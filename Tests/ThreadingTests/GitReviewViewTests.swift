@@ -136,11 +136,18 @@ final class GitReviewViewTests: XCTestCase {
             view.lineNumberColorForTesting(atDisplayedLine: addedIndex)?.usingColorSpace(.sRGB),
             colors.addedMarker.usingColorSpace(.sRGB)
         )
+        view.setFrameSize(NSSize(width: 240, height: view.initialMeasuredSize.height))
         let action = try XCTUnwrap(
             view.lineActionRectForTesting(atDisplayedLine: addedIndex)
         )
         XCTAssertGreaterThanOrEqual(action.minX, 0)
         XCTAssertLessThanOrEqual(action.maxX, GitReviewDefaults.lineNumberWidth)
+        let hover = try XCTUnwrap(
+            view.lineHoverRectForTesting(atDisplayedLine: addedIndex)
+        )
+        XCTAssertEqual(hover.minX, view.bounds.minX, accuracy: 0.5)
+        XCTAssertEqual(hover.maxX, view.bounds.maxX, accuracy: 0.5)
+        XCTAssertTrue(hover.contains(action), "the plus belongs to the whole-row hover cue")
     }
 
     func testWordDiffsEmphasizeOnlyTheChangedSubstring() throws {
@@ -581,6 +588,11 @@ final class GitReviewViewTests: XCTestCase {
         let expand = Self.descendants(of: ThemedButton.self, in: row)
             .first { $0.title.contains("7") }
         XCTAssertNotNil(expand)
+        XCTAssertEqual(
+            expand?.hoverFill?.usingColorSpace(.sRGB),
+            Design.Surface.controlHover.usingColorSpace(.sRGB),
+            "a context control already resting on a fill must lift to the next hover step"
+        )
         XCTAssertTrue(expand?.performPrimaryAction() == true)
         XCTAssertEqual(expansionRequests, 1)
         XCTAssertEqual(
@@ -617,12 +629,23 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(disclosures[0].accessibilityValue() as? Bool, true)
         XCTAssertFalse(body.arrangedSubviews[1].isHidden)
 
+        let hunkWindowY = disclosures[0].convert(.zero, to: nil).y
         XCTAssertTrue(disclosures[0].performPrimaryAction())
-        row.layoutSubtreeIfNeeded()
         XCTAssertEqual(disclosures[0].accessibilityValue() as? Bool, false)
         XCTAssertTrue(body.arrangedSubviews[1].isHidden)
         XCTAssertFalse(body.arrangedSubviews[4].isHidden, "the second hunk stays open")
         XCTAssertEqual(controller.collapsedHunksByPath[file.path]?.count, 1)
+        XCTAssertFalse(row.needsLayout, "the clicked row settles in the action's layout pass")
+        XCTAssertFalse(
+            controller.fileTableView.needsLayout,
+            "the virtual table has no second visible expansion frame pending"
+        )
+        XCTAssertEqual(
+            disclosures[0].convert(.zero, to: nil).y,
+            hunkWindowY,
+            accuracy: 0.5,
+            "collapsing a hunk keeps its disclosure at the same window coordinate"
+        )
 
         controller.fileTableView.reloadData()
         controller.view.layoutSubtreeIfNeeded()
@@ -936,6 +959,58 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertEqual(navigator.visibleLeafPathsForTesting, ["Sources/Git/Reader.swift"])
         navigator.setFilterForTesting("")
         XCTAssertEqual(Set(navigator.visibleLeafPathsForTesting), Set(files.map(\.path)))
+    }
+
+    /// The popover hands the navigator its files while it is still an unloaded controller, so a
+    /// pass that only ran for an already-loaded view left ⌘J opening on a column of collapsed
+    /// directories. The model may arrive first; loading is where the view owes it a pass.
+    func testChangedFileNavigatorShowsItsTreeWhenTheRosterArrivesBeforeTheViewLoads() {
+        let navigator = GitReviewPathNavigatorViewController(
+            rootURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        )
+        let files = [
+            GitFileDiff(path: "Sources/UI/Review.swift", change: .modified, hunks: [], added: 4, removed: 2),
+            GitFileDiff(path: "Sources/Git/Reader.swift", change: .modified, hunks: [], added: 1, removed: 0),
+            GitFileDiff(path: "Tests/ReviewTests.swift", change: .added, hunks: [], added: 20, removed: 0),
+        ]
+
+        navigator.update(files: files)
+        _ = navigator.view
+
+        // Sources ▸ Git ▸ Reader.swift, Sources ▸ UI ▸ Review.swift, Tests ▸ ReviewTests.swift:
+        // four directories and three files, every one of them disclosed.
+        XCTAssertEqual(
+            navigator.outlineRowCountForTesting,
+            7,
+            "every changed file must be showing, not waiting behind a collapsed directory"
+        )
+    }
+
+    /// A jump raised by a chord has to be finishable without the pointer.
+    func testFilteredNavigatorTakesTheTopMatchOnReturn() throws {
+        let navigator = GitReviewPathNavigatorViewController(
+            rootURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        )
+        let files = [
+            GitFileDiff(path: "Sources/UI/Review.swift", change: .modified, hunks: [], added: 4, removed: 2),
+            GitFileDiff(path: "Sources/Git/Reader.swift", change: .modified, hunks: [], added: 1, removed: 0),
+        ]
+        navigator.update(files: files)
+        var chosen: [String] = []
+        navigator.onChoosePath = { chosen.append($0) }
+
+        let field = try XCTUnwrap(navigator.searchResponder as? NSTextField)
+        let returnKey = #selector(NSResponder.insertNewline(_:))
+
+        XCTAssertFalse(
+            navigator.control(field, textView: NSTextView(), doCommandBy: returnKey),
+            "Return with nothing typed picks nothing, and stays the field's own key"
+        )
+        XCTAssertTrue(chosen.isEmpty)
+
+        navigator.setFilterForTesting("Reader")
+        XCTAssertTrue(navigator.control(field, textView: NSTextView(), doCommandBy: returnKey))
+        XCTAssertEqual(chosen, ["Sources/Git/Reader.swift"])
     }
 
     func testNavigatorToggleResizesTheDiffAndJumpKeepsTheChosenFileVisible() {

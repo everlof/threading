@@ -96,6 +96,14 @@ user's own limit holds. Work is bounded at eight live children, 128 retained eve
 supervision, 20 managed sends per minute and three account moves per child per day. Optional
 `SpendCeiling` admission guards work the manager starts without changing provider-limit semantics.
 
+The busy-child refusal makes targeted archive different from self-archive at exactly one timing
+boundary. A self-archive is requested inside the turn that must finish; a manager archive is
+accepted only after the child is already settled. `SessionArchiveScheduler` therefore reconciles a
+manager target's current activity when recording the request and begins its ordinary settle grace
+immediately. Waiting only for the next `SessionActivityDidChange` would strand an idle child until
+an unrelated future turn. If the child starts again during the grace, that event disarms the timer
+and the request survives until the later, real end.
+
 `Supervision` is the durable source of truth for manager, child, brief, state and outcome;
 `SupervisionEvent` records the bounded event stream. It is created by spawn or adoption and closed
 by release, archive, completion or revocation. `subscribe_to_children` uses

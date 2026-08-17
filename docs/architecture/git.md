@@ -176,6 +176,21 @@ exact checkpoint instead of redirecting every old card to the newest one. Mobile
 working-copy comparisons and defaults to Uncommitted too; Commits remains the desktop history
 navigator rather than pretending to be another compact diff mode.
 
+**Reaching one file among the changed ones** is `GitReviewPathNavigatorViewController`, shared by
+the folder button's persistent rail and the ⌘J popover so there is one changed-path tree rather
+than two. It receives the diff's already-bounded roster as values and never walks the checkout.
+Selecting a row *is* choosing it — there is no second confirming click in either surface — so the
+filter field commits its top match on Return, and ⌘J is finishable without the pointer.
+
+Three things had to be true before that was so, and each failed silently. The popover **takes key
+status**: `ThemedPopover.initialFirstResponder` is set, because a panel that is merely ordered
+front still accepts `makeFirstResponder` and still installs a field editor, so the caret appeared
+in the filter while the keystrokes went to the window underneath. The tree **catches up on view
+load**: the popover hands the navigator its files while it is still an unloaded controller, and a
+filter pass that only ran for a loaded view left ⌘J opening on collapsed directories. And the
+expansion is **every level, not the first**, or the files the surface exists to reach sit behind a
+second disclosure.
+
 The data layer (`GitReviewReader`) shells out on a dedicated queue and completes on main —
 `GitWorktree`'s runner made async, following `ProjectIconResearch`'s shape. Every invocation
 passes `--no-optional-locks`, so a *read never takes `index.lock`* out from under the agent
@@ -328,6 +343,13 @@ then override that neutral base without borrowing either semantic hue. NativeDif
 one changed-line ink for both sign and body, so the compact `DiffView` gives both the neutral body
 ink; its semantic wash and the `+`/`−` shape still carry the change until that renderer gains
 separate fields.
+
+Pointer targeting is paint on that same TextKit surface, not another row tree. The hovered logical
+source line gets a full-width translucent wash derived from the theme's control-hover role, while
+the `+` action plate stays drawn over the gutter. A one-pixel rule looked like a clipping seam and
+did not identify the line as the target. Moving the pointer invalidates only the old and new
+logical-line rectangles, including wrapped fragments; it neither mounts per-line views nor redraws
+the complete hunk.
 
 Both wash and base ink are frozen colours derived from the surface underneath, so a virtual row
 resolves them inside its own effective appearance and rebuilds the attributed document when it
@@ -531,12 +553,16 @@ not spelled as a feature-owned Core Animation mask.
 Each visible `Lines …` heading is a real compact `ThemedDisclosureRow`, so its familiar chevron
 actually hides and reveals that hunk. Collapse state is keyed by the changed-line endpoints rather
 than the surrounding context range, survives virtual-row recycling, and is cleared when the
-comparison identity changes. Toggling hides the already-materialized hunk body and invalidates
-only its file row; it never constructs another file or rebuilds the complete table. Find navigation
-reopens a collapsed destination before revealing it. The source-line identity, staging eligibility,
-collapse persistence, and exact virtual height remain deliberately host-owned correctness
-behaviour; themes may change their shared disclosure and surface presentation, but extensions do
-not replace this review-state machinery.
+comparison identity changes. Its compact hover uses the next filled surface step: the standard
+disclosure hover is correct on plain ground, but a hunk heading already rests on a filled band and
+must not disappear into that same colour. Toggling hides the already-materialized hunk body, updates
+the row estimate, and settles the mounted viewport non-animated in the same input event. The first
+pass adopts the new model height and the second adopts the exact TextKit measurement; this avoids
+showing an old-height row between display frames. It never constructs another file or rebuilds the
+complete table. Find navigation reopens a collapsed destination before revealing it. The
+source-line identity, staging eligibility, collapse persistence, and exact virtual height remain
+deliberately host-owned correctness behaviour; themes may change their shared disclosure and
+surface presentation, but extensions do not replace this review-state machinery.
 
 A two-line path makes the file name and directory one visual identity. The trailing change counts,
 staging action and disclosure therefore centre on that identity's complete height in both ordinary
@@ -776,13 +802,13 @@ hit target rather than a line of text. Wherever it meets an inset or a gap, that
 gives its padding back (`childrenRowInset`), so what the reader sees lands on the same rhythm as
 every other row instead of a step below it.
 
-**The agent line says which agent is working this checkout, and how.** It carries the model, and
-where they are knowable the permission mode, the effort and the Fast state, under the checkout rows
-and above the children — the rows reading outward from what the pane *is*: which branch, what
-changed in it, which agent is working it, who it delegated to. Within the row the order is the
-composer's own — model, then posture, then how it thinks, then how fast — so one fact keeps one
-place wherever it is shown. It reuses the `cpu` mark the composer and the conversation's status row
-already give the model chip, so one fact keeps one mark too.
+**The agent line says which agent is working this checkout, and how.** It carries the model, the
+effort and the Fast state, under the checkout rows and above the children — the rows reading
+outward from what the pane *is*: which branch, what changed in it, which agent is working it, who
+it delegated to. Within the row the order is model, then how it thinks, then how fast. It reuses
+the `cpu` mark the composer and the conversation's status row already give the model chip, so one
+fact keeps one mark too. Permission mode stays on the surfaces that own choosing or directly
+presenting it; the passive corner card does not repeat it.
 
 **Fast mode is a bolt, not a word, and only when it is on.** The row ends on `speedMark` — the same
 `bolt.fill` the composer's speed chip carries *while it says Fast*
@@ -793,10 +819,7 @@ at a glance; standard speed draws nothing at all, because it is what every sessi
 something says otherwise and a dimmed or crossed-out bolt would be a second state to learn. The
 spoken label keeps the word, in the bolt's place at the end of the phrase: a symbol read aloud is a
 fact lost rather than a fact shortened. Under a period theme the bolt is the hand-drawn one-bit
-`ClassicGlyph.speed` rather than an SF Symbol, like every other mark on the card. Moving speed last
-also settled a disagreement the fixtures had been carrying: the row claimed the composer's order
-while putting speed between posture and effort, which no runtime could reach and so nothing on
-screen contradicted.
+`ClassicGlyph.speed` rather than an SF Symbol, like every other mark on the card.
 
 Which facts belong to the card is decided *before* it. A **native conversation** gets none: its
 status row already carries model, effort and speed as chips directly above the composer, so the
@@ -810,28 +833,6 @@ only failure direction was hiding a fact the user had asked to see. Duplication 
 outcome; a missing model is not. `GitStatusOverlayView.ModelReading` is still handed the decision
 rather than asked to make one — a nil field means "do not say this", not "unknown" — which keeps a
 runtime-specific rule out of a Git-shaped view and lets each part drop independently.
-
-**The permission mode is the one fact taken only from observation.** Nothing in the app used to
-show it at all: the session's `⋯` menu and Settings ▸ General state what the *next* launch will
-ask for, the native composer's chip belongs to a surface a terminal does not have, and a terminal
-posture the user Shift+Tabbed into was invisible to Threading entirely. Claude writes each
-assertion of it into the session's transcript, so the card reads it back through
-`ObservedPermissionMode` — the provider-neutral seam, gated on
-`AgentCapabilities.transcriptPermissionModeRecord`, which Claude alone claims. The launch record is
-deliberately **not** a fallback: Bypass Permissions shown from a flag the user has since cycled out
-of is a promise the app cannot keep, so an unobservable runtime, an unreadable transcript and a
-session that has not started all show no posture rather than a stale one. All six modes show,
-Manual included, because a posture that is only ever drawn when it is unusual is one nobody learns
-to look for.
-
-It is also the one fact no status line could ever carry, which is measured rather than assumed:
-the CLI's own payload builder in 2.1.222 spreads `model`, `workspace`, `output_style`, `cost`,
-`context_window`, `exceeds_200k_tokens`, `fast_mode`, `effort`, `thinking`, `rate_limits`, `vim`,
-`agent`, `remote`, `pr` and `worktree` into the document a status line reads, and no posture — a
-command cannot print what it was never handed. Claude's TUI does draw the posture in its own
-footer for three of the modes (`accept edits on`, `plan mode on`, `auto mode on`, with the default
-posture labelled with an empty string), which the card repeats knowingly: the modes the footer
-stays silent about are the ones worth saying most.
 
 One fact is withheld rather than guessed. **Fast mode is a reading only where Threading sets
 it** — `appendCodexConversationOverrides` is Codex-only, and Claude's fast-mode state belongs to

@@ -568,6 +568,35 @@ final class SidebarRowRenderTests: XCTestCase {
 
     // MARK: - Selected Ground
 
+    /// The OpenAI knot is a template image, so unlike Claude's fixed-colour mark its pixels are
+    /// exactly the tint the row retained for it. A selected row correctly chose selection ink,
+    /// then its customization restore put the pre-selection sidebar tint back after every
+    /// activity refresh — black title beside a white mark on Threading's orange selection.
+    func testASelectedCodexMarkKeepsSelectionInkAfterRowRefresh() throws {
+        for theme in AppThemeLibrary.stock {
+            try withTheme(theme) {
+                let row = SessionRowView(customizationLookup: { _ in .empty })
+                let session = AgentSession(kind: .codex, title: "Selected Codex session")
+
+                row.configure(with: session, activity: .idle)
+                row.backgroundStyle = .emphasized
+                // Shipping rows are configured again whenever activity changes. This second
+                // pass reaches the native-content restore that used to overwrite selection ink.
+                row.configure(with: session, activity: .working)
+
+                let mark = try XCTUnwrap(
+                    row.descendant(identified: "sidebar.session.identity") as? NSImageView
+                )
+                XCTAssertTrue(try XCTUnwrap(mark.image).isTemplate)
+                XCTAssertEqual(
+                    mark.contentTintColor?.hexString,
+                    Design.Ink.selection.label.hexString,
+                    "\(theme.name): a refreshed selected Codex mark should use its row's ink"
+                )
+            }
+        }
+    }
+
     /// A selected row's trailing controls have to ink against the fill the *row* painted, not
     /// against the chrome's ground they were built for.
     ///

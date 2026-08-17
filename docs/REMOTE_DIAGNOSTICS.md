@@ -52,7 +52,22 @@ Every record has:
 - A per-operation `trace` where the protocol already has one. Notification event ids are traces;
   APNs' `apns-id` is stored as the provider trace.
 - Locally pseudonymised `peer` and `session` ids when grouping is necessary.
+- A pseudonymised `origin` on every connect and connect failure, beside the `transport` kind. An
+  address is a routable location of someone's machine, so only its scheme, host and port are
+  hashed, and the shared upload policy refuses an `origin` value that is not already in that
+  shape. Both sides derive it the same way, which is the only reason a joined report can say
+  whether a phone was pointed at the address the Mac published. Without it, "wrong address" and
+  "right address, host down" are the same record and have opposite fixes.
+- An optional `detail` beside `code` or `reason`, carrying the bounded machine values behind a
+  refusal. A rejected viewport, for example, records the clause that refused and the grid that
+  was asked for.
 - App/build, OS and remote-protocol versions in the report manifest.
+
+Every connect reaches a terminal event. A socket that opens and is never greeted is ended by a
+client-side hello deadline rather than awaited, because `URLSessionWebSocketTask` honours no
+resource timeout and would otherwise leave a report that stops after `socketConnecting`. Where
+URLSession kept the HTTP response behind a `NSURLErrorBadServerResponse`, its status is recorded
+too: 530, 502 and 404 behind the same error code mean three different things.
 
 The shared writer strips control characters, bounds each value, keeps seven days, and caps an
 export at 5,000 newest events. Report assembly prunes before reading, accepts only regular files
@@ -87,7 +102,9 @@ never use this route.
   preflight prompt, sees the image that will leave the phone, and can remove it before sharing.
 - Additional device details are off by default. The allowlist covers model, idiom, locale,
   preferred language, time zone, power/thermal/storage/display state, app/connection state,
-  counts, capability/scope and notification state.
+  counts, capability/scope and notification state. Connection state is carried as a bounded ring
+  of its last transitions with their ages, not only as the current value, since a phone that
+  never reached the Mac and one that reached it and dropped otherwise produce identical headers.
 - Optional context still excludes names and stable device, host, account or session identifiers.
 
 ### Never recorded
@@ -96,6 +113,9 @@ never use this route.
 - Prompt, response, terminal, diff, filename, path, project or notification content.
 - Member, device, account, repository or Mac display names.
 - Raw request URLs; an error description can contain the credential-bearing fragment.
+- Any address, on either side: the one a client aimed at and the one a Mac advertised are both
+  recorded only as `origin` hashes, and the hash covers scheme, host and port so a pairing URL's
+  bearer fragment cannot reach it.
 - Clipboard, photo, attachment or voice contents.
 
 Errors are stored as stable codes such as `remote.http.401`, `remote.upgradeRequired` or a

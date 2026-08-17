@@ -130,13 +130,14 @@ final class ProjectSidebarViewController: NSViewController {
     }()
     /// The global silence gate, at the band's trailing edge.
     ///
-    /// One glyph, worn while it holds: the button's own selected state is the whole indication,
-    /// because a control that stops every sound the app can make and then looks exactly like it
-    /// did is the mystery-noise problem inverted. Pressing it writes one Boolean and no
-    /// override anywhere, so releasing it gives every scope back the answer it already had.
+    /// The speaker becomes slashed while the gate holds, and the selected surface reinforces
+    /// that it is one toggle rather than two adjacent actions. Pressing it writes one Boolean
+    /// and no override anywhere, so releasing it gives every scope back the answer it already
+    /// had.
+    private var appliedSilenceState: Bool?
     private lazy var silenceButton: ThemedIconButton = {
         let button = ThemedIconButton(
-            symbolName: SidebarDefaults.silenceSymbol,
+            symbolName: SidebarDefaults.silenceSymbol(isSilenced: false),
             accessibility: SidebarStrings.silenceSounds,
             target: .inline,
             inkSource: .chrome
@@ -563,14 +564,21 @@ private extension ProjectSidebarViewController {
         AppSettings.shared.silencesAllSounds.toggle()
     }
 
-    /// Wears the gate's current state — filled and bordered while it holds, quiet otherwise —
-    /// and says which state that is in words the pointer and VoiceOver can both reach.
+    /// Wears the gate's current state — slashed, filled and bordered while it holds; audible and
+    /// quiet otherwise — and says which state that is in words the pointer and VoiceOver can
+    /// both reach.
     ///
     /// Called on every settings change rather than only on the press, because the same Boolean
     /// is written from three surfaces and a control that only followed its own presses would be
     /// wrong the first time one of the other two was used.
     private func applySilenceState() {
         let silenced = AppSettings.shared.silencesAllSounds
+        guard appliedSilenceState != silenced else { return }
+        appliedSilenceState = silenced
+        silenceButton.setSymbol(
+            SidebarDefaults.silenceSymbol(isSilenced: silenced),
+            accessibility: SidebarStrings.silenceSounds
+        )
         silenceButton.isSelected = silenced
         silenceButton.toolTip = silenced
             ? SidebarStrings.silencedHint

@@ -7,7 +7,7 @@ import Foundation
 /// Threading so stopping this transport can remove exactly its handler; `tailscale serve reset`
 /// is intentionally never used because it would erase unrelated services the user configured.
 @MainActor
-final class TailscaleRemoteTransport: RemoteAccessTransport {
+final class TailscaleRemoteTransport: RemoteTailnetTransport {
 
     private(set) var state: RemoteTransportState = .stopped
 

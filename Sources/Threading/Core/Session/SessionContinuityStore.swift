@@ -53,10 +53,109 @@ final class SessionContinuityStore {
         }
     }
 
+    // MARK: - Image annotations
+
+    func imageAnnotationDocument(
+        forAssetKey assetKey: String,
+        in sessionID: SessionID
+    ) -> ImageAnnotationDocument? {
+        state(for: sessionID).imageAnnotationDocuments.values.first {
+            $0.assetKeys.contains(assetKey)
+        }
+    }
+
+    func imageAnnotationDocument(
+        forContextAttachmentID contextAttachmentID: UUID,
+        in sessionID: SessionID
+    ) -> ImageAnnotationDocument? {
+        state(for: sessionID).imageAnnotationDocuments.values.first {
+            $0.contextAttachmentID == contextAttachmentID
+        }
+    }
+
+    func imageAnnotationDocuments(in sessionID: SessionID) -> [ImageAnnotationDocument] {
+        Array(state(for: sessionID).imageAnnotationDocuments.values)
+    }
+
+    func isImageAnnotationStaged(
+        _ document: ImageAnnotationDocument,
+        in sessionID: SessionID
+    ) -> Bool {
+        state(for: sessionID).conversationContext.contains {
+            $0.id == document.contextAttachmentID
+        }
+    }
+
+    /// Creates or updates the editable document for an image and returns only a committed value.
+    /// Annotation edits advance the revision; discovering a stable attachment alias does not.
+    @discardableResult
+    func setImageAnnotations(
+        _ annotations: [ImageAnnotation],
+        assetKeys: [String],
+        sourceAttachmentID: String?,
+        sourcePath: String,
+        title: String,
+        in sessionID: SessionID
+    ) -> ImageAnnotationDocument? {
+        var state = states[sessionID] ?? SessionContinuityState()
+        let keys = Array(Set(assetKeys)).sorted()
+        let existing = state.imageAnnotationDocuments.values.first { document in
+            !Set(document.assetKeys).isDisjoint(with: keys)
+        }
+        var document = existing ?? ImageAnnotationDocument(
+            assetKeys: keys,
+            sourceAttachmentID: sourceAttachmentID,
+            sourcePath: sourcePath,
+            title: title
+        )
+
+        let mergedKeys = Array(Set(document.assetKeys + keys)).sorted()
+        let annotationsChanged = document.annotations != annotations
+        document.assetKeys = mergedKeys
+        document.sourceAttachmentID = sourceAttachmentID ?? document.sourceAttachmentID
+        document.sourcePath = sourcePath
+        document.title = title
+        document.annotations = annotations
+        if annotationsChanged { document.revision += 1 }
+
+        guard existing != document else { return existing }
+        document.updatedAt = Date()
+        state.imageAnnotationDocuments[document.id.uuidString] = document
+        state.updatedAt = document.updatedAt
+        var candidate = states
+        candidate[sessionID] = state
+        guard commit(candidate) else { return existing }
+        NotificationCenter.default.post(ImageAnnotationsDidChange(sessionID: sessionID))
+        return document
+    }
+
+    @discardableResult
+    func markImageAnnotationShared(
+        documentID: UUID,
+        revision: Int,
+        attachmentID: String,
+        in sessionID: SessionID
+    ) -> ImageAnnotationDocument? {
+        var state = states[sessionID] ?? SessionContinuityState()
+        guard var document = state.imageAnnotationDocuments[documentID.uuidString] else {
+            return nil
+        }
+        document.sharedRevision = revision
+        document.sharedAttachmentID = attachmentID
+        document.updatedAt = Date()
+        state.imageAnnotationDocuments[documentID.uuidString] = document
+        state.updatedAt = document.updatedAt
+        var candidate = states
+        candidate[sessionID] = state
+        guard commit(candidate) else { return nil }
+        NotificationCenter.default.post(ImageAnnotationsDidChange(sessionID: sessionID))
+        return document
+    }
+
     func clear(for sessionID: SessionID) {
         var candidate = states
         guard candidate.removeValue(forKey: sessionID) != nil else { return }
-        commit(candidate)
+        _ = commit(candidate)
     }
 
     private func update(
@@ -74,7 +173,7 @@ final class SessionContinuityStore {
         } else {
             candidate[sessionID] = state
         }
-        commit(candidate)
+        _ = commit(candidate)
     }
 
     private func load() {
@@ -96,12 +195,14 @@ final class SessionContinuityStore {
     /// This store carries unsent user text, so the verified file is the commit point. Keeping
     /// the prior in-memory value after failure also lets the standing composer continue to show
     /// what the next launch can actually recover.
-    private func commit(_ candidate: [SessionID: SessionContinuityState]) {
+    @discardableResult
+    private func commit(_ candidate: [SessionID: SessionContinuityState]) -> Bool {
         let file = SessionContinuityFile(states: candidate.reduce(into: [:]) {
             $0[$1.key.uuidString] = $1.value
         })
-        guard persistence.save(file) else { return }
+        guard persistence.save(file) else { return false }
         states = candidate
+        return true
     }
 }
 
@@ -110,6 +211,7 @@ struct SessionContinuityState: Codable, Equatable {
     var conversationContext: [ConversationContextAttachment] = []
     var conversationViewportProgress: Double?
     var conversationFollowsBottom = true
+    var imageAnnotationDocuments: [String: ImageAnnotationDocument] = [:]
     var updatedAt = Date()
 
     var isEmpty: Bool {
@@ -117,6 +219,7 @@ struct SessionContinuityState: Codable, Equatable {
             && conversationContext.isEmpty
             && conversationViewportProgress == nil
             && conversationFollowsBottom
+            && imageAnnotationDocuments.isEmpty
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -124,6 +227,7 @@ struct SessionContinuityState: Codable, Equatable {
         case conversationContext
         case conversationViewportProgress
         case conversationFollowsBottom
+        case imageAnnotationDocuments
         case updatedAt
     }
 
@@ -144,6 +248,10 @@ struct SessionContinuityState: Codable, Equatable {
             Bool.self,
             forKey: .conversationFollowsBottom
         ) ?? true
+        imageAnnotationDocuments = try values.decodeIfPresent(
+            [String: ImageAnnotationDocument].self,
+            forKey: .imageAnnotationDocuments
+        ) ?? [:]
         updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 }

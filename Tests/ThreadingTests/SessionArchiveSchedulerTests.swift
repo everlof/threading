@@ -114,6 +114,53 @@ final class SessionArchiveSchedulerTests: XCTestCase {
         XCTAssertEqual(due.first?.reason, "review complete")
     }
 
+    /// A manager may target only a child with no turn in flight. That means the child has already
+    /// crossed the activity edge the ordinary self-archive waits for, and may never emit another
+    /// one. The request must begin its settle from the current state rather than remain pending
+    /// until an unrelated future turn.
+    func testManagerRequestForAnAlreadySettledChildNeedsNoFutureActivityEvent() {
+        activity = .idle
+        let scheduler = scheduler()
+        let managerID = SessionID()
+
+        XCTAssertEqual(
+            scheduler.request(
+                sessionID: session.id,
+                reason: "review complete",
+                requestedByManagerID: managerID
+            ),
+            .scheduled
+        )
+
+        settle()
+
+        XCTAssertEqual(due.map(\.sessionID), [session.id])
+        XCTAssertEqual(due.first?.requestedByManagerID, managerID)
+        XCTAssertFalse(scheduler.isPending(sessionID: session.id))
+    }
+
+    /// The manager shortcut must not change self-archive semantics. Even if the activity snapshot
+    /// is briefly quiet while the tool call is open, the session filing itself still waits for a
+    /// later report from its own turn boundary.
+    func testSelfArchiveDoesNotTrustAnAlreadyIdleSnapshotInsideItsOwnTurn() {
+        activity = .idle
+        let scheduler = scheduler()
+
+        XCTAssertEqual(
+            scheduler.request(sessionID: session.id, reason: "finished"),
+            .scheduled
+        )
+        settle()
+
+        XCTAssertTrue(due.isEmpty)
+        XCTAssertTrue(scheduler.isPending(sessionID: session.id))
+
+        reportActivity(.idle)
+        settle()
+
+        XCTAssertEqual(due.map(\.sessionID), [session.id])
+    }
+
     /// A finished turn nobody was looking at ends up unread rather than idle, and a session whose
     /// agent exited ends up dormant. Neither is still answering, so both are the end of the turn.
     func testAnyFinishedTurnIsTheEndOfTheTurn() {

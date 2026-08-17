@@ -2298,13 +2298,35 @@ public struct RemoteNotificationRegistrationResponseDTO: Codable, Equatable, Sen
 }
 
 /// An in-band error, e.g. an interact action attempted on a view-only share.
+/// Which clause of the viewport guard refused a `viewport` message.
+///
+/// The guard has five reasons to say no and used to say only "invalidViewport", so a phone
+/// whose grid the host rejected could report neither what it asked for nor why it was refused.
+/// The cases are structural tokens rather than sentences: they cross the wire, reach a
+/// share-safe journal, and must never carry anything a person wrote.
+public enum RemoteViewportRefusal: String, Codable, Sendable {
+    case missingSize
+    case columnsOutOfRange
+    case rowsOutOfRange
+    case unroutedConnection
+    case malformedSessionID
+
+    /// The accepted grid. Stated here so the host and the client agree on one bound.
+    public static let columns = 20...240
+    public static let rows = 4...160
+}
+
 public struct RemoteErrorDTO: Codable, Equatable, Sendable {
     public let type: String        // "error"
     public let code: String
+    /// A bounded machine token qualifying `code`, such as the guard clause that refused. It is
+    /// optional because a host from before this field simply omits it.
+    public let detail: String?
 
-    public init(code: String) {
+    public init(code: String, detail: String? = nil) {
         self.type = "error"
         self.code = code
+        self.detail = detail
     }
 }
 

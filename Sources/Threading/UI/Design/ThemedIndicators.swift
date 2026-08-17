@@ -13,11 +13,23 @@ final class SeparatorView: NSView, ThemedComponent {
         case vertical
     }
 
+    /// How strongly the rule separates what sits on either side of it.
+    ///
+    /// Most separators divide rows inside one surface and deliberately stay quiet. A boundary
+    /// between sibling panes has to remain legible when both panes resolve to nearly the same
+    /// ground, so it takes the theme's structural border ink instead.
+    enum Role {
+        case content
+        case paneBoundary
+    }
+
     private let orientation: Orientation
+    private let role: Role
     private var themeRedraw: ThemeRedraw?
 
-    init(_ orientation: Orientation = .horizontal) {
+    init(_ orientation: Orientation = .horizontal, role: Role = .content) {
         self.orientation = orientation
+        self.role = role
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         themeRedraw = ThemeRedraw(self)
@@ -122,7 +134,10 @@ final class SeparatorView: NSView, ThemedComponent {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        Design.Surface.divider.setFill()
+        switch role {
+        case .content: Design.Surface.divider.setFill()
+        case .paneBoundary: Design.Surface.border.setFill()
+        }
         bounds.fill()
     }
 }

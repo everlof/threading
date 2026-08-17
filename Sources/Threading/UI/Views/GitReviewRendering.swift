@@ -1253,6 +1253,22 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             self.fileTableView.noteHeightOfRows(
                 withIndexesChanged: IndexSet(integer: tableRow)
             )
+
+            // `isHidden`, the table's model estimate and TextKit's exact height used to become
+            // three separately displayed layouts. Settle the mounted viewport twice inside this
+            // one non-animated event: once at the updated estimate, then once at the exact fitted
+            // height. Offscreen rows remain value estimates and no complete-index work is added.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Design.Motion.immediate
+                context.allowsImplicitAnimation = false
+                self.fileTableView.layoutSubtreeIfNeeded()
+            }
+            self.recordFileHeight(file, row: row)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Design.Motion.immediate
+                context.allowsImplicitAnimation = false
+                self.fileTableView.layoutSubtreeIfNeeded()
+            }
         }
         row.onStageFile = { [weak self] in self?.stageFile(file) }
         row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }

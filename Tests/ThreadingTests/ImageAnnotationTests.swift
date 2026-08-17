@@ -260,6 +260,45 @@ final class ImageAnnotationTests: XCTestCase {
         XCTAssertEqual(after?.stringValue, "typed")
     }
 
+    /// A reopened document used to grow its zero-height scroll document downward, leaving every
+    /// row below the viewport until collection navigation forced another layout pass.
+    @MainActor
+    func testSeveralSavedAnnotationsAreVisibleOnTheFirstLayoutPass() throws {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 420))
+        let pane = ImageAnnotationPaneView(frame: .zero)
+        host.addSubview(pane)
+        NSLayoutConstraint.activate([
+            pane.topAnchor.constraint(equalTo: host.topAnchor),
+            pane.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            pane.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            pane.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+        pane.setAnnotations(
+            (0..<4).map { index in
+                ImageAnnotation(point: .zero, note: "note \(index)")
+            },
+            sharingState: .local,
+            showsChatActions: true,
+            canShare: true
+        )
+
+        host.layoutSubtreeIfNeeded()
+
+        let scroll = try XCTUnwrap(
+            allSubviews(of: pane).compactMap { $0 as? NSScrollView }.first
+        )
+        let fields = allSubviews(of: pane).compactMap { $0 as? ThemedTextField }
+        XCTAssertEqual(fields.count, 4)
+        for field in fields {
+            let frameInClip = field.convert(field.bounds, to: scroll.contentView)
+            XCTAssertTrue(
+                scroll.contentView.bounds.intersects(frameInClip),
+                "a saved annotation began outside the initial viewport: \(frameInClip); "
+                    + "clip: \(scroll.contentView.bounds); document: \(scroll.documentView?.frame ?? .zero)"
+            )
+        }
+    }
+
     // MARK: - Live Theme Switch
 
     /// An assigned `textColor` freezes onto a label exactly as a `CGColor` freezes onto a layer,

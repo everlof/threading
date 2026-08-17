@@ -937,10 +937,13 @@ final class GitReviewViewController: NSViewController {
         }
         popover.contentViewController = navigator
         popover.onClose = { [weak self] in self?.jumpToFilePopover = nil }
+        // The keyboard belongs to the filter for as long as this is open: the command that
+        // raises it is a chord, and a search field it cannot type into is the whole surface
+        // failing. `ThemedPopover` makes the panel key only because this is set.
+        popover.initialFirstResponder = navigator.searchResponder
         jumpToFilePopover = popover
         navigator.update(files: renderedFiles)
         popover.show(relativeTo: jumpToFileButton.bounds, of: jumpToFileButton, preferredEdge: .maxY)
-        navigator.focusSearch()
     }
 
     private func toggleFileNavigator() {

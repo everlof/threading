@@ -319,6 +319,61 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertEqual(closes, 1, "closing an already closed surface must be idempotent")
     }
 
+    /// Ordering a panel front is not enough to type into it, and every cheaper assertion says it
+    /// is: on a merely-visible panel `makeFirstResponder` returns true and installs the field
+    /// editor, so a caret blinks in the popover while the keystrokes reach the window underneath.
+    /// ⌘J's file search shipped that way. Only key status is evidence, so that is what is asserted.
+    func testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack() throws {
+        let window = offscreenWindow()
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+        XCTAssertTrue(window.makeFirstResponder(anchor))
+
+        let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 160, height: 24))
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 80))
+        content.view.addSubview(field)
+        content.preferredContentSize = content.view.frame.size
+
+        let popover = ThemedPopover()
+        popover.animates = false
+        popover.contentViewController = content
+        popover.initialFirstResponder = field
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+
+        let panel = try XCTUnwrap(popover.presentedWindow)
+        XCTAssertTrue(panel.isKeyWindow, "a popover asked for the keyboard must hold it")
+        XCTAssertTrue(NSApp.keyWindow === panel, "typing must be routed to the popover")
+        XCTAssertTrue((panel.firstResponder as? NSTextView)?.delegate === field)
+        XCTAssertNotNil(field.currentEditor())
+
+        popover.close()
+        XCTAssertFalse(NSApp.keyWindow === panel)
+        XCTAssertTrue(
+            window.firstResponder === anchor,
+            "the keyboard returns to the responder it was taken from"
+        )
+    }
+
+    /// The other half of the same rule. Most popovers here are pointer-driven, and one that took
+    /// key status unasked would pull the caret out of the composer and unemphasize every list
+    /// behind it — so the keyboard stays put unless the content named a responder.
+    func testPopoverWithoutAnInitialResponderLeavesTheKeyboardWhereItWas() throws {
+        let window = offscreenWindow()
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+        XCTAssertTrue(window.makeFirstResponder(anchor))
+
+        let popover = ThemedPopover()
+        popover.animates = false
+        popover.contentViewController = popoverContent()
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+
+        let panel = try XCTUnwrap(popover.presentedWindow)
+        XCTAssertFalse(panel.isKeyWindow, "an unasked popover must not take the keyboard")
+        XCTAssertFalse(NSApp.keyWindow === panel)
+        XCTAssertTrue(window.firstResponder === anchor)
+        popover.close()
+    }
+
     func testPopoverClosesWhenItsAnchorLeavesTheHierarchy() throws {
         let window = offscreenWindow()
         let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)

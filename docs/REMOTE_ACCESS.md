@@ -309,6 +309,9 @@ sharing action.
 ## Diagnostics sharing
 
 iOS and the browser keep a small seven-day journal of typed connection events on that client.
+Every connect attempt ends in one of them: connected, ended, or failed with a stated reason, so a
+phone that never reached the Mac leaves a record rather than a silence. Each carries the kind of
+route it used and a hash of the address it aimed at, never the address itself.
 They do not send it to the Mac by default. A paired interactive owner can open **Diagnostics** on
 iPhone, or use the control beside the Mac in the browser session list, and choose **Share
 diagnostics for 30 minutes**. The existing bounded history is sent first and new events follow

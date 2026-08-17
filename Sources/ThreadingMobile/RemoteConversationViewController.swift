@@ -635,8 +635,22 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             title: connection.title,
             status: connectionStatusLabel,
             statusColor: connectionStatusColor,
-            reconnect: connection.phase.isFailed ? { [weak connection] in connection?.connect() } : nil
+            recovery: connection.phase.failure.map { failure in
+                (failure.recoveryTitle, { [weak self] in self?.recover(from: failure) })
+            }
         )
+    }
+
+    private func recover(from failure: RemoteConnectionFailure) {
+        switch failure.recovery {
+        case .reconnect:
+            connection.connect()
+        case .pairAgain:
+            model.isPairing = true
+        case .openLocalNetworkSettings:
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        }
     }
 
     private var connectionStatusLabel: String {
@@ -644,7 +658,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         case .connecting: return MobileL10n.string("Connecting to Mac…")
         case .connected:
             return model.activeHost?.name ?? MobileL10n.string("Connected")
-        case .ended(let reason), .failed(let reason): return reason
+        case .ended(let reason): return reason
+        case .failed(let failure): return failure.message
         }
     }
 
@@ -1241,14 +1256,21 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func update(title: String, status: String, statusColor: UIColor, reconnect: (() -> Void)?) {
+    /// `recovery` is the whole failure state's one next step, which is not always a retry: a
+    /// dead address needs a fresh QR code and a denied Local Network switch needs Settings.
+    func update(
+        title: String,
+        status: String,
+        statusColor: UIColor,
+        recovery: (title: String, action: () -> Void)?
+    ) {
         titleLabel.text = title
         statusLabel.text = status
         dot.backgroundColor = statusColor
-        self.reconnect = reconnect
-        isUserInteractionEnabled = reconnect != nil
+        self.reconnect = recovery?.action
+        isUserInteractionEnabled = recovery != nil
         accessibilityLabel = [title, status].joined(separator: ", ")
-        accessibilityHint = reconnect == nil ? nil : MobileL10n.string("Reconnect")
+        accessibilityHint = recovery?.title
     }
 
     func applyTheme(_ theme: RemoteThemePalette) {
@@ -1257,9 +1279,4 @@ private final class RemoteConversationNavigationTitleView: UIControl {
     }
 }
 
-private extension RemoteSessionConnection.Phase {
-    var isFailed: Bool {
-        if case .failed = self { return true }
-        return false
-    }
-}
+

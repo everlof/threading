@@ -1134,7 +1134,8 @@ final class SessionRowActionsTests: XCTestCase {
             let sidebar = ProjectSidebarViewController()
             let session = AgentSession(kind: .claude, title: "Terminal")
             let choices = try limitRecoveryChoices(for: session, in: sidebar)
-            let titles = choices.compactMap { $0.item?.title }
+            let items = choices.compactMap(\.item)
+            let titles = items.map(\.title)
 
             XCTAssertEqual(
                 Array(titles.prefix(3)),
@@ -1152,7 +1153,19 @@ final class SessionRowActionsTests: XCTestCase {
             )
             for item in choices.compactMap(\.item) {
                 XCTAssertNotNil(item.onChoose, "\(item.title) answers nothing")
+                XCTAssertFalse(
+                    item.help?.isEmpty ?? true,
+                    "\(item.title) does not explain its consequence on hover"
+                )
             }
+            XCTAssertEqual(
+                Array(items.prefix(3).map(\.help)),
+                [
+                    LimitRecoveryPolicy.flagOnly.explanation,
+                    LimitRecoveryPolicy.waitForReset.explanation,
+                    LimitRecoveryPolicy.resumeOnBestAccount.explanation
+                ]
+            )
 
             // The fold names the *condition* and its rows name the outcomes. A fold carrying one
             // of its own rows' names would read as that row being switched on, which is the

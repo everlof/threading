@@ -19,6 +19,14 @@ enum PaneBandMargin {
     case paneEdge
 }
 
+/// What the footer's outer margin aligns when its first or last control carries internal
+/// padding. Textual chrome normally aligns the visible title or glyph; a filled call-to-action
+/// aligns its plate so the coloured surface itself keeps clear of the pane edge.
+enum PaneFooterOuterEdgeAlignment: Equatable {
+    case visibleContent
+    case controlFrame
+}
+
 /// The bottom band of a pane: a hairline above, its controls centred in the band, leading
 /// actions at one edge and trailing ones at the other.
 ///
@@ -34,10 +42,11 @@ enum PaneBandMargin {
 ///   for edges that actually abut a curve — measured for the sidebar's band: 16pt at the window
 ///   corner, zero at the divider — so "equal spacing" is measured from the region the eye reads
 ///   as usable. A pane that sits against another pane gets no phantom inset, automatically.
-/// - **Controls align by ink, not by frame.** The outermost view on each side is pulled out by
-///   its `OpticalInsetProviding` padding, so a plain button's glyph lands exactly on the stated
-///   margin instead of its invisible hover surface doing so. Views that state no padding are
-///   taken at their frame.
+/// - **Controls align by visible content by default.** The outermost view on each side is pulled
+///   out by its `OpticalInsetProviding` padding, so a plain button's glyph lands exactly on the
+///   stated margin instead of its invisible hover surface doing so. A footer ending in a filled
+///   action can opt into control-frame alignment so its plate, rather than its title, keeps that
+///   margin. Views that state no padding are identical under both rules.
 ///
 /// The footer draws nothing itself — the hairline is a `SeparatorView`, and the ground beneath
 /// is the pane's own. Hosts pin leading, trailing and bottom; the band supplies its height.
@@ -58,6 +67,7 @@ final class PaneFooterView: NSView {
     /// state one and the band asks for it, the band's own edges otherwise. Exposed so a test can
     /// assert the margin against what the content is actually measured from.
     private let margin: PaneBandMargin
+    private let outerEdgeAlignment: PaneFooterOuterEdgeAlignment
     private(set) lazy var contentGuide: NSLayoutGuide = makeContentGuide(margin)
 
     private let separator = SeparatorView()
@@ -69,9 +79,11 @@ final class PaneFooterView: NSView {
     init(
         leading: [NSView] = [],
         trailing: [NSView] = [],
-        margin: PaneBandMargin = .cornerAdapted
+        margin: PaneBandMargin = .cornerAdapted,
+        outerEdgeAlignment: PaneFooterOuterEdgeAlignment = .visibleContent
     ) {
         self.margin = margin
+        self.outerEdgeAlignment = outerEdgeAlignment
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: Design.Size.footerHeight).isActive = true
@@ -174,6 +186,7 @@ final class PaneFooterView: NSView {
     }
 
     private func opticalInset(of view: NSView) -> CGFloat {
-        (view as? OpticalInsetProviding)?.opticalHorizontalInset ?? 0
+        guard outerEdgeAlignment == .visibleContent else { return 0 }
+        return (view as? OpticalInsetProviding)?.opticalHorizontalInset ?? 0
     }
 }

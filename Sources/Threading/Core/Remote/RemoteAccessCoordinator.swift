@@ -137,8 +137,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     private let server: RemoteAccessServer
     private let mirrors: RemoteSessionMirrorRegistry
-    private let tunnel = RemoteTunnel()
-    private let tailscale = TailscaleRemoteTransport()
+    private let tunnel: any RemoteRelayTransport
+    private let tailscale: any RemoteTailnetTransport
     private let hostedService: RemoteHostedServiceController
     private let appSettings: AppSettings
     private let authority = RemoteAuthorityStore()
@@ -166,9 +166,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         appSettings: AppSettings,
         guestShareStore: RemoteGuestSharePersisting? = nil,
         hostedService: RemoteHostedServiceController? = nil,
-        serverServices: RemoteAccessServerServices? = nil
+        serverServices: RemoteAccessServerServices? = nil,
+        relayTransport: (any RemoteRelayTransport)? = nil,
+        tailnetTransport: (any RemoteTailnetTransport)? = nil
     ) {
         self.appSettings = appSettings
+        tunnel = relayTransport ?? Self.defaultRelayTransport()
+        tailscale = tailnetTransport ?? Self.defaultTailnetTransport()
         let services = serverServices ?? Self.makeServerServices(appSettings: appSettings)
         mirrors = services.mirrors
         server = RemoteAccessServer(services: services)
@@ -223,6 +227,25 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         _ terminalApplication: any RemoteTerminalApplicationCapability
     ) {
         mirrors.installTerminalApplication(terminalApplication)
+    }
+
+    /// The transports the app ships with, unless a caller injected substitutes.
+    ///
+    /// A hosted test process gets `RefusedRemoteTransport` instead: the test bundle lives inside
+    /// this app, so a test that reaches `shared` would otherwise spawn the developer's own
+    /// `cloudflared` and `tailscale` and publish their Mac, leaving children behind after the run.
+    /// A test that wants to observe transport behaviour injects its own double rather than
+    /// relying on this.
+    static func defaultRelayTransport() -> any RemoteRelayTransport {
+        isHostedTestProcess ? RefusedRemoteTransport() : RemoteTunnel()
+    }
+
+    static func defaultTailnetTransport() -> any RemoteTailnetTransport {
+        isHostedTestProcess ? RefusedRemoteTransport() : TailscaleRemoteTransport()
+    }
+
+    private static var isHostedTestProcess: Bool {
+        NSClassFromString("XCTestCase") != nil
     }
 
     /// The remote transport's live composition root. No route may recover one of these process
@@ -1620,12 +1643,18 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
 
         switch state {
-        case .connected:
+        case .connected(let origin):
+            // The advertised origin, hashed. Without it a report says a transport connected and
+            // cannot say to what, which is exactly the question a phone failing against a dead
+            // address needs answered.
+            let digest = MacRemoteDiagnostics.originDigest(origin)
             MacRemoteDiagnostics.record(.relayConnected, fields: [
                 .transport: kind.rawValue,
+                .origin: digest,
             ])
             EventLog.shared.record(.remote, "Remote transport connected", [
                 "transport": kind.rawValue,
+                "origin": digest,
             ])
             drainPendingSharesIfPossible()
         case .unavailable(let reason):

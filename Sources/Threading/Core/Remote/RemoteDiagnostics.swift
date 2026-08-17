@@ -34,6 +34,17 @@ enum MacRemoteDiagnostics {
         return "\(prefix)-\(short)"
     }
 
+    /// The address this Mac advertised, as a value a report can carry.
+    ///
+    /// `Remote access started {port}` recorded the loopback port and nothing about the public
+    /// origin, so a report could not say whether a phone had been given the address it was
+    /// failing against. The origin itself is a routable location of someone's machine and never
+    /// belongs in a file meant to leave it, so only its scheme, host and port are hashed. Two
+    /// events naming the same origin therefore match, and neither one names it.
+    static func originDigest(_ origin: URL) -> String {
+        pseudonym(RemoteOriginIdentity.canonical(origin), prefix: "origin")
+    }
+
     static func supportReport(
         additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
     ) throws -> URL {
@@ -119,5 +130,18 @@ private func reportMacRemoteDiagnosticStorageEvent(
         ThreadingLogger.remote.warning(
             "Share-safe diagnostic journal storage failed stage=\(event.stage.rawValue, privacy: .public) domain=\(event.errorDomain.rawValue, privacy: .public) code=\(event.errorCode, privacy: .public) affected=\(event.affectedCount, privacy: .public)"
         )
+    }
+}
+
+/// The part of an address two diagnostic events must agree on to be talking about one origin.
+///
+/// Paths, queries and fragments are excluded deliberately: a fragment is where a pairing bearer
+/// lives, and a hash of a URL that includes one would still be a hash *of a credential*.
+enum RemoteOriginIdentity {
+    static func canonical(_ origin: URL) -> String {
+        let scheme = origin.scheme?.lowercased() ?? "none"
+        let host = origin.host?.lowercased() ?? "none"
+        let port = origin.port.map(String.init) ?? "default"
+        return "\(scheme)://\(host):\(port)"
     }
 }

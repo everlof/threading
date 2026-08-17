@@ -225,6 +225,7 @@ enum ShellCommandPolicy {
             "basename", "dirname", "realpath", "readlink", "which", "type", "tree",
             "grep", "egrep", "fgrep", "rg", "ag", "find", "fd",
             "du", "df", "date", "uname", "hostname", "whoami", "id", "uptime", "arch",
+            "pgrep",
             "sort", "uniq", "cut", "tr", "column", "nl", "seq", "diff", "cmp",
             "jq", "yq", "shasum", "md5sum", "cksum", "true", "false", "git", "sed"
         ]

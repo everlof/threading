@@ -89,6 +89,24 @@ final class PaneFooterTests: XCTestCase {
         XCTAssertEqual(view.frame.minX, footer.contentGuide.frame.minX + contentInset)
     }
 
+    func testAFrameAlignedActionKeepsItsPlateInsideTheMargin() {
+        let button = ThemedButton()
+        button.title = "Update chat"
+        button.emphasis = .primary
+        let footer = PaneFooterView(
+            trailing: [button],
+            margin: .paneEdge,
+            outerEdgeAlignment: .controlFrame
+        )
+        _ = host(footer)
+
+        XCTAssertEqual(
+            button.frame.maxX,
+            footer.contentGuide.frame.maxX - contentInset,
+            accuracy: 0.5
+        )
+    }
+
     func testSiblingsKeepTheStatedSpacing() {
         let first = plainButton()
         let second = plainButton()

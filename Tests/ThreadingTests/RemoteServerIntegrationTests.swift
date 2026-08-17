@@ -3704,12 +3704,14 @@ final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
 
     private let invitationToken = String(repeating: "c", count: 43)
     private var appSettingsSuites: [(String, UserDefaults)] = []
+    private var transportDoubles: [any RemoteAccessTransport] = []
 
     override func tearDown() {
         for (name, defaults) in appSettingsSuites {
             defaults.removePersistentDomain(forName: name)
         }
         appSettingsSuites.removeAll()
+        transportDoubles.removeAll()
         super.tearDown()
     }
 
@@ -3718,6 +3720,25 @@ final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
         let defaults = UserDefaults(suiteName: name)!
         appSettingsSuites.append((name, defaults))
         return AppSettings(defaults: defaults)
+    }
+
+    /// Never the shipping transports. A coordinator built with the defaults owns a `RemoteTunnel`
+    /// pointed at the real `cloudflared`, and the test bundle is hosted inside the app, so a
+    /// coordinator that ever reached relay mode here would publish this developer's Mac.
+    private func makeCoordinator(
+        guestShareStore: RemoteGuestSharePersisting
+    ) -> RemoteAccessCoordinator {
+        let relay = RecordingRelayTransport()
+        let tailnet = RecordingTailnetTransport()
+        transportDoubles.append(relay)
+        transportDoubles.append(tailnet)
+        return RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: isolatedRemoteAppSettings(),
+            guestShareStore: guestShareStore,
+            relayTransport: relay,
+            tailnetTransport: tailnet
+        )
     }
 
     func testAcceptedGuestMembershipAndUnusedInvitationSurviveCoordinatorRecreation() throws {
@@ -3732,11 +3753,7 @@ final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
             expiresAt: Date(timeIntervalSinceNow: 3_600),
             members: []
         )])
-        let first = RemoteAccessCoordinator(
-            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
-            appSettings: isolatedRemoteAppSettings(),
-            guestShareStore: store
-        )
+        let first = makeCoordinator(guestShareStore: store)
         XCTAssertEqual(first.access(for: sessionID).links.count, 1)
 
         let redemption = try XCTUnwrap(first.redeemInvitation(
@@ -3749,22 +3766,14 @@ final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
         XCTAssertTrue(first.access(for: sessionID).links.isEmpty)
         XCTAssertEqual(first.access(for: sessionID).members.map(\.displayName), ["Anna"])
 
-        let afterRestart = RemoteAccessCoordinator(
-            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
-            appSettings: isolatedRemoteAppSettings(),
-            guestShareStore: store
-        )
+        let afterRestart = makeCoordinator(guestShareStore: store)
         XCTAssertTrue(afterRestart.access(for: sessionID).links.isEmpty)
         XCTAssertEqual(afterRestart.access(for: sessionID).members.map(\.displayName), ["Anna"])
     }
 
     func testUnreadableGuestPersistenceFailsClosedWithoutConsumingAnInvitation() {
         let store = FailingGuestShareStore()
-        let coordinator = RemoteAccessCoordinator(
-            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
-            appSettings: isolatedRemoteAppSettings(),
-            guestShareStore: store
-        )
+        let coordinator = makeCoordinator(guestShareStore: store)
 
         XCTAssertNotNil(coordinator.guestSharePersistenceError)
         XCTAssertNil(coordinator.redeemInvitation(

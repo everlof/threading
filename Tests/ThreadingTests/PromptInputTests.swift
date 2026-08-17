@@ -645,25 +645,67 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(observedDrafts.last, "draft", "Redo has to persist the restored draft too")
     }
 
-    /// The app menu does not target `UndoManager` directly: its registry-backed item reaches the
-    /// host command plane first. Calling the manager in the test above therefore missed the bug
-    /// where the second responder-chain send found no action and ⌘Z did nothing in the app.
-    func testHostUndoRouteInvokesTheFocusedDraftsUndoManager() throws {
+    /// The undo manager is not the shipping entry point: AppKit first has to resolve the main-menu
+    /// key equivalent and send the window responder's `undo:` action. The earlier regression test
+    /// called the manager directly, so it passed while the menu used `UndoManager.undo` — a
+    /// different, zero-argument selector for which the responder chain had no target.
+    func testCommandZThroughTheApplicationMenuUndoesAndRedoesTheFocusedDraft() throws {
         let prompt = PromptView()
         let window = makeWindow(hosting: prompt)
-        let textView = try promptTextView(in: prompt)
-        var observedDrafts: [String] = []
-        prompt.onChange = { observedDrafts.append($0) }
 
+        let textView = try promptTextView(in: prompt)
         XCTAssertTrue(window.makeFirstResponder(textView))
         type("draft", in: window)
 
-        XCTAssertTrue(
-            FirstResponderUndo.perform(in: window),
-            "the host route did not find the focused editor's pending operation"
-        )
+        let delegate = try XCTUnwrap(NSApp.delegate as? AppDelegate)
+        let previousMenu = NSApp.mainMenu
+        defer { NSApp.mainMenu = previousMenu }
+        delegate.setupMenuBar()
+
+        let menu = try XCTUnwrap(NSApp.mainMenu)
+        let editMenu = try XCTUnwrap(menu.items.lazy.compactMap(\.submenu).first { submenu in
+            submenu.items.contains { ($0.representedObject as? String) == "system.undo" }
+        })
+        let undoItem = try XCTUnwrap(editMenu.items.first {
+            ($0.representedObject as? String) == "system.undo"
+        })
+        let redoItem = try XCTUnwrap(editMenu.items.first { $0.action == AppKitEditActions.redo })
+        XCTAssertNil(undoItem.target)
+        XCTAssertNil(redoItem.target)
+        XCTAssertEqual(undoItem.action, AppKitEditActions.undo)
+
+        // A hosted test cannot make its fixture the application's real key window under
+        // xcodebuild. Pointing these otherwise targetless shipping items at that window supplies
+        // exactly the responder NSApplication would select in the running app, while preserving
+        // the menu's real key equivalents and actions.
+        undoItem.target = window
+        redoItem.target = window
+        defer {
+            undoItem.target = nil
+            redoItem.target = nil
+        }
+
+        func commandZ(modifiers: NSEvent.ModifierFlags) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: modifiers.contains(.shift) ? "Z" : "z",
+                charactersIgnoringModifiers: modifiers.contains(.shift) ? "Z" : "z",
+                isARepeat: false,
+                keyCode: 6
+            ))
+        }
+
+        XCTAssertTrue(menu.performKeyEquivalent(with: try commandZ(modifiers: .command)))
         XCTAssertEqual(prompt.stringValue, "")
-        XCTAssertEqual(observedDrafts.last, "", "host-routed undo did not persist the draft")
+        XCTAssertTrue(
+            menu.performKeyEquivalent(with: try commandZ(modifiers: [.command, .shift]))
+        )
+        XCTAssertEqual(prompt.stringValue, "draft")
     }
 
     /// The prompt sizes itself to its text through the layout manager, so a missing network
@@ -1880,9 +1922,23 @@ final class PromptInputTests: XCTestCase {
         prompt.addContextAttachment(comment)
 
         XCTAssertEqual(prompt.contextAttachments, [comment], "the same receipt must stage once")
+        let updated = ConversationContextAttachment(
+            id: comment.id,
+            kind: .comment,
+            source: .attachment,
+            title: "layout.png · revision 2",
+            comment: "The toolbar and title are both too close.",
+            locator: "attachments/layout-r2.png"
+        )
+        prompt.addContextAttachment(updated)
+        XCTAssertEqual(
+            prompt.contextAttachments,
+            [updated],
+            "a new annotation revision should update its linked receipt in place"
+        )
         XCTAssertTrue(try inlineSubmitButton(in: prompt).isEnabled)
         prompt.submit()
-        XCTAssertEqual(submittedContexts, [[comment]])
+        XCTAssertEqual(submittedContexts, [[updated]])
 
         prompt.clear()
         XCTAssertTrue(prompt.contextAttachments.isEmpty)

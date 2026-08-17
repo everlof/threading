@@ -26,6 +26,16 @@ final class SessionComposerViewController: NSViewController {
     private let heroRegion = NSLayoutGuide()
     private var hasPlayedHeroDrawIn = false
 
+    /// The greeting this composer is holding — minted when it is pointed at a project, and kept
+    /// until it is pointed at another one.
+    ///
+    /// Held rather than asked for each time the hero is restated. The line is a *welcome*: it
+    /// belongs to arriving at the composer, not to any decision made inside it. Re-rolled on
+    /// every restatement it followed `refreshChips` instead, so choosing a model — or an effort,
+    /// or a permission mode — morphed the sentence above the box into a different one, which
+    /// reads as the app answering a choice it has nothing to say about.
+    private var chatGreeting = ComposerGreeting.message()
+
     /// Where the session runs: the project, and the checkout inside it.
     private let locationChip = ChipView()
 
@@ -258,8 +268,15 @@ final class SessionComposerViewController: NSViewController {
     /// Conversations found on disk for the current project, once discovery has finished.
     ///
     /// Scanning a busy project takes a couple of seconds, so it runs when the composer is
-    /// shown and the chip stays hidden until there is something to offer.
-    private var importable: [ImportableSession] = []
+    /// shown and the chip stays hidden until there is something to offer. The offer follows
+    /// this list rather than being switched beside it, so nothing can change what was found
+    /// without the row saying so.
+    ///
+    /// Internal so a test can state what discovery answered: the offer's arrival is a
+    /// transition, and one driven by a scan of the developer's own machine is not a test.
+    var importable: [ImportableSession] = [] {
+        didSet { refreshImportOffer() }
+    }
 
     /// Whether the next session is rendered by Threading rather than shown as a terminal.
     /// Experimental, and offered only for agents with a structured headless transport.
@@ -884,6 +901,10 @@ final class SessionComposerViewController: NSViewController {
         // Warmed as the composer appears, not as the identity menu opens: a fetch started on
         // the click lands after the menu has been read and dismissed.
         AccountUsageMenu.prefetch()
+        // A fresh line for a fresh arrival. Not on the return above, which keeps the chips, the
+        // half-written prompt and the attachments exactly as they were — and the sentence over
+        // them is part of that picture.
+        chatGreeting = ComposerGreeting.message()
         refreshGreeting()
 
         if !hasPlayedHeroDrawIn, !Design.Motion.reducesMotion {
@@ -896,7 +917,6 @@ final class SessionComposerViewController: NSViewController {
             // Words typed here stay; a draft belonging to the project just left does not.
             promptView.stringValue = carriedPrompt ?? ""
             importable = []
-            refreshImportOffer()
             refreshChips()
             return
         }
@@ -916,7 +936,7 @@ final class SessionComposerViewController: NSViewController {
         discoverImportable(for: project)
     }
 
-    /// A fresh line each time the composer is pointed somewhere, morphing in place when a
+    /// Restates the hero from the line this composer is holding, morphing in place when a
     /// greeting is already up.
     ///
     /// The manager's brief is three lines against the chat greeting's one, and the block morphs
@@ -924,10 +944,13 @@ final class SessionComposerViewController: NSViewController {
     /// other two morph in beneath it, and back out again on the way to a chat. Two labels swapped
     /// by `isHidden` did the same job and cut between them, which is the one transition on this
     /// screen the eye is already on.
+    ///
+    /// It reads `chatGreeting` rather than asking `ComposerGreeting` for a line, because this
+    /// runs on every chip selection — `refreshChips` restates the role, and the role owns the
+    /// hero. Rolling a fresh line here meant picking a model rewrote the sentence above the box,
+    /// so a choice that changes nothing about the greeting animated it anyway.
     private func refreshGreeting() {
-        let message = selectedRole == .manager
-            ? ComposerDefaults.managerGreeting
-            : ComposerGreeting.message()
+        let message = selectedRole == .manager ? ComposerDefaults.managerGreeting : chatGreeting
         guard message != greetingLabel.stringValue else { return }
         greetingLabel.setStringValue(message, animated: !greetingLabel.stringValue.isEmpty)
     }
@@ -981,13 +1004,11 @@ final class SessionComposerViewController: NSViewController {
     /// enough that the user can select another project before it finishes.
     private func discoverImportable(for project: Project) {
         importable = []
-        refreshImportOffer()
 
         SessionImporter.discover(for: project) { [weak self] found in
             guard let self, self.projectID == project.id else { return }
 
             self.importable = found
-            self.refreshImportOffer()
         }
     }
 
@@ -995,8 +1016,41 @@ final class SessionComposerViewController: NSViewController {
     /// the row it is on carries the send, so it stands whatever discovery answers. While an
     /// edit holds the box its slot belongs to Cancel, the way out of the edit.
     private func refreshImportOffer() {
-        importButton.isHidden = importable.isEmpty || editingScheduledStartID != nil
         importButton.title = ComposerDefaults.importTitle(count: importable.count)
+        setImportOffered(!importable.isEmpty && editingScheduledStartID == nil)
+    }
+
+    /// Puts the offer up, or takes it away — fading it **in** and never out.
+    ///
+    /// Discovery answers a beat or two after the composer has settled, so the button arrives
+    /// under a pane the eye has already stopped moving over. Switched on at full strength that
+    /// is a blink beside the send, which is the one thing on this row that should be noticed;
+    /// a short fade says the same thing without claiming the eye back.
+    ///
+    /// Withdrawal is immediate, because every route that withdraws it — another project, an
+    /// edit taking the slot — has already replaced what the rest of the row says. Fading a
+    /// stale count out over that would be the offer lingering after it stopped being true. It
+    /// also means the only animation here ends at full opacity, so an arrival interrupted by
+    /// anything at all still settles where it belongs, with no generation to track.
+    private func setImportOffered(_ offered: Bool) {
+        let isOnOffer = !importButton.isHidden
+        guard offered != isOnOffer else { return }
+
+        // No window means no render tree to fade in: an `animator()` proxy with nothing to
+        // animate against leaves the button at the alpha it was given.
+        guard offered, !Design.Motion.reducesMotion, importButton.window != nil else {
+            importButton.alphaValue = 1
+            importButton.isHidden = !offered
+            return
+        }
+
+        importButton.alphaValue = 0
+        importButton.isHidden = false
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.standard
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            importButton.animator().alphaValue = 1
+        }
     }
 
     /// Restates the action row for whether an edit is holding the box.
@@ -1964,7 +2018,6 @@ final class SessionComposerViewController: NSViewController {
             // offering them again would only be refused as duplicates.
             let adopted = Set(chosen.map(\.id))
             self.importable.removeAll { adopted.contains($0.id) }
-            self.refreshImportOffer()
 
             self.delegate?.sessionComposer(self, importSessions: chosen, into: projectID)
         }

@@ -1700,11 +1700,13 @@ frequency.
 
 The remembered divider position is installed in the same geometry transaction as the uncollapse,
 so there is no second restoration motion. More importantly, terminal-backed sessions take the
-immediate split route even when the caller requests animation. That commits the one useful final
-width without blocking the main thread on a backing-tree animation or manufacturing intermediate
-terminal grids. Native conversation surfaces retain the standard motion. This is a presentation
-policy at the pane boundary, not a SwiftTerm resize suppression: terminal frame, emulator, PTY,
-accessibility, search and scroller state still follow the one final geometry normally.
+immediate split route even when the caller requests animation. The policy is resolved once in the
+shared split-collapse boundary for both edge panes, so the sidebar and display panel cannot
+disagree. That commits the one useful final width without blocking the main thread on a
+backing-tree animation or manufacturing intermediate terminal grids. Native conversation surfaces
+retain the standard motion. This is a presentation policy at the pane boundary, not a SwiftTerm
+resize suppression: terminal frame, emulator, PTY, accessibility, search and scroller state still
+follow the one final geometry normally.
 
 The empty display pane had a second independent cold cost: `viewDidLoad` eagerly installed a
 `WKWebView`, launching WebKit services for image, chart, native-controller, and empty panes.
@@ -1896,6 +1898,17 @@ warm massive-index runs measured resize p95 at **9.005 and 8.091 ms** (max **11.
 and 16.012 ms**. Both retained `max_width_delta_drift=0.000` and
 `pending_layout_frames=0`; the standard and massive opt-in workloads passed. Rounded-card clipping
 therefore does not change the existing virtualization or live-resize coherence boundary.
+
+The 2026-08-17 pointer and disclosure-settling follow-up keeps those same bounds. Source-line hover
+is one cached TextKit logical-line rectangle and invalidates only the old and new pointer targets;
+there is still no view per source line. A hunk toggle performs two non-animated mounted-viewport
+layout passes in the input event — model estimate, then exact TextKit height — so no old-height
+table frame reaches display. Offscreen files remain estimates and neither pass constructs them. The
+174-file/400-line workload measured **10.654 ms/frame** and its disclosure cycle completed without
+a pending layout frame. Two sequential warm 8,985-file runs measured resize p95 at **8.421 and
+8.790 ms** (max **11.580 and 12.303 ms**), continuous-scroll p95 at **16.505 and 17.318 ms**, and
+full-index p95 at **15.606 and 15.491 ms**. Both recorded `max_width_delta_drift=0.000` and
+`pending_layout_frames=0`; the standard and massive opt-in workloads passed.
 
 The generated workload is the regression boundary, but it cannot reproduce the object database,
 index and history shape of Linux-scale repositories. `git-repository-stress` accepts an existing

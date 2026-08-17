@@ -178,6 +178,11 @@ final class SessionAttachmentsViewController: NSViewController {
         return host
     }()
     private var imageView: ThemedImagePreview?
+    private var imagePreviewStack: NSStackView?
+    private var annotationReceipt: ImageAnnotationReceiptView?
+    /// Rebuilt once per list snapshot so row construction remains O(attachments + documents),
+    /// rather than scanning every annotation document for every attachment row.
+    private var annotationDocumentsByAttachmentID: [String: ImageAnnotationDocument] = [:]
     /// PDFs, archives and office documents alike: PDFKit for the first, Quick Look for the
     /// rest, both already contained inside the one named system-chrome boundary.
     private var documentView: MediaInspectorDocumentView?
@@ -393,6 +398,13 @@ final class SessionAttachmentsViewController: NSViewController {
         appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
             guard event.sessionID == self?.sessionID else { return }
             self?.updatePrimaryAction()
+            self?.updateAnnotationReceipt()
+        }
+        appEvents.observe(ImageAnnotationsDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.sessionID else { return }
+            self?.rebuildAnnotationDocumentIndex()
+            self?.tableView.reloadData()
+            self?.updateAnnotationReceipt()
         }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applyPreviewTheme()
@@ -729,6 +741,7 @@ final class SessionAttachmentsViewController: NSViewController {
             filter = .all
         }
         attachments = allAttachments.filter(filter.admits)
+        rebuildAnnotationDocumentIndex()
         countLabel.stringValue = L10n.format(
             "ATTACHMENTS  %lld",
             Int64(attachments.count)
@@ -1034,6 +1047,8 @@ final class SessionAttachmentsViewController: NSViewController {
             imageView.image = image
             imageView.fileURL = attachment.url
             imageView.isHidden = false
+            imagePreviewStack?.isHidden = false
+            updateAnnotationReceipt()
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
 
         case .pdf, .archive, .document:
@@ -1303,7 +1318,8 @@ final class SessionAttachmentsViewController: NSViewController {
                             .map(MediaInspectorItemContent.media) ?? .document
                     default: .document
                     }
-                }()
+                }(),
+                annotationAssetID: attachment.id
             )
         }
         return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
@@ -1348,8 +1364,28 @@ final class SessionAttachmentsViewController: NSViewController {
             return self.mediaInspectorSelection(forRow: self.tableView.selectedRow)
         }
         image.isHidden = true
-        installPreviewSurface(image)
+        image.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+        let receipt = ImageAnnotationReceiptView()
+        receipt.isHidden = true
+        receipt.onEdit = { [weak self] in
+            guard let self else { return }
+            _ = self.inspectAttachment(atRow: self.tableView.selectedRow)
+        }
+        receipt.onPrimaryAction = { [weak self] in self?.takeAnnotationReceiptAction() }
+
+        let stack = NSStackView(views: [image, receipt])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        stack.detachesHiddenViews = true
+        stack.isHidden = true
+        image.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        receipt.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        installPreviewSurface(stack)
         imageView = image
+        imagePreviewStack = stack
+        annotationReceipt = receipt
         return image
     }
 
@@ -1416,6 +1452,8 @@ final class SessionAttachmentsViewController: NSViewController {
     private func hideNativePreviews() {
         imageView?.image = nil
         imageView?.isHidden = true
+        imagePreviewStack?.isHidden = true
+        annotationReceipt?.isHidden = true
         documentView?.clear()
         documentView?.isHidden = true
         clearHTMLPreview()
@@ -1432,6 +1470,71 @@ final class SessionAttachmentsViewController: NSViewController {
         previewHost.applySurface(fill: Design.Surface.ground, radius: .panel)
         documentView?.applyTheme()
         htmlView?.underPageBackgroundColor = Design.Surface.ground
+    }
+
+    private func annotationDocument(
+        for attachment: SessionAttachment
+    ) -> ImageAnnotationDocument? {
+        annotationDocumentsByAttachmentID[attachment.id]
+    }
+
+    private func rebuildAnnotationDocumentIndex() {
+        let prefix = "attachment:"
+        annotationDocumentsByAttachmentID = SessionContinuityStore.shared
+            .imageAnnotationDocuments(in: sessionID)
+            .reduce(into: [:]) { result, document in
+                if let id = document.sourceAttachmentID { result[id] = document }
+                for key in document.assetKeys where key.hasPrefix(prefix) {
+                    result[String(key.dropFirst(prefix.count))] = document
+                }
+            }
+    }
+
+    private func updateAnnotationReceipt() {
+        guard isViewLoaded,
+              let attachment = selectedAttachment,
+              attachment.kind == .image,
+              let document = annotationDocument(for: attachment),
+              !document.annotations.isEmpty,
+              let receipt = annotationReceipt else {
+            annotationReceipt?.isHidden = true
+            return
+        }
+        let host = ChatImageAnnotationHost(sessionID: sessionID)
+        let item = MediaInspectorItem(
+            url: attachment.url,
+            title: attachment.name,
+            content: .image,
+            annotationAssetID: attachment.id
+        )
+        receipt.configure(
+            count: document.annotations.count,
+            state: host.sharingState(for: item),
+            canShare: host.canHandOff
+        )
+        receipt.isHidden = false
+    }
+
+    private func takeAnnotationReceiptAction() {
+        guard let attachment = selectedAttachment,
+              let document = annotationDocument(for: attachment) else { return }
+        let host = ChatImageAnnotationHost(sessionID: sessionID)
+        let item = MediaInspectorItem(
+            url: attachment.url,
+            title: attachment.name,
+            content: .image,
+            annotationAssetID: attachment.id
+        )
+        if host.sharingState(for: item) == .currentInChat {
+            _ = ImageAnnotationChatHandoff.removeFromChat(document, for: sessionID)
+        } else {
+            _ = ImageAnnotationChatHandoff.stage(
+                document,
+                image: imageView?.image,
+                for: sessionID
+            )
+        }
+        updateAnnotationReceipt()
     }
 
     private func clearHTMLPreview() {
@@ -2063,7 +2166,9 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
         row: Int
     ) -> NSView? {
         guard attachments.indices.contains(row) else { return nil }
-        return SessionAttachmentRowView(attachment: attachments[row])
+        let attachment = attachments[row]
+        let count = annotationDocument(for: attachment)?.annotations.count ?? 0
+        return SessionAttachmentRowView(attachment: attachment, annotationCount: count)
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
@@ -2121,7 +2226,7 @@ final class SessionAttachmentRowView: NSView {
         return label
     }()
 
-    init(attachment: SessionAttachment) {
+    init(attachment: SessionAttachment, annotationCount: Int = 0) {
         super.init(frame: .zero)
 
         let icon = NSImageView()
@@ -2167,11 +2272,16 @@ final class SessionAttachmentRowView: NSView {
         moment.setContentHuggingPriority(.required, for: .horizontal)
         moment.translatesAutoresizingMaskIntoConstraints = false
 
+        let annotationBadge = annotationCount > 0
+            ? ImageAnnotationCountView(count: annotationCount)
+            : nil
+
         addSubview(icon)
         addSubview(name)
         addSubview(path)
         addSubview(origin)
         addSubview(moment)
+        if let annotationBadge { addSubview(annotationBadge) }
         addSubview(dropLabel)
         pathLabel = path
 
@@ -2216,10 +2326,6 @@ final class SessionAttachmentRowView: NSView {
                 equalTo: icon.trailingAnchor,
                 constant: Design.Spacing.small
             ),
-            name.trailingAnchor.constraint(
-                lessThanOrEqualTo: moment.leadingAnchor,
-                constant: -Design.Spacing.small
-            ),
             name.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.tight),
 
             path.leadingAnchor.constraint(equalTo: name.leadingAnchor),
@@ -2234,6 +2340,25 @@ final class SessionAttachmentRowView: NSView {
                 constant: -Design.Spacing.small
             )
         ])
+
+        if let annotationBadge {
+            NSLayoutConstraint.activate([
+                annotationBadge.trailingAnchor.constraint(
+                    equalTo: moment.leadingAnchor,
+                    constant: -Design.Spacing.small
+                ),
+                annotationBadge.centerYAnchor.constraint(equalTo: moment.centerYAnchor),
+                name.trailingAnchor.constraint(
+                    lessThanOrEqualTo: annotationBadge.leadingAnchor,
+                    constant: -Design.Spacing.small
+                )
+            ])
+        } else {
+            name.trailingAnchor.constraint(
+                lessThanOrEqualTo: moment.leadingAnchor,
+                constant: -Design.Spacing.small
+            ).isActive = true
+        }
     }
 
     @available(*, unavailable)

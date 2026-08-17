@@ -498,6 +498,15 @@ against a button that no click could reach in the app — `NSOutlineView` was sw
 [`design-system.md`](docs/architecture/design-system.md)). When a component's behaviour depends on
 its host, put the host in the fixture, and assert the host's own answer beside ours.
 
+**Focus is not `makeFirstResponder`'s return value.** On a window that is merely visible rather
+than key, `makeFirstResponder` returns `true`, installs the field editor, and leaves
+`currentEditor()` non-nil — while every keystroke goes on reaching the key window somewhere else.
+So the assertions anyone would reach for all pass on a surface that cannot be typed into, which is
+how ⌘J's file search shipped with a search field the keyboard never reached. A test about focus
+asserts `isKeyWindow` (or `NSApp.keyWindow`) beside the responder. A borderless
+`.nonactivatingPanel` can hold key status while the host application is inactive, so this needs no
+window on screen and no activation — it stays in `fast`.
+
 **A detached fixture with a frame constrains nothing.** `NSView(frame:)` outside a window pins no
 width, so Auto Layout lays the subtree out at the width it would *prefer* and a child may come out
 wider than the view holding it — with no "unable to simultaneously satisfy" to say so, because

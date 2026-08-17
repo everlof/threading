@@ -184,6 +184,35 @@ final class DisplayPanelTogglePressTests: HostedStoreTestCase {
         }
     }
 
+    /// Both edge panes share one motion policy. A terminal-backed workspace takes the measured
+    /// immediate route at either edge; leaving the sidebar on the default animated route while
+    /// only the display panel consulted the terminal was the visible mismatch this guards.
+    func testTerminalWorkspaceUsesTheSameImmediateTransitionAtBothEdges() throws {
+        let fixture = try makeFixture()
+        defer { fixture.teardown() }
+        let splitController = fixture.controller.splitViewController
+        let content = try XCTUnwrap(
+            splitController.splitViewItems[1].viewController
+                as? TerminalContainerViewController
+        )
+        XCTAssertNotNil(
+            content.activeTerminalSession,
+            "the fixture is not exercising the terminal-backed motion policy"
+        )
+
+        fixture.controller.setDisplayPaneVisible(true)
+        XCTAssertFalse(
+            splitController.lastCollapseUsedAnimatedGeometry,
+            "the display panel animated beside a live terminal"
+        )
+
+        fixture.controller.toggleSidebar()
+        XCTAssertFalse(
+            splitController.lastCollapseUsedAnimatedGeometry,
+            "the sidebar did not use the display panel's immediate terminal route"
+        )
+    }
+
     /// One control, drawn once: the window must never hold two views offering this switch, in
     /// either state. The corner is a *slot* the one toggle moves into, so a second button
     /// appearing here would be the old arrangement coming back.

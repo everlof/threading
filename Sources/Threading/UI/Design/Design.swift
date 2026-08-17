@@ -1287,6 +1287,22 @@ enum Design {
             }
         }
 
+        /// The whole logical source row under Git Review's pointer action.
+        ///
+        /// A control-hover role is normally opaque because it replaces bare ground. Here it
+        /// lies over syntax ink and semantic added/removed washes, so using that role directly
+        /// would erase the information the row exists to show. Keep its authored hue and make
+        /// it a wash, just as image hover does for content that must remain readable beneath it.
+        static var diffLineHoverWash: NSColor {
+            NSColor(name: NSColor.Name("threading.surface.diffLineHoverWash")) { _ in
+                let hover = AppThemePalette.current.resolved(.controlHover)
+                let alpha = Accessibility.increasesContrast
+                    ? Opacity.diffLineHoverWashIncreasedContrast
+                    : Opacity.diffLineHoverWash
+                return (hover.usingColorSpace(.sRGB) ?? hover).withAlphaComponent(alpha)
+            }
+        }
+
         /// The wash a covering surface lays over the window it opened in — see `InWindowOverlay`.
         ///
         /// Deliberately *not* derived from a theme role, and the only fill here that says so.
@@ -1946,6 +1962,14 @@ enum Design {
 
         /// The same wash under Increase Contrast, where a faint tint is the first thing to go.
         static let imageHoverWashIncreasedContrast: CGFloat = 0.34
+
+        /// A diff line is still source content while it is actionable. This is strong enough
+        /// to read as a row rather than the old one-pixel rule, without flattening its change
+        /// wash or syntax colours.
+        static let diffLineHoverWash: CGFloat = 0.18
+
+        /// The same row cue under Increase Contrast.
+        static let diffLineHoverWashIncreasedContrast: CGFloat = 0.36
 
         /// How much of its diff hue a loading skeleton's bar keeps.
         ///

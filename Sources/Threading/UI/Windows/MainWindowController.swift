@@ -668,6 +668,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             - headerStarted
 
         let finalizeStarted = DispatchTime.now().uptimeNanoseconds
+        // Both edge panes make the same motion decision. Beside a live terminal, AppKit's split
+        // animation synchronously commits the whole backing tree before its first frame and may
+        // manufacture intermediate terminal grids; measured cold, that was ~297 ms versus
+        // ~111 ms for one stable width. Native conversations keep the standard motion, while a
+        // terminal-backed workspace commits either edge pane's final geometry immediately.
+        splitViewController.allowsAnimatedPaneTransitions = { [weak self] in
+            self?.containerViewController.activeTerminalSession == nil
+        }
         splitViewController.paneCollapseStateDidChange = { [weak self] item, collapsed in
             guard let self else { return }
             self.updatePaneToggleSelection()
@@ -1309,12 +1317,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     // MARK: - Display Pane
 
-    /// Shows or hides the display panel, through the same animated route as the sidebar.
+    /// Shows or hides the display panel through the same transition route as the sidebar.
     ///
-    /// Animated by default because showing and hiding this panel are *gestures* — the toolbar
-    /// toggle, the pane's own ✕, a surface command. A session switch passes `animated: false`:
-    /// it swaps the whole workspace, and a panel sliding during the swap would animate a change
-    /// of subject as if it were a change of state.
+    /// Callers request animation by default because showing and hiding this panel are *gestures*
+    /// — the toolbar toggle, the pane's own ✕, a surface command. The shared edge-pane policy
+    /// resolves that request against the active content. A session switch passes
+    /// `animated: false`: it swaps the whole workspace, and a panel sliding during the swap
+    /// would animate a change of subject as if it were a change of state.
     func setDisplayPaneVisible(
         _ visible: Bool,
         animated: Bool = true
@@ -1329,15 +1338,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return
         }
 
-        // AppKit's implicit split animation synchronously commits the window's whole backing
-        // layer tree before its first frame. Beside a live TUI that means repainting SwiftTerm,
-        // laying out every intermediate width, and provoking SIGWINCH-driven Codex/Claude
-        // redraws for motion whose only useful result is the final divider position. Measured
-        // cold on the CLI fixture: ~297 ms animated versus ~111 ms at one stable width. Native
-        // conversation surfaces keep the standard pane motion; a terminal commits once.
-        let activeTerminal = containerViewController.activeTerminalSession?.terminalView
-        let animatesGeometry = animated && activeTerminal == nil
-
         guard visible else {
 #if DEBUG
             let collapseStarted = DispatchTime.now().uptimeNanoseconds
@@ -1345,7 +1345,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             splitViewController.setCollapsed(
                 true,
                 on: displayItem,
-                animated: animatesGeometry,
+                animated: animated,
                 completion: nil
             )
 #if DEBUG
@@ -1376,7 +1376,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         splitViewController.setCollapsed(
             false,
             on: displayItem,
-            animated: animatesGeometry,
+            animated: animated,
             geometryChanges: { [weak self] in
                 self?.applyDisplayPaneWidth(target)
             }

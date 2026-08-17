@@ -2029,7 +2029,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertEqual(card.accessibilityLabel(), "Fast")
     }
 
-    /// Each part is independently droppable: a session may know its model and not its posture, or
+    /// Each part is independently droppable: a session may know its model and not its effort, or
     /// the reverse, and the row says whichever it has rather than waiting for a full set.
     func testTheAgentLineShowsOnlyTheFactsItWasGiven() {
         let card = GitStatusOverlayView()
@@ -2041,40 +2041,6 @@ final class ThemedIndicatorsTests: XCTestCase {
 
         card.updateModel(GitStatusOverlayView.ModelReading(effort: "Extra High"))
         XCTAssertEqual(card.accessibilityLabel(), "Extra High")
-    }
-
-    /// The posture reads between the model and how it thinks, which is the order the composer's
-    /// own chips are in — one fact keeps one place wherever it is shown.
-    ///
-    /// It is on the card at all because nothing else showed it: a terminal's mode lives in the
-    /// CLI's own footer, the session's `⋯` menu states only what the *next* launch will ask for,
-    /// and Claude's status-line payload carries no posture for a status line to print.
-    func testTheAgentLineShowsThePostureBetweenTheModelAndItsEffort() {
-        let card = GitStatusOverlayView()
-        card.updateModel(GitStatusOverlayView.ModelReading(
-            name: "Opus 5",
-            mode: AgentPermissionMode.auto.displayName,
-            effort: "Extra High"
-        ))
-        card.applyInk(WindowBackdrop.ink)
-
-        XCTAssertFalse(card.isHidden)
-        XCTAssertEqual(card.accessibilityLabel(), "Opus 5 · Auto · Extra High")
-    }
-
-    /// A posture on its own is a row, for the same reason speed on its own is: the caller has
-    /// already dropped whatever the session's own surfaces say, and what is left is what the card
-    /// owes. This is the live case for a login that pins no model — the observed posture is then
-    /// the only agent fact the pane has.
-    func testAPostureAloneKeepsTheAgentLine() {
-        let card = GitStatusOverlayView()
-        card.updateModel(GitStatusOverlayView.ModelReading(
-            mode: AgentPermissionMode.bypassPermissions.displayName
-        ))
-        card.applyInk(WindowBackdrop.ink)
-
-        XCTAssertFalse(card.isHidden, "the posture did not hold the card open on its own")
-        XCTAssertEqual(card.accessibilityLabel(), "Bypass Permissions")
     }
 
     /// An empty reading and no reading mean the same thing: the caller whose status line already
@@ -2675,7 +2641,6 @@ final class ThemedIndicatorsTests: XCTestCase {
                     ))
                     card.updateModel(.init(
                         name: "Opus · 1M",
-                        mode: "Auto",
                         effort: "Extra High"
                     ))
                     card.updateChangeRequest(GitStatusOverlayView.ChangeRequestReading(status: review))

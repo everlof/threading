@@ -231,12 +231,12 @@ A numbered pin on an image, a field per pin, and one seam deciding who owns the 
 **The inspector never owns the marks.** Opened from the element-report sheet it is a second view
 of a list that sheet is already showing in its rail, and a pin dropped at 400% has to appear in a
 field the user goes back to. Opened from anywhere else — an attachment, a chart an agent drew, a
-browser baseline — there is no rail and no report, and the marks are worth exactly one thing:
-handing them to the chat. Both are the same gesture over the same picture, so the difference
-belongs in *who is asked*, not in a mode flag inside the inspector. `MediaInspectorAnnotationHost`
-is that question; `MediaInspectorPresenter.defaultAnnotationHost` is who answers it when the
-opener named nobody, installed by `AppDelegate` because this file draws pictures and knows
-nothing about sessions or composers.
+browser baseline — the host stores an editable `ImageAnnotationDocument` in session continuity
+and exposes it from the Attachments pane. Both are the same gesture over the same picture, so the
+difference belongs in *who is asked*, not in a mode flag inside the inspector.
+`MediaInspectorAnnotationHost` is that question; `MediaInspectorPresenter.defaultAnnotationHost`
+is who answers it when the opener named nobody, installed by `AppDelegate` because this file draws
+pictures and knows nothing about sessions or composers.
 
 Three decisions worth their words:
 
@@ -248,16 +248,20 @@ Three decisions worth their words:
   the button going down on the same pixel, and a zoomed picture is exactly when someone wants to
   pan *and* has a reason to mark a detail. Deciding on the way down dropped a pin at the start of
   every pan.
-- **The chat gets the flattened picture and the coordinates**, once, on close. Marking is a
-  sentence being composed — the third pin often renames the first — so a handoff per click would
-  put three versions of the same image in the composer. It rides `SessionContextHandoff`, the
-  seam that answers for a native conversation *and* a terminal, rather than an image-only route
-  that would work on one surface and silently do nothing on the other.
+- **Close means close; publication is explicit.** Edits are committed on every mutation, while
+  **Add to chat** creates an immutable flattened attachment revision with the coordinates beside
+  it. A stable context id upserts that revision in a native composer instead of multiplying
+  receipts; a terminal receives the same file-and-prose handoff. Sent revisions remain immutable
+  while the source document can be reopened and changed.
+- **The first layout is the real layout.** The notes document is flipped and top-anchored before
+  its first frame. A reopened list of several notes cannot begin below the viewport and wait for
+  collection-arrow navigation to provoke a second layout pass.
 
 `ChatImageAnnotationHost` is held **strongly** by `MediaInspectorSession`: the view's reference is
-weak, and a host built on demand by the default provider has no other owner. Without that, the
-chat host was deallocated between being created and being asked for the marks, and annotation
-quietly never appeared outside the report sheet.
+weak, and a host built on demand by the default provider has no other owner. It keys documents by
+stable attachment identity where one exists, promotes an otherwise transient image into session
+custody on its first mark, and keeps the file-path key as an alias so the same document is found
+from either route.
 
 The pin is `BrowserAnnotationOverlay`'s pin — same chip height, border weight, accent fill with
 the ground stroked around it, numeric face, top-most-wins hit test. A second numbered mark with

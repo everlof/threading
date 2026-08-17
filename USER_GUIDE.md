@@ -217,8 +217,9 @@ hover, and on the About window.
 At the other end of the same band, a **speaker** is the app's silence switch: one click stops
 every sound Threading makes — notification alerts and the terminal bell alike — and a second
 click gives both back exactly what they were set to, since the switch changes no sound
-setting. While it holds, the button is filled rather than quiet, so a silent app always says
-so on screen. It is the same state as **Settings ▸ General ▸ Silence** and the **Threading ▸
+setting. The ordinary speaker becomes slashed while it holds, and the button is filled rather
+than quiet, so a silent app always says so on screen. It is the same state as **Settings ▸
+General ▸ Silence** and the **Threading ▸
 Silence Sounds** menu item (⇧⌘S); all three follow each other, and the choice survives a
 relaunch. See [Notifications](#notifications) for what it does and does not silence.
 
@@ -797,8 +798,8 @@ Nothing is suppressed while it holds. Banners still arrive, the sidebar still ma
 a bell still ends the turn it was reporting — they are simply quiet. That is what separates it
 from Mute below: **Mute** answers "don't tell me", the silence switch answers "tell me quietly".
 Choosing a sound in either picker still plays it while the switch holds, because picking a sound
-is asking to hear it. The button is filled while the app is silent, and the state survives a
-relaunch.
+is asking to hear it. The speaker becomes slashed and the button fills while the app is silent;
+the state survives a relaunch.
 
 **Silencing one chat or one project.** **Session Options ▸ Mute Notifications** in a session's `⋯` menu quiets
 that conversation; the same item on a project row quiets the whole checkout, including sessions
@@ -2443,12 +2444,15 @@ as the last-resort system viewer. The panel's own **⋯** advertises the same ro
 image to drop a numbered mark, and a field for it appears in a column beside the picture. Click a
 mark to put the caret in its field; put the caret in a field and its mark lights up, so "which one
 is this?" is answered by looking rather than counting. Marks survive zoom and pan because they
-belong to the picture rather than to the view. Remove one with the **✕** beside its field.
+belong to the picture rather than to the view. Remove one with the **✕** beside its field. Several
+saved notes open at the top of the column immediately; you do not need to move to another image
+and back to make them line up.
 
-When you close the inspector, the marks go to the chat you are looking at: a copy of the image
-with the numbers drawn into it, plus the numbered notes, each carrying its point in the image's
-own pixels. Nothing is sent while you are still marking, and nothing is sent if you made no
-marks. A session with no live chat or terminal receives nothing — there is nowhere to put it.
+Edits are saved to the session as you make them. Closing the inspector only closes it; reopen the
+image to continue editing. Press **Add to chat** when the revision is ready: chat receives a copy
+of the image with the numbers drawn into it, plus the numbered notes, each carrying its point in
+the image's own pixels. Later changes show **Update chat** instead of silently replacing something
+already sent.
 
 **The panel gives way to the window.** Showing an image opens the panel, and an open panel used
 to put a floor under how narrow the window could be made. It no longer does: drag the window's
@@ -2654,6 +2658,12 @@ year after that. Rows are also marked **Agent** or **You**; when a session has b
 **All / Agent / You** filter appears beside the count. It stays hidden while everything came from
 one side. A picture the agent shows opens this tab and selects its row, and resets that filter if it
 would have hidden it: being asked to show something outranks a filter you left set.
+
+A marked image carries a pin count in its row and a saved-annotations receipt below its preview.
+That receipt remains after the inspector closes: use **Edit** to reopen the editable document, or
+**Add to chat** / **Update chat** to publish the current flattened revision. A receipt already in
+the composer can be removed there or with the receipt's **Remove** action; sent revisions remain
+unchanged while the saved document continues to be editable.
 
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu.
 The tab is two panes: the list above, and the selected file's preview filling the space below —
@@ -3067,6 +3077,11 @@ open as the header's split control, landing at the first line the diff changes. 
 right-click menu keeps the full set: the **Open in ▸** app list, **Reveal in Finder**, and
 **Copy Path**. A file the comparison deletes offers neither, having no working copy to act on.
 
+**View ▸ Jump to Review File…** (Cmd+J) opens a filter over the files the comparison changed,
+with the keyboard already in it. Type any part of a path and press Return to go to the top match;
+Escape closes without moving. The folder button beside it keeps the same tree open as a rail
+alongside the diff, where clicking a file jumps to it.
+
 ### Pull and merge requests
 
 For a checkout whose `origin` is on GitHub.com or GitLab.com, Git Review also shows the current
@@ -3149,14 +3164,6 @@ session left on the CLI's own default still reports it — and a `/model` typed 
 moves the line the next time the card refreshes. The card says what it knows whether or not your
 own Claude status line already prints the same thing, so a line that names the model shows it
 twice — once there, once on the card.
-
-**The same line names the permission mode a Claude session is actually in** — Auto, Plan, Accept
-Edits, Manual, Don't Ask or Bypass Permissions — between the model and the effort. It is read from
-what the session recorded, not from what it was started with, so pressing Shift+Tab inside Claude
-moves the line the next time the card refreshes. Chats where the posture cannot be observed show
-none: Codex, Grok and OpenCode record nothing to read, and a chat that has not been started yet
-has nothing to have observed. The mode shown here is a *reading*; the place to change it is still
-the chat's **⋯** menu ▸ Permission Mode, which takes effect the next time the chat starts.
 
 **A bolt at the end of that line means the chat is running in Fast mode.** Standard speed shows
 nothing — it is what a chat runs at unless you asked otherwise, so it costs no ink. VoiceOver reads
@@ -4323,6 +4330,7 @@ screen says so and leads with the offers further down the list instead.
 | Browser | Cmd+Shift+B |
 | Activity (display panel tab) | Cmd+P |
 | Git Review | Cmd+Shift+R |
+| Jump to Review File… | Cmd+J |
 | Save as Baseline… (the visible browser page) | unbound by default — assign one in Settings ▸ Keyboard |
 | Session Info | Cmd+Shift+I |
 | Shell drawer | Ctrl+` |

@@ -443,6 +443,17 @@ final class GitReviewPathNavigatorViewController: NSViewController {
         ])
     }
 
+    /// Catches the outline up with a roster that arrived before there was a view to show it in.
+    ///
+    /// The popover is handed its files while it is still an unloaded controller, so `applyFilter`
+    /// ran against `isViewLoaded == false` and returned without expanding anything — ⌘J opened on
+    /// a column of collapsed directories rather than the changed files. The model may legitimately
+    /// be set first; loading is where the view owes it a pass, not the caller's ordering.
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        applyFilter()
+    }
+
     func update(files: [GitFileDiff]) {
         let nextRoster = files.map {
             RosterEntry(path: $0.path, added: $0.added, removed: $0.removed)
@@ -497,12 +508,19 @@ final class GitReviewPathNavigatorViewController: NSViewController {
         applyFilter()
     }
 
-    func focusSearch() {
-        view.window?.makeFirstResponder(searchField)
+    /// The field a presenter hands the keyboard to. Loading the view is part of the answer — the
+    /// responder has to exist before the surface carrying it is shown.
+    var searchResponder: NSResponder {
+        _ = view
+        return searchField
     }
 
     var rootPathsForTesting: [String] { roots.map(\.path) }
     var visibleLeafPathsForTesting: [String] { (filteredLeaves ?? leaves).map(\.path) }
+
+    /// What the outline is *showing*, as against the model answer the two above give. The
+    /// difference is the whole of the bug they could not see: a tree the view never reloaded.
+    var outlineRowCountForTesting: Int { outlineView.numberOfRows }
 
     func setFilterForTesting(_ query: String) {
         _ = view
@@ -523,7 +541,13 @@ final class GitReviewPathNavigatorViewController: NSViewController {
             ) != nil }
         outlineView.reloadData()
         if filteredLeaves == nil {
-            roots.filter(\.isDirectory).forEach(outlineView.expandItem)
+            // Every level, not just the first. Expanding one deep left the files this exists to
+            // reach sitting behind a second disclosure — `Sources ▸ Git ▸` and nothing to jump
+            // to. The roster is the diff's already-bounded file list, so there is no tail here
+            // that a full expansion could run away with.
+            roots.filter(\.isDirectory).forEach {
+                outlineView.expandItem($0, expandChildren: true)
+            }
         }
     }
 }
@@ -576,6 +600,21 @@ extension GitReviewPathNavigatorViewController: NSOutlineViewDelegate {
 
 extension GitReviewPathNavigatorViewController: NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) { applyFilter() }
+
+    /// Return takes the top match, so a jump opened from the keyboard can be finished from the
+    /// keyboard rather than sending the hand back to the pointer for the last step. There is no
+    /// arrow-key highlight to move through first because selecting a row here *is* choosing it —
+    /// the rail alongside the diff works the same way — so the query is the whole selection.
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        guard commandSelector == #selector(NSResponder.insertNewline(_:)),
+              let match = filteredLeaves?.first else { return false }
+        onChoosePath?(match.path)
+        return true
+    }
 }
 
 private final class GitReviewPathNavigatorRow: NSView {

@@ -175,6 +175,14 @@ final class PromptView: NSView, ThemedComponent {
     /// The prompt owns presentation and removal; its conversation owner supplies the short text
     /// prompt that turns an existing reference or image into a comment.
     var onRequestContextComment: ((ConversationContextAttachment) -> Void)?
+
+    /// Opens the editable source behind a linked receipt, such as an image annotation document.
+    var isContextAttachmentOpenable: ((ConversationContextAttachment) -> Bool)? {
+        didSet { contextRail.isOpenable = isContextAttachmentOpenable }
+    }
+    var onOpenContextAttachment: ((ConversationContextAttachment) -> Void)? {
+        didSet { contextRail.onOpen = onOpenContextAttachment }
+    }
     var onRequestImageComment: ((String) -> Void)?
 
     /// Sidebar sessions dropped on the box, in drag order.
@@ -754,11 +762,17 @@ final class PromptView: NSView, ThemedComponent {
         clearContextAttachments()
     }
 
-    /// Stages one provider-neutral reference or comment. Duplicate ids are ignored so choosing
-    /// Add to chat twice cannot silently send the same context twice.
+    /// Stages one provider-neutral reference or comment. A repeated id updates its receipt in
+    /// place, which is how a new immutable annotation revision replaces the old draft revision
+    /// without adding a second comment pill.
     func addContextAttachment(_ attachment: ConversationContextAttachment) {
-        guard !contextAttachments.contains(where: { $0.id == attachment.id }) else { return }
-        contextAttachments = ConversationContextPolicy.normalized(contextAttachments + [attachment])
+        if let index = contextAttachments.firstIndex(where: { $0.id == attachment.id }) {
+            guard contextAttachments[index] != attachment else { return }
+            contextAttachments[index] = attachment
+        } else {
+            contextAttachments.append(attachment)
+        }
+        contextAttachments = ConversationContextPolicy.normalized(contextAttachments)
         contextRail.setAttachments(contextAttachments)
         updateSubmitState()
         updateHeight()
@@ -1197,14 +1211,16 @@ final class PromptView: NSView, ThemedComponent {
         focus()
     }
 
-    private func removeContextAttachment(id: UUID) {
-        guard contextAttachments.contains(where: { $0.id == id }) else { return }
+    @discardableResult
+    func removeContextAttachment(id: UUID) -> Bool {
+        guard contextAttachments.contains(where: { $0.id == id }) else { return false }
         contextAttachments.removeAll { $0.id == id }
         contextRail.setAttachments(contextAttachments)
         updateSubmitState()
         updateHeight()
         onContextAttachmentsChange?(contextAttachments)
         focus()
+        return true
     }
 
     private static func quotedPath(_ path: String) -> String {

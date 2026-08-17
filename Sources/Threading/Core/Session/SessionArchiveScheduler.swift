@@ -57,7 +57,7 @@ enum SessionArchiveCancellation: Equatable {
 
 // MARK: - Scheduler
 
-/// Holds an agent's request to archive its own session until the turn it asked in has ended.
+/// Holds an agent's request to archive a session until it is safe to end.
 ///
 /// **The delay is the feature, not a nicety.** Archiving stops the agent, and an agent stopped
 /// inside its own tool call never receives the result of that call: the process dies mid-turn,
@@ -66,7 +66,10 @@ enum SessionArchiveCancellation: Equatable {
 /// which is also the only order in which "commit this and then close the session" reads the way
 /// it was said.
 ///
-/// **The turn's end is the app's existing answer to "is it finished".** This watches
+/// **The turn's end is the app's existing answer to "is it finished".** A self-archive waits
+/// for the turn carrying the tool call to end. A manager-targeted archive is admitted only after
+/// the control plane has already found the child settled, so it begins the same settle grace from
+/// that current state instead of waiting for an activity edge that may never come. This watches
 /// `SessionActivityDidChange` and fires on the edge out of `hasTurnInFlight` — the same edge the
 /// attention notifications already treat as a finished turn. For a session whose agent reports
 /// its own turn boundaries that edge is the agent saying so; for one still on the output
@@ -120,7 +123,7 @@ final class SessionArchiveScheduler {
         self.observations = AppEventObservations(center: center)
 
         observations.observe(SessionActivityDidChange.self) { [weak self] event in
-            self?.activityChanged(for: event.sessionID)
+            self?.reconcileActivity(for: event.sessionID)
         }
     }
 
@@ -150,6 +153,16 @@ final class SessionArchiveScheduler {
             requestedByManagerID: requestedByManagerID,
             requestedAt: Date()
         )
+
+        // The caller's own archive request is made inside the turn that must finish before it
+        // lands, so only a later activity report may arm it. A manager request is the opposite:
+        // `WorkspaceControlPlane` refuses it while the child has a turn in flight. Reconcile that
+        // already-settled state now, or an idle child with no future activity event stays pending
+        // forever. If the child starts during the grace, the ordinary activity observer disarms
+        // the timer and spends the request on the later, real end instead.
+        if requestedByManagerID != nil {
+            reconcileActivity(for: sessionID)
+        }
         return wasPending ? .alreadyPending : .scheduled
     }
 
@@ -174,7 +187,7 @@ final class SessionArchiveScheduler {
     /// heuristic falls silent in the middle of a turn — the agent is waiting on the model, not
     /// finished — so a session that starts writing again only *disarms* the settle, and the
     /// request is spent on the turn's real end instead of on the pause in the middle of it.
-    private func activityChanged(for sessionID: SessionID) {
+    private func reconcileActivity(for sessionID: SessionID) {
         guard let request = pending[sessionID] else { return }
 
         guard !activity(sessionID).hasTurnInFlight else {
