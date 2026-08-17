@@ -2266,25 +2266,90 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
-        guard let cols, let rows,
-              (20...240).contains(cols), (4...160).contains(rows),
-              let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
-            connection.sendText(encode(RemoteErrorDTO(code: "invalidViewport")))
-            return
-        }
-        DispatchQueue.main.async {
-            guard self.authorizer?.isCurrent(authorization) == true else {
-                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
-                return
+        switch Self.viewportRequest(
+            cols: cols,
+            rows: rows,
+            routedSessionID: connection.routedSessionID
+        ) {
+        case .refused(let refusal):
+            refuseViewport(connection, cols: cols, rows: rows, refusal: refusal)
+        case .accepted(let cols, let rows, let sessionID):
+            DispatchQueue.main.async {
+                guard self.authorizer?.isCurrent(authorization) == true else {
+                    connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                    return
+                }
+                self.services.mirrors.requestViewport(
+                    from: connection,
+                    sessionID: sessionID,
+                    cols: cols,
+                    rows: rows
+                )
             }
-            self.services.mirrors.requestViewport(
-                from: connection,
-                sessionID: sessionID,
-                cols: cols,
-                rows: rows
-            )
         }
+    }
+
+    enum ViewportRequest: Equatable {
+        case accepted(cols: Int, rows: Int, sessionID: SessionID)
+        case refused(RemoteViewportRefusal)
+    }
+
+    /// One decision, and it names the clause that refused.
+    ///
+    /// This used to be a five-clause `guard` that answered every failure with the single word
+    /// `invalidViewport`, so a phone asking for a grid outside the accepted range and a
+    /// connection routed to no session at all produced the same message and the same silence in
+    /// the journal. Keeping the accepted case in the same result is what stops the diagnosis and
+    /// the admission rule from drifting apart.
+    static func viewportRequest(
+        cols: Int?,
+        rows: Int?,
+        routedSessionID: String?
+    ) -> ViewportRequest {
+        guard let cols, let rows else { return .refused(.missingSize) }
+        guard let routedSessionID else { return .refused(.unroutedConnection) }
+        guard let sessionID = SessionID(uuidString: routedSessionID) else {
+            return .refused(.malformedSessionID)
+        }
+        guard RemoteViewportRefusal.columns.contains(cols) else {
+            return .refused(.columnsOutOfRange)
+        }
+        guard RemoteViewportRefusal.rows.contains(rows) else {
+            return .refused(.rowsOutOfRange)
+        }
+        return .accepted(cols: cols, rows: rows, sessionID: sessionID)
+    }
+
+    private func refuseViewport(
+        _ connection: RemoteConnection,
+        cols: Int?,
+        rows: Int?,
+        refusal: RemoteViewportRefusal
+    ) {
+        connection.sendText(
+            encode(RemoteErrorDTO(code: "invalidViewport", detail: refusal.rawValue))
+        )
+        let requested = Self.viewportDetail(cols: cols, rows: rows)
+        ThreadingLogger.remote.warning(
+            "Remote viewport refused reason=\(refusal.rawValue, privacy: .public) requested=\(requested, privacy: .public)"
+        )
+        var fields: [RemoteDiagnosticField: String] = [
+            .code: "invalidViewport",
+            .reason: refusal.rawValue,
+            .detail: requested,
+        ]
+        if let routed = connection.routedSessionID {
+            fields[.session] = MacRemoteDiagnostics.pseudonym(routed, prefix: "session")
+        }
+        MacRemoteDiagnostics.record(.socketFailed, level: .warning, fields: fields)
+    }
+
+    /// The grid the client asked for, as a token the share-safe journal accepts. Terminal
+    /// dimensions are the client's own layout, never content, so the numbers travel verbatim.
+    private static func viewportDetail(cols: Int?, rows: Int?) -> String {
+        let columns = cols.map(String.init) ?? "none"
+        let lines = rows.map(String.init) ?? "none"
+        return "\(columns)x\(lines)"
     }
 
     private func handleViewportRelease(_ connection: RemoteConnection) {

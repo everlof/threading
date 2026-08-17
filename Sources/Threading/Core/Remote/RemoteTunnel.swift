@@ -7,7 +7,7 @@ import Foundation
 /// stay unreachable. Quick Tunnels remain launch-scoped: public guest shares disappear with this
 /// process, while a durable owner credential needs a stable relay origin before it can reconnect.
 @MainActor
-final class RemoteTunnel: RemoteAccessTransport {
+final class RemoteTunnel: RemoteRelayTransport {
 
     typealias State = RemoteTransportState
 

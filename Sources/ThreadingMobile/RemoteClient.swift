@@ -25,6 +25,43 @@ enum RemoteDeviceIdentity {
     }
 }
 
+enum RemoteClientDefaults {
+    static let requestTimeoutSeconds: TimeInterval = 20
+    static let resourceTimeoutSeconds: TimeInterval = 30
+    /// How far down a Foundation error chain the local-network diagnosis will look. Underlying
+    /// errors nest, and an unbounded walk over attacker- or framework-controlled `userInfo` is
+    /// not a bound.
+    static let underlyingErrorDepthLimit = 4
+}
+
+/// Which private-network addresses iOS asks for Local Network permission before reaching.
+///
+/// The denial produces an ordinary no-route POSIX error, identical to the one a genuinely
+/// unreachable host produces, so the address is what separates "you did not grant this" from
+/// "that machine is off". Loopback is deliberately absent: it needs no grant.
+enum RemoteLocalNetworkAddress {
+    static func isPrivate(_ host: String) -> Bool {
+        let lowered = host.lowercased()
+        if lowered.hasSuffix(".local") { return true }
+        if lowered.hasPrefix("fe80:") { return true }
+        // Unique local addresses, fc00::/7.
+        if lowered.hasPrefix("fc") || lowered.hasPrefix("fd") {
+            if lowered.contains(":") { return true }
+        }
+        let parts = lowered.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        let octets = parts.compactMap { UInt8($0) }
+        guard octets.count == 4 else { return false }
+        switch octets[0] {
+        case 10: return true
+        case 169: return octets[1] == 254
+        case 172: return (16...31).contains(octets[1])
+        case 192: return octets[1] == 168
+        default: return false
+        }
+    }
+}
+
 enum RemoteClientError: LocalizedError {
     case invalidResponse
     case unauthorized
@@ -49,6 +86,127 @@ enum RemoteClientError: LocalizedError {
     }
 }
 
+/// Why a remote connection stopped, in a form a screen can act on.
+///
+/// A localized sentence is not a state. The 2026-08-17 incident produced a phone stuck on
+/// "Connecting…" and a support report that could say only that something answered and it was not
+/// the Mac; both halves of that are fixed by naming the cause, keeping a structural code beside
+/// the sentence a person reads, and stating what the one available next step is.
+struct RemoteConnectionFailure: Equatable {
+
+    /// What the person can do about it, which is not always "try again".
+    enum Recovery: Equatable {
+        case reconnect
+        case pairAgain
+        case openLocalNetworkSettings
+    }
+
+    enum Cause: String, Equatable {
+        /// The address answered, and what answered was not this Mac's listener. A Quick Tunnel
+        /// hostname outlives the tunnel, so a paired phone keeps reaching a stranger's 404.
+        case addressChanged
+        /// iOS refused the connection because Local Network access was never granted. It is a
+        /// no-route POSIX error on a private address, which is indistinguishable from an absent
+        /// host until the address is taken into account.
+        case localNetworkDenied
+        /// The socket opened and the Mac never greeted it.
+        case helloTimeout
+        /// The Mac refused an action over an otherwise healthy socket.
+        case remoteAction
+        /// Anything else the transport reported.
+        case transport
+    }
+
+    let cause: Cause
+    let message: String
+
+    var recovery: Recovery {
+        switch cause {
+        case .addressChanged: return .pairAgain
+        case .localNetworkDenied: return .openLocalNetworkSettings
+        case .helloTimeout, .remoteAction, .transport: return .reconnect
+        }
+    }
+
+    /// The one-tap next step, as the label a control or an accessibility hint uses.
+    var recoveryTitle: String {
+        switch recovery {
+        case .reconnect: return MobileL10n.string("Reconnect")
+        case .pairAgain: return MobileL10n.string("Scan the QR code again")
+        case .openLocalNetworkSettings: return MobileL10n.string("Open Settings")
+        }
+    }
+
+    static func helloTimeout() -> RemoteConnectionFailure {
+        RemoteConnectionFailure(
+            cause: .helloTimeout,
+            message: MobileL10n.string("This Mac accepted the connection but never answered.")
+        )
+    }
+
+    static func remoteAction(_ message: String) -> RemoteConnectionFailure {
+        RemoteConnectionFailure(cause: .remoteAction, message: message)
+    }
+
+    static func transport(_ message: String) -> RemoteConnectionFailure {
+        RemoteConnectionFailure(cause: .transport, message: message)
+    }
+
+    /// Classifies a transport error against the address it was aimed at.
+    ///
+    /// The address is part of the diagnosis rather than decoration: Local Network denial and an
+    /// absent host produce the same POSIX code, and only a private destination makes the
+    /// permission the likelier of the two. Nothing here is mapped to "address changed" unless
+    /// the socket really did get an HTTP answer that was not an upgrade.
+    static func transport(_ error: Error, host: String?) -> RemoteConnectionFailure {
+        if isLocalNetworkDenial(error, host: host) {
+            return RemoteConnectionFailure(
+                cause: .localNetworkDenied,
+                message: MobileL10n.string(
+                    "Threading needs Local Network access to reach this Mac on Wi-Fi. Turn it on in Settings."
+                )
+            )
+        }
+        if (error as? URLError)?.code == .badServerResponse {
+            return RemoteConnectionFailure(
+                cause: .addressChanged,
+                message: MobileL10n.string(
+                    "This Mac’s address has changed. Scan its QR code again."
+                )
+            )
+        }
+        return RemoteConnectionFailure(
+            cause: .transport,
+            message: error.localizedDescription
+        )
+    }
+
+    static func isLocalNetworkDenial(_ error: Error, host: String?) -> Bool {
+        guard let host, RemoteLocalNetworkAddress.isPrivate(host) else { return false }
+        return hasNoRouteCode(error)
+    }
+
+    /// iOS reports the denial as `NWError.posix` under whichever URL-loading error wraps it, so
+    /// the POSIX code has to be read through a bounded chain rather than off the top error.
+    private static func hasNoRouteCode(_ error: Error) -> Bool {
+        var current: NSError? = error as NSError
+        var depth = 0
+        while let candidate = current, depth < RemoteClientDefaults.underlyingErrorDepthLimit {
+            if candidate.domain == NSPOSIXErrorDomain,
+               noRouteCodes.contains(Int32(candidate.code)) {
+                return true
+            }
+            current = candidate.userInfo[NSUnderlyingErrorKey] as? NSError
+            depth += 1
+        }
+        return false
+    }
+
+    private static let noRouteCodes: Set<Int32> = [
+        EHOSTUNREACH, ENETUNREACH, ENETDOWN, EHOSTDOWN,
+    ]
+}
+
 struct RemoteClient {
     let link: RemoteConnectionLink
     let requestTimeout: TimeInterval?
@@ -61,9 +219,27 @@ struct RemoteClient {
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 30
+        configuration.timeoutIntervalForRequest = RemoteClientDefaults.requestTimeoutSeconds
+        configuration.timeoutIntervalForResource = RemoteClientDefaults.resourceTimeoutSeconds
         configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }()
+
+    /// The WebSocket half deliberately does not share the request session's configuration.
+    ///
+    /// `waitsForConnectivity` turns an unreachable host into an indefinite wait rather than an
+    /// error, and `URLSessionWebSocketTask` does not honour `timeoutIntervalForResource`, so a
+    /// socket opened through the request session had no failure path at all: the receive loop
+    /// awaited a message that never came, nothing reconnected, and the phone showed
+    /// "Connecting…" until the user gave up. Here the connect fails immediately when there is no
+    /// route, and the hello deadline in `RemoteSessionConnection` is what bounds a host that
+    /// accepts the connection and then says nothing. The resource timeout is left at its default
+    /// on purpose: a healthy session socket is long-lived, and the request session's 30 seconds
+    /// would be a ceiling on the conversation rather than on the handshake.
+    private static let socketSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        configuration.waitsForConnectivity = false
         return URLSession(configuration: configuration)
     }()
 
@@ -385,14 +561,22 @@ struct RemoteClient {
         guard let url = link.webSocketURL(sessionID: sessionID) else {
             throw RemoteClientError.invalidResponse
         }
-        return Self.session.webSocketTask(with: url)
+        return Self.socketSession.webSocketTask(with: url)
     }
 
     func eventsWebSocketTask() throws -> URLSessionWebSocketTask {
         guard let url = link.eventsWebSocketURL else {
             throw RemoteClientError.invalidResponse
         }
-        return Self.session.webSocketTask(with: url)
+        return Self.socketSession.webSocketTask(with: url)
+    }
+
+    /// True when a socket opened by this client cannot wait for connectivity.
+    ///
+    /// Asserted rather than assumed: the whole failure this fixes was a socket silently
+    /// inheriting the request session's `waitsForConnectivity`.
+    static var socketWaitsForConnectivity: Bool {
+        socketSession.configuration.waitsForConnectivity
     }
 
     private func request(url: URL) -> URLRequest {

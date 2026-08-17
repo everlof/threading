@@ -5,6 +5,14 @@ private enum RemoteMobileConnectionDefaults {
     static let conversationPageRows = 64
     /// Stay inside the Mac's five-minute replay window even after timer and network jitter.
     static let acknowledgedSubmissionRetrySeconds: TimeInterval = 4 * 60
+    /// How long a socket may stay open without the Mac greeting it.
+    ///
+    /// `URLSessionWebSocketTask` does not honour `timeoutIntervalForResource`, so nothing in
+    /// URLSession bounds "the TCP connection was accepted and no frame ever arrived". Without
+    /// this the receive loop awaits forever: no failure, no reconnect, and no terminal event in
+    /// the diagnostics journal, which is exactly the shape the 2026-08-17 report could not
+    /// explain. Long enough for a slow cellular handshake, far shorter than a person's patience.
+    static let helloDeadline: Duration = .seconds(15)
 }
 
 enum MobileCollaborationPresentation {
@@ -71,7 +79,12 @@ final class RemoteSessionConnection: ObservableObject {
         case connecting
         case connected
         case ended(String)
-        case failed(String)
+        case failed(RemoteConnectionFailure)
+
+        var failure: RemoteConnectionFailure? {
+            if case .failed(let failure) = self { return failure }
+            return nil
+        }
     }
 
     @Published private(set) var phase: Phase = .connecting
@@ -106,6 +119,10 @@ final class RemoteSessionConnection: ObservableObject {
     private var task: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
+    /// Armed by `connect()`, disarmed by the `hello` frame, and the only thing that turns a
+    /// socket the Mac never greets into a terminal state.
+    private var helloDeadlineTask: Task<Void, Never>?
+    private let helloDeadline: Duration
     private var reconnectAttempt = 0
     private var stopped = false
     private var connectionGeneration = 0
@@ -157,11 +174,13 @@ final class RemoteSessionConnection: ObservableObject {
     init(
         session: RemoteSessionSummaryDTO,
         client: RemoteClient,
-        reconnectClient: (@MainActor () async -> RemoteClient?)? = nil
+        reconnectClient: (@MainActor () async -> RemoteClient?)? = nil,
+        helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline
     ) {
         self.session = session
         self.client = client
         self.reconnectClient = reconnectClient
+        self.helloDeadline = helloDeadline
         title = session.title
         surface = session.surface
         terminalTheme = session.terminalTheme
@@ -184,11 +203,10 @@ final class RemoteSessionConnection: ObservableObject {
         inputControl = nil
         inputControlEvents = []
         attentionRecipients = []
-        MobileDiagnostics.record(.socketConnecting, fields: [
-            .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
+        MobileDiagnostics.record(.socketConnecting, fields: destinationFields.merging([
             .protocolVersion: String(RemoteProtocol.current),
             .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
-        ])
+        ]) { current, _ in current })
         pendingTerminalOutput.removeAll(keepingCapacity: true)
         // A reconnect receives the Mac's authoritative ring again. Reset an already-mounted
         // SwiftTerm first so replay replaces its prior state instead of duplicating scrollback.
@@ -206,6 +224,7 @@ final class RemoteSessionConnection: ObservableObject {
             let task = try client.webSocketTask(sessionID: session.id)
             self.task = task
             task.resume()
+            armHelloDeadline(generation: generation)
             try send(RemoteClientMessage(
                 type: "auth",
                 token: client.link.token,
@@ -220,12 +239,42 @@ final class RemoteSessionConnection: ObservableObject {
         } catch {
             guard connectionGeneration == generation else { return }
             stopped = true
+            cancelHelloDeadline()
             task?.cancel(with: .goingAway, reason: nil)
             task = nil
-            phase = .failed(error.localizedDescription)
-            recordSocketFailure(error)
+            fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
             scheduleReconnect(generation: generation)
         }
+    }
+
+    /// Every connect ends in a terminal event, including the one nobody answers.
+    private func armHelloDeadline(generation: Int) {
+        helloDeadlineTask?.cancel()
+        let deadline = helloDeadline
+        helloDeadlineTask = Task { [weak self] in
+            try? await Task.sleep(for: deadline)
+            guard !Task.isCancelled else { return }
+            self?.helloDeadlineExpired(generation: generation)
+        }
+    }
+
+    private func cancelHelloDeadline() {
+        helloDeadlineTask?.cancel()
+        helloDeadlineTask = nil
+    }
+
+    private func helloDeadlineExpired(generation: Int) {
+        guard !stopped, connectionGeneration == generation, phase != .connected else { return }
+        helloDeadlineTask = nil
+        // A socket that has not greeted us by now is not going to. Declaring the connection
+        // failed also ends it, rather than leaving a receive loop awaiting a frame forever,
+        // which is the shape of the bug this deadline exists to close.
+        task?.cancel(with: .goingAway, reason: nil)
+        task = nil
+        receiveTask?.cancel()
+        receiveTask = nil
+        fail(with: .helloTimeout())
+        scheduleReconnect(generation: generation)
     }
 
     func disconnect(markEnded: Bool = true) {
@@ -235,6 +284,7 @@ final class RemoteSessionConnection: ObservableObject {
         }
         connectionGeneration &+= 1
         stopped = true
+        cancelHelloDeadline()
         demoScript?.cancel()
         demoScript = nil
         receiveTask?.cancel()
@@ -337,8 +387,7 @@ final class RemoteSessionConnection: ObservableObject {
             ))
             return requestID
         } catch {
-            phase = .failed(error.localizedDescription)
-            recordSocketFailure(error)
+            fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
             return nil
         }
     }
@@ -387,8 +436,7 @@ final class RemoteSessionConnection: ObservableObject {
         } catch {
             pendingPromptSubmission = nil
             isPromptSubmissionPending = false
-            phase = .failed(error.localizedDescription)
-            recordSocketFailure(error)
+            fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
             scheduleReconnect(generation: connectionGeneration)
             return nil
         }
@@ -432,8 +480,7 @@ final class RemoteSessionConnection: ObservableObject {
                 .result: allow ? "allow" : "deny",
             ])
         } catch {
-            phase = .failed(error.localizedDescription)
-            recordSocketFailure(error)
+            fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
             scheduleReconnect(generation: connectionGeneration)
         }
     }
@@ -510,8 +557,10 @@ final class RemoteSessionConnection: ObservableObject {
             Task { @MainActor in
                 guard let self, self.connectionGeneration == expectedGeneration,
                       self.stopped == false, self.task === task else { return }
-                self.phase = .failed(error.localizedDescription)
-                self.recordSocketFailure(error)
+                self.fail(with: RemoteConnectionFailure.transport(
+                    error,
+                    host: self.destinationHost
+                ))
                 self.scheduleReconnect(generation: expectedGeneration)
             }
         }
@@ -546,8 +595,10 @@ final class RemoteSessionConnection: ObservableObject {
             return
         } catch {
             guard !stopped, connectionGeneration == generation, self.task === task else { return }
-            phase = .failed(error.localizedDescription)
-            recordSocketFailure(error)
+            fail(
+                with: RemoteConnectionFailure.transport(error, host: destinationHost),
+                httpStatus: Self.httpStatus(of: task)
+            )
             scheduleReconnect(generation: generation)
         }
     }
@@ -561,6 +612,17 @@ final class RemoteSessionConnection: ObservableObject {
         guard demoScript != nil else { return }
         handle(text)
     }
+
+#if DEBUG
+    /// Feeds one server frame through the same handler a real socket frame reaches.
+    ///
+    /// Refusal policy is the part of this class most worth asserting and the part hardest to
+    /// reach: it needs a Mac that answers. Kept out of release builds so nothing shipping can
+    /// inject server state.
+    func receiveServerTextForTesting(_ text: String) {
+        handle(text)
+    }
+#endif
 
     /// Synthesized terminal bytes, buffered exactly the way `receiveLoop` buffers real ones.
     func receiveDemoTerminalOutput(_ data: Data) {
@@ -586,7 +648,7 @@ final class RemoteSessionConnection: ObservableObject {
     func performReconnectPerformanceFixture(
         snapshot: RemoteConversationSnapshotDTO
     ) -> Bool {
-        phase = .failed("Performance fixture reconnect")
+        phase = .failed(.transport("Performance fixture reconnect"))
         phase = .connecting
         composerCapabilities = []
         supportsAtomicTerminalSubmission = false
@@ -631,13 +693,13 @@ final class RemoteSessionConnection: ObservableObject {
                 RemoteWebSocketFeature.focusedInputControl.rawValue
             )
             updateTerminalGrid(cols: hello.cols, rows: hello.rows)
+            cancelHelloDeadline()
             phase = .connected
             reconnectAttempt = 0
-            MobileDiagnostics.record(.socketConnected, fields: [
-                .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
+            MobileDiagnostics.record(.socketConnected, fields: destinationFields.merging([
                 .capability: hello.capability,
                 .surface: hello.surface.rawValue,
-            ])
+            ]) { current, _ in current })
             if let pendingViewport, capability == .interact {
                 try? send(RemoteClientMessage(
                     type: "viewport",
@@ -810,9 +872,13 @@ final class RemoteSessionConnection: ObservableObject {
                 )
                 return
             }
-            // Another paired client may answer the same visible card first. Its authoritative
-            // snapshot follows immediately; that benign race must not mark this socket failed.
-            if error?.code != "permissionNotPending" {
+            // Two refusals are ordinary traffic on a healthy socket rather than reasons to tear
+            // the session down. `permissionNotPending` is another paired client answering the
+            // same visible card first, whose authoritative snapshot follows immediately.
+            // `invalidViewport` is this phone asking for a grid the Mac will not accept, which
+            // costs the terminal a resize and nothing else; ending the session over it took the
+            // conversation, the composer and the scrollback with it.
+            if !Self.survivableErrorCodes.contains(error?.code ?? "") {
                 let message: String
                 switch error?.code {
                 case "forbidden":
@@ -824,30 +890,80 @@ final class RemoteSessionConnection: ObservableObject {
                 default:
                     message = MobileL10n.string("Remote action failed")
                 }
-                phase = .failed(message)
-                MobileDiagnostics.record(
-                    .socketFailed,
-                    level: .error,
-                    fields: [
-                        .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
-                        .code: error?.code ?? "remote.actionFailed",
-                    ]
-                )
+                fail(with: .remoteAction(message), code: error?.code ?? "remote.actionFailed")
+            } else {
+                reportSurvivableRefusal(error)
             }
         default:
             break
         }
     }
 
-    private func recordSocketFailure(_ error: Error) {
-        MobileDiagnostics.record(
-            .socketFailed,
-            level: .error,
-            fields: [
-                .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
-                .code: MobileDiagnostics.errorCode(error),
-            ]
+    /// Refusals a healthy socket may carry. Everything else still fails the session.
+    private static let survivableErrorCodes: Set<String> = [
+        "permissionNotPending",
+        "invalidViewport",
+    ]
+
+    /// A refusal the session survives is still evidence. The Mac names the guard clause it
+    /// failed, so the phone's log can say which one rather than only that a viewport was
+    /// rejected.
+    private func reportSurvivableRefusal(_ error: RemoteErrorDTO?) {
+        guard let error else { return }
+        MobileDiagnostics.logDegraded(
+            .sessionRefusal,
+            code: error.code,
+            detail: error.detail
         )
+    }
+
+    /// The one place a connection becomes terminal.
+    ///
+    /// Phase and journal entry move together so a failure cannot reach the screen without
+    /// reaching the report, which is how the 2026-08-17 incident produced a phone stuck on
+    /// "Connecting…" and a journal with nothing after `socketConnecting`.
+    private func fail(
+        with failure: RemoteConnectionFailure,
+        code: String? = nil,
+        httpStatus: Int? = nil
+    ) {
+        phase = .failed(failure)
+        var fields = destinationFields
+        fields[.code] = code ?? "connection.\(failure.cause.rawValue)"
+        fields[.reason] = failure.cause.rawValue
+        // 530, 502 and 404 behind the same -1011 mean three different things: a relay whose
+        // origin is gone, a relay that could not reach it, and something else answering on that
+        // address entirely.
+        if let httpStatus { fields[.status] = String(httpStatus) }
+        MobileDiagnostics.record(.socketFailed, level: .error, fields: fields)
+    }
+
+    private func recordSocketFailure(_ error: Error) {
+        var fields = destinationFields
+        fields[.code] = MobileDiagnostics.errorCode(error)
+        MobileDiagnostics.record(.socketFailed, level: .error, fields: fields)
+    }
+
+    /// Which session, which kind of address, and which address, as a hash.
+    ///
+    /// Without the last two, "wrong address" and "right address, host down" are the same record
+    /// in a support report and have opposite fixes.
+    private var destinationFields: [RemoteDiagnosticField: String] {
+        [
+            .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
+            .transport: PairedRemoteHost.endpointKind(for: client.link.baseURL),
+            .origin: MobileDiagnostics.originDigest(client.link.baseURL),
+        ]
+    }
+
+    private var destinationHost: String? { client.link.baseURL.host }
+
+    /// The status URLSession kept from a handshake that was answered but not upgraded.
+    ///
+    /// `URLSessionWebSocketTask` reports the refusal as `NSURLErrorBadServerResponse` and puts
+    /// the real response on the task, which is the only place the status survives.
+    private static func httpStatus(of task: URLSessionWebSocketTask) -> Int? {
+        (task.response as? HTTPURLResponse)?.statusCode
     }
 
     private func scheduleReconnect(generation: Int) {

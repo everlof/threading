@@ -836,6 +836,7 @@ extension MobileDiagnostics {
             .physicalMemoryMB: String(process.physicalMemory / 1_048_576),
             .applicationState: applicationState(UIApplication.shared.applicationState),
             .connectionState: connectionState(model.phase),
+            .connectionStateHistory: MobileConnectionStateLog.summary() ?? "none",
             .pairedHostCount: String(model.hosts.count),
             .visibleSessionCount: String(model.me?.sessions.count ?? 0),
             .activeScope: model.me?.share.scope ?? "none",
@@ -926,7 +927,7 @@ extension MobileDiagnostics {
         }
     }
 
-    private static func connectionState(_ phase: RemoteAppModel.Phase) -> String {
+    static func connectionState(_ phase: RemoteAppModel.Phase) -> String {
         switch phase {
         case .idle: return "idle"
         case .connecting: return "connecting"
