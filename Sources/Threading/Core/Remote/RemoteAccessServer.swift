@@ -103,16 +103,18 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     }
 }
 
-/// The second loopback HTTP/WebSocket server — the one a tunnel forwards to. It is deliberately
-/// separate from `MCPServer` and `ExtensionHostService`: those broker tool permissions and host
+/// The second HTTP/WebSocket server — the one a tunnel forwards to. It is deliberately separate
+/// from `MCPServer` and `ExtensionHostService`: those broker tool permissions and host
 /// extensions, and nothing reachable through a public tunnel may touch them.
 ///
-/// The listener mirrors `MCPServer.start`: a loopback ephemeral port, a latched ready-or-failed
-/// completion, and a `queue.sync` stop that has cancelled everything by the time it returns.
+/// One server, one identity, one authorization path. Which addresses it answers on is
+/// `RemoteListenerSet`'s question, not this type's: it owns the sticky port and one `NWListener`
+/// per door. What remains here is a latched ready-or-failed completion and a `queue.sync` stop
+/// that has cancelled everything by the time it returns.
 ///
-/// Mutable listener, connection, and rate-limit state belongs to `queue`. The dependency and
-/// published-port values have separate locks. This queue ownership is why passing the server's
-/// identity into Network.framework callbacks is safe.
+/// Mutable connection and rate-limit state belongs to `queue`, which is also the listener set's
+/// queue. The dependency values have separate locks. This queue ownership is why passing the
+/// server's identity into Network.framework callbacks is safe.
 final class RemoteAccessServer: @unchecked Sendable {
 
     // MARK: - Properties
