@@ -3808,6 +3808,54 @@
     "Enable Tailscale Serve…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera Tailscale Serve…" } } }
     },
+    "%1$@ The local mirror is ready on 127.0.0.1:%2$@.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%1$@ Den lokala spegeln är klar på 127.0.0.1:%2$@." } } }
+    },
+    "Approve this Mac in the Tailscale admin console, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Godkänn denna Mac i Tailscales adminkonsol och försök sedan igen." } } }
+    },
+    "Check that Tailscale is running on this Mac, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollera att Tailscale körs på denna Mac och försök sedan igen." } } }
+    },
+    "Checking Tailscale": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollerar Tailscale" } } }
+    },
+    "Enable HTTPS certificates in the Tailscale admin console, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera HTTPS-certifikat i Tailscales adminkonsol och försök sedan igen." } } }
+    },
+    "HTTPS certificates are not enabled for this tailnet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "HTTPS-certifikat är inte aktiverade för det här tailnetet." } } }
+    },
+    "HTTPS port 8443 already has a Tailscale Serve handler.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "HTTPS-porten 8443 har redan en Tailscale Serve-hanterare." } } }
+    },
+    "Publishing on your tailnet": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Publicerar på ditt tailnet" } } }
+    },
+    "Reading this Mac’s Tailscale status.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser Tailscale-statusen på denna Mac." } } }
+    },
+    "Remove that handler, then retry.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ta bort den hanteraren och försök sedan igen." } } }
+    },
+    "Retry the connection.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Försök ansluta igen." } } }
+    },
+    "Tailscale Serve is not enabled for this tailnet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale Serve är inte aktiverat för det här tailnetet." } } }
+    },
+    "Tailscale is not installed on this Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale är inte installerat på denna Mac." } } }
+    },
+    "Tailscale is not running on this Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale körs inte på denna Mac." } } }
+    },
+    "This Mac is not signed in to Tailscale.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Denna Mac är inte inloggad på Tailscale." } } }
+    },
+    "Waiting for the tailnet HTTPS endpoint to answer. The first time can take up to a minute.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väntar på att tailnetets HTTPS-slutpunkt ska svara. Första gången kan det ta upp till en minut." } } }
+    },
     "Grants a grace to cross the gap, and holds while the pointer rests here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ger en frist att korsa glappet och håller kvar medan pekaren vilar här." } } }
     },
@@ -4081,11 +4129,6 @@
     "Turning it off closes every connection and shared-chat link. Your explicitly paired devices remain paired for the next time.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "När du stänger av funktionen stängs alla anslutningar och delade chattlänkar. Dina uttryckligen parkopplade enheter förblir parkopplade till nästa gång." } }
-      }
-    },
-    "You can still test the browser on this Mac, or retry the selected connection.": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Du kan fortfarande testa webbläsaren på den här Mac-datorn eller försöka med den valda anslutningen igen." } }
       }
     },
     "the HTTPS relay": {

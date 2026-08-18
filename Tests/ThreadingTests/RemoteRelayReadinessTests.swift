@@ -233,10 +233,49 @@ final class RemoteRelayReadinessTests: XCTestCase {
                     pairingCodePayload: nil,
                     transport: transport
                 ),
-                .preparing,
+                .preparing(detail: nil),
                 "\(transport) should still read as work in progress"
             )
         }
+    }
+
+    /// The silence this replaced: `tailscale serve` sat on the tailnet's first certificate for
+    /// close to a minute while the card said only that a code would appear "as soon as the
+    /// selected connection is ready", and the person concluded it had failed.
+    func testAPublishingTailnetSaysWhatItIsWaitingFor() throws {
+        let state = RemotePairingCardState.resolve(
+            ownerDevicePersistenceError: nil,
+            pairingCodePayload: nil,
+            transport: .starting,
+            tailscaleReadiness: .publishing
+        )
+        guard case .preparing(let detail) = state else {
+            return XCTFail("a publishing tailnet is still work in progress")
+        }
+        XCTAssertEqual(
+            detail,
+            "Waiting for the tailnet HTTPS endpoint to answer. The first time can take up to a "
+                + "minute.",
+            "the card does not say what the tailnet is doing"
+        )
+    }
+
+    /// The transport observes the command it is running and nothing else, so the states that
+    /// are not a step on the way to a door say nothing rather than guessing.
+    func testOnlyAnInFlightCommandProducesAStartupStatement() throws {
+        XCTAssertNil(TailscaleReadiness.notChecked.startupStatement)
+        XCTAssertNil(TailscaleReadiness.ready(URL(string: "https://mac.ts.net:8443/")!).startupStatement)
+        XCTAssertNil(
+            TailscaleReadiness.actionRequired(.serveNotEnabled, actionURL: nil).startupStatement
+        )
+        XCTAssertEqual(
+            TailscaleReadiness.checking.startupStatement?.title,
+            "Checking Tailscale"
+        )
+        XCTAssertEqual(
+            TailscaleReadiness.publishing.startupStatement?.title,
+            "Publishing on your tailnet"
+        )
     }
 
     func testAPayloadWinsOverTheTransportState() {
@@ -268,8 +307,109 @@ final class RemoteRelayReadinessTests: XCTestCase {
                 pairingCodePayload: nil,
                 transport: .unavailable("The secure relay did not answer in time.")
             ),
-            .connectionUnavailable
+            .connectionUnavailable(
+                reason: "The secure relay did not answer in time.",
+                remedy: nil
+            ),
+            "the relay's own sentence is what the panel has to show"
         )
+    }
+
+    // MARK: - The panel carries the reason
+
+    /// The bug this pair exists for: the page showed "Private connection unavailable. You can
+    /// still test the browser on this Mac, or retry the selected connection." while the only
+    /// explanation it had sat in a readiness row three rows above it.
+    func testTheUnavailablePanelStatesTheFailureAndItsRemedy() throws {
+        let approval = try XCTUnwrap(URL(string: "https://login.tailscale.com/f/serve?node=abc"))
+        let state = RemotePairingCardState.resolve(
+            ownerDevicePersistenceError: nil,
+            pairingCodePayload: nil,
+            transport: .unavailable(TailscaleReadinessIssue.serveNotEnabled.message),
+            tailscaleReadiness: .actionRequired(.serveNotEnabled, actionURL: approval)
+        )
+
+        XCTAssertEqual(
+            state,
+            .connectionUnavailable(
+                reason: "Tailscale Serve is not enabled for this tailnet. Enable HTTPS "
+                    + "certificates in the Tailscale admin console, then retry.",
+                remedy: RemotePairingRemedy(title: "Enable Tailscale Serve…", url: approval)
+            )
+        )
+    }
+
+    /// Every issue the readiness model can express reaches the panel with both halves, so a new
+    /// one cannot arrive as a panel that says a connection is unavailable and nothing else.
+    func testEveryReadinessIssueReachesThePanelWithAReasonAndARemedy() throws {
+        let approval = try XCTUnwrap(URL(string: "https://login.tailscale.com/f/serve?node=abc"))
+        for issue in [
+            TailscaleReadinessIssue.notInstalled,
+            .signedOut,
+            .stopped,
+            .statusUnavailable,
+            .serveNotEnabled,
+            .httpsRequired,
+            .permissionDenied,
+            .portInUse,
+            .serveFailed
+        ] {
+            let state = RemotePairingCardState.resolve(
+                ownerDevicePersistenceError: nil,
+                pairingCodePayload: nil,
+                transport: .unavailable(issue.message),
+                tailscaleReadiness: .actionRequired(issue, actionURL: approval)
+            )
+            guard case .connectionUnavailable(let reason, let remedy) = state else {
+                return XCTFail("\(issue) did not reach the panel")
+            }
+            XCTAssertTrue(
+                reason.hasPrefix(issue.failureStatement),
+                "\(issue) does not state what failed"
+            )
+            XCTAssertTrue(
+                reason.hasSuffix(issue.remedyStatement),
+                "\(issue) does not state what fixes it"
+            )
+            XCTAssertEqual(
+                remedy?.title,
+                issue.remedyActionTitle,
+                "\(issue) offered a button the model does not name"
+            )
+        }
+    }
+
+    /// A remedy is a title *and* a page. An issue with no page to open shows Retry alone rather
+    /// than a button that goes nowhere.
+    func testAnIssueWithNoPageToOpenOffersNoRemedyButton() {
+        let state = RemotePairingCardState.resolve(
+            ownerDevicePersistenceError: nil,
+            pairingCodePayload: nil,
+            transport: .unavailable(TailscaleReadinessIssue.serveNotEnabled.message),
+            tailscaleReadiness: .actionRequired(.serveNotEnabled, actionURL: nil)
+        )
+        guard case .connectionUnavailable(_, let remedy) = state else {
+            return XCTFail("the panel lost the failure")
+        }
+        XCTAssertNil(remedy)
+    }
+
+    /// The readiness rows and the panel read the same value, which is what stops a reason from
+    /// existing in one and not the other.
+    func testEveryIssueNamesTheReadinessRowItBelongsTo() {
+        XCTAssertEqual(TailscaleReadinessIssue.notInstalled.step, .installed)
+        XCTAssertEqual(TailscaleReadinessIssue.signedOut.step, .signedIn)
+        XCTAssertEqual(TailscaleReadinessIssue.stopped.step, .signedIn)
+        XCTAssertEqual(TailscaleReadinessIssue.statusUnavailable.step, .signedIn)
+        for issue in [
+            TailscaleReadinessIssue.serveNotEnabled,
+            .httpsRequired,
+            .permissionDenied,
+            .portInUse,
+            .serveFailed
+        ] {
+            XCTAssertEqual(issue.step, .privateEndpoint, "\(issue) lands on the wrong row")
+        }
     }
 }
 

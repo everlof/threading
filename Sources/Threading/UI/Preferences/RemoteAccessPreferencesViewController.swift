@@ -30,12 +30,16 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let statusTitle = NSTextField(labelWithString: "")
     private let statusDetail = NSTextField(wrappingLabelWithString: "")
 
-    private let pairingSymbol = NSImageView()
     private let pairingTitle = NSTextField(labelWithString: "")
     private let pairingSpinner = ThemedSpinner()
     private let pairingDetail = NSTextField(wrappingLabelWithString: "")
     private let pairingCode = NSImageView()
-    private let pairingInstruction = NSTextField(wrappingLabelWithString: "")
+    private let pairingNote = NSTextField(wrappingLabelWithString: "")
+    private let pairingRemedyButton = ThemedButton()
+    /// The page the pairing panel's remedy button opens, held here for the same reason
+    /// `tailscaleActionURL` is: a target-action carries no payload. Cleared on every update so a
+    /// stale page can never outlive the failure that offered it.
+    private var pairingRemedyURL: URL?
     private let hostedSpinner = ThemedSpinner()
     private var tailscaleStepGlyphs: [NSTextField] = []
     private var tailscaleStepSpinners: [ThemedSpinner] = []
@@ -175,6 +179,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         pairingActionButton.action = #selector(pairingAction)
         pairingActionButton.setAccessibilityIdentifier("settings.remote-access.pair")
 
+        pairingRemedyButton.target = self
+        pairingRemedyButton.action = #selector(openPairingRemedy)
+        pairingRemedyButton.isHidden = true
+        pairingRemedyButton.setAccessibilityIdentifier("settings.remote-access.pairing-remedy")
+
         statusGlyph.applyFont(.body)
         statusGlyph.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -185,23 +194,22 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         statusDetail.applyFont(.subheading)
         statusDetail.textColor = Design.Text.secondary
 
-        pairingSymbol.imageScaling = .scaleProportionallyDown
-        pairingSymbol.contentTintColor = Design.Text.secondary
-        pairingSymbol.translatesAutoresizingMaskIntoConstraints = false
-
-        pairingTitle.applyFont(.heading)
+        // A card's title, at body scale: the page already has one heading, and a second one
+        // inside a card is what made this read as a poster rather than as a settings card.
+        pairingTitle.applyFont(.emphasizedBody)
         pairingTitle.textColor = Design.Text.label
+        pairingTitle.setAccessibilityIdentifier("settings.remote-access.pairing-title")
         pairingDetail.applyFont(.subheading)
         pairingDetail.textColor = Design.Text.secondary
-        pairingDetail.alignment = .center
+        pairingDetail.setAccessibilityIdentifier("settings.remote-access.pairing-detail")
 
         pairingCode.imageScaling = .scaleProportionallyUpOrDown
         pairingCode.translatesAutoresizingMaskIntoConstraints = false
         pairingCode.setAccessibilityIdentifier("settings.remote-access.qr-code")
 
-        pairingInstruction.applyFont(.subheading)
-        pairingInstruction.textColor = Design.Text.secondary
-        pairingInstruction.alignment = .center
+        pairingNote.applyFont(.subheading)
+        pairingNote.textColor = Design.Text.secondary
+        pairingNote.setAccessibilityIdentifier("settings.remote-access.pairing-note")
 
         pairedDevicesStack.orientation = .vertical
         pairedDevicesStack.alignment = .leading
@@ -386,41 +394,71 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         return row
     }
 
+    /// The pairing card: the code at the leading edge, everything it needs read beside it.
+    ///
+    /// It was a poster — a centred title with a phone glyph over a centred instruction, a plate
+    /// floating in the middle of the card, a centred two-line warning ending in an orphan, and a
+    /// button under all of it. Nothing else in the app is laid out that way, and the centring is
+    /// what made the warning read as a caption rather than as the thing it says it is. The code
+    /// sits on the same column every row of every card starts on, and the title, the
+    /// instruction, the ownership note and the action stack against its trailing side.
     private func pairingCard() -> SettingsCard {
-        pairingSymbol.image = symbol("iphone")
-
-        let heading = NSStackView(views: [pairingSymbol, pairingTitle, pairingSpinner])
+        let heading = NSStackView(views: [pairingTitle, pairingSpinner])
         heading.orientation = .horizontal
         heading.alignment = .centerY
         heading.spacing = Design.Spacing.small
 
-        let content = NSStackView(views: [
-            heading,
-            pairingDetail,
-            pairingCode,
-            pairingInstruction,
-            pairingActionButton
-        ])
-        content.orientation = .vertical
-        content.alignment = .centerX
-        content.spacing = Design.Spacing.medium
-        content.edgeInsets = NSEdgeInsets(
-            top: Design.Spacing.small,
-            left: Design.Spacing.medium,
-            bottom: Design.Spacing.small,
-            right: Design.Spacing.medium
-        )
+        let actions = NSStackView(views: [pairingRemedyButton, pairingActionButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = Design.Spacing.small
+
+        let text = NSStackView(views: [heading, pairingDetail, pairingNote, actions])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = Design.Spacing.medium
+        // A vertical stack aligned `.leading` gives each arranged view its *fitting* width, and
+        // a wrapping label has none to give — so both paragraphs are pinned to the column they
+        // sit in, or they wrap at whatever width they happen to prefer.
+        text.setHuggingPriority(.defaultLow, for: .horizontal)
+        // A stack has no intrinsic height of its own, so beside a 168pt code it was handed the
+        // code's height and spread its four rows through it: the title floated a quarter of the
+        // way down the card and the gaps came out 41, 19 and 15 points where all three are
+        // meant to be `medium`. Hugging vertically is what makes the column its content's
+        // height and the spacing the token that states it.
+        for stack in [heading, actions, text] {
+            stack.setHuggingPriority(.required, for: .vertical)
+        }
+
+        let content = NSStackView(views: [pairingCode, text])
+        content.orientation = .horizontal
+        // The code is a block; the text beside it starts at its first line.
+        content.alignment = .top
+        content.distribution = .fill
+        content.spacing = Design.Spacing.large
 
         NSLayoutConstraint.activate([
-            pairingSymbol.widthAnchor.constraint(equalToConstant: Design.Symbol.control + 4),
-            pairingSymbol.heightAnchor.constraint(equalTo: pairingSymbol.widthAnchor),
-            pairingCode.widthAnchor.constraint(equalToConstant: PairingCodeImage.preferredSide),
+            pairingCode.widthAnchor.constraint(equalToConstant: PairingCardLayout.codeSide),
             pairingCode.heightAnchor.constraint(equalTo: pairingCode.widthAnchor),
-            pairingDetail.widthAnchor.constraint(equalTo: content.widthAnchor),
-            pairingInstruction.widthAnchor.constraint(equalTo: content.widthAnchor)
+            pairingDetail.widthAnchor.constraint(equalTo: text.widthAnchor),
+            pairingNote.widthAnchor.constraint(equalTo: text.widthAnchor)
         ])
+        pairingCode.setContentHuggingPriority(.required, for: .horizontal)
+        pairingCode.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         return SettingsCard(rows: [SettingsUI.fullRow(content)])
+    }
+
+    enum PairingCardLayout {
+        /// The side the card gives the pairing code, which is also the side the image is drawn
+        /// at — the plate `PairingCodeImage` draws *is* the quiet zone, so the plate is never
+        /// wider than the code needs, and drawing at the displayed size keeps the modules from
+        /// being resampled on the way down.
+        ///
+        /// 49 modules (41 plus the four-module quiet zone on each side) at 3.4 points each, so
+        /// nearly 7 pixels per module on a 2x display against the 3.02 that
+        /// `PairingCodeImageTests` measured as the floor for a tilted, softened decode.
+        static let codeSide: CGFloat = 168
     }
 
     private func securityCard() -> SettingsCard {
@@ -452,10 +490,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             ),
             pairedDevicesStack
         ])
-    }
-
-    private func symbol(_ name: String) -> NSImage {
-        SettingsUI.symbolImage(name)
     }
 
     // MARK: - State
@@ -532,8 +566,29 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             )
 
         case .listening(let port):
-            updateConnectionForTransports(coordinator, localPort: port)
-            updatePairingForTransport(coordinator)
+            let transport = AppSettings.shared.remoteAccessConnectionMode == .relay
+                ? coordinator.relayStatus
+                : coordinator.tailscaleStatus
+            let readiness = AppSettings.shared.remoteAccessConnectionMode == .relay
+                ? nil
+                : coordinator.tailscaleReadiness
+            applyListeningState(
+                connection: RemoteConnectionStatusPresentation.resolve(
+                    mode: AppSettings.shared.remoteAccessConnectionMode,
+                    relay: coordinator.relayStatus,
+                    tailscale: coordinator.tailscaleStatus,
+                    tailscaleReadiness: coordinator.tailscaleReadiness,
+                    allowsOwnerRelayFallback:
+                        AppSettings.shared.remoteAccessAllowsOwnerRelayFallback,
+                    localPort: port
+                ),
+                card: RemotePairingCardState.resolve(
+                    ownerDevicePersistenceError: coordinator.ownerDevicePersistenceError,
+                    pairingCodePayload: coordinator.pairingCodePayload,
+                    transport: transport,
+                    tailscaleReadiness: readiness
+                )
+            )
 
         case .failed(let reason):
             updateConnection(
@@ -674,108 +729,37 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         }
     }
 
-    private func updateConnectionForTransports(
-        _ coordinator: RemoteAccessCoordinator,
-        localPort: UInt16
+    /// Applies one coherent listening-state page: the status row and the pairing card together.
+    ///
+    /// Both come from values a test can build, because both states this page needed fixing in —
+    /// a door that failed and a door that is still coming up — take a live tailnet to reach, and
+    /// what shipped was reviewed in neither.
+    func applyListeningState(
+        connection: RemoteConnectionStatusPresentation,
+        card: RemotePairingCardState
     ) {
-        let mode = AppSettings.shared.remoteAccessConnectionMode
-        let relay = coordinator.relayStatus
-        let tailscale = coordinator.tailscaleStatus
+        apply(connection)
+        applyPairingCard(card)
+    }
 
-        if mode == .tailscaleAndRelay,
-           case .connected = relay,
-           case .connected = tailscale {
-            updateConnection(
-                title: L10n.string("Ready"),
-                detail: L10n.string(
-                    "Private Tailscale pairing and public share links are both ready."
-                ),
-                color: Design.Status.positive
-            )
-            return
-        }
+    private func apply(_ connection: RemoteConnectionStatusPresentation) {
+        updateConnection(
+            title: connection.title,
+            detail: connection.detail,
+            color: color(for: connection.tone),
+            busy: connection.isBusy
+        )
+    }
 
-        if mode == .tailscaleAndRelay,
-           AppSettings.shared.remoteAccessAllowsOwnerRelayFallback,
-           case .connected = relay,
-           case .unavailable(let reason) = tailscale {
-            updateConnection(
-                title: L10n.string("Relay fallback ready"),
-                detail: L10n.format(
-                    "Paired devices can connect through Relay. Tailscale pairing: %@",
-                    reason
-                ),
-                color: Design.Status.warning
-            )
-            return
-        }
-
-        let pairingState = mode == .relay ? relay : tailscale
-        switch pairingState {
-        case .connected(let origin):
-            let detail: String
-            if mode == .tailscaleAndRelay {
-                switch relay {
-                case .connected:
-                    detail = L10n.string("Tailscale pairing and share links are ready.")
-                case .unavailable(let reason):
-                    detail = L10n.format("Private pairing is ready. Sharing relay: %@", reason)
-                case .starting:
-                    detail = L10n.string("Private pairing is ready; the sharing relay is connecting…")
-                case .stopped:
-                    detail = L10n.string(
-                        "Private pairing is ready. The public relay starts when you share."
-                    )
-                }
-            } else if mode == .tailscale {
-                detail = L10n.format(
-                    "Available privately through %@.",
-                    origin.host ?? L10n.string("your tailnet")
-                )
-            } else {
-                detail = L10n.format(
-                    "Connected through %@.",
-                    origin.host ?? L10n.string("the secure relay")
-                )
-            }
-            updateConnection(
-                title: L10n.string("Ready"),
-                detail: detail,
-                color: Design.Status.positive
-            )
-
-        case .stopped, .starting:
-            updateConnection(
-                title: L10n.string("Connecting securely"),
-                // The port is an address, not a quantity: formatted through the locale it
-                // grew a grouping separator ("127.0.0.1:53,651"), so it crosses as a string.
-                detail: L10n.format(
-                    "The local mirror is ready on 127.0.0.1:%@. Waiting for %@…",
-                    String(localPort),
-                    mode == .relay ? L10n.string("the relay") : L10n.string("Tailscale")
-                ),
-                color: Design.Status.warning,
-                busy: true
-            )
-
-        case .unavailable(let reason):
-            updateConnection(
-                title: L10n.string("Local access only"),
-                detail: reason,
-                color: Design.Status.warning
-            )
+    private func color(for tone: RemoteConnectionStatusPresentation.Tone) -> NSColor {
+        switch tone {
+        case .ready: return Design.Status.positive
+        case .attention, .working: return Design.Status.warning
         }
     }
 
-    private func updatePairingForTransport(_ coordinator: RemoteAccessCoordinator) {
-        let transport = AppSettings.shared.remoteAccessConnectionMode == .relay
-            ? coordinator.relayStatus
-            : coordinator.tailscaleStatus
-        switch RemotePairingCardState.resolve(
-            ownerDevicePersistenceError: coordinator.ownerDevicePersistenceError,
-            pairingCodePayload: coordinator.pairingCodePayload,
-            transport: transport
-        ) {
+    private func applyPairingCard(_ state: RemotePairingCardState) {
+        switch state {
         case .keychainUnavailable:
             updatePairing(
                 title: L10n.string("Pairing unavailable"),
@@ -800,21 +784,22 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 pairingPayload: payload
             )
 
-        case .connectionUnavailable:
+        case .connectionUnavailable(let reason, let remedy):
+            // The reason is the panel's own, not a pointer at the readiness row above it.
             updatePairing(
                 title: L10n.string("Private connection unavailable"),
-                detail: L10n.string(
-                    "You can still test the browser on this Mac, or retry the selected connection."
-                ),
+                detail: reason,
                 action: L10n.string("Retry Connection"),
                 actionEnabled: true,
-                prominent: true
+                // The fix is the button to press when there is one; Retry stands beside it.
+                prominent: remedy == nil,
+                remedy: remedy
             )
 
-        case .preparing:
+        case .preparing(let detail):
             updatePairing(
                 title: L10n.string("Preparing your pairing code"),
-                detail: L10n.string(
+                detail: detail ?? L10n.string(
                     "The QR code appears here as soon as the selected connection is ready."
                 ),
                 action: L10n.string("Connecting…"),
@@ -851,117 +836,100 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         statusSpinner.isAnimating = busy
     }
 
-    private func updateTailscaleReadiness(_ readiness: TailscaleReadiness) {
-        guard tailscaleStepGlyphs.count == 3,
-              tailscaleStepSpinners.count == 3,
-              tailscaleStepDetails.count == 3,
-              tailscaleStepActions.count == 3 else { return }
+    /// The readiness card, drawn from the same values the unavailable panel reads.
+    ///
+    /// Every issue used to restate all three rows here, which is how a new one could land with
+    /// no mark at all and how the row's copy drifted from the sentence the transport reported.
+    /// The issue names its step and its own line; the rows above it are met and the rows below
+    /// it are waiting, by construction.
+    func updateTailscaleReadiness(_ readiness: TailscaleReadiness) {
+        guard tailscaleStepGlyphs.count == TailscaleReadinessStep.allCases.count,
+              tailscaleStepSpinners.count == TailscaleReadinessStep.allCases.count,
+              tailscaleStepDetails.count == TailscaleReadinessStep.allCases.count,
+              tailscaleStepActions.count == TailscaleReadinessStep.allCases.count else { return }
 
         tailscaleActionURL = nil
         tailscaleStepActions.forEach { $0.isHidden = true }
 
-        func setStep(_ index: Int, glyph: String, color: NSColor, detail: String) {
+        func setStep(_ step: TailscaleReadinessStep, glyph: String, color: NSColor, detail: String) {
+            let index = step.rawValue
             tailscaleStepGlyphs[index].stringValue = glyph
             tailscaleStepGlyphs[index].textColor = color
             tailscaleStepGlyphs[index].isHidden = false
             tailscaleStepSpinners[index].isAnimating = false
             tailscaleStepDetails[index].stringValue = detail
         }
-        func offerAction(_ index: Int, title: String, url: URL) {
+        func offerAction(_ step: TailscaleReadinessStep, title: String, url: URL) {
+            let index = step.rawValue
             tailscaleActionURL = url
             tailscaleStepActions[index].title = title
             tailscaleStepActions[index].setAccessibilityLabel(title)
             tailscaleStepActions[index].isHidden = false
         }
-        func pending(_ index: Int, _ detail: String) {
-            setStep(index, glyph: "–", color: Design.Text.tertiary, detail: detail)
+        func pending(_ step: TailscaleReadinessStep, _ detail: String) {
+            setStep(step, glyph: "–", color: Design.Text.tertiary, detail: detail)
         }
-        func working(_ index: Int, _ detail: String) {
+        func working(_ step: TailscaleReadinessStep, _ detail: String) {
+            let index = step.rawValue
             tailscaleStepGlyphs[index].isHidden = true
             tailscaleStepSpinners[index].setAccessibilityLabel(detail)
             tailscaleStepSpinners[index].isAnimating = true
             tailscaleStepDetails[index].stringValue = detail
         }
-        func ready(_ index: Int, _ detail: String) {
-            setStep(index, glyph: "✓", color: Design.Status.positive, detail: detail)
+        func ready(_ step: TailscaleReadinessStep, _ detail: String) {
+            setStep(step, glyph: "✓", color: Design.Status.positive, detail: detail)
         }
-        func attention(_ index: Int, _ detail: String) {
-            setStep(index, glyph: "!", color: Design.Status.warning, detail: detail)
+        func attention(_ step: TailscaleReadinessStep, _ detail: String) {
+            setStep(step, glyph: "!", color: Design.Status.warning, detail: detail)
+        }
+        func met(upTo step: TailscaleReadinessStep) {
+            if step.rawValue > TailscaleReadinessStep.installed.rawValue {
+                ready(.installed, L10n.string("Tailscale is installed."))
+            }
+            if step.rawValue > TailscaleReadinessStep.signedIn.rawValue {
+                ready(.signedIn, L10n.string("This Mac is connected to your tailnet."))
+            }
+        }
+        func waiting(after step: TailscaleReadinessStep) {
+            for later in TailscaleReadinessStep.allCases where later.rawValue > step.rawValue {
+                pending(later, L10n.string("Waiting for Tailscale."))
+            }
         }
 
         switch readiness {
         case .notChecked:
-            pending(0, L10n.string("Checked when Remote Access turns on."))
-            pending(1, L10n.string("Waiting for the installation check."))
-            pending(2, L10n.string("Waiting for Tailscale."))
+            pending(.installed, L10n.string("Checked when Remote Access turns on."))
+            pending(.signedIn, L10n.string("Waiting for the installation check."))
+            pending(.privateEndpoint, L10n.string("Waiting for Tailscale."))
         case .checking:
             // One `tailscale status` answers both installation and the tailnet, so the two
             // steps are genuinely in flight together.
-            working(0, L10n.string("Looking for Tailscale…"))
-            working(1, L10n.string("Checking your tailnet status…"))
-            pending(2, L10n.string("Waiting for Tailscale."))
+            working(.installed, L10n.string("Looking for Tailscale…"))
+            working(.signedIn, L10n.string("Checking your tailnet status…"))
+            pending(.privateEndpoint, L10n.string("Waiting for Tailscale."))
         case .publishing:
-            ready(0, L10n.string("Tailscale is installed."))
-            ready(1, L10n.string("This Mac is connected to your tailnet."))
-            working(2, L10n.string("Publishing Threading privately…"))
+            met(upTo: .privateEndpoint)
+            // The same sentence the status row and the pairing panel are showing: this step is
+            // where the wait actually is, and it was the one saying least about it.
+            working(
+                .privateEndpoint,
+                readiness.startupStatement?.detail
+                    ?? L10n.string("Publishing Threading privately…")
+            )
         case .ready(let origin):
-            ready(0, L10n.string("Tailscale is installed."))
-            ready(1, L10n.string("This Mac is connected to your tailnet."))
+            met(upTo: .privateEndpoint)
             setStep(
-                2,
+                .privateEndpoint,
                 glyph: "✓",
                 color: Design.Status.positive,
                 detail: L10n.format("Ready at %@.", origin.host ?? origin.absoluteString)
             )
         case .actionRequired(let issue, let actionURL):
-            switch issue {
-            case .notInstalled:
-                attention(0, L10n.string("Install Tailscale on this Mac, then retry."))
-                pending(1, L10n.string("Waiting for Tailscale."))
-                pending(2, L10n.string("Waiting for Tailscale."))
-            case .signedOut:
-                ready(0, L10n.string("Tailscale is installed."))
-                attention(1, L10n.string("Sign in to Tailscale on this Mac, then retry."))
-                pending(2, L10n.string("Waiting for Tailscale."))
-            case .stopped:
-                ready(0, L10n.string("Tailscale is installed."))
-                attention(1, L10n.string("Turn on Tailscale on this Mac, then retry."))
-                pending(2, L10n.string("Waiting for Tailscale."))
-            case .statusUnavailable:
-                ready(0, L10n.string("Tailscale is installed."))
-                attention(1, L10n.string("Threading could not read Tailscale’s status."))
-                pending(2, L10n.string("Waiting for Tailscale."))
-            case .serveNotEnabled:
-                ready(0, L10n.string("Tailscale is installed."))
-                ready(1, L10n.string("This Mac is connected to your tailnet."))
-                attention(2, L10n.string("Enable Tailscale Serve for this tailnet, then retry."))
-                if let actionURL {
-                    offerAction(2, title: L10n.string("Enable Tailscale Serve…"), url: actionURL)
-                }
-            case .httpsRequired:
-                ready(0, L10n.string("Tailscale is installed."))
-                ready(1, L10n.string("This Mac is connected to your tailnet."))
-                attention(2, L10n.string("Enable Tailscale HTTPS for this tailnet, then retry."))
-                if let actionURL {
-                    offerAction(2, title: L10n.string("Enable HTTPS…"), url: actionURL)
-                }
-            case .permissionDenied:
-                ready(0, L10n.string("Tailscale is installed."))
-                ready(1, L10n.string("This Mac is connected to your tailnet."))
-                attention(2, L10n.string("Allow Threading to publish this private service, then retry."))
-            case .portInUse:
-                ready(0, L10n.string("Tailscale is installed."))
-                ready(1, L10n.string("This Mac is connected to your tailnet."))
-                attention(
-                    2,
-                    L10n.string(
-                        "HTTPS port 8443 already has a Tailscale Serve handler. Remove it, then retry."
-                    )
-                )
-            case .serveFailed:
-                ready(0, L10n.string("Tailscale is installed."))
-                ready(1, L10n.string("This Mac is connected to your tailnet."))
-                attention(2, L10n.string("Tailscale Serve could not publish Threading. Retry the connection."))
+            met(upTo: issue.step)
+            attention(issue.step, issue.rowDetail)
+            waiting(after: issue.step)
+            if let actionURL, let title = issue.remedyActionTitle {
+                offerAction(issue.step, title: title, url: actionURL)
             }
         }
     }
@@ -1046,6 +1014,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         actionEnabled: Bool,
         prominent: Bool,
         busy: Bool = false,
+        remedy: RemotePairingRemedy? = nil,
         pairingPayload: String? = nil
     ) {
         pairingTitle.stringValue = title
@@ -1056,11 +1025,23 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         pairingActionButton.isEnabled = actionEnabled
         pairingActionButton.isProminent = prominent
 
-        let code = pairingPayload.flatMap { PairingCodeImage.make(for: $0) }
+        pairingRemedyURL = remedy?.url
+        pairingRemedyButton.isHidden = remedy == nil
+        pairingRemedyButton.isProminent = remedy != nil
+        if let remedy {
+            pairingRemedyButton.title = remedy.title
+            pairingRemedyButton.setAccessibilityLabel(remedy.title)
+        }
+
+        // Drawn at the side the card gives it: an `NSImage` scaled into an image view is
+        // resampled, and a resampled module edge is the one thing this artwork cannot spare.
+        let code = pairingPayload.flatMap {
+            PairingCodeImage.make(for: $0, side: PairingCardLayout.codeSide)
+        }
         pairingCode.image = code
         pairingCode.isHidden = code == nil
-        pairingInstruction.isHidden = code == nil
-        pairingInstruction.stringValue = code == nil
+        pairingNote.isHidden = code == nil
+        pairingNote.stringValue = code == nil
             ? ""
             : L10n.string(
                 "Only scan this owner code on a device you control. It can access every chat "
@@ -1104,6 +1085,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     @objc private func openTailscaleAction() {
         guard let tailscaleActionURL else { return }
         NSWorkspace.shared.open(tailscaleActionURL)
+    }
+
+    @objc private func openPairingRemedy() {
+        guard let pairingRemedyURL else { return }
+        NSWorkspace.shared.open(pairingRemedyURL)
     }
 
     @objc private func pairingAction() {

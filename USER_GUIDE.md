@@ -2166,7 +2166,12 @@ unreachable; **Keep Sharing Relay Ready** starts it immediately. Both are off by
 Tailscale readiness card tells you whether installation, sign-in/running, or private HTTPS Serve
 needs attention. If your tailnet has not approved Tailscale Serve (or HTTPS certificates) yet,
 the card's endpoint row offers an **Enable Tailscale Serve…** / **Enable HTTPS…** button that
-opens the tailnet's approval page; approve there, then **Retry Connection**. **Open in Browser** tests the
+opens the tailnet's approval page; approve there, then **Retry Connection**. The pairing panel
+below states the same reason and the same fix itself, with that button beside **Retry
+Connection**, so you never have to match a failure to a row elsewhere on the page. While the
+tailnet is coming up, the status line and the panel say what is being waited for: the first
+HTTPS certificate a tailnet issues can take up to a minute, and both say so until it answers.
+**Open in Browser** tests the
 client on the Mac, and the page shows an owner-device QR code for the native app. Pairing is for
 your own
 trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded
