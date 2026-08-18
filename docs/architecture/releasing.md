@@ -80,14 +80,22 @@ TCC grants survive the swap. It is *not* a shipping artefact: unnotarized, untim
 architecture, and missing the managed capability. It still cannot answer "did the entitlement
 change work?"; only the export can.
 
-**It never quits the running app.** Threading hosts live agent sessions in PTYs, and any agent
-committing to master would otherwise end a turn somebody is in the middle of.
-`install-app.sh --leave-running` moves the new bundle in underneath the running process, which
-keeps running the build it launched with until the app is reopened. The outgoing bundle is not
-deleted while a process is still reading it — that is how a running app gets SIGKILLed on its
-next page fault — but parked as `.Threading.app.parked-<pids>` and removed once none of those
-pids is a running Threading. Only one parked copy accumulates: the next install finds the
-destination unheld, because its holders are on the parked copy, and deletes it outright.
+**It never quits or moves the running app.** Threading hosts live agent sessions in PTYs, and any
+agent committing to master would otherwise end a turn somebody is in the middle of. Once a build
+is ready, the builder waits for `/Applications/Threading.app` to quit and only then calls the
+installer. If master moves while it waits, that product is discarded and the newest commit is
+built instead. The installer checks again both before and immediately after moving the outgoing
+bundle, so a reopen during staging is refused and retried rather than turning a live bundle into
+an update casualty.
+
+That refusal is load-bearing for notifications. The old `--leave-running` path moved a live app
+to `.Threading.app.parked-<pid>` and installed the replacement at its original URL. LaunchServices
+kept the parked bundle registered for `codes.threading`; clicking a notification could therefore
+launch the parked executable, which lost `SingleInstanceLock` and showed “Threading is already
+running” instead of delivering the notification response to the existing process. The installer
+now unregisters and removes legacy parked bundles once their recorded processes are gone, never
+creates new ones, unregisters the outgoing stopped bundle, and force-registers the one surviving
+`/Applications` URL.
 
 **Detection uses `ps -o comm=`, not `pgrep -f`.** `pgrep` matches against argv, which a sandboxed
 shell cannot read — and a git hook fired by an agent's commit is one. It returns nothing while the
@@ -100,8 +108,9 @@ master's tip with the commit it was building: moved means start again, unchanged
 genuinely failed, which is reported once and out loud.
 
 Measured on this machine: 509s for the first build of a fresh checkout, 24s for an incremental
-rebuild with no source change, 27s from trigger to installed and verified. On disk: 134MB of
-checkout, 2.5GB of DerivedData, and a 200MB parked bundle whenever the app was running.
+rebuild with no source change, 27s from trigger to ready and, when Threading is not running,
+installed and verified. On disk: 134MB of checkout and 2.5GB of DerivedData; no second runnable
+application bundle is retained.
 
 Before signing, the release script runs the same `scripts/ci.sh` gate as GitHub Actions:
 architecture/localization/theme boundaries, SwiftLint, the three local package suites, and the

@@ -12,7 +12,6 @@
 #   scripts/install-app.sh --app <path/to/.app>     # installs a bundle built anywhere
 #   scripts/install-app.sh --to ~/Applications      # somewhere other than /Applications
 #   scripts/install-app.sh --quit                   # quit a running copy without asking
-#   scripts/install-app.sh --leave-running          # install underneath a running copy
 #
 # **Why not `cp -R`.** `cp -R src dst` copies *into* `dst` when `dst` already exists as a
 # directory, so `cp -R Threading.app /Applications/Threading.app` produces
@@ -24,6 +23,7 @@ set -euo pipefail
 
 readonly SCHEME="Threading"
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
@@ -31,22 +31,19 @@ fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 APP="$ROOT/build/release/export/$SCHEME.app"
 DEST_DIR="/Applications"
 QUIT_RUNNING=0
-LEAVE_RUNNING=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --app) shift; APP="${1:-}" ;;
         --to) shift; DEST_DIR="${1:-}" ;;
         --quit) QUIT_RUNNING=1 ;;
-        --leave-running) LEAVE_RUNNING=1 ;;
+        --leave-running)
+            fail "--leave-running is unsafe: moving a live app leaves a stale LaunchServices notification target; wait for Threading to quit instead"
+            ;;
         *) fail "unknown argument '$1'" ;;
     esac
     shift
 done
-
-if [[ $QUIT_RUNNING -eq 1 && $LEAVE_RUNNING -eq 1 ]]; then
-    fail "--quit and --leave-running ask for opposite things"
-fi
 
 [[ -n "$APP" && -d "$APP" ]] || fail "no app bundle at '$APP'"
 [[ -d "$DEST_DIR" ]] || fail "no such directory: $DEST_DIR"
@@ -55,7 +52,19 @@ fi
 readonly DEST="$DEST_DIR/$SCHEME.app"
 readonly STAGE="$DEST_DIR/.$SCHEME.app.incoming"
 readonly PREVIOUS="$DEST_DIR/.$SCHEME.app.previous"
+# Removed installs can leave one of these behind. New installs never create one; the sweep is a
+# migration that unregisters and removes the old launch target once its original process is gone.
 readonly PARKED_PREFIX="$DEST_DIR/.$SCHEME.app.parked-"
+
+unregister_bundle() {
+    [[ -x "$LSREGISTER" ]] || return 0
+    "$LSREGISTER" -u "$1" >/dev/null 2>&1 || true
+}
+
+register_bundle() {
+    [[ -x "$LSREGISTER" ]] || return 0
+    "$LSREGISTER" -f "$1" >/dev/null 2>&1 || true
+}
 
 # Which processes are running the bundle at $1.
 #
@@ -66,8 +75,8 @@ readonly PARKED_PREFIX="$DEST_DIR/.$SCHEME.app.parked-"
 # the kernel's path for the running image and answers correctly in both contexts.
 #
 # It reports the path the process was *launched* from, which does not follow a later rename. That
-# is exactly the question being asked here — "who is using the bundle at this path" — and it is
-# why a parked bundle records the pids that were running it rather than being re-tested by path.
+# is exactly the question being asked here — "who is using the bundle at this path" — and is also
+# why the legacy parked-bundle sweep checks both the original and moved paths below.
 running_pids_at() {
     local executable="$1/Contents/MacOS/$SCHEME"
     local pid path
@@ -89,21 +98,24 @@ running_pids_at() {
 # The pid is checked against a still-running Threading rather than against bare liveness, because
 # pids are reused, and a recycled one would otherwise pin 200MB on disk indefinitely.
 sweep_parked_bundles() {
-    local aside pids pid in_use
+    local aside pids pid in_use process_path
     for aside in "$PARKED_PREFIX"*; do
         [[ -d "$aside" ]] || continue
         pids="${aside##*.parked-}"
         in_use=0
         for pid in ${pids//-/ }; do
-            if [[ "$(ps -o comm= -p "$pid" 2>/dev/null)" == *"/$SCHEME.app/Contents/MacOS/$SCHEME" ]]; then
+            process_path="$(ps -o comm= -p "$pid" 2>/dev/null)"
+            if [[ "$process_path" == *"/$SCHEME.app/Contents/MacOS/$SCHEME" \
+                || "$process_path" == "$aside/Contents/MacOS/$SCHEME" ]]; then
                 in_use=1
             fi
         done
         if [[ $in_use -eq 1 ]]; then
             echo "  keeping $(basename "$aside") — pid ${pids//-/, } is still running it"
         else
+            unregister_bundle "$aside"
             rm -rf "$aside"
-            echo "  removed $(basename "$aside") — nothing is running it any more"
+            echo "  unregistered and removed $(basename "$aside") — nothing is running it any more"
         fi
     done
     return 0
@@ -134,16 +146,8 @@ fi
 # were doing stops. That is why this asks rather than killing, and why it never escalates to
 # SIGKILL — a forced quit here can lose a turn somebody is in the middle of.
 
-# --leave-running is the other answer to the same problem, and the one an automated install needs:
-# the swap below goes in underneath the running process instead of asking it to stop. It costs a
-# relaunch before the new build is the one you are using, which is a much smaller price than
-# ending a turn somebody is in the middle of.
 running_pid="$(running_pids_at "$DEST" | tr '\n' ' ' | sed 's/ *$//')"
-if [[ -n "$running_pid" && $LEAVE_RUNNING -eq 1 ]]; then
-    echo
-    echo "$SCHEME is running (pid $running_pid) and is being left alone. The new build goes in"
-    echo "underneath it; the running copy stays on the build it launched with until you reopen it."
-elif [[ -n "$running_pid" ]]; then
+if [[ -n "$running_pid" ]]; then
     if [[ $QUIT_RUNNING -eq 0 ]]; then
         if [[ ! -t 0 ]]; then
             fail "$SCHEME is running (pid $running_pid); re-run with --quit, or quit it yourself"
@@ -188,19 +192,27 @@ ditto "$APP" "$STAGE"
 say "Swapping"
 aside=""
 if [[ -e "$DEST" ]]; then
-    # Asked again here rather than reusing the answer from above, because the quit path may have
-    # changed it. Nobody running the outgoing bundle means it can simply be deleted once the new
-    # one is in place; somebody running it means it is parked under their pids instead. Only one
-    # parked bundle can accumulate: the next install finds the destination unheld — its holders
-    # are on the parked copy, not on it — and deletes it outright.
+    # Asked again here rather than reusing the answer from above: staging takes long enough for
+    # somebody to reopen the app. Moving a live bundle aside is forbidden. Notification Center
+    # records the bundle id and LaunchServices can keep resolving it to the moved copy, launching
+    # a second Threading which then loses the state lock instead of delivering the click.
     holders="$(running_pids_at "$DEST" | tr '\n' '-' | sed 's/-$//')"
     if [[ -n "$holders" ]]; then
-        aside="$PARKED_PREFIX$holders"
-        rm -rf "$aside"
-    else
-        aside="$PREVIOUS"
+        rm -rf "$STAGE"
+        fail "$SCHEME began running while the replacement was staged; the installed app was left untouched"
     fi
+    aside="$PREVIOUS"
     mv "$DEST" "$aside"
+
+    # Close the launch-before-rename race. A process started from DEST keeps that original path in
+    # `ps -o comm=` after the rename, so it is still discoverable and the old bundle can be put
+    # straight back before anything deletes or overwrites it.
+    holders="$(running_pids_at "$DEST" | tr '\n' '-' | sed 's/-$//')"
+    if [[ -n "$holders" ]]; then
+        mv "$aside" "$DEST"
+        rm -rf "$STAGE"
+        fail "$SCHEME began launching during the replacement; the installed app was restored untouched"
+    fi
 fi
 if ! mv "$STAGE" "$DEST"; then
     # Put the old one back rather than leaving the machine with no app at all.
@@ -210,6 +222,7 @@ if ! mv "$STAGE" "$DEST"; then
     fail "could not move the new bundle into place"
 fi
 if [[ "$aside" == "$PREVIOUS" ]]; then
+    unregister_bundle "$PREVIOUS"
     rm -rf "$PREVIOUS"
 fi
 
@@ -238,10 +251,11 @@ dest_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
 [[ "$dest_build" == "$installed_build" ]] \
     || fail "installed bundle reports build $dest_build, expected $installed_build"
 
+# Notification Center opens by application identity rather than by the posting process's pid.
+# Force the surviving path to be LaunchServices' current record after unregistering the outgoing
+# bundle above, so an old notification cannot resolve to a bundle that no longer owns the state.
+register_bundle "$DEST"
+
 say "Installed: $SCHEME $installed_version ($installed_build)"
 echo "  $DEST"
-if [[ "$aside" == "$PARKED_PREFIX"* ]]; then
-    echo "  pid ${aside##*.parked-} is still running the previous build — quit and reopen to use this one"
-else
-    echo "  open it with: open -a $SCHEME"
-fi
+echo "  open it with: open -a $SCHEME"
