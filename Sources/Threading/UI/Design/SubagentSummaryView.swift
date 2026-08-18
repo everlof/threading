@@ -40,6 +40,7 @@ struct SubagentSummaryItem: Equatable {
     let subtitle: String?
     let state: State
     let statusDetail: String?
+    let usageDetail: String?
     let detailLines: [String]
     let transcriptAvailability: TranscriptAvailability
 
@@ -49,6 +50,7 @@ struct SubagentSummaryItem: Equatable {
         subtitle: String?,
         state: State,
         statusDetail: String?,
+        usageDetail: String? = nil,
         detailLines: [String],
         transcriptAvailability: TranscriptAvailability = .openable
     ) {
@@ -57,6 +59,7 @@ struct SubagentSummaryItem: Equatable {
         self.subtitle = subtitle
         self.state = state
         self.statusDetail = statusDetail
+        self.usageDetail = usageDetail
         self.detailLines = detailLines
         self.transcriptAvailability = transcriptAvailability
     }
@@ -186,13 +189,15 @@ final class SubagentSummaryView: NSView {
     func update(
         items: [SubagentSummaryItem],
         workingCount: Int,
-        doneCount: Int
+        doneCount: Int,
+        usageText: String? = nil
     ) {
         update(
             items: items,
             workingCount: workingCount,
             doneCount: doneCount,
-            selectedID: selectedID
+            selectedID: selectedID,
+            usageText: usageText
         )
     }
 
@@ -203,7 +208,8 @@ final class SubagentSummaryView: NSView {
         items: [SubagentSummaryItem],
         workingCount: Int,
         doneCount: Int,
-        selectedID: String?
+        selectedID: String?,
+        usageText: String? = nil
     ) {
         self.items = items
         self.selectedID = selectedID.flatMap { candidate in
@@ -212,7 +218,11 @@ final class SubagentSummaryView: NSView {
 
         let working = L10n.format("%lld working", Int64(workingCount))
         let done = L10n.format("%lld done", Int64(doneCount))
-        countLabel.stringValue = workingCount > 0 ? "\(working) · \(done)" : done
+        var count = [workingCount > 0 ? "\(working) · \(done)" : done]
+        if let usageText, !usageText.isEmpty {
+            count.append(usageText)
+        }
+        countLabel.stringValue = count.joined(separator: " · ")
         rebuildRows()
     }
 
@@ -364,6 +374,10 @@ final class SubagentSummaryView: NSView {
 
         if let statusDetail = item.statusDetail, !statusDetail.isEmpty {
             addDetail(statusDetail, to: row, color: Design.Text.tertiary)
+        }
+        if let usageDetail = item.usageDetail, !usageDetail.isEmpty,
+           usageDetail != item.statusDetail {
+            addDetail(usageDetail, to: row, color: Design.Text.tertiary)
         }
 
         // Removing the chevron answers "why does this not open"; without a line saying so the

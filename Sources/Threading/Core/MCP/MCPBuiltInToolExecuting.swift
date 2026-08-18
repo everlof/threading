@@ -193,6 +193,9 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func subscribeToChildren(
     _ arguments: SubscribeToChildrenArguments, for sessionID: SessionID
   ) -> MCPToolResult
+  func respondToPermission(
+    _ arguments: RespondToPermissionArguments, for sessionID: SessionID
+  ) -> MCPToolResult
   func listReclaimableStorage() -> MCPToolResult
   func suggestReclaimableLocation(
     _ arguments: SuggestReclaimableLocationArguments

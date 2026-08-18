@@ -202,6 +202,26 @@ final class PermissionRequestView: NSView {
         return true
     }
 
+    /// Resolves this exact card for a user-appointed manager. Like the paired-device route this
+    /// is one-shot only; it cannot create an allow-for-session policy. The distinct reason keeps
+    /// the execution audit honest about who supplied the decision.
+    func resolveManager(id: String, decision: ControlPermissionDecision) -> Bool {
+        guard id == remoteID, !isResolved, remoteRequest.canDecide else { return false }
+        switch decision {
+        case .allow:
+            settle(
+                .allow(reason: "Approved by a user-appointed Threading manager."),
+                note: L10n.string("Allowed by manager.")
+            )
+        case .deny:
+            settle(
+                .deny(reason: "Declined by a user-appointed Threading manager."),
+                note: L10n.string("Denied by manager.")
+            )
+        }
+        return true
+    }
+
     // MARK: - Actions
 
     @objc private func allowOnce() {

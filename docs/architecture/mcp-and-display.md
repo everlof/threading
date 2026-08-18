@@ -230,7 +230,7 @@ The panel normally belongs to the selected session and presents that session's p
 strip with one non-persisted inspector while leaving both per-session tab lists untouched. It is
 not offered by the tab `+`, cannot be reordered or transferred, and stays visible when the user
 selects another conversation. An explicit request for a session surface — Browser, Review,
-Terminal, Activity, Info, Attachments, Subagents, or a transferred tab — exits the inspector and
+Terminal, Overview, Attachments, Subagents, or a transferred tab — exits the inspector and
 returns to the selected session's tabs. This lets a conversation remain alongside the theme being
 discussed without pretending an app-wide document belongs to that conversation.
 
@@ -238,14 +238,30 @@ discussed without pretending an app-wide document belongs to that conversation.
 native semantic scene and the `⋯` menu offers only the actions that fit — an image and a document
 share almost nothing worth acting on.
 
-**Activity is the filesystem-shaped account of agent work.** The former Files tab keeps its
-persisted `.files` body and `view.files` command identity for layout and shortcut compatibility,
-but presents as Activity. `AgentWorkSummaryView` supplies the bounded repository atlas and recent
-action overview above `FileTreeViewController`; the outline below remains the ordinary lazy file
-browser and annotates its visible rows with exact read/edit totals. A directory total is maintained
-incrementally from file events, not computed by walking its subtree. Row queries contain only the
-current viewport, cache at most 256 paths, and run through `AgentWorkTraceStore`'s utility worker.
-Closed directories are neither enumerated nor represented by views merely because the pane opened.
+**Overview is the session's two-part operational reading.** Activity and Info share one singleton
+tab and a host-owned segmented control. `view.files` and **⌘P** select Activity; `view.info` and
+**⌘⇧I** select Info. Only the selected child is attached, so Activity does not construct process
+rows or start Info's polling, and Info does not expand the filesystem. The old persisted `.files`
+and `.info` kinds now encode the selected section; on restore, a legacy layout containing both
+singleton tabs is merged into one Overview, with the active legacy tab deciding the section and
+surviving identity. When a person opens an otherwise empty panel by hand, it shows a synthetic
+Info-first Overview that is absent from persistence and the agent-facing tab list; selecting a
+surface explicitly materializes the ordinary persisted Overview.
+
+**Overview's Info section owns the detailed session receipt as well as live processes.** Its Usage
+section projects the provider-neutral transcript ledger into lifetime Total, Main agent and
+Subagents readings, token categories, cost provenance and a six-model maximum. The projection and
+machine-wide session index are prepared on a utility queue; the fixed form never receives raw
+response records. Info keeps its existing visibility boundary for process and port polling, while
+the usage snapshot can update from a completed transcript scan without starting that poll.
+
+**Overview's Activity section is the filesystem-shaped account of agent work.**
+`AgentWorkSummaryView` supplies the bounded repository atlas and recent action overview above
+`FileTreeViewController`; the outline below remains the ordinary lazy file browser and annotates
+its visible rows with exact read/edit totals. A directory total is maintained incrementally from
+file events, not computed by walking its subtree. Row queries contain only the current viewport,
+cache at most 256 paths, and run through `AgentWorkTraceStore`'s utility worker. Closed directories
+are neither enumerated nor represented by views merely because Overview opened.
 
 **Observed work has three feeds and one honest absence.**
 A rendered conversation records each tool call as it streams, from `ConversationViewController`.
@@ -274,7 +290,7 @@ nothing to do.
 
 That cheapness is what lets the trigger sites be blunt: the `turnFinished` lifecycle hook a
 terminal session already carries, the inferred activity edge for a session whose runtime or user
-has no hooks, and the Activity tab opening. **No hook is registered per tool call** — every hook
+has no hooks, and explicitly selecting Overview's Activity section. **No hook is registered per tool call** — every hook
 is a process spawned on the agent's own turn boundary, so that would buy this panel with the
 user's latency on every `Read`, and the transcript already holds every call by the time the turn
 ends. Measured, Debug: 2,000 calls fold in in 184 ms on the worker queue, a resumed pass over the

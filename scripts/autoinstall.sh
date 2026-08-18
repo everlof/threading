@@ -36,10 +36,10 @@
 # the same shape release.sh's manual-signing fallback has been installing all along; the copy in
 # /Applications carries exactly those two entitlements today.
 #
-# **Why it never quits the running app.** Threading hosts live agent sessions in PTYs, and any
-# agent committing to master would otherwise stop your session mid-turn. The install goes in
-# underneath the running copy, which keeps running the build it launched with until you quit and
-# reopen it. scripts/install-app.sh --leave-running does the careful part.
+# **Why it never quits or moves the running app.** Threading hosts live agent sessions in PTYs,
+# and any agent committing to master would otherwise stop your session mid-turn. A completed build
+# waits until Threading quits, then replaces the bundle. Moving the live bundle aside made
+# LaunchServices retain that parked copy as a notification target and launch a second instance.
 
 set -euo pipefail
 
@@ -79,6 +79,7 @@ readonly LOCK="$STATE/builder.lock"
 readonly BUILDER_PID_FILE="$STATE/builder.pid"
 readonly BUILD_GROUP_FILE="$STATE/build.pgid"
 readonly BUILDING_SHA_FILE="$STATE/building.sha"
+readonly WAITING_SHA_FILE="$STATE/waiting-to-install.sha"
 readonly INSTALLED_SHA_FILE="$STATE/installed.sha"
 readonly DISABLED_FILE="$STATE/disabled"
 
@@ -292,18 +293,65 @@ build_the_checkout() {
 
 install_the_build() {
     # The installer next to this script, not the one in the checkout: they are a matched pair, and
-    # the checkout is at an arbitrary commit that may predate --leave-running.
+    # the checkout is at an arbitrary older commit.
     "$SOURCE_REPO/scripts/install-app.sh" \
         --app "$PRODUCT" \
-        --to "$INSTALL_DIR" \
-        --leave-running >>"$BUILD_LOG" 2>&1
+        --to "$INSTALL_DIR" >>"$BUILD_LOG" 2>&1
+}
+
+# A live bundle stays at its registered URL until its process exits. Apart from avoiding a stale
+# LaunchServices record, waiting also means every notification posted by that process still opens
+# the process that owns its UNUserNotificationCenter delegate. If master moves while we wait, the
+# built product is obsolete and the caller starts a fresh round instead of installing it briefly.
+wait_for_install_window() {
+    local sha="$1" subject="$2"
+    [[ "$(source_tip)" == "$sha" ]] || return 2
+    app_is_running || return 0
+
+    echo "$sha" > "$WAITING_SHA_FILE"
+    log_line "built $(short "$sha"); waiting for Threading to quit before installing"
+    record "ready  $(short "$sha") $subject — waiting for Threading to quit"
+    notify "Threading update ready" "$subject — quit Threading to install it"
+
+    while app_is_running; do
+        if [[ "$(source_tip)" != "$sha" ]]; then
+            rm -f "$WAITING_SHA_FILE"
+            return 2
+        fi
+        sleep 2
+    done
+    rm -f "$WAITING_SHA_FILE"
+    return 0
+}
+
+# The app can be reopened during the installer's staging copy. The installer rechecks immediately
+# before the swap and refuses rather than parking a newly live bundle; in that narrow race, wait
+# again and retry the already-built product.
+install_when_available() {
+    local sha="$1" subject="$2" status=0
+    while :; do
+        wait_for_install_window "$sha" "$subject" || status=$?
+        if [[ $status -ne 0 ]]; then
+            return "$status"
+        fi
+
+        if install_the_build; then
+            return 0
+        fi
+        if app_is_running; then
+            log_line "Threading reopened while $(short "$sha") was being staged; waiting again"
+            status=0
+            continue
+        fi
+        return 1
+    done
 }
 
 # MARK: - The builder loop
 
 release_lock() {
     rm -rf "$LOCK"
-    rm -f "$BUILDER_PID_FILE" "$BUILD_GROUP_FILE" "$BUILDING_SHA_FILE"
+    rm -f "$BUILDER_PID_FILE" "$BUILD_GROUP_FILE" "$BUILDING_SHA_FILE" "$WAITING_SHA_FILE"
 }
 
 acquire_lock() {
@@ -369,10 +417,13 @@ run_builder() {
             return 0
         fi
 
-        local was_running=1
-        app_is_running || was_running=0
-
-        if ! install_the_build; then
+        local install_status=0
+        install_when_available "$sha" "$subject" || install_status=$?
+        if [[ $install_status -eq 2 ]]; then
+            log_line "master moved while $(short "$sha") waited to install — building again"
+            continue
+        fi
+        if [[ $install_status -ne 0 ]]; then
             log_line "install of $(short "$sha") failed — see $BUILD_LOG"
             record "FAILED to install $(short "$sha") $subject"
             notify "Threading auto-install failed" "built $(short "$sha") but could not install it"
@@ -382,11 +433,7 @@ run_builder() {
         echo "$sha" > "$INSTALLED_SHA_FILE"
         log_line "installed $(short "$sha") $subject"
         record "installed $(short "$sha") $subject"
-        if [[ $was_running -eq 1 ]]; then
-            notify "Threading updated in /Applications" "$subject — relaunch to pick it up"
-        else
-            notify "Threading updated in /Applications" "$subject"
-        fi
+        notify "Threading updated in /Applications" "$subject"
 
         if [[ "$(source_tip)" == "$sha" ]]; then
             break
@@ -399,14 +446,18 @@ run_builder() {
 # MARK: - Status
 
 report_status() {
-    local tip installed building
+    local tip installed building waiting
     tip="$(source_tip)"
     installed="$(cat "$INSTALLED_SHA_FILE" 2>/dev/null || true)"
     building="$(cat "$BUILDING_SHA_FILE" 2>/dev/null || true)"
+    waiting="$(cat "$WAITING_SHA_FILE" 2>/dev/null || true)"
 
     printf '\033[1mThreading auto-install\033[0m\n'
     if [[ -e "$DISABLED_FILE" ]]; then
         printf '  state:      paused (scripts/autoinstall.sh on)\n'
+    elif builder_alive && [[ -n "$waiting" ]]; then
+        printf '  state:      waiting for Threading to quit, then installing %s %s\n' \
+            "$(short "$waiting")" "$(subject_of "$waiting")"
     elif builder_alive; then
         printf '  state:      building %s %s\n' "$(short "$building")" "$(subject_of "$building")"
     else
@@ -433,7 +484,7 @@ report_status() {
                 2>/dev/null || echo '?')"
     fi
     if app_is_running; then
-        printf '  running:    yes — it stays on its launched build until you reopen it\n'
+        printf '  running:    yes — a ready build waits rather than moving this live bundle\n'
     fi
 
     printf '  disk:       %s\n' "$(du -sh "$HOME_DIR" 2>/dev/null | cut -f1)"

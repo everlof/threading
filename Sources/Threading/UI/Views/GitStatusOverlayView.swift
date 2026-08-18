@@ -290,6 +290,8 @@ final class GitStatusOverlayView: BackdropOverlay {
 
     /// Called when the Git portion is clicked; the container routes it to the review tab.
     var onOpen: (() -> Void)?
+    /// The usage receipt opens the Info section of the session Overview.
+    var onOpenUsage: (() -> Void)?
     /// The child-agent segment is a distinct destination inside the same status card.
     var onOpenSubagents: (() -> Void)?
     /// So is the audience segment, which opens the sharing pane.
@@ -370,6 +372,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         pointSize: GitStatusOverlayDefaults.markPointSize,
         accessibilityDescription: L10n.string("Fast")
     )
+    private let usageButton: ThemedButton
     private let subagentsButton: ThemedButton
     private let audienceButton: ThemedButton
     private let changeRequestButton: ThemedButton
@@ -439,7 +442,8 @@ final class GitStatusOverlayView: BackdropOverlay {
     private var lastReading: GitChangeMonitor.Reading?
     private var isRunActive = false
     private var runProgress: RunProgress?
-    private var subagentCounts = (working: 0, done: 0)
+    private var usageReading: SessionUsageSnapshot.Reading?
+    private var subagentCounts = (working: 0, done: 0, tokens: Int64?.none)
     private var modelReading: ModelReading?
     private var workspaceReading: WorkspaceReading?
     private var audienceReading = AudienceReading()
@@ -499,6 +503,12 @@ final class GitStatusOverlayView: BackdropOverlay {
             ComponentCustomizationProviderSlot.shared.customization(for: $0)
         }
     ) {
+        usageButton = ThemedButton(
+            symbol: "chart.bar.xaxis",
+            accessibility: L10n.string("Open Session Info"),
+            target: nil,
+            action: nil
+        )
         subagentsButton = ThemedButton(
             symbol: "person.2",
             accessibility: L10n.string("Open Subagents"),
@@ -649,6 +659,18 @@ final class GitStatusOverlayView: BackdropOverlay {
         // Under the checkout, over the children: the rows read outward from what this pane *is* —
         // which branch, what changed in it, which agent is working it, who it delegated to.
         content.addArrangedSubview(modelRow)
+
+        usageButton.target = self
+        usageButton.action = #selector(openUsage)
+        usageButton.setAccessibilityIdentifier("session.status.usage")
+        usageButton.emphasis = .tertiary
+        usageButton.contentAlignment = .leading
+        usageButton.applyFont(GitStatusOverlayDefaults.font)
+        usageButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        usageButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        usageButton.isHidden = true
+        content.addArrangedSubview(usageButton)
+
         content.addArrangedSubview(changeRequestButton)
         content.addArrangedSubview(checksButton)
 
@@ -740,6 +762,9 @@ final class GitStatusOverlayView: BackdropOverlay {
         let subagentsHeight = subagentsButton.heightAnchor.constraint(
             equalToConstant: GitStatusOverlayDefaults.rowHeight
         )
+        let usageHeight = usageButton.heightAnchor.constraint(
+            equalToConstant: GitStatusOverlayDefaults.rowHeight
+        )
         let audienceHeight = audienceButton.heightAnchor.constraint(
             equalToConstant: GitStatusOverlayDefaults.rowHeight
         )
@@ -793,6 +818,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         )
         extensionDividerTopConstraint = extensionDividerTop
         rowHeightConstraints = [
+            usageHeight,
             subagentsHeight,
             audienceHeight,
             changeRequestHeight,
@@ -819,6 +845,7 @@ final class GitStatusOverlayView: BackdropOverlay {
             // knowing what it would sit under, and here that made it 22 beside text rows whose
             // hover reached 19 — three rows on two rhythms. Constrained, every row is one shape
             // and `childrenRowInset` is a number this file states rather than discovers.
+            usageHeight,
             subagentsHeight,
             audienceHeight,
             changeRequestHeight,
@@ -833,7 +860,7 @@ final class GitStatusOverlayView: BackdropOverlay {
             slotTop,
             collapsedBottom
         ])
-        NSLayoutConstraint.activate(Array(rowHeightConstraints.dropFirst(4)))
+        NSLayoutConstraint.activate(Array(rowHeightConstraints.dropFirst(5)))
 
         // The one row whose sentence is routinely longer than the card is wide, held to the
         // column rather than allowed to overflow it.
@@ -855,6 +882,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         // native control and the section rule to the content column explicitly.
         NSLayoutConstraint.activate(
             ([
+                usageButton,
                 changeRequestButton,
                 checksButton,
                 subagentsButton,
@@ -932,6 +960,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         // neither colour, so it drew in AppKit's own label colour and lifted to nothing under
         // the pointer — the one row inert by omission rather than by design.
         for button in [
+            usageButton,
             subagentsButton,
             audienceButton,
             viewAllAttachmentsButton
@@ -969,7 +998,27 @@ final class GitStatusOverlayView: BackdropOverlay {
     func updateSubagents(workingCount: Int, doneCount: Int) {
         subagentCounts = (
             working: max(0, workingCount),
-            done: max(0, doneCount)
+            done: max(0, doneCount),
+            tokens: subagentCounts.tokens
+        )
+        rebuild()
+    }
+
+    /// Adds the session-wide token and cost receipt. It is a route into Overview › Info rather
+    /// than a second dashboard squeezed into the corner.
+    func updateUsage(_ reading: SessionUsageSnapshot.Reading?) {
+        guard reading != usageReading else { return }
+        usageReading = reading
+        rebuild()
+    }
+
+    /// Keeps the existing source-compatible call sites while letting the card state delegated
+    /// usage beside the child count when a session projection is available.
+    func updateSubagents(workingCount: Int, doneCount: Int, tokenCount: Int64?) {
+        subagentCounts = (
+            working: max(0, workingCount),
+            done: max(0, doneCount),
+            tokens: tokenCount.map { max(0, $0) }
         )
         rebuild()
     }
@@ -1019,13 +1068,15 @@ final class GitStatusOverlayView: BackdropOverlay {
         lastReading = nil
         isRunActive = false
         runProgress = nil
-        subagentCounts = (working: 0, done: 0)
+        usageReading = nil
+        subagentCounts = (working: 0, done: 0, tokens: nil)
         modelReading = nil
         workspaceReading = nil
         audienceReading = AudienceReading()
         changeRequestReading = nil
         attachmentReading = AttachmentReading(attachments: [])
         hasGitReceipt = false
+        usageButton.isHidden = true
         subagentsButton.isHidden = true
         audienceButton.isHidden = true
         changeRequestButton.isHidden = true
@@ -1168,12 +1219,13 @@ final class GitStatusOverlayView: BackdropOverlay {
 
         hasGitReceipt = head != nil || counters != nil
         let hasSubagents = subagentCounts.working + subagentCounts.done > 0
+        let hasUsage = usageReading?.isEmpty == false
         let hasAudience = !audienceReading.isEmpty
         let hasChangeRequest = changeRequestReading != nil
         let hasAttachments = !attachmentReading.isEmpty
-        let hasNativeReading = hasGitReceipt || hasSubagents || hasAudience || hasChangeRequest
+        let hasNativeReading = hasGitReceipt || hasUsage || hasSubagents || hasAudience || hasChangeRequest
             || model != nil || isFast || workspace != nil
-        guard hasGitReceipt || hasSubagents || hasAudience || hasChangeRequest
+        guard hasGitReceipt || hasUsage || hasSubagents || hasAudience || hasChangeRequest
             || hasAttachments || model != nil || isFast || workspace != nil else {
             hasContent = false
             applyVisibility(animated: false)
@@ -1248,6 +1300,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         countersRow.isHidden = counters == nil
         modelRow.isHidden = model == nil && !isFast
         speedMark.isHidden = !isFast
+        usageButton.isHidden = !hasUsage
         changeRequestButton.isHidden = !hasChangeRequest
         checksButton.isHidden = !hasChangeRequest
         subagentsButton.isHidden = !hasSubagents
@@ -1265,6 +1318,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         let childrenInset = childrenRowInset
         let textRows = [workspaceRow, summaryRow, countersRow, modelRow].filter { !$0.isHidden }
         let nativeButtonRows = [
+            usageButton,
             changeRequestButton,
             checksButton,
             subagentsButton,
@@ -1331,12 +1385,20 @@ final class GitStatusOverlayView: BackdropOverlay {
             )
         }
 
+        if let usageReading, hasUsage {
+            usageButton.title = SessionUsageFormat.compact(usageReading)
+            usageButton.setAccessibilityHelp(L10n.string("Open Session Info"))
+        }
         if hasSubagents {
             let working = subagentCounts.working
             let done = subagentCounts.done
             let workingText = L10n.format("%lld working", Int64(working))
             let doneText = L10n.format("%lld done", Int64(done))
-            subagentsButton.title = working > 0 ? "\(workingText) · \(doneText)" : doneText
+            var parts = [working > 0 ? "\(workingText) · \(doneText)" : doneText]
+            if let tokens = subagentCounts.tokens, tokens > 0 {
+                parts.append(L10n.format("%@ tokens", UsageFormat.tokens(tokens)))
+            }
+            subagentsButton.title = parts.joined(separator: " · ")
             // A titled `ThemedButton` deliberately exposes its visible title to accessibility.
             // Put the destination in help instead of trying to replace that truthful title.
             subagentsButton.setAccessibilityHelp(L10n.string("Open Subagents"))
@@ -1398,6 +1460,9 @@ final class GitStatusOverlayView: BackdropOverlay {
             }
             if hasSubagents {
                 parts.append(L10n.format("Subagents: %@", subagentsButton.title))
+            }
+            if hasUsage, let usageReading {
+                parts.append(L10n.format("Usage: %@", SessionUsageFormat.compact(usageReading)))
             }
             if hasAudience {
                 parts.append(Self.audienceText(audienceReading))
@@ -1899,6 +1964,10 @@ final class GitStatusOverlayView: BackdropOverlay {
 
     @objc private func openSubagents() {
         onOpenSubagents?()
+    }
+
+    @objc private func openUsage() {
+        onOpenUsage?()
     }
 
     @objc private func openSharing() {

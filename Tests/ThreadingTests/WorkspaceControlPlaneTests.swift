@@ -67,6 +67,10 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         activity: @escaping (SessionID) -> SessionActivity = { _ in .idle },
         surface: @escaping (SessionID) -> ControlSessionOverview.Surface = { _ in .chat },
         grants: @escaping (ControlActor) -> [ControlGrant] = { _ in [] },
+        pendingPermission: @escaping (SessionID) -> ControlPendingPermission? = { _ in nil },
+        resolvePermission: @escaping (
+            SessionID, String, ControlPermissionDecision, SessionID
+        ) -> Bool = { _, _, _, _ in false },
         requestManagerArchive: @escaping (
             SessionID, String?, SessionID
         ) -> SessionArchiveRequestOutcome = { _, _, _ in .scheduled },
@@ -100,6 +104,8 @@ final class WorkspaceControlPlaneTests: XCTestCase {
                     return steerOutcome(target)
                 },
                 armWatch: armWatch,
+                pendingPermission: pendingPermission,
+                resolvePermission: resolvePermission,
                 grants: grants,
                 requestManagerArchive: requestManagerArchive,
                 accountMoveCount: moveCount
@@ -117,6 +123,43 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         var result: ControlSendOutcome = .refused(.deliveryFailed)
         plane.send(message, to: target, from: actor) { result = $0 }
         return result
+    }
+
+    private func pendingPermission(
+        id: String,
+        canDecide: Bool = true,
+        reason: String? = nil
+    ) -> ControlPendingPermission {
+        ControlPendingPermission(
+            requestID: id,
+            toolName: "Bash",
+            summary: "pgrep -fl xctest",
+            filePath: nil,
+            diff: [],
+            canDecide: canDecide,
+            unavailableReason: reason
+        )
+    }
+
+    private func permissionRow(
+        _ session: AgentSession,
+        caller: SessionID
+    ) -> ControlSessionOverview {
+        ControlSessionOverview(
+            id: session.id,
+            title: WorkspaceControlPlane.safeHeaderTitle(session.displayTitle),
+            kind: session.kind,
+            activity: .idle,
+            surface: .chat,
+            isCaller: session.id == caller,
+            forkedFrom: session.forkedFrom,
+            supervision: ControlSupervisionOverview(
+                managedBy: nil,
+                children: [],
+                brief: nil,
+                lastEvent: nil
+            )
+        )
     }
 
     // MARK: - Scope
@@ -163,6 +206,169 @@ final class WorkspaceControlPlaneTests: XCTestCase {
             plane.authorize(actor, operation: .archiveSession, target: workspace.peer.id),
             .notPermitted(.archiveSession)
         )
+    }
+
+    func testHistoricalFullManagerRoleUpgradesButANarrowGrantDoesNot() {
+        let workspace = makeWorkspace()
+        var historical = ControlGrant.manager(
+            sessionID: workspace.caller.id,
+            projectID: workspace.project.id,
+            maximumPermissionMode: .manual,
+            origin: .newManagerTemplate
+        )
+        historical.operations = ControlOperation.prePermissionResponseManagerOperations
+        XCTAssertTrue(historical.upgradeManagerRoleIfNeeded())
+        XCTAssertEqual(historical.operations, ControlOperation.managerOperations)
+
+        var narrow = historical
+        narrow.operations = ControlOperation.prePermissionResponseManagerOperations
+            .subtracting([.finishWorkspace])
+        XCTAssertFalse(narrow.upgradeManagerRoleIfNeeded())
+        XCTAssertFalse(narrow.operations.contains(.respondToPermission))
+    }
+
+    // MARK: - Permission Responses
+
+    func testOnlyAManagerMayInspectAChildPermissionAndNeverItsOwn() {
+        let workspace = makeWorkspace()
+        let request = pendingPermission(id: "request-1")
+        let regularPlane = makePlane(workspace, pendingPermission: { _ in request })
+        let actor = ControlActor.agentSession(workspace.caller.id)
+
+        XCTAssertEqual(
+            regularPlane.inspectPermission(in: workspace.peer.id, from: actor),
+            .refused(.notPermitted(.respondToPermission))
+        )
+
+        let grant = ControlGrant.manager(
+            sessionID: workspace.caller.id,
+            projectID: workspace.project.id,
+            maximumPermissionMode: .manual,
+            origin: .newManagerTemplate
+        )
+        let managerPlane = makePlane(
+            workspace,
+            grants: { _ in [grant] },
+            pendingPermission: { _ in request }
+        )
+
+        XCTAssertEqual(
+            managerPlane.inspectPermission(in: workspace.caller.id, from: actor),
+            .refused(.targetIsCaller),
+            "manager authority must never become a self-approval path"
+        )
+        guard case .pending(let row, let inspected) = managerPlane.inspectPermission(
+            in: workspace.peer.id,
+            from: actor
+        ) else { return XCTFail("Expected the bounded request") }
+        XCTAssertEqual(row.id, workspace.peer.id)
+        XCTAssertEqual(inspected, request)
+    }
+
+    func testPermissionResolutionRequiresTheExactCurrentRequestAndReauthorizes() {
+        let workspace = makeWorkspace()
+        let actor = ControlActor.agentSession(workspace.caller.id)
+        var grants = [ControlGrant.manager(
+            sessionID: workspace.caller.id,
+            projectID: workspace.project.id,
+            maximumPermissionMode: .manual,
+            origin: .newManagerTemplate
+        )]
+        var current: ControlPendingPermission? = pendingPermission(id: "request-1")
+        var resolutions: [(SessionID, String, ControlPermissionDecision, SessionID)] = []
+        let plane = makePlane(
+            workspace,
+            grants: { _ in grants },
+            pendingPermission: { _ in current },
+            resolvePermission: { target, request, decision, manager in
+                resolutions.append((target, request, decision, manager))
+                current = nil
+                return true
+            }
+        )
+
+        XCTAssertEqual(
+            plane.resolvePermission(
+                in: workspace.peer.id,
+                requestID: "stale-request",
+                decision: .allow,
+                from: actor
+            ),
+            .requestChanged(in: permissionRow(workspace.peer, caller: workspace.caller.id))
+        )
+        XCTAssertTrue(resolutions.isEmpty)
+
+        grants[0].revokedAt = Date()
+        XCTAssertEqual(
+            plane.resolvePermission(
+                in: workspace.peer.id,
+                requestID: "request-1",
+                decision: .allow,
+                from: actor
+            ),
+            .refused(.notPermitted(.respondToPermission))
+        )
+        grants[0].revokedAt = nil
+
+        guard case .resolved(let row, let requestID, let decision) = plane.resolvePermission(
+            in: workspace.peer.id,
+            requestID: "request-1",
+            decision: .deny,
+            from: actor
+        ) else { return XCTFail("Expected the exact request to settle") }
+        XCTAssertEqual(row.id, workspace.peer.id)
+        XCTAssertEqual(requestID, "request-1")
+        XCTAssertEqual(decision, .deny)
+        XCTAssertEqual(resolutions.count, 1)
+        XCTAssertEqual(resolutions.first?.0, workspace.peer.id)
+        XCTAssertEqual(resolutions.first?.1, "request-1")
+        XCTAssertEqual(resolutions.first?.2, .deny)
+        XCTAssertEqual(resolutions.first?.3, workspace.caller.id)
+    }
+
+    func testPermissionResolutionFailsClosedForMissingEvidenceAndASettlementRace() {
+        let workspace = makeWorkspace()
+        let actor = ControlActor.agentSession(workspace.caller.id)
+        let grant = ControlGrant.manager(
+            sessionID: workspace.caller.id,
+            projectID: workspace.project.id,
+            maximumPermissionMode: .manual,
+            origin: .newManagerTemplate
+        )
+        var current: ControlPendingPermission? = pendingPermission(
+            id: "request-1",
+            canDecide: false,
+            reason: "Review on this Mac."
+        )
+        var resolutionCalls = 0
+        let plane = makePlane(
+            workspace,
+            grants: { _ in [grant] },
+            pendingPermission: { _ in current },
+            resolvePermission: { _, _, _, _ in
+                resolutionCalls += 1
+                current = self.pendingPermission(id: "request-2")
+                return false
+            }
+        )
+
+        guard case .requiresLocalReview(_, let reason) = plane.resolvePermission(
+            in: workspace.peer.id,
+            requestID: "request-1",
+            decision: .allow,
+            from: actor
+        ) else { return XCTFail("Expected local review") }
+        XCTAssertEqual(reason, "Review on this Mac.")
+        XCTAssertEqual(resolutionCalls, 0)
+
+        current = pendingPermission(id: "request-1")
+        guard case .requestChanged = plane.resolvePermission(
+            in: workspace.peer.id,
+            requestID: "request-1",
+            decision: .allow,
+            from: actor
+        ) else { return XCTFail("Expected the one-shot settlement race to fail closed") }
+        XCTAssertEqual(resolutionCalls, 1)
     }
 
     func testManagerArchiveRefusesWorkingChildAndCarriesActorToScheduler() {

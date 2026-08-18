@@ -1646,6 +1646,30 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertTrue(card.isHidden)
     }
 
+    func testGitStatusCardCarriesSessionUsageAndDelegatedSubtotal() throws {
+        let card = GitStatusOverlayView()
+        var openedInfo = 0
+        card.onOpenUsage = { openedInfo += 1 }
+        let reading = SessionUsageSnapshot.Reading(
+            tokens: .init(uncachedInput: 80_000, cachedInput: 90_000, output: 14_000),
+            cost: .init(catalogPricedUSD: 1.42),
+            records: 8
+        )
+
+        card.updateUsage(reading)
+        card.updateSubagents(workingCount: 1, doneCount: 2, tokenCount: 61_000)
+
+        let buttons = card.subviews
+            .compactMap { $0 as? NSStackView }
+            .flatMap(\.arrangedSubviews)
+            .compactMap { $0 as? ThemedButton }
+        let usage = try XCTUnwrap(buttons.first { $0.title.contains("184K tokens") })
+        XCTAssertTrue(usage.title.contains("$1.42 est."))
+        _ = usage.sendAction(usage.action, to: usage.target)
+        XCTAssertEqual(openedInfo, 1)
+        XCTAssertNotNil(buttons.first { $0.title == "1 working · 2 done · 61K tokens" })
+    }
+
     // MARK: - The Card's Isolated Worktree
 
     /// One managed workspace record, with only the fields this row reads varied.
@@ -2643,8 +2667,19 @@ final class ThemedIndicatorsTests: XCTestCase {
                         name: "Opus · 1M",
                         effort: "Extra High"
                     ))
+                    card.updateUsage(.init(
+                        tokens: .init(
+                            uncachedInput: 72_000,
+                            cachedInput: 96_000,
+                            cacheWrite: 4_000,
+                            output: 12_000,
+                            reasoning: 5_000
+                        ),
+                        cost: .init(catalogPricedUSD: 1.42),
+                        records: 8
+                    ))
                     card.updateChangeRequest(GitStatusOverlayView.ChangeRequestReading(status: review))
-                    card.updateSubagents(workingCount: 0, doneCount: 1)
+                    card.updateSubagents(workingCount: 0, doneCount: 1, tokenCount: 61_000)
                     card.updateAttachments(.init(attachments: attachments))
                     card.applyInk(WindowBackdrop.ink)
 

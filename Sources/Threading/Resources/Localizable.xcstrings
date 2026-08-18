@@ -1,6 +1,29 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Session Status Card": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionens statuskort"}}}},
+    "Show or Hide the Session Status Card": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj sessionens statuskort"}}}},
+    "%@ est.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ uppsk."}}}},
+    "%@ list-price estimate": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ uppskattat listpris"}}}},
+    "%@ mixed": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ blandat"}}}},
+    "%@ provider reported": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ leverantörsrapporterat"}}}},
+    "%@ read · %@ written": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ lästa · %@ skrivna"}}}},
+    "%@ reported + estimated": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ rapporterat + uppskattat"}}}},
+    "%@ reported": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ rapporterat"}}}},
+    "%@ tokens": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ tokens"}}}},
+    "%lld more models are included in the total.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld modeller till ingår i totalen."}}}},
+    "Awaiting index": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väntar på indexering"}}}},
+    "Last 90 days; rebuilding lifetime index": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senaste 90 dagarna; bygger om livstidsindex"}}}},
+    "Lifetime transcript index": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Livstidsindex för transkript"}}}},
+    "Live child total; category and cost not available yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Aktuell totalsumma för underagenter; kategori och kostnad är ännu inte tillgängliga"}}}},
+    "Main agent": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Huvudagent"}}}},
+    "Open Session Info": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna sessionsinfo"}}}},
+    "Price catalog %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Priskatalog %@"}}}},
+    "Session usage is being indexed.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionens användning indexeras."}}}},
+    "Token breakdown": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tokenfördelning"}}}},
+    "Total": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Totalt"}}}},
+    "Transcript index unavailable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Transkriptindex är inte tillgängligt"}}}},
+    "Usage: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Användning: %@"}}}},
     "Keep this Mac awake while agents work": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Håll Mac-datorn vaken medan agenter arbetar"}}}},
     "Power": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ström"}}}},
     "Prevents idle system sleep while an agent turn is active or waiting for your answer. The display may turn off, and closing a MacBook’s lid can still put it to sleep.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förhindrar automatisk systemvila medan en agenttur är aktiv eller väntar på ditt svar. Skärmen kan släckas, och datorn kan fortfarande försättas i vila om du stänger locket på en MacBook."}}}},
@@ -853,7 +876,7 @@
     "Projection": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Prognos" } } } },
     "Processed tokens": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bearbetade tokens" } } } },
     "Provider-reported + official catalog rates": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsrapporterat + officiella katalogpriser" } } } },
-    "Provider-reported cost where available; exact catalog pricing otherwise.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsrapporterad kostnad där den finns; annars exakt katalogpris." } } } },
+    "Provider-reported cost where available; catalog estimate otherwise.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsrapporterad kostnad där den finns; annars kataloguppskattning." } } } },
     "Provider-neutral charts and the retained dashboard they compose.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörsneutrala diagram och den beständiga instrumentpanel de bygger upp." } } } },
     "Providers": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Leverantörer" } } } },
     "Account": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konto" } } } },
@@ -917,6 +940,10 @@
     "Activity": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivitet" } } }
+    },
+    "Info": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Info" } } }
     },
     "AgentActivityBeamView": {
       "extractionState": "manual",
@@ -28635,6 +28662,8 @@
     "Architecture": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Arkitektur"}}}},
     "Version": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Version"}}}},
     "Agent session scratchpad": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Agentsessionens skrivyta"}}}},
+    "Allowed by manager.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillåten av manager."}}}},
+    "Denied by manager.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nekad av manager."}}}},
     "not rebuilt — the session has ended": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "byggs inte om — sessionen har avslutats"}}}},
     "Let agents see reclaimable build output, suggest more of it, and propose removing some.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt agenter se återvinningsbar byggdata, föreslå mer av den och föreslå att ta bort delar av den."}}}},
     "StorageProposalOutlineView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "StorageProposalOutlineView"}}}},

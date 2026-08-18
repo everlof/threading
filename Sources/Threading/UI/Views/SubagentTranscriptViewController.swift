@@ -99,6 +99,8 @@ final class SubagentTranscriptViewController: NSViewController {
     private var cachedMarkdownStyle: MarkdownStyle?
     private var hasRendered = false
     private let appEvents = AppEventObservations()
+    private let sessionID: SessionID?
+    private var usageSnapshot: SessionUsageSnapshot?
 
     private(set) var representedThreadID: String?
     private(set) var renderedRowCount = 0
@@ -112,6 +114,16 @@ final class SubagentTranscriptViewController: NSViewController {
     var transcriptScrollView: ThemedScrollView { scrollView }
     var transcriptTableView: ThemedTableView { tableView }
     var onSelectAgent: ((String) -> Void)?
+
+    init(sessionID: SessionID? = nil) {
+        self.sessionID = sessionID
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     // MARK: - Lifecycle
 
@@ -135,6 +147,14 @@ final class SubagentTranscriptViewController: NSViewController {
             self.cachedMarkdownStyle = nil
             self.clearMarkdownBlockCache()
             self.render(agent, shouldFollow: false)
+        }
+        appEvents.observe(SessionUsageDidChange.self) { [weak self] event in
+            guard let self, event.sessionID == self.sessionID else { return }
+            self.applyUsage(SessionUsageService.shared.snapshot(for: event.sessionID))
+        }
+        if let sessionID {
+            SessionUsageService.shared.refresh(sessionID)
+            applyUsage(SessionUsageService.shared.snapshot(for: sessionID))
         }
 
         view.addSubview(scrollView)
@@ -243,7 +263,12 @@ final class SubagentTranscriptViewController: NSViewController {
             items: agents.map(summaryItem),
             workingCount: workingCount,
             doneCount: doneCount,
-            selectedID: agent.descriptor.threadID
+            selectedID: agent.descriptor.threadID,
+            usageText: usageSnapshot.flatMap {
+                $0.subagents.processedTokens > 0
+                    ? SessionUsageFormat.tokenCount($0.subagents.processedTokens)
+                    : nil
+            }
         )
         summarySpan.end(metadata: ["agents": "\(agents.count)"])
 #if DEBUG
@@ -564,15 +589,29 @@ final class SubagentTranscriptViewController: NSViewController {
         let detailLines = agent.activity.isEmpty
             ? agent.message.map { [$0] } ?? []
             : agent.activity
+        let usage = usageSnapshot?.children[agent.descriptor.threadID]
         return SubagentSummaryItem(
             id: agent.descriptor.threadID,
             title: agent.descriptor.displayName,
             subtitle: agent.descriptor.prompt,
             state: summaryState(agent.status),
             statusDetail: agent.statusDetail,
+            usageDetail: usage.flatMap {
+                SessionUsageFormat.childDetail(
+                    $0,
+                    liveTokenAlreadyShown: agent.progress?.totalTokens != nil
+                )
+            },
             detailLines: Array(detailLines.suffix(SubagentDefaults.activityLimit)),
             transcriptAvailability: transcriptAvailability(for: agent)
         )
+    }
+
+    private func applyUsage(_ snapshot: SessionUsageSnapshot?) {
+        guard snapshot != usageSnapshot else { return }
+        usageSnapshot = snapshot
+        guard isViewLoaded, let agent else { return }
+        render(agent, shouldFollow: false)
     }
 }
 

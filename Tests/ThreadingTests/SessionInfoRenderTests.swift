@@ -38,7 +38,7 @@ final class SessionInfoRenderTests: XCTestCase {
             ("swiss", AppThemeStyles.swissMinimalist)
         ]
 
-        static let size = NSSize(width: 380, height: 420)
+        static let size = NSSize(width: 420, height: 760)
     }
 
     // MARK: - Stories
@@ -190,6 +190,61 @@ final class SessionInfoRenderTests: XCTestCase {
         )
     }
 
+    private static var usageFixture: SessionUsageSnapshot {
+        let total = SessionUsageSnapshot.Reading(
+            tokens: .init(
+                uncachedInput: 72_000,
+                cachedInput: 96_000,
+                cacheWrite: 4_000,
+                output: 12_000,
+                reasoning: 5_000
+            ),
+            unindexedTokens: 2_000,
+            cost: .init(catalogPricedUSD: 1.42, cacheSavingsUSD: 0.86),
+            records: 8,
+            models: [
+                .init(
+                    name: "claude-opus-4-6",
+                    tokens: .init(uncachedInput: 72_000, cachedInput: 51_000, output: 9_000),
+                    cost: .init(catalogPricedUSD: 1.12),
+                    records: 5
+                ),
+                .init(
+                    name: "claude-sonnet-4-6",
+                    tokens: .init(cachedInput: 45_000, cacheWrite: 4_000, output: 3_000),
+                    cost: .init(catalogPricedUSD: 0.30),
+                    records: 3
+                )
+            ]
+        )
+        return SessionUsageSnapshot(
+            sessionID: SessionID(),
+            total: total,
+            main: .init(
+                tokens: .init(uncachedInput: 55_000, cachedInput: 54_000, output: 8_000),
+                cost: .init(catalogPricedUSD: 1.04),
+                records: 5
+            ),
+            subagents: .init(
+                tokens: .init(uncachedInput: 17_000, cachedInput: 42_000, cacheWrite: 4_000, output: 4_000),
+                unindexedTokens: 2_000,
+                cost: .init(catalogPricedUSD: 0.38),
+                records: 3
+            ),
+            children: ["child": .init(tokens: .init(output: 4_000), unindexedTokens: 2_000)],
+            indexedRange: .lifetime,
+            builtAt: Date(),
+            pricingCatalogVersion: UsagePricingCatalog.version,
+            coverage: .init(
+                runtimeID: AgentKind.claude.rawValue,
+                runtimeName: AgentKind.claude.displayName,
+                state: .complete,
+                sourceCount: 2,
+                recordCount: 8
+            )
+        )
+    }
+
     // MARK: - Helpers
 
     private func panelImage(
@@ -208,6 +263,7 @@ final class SessionInfoRenderTests: XCTestCase {
             // Installed before the view exists, so even `viewDidLoad`'s own refresh reads the
             // fixture rather than walking the machine.
             controller.readSource = { completion in completion(snapshot) }
+            controller.usageSource = { Self.usageFixture }
 
             let host = ThemedSurfaceView()
             host.frame = NSRect(origin: .zero, size: Render.size)

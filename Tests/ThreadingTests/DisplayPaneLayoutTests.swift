@@ -781,6 +781,117 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         )
     }
 
+    /// Activity and Info are destinations inside one durable surface, not two singleton tabs
+    /// that spend the narrow strip naming the same session twice.
+    func testTheNewTabMenuOffersOneOverviewInsteadOfActivityAndInfo() {
+        let pane = DisplayPaneController()
+        let entries = pane.newTabEntries(for: SessionID())
+        let titles = entries.compactMap(\.itemTitle)
+
+        XCTAssertEqual(titles.filter { $0 == L10n.string("Overview") }.count, 1)
+        XCTAssertFalse(titles.contains(L10n.string("Activity")))
+        XCTAssertFalse(titles.contains(L10n.string("Info")))
+    }
+
+    /// The old commands remain useful anchors, but both focus a section of the same tab. The
+    /// selected section is written through the old persisted kind so layouts stay compatible
+    /// with builds from before the merge.
+    func testActivityAndInfoCommandsFocusOnePersistedOverview() throws {
+        let fixture = try projectAndSession()
+        defer { fixture.tearDown() }
+        let pane = DisplayPaneController()
+
+        XCTAssertNotNil(pane.activateFiles(for: fixture.sessionID))
+        var tabs = pane.tabs(for: fixture.sessionID)
+        XCTAssertEqual(tabs.count, 1)
+        XCTAssertEqual(tabs.first?.title, L10n.string("Overview"))
+        XCTAssertEqual(tabs.first?.overview?.selectedSection, .activity)
+        XCTAssertEqual(
+            DisplayPaneStore.shared.loadLayout(for: fixture.sessionID)?.panelTabs.first?.kind,
+            .files
+        )
+
+        let originalID = tabs.first?.id
+        XCTAssertNotNil(pane.activateInfo(for: fixture.sessionID))
+        tabs = pane.tabs(for: fixture.sessionID)
+        XCTAssertEqual(tabs.count, 1)
+        XCTAssertEqual(tabs.first?.id, originalID)
+        XCTAssertEqual(tabs.first?.overview?.selectedSection, .info)
+        XCTAssertEqual(
+            DisplayPaneStore.shared.loadLayout(for: fixture.sessionID)?.panelTabs.first?.kind,
+            .info
+        )
+    }
+
+    /// Layouts written before Overview can legitimately contain both old singleton tabs. The
+    /// selected one supplies the section, identity and strip position; the duplicate disappears.
+    func testRestoreMergesLegacyActivityAndInfoTabsIntoTheSelectedOverview() throws {
+        let fixture = try projectAndSession()
+        defer { fixture.tearDown() }
+        let activityID = UUID()
+        let infoID = UUID()
+        DisplayPaneStore.shared.saveLayout(
+            tabs: [
+                PersistedTab(
+                    id: activityID.uuidString, kind: .files, title: nil,
+                    subtitle: "", url: nil, html: nil, cacheFile: nil
+                ),
+                PersistedTab(
+                    id: infoID.uuidString, kind: .info, title: nil,
+                    subtitle: "", url: nil, html: nil, cacheFile: nil
+                ),
+            ],
+            activeID: infoID.uuidString,
+            for: fixture.sessionID
+        )
+
+        let pane = DisplayPaneController()
+        let tabs = pane.tabs(for: fixture.sessionID)
+
+        XCTAssertEqual(tabs.count, 1)
+        XCTAssertEqual(tabs.first?.id, infoID)
+        XCTAssertEqual(tabs.first?.overview?.selectedSection, .info)
+        XCTAssertEqual(pane.activeTabID(for: fixture.sessionID), infoID)
+        XCTAssertEqual(
+            DisplayPaneStore.shared.loadLayout(for: fixture.sessionID)?.panelTabs.map(\.id),
+            [infoID.uuidString],
+            "the in-memory merge left the legacy duplicate on disk"
+        )
+    }
+
+    /// Pressing the panel toggle should reveal something useful, but a look is not a decision to
+    /// restore that surface forever. The fallback therefore appears in the strip and nowhere in
+    /// the persisted or agent-facing tab lists.
+    func testAnEmptyPanelShowsANonPersistedOverviewWhenOpenedByHand() throws {
+        let fixture = try projectAndSession()
+        defer { fixture.tearDown() }
+        let pane = DisplayPaneController()
+
+        pane.showSessionWithDefaultOverview(fixture.sessionID)
+        pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(pane.hasContent(for: fixture.sessionID))
+        XCTAssertTrue(pane.tabs(for: fixture.sessionID).isEmpty)
+        XCTAssertNil(DisplayPaneStore.shared.loadLayout(for: fixture.sessionID))
+        XCTAssertNotNil(descendant(
+            in: pane.view,
+            accessibilityIdentifier: "session-overview"
+        ))
+        let infoSegment = try XCTUnwrap(descendant(
+            in: pane.view,
+            accessibilityIdentifier: "session-overview.section.info"
+        ))
+        XCTAssertEqual(infoSegment.accessibilityValue() as? NSNumber, 1)
+
+        pane.showSession(fixture.sessionID)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertNil(
+            descendant(in: pane.view, accessibilityIdentifier: "session-overview"),
+            "ordinary session selection retained the manual-open fallback"
+        )
+    }
+
     func testWindowCommandTogglesTheInspectorWithoutOpeningSettings() throws {
         let settings = AppSettings.shared
         let previous = settings.disabledToolGroupIDs

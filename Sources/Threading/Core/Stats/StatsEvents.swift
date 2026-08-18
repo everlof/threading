@@ -11,6 +11,12 @@ struct TranscriptUsageDidChange: AppEvent {
     static let name = Notification.Name("transcriptUsageDidChange")
 }
 
+/// One session's parent/child projection changed after a usage scan or live child update.
+struct SessionUsageDidChange: AppEvent {
+    static let name = Notification.Name("sessionUsageDidChange")
+    let sessionID: SessionID
+}
+
 /// A usage scan moved. Separate from `TranscriptUsageDidChange` because this arrives many times
 /// for one report and only the dashboard's own placeholder is interested: a listener that rebuilt
 /// a page from it would rebuild that page for every tick of a progress bar.

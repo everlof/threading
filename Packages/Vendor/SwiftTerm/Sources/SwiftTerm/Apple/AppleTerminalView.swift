@@ -1676,3 +1676,45 @@ extension TerminalView {
     
 }
 #endif
+
+/// The rate at which wheel reports may be written to a pty, and the bucket that spends them.
+///
+/// A pty carries no message boundaries and its input queue fills a byte at a time, so a program
+/// that is mid-render when reports arrive resumes reading in the *middle* of one; a stdin parser
+/// that does not carry a partial escape sequence across reads then drops the orphaned `ESC [ <`
+/// and takes the rest for typing. Measured against a reader on a 40ms frame: at 100 reports a
+/// second every one of its `read`s still began on a report boundary after an 800ms stall; at 180
+/// a second an 800ms stall split one; at 300 a second 400ms was enough.
+///
+/// One implementation with two owners — a Mac wheel and a phone's finger report the same way, so
+/// the measured numbers cannot drift apart between them.
+public struct WheelReportBudget {
+
+    /// Reports a second the program on the other end keeps up with.
+    public static let reportsPerSecond: Double = 100
+
+    /// The most reports one gesture may put out at once, so a deliberate notch still moves the
+    /// application's view immediately while a flick cannot open the tap.
+    public static let burst: Double = 6
+
+    private var allowance: Double = WheelReportBudget.burst
+    private var stamp: DispatchTime = DispatchTime.now()
+
+    public init () {}
+
+    /// Takes up to `wanted` reports out of the budget, refilling it for the time elapsed since
+    /// the last one. Nothing banks past the burst, so a pause cannot buy a flood.
+    public mutating func grant (_ wanted: Int) -> Int {
+        let now = DispatchTime.now()
+        let elapsed = Double (now.uptimeNanoseconds &- stamp.uptimeNanoseconds) / 1_000_000_000
+        stamp = now
+
+        allowance = min (
+            WheelReportBudget.burst,
+            allowance + elapsed * WheelReportBudget.reportsPerSecond
+        )
+        let granted = min (wanted, Int (allowance))
+        allowance -= Double (granted)
+        return granted
+    }
+}

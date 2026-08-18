@@ -90,6 +90,21 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     A dropped report is right where a queued one is not: a scroll the client never saw is a
     scroll that did not happen, and the next gesture already says where the user wants to be.
     `TerminalMouseReportingTests` pins the counts.
+  - **The phone scrolls by the same two rules, and neither one held.** iOS draws the whole buffer
+    inside a `UIScrollView` rather than a viewport over `yDisp`, and `updateScroller` pinned
+    `contentOffset` to the bottom on every emulator scroll — with no `userScrolling` guard, which
+    the Mac has had all along. A mirrored agent writes constantly, so each line of output undid
+    the drag: scrolling back through a working session from the phone was not slow, it was
+    impossible. `updateScroller` now follows `buffer.yDisp`, `layoutSubviews` mirrors an offset
+    the view did not set back into the emulator (`yDisp` plus `Terminal.userScrolling`), a drag in
+    flight is left alone and only nudged by the lines the scrollback trimmed under it, and typing
+    rejoins the tail. The second rule is the wheel: a program that tracks the mouse scrolls its
+    *own* content, so one finger is now reported as wheel buttons 4/5 through the shared
+    `WheelReportBudget` — the same measured 100/s with a burst of 6 the Mac spends — instead of
+    the press-and-drag it used to send, which is a selection gesture and moved nothing at all.
+    Both pans live on the one scroll view and two of them cannot both recognise, so mouse
+    tracking gives one finger to the program and keeps two for the local scrollback, which is
+    this device's option-wheel. `RemoteTerminalScrollTests` covers both rules.
   - **`pasteText` is ours.** Upstream reaches bracketed paste only through `paste(_:)`, which
     reads `NSPasteboard.general` — so text that never came from the clipboard could only be sent
     as typing, or by writing over the user's clipboard first. A drop is a paste, and the markers

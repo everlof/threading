@@ -191,6 +191,28 @@ Terminal sessions are outside all of this. `brokersPermissions` is false for the
 (`AgentLauncher`), so there is no `PreToolUse` hook and no call to see coming; a terminal agent's
 system prompt still arrives the way it always did.
 
+## A manager may answer one exact child request, not set child policy
+
+A user-appointed manager has to be able to clear the condition an attention notice reports. A
+cross-session message cannot do that: native-chat input queues behind the permission card, so
+asking the blocked child to answer itself leaves both sessions waiting. The manager-only
+`respond_to_permission` tool therefore has two explicit phases over the existing permission-card
+boundary:
+
+1. With `session_id` only it returns the active card's provider-neutral evidence and opaque
+   request id. This is the same byte-bounded projection a paired client receives; raw provider
+   arguments do not cross into the control plane, and an oversized diff carries `canDecide =
+   false` with a local-review reason.
+2. With that exact `request_id` and `allow` or `deny`, it settles only that card. There is no
+   manager form of **Allow for Session**, and the manager cannot answer its own card.
+
+`WorkspaceControlPlane` re-reads the durable grant, scope, target, current evidence and request id
+on the decision call. Revocation is therefore immediate. A card that settled or was replaced
+between inspection and response refuses the stale answer rather than applying it to the new one;
+the card itself repeats the exact-id and once-only gate at settlement. The execution audit records
+the decision as manager-authored, with manager, target, request and decision identities. An
+attention notice is only a reason to inspect—it is never evidence for an approval.
+
 ## The page is an inventory, not a checklist
 
 Accessibility and Screen Recording read "Not allowed" on any machine that has never installed a

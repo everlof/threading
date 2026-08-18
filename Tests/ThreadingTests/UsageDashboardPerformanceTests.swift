@@ -61,6 +61,11 @@ final class UsageDashboardPerformanceTests: XCTestCase {
         XCTAssertEqual(report.scan.distinctRecords, recordCount)
         XCTAssertEqual(report.turns, recordCount)
         XCTAssertLessThanOrEqual(report.cells.count, 90 * origins.count * 20 * 40)
+        XCTAssertEqual(
+            report.sessionCells?.count,
+            min(recordCount, 2_000),
+            "lifetime receipts aggregate to the session/model route rather than retaining responses"
+        )
         XCTAssertLessThan(elapsed, isStressRun ? 45 : 10, "Ledger aggregation took \(elapsed)s")
     }
 

@@ -37,6 +37,13 @@ final class WorkspaceControlPlane {
         /// watch is permitted; the centre owns the edge, the budget and the notice.
         let armWatch: (SessionID, SessionID, TimeInterval?) -> SessionWatchCenter.WatchArmOutcome
 
+        /// Reads and settles only the active native-chat permission card. Evidence has already
+        /// passed through the bounded provider-neutral projection before it reaches this plane.
+        var pendingPermission: (SessionID) -> ControlPendingPermission? = { _ in nil }
+        var resolvePermission: (
+            SessionID, String, ControlPermissionDecision, SessionID
+        ) -> Bool = { _, _, _, _ in false }
+
         /// Whether one of the *user's own* limits is holding the target's account, and the
         /// sentence that says so. Nil is the ordinary answer.
         ///
@@ -89,6 +96,17 @@ final class WorkspaceControlPlane {
             steer: { SessionMessageDelivery.steer($0, to: $1) },
             armWatch: {
                 SessionWatchCenter.shared.arm(watcher: $0, target: $1, timeout: $2)
+            },
+            pendingPermission: {
+                AgentRuntime.shared.pendingControlPermission(sessionID: $0)
+            },
+            resolvePermission: { targetID, requestID, decision, managerID in
+                AgentRuntime.shared.resolveManagerPermission(
+                    sessionID: targetID,
+                    id: requestID,
+                    decision: decision,
+                    managerID: managerID
+                )
             },
             heldByOwnLimit: { sessionID in
                 guard let session = ProjectStore.shared.session(withID: sessionID),
@@ -366,6 +384,69 @@ final class WorkspaceControlPlane {
         case .invalidTimeout:
             return .refused(.invalidWatchTimeout)
         }
+    }
+
+    // MARK: - Permission Responses
+
+    /// Returns the exact bounded evidence for the target's active permission card.
+    func inspectPermission(
+        in targetID: SessionID,
+        from actor: ControlActor
+    ) -> ControlPermissionInspectionOutcome {
+        guard case .agentSession(let callerID) = actor else { return .refused(.callerUnknown) }
+        if let refusal = authorize(actor, operation: .respondToPermission, target: targetID) {
+            return .refused(refusal)
+        }
+        guard targetID != callerID else { return .refused(.targetIsCaller) }
+        guard let target = dependencies.session(targetID), !target.isArchived else {
+            return .refused(.targetArchived)
+        }
+
+        let row = overview(of: target, caller: callerID)
+        guard let request = dependencies.pendingPermission(targetID) else {
+            return .noPendingRequest(in: row)
+        }
+        return .pending(in: row, request: request)
+    }
+
+    /// Applies one allow/deny to the exact active request id. Authorization and current evidence
+    /// are both re-read here, so grant revocation and card replacement take effect immediately.
+    func resolvePermission(
+        in targetID: SessionID,
+        requestID: String,
+        decision: ControlPermissionDecision,
+        from actor: ControlActor
+    ) -> ControlPermissionResolutionOutcome {
+        guard case .agentSession(let callerID) = actor else { return .refused(.callerUnknown) }
+        if let refusal = authorize(actor, operation: .respondToPermission, target: targetID) {
+            return .refused(refusal)
+        }
+        guard targetID != callerID else { return .refused(.targetIsCaller) }
+        guard let target = dependencies.session(targetID), !target.isArchived else {
+            return .refused(.targetArchived)
+        }
+
+        let row = overview(of: target, caller: callerID)
+        guard let current = dependencies.pendingPermission(targetID) else {
+            return .noPendingRequest(in: row)
+        }
+        guard requestID.count <= ControlDefaults.maximumPermissionRequestIDLength,
+              requestID == current.requestID else {
+            return .requestChanged(in: row)
+        }
+        guard current.canDecide else {
+            return .requiresLocalReview(
+                in: row,
+                reason: current.unavailableReason ?? "The complete evidence is available only locally."
+            )
+        }
+        guard dependencies.resolvePermission(targetID, requestID, decision, callerID) else {
+            // The card may have settled or advanced between the read and the exact one-shot write.
+            return dependencies.pendingPermission(targetID) == nil
+                ? .noPendingRequest(in: row)
+                : .requestChanged(in: row)
+        }
+        return .resolved(in: row, requestID: requestID, decision: decision)
     }
 
     // MARK: - Targeted Lifecycle

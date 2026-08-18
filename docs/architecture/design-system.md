@@ -90,7 +90,7 @@ Components so far:
 | `UsageReadingLabel` | An account's rate-limit windows as one line — `5h 43% · 7d 73%` — that gives up **whole windows** rather than characters when the row squeezes it. Given room for one it states one, complete; given room for none it draws nothing and leaves the row to the controls. Its intrinsic width is always the whole line, so a dropped window returns when the window widens — sizing to what it last drew would be a ratchet. One composition, shared with the toolbar pill (`AccountUsageItemView`), so the reading a session is started on is the reading the pill goes on showing: name a tier under value, and the value tinted only once its window is close enough to its limit for the colour to mean anything. |
 | `CodeContextPreviewView` | The bounded diff-shaped context above a code-comment field. It keeps two neighbouring rendered rows around an ordinary target, preserves additions/removals and line numbers, and marks every target row with the theme's selection surface plus a leading `›` so the distinction survives without colour. The presentation model draws at most ten code rows; a larger selection retains both ends around one counted omission row, while the attachment still carries the complete selected excerpt. |
 | `ConversationContextRailView` | The compact reference/comment receipts shared by the Chat composer and sent-message transcript. It groups a large batch into quiet count chips, then uses the themed menu for inspection, removal, re-reference, and comment actions. |
-| `SubagentSummaryView` | The compact child-agent navigator shared by the overview and transcript pane. Feature code supplies `SubagentSummaryItem.TranscriptAvailability` as one of three states: unavailable, openable from memory/while still running, or on disk with the file URL. A file-backed row is therefore structurally openable and revealable; the chevron and Finder action cannot disagree through independent Boolean/optional inputs. |
+| `SubagentSummaryView` | The compact child-agent navigator shared by the overview and transcript pane. Feature code supplies `SubagentSummaryItem.TranscriptAvailability` as one of three states: unavailable, openable from memory/while still running, or on disk with the file URL. A file-backed row is therefore structurally openable and revealable; the chevron and Finder action cannot disagree through independent Boolean/optional inputs. Optional usage arrives as already formatted semantic text, keeping provider accounting out of Design while adding no new rows beyond the navigator's existing cardinality. |
 | `ThemedSegmentedControl` | Two or three fixed choices with all of them on screen: a track at `controlResting` with the selected segment lifted to `controlHover`. Built as a container of small `ThemedControl`s, the same shape as `ThemedTabStripView`, so each segment inherits hover, focus and its `.radioButton` role rather than one element re-deriving all three for parts of itself that are not views. An unselected segment answers the pointer in *ink* rather than taking a third fill step, because the scale has two control fills and a third invented here is how a scale stops being a scale. Arrow keys walk the run and take the selection with them; the ends hold rather than wrap. |
 | `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
 | `AnnotatedImageView` / `ImageAnnotationRailView` | A picture you can point at, and one numbered field per place you pointed. `ThemedImagePreview`'s sibling rather than a mode on it: that control's whole gesture is *one press opens the inspector* — click, Space, force click and VoiceOver's press all land on the same action — and a click that sometimes drops a pin instead would make the most-used image affordance in the app conditional on a flag its call sites cannot see. Here the click is the mark and the **keyboard** opens the picture full size, which is the inverse contract stated once rather than a branch inside the shared one. The scale is `ThemedImagePreview.fittedRect` itself so the two never disagree about size; the placement differs deliberately (centred, not top-pinned — this view *is* its column and runs the full depth of the sheet). Neither view owns the list: the host does, because the same marks are shown by the picture, by the rail, and by the fullscreen inspector's canvas at the same time. Focus is the tie — a field taking the caret lights its own pin, and a click on a pin puts the caret in its field. Bounded at `ImageAnnotationDefaults.maximumCount` (20), which is what makes a retained stack of rows the right shape. The pin is **`BrowserAnnotationOverlay`'s pin**: same chip height, border weight, accent fill with the ground stroked around it, `numericDetail` number, top-most-wins hit test — a second numbered mark with its own anatomy would be two annotation vocabularies in one app. |
@@ -288,13 +288,17 @@ under the pointer, and takes the same selection ground through `hostGround`. The
 remains identity at the leading edge; replacing it with activity would make the row stop saying
 what kind of thing it is precisely while it works.
 
-**Status says whether an agent is working; Activity says where the work has landed.** Sidebar rows
+**Status says whether an agent is working; Overview says what the session is doing and where its
+work has landed.** Sidebar rows
 carry status only: the former 3pt repository strip and its expanded hover card were too compressed
-for the information and duplicated a surface with more room. The display panel's Activity tab now
-places the bounded repository atlas, recent action ribbon, and counts above the real filesystem
-tree. Every visible file row states exact reads and edits; a directory states the touched-file and
-read/edit totals below it. New paths retain one stable overflow cell in the overview rather than
-resorting the map under the pointer.
+for the information and duplicated a surface with more room. The display panel's single Overview
+tab has Activity and Info sections in a themed segmented control. Activity places the bounded
+repository atlas, recent action ribbon, and counts above the real filesystem tree. Every visible
+file row states exact reads and edits; a directory states the touched-file and read/edit totals
+below it. New paths retain one stable overflow cell in the summary rather than resorting the map
+under the pointer. Info owns the working directory, live process tree and listening ports. Only the
+selected child is attached, which makes the control a lifecycle boundary: an unseen Info does not
+poll, and an unseen Activity does not build or enumerate filesystem views.
 
 The implementation stays inside the design boundary: `FileActivityMapView` is the drawing
 primitive and `AgentWorkSummaryView` composes only `Design/` controls. The detailed map is one
@@ -1055,6 +1059,16 @@ into it (see the `maxSize` rule under [Themed Controls](#themed-controls)). Whic
 is why the scroller is decided *before* the height guard in `updateHeight`: by the time text
 overflows, the box is already at its cap and the constant has stopped moving.
 
+**Undo has two owners, and both are required.** `ThemedTextView.allowsUndo` makes user edits enter
+the text system's manager; the application menu then reaches that manager through AppKit's window
+responder actions, `undo:` and `redo:`. Those colons are load-bearing. `UndoManager.undo` and
+`.redo` expose different zero-argument selectors, so sending them through the responder chain
+finds no target even while the focused prompt has an operation waiting. A component test that
+calls the manager directly proves only the first half; `PromptInputTests` drives ⌘Z and ⇧⌘Z through
+the real main-menu items and a fixture window's responder chain so the shipping route is covered
+too. Hosted `xcodebuild` cannot make that window genuinely key, so the test supplies it as the
+otherwise-targetless items' target — the same window `NSApplication` selects in the running app.
+
 **A drag the composer can take lights the whole box while it is over it**: the accent ring at
 focus width over a well tinted `Design.Surface.fieldDropTarget` — the row wash's accent-at-alpha
 sentence composited over the field fill, because `applySurface` records exactly one fill and a
@@ -1431,7 +1445,8 @@ here — the sidebar's attention dot is the same colour — and spending it on w
 to be open says that about nothing. The info panel's process dots follow the same rule and draw
 in the positive status role, which is what a running process actually is.
 
-**The info panel is `PanelListView` speech.** Its sections ("Processes", "Ports"), notes
+**The info panel is `PanelListView` speech.** Its fixed Usage form and live sections
+("Processes", "Ports"), notes
 ("Nothing listening.") and header block all stand on the component's one ink column — the panel
 once had four different leading edges, each individually "correct", and the misalignment was
 visible only in a picture (`SessionInfoRenderTests` now takes that picture). Its rows carry the

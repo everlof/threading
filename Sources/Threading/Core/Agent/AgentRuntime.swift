@@ -574,6 +574,47 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         conversation(for: sessionID)?.resolveRemotePermission(id: id, decision: decision) == true
     }
 
+    /// The same bounded evidence paired clients receive, projected into Core's control contract.
+    /// Raw provider arguments stay behind the permission card boundary.
+    func pendingControlPermission(sessionID: SessionID) -> ControlPendingPermission? {
+        guard let request = conversation(for: sessionID)?.remoteSnapshot.permission else {
+            return nil
+        }
+        return ControlPendingPermission(
+            requestID: request.id,
+            toolName: request.toolName,
+            summary: request.summary,
+            filePath: request.filePath,
+            diff: request.diff.compactMap { line in
+                guard let kind = ControlPermissionDiffLine.Kind(rawValue: line.kind) else {
+                    return nil
+                }
+                return ControlPermissionDiffLine(kind: kind, text: line.text)
+            },
+            canDecide: request.canDecide,
+            unavailableReason: request.unavailableReason
+        )
+    }
+
+    func resolveManagerPermission(
+        sessionID: SessionID,
+        id: String,
+        decision: ControlPermissionDecision,
+        managerID: SessionID
+    ) -> Bool {
+        guard conversation(for: sessionID)?.resolveManagerPermission(
+            id: id,
+            decision: decision
+        ) == true else { return false }
+        EventLog.shared.record(.session, "Manager resolved permission", [
+            "manager": managerID.uuidString,
+            "session": sessionID.uuidString,
+            "request": id,
+            "decision": decision.rawValue,
+        ])
+        return true
+    }
+
     func subagentState(for sessionID: SessionID) -> SubagentSessionState {
         if let existing = subagentStates[sessionID] { return existing }
 

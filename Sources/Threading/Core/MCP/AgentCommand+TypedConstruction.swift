@@ -150,6 +150,9 @@ extension AgentCommand {
   static func subscribeToChildren(_ value: SubscribeToChildrenArguments) -> Self {
     builtIn(.subscribeToChildren, value)
   }
+  static func respondToPermission(_ value: RespondToPermissionArguments) -> Self {
+    builtIn(.respondToPermission, value)
+  }
   static func listReclaimableStorage(_ value: EmptyToolArguments) -> Self {
     builtIn(.listReclaimableStorage, value)
   }

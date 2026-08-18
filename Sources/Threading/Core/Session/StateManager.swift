@@ -1086,11 +1086,18 @@ final class StateManager {
     }
 
     private func recordPersistenceFailure(_ error: Error) {
-        if let failure = error as? SQLiteDatabase.Failure, failure.isStorageExhausted {
-            guard case .healthy = persistenceHealth else { return }
-            persistenceHealth = .storageExhausted
-            EventLog.shared.record(.app, "Persistence paused because storage is full")
-            return
+        if let failure = error as? SQLiteDatabase.Failure {
+            if failure.isStorageExhausted {
+                guard case .healthy = persistenceHealth else { return }
+                persistenceHealth = .storageExhausted
+                EventLog.shared.record(.app, "Persistence paused because storage is full")
+                return
+            }
+
+            // A constraint refusal is an atomic rejection of one candidate write. The database
+            // remains authoritative and writable, so escalating it to `recoveryRequired` would
+            // disable unrelated session, project and layout writes over a healthy store.
+            if failure.isConstraintViolation { return }
         }
 
         requireRecovery()

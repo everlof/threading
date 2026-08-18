@@ -39,6 +39,38 @@ final class TerminalKeyBridge: ObservableObject {
         consumeArmed()
         return transformed
     }
+
+    /// Whether the terminal is holding the keyboard open right now.
+    ///
+    /// The bar's own state is fed by the keyboard notifications, which only say what *changed*.
+    /// Arriving at a session that already has the keyboard up produces no notification at all,
+    /// so the bar has to be able to ask.
+    var isKeyboardShowing: Bool {
+        terminalView?.isFirstResponder ?? false
+    }
+
+    /// Puts the system keyboard away.
+    ///
+    /// This used to be `UIApplication.sendAction(#selector(UIResponder.resignFirstResponder),
+    /// to: nil, …)`, the broadcast that works for a `UITextField`. It does not reach this
+    /// terminal — measured, and `TerminalKeyboardDismissalTests` keeps measuring it — so the
+    /// button did nothing whatsoever. The view holding the keyboard is right here on the bridge:
+    /// ask it directly, and let the window answer for a composer or anything else that took the
+    /// keyboard instead.
+    func dismissKeyboard() {
+        if let terminalView, terminalView.isFirstResponder {
+            _ = terminalView.resignFirstResponder()
+        }
+        keyWindow?.endEditing(true)
+    }
+
+    private var keyWindow: UIWindow? {
+        terminalView?.window
+            ?? UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)
+    }
 }
 
 /// Resolves the stock, word-like key captions through the app's localization catalog while
@@ -105,7 +137,7 @@ struct TerminalKeyBar: View {
                 .frame(width: theme.borderWidth, height: Metrics.keyHeight)
 
             if isKeyboardVisible {
-                Button(action: Self.dismissKeyboard) {
+                Button(action: bridge.dismissKeyboard) {
                     trailingIcon("keyboard.chevron.compact.down")
                 }
                 .accessibilityLabel(MobileL10n.string("Hide keyboard"))
@@ -120,6 +152,7 @@ struct TerminalKeyBar: View {
         .overlay(alignment: .top) {
             Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
         }
+        .onAppear { isKeyboardVisible = bridge.isKeyboardShowing }
         .onReceive(
             NotificationCenter.default.publisher(
                 for: UIResponder.keyboardWillShowNotification
@@ -132,6 +165,10 @@ struct TerminalKeyBar: View {
         ) { _ in isKeyboardVisible = false }
     }
 
+    /// The key caps are hit-testable across their whole cap because each carries a filled
+    /// background. These two carry none, and an `Image` inside a larger `frame` answers taps
+    /// only on the glyph itself — so both trailing controls were a fraction of the tap target
+    /// they reserve. `contentShape` is what makes the reserved area the real one.
     private func trailingIcon(_ systemName: String) -> some View {
         Image(systemName: systemName)
             .font(.subheadline)
@@ -140,19 +177,7 @@ struct TerminalKeyBar: View {
                 width: MobileDesign.Size.minimumTapTarget,
                 height: Metrics.keyHeight
             )
-    }
-
-    /// The terminal is a first responder rather than a focusable SwiftUI field, so there is no
-    /// `@FocusState` to clear. SwiftTerm's own accessory used to carry the way back from the
-    /// keyboard; this bar replaces that accessory, so it carries the control too.
-    @MainActor
-    private static func dismissKeyboard() {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
+            .contentShape(Rectangle())
     }
 
     private var canSend: Bool {

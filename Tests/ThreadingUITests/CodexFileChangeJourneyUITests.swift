@@ -49,6 +49,11 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
             firstLaunch.staticTexts["Updated status.txt."].waitForExistence(timeout: 15),
             "the streamed Codex answer never reached the conversation"
         )
+        let sessionUsageButton = firstLaunch.descendants(matching: .any)["session.status.usage"]
+        XCTAssertTrue(
+            sessionUsageButton.waitForExistence(timeout: 15),
+            "the Session Status Card never received the completed turn's usage receipt"
+        )
         assertTurnEvidenceRecovered(in: firstLaunch, context: "the live turn")
         assertFile(statusFile, eventuallyEquals: "after\n")
         try recordScenarioScreenshot(
@@ -56,6 +61,81 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
             order: 1,
             title: "Completed agent turn",
             description: "The streamed Codex reply is complete and the changed status.txt file is visible in the conversation.",
+            journey: Self.journey,
+            in: sandbox,
+            of: firstWindow
+        )
+
+        let displayPanel = firstLaunch.buttons["Display panel"]
+        XCTAssertTrue(
+            displayPanel.waitForExistence(timeout: 5),
+            "the display-panel toggle did not appear"
+        )
+        displayPanel.click()
+        let infoSection = firstLaunch.radioButtons["session-overview.section.info"]
+        XCTAssertTrue(
+            infoSection.waitForExistence(timeout: 10),
+            "the empty panel did not open a default Overview"
+        )
+        XCTAssertTrue(
+            firstLaunch.buttons["Finder"].waitForExistence(timeout: 10),
+            "Overview did not open with its right-hand Info section focused"
+        )
+        let infoLoaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                firstLaunch.staticTexts["Processes"].exists
+                    || firstLaunch.staticTexts["This session isn’t running."].exists
+            },
+            object: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [infoLoaded], timeout: 10),
+            .completed,
+            "Overview Info had not completed its first process reading"
+        )
+        XCTAssertTrue(
+            firstLaunch.staticTexts["Usage"].waitForExistence(timeout: 10),
+            "Overview Info did not show the session usage section"
+        )
+        XCTAssertTrue(
+            firstLaunch.staticTexts["Total"].waitForExistence(timeout: 5),
+            "Overview Info did not show the indexed session total"
+        )
+        try recordScenarioScreenshot(
+            checkpoint: "file-change-02-overview-info",
+            order: 2,
+            title: "Usage and runtime in Overview Info",
+            description: "An otherwise empty panel opens one Overview tab with its right-hand Info section focused.",
+            journey: Self.journey,
+            in: sandbox,
+            of: firstWindow
+        )
+
+        let activitySection = firstLaunch.radioButtons["session-overview.section.activity"]
+        XCTAssertTrue(
+            activitySection.waitForExistence(timeout: 5),
+            "Overview did not expose its Activity section"
+        )
+        activitySection.click()
+        let activitySummary = firstLaunch.descendants(matching: .any)["activity.summary"]
+        XCTAssertTrue(
+            activitySummary.waitForExistence(timeout: 10),
+            "Overview did not switch from Info to Activity"
+        )
+        let activityLoaded = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value CONTAINS %@", " actions"),
+            object: activitySummary
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [activityLoaded], timeout: 10),
+            .completed,
+            "Overview Activity was still loading when evidence was captured"
+        )
+        try recordScenarioScreenshot(
+            checkpoint: "file-change-03-overview-activity",
+            order: 3,
+            title: "Work in Overview Activity",
+            description: "The same Overview tab switches to Activity and accounts for work in the synthetic checkout.",
             journey: Self.journey,
             in: sandbox,
             of: firstWindow
@@ -78,7 +158,7 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
         )
         try recordScenarioScreenshot(
             checkpoint: "file-change-02-git-review",
-            order: 2,
+            order: 4,
             title: "Changed file in Git Review",
             description: "Git Review identifies status.txt in the synthetic checkout after the agent mutation.",
             journey: Self.journey,
@@ -113,7 +193,7 @@ final class CodexFileChangeJourneyUITests: XCTestCase {
         assertFile(statusFile, eventuallyEquals: "after\n")
         try recordScenarioScreenshot(
             checkpoint: "file-change-03-relaunch-recovery",
-            order: 3,
+            order: 5,
             title: "Conversation recovered after relaunch",
             description: "A clean quit and relaunch restores both the user's prompt and the completed agent response.",
             journey: Self.journey,

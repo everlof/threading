@@ -59,6 +59,60 @@ struct ControlSessionOverview: Equatable, Sendable {
     let supervision: ControlSupervisionOverview
 }
 
+/// One line of bounded edit evidence attached to a pending permission request.
+struct ControlPermissionDiffLine: Equatable, Sendable {
+    enum Kind: String, Equatable, Sendable {
+        case context
+        case addition
+        case removal
+    }
+
+    let kind: Kind
+    let text: String
+}
+
+/// The provider-neutral, wire-bounded evidence needed to decide one permission request.
+///
+/// Raw provider arguments never enter the control plane. This is the same safe projection a
+/// paired remote client receives, including the fail-closed `canDecide` bit when the complete
+/// evidence did not fit the bound.
+struct ControlPendingPermission: Equatable, Sendable {
+    let requestID: String
+    let toolName: String
+    let summary: String
+    let filePath: String?
+    let diff: [ControlPermissionDiffLine]
+    let canDecide: Bool
+    let unavailableReason: String?
+}
+
+/// The only decisions a manager can make. There is deliberately no session-wide answer: a
+/// manager responds to the exact active request and cannot change the child's future policy.
+enum ControlPermissionDecision: String, Equatable, Sendable {
+    case allow
+    case deny
+}
+
+enum ControlPermissionInspectionOutcome: Equatable, Sendable {
+    case pending(in: ControlSessionOverview, request: ControlPendingPermission)
+    case noPendingRequest(in: ControlSessionOverview)
+    case refused(ControlRefusal)
+}
+
+enum ControlPermissionResolutionOutcome: Equatable, Sendable {
+    case resolved(
+        in: ControlSessionOverview,
+        requestID: String,
+        decision: ControlPermissionDecision
+    )
+    case noPendingRequest(in: ControlSessionOverview)
+    /// The supplied opaque id no longer names the active card. The manager must inspect again;
+    /// Threading never silently applies a decision to the request that replaced it.
+    case requestChanged(in: ControlSessionOverview)
+    case requiresLocalReview(in: ControlSessionOverview, reason: String)
+    case refused(ControlRefusal)
+}
+
 /// Why the control plane refused, as a value the adapter turns into words.
 enum ControlRefusal: Error, Equatable, Sendable {
     /// The caller's own session record is gone — there is no scope to resolve.
@@ -210,4 +264,8 @@ enum ControlDefaults {
     /// One cross-session message. Generous for a conclusion or a brief; far below anything
     /// that could stand in for a transcript, which `conversation_history` exists for.
     static let maximumMessageLength = 16_384
+
+    /// Generated request ids are UUIDs. The larger cap leaves room for a future opaque format
+    /// without letting an unbounded tool argument become work on the main actor.
+    static let maximumPermissionRequestIDLength = 256
 }

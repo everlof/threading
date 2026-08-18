@@ -65,6 +65,7 @@ enum ControlOperation: String, CaseIterable, Codable, Hashable, Sendable {
     case adoptSession
     case releaseSession
     case subscribeToChildren
+    case respondToPermission
 
     static let regularProjectOperations: Set<Self> = [
         .listSessions, .sendMessage, .steer, .watch,
@@ -75,6 +76,18 @@ enum ControlOperation: String, CaseIterable, Codable, Hashable, Sendable {
     ]
 
     static let managerOperations: Set<Self> = Set(allCases)
+
+    /// The complete manager role before permission responses became a manager capability.
+    ///
+    /// Persisted grants store exact operations rather than a role name. `ControlGrantStore`
+    /// recognizes only this exact historical set when upgrading an active full-manager grant;
+    /// a deliberately narrower grant must never grow because the role did.
+    static let prePermissionResponseManagerOperations: Set<Self> = [
+        .listSessions, .sendMessage, .steer, .watch,
+        .archiveSession, .renameSession, .resumeSession, .spawnSession,
+        .readAccounts, .readUsage, .moveSessionToAccount, .finishWorkspace,
+        .adoptSession, .releaseSession, .subscribeToChildren,
+    ]
 
     /// Manager-only tools are advertised from the exact operations a grant carries.
     var supervisionToolName: String? {
@@ -91,6 +104,7 @@ enum ControlOperation: String, CaseIterable, Codable, Hashable, Sendable {
         case .adoptSession: return "adopt_session"
         case .releaseSession: return "release_session"
         case .subscribeToChildren: return "subscribe_to_children"
+        case .respondToPermission: return "respond_to_permission"
         case .listSessions, .sendMessage, .steer, .watch:
             return nil
         }
@@ -129,7 +143,7 @@ struct ControlGrant: Codable, Equatable, Sendable, Identifiable {
     let id: ControlGrantID
     let actor: ControlActor
     let scope: ControlScope
-    let operations: Set<ControlOperation>
+    var operations: Set<ControlOperation>
     let ceiling: SpendCeiling?
     let maximumPermissionMode: AgentPermissionMode
     let allowedDeliveries: Set<ManagedWorkspaceDelivery>
@@ -178,6 +192,18 @@ struct ControlGrant: Codable, Equatable, Sendable, Identifiable {
             conferredAt: date,
             conferredBy: origin
         )
+    }
+
+    /// Advances an active grant that is provably the complete historical manager role.
+    /// Deliberately exact: partial grants and revoked audit rows remain unchanged.
+    @discardableResult
+    mutating func upgradeManagerRoleIfNeeded() -> Bool {
+        guard isActive,
+              operations == ControlOperation.prePermissionResponseManagerOperations else {
+            return false
+        }
+        operations = ControlOperation.managerOperations
+        return true
     }
 }
 
