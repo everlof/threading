@@ -486,7 +486,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 } else {
                     let location = gestureRecognizer.location(in: gestureRecognizer.view)
                     let tapLoc = calculateTapHit(gesture: gestureRecognizer).grid
-                    let cursorRow = terminal.buffer.y+terminal.buffer.yDisp
+                    // The cursor's absolute row is fixed to the live screen, so it is `yBase`
+                    // it is measured from — `yDisp` is wherever the viewport has been scrolled.
+                    let cursorRow = terminal.buffer.y+terminal.buffer.yBase
                     if abs (tapLoc.col-terminal.buffer.x) < 4 && abs (tapLoc.row - cursorRow) < 2 {
                         showContextMenu (forRegion: makeContextMenuRegionForTap (point: location), pos: tapLoc)
                     }
@@ -600,29 +602,72 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         imgView.tintColor = .white
     }
     
+    /// Leftover drag distance not yet worth a whole line to report.
+    var wheelDragAccumulator: CGFloat = 0
+
+    /// The measured rate wheel reports may be written at, shared with the Mac view.
+    var wheelBudget = WheelReportBudget()
+
+    /// A one-finger drag over a program that tracks the mouse.
+    ///
+    /// It reports the drag as **wheel** buttons rather than as a press and motion. A finger is
+    /// this device's wheel: a full-screen program scrolls its own content when it is told the
+    /// wheel turned — Claude Code moves its transcript that way, which is the only way to reach
+    /// history it has already scrolled past — whereas the press-and-drag this used to send is a
+    /// selection gesture that leaves the content exactly where it was. That is why scrolling a
+    /// mirrored agent TUI from the phone did nothing at all. The Mac has reported the wheel
+    /// since `MacTerminalView.scrollWheel`; this is the same routing with a finger for a wheel,
+    /// and two fingers left over for the local scrollback the same way option-wheel is on the Mac.
     @objc func panMouseHandler (_ gestureRecognizer: UIPanGestureRecognizer){
         guard gestureRecognizer.view != nil else { return }
-        if allowMouseReporting && terminal.mouseMode != .off {
-            switch gestureRecognizer.state {
-            case .began:
-                // send the initial tap
-                if terminal.mouseMode.sendButtonPress() {
-                    sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
-                }
-            case .ended, .cancelled:
-                if terminal.mouseMode.sendButtonRelease() {
-                    sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
-                }
-            case .changed:
-                if terminal.mouseMode.sendButtonTracking() {
-                    let hit = calculateTapHit(gesture: gestureRecognizer)
-                    if let grid = hit.grid.toScreenCoordinate(from: terminal.buffer) {
-                        terminal.sendMotion(buttonFlags: encodeFlags(release: false), x: grid.col, y: grid.row, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
-                    }
-                }
-            default:
-                break
-            }
+        guard allowMouseReporting && terminal.mouseMode != .off else { return }
+        switch gestureRecognizer.state {
+        case .began:
+            // A new gesture starts fresh, so leftovers cannot accumulate into a jump.
+            wheelDragAccumulator = 0
+        case .changed:
+            let travelled = gestureRecognizer.translation(in: self).y
+            gestureRecognizer.setTranslation(.zero, in: self)
+            forwardWheelDrag (distance: travelled, gestureRecognizer: gestureRecognizer)
+        default:
+            break
+        }
+    }
+
+    /// Reports `distance` points of drag to the application as wheel presses (64/65), one per
+    /// whole line travelled and no faster than the program on the other end reads them. Reports
+    /// past the budget are dropped rather than queued: a scroll the application never saw is a
+    /// scroll that did not happen, and the rest of the gesture already says where to be.
+    public func forwardWheelDrag (distance: CGFloat, gestureRecognizer: UIGestureRecognizer) {
+        let cellHeight = cellDimension.height
+        guard cellHeight > 0 else { return }
+
+        wheelDragAccumulator += distance
+        let lines = Int (wheelDragAccumulator / cellHeight)
+        guard lines != 0 else { return }
+        wheelDragAccumulator -= CGFloat (lines) * cellHeight
+
+        let reports = wheelBudget.grant (min (abs (lines), Int (WheelReportBudget.burst)))
+        guard reports > 0 else { return }
+
+        let hit = calculateTapHit (gesture: gestureRecognizer)
+        guard let grid = hit.grid.toScreenCoordinate (from: terminal.buffer) else { return }
+        // Dragging the content down asks for what is above it, which is the wheel turning up.
+        let flags = terminal.encodeButton (
+            button: lines > 0 ? 4 : 5,
+            release: false,
+            shift: false,
+            meta: false,
+            control: false
+        )
+        for _ in 0..<reports {
+            terminal.sendEvent (
+                buttonFlags: flags,
+                x: grid.col,
+                y: grid.row,
+                pixelX: hit.pixels.col,
+                pixelY: hit.pixels.row
+            )
         }
     }
    
@@ -709,14 +754,22 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
     
-    var panMouseGesture: UIPanGestureRecognizer?
+    public private(set) var panMouseGesture: UIPanGestureRecognizer?
+
+    /// Hands one finger to the application and keeps two for the local scrollback.
+    ///
+    /// Both gestures live on this same scroll view, and two pan recognizers on one view do not
+    /// both get to recognise: without the touch count telling them apart, whichever won took the
+    /// drag and the other behaviour became unreachable. Two fingers is this device's option-wheel.
     func enableMousePanGesture () {
         guard panMouseGesture == nil else {
             return
         }
         let gesture = UIPanGestureRecognizer (target: self, action: #selector(panMouseHandler))
+        gesture.maximumNumberOfTouches = 1
         addGestureRecognizer(gesture)
         panMouseGesture = gesture
+        panGestureRecognizer.minimumNumberOfTouches = 2
     }
     
     func disableMousePanGesture () {
@@ -725,6 +778,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         removeGestureRecognizer(gesture)
         panMouseGesture = nil
+        panGestureRecognizer.minimumNumberOfTouches = 1
     }
     
     var panSelectionGesture: UIPanGestureRecognizer?
@@ -927,6 +981,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     var lineLeading: CGFloat = 0
     
     open func bufferActivated(source: Terminal) {
+        // A buffer switch has no scroll position worth keeping: the alternate buffer has no
+        // scrollback at all, and coming back from one lands on the live tail.
+        source.userScrolling = false
         updateScroller ()
     }
     
@@ -1011,14 +1068,79 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         disableSelectionPanGesture()
     }
     
+    /// The offset this view last put there itself, so a later one that differs can only have
+    /// come from the person dragging.
+    var appliedOffsetY: CGFloat = 0
+
+    /// `buffer.linesTop` as of the last `updateScroller`. It counts the lines the emulator has
+    /// dropped off the top of its scrollback, which is how far the text under a held viewport
+    /// has moved since.
+    var reportedLinesTop = 0
+
     func updateScroller ()
     {
+        let cellHeight = cellDimension.height
         contentSize = CGSize (width: CGFloat (terminal.buffer.cols) * cellDimension.width,
-                              height: CGFloat (terminal.buffer.lines.count) * cellDimension.height)
-        //contentOffset = CGPoint (x: 0, y: CGFloat (terminal.buffer.lines.count-terminal.rows)*cellDimension.height)
-        contentOffset = CGPoint (x: 0, y: CGFloat (terminal.buffer.lines.count-terminal.rows)*cellDimension.height)
-        //Xscroller.doubleValue = scrollPosition
-        //Xscroller.knobProportion = scrollThumbsize
+                              height: CGFloat (terminal.buffer.lines.count) * cellHeight)
+
+        let trimmed = terminal.buffer.linesTop - reportedLinesTop
+        reportedLinesTop = terminal.buffer.linesTop
+
+        // A drag and the momentum after it own the offset outright: assigning to
+        // `contentOffset` under a live gesture stops deceleration dead. The text still slides
+        // up as the emulator trims its scrollback, so the offset follows it by that many lines
+        // and the line being read stays under the finger.
+        if isTracking || isDragging || isDecelerating {
+            if trimmed > 0 {
+                setContentOffsetY (max (0, contentOffset.y - CGFloat (trimmed) * cellHeight))
+            }
+            return
+        }
+
+        // `yDisp` is the first visible row, and the emulator holds it above the live tail for
+        // as long as `terminal.userScrolling` is set. Following it here is what lets a scroll
+        // back survive output. Pinning to `lines.count - rows` instead — which is where the
+        // bottom is, unconditionally — is what made a streaming agent impossible to read back
+        // through on iOS: every line written yanked the viewport down again, faster than a
+        // finger can drag it up. The Mac side has had the `userScrolling` seam all along.
+        setContentOffsetY (CGFloat (terminal.buffer.yDisp) * cellHeight)
+    }
+
+    /// Moves the viewport and records that this view, rather than the person holding it, is
+    /// what moved it.
+    func setContentOffsetY (_ y: CGFloat)
+    {
+        appliedOffsetY = y
+        contentOffset = CGPoint (x: 0, y: y)
+    }
+
+    open override func layoutSubviews ()
+    {
+        super.layoutSubviews ()
+        trackScrollPosition ()
+    }
+
+    /// Mirrors an offset this view did not set back into the emulator. `yDisp` is what
+    /// selection, mouse reporting and the caret read as the first visible row, and
+    /// `terminal.userScrolling` is what keeps `Terminal.scroll` from resetting it to the live
+    /// tail on the very next write.
+    ///
+    /// UIScrollView calls `layoutSubviews` on every offset change, so this is the one place
+    /// that sees a drag, its momentum, and a host restoring a saved position alike. It is O(1)
+    /// on purpose: it runs once per scrolled frame.
+    func trackScrollPosition ()
+    {
+        guard terminal != nil else { return }
+        let cellHeight = cellDimension.height
+        guard cellHeight > 0 else { return }
+        guard abs (contentOffset.y - appliedOffsetY) > 0.5 else { return }
+        appliedOffsetY = contentOffset.y
+        guard !terminal.isCurrentBufferAlternate else { return }
+        let row = min (max (Int ((contentOffset.y / cellHeight).rounded ()), 0), terminal.buffer.yBase)
+        if row != terminal.buffer.yDisp {
+            terminal.buffer.yDisp = row
+        }
+        terminal.userScrolling = row < terminal.buffer.yBase
     }
     
     var userScrolling = false
@@ -1150,7 +1272,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     func ensureCaretIsVisible ()
     {
-        contentOffset = CGPoint (x: 0, y: CGFloat (terminal.buffer.lines.count-terminal.rows)*cellDimension.height)
+        // Typing rejoins the live tail. The emulator has to be told to stop holding `yDisp`
+        // above it as well, or the next line of output pulls the viewport straight back up to
+        // wherever the user had scrolled to.
+        terminal.userScrolling = false
+        terminal.buffer.yDisp = terminal.buffer.yBase
+        setContentOffsetY (CGFloat (terminal.buffer.lines.count-terminal.rows)*cellDimension.height)
     }
     
     public func deleteBackward() {

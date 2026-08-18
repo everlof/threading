@@ -236,6 +236,25 @@ Every applied grid is written to the event log as `Remote viewport applied` with
 number of clients holding a lease. Diagnosing the argument above meant reading it out of
 screenshots, because nothing recorded what the clients had asked for.
 
+**Scrolling a mirrored TUI needed both halves of what the Mac does, and the phone had neither.**
+An agent's terminal is scrolled two different ways depending on who owns the wheel. When the
+program tracks the mouse — Claude Code does — the wheel belongs to it and it moves its own
+transcript; otherwise the wheel moves the terminal's local scrollback. On iOS SwiftTerm draws the
+whole buffer inside a `UIScrollView`, and it pinned the offset to the bottom on every emulator
+scroll, so a session that was producing output could not be scrolled back at all: each line undid
+the drag. A drag over a mouse-tracking program was reported as a press and a drag, which is a
+selection gesture and moves nothing. Both are fixed in the fork — see
+[`dependencies.md`](architecture/dependencies.md) — and the touch mapping now reads: one finger
+scrolls the program when it is tracking the mouse and the mirror's own scrollback when it is not,
+two fingers always scroll the mirror.
+
+A joining client is seeded with a repaint of the *visible screen* (`RemoteScreenSeed`), which
+carries no DEC private modes, so a phone that connects to an already-running agent does not know
+the program is tracking the mouse until the program says so again. Until it does, one finger
+scrolls the phone's own mirror rather than the agent's transcript. Both scroll something, which is
+why this is a fidelity gap rather than a broken surface, and seeding the sticky modes beside the
+repaint is what closes it.
+
 **The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
 a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the
 session off its own frame and put the rest behind a scrollbar, and only resizing the *Mac* ever
@@ -477,6 +496,18 @@ through SwiftTerm's own documented assignment seam, once, because that is the on
 installed. The dismiss control that row carried moves onto the key bar, where it appears only
 while a keyboard is actually up: the terminal is a first responder rather than a focusable
 SwiftUI field, so there is no other way back from the keyboard.
+
+That control shipped doing nothing. It broadcast `resignFirstResponder` through
+`UIApplication.sendAction(_:to:from:for:)`, the idiom that dismisses a `UITextField`, and the
+broadcast does not reach this terminal — `TerminalKeyboardDismissalTests` measures exactly that
+and keeps it measured. `TerminalKeyBridge` already holds the live terminal for DECCKM, so it owns
+dismissal too: it resigns that view directly and lets the window answer for a composer that took
+the keyboard instead. Two smaller faults rode along. The bar's visibility came only from the
+keyboard notifications, which say what *changed*, so arriving at a session whose keyboard was
+already up produced no notification and no button — it now asks the bridge on appear. And both
+trailing controls are a bare `Image` in a reserved 44pt frame with no fill behind it, which
+answers taps on the glyph alone; the key caps are hit-testable across their whole cap only
+because each carries a background. `contentShape` makes the reserved area the real one.
 
 iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
 terminal drafts are written locally as they change, pending request ids survive a reconnect, and

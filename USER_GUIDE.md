@@ -2266,6 +2266,13 @@ are stored only on the device that authored them; an iPhone and an iPad keep sep
 bar is the only one over the keyboard: the terminal emulator's own fixed accessory row is
 removed, and the bar carries the control that puts the keyboard away.
 
+Scrolling a mirrored terminal follows what the program in it wants. Full-screen agent TUIs such as
+Claude Code track the mouse and scroll their own transcript, so **one finger** moves the agent's
+view the way a wheel does on the Mac. A program that is not tracking the mouse leaves the finger to
+the terminal's own scrollback instead. **Two fingers** always scroll the local scrollback, which is
+the phone's equivalent of holding Option while scrolling on the Mac. Output no longer pulls the
+view back to the bottom while you are reading above it; typing returns you to the live end.
+
 Focused control is enforced on the Mac, not merely by disabling a button. A watcher may edit a
 draft, select and scroll terminal output, and follow the session, but raw keys, paste/drop, mouse
 reporting, atomic terminal sends and Native prompt sends are refused. Only the controller's

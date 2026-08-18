@@ -1481,37 +1481,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         return event.deltaY > 0 ? velocity : -velocity
     }
 
-    /// Wheel reports a second the program on the other end keeps up with.
-    ///
-    /// Measured against a reader on a 40ms frame, writing SGR reports into a pty it was not
-    /// draining: at 100 a second every one of its `read`s still began on a report boundary even
-    /// after it stalled 800ms; at 180 a second an 800ms stall split one; at 300 a second 400ms
-    /// was enough. See `forwardWheelEvent` for what a split costs.
-    private static let wheelReportsPerSecond: Double = 100
-
-    /// The most reports one gesture may put out at once, so a deliberate notch still moves the
-    /// application's view immediately while a flick cannot open the tap.
-    private static let wheelReportBurst: Double = 6
-
-    /// Reports available to spend now.
-    private var wheelReportAllowance: Double = TerminalView.wheelReportBurst
-    private var wheelAllowanceStamp: DispatchTime = DispatchTime.now()
-
-    /// Takes up to `wanted` reports out of the budget, refilling it for the time elapsed since
-    /// the last one. Nothing banks past the burst, so a pause cannot buy a flood.
-    private func grantWheelReports(_ wanted: Int) -> Int {
-        let now = DispatchTime.now()
-        let elapsed = Double(now.uptimeNanoseconds &- wheelAllowanceStamp.uptimeNanoseconds) / 1_000_000_000
-        wheelAllowanceStamp = now
-
-        wheelReportAllowance = min(
-            TerminalView.wheelReportBurst,
-            wheelReportAllowance + elapsed * TerminalView.wheelReportsPerSecond
-        )
-        let granted = min(wanted, Int(wheelReportAllowance))
-        wheelReportAllowance -= Double(granted)
-        return granted
-    }
+    /// The measured rate wheel reports may be written at, shared with the iOS view so the two
+    /// cannot drift apart. See `WheelReportBudget` for what a split report costs.
+    private var wheelBudget = WheelReportBudget()
 
     /// The wheel's distance in lines *as reported to the application*.
     ///
@@ -1545,7 +1517,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// wants to be.
     private func forwardWheelEvent(_ event: NSEvent) {
         guard let lines = wheelReportLines(for: event) else { return }
-        let reports = grantWheelReports(min(abs(lines), Int(TerminalView.wheelReportBurst)))
+        let reports = wheelBudget.grant(min(abs(lines), Int(WheelReportBudget.burst)))
         guard reports > 0 else { return }
 
         let hit = calculateMouseHit(with: event)
