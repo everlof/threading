@@ -170,6 +170,4 @@ enum RemoteDEROID {
     static let aes256CBC: [UInt] = [2, 16, 840, 1, 101, 3, 4, 1, 42]
     /// `1.3.14.3.2.26` — SHA-1, which PKCS#12's MacData is defined in terms of.
     static let sha1: [UInt] = [1, 3, 14, 3, 2, 26]
-    /// `1.2.840.113549.1.9.20` — friendlyName.
-    static let friendlyName: [UInt] = [1, 2, 840, 113549, 1, 9, 20]
 }

@@ -21,9 +21,12 @@ struct RemoteAccessIdentitySnapshot: Equatable, Sendable {
     /// A successor that has been minted and not yet activated. This is what `/api/me` announces
     /// so a paired device can pin it before it goes live.
     let nextFingerprint: RemoteHostFingerprint?
-    /// Why there is no identity, when there is none. Never nil at the same time as `fingerprint`.
+    /// Why there is no identity, when one was asked for and there is none. A failure and a
+    /// fingerprint are never both present.
     let failure: RemoteIdentityFailure?
 
+    /// Nothing has asked for an identity yet, which is the shipped state: no routable door is
+    /// bound, so no certificate has been minted or read.
     static let unloaded = RemoteAccessIdentitySnapshot(
         fingerprint: nil,
         nextFingerprint: nil,
