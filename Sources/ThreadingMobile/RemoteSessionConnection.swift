@@ -74,6 +74,35 @@ private struct PendingAttentionRequest {
     let recipientID: String
 }
 
+/// Whether the agent is mid-turn, read from what one chat client can actually see.
+///
+/// The Mac never sends a status word over the wire, but it does send `canSend`, which each
+/// transport defines as `isRunning && input != nil && !isTurnInFlight && pendingPrompt == nil`
+/// and the server then narrows to this viewer's own capability. So on a connected session a
+/// client that *would* be allowed to type and is told it cannot is being told a turn is in
+/// flight — the mobile reading of the Mac's `isTurnInFlight`, which is what gates the orb there.
+///
+/// The two narrowings matter as much as the signal. A view-only viewer is sent `canSend: false`
+/// with no turn running at all, and a collaborator holding the input control makes it false for
+/// everyone else; neither is the agent working, so both answer `false` rather than spinning an
+/// orb about someone else's keyboard.
+enum MobileAgentTurnActivity {
+    static func isWorking(
+        isConnected: Bool,
+        capability: RemoteCapability,
+        canWrite: Bool,
+        canSend: Bool,
+        isPromptSubmissionPending: Bool
+    ) -> Bool {
+        guard isConnected, capability == .interact else { return false }
+        // A prompt still being acknowledged is the very start of a turn: the Mac has it and has
+        // not answered yet, so the composer is already closed on this side.
+        if isPromptSubmissionPending { return true }
+        guard canWrite else { return false }
+        return !canSend
+    }
+}
+
 @MainActor
 final class RemoteSessionConnection: ObservableObject {
     enum Phase: Equatable {
@@ -157,6 +186,18 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
     var onWorkspaceChanged: ((RemoteWorkspaceChangedDTO) -> Void)?
+
+    /// True while this session's agent is working on a turn — what the navigation title's orb
+    /// is drawn for. See `MobileAgentTurnActivity` for why `canSend` is the signal.
+    var isAgentWorking: Bool {
+        MobileAgentTurnActivity.isWorking(
+            isConnected: phase == .connected,
+            capability: capability,
+            canWrite: inputControl?.canWrite != false,
+            canSend: conversationCanSend,
+            isPromptSubmissionPending: isPromptSubmissionPending
+        )
+    }
 
     var shouldPresentInputControl: Bool {
         MobileCollaborationPresentation.showsInputControl(

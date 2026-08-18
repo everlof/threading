@@ -2215,6 +2215,15 @@ connection icon says which surface you will land in: a terminal for the agent's 
 bubble for a Native conversation. Rows are two lines tall, so a long chat title is shortened here
 and shown in full once the chat is open.
 
+Starting a chat from the phone opens it. The **+** button's sheet closes onto the new chat's own
+screen rather than back onto the list, and stays there while the Mac starts the agent — a new
+session shows "Resuming on your Mac…" for as long as that takes.
+
+While the agent is working on a turn, the dotted thinking orb takes the place of the connection dot
+under the chat's title, tinted with the app theme's accent, exactly as it appears beside the
+conversation status on the Mac. It picks one of its nine animations per turn, never the one the
+previous turn used, and gives the dot its place back when the turn is done.
+
 You can also pair one iPhone with several Macs. **Devices** shows the current Mac and compact
 switch targets for the others; choosing one swaps the session list without re-pairing. The app
 remembers the selected Mac and the last open session. Because continuity uses the paired host

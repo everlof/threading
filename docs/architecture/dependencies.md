@@ -193,13 +193,32 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     dropping the modifier. Fixing that one means touching that branch, not this switch.
 
 - **ThinkingOrbs** (local fork): the dotted "working" thought-orb drawn beside the
-  conversation status while a turn is in flight.
+  conversation status while a turn is in flight — on the Mac, and in the iPhone chat's
+  navigation title.
   - Location: `./Packages/Vendor/ThinkingOrbs/` (git submodule), referenced as a local Swift package through
-    `XCLocalSwiftPackageReference` and mirrored entries in `project.pbxproj`.
+    `XCLocalSwiftPackageReference` and mirrored entries in `project.pbxproj`. Both app targets
+    link it.
   - Upstream: https://github.com/everlof/thinking-orbs-swift — **our fork**, mod it directly.
-  - The app uses only the AppKit `ThinkingOrbView` (a plain `NSView` drawing through a
-    CoreGraphics engine, display link on 14+ / 60Hz timer on 13). SwiftUI ships in the package
-    but the app touches none of it, so the app itself stays AppKit-only.
+  - The app uses only the two native front ends: the AppKit `ThinkingOrbView` (a plain `NSView`
+    drawing through a CoreGraphics engine, display link on 14+ / 60Hz timer on 13) and the
+    UIKit one. SwiftUI ships in the package but neither app touches it, so each stays in its
+    own framework.
+  - **The UIKit front end is ours.** Upstream ships SwiftUI and AppKit; `ThinkingOrbUIView.swift`
+    adds the same class over the same engine for UIKit, behind
+    `#if canImport(UIKit) && !canImport(AppKit)`. Two things differ from a transliteration. It
+    flips the CTM before handing the context over, because the engine's geometry is written for
+    an unflipped `NSView` and a mode with an up/down reading — the globe's scan meridian, the
+    wave — would otherwise run mirrored against the same orb on the Mac. And where AppKit stops
+    the display link on window occlusion and enclosing clip views, UIKit stops it on
+    `didMoveToWindow`, hidden/transparent ancestors, a bounds/window intersection, and
+    background/foreground notifications (tracked from the notifications rather than read from
+    `UIApplication.shared`, which app extensions cannot touch).
+  - **`staticFrameTime` is ours too**, and it is not `paused`. Pausing freezes whichever frame
+    was current, which is a different picture on every launch; a screenshot fixture needs the
+    same one every run, so this pins the clock position and stops the link. Reduce Motion takes
+    the same path at 0.6. `MobileWorkingOrbView` sets it under
+    `THREADING_MOBILE_UI_EVIDENCE_ID`, and pins the variant there too — a per-turn random
+    animation is the other thing a baseline cannot survive.
   - The fork tracks upstream's nine tuned states at both 64pt and 20pt: working/orbits,
     searching/globe, solving/rubik, listening/wave, connecting/web, weaving/braid,
     composing/ribbon, breathing/ring, and shaping/morph. Threading exposes all nine as fixed
@@ -210,7 +229,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     instead of luminance (an ink mark's visibility is `1 - white` on either substrate), so a
     tinted orb reads identically in light and dark, only in the accent's hue. `WorkingOrbView`
     (in `UI/Design/`) is the theme boundary that drives it from `Design.Surface.accent`,
-    re-resolved on a live theme switch and an appearance change.
+    re-resolved on a live theme switch and an appearance change. `MobileWorkingOrbView` (in
+    `Sources/ThreadingMobile/`) is the phone's counterpart and the only place there that names a
+    ThinkingOrbs type; it takes the accent from the palette the Mac sent, and takes the orb's
+    light/dark substrate from that theme's mode rather than from iOS's appearance, since the two
+    can disagree.
 
 - **LabelMorph** (local fork): the single-line label that morphs a name character by
   character when it changes, used for every session, project and checkout name the app shows.

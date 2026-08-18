@@ -342,6 +342,42 @@ Use **Open in Browser** to test the browser client without leaving the Mac. The 
 can also be copied from the pairing sheet, but it is intentionally not presented as a general
 sharing action.
 
+## Starting a chat from the phone, and seeing it work
+
+**Start opens the chat it started.** The New Session sheet's Start used to create the session and
+then leave you on the dashboard, watching a row appear. The Mac answers the create with the new
+session's id *and* the whole refreshed catalogue, so the row the navigation stack resolves against
+is already published by the time the sheet closes; the push therefore needs nothing but the
+result Start already had. It waits for `onDismiss` rather than pushing from the submit, because a
+push ordered while the sheet is still on screen is dropped by the stack. Tapping a row and
+starting a chat now go through one function, so a new chat is opened with the transition its
+surface can survive — a terminal still commits its final geometry immediately rather than being
+resized through every intermediate width. The session's own screen owns the wait: a brand-new
+session is not yet running, so it shows "Resuming on your Mac…" until the agent answers.
+
+**The chat's title says when the agent is working.** The navigation title's status line carries
+the dotted thinking orb — the same mark, the same nine animations and the same accent tint as the
+Mac's conversation status — while a turn is in flight. One variant is chosen per turn and never
+repeats the previous turn's.
+
+It stands **in the connection dot's place**, not beside the title. Beside the title it took a
+column of its own and pushed the session name off the bar's centre every time a turn started, and
+it left two marks on one line saying two different things at once. In the dot's place it costs no
+width and the title never moves; the dot has nothing to add meanwhile, because the orb only ever
+appears on a connected session, which is what the green dot was there to say. It is drawn at the
+caption line's size rather than the preset's own 20pt, since a taller status line would push a
+two-line title past the 44pt bar.
+
+The phone is never told "working" in words: no status word crosses the wire. What does cross is
+`canSend`, which each transport defines as `isRunning && input != nil && !isTurnInFlight &&
+pendingPrompt == nil` and the Mac then narrows to the asking viewer's own capability. So a client
+that *would* be allowed to type and is told it cannot is being told a turn is in flight, and that
+is the reading `MobileAgentTurnActivity` encodes. Both narrowings matter as much as the signal: a
+view-only viewer is sent `canSend: false` with no turn running at all, and a collaborator holding
+Focused input control makes it false for everyone else. Neither is the agent working, so both
+answer no rather than spinning an orb about someone else's keyboard. Our own prompt still being
+acknowledged answers yes, because that turn has begun on this side before the Mac has said so.
+
 ## Sending a file from the phone
 
 The composer's paperclip attaches a photo or a document to the next prompt. It is the only route

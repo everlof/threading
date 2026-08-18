@@ -39,6 +39,7 @@
 		A20000010000000000000013 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		D3EE00010000000000000002 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = D3EE00010000000000000005 /* ThreadingPeerTransport */; };
 		A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
+		A20000010000000000000018 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
 		A20000010000000000000016 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015 /* AppIcon.icon */; };
 		B70000010000000000000002 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Fonts */; };
 		D2E00001000000000000000C /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
@@ -50,6 +51,9 @@
 		A61400010000000000000001 /* MobileCollaborationPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */; };
 		A61500010000000000000001 /* MobileSessionChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61500010000000000000002 /* MobileSessionChromeTests.swift */; };
 		A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */; };
+		A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62100010000000000000002 /* MobileWorkingOrbTests.swift */; };
+		A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */; };
+		A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62300010000000000000002 /* MobileAgentIdentityTests.swift */; };
 		A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61900010000000000000002 /* RemoteTerminalScrollTests.swift */; };
 		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
 		A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61700010000000000000002 /* RemoteConnectionFailureTests.swift */; };
@@ -151,6 +155,9 @@
 		A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileCollaborationPresentationTests.swift; sourceTree = "<group>"; };
 		A61500010000000000000002 /* MobileSessionChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionChromeTests.swift; sourceTree = "<group>"; };
 		A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardDismissalTests.swift; sourceTree = "<group>"; };
+		A62100010000000000000002 /* MobileWorkingOrbTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileWorkingOrbTests.swift; sourceTree = "<group>"; };
+		A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionNavigationTransitionTests.swift; sourceTree = "<group>"; };
+		A62300010000000000000002 /* MobileAgentIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAgentIdentityTests.swift; sourceTree = "<group>"; };
 		A61900010000000000000002 /* RemoteTerminalScrollTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalScrollTests.swift; sourceTree = "<group>"; };
 		A61600010000000000000002 /* MobileThemeChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeChromeTests.swift; sourceTree = "<group>"; };
 		A61700010000000000000002 /* RemoteConnectionFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteConnectionFailureTests.swift; sourceTree = "<group>"; };
@@ -184,6 +191,7 @@
 				ThreadingMobile/MobileSettingsChrome.swift,
 				ThreadingMobile/MobileThemeEnvironment.swift,
 				ThreadingMobile/MobileSettingsView.swift,
+				ThreadingMobile/MobileWorkingOrbView.swift,
 				ThreadingMobile/MobileWorkspaceActivity.swift,
 				ThreadingMobile/MobileSessionContinuityStore.swift,
 				ThreadingMobile/RemoteAppModel.swift,
@@ -315,6 +323,7 @@
 				A20000010000000000000013 /* ThreadingRemoteKit in Frameworks */,
 				D3EE00010000000000000002 /* ThreadingPeerTransport in Frameworks */,
 				A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */,
+				A20000010000000000000018 /* ThinkingOrbs in Frameworks */,
 				D1FF00010000000000000013 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000014 /* NativeDiffUIKit in Frameworks */,
 			);
@@ -449,6 +458,9 @@
 				A61700010000000000000002 /* RemoteConnectionFailureTests.swift */,
 				A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */,
 				A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */,
+				A62100010000000000000002 /* MobileWorkingOrbTests.swift */,
+				A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */,
+				A62300010000000000000002 /* MobileAgentIdentityTests.swift */,
 				A61900010000000000000002 /* RemoteTerminalScrollTests.swift */,
 			);
 			name = "Mobile Tests";
@@ -614,6 +626,7 @@
 				A20000010000000000000011 /* ThreadingRemoteKit */,
 				D3EE00010000000000000005 /* ThreadingPeerTransport */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
+				F4000001000000000000003 /* ThinkingOrbs */,
 				D1FF00010000000000000003 /* NativeDiffCore */,
 				D1FF00010000000000000004 /* NativeDiffUIKit */,
 			);
@@ -976,6 +989,9 @@
 				A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */,
 				A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */,
 				A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */,
+				A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */,
+				A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */,
+				A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */,
 				A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

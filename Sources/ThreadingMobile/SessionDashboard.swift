@@ -94,6 +94,10 @@ struct SessionDashboard: View {
     @State private var showsSnoozed = false
     @State private var showsNewSession = false
     @State private var newSessionProjectName: String?
+    /// The session Start just created, held until its sheet has finished dismissing. A push
+    /// ordered while the sheet is still on screen is dropped by the navigation stack, so the
+    /// new chat has to open from `onDismiss` rather than from the submit that made it.
+    @State private var sessionToOpenAfterStart: RemoteSessionSummaryDTO?
     @State private var showsMacPicker = false
     @State private var renamingSession: RemoteSessionSummaryDTO?
     @State private var renameText = ""
@@ -251,8 +255,11 @@ struct SessionDashboard: View {
 
     private var dashboardSheets: some View {
         dashboardNavigation
-        .sheet(isPresented: $showsNewSession) {
-            NewRemoteSessionView(initialProjectName: newSessionProjectName)
+        .sheet(isPresented: $showsNewSession, onDismiss: openSessionStartedFromTheSheet) {
+            NewRemoteSessionView(
+                initialProjectName: newSessionProjectName,
+                onStarted: { sessionToOpenAfterStart = $0 }
+            )
                 .environmentObject(model)
                 .mobileTheme(theme)
         }
@@ -540,6 +547,15 @@ struct SessionDashboard: View {
             }
             .accessibilityLabel("Remote access options")
         }
+    }
+
+    /// Opens the chat Start just created, once its sheet has gone. The Mac answers the create
+    /// with the whole catalogue, so the row the stack resolves the pushed id against is already
+    /// published by the time this runs; the session's own screen owns the wait for the agent.
+    private func openSessionStartedFromTheSheet() {
+        guard let session = sessionToOpenAfterStart else { return }
+        sessionToOpenAfterStart = nil
+        MobileSessionNavigationTransition.push(session, onto: model)
     }
 
     private func perform(
@@ -909,6 +925,24 @@ enum MobileSessionNavigationTransition: Equatable {
     static func forSurface(_ surface: RemoteSessionSurface) -> Self {
         surface == .terminal ? .immediate : .standard
     }
+
+    /// The one way a session's screen is opened. Tapping a row and starting a chat land here
+    /// alike, so a new session is pushed with the same transition its surface would have got
+    /// from the list. Pushing an id already on top is a no-op rather than a second copy.
+    @MainActor
+    static func push(_ session: RemoteSessionSummaryDTO, onto model: RemoteAppModel) {
+        guard model.navigationPath.last != session.id else { return }
+        switch forSurface(session.surface) {
+        case .standard:
+            model.navigationPath.append(session.id)
+        case .immediate:
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                model.navigationPath.append(session.id)
+            }
+        }
+    }
 }
 
 private struct SessionListItem: View {
@@ -946,16 +980,7 @@ private struct SessionListItem: View {
     }
 
     private func openSession() {
-        switch MobileSessionNavigationTransition.forSurface(session.surface) {
-        case .standard:
-            model.navigationPath.append(session.id)
-        case .immediate:
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                model.navigationPath.append(session.id)
-            }
-        }
+        MobileSessionNavigationTransition.push(session, onto: model)
     }
 
     @ViewBuilder
@@ -1329,6 +1354,8 @@ struct NewRemoteSessionView: View {
     @State private var launchIconAnimated = false
     @State private var promptSuggestion: String
     private let initialProjectName: String?
+    /// Handed the session Start created, for the presenter to open once this sheet is gone.
+    private let onStarted: (RemoteSessionSummaryDTO) -> Void
 
     private static let promptSuggestions = [
         MobileL10n.string("Hunt down the flaky test…"),
@@ -1338,8 +1365,12 @@ struct NewRemoteSessionView: View {
         MobileL10n.string("Find the bug hiding in plain sight…"),
     ]
 
-    init(initialProjectName: String? = nil) {
+    init(
+        initialProjectName: String? = nil,
+        onStarted: @escaping (RemoteSessionSummaryDTO) -> Void = { _ in }
+    ) {
         self.initialProjectName = initialProjectName
+        self.onStarted = onStarted
         let evidenceID = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
         let suggestion: String
         if let evidenceID {
@@ -1924,7 +1955,7 @@ struct NewRemoteSessionView: View {
         Task {
             defer { isSubmitting = false }
             do {
-                _ = try await appModel.createSession(
+                let session = try await appModel.createSession(
                     projectID: projectID,
                     agentKind: agentID,
                     accountHandle: accountID.isEmpty ? nil : accountID,
@@ -1935,6 +1966,9 @@ struct NewRemoteSessionView: View {
                     surface: surface,
                     prompt: prompt
                 )
+                // Starting a chat is a request to be in it. The push waits for the sheet to
+                // finish dismissing; see the presenter's `onDismiss`.
+                onStarted(session)
                 dismiss()
             } catch is CancellationError {
                 return
