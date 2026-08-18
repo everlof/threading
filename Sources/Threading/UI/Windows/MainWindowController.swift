@@ -522,7 +522,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 #if DEBUG
         if let scenarioSize = MainWindowUIScenarioSize.requested() {
             window.setContentSize(scenarioSize)
-            window.center()
+            if let primaryScreen = NSScreen.screens.first {
+                let bounds = primaryScreen.visibleFrame
+                window.setFrameOrigin(NSPoint(
+                    x: bounds.midX - window.frame.width / 2,
+                    y: bounds.midY - window.frame.height / 2
+                ))
+            } else {
+                window.center()
+            }
             return
         }
 #endif
