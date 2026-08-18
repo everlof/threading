@@ -104,6 +104,10 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var supportsAtomicTerminalSubmission = false
     @Published private(set) var supportsAttentionRequests = false
     @Published private(set) var supportsFocusedInputControl = false
+    /// Whether this connection may hand the Mac files to send with a prompt. False for a
+    /// view-only or guest link, which the host never advertises the feature to — so the composer
+    /// draws no attach button rather than one that would be refused.
+    @Published private(set) var supportsComposerAttachmentUploads = false
     @Published private(set) var inputControl: RemoteInputControlStateDTO?
     @Published private(set) var inputControlEvents: [RemoteInputControlEventDTO] = []
     @Published private(set) var inputControlResult: RemoteInputControlResultDTO?
@@ -198,6 +202,7 @@ final class RemoteSessionConnection: ObservableObject {
         phase = .connecting
         composerCapabilities = []
         serverFeatures.removeAll()
+        supportsComposerAttachmentUploads = false
         supportsAtomicTerminalSubmission = false
         supportsAttentionRequests = false
         supportsFocusedInputControl = false
@@ -348,7 +353,8 @@ final class RemoteSessionConnection: ObservableObject {
     @discardableResult
     func submit(
         _ text: String,
-        contextAttachments: [RemoteConversationContextAttachmentDTO] = []
+        contextAttachments: [RemoteConversationContextAttachmentDTO] = [],
+        attachmentUploadIDs: [String] = []
     ) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard phase == .connected, capability == .interact,
@@ -356,11 +362,13 @@ final class RemoteSessionConnection: ObservableObject {
               contextAttachments.isEmpty || serverFeatures.contains(
                   RemoteWebSocketFeature.conversationContextAttachments.rawValue
               ),
+              attachmentUploadIDs.isEmpty || supportsComposerAttachmentUploads,
               conversationStore.state.canSend else { return nil }
         return sendSubmission(
             type: "submit",
             text: trimmed,
             contextAttachments: contextAttachments,
+            attachmentUploadIDs: attachmentUploadIDs,
             permitsLegacyHost: true
         )
     }
@@ -397,11 +405,13 @@ final class RemoteSessionConnection: ObservableObject {
         type: String,
         text: String,
         contextAttachments: [RemoteConversationContextAttachmentDTO] = [],
+        attachmentUploadIDs: [String] = [],
         permitsLegacyHost: Bool
     ) -> String? {
         guard phase == .connected, capability == .interact,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !contextAttachments.isEmpty,
+                || !contextAttachments.isEmpty
+                || !attachmentUploadIDs.isEmpty,
               pendingPromptSubmission == nil else { return nil }
         let requestID = UUID().uuidString
         let supportsAcknowledgement = serverFeatures.contains(
@@ -421,7 +431,8 @@ final class RemoteSessionConnection: ObservableObject {
                 type: type,
                 text: text,
                 requestID: supportsAcknowledgement ? requestID : nil,
-                contextAttachments: contextAttachments.isEmpty ? nil : contextAttachments
+                contextAttachments: contextAttachments.isEmpty ? nil : contextAttachments,
+                attachmentUploadIDs: attachmentUploadIDs.isEmpty ? nil : attachmentUploadIDs
             ))
             if !supportsAcknowledgement {
                 pendingPromptSubmission = nil
@@ -695,6 +706,9 @@ final class RemoteSessionConnection: ObservableObject {
             )
             supportsFocusedInputControl = serverFeatures.contains(
                 RemoteWebSocketFeature.focusedInputControl.rawValue
+            )
+            supportsComposerAttachmentUploads = serverFeatures.contains(
+                RemoteWebSocketFeature.composerAttachmentUploads.rawValue
             )
             updateTerminalGrid(cols: hello.cols, rows: hello.rows)
             cancelHelloDeadline()

@@ -342,6 +342,49 @@ Use **Open in Browser** to test the browser client without leaving the Mac. The 
 can also be copied from the pairing sheet, but it is intentionally not presented as a general
 sharing action.
 
+## Sending a file from the phone
+
+The composer's paperclip attaches a photo or a document to the next prompt. It is the only route
+by which a remote client can cause the Mac to keep a file, so it is worth saying exactly what it
+does and where it stops.
+
+**The bytes go over first, and the prompt names them afterwards.** `POST …/attachment-upload`
+carries one chunk of base64 inside the same JSON envelope every other mutation uses; chunk 0
+mints a host-side upload id and later chunks carry it. The transfer is chunk-shaped even though a
+phone normally re-encodes an image small enough for one request — a single-shot upload is chunk 0
+of 1 — so full-fidelity transfer stays an additive client change rather than a second route. The
+prompt then carries upload **ids**, never paths: a client never learns where a file landed, so it
+cannot name one it did not send or one belonging to another session.
+
+**Nothing is attached until a prompt claims it.** A completed upload waits in a staging directory
+under the app's own temporary directory. Claiming happens on the server queue before the main
+actor is touched, so two submissions racing for the same upload cannot both name it. An abandoned
+transfer — a draft never sent, an app killed mid-upload — is reaped after thirty minutes with its
+bytes, and staging is emptied outright when Remote Access stops. That is the property that keeps
+an interrupted attach from leaving a half-sent picture in somebody's conversation.
+
+**What the host will take:**
+
+| Bound | Value | Why |
+|---|---|---|
+| Scope | paired owner device, `allSessions`, `interact` | The feature is not advertised to a view-only or guest connection, so its composer draws no paperclip rather than one it would be refused for. |
+| Per file | 24 MB | The ceiling the download side already applies. Declared up front, so an oversized transfer is refused on its first chunk. |
+| Per message | 8 files | Also the bound on the phone's strip; `RemoteAttachmentUploadLimits` is shared so the two cannot drift. |
+| In flight | 24 uploads | Beginning one past the cap is refused rather than evicting somebody else's staged file. |
+| Type | whatever the attachments pane can show | The extension is re-derived from the declared uniform type and the assembled bytes are put through `AttachmentReferenceDetector.kind(for:)` — the same question the scanner asks. A `.command` renamed `photo.png` lands nowhere. |
+
+Every refusal answers `400` with no detail. Saying which bound was hit would let something that
+has not proved it owns any staged state enumerate the host's: whether an id exists, whose device
+it belongs to, how far a transfer got.
+
+**A claimed upload becomes an ordinary user attachment.** The host hands it to
+`SessionAttachmentStore` through the declared door with `origin: .user` and appends its quoted
+path to the prompt — the identical contract `PromptView.submittableText` uses on the Mac, shared
+through `ComposerAttachmentHandover`. So a picture sent from a phone reaches the agent as the same
+prompt it would have from the Mac, and appears in the Attachments tab beside what the agent makes
+of it. If custody cannot be taken for every file, the submission is rejected rather than sent
+without them: someone who attached a picture and pressed send meant to send the picture.
+
 ## Diagnostics sharing
 
 iOS and the browser keep a small seven-day journal of typed connection events on that client.
@@ -657,7 +700,10 @@ feature lock.
   create, rename, pin, archive or restore sessions, or select the shared app appearance and a
   session's visual terminal theme. Workspace browser metadata and bounded visible-tab snapshots,
   plus checkout reads including Git Review, repository files, and detected image/PDF/HTML/archive/document/diagram attachments,
-  also require that owner scope. View-only and guest links cannot change host state, read checkout
+  also require that owner scope. Handing the Mac a file to send with a prompt requires it too, and
+  is the only write into the host filesystem a remote client has; see
+  [Sending a file from the phone](#sending-a-file-from-the-phone) for its bounds. View-only and
+  guest links cannot change host state, read checkout
   files, or receive browser pixels. Permanent deletion remains a Mac-only action.
   Archiving a live session immediately disconnects any remote viewer already attached to it.
 - Authentication failures are rate-limited globally and per device, and slow WebSocket consumers
@@ -713,8 +759,11 @@ background and does not activate or bring Threading's Mac window to the front.
 Remote session creation intentionally exposes only checkouts the Mac already knows. Git Review,
 the read-only repository browser, detected image/PDF previews, and browser follow snapshots have
 separate owner-only and size boundaries; file surfaces additionally enforce path containment.
-Phone-to-Mac attachment uploads, arbitrary filesystem access, browser control from the phone, and
-private browser pixels are not exposed.
+Arbitrary filesystem access, browser control from the phone, and private browser pixels are not
+exposed. Composer attachment uploads are — narrowly, and only as described under
+[Sending a file from the phone](#sending-a-file-from-the-phone); the phone can put a file in the
+attachment store of one session it may already write to, and can do nothing else with the
+filesystem.
 
 If `cloudflared` is not installed, local browser mirroring still works. Install it with:
 

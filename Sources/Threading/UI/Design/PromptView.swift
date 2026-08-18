@@ -2065,16 +2065,8 @@ enum PromptAttachment {
         return [path]
     }
 
-    /// Files the user handed to a session, filed so they sit beside what the agent made of them.
-    ///
-    /// The one rename: a pasted screenshot is written under a generated name, which is right for
-    /// a file that only has to outlive the turn and unreadable as a row someone is scanning. A
-    /// dropped file keeps the name it already had.
-    ///
-    /// The rows are handed back for the caller that has something to do with the file *as an
-    /// attachment* the moment it is one — the attachments pane, where a picture dropped onto a
-    /// row is filed and then compared against that row. Discardable, because every other caller
-    /// is simply filing what the user sent.
+    /// Custody and spelling live in `ComposerAttachmentHandover`, which the paired phone's
+    /// composer also submits through. What stays here is the half that needs a pasteboard.
     @MainActor
     @discardableResult
     static func record(
@@ -2082,51 +2074,28 @@ enum PromptAttachment {
         sessionID: SessionID,
         projectRoot: URL
     ) -> [SessionAttachment] {
-        paths.compactMap { path in
-            let url = URL(fileURLWithPath: path)
-            let isGenerated = url.lastPathComponent.hasPrefix(PromptViewDefaults.attachmentPrefix)
-            return SessionAttachmentStore.shared.record(
-                declared: url,
-                sessionID: sessionID,
-                projectRoot: projectRoot,
-                origin: .user,
-                preferredName: isGenerated ? L10n.string("Pasted image") : nil
-            )
-        }
+        ComposerAttachmentHandover.record(
+            paths: paths,
+            sessionID: sessionID,
+            projectRoot: projectRoot
+        )
     }
 
-    /// Files pictures with the session about to be handed them, and answers the paths to name.
-    ///
-    /// The answer is the session's **own** copies, not the caller's: a scheduled send hands over
-    /// files from a directory it is about to delete, and a path in a prompt that names one of
-    /// those is a picture the agent opens after it has gone. Falls back to what it was given if
-    /// custody could not be taken, because a path that might still work beats no picture at all.
     @MainActor
     static func handOver(paths: [String], sessionID: SessionID, projectRoot: URL) -> [String] {
-        guard !paths.isEmpty else { return [] }
-        let recorded = record(paths: paths, sessionID: sessionID, projectRoot: projectRoot)
-        return recorded.isEmpty ? paths : recorded.map(\.url.path)
+        ComposerAttachmentHandover.handOver(
+            paths: paths,
+            sessionID: sessionID,
+            projectRoot: projectRoot
+        )
     }
 
-    /// The words followed by quoted paths — the only form of an image either CLI can open.
-    ///
-    /// Shared with the scheduled send that finally hands its pictures over: the composer builds
-    /// this at submission time from the box's own attachments, and a message scheduled on Friday
-    /// builds it on Monday from the copies the app took. One spelling, so a path with a space in
-    /// it is quoted the same way in both.
     static func appending(paths: [String], to text: String) -> String {
-        guard !paths.isEmpty else { return text }
-
-        let addition = paths.map(quotedPath).joined(separator: " ")
-        guard !text.isEmpty else { return addition }
-        guard !text.hasSuffix(" "), !text.hasSuffix("\n") else {
-            return text + addition
-        }
-        return text + " " + addition
+        ComposerAttachmentHandover.appending(paths: paths, to: text)
     }
 
     static func quotedPath(_ path: String) -> String {
-        path.contains(" ") ? "\"\(path)\"" : path
+        ComposerAttachmentHandover.quotedPath(path)
     }
 
     /// Whether `paths` would find anything, without doing the work.
@@ -2312,6 +2281,9 @@ enum PromptViewDefaults {
     static let upArrowKeyCode: UInt16 = 126
     static let downArrowKeyCode: UInt16 = 125
 
-    static let attachmentPrefix = "threading-attachment-"
-    static let attachmentExtension = "png"
+    /// Shared with every other composer through `ComposerAttachmentDefaults` — the phone's
+    /// uploads are written under the same prefix, so one rule decides what counts as a file the
+    /// app generated rather than one the person already had a name for.
+    static let attachmentPrefix = ComposerAttachmentDefaults.generatedPrefix
+    static let attachmentExtension = ComposerAttachmentDefaults.generatedImageExtension
 }

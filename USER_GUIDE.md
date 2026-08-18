@@ -2148,6 +2148,20 @@ metadata only; the Mac resolves and executes the selected action against the sti
 session. An unknown leading Claude slash command remains at the start of the provider message —
 shared-chat attribution never moves it out of command position.
 
+**Attaching a photo or file from the phone.** The paperclip beside the plus attaches from your
+photo library or Files — up to eight per message, images, PDFs, HTML, archives and the common
+document formats. Each one starts travelling to your Mac the moment you pick it, so the wait
+usually happens while you are still typing; a thumbnail strip above the box shows what is
+attached, with a progress hairline under each and a tap target to remove one. Send stays held
+until every attachment has arrived. Large photos are re-encoded smaller before sending, since an
+agent reading a screenshot or a photo of a screen gains nothing from a 12-megapixel original.
+A picture on its own is a valid message — you do not have to type anything with it.
+
+Attachments arrive on the Mac exactly as they would if you had dropped them on its own composer:
+the agent gets the file's path in the prompt, and the file appears in the session's **Attachments**
+tab marked as coming from you. The paperclip appears only on your own paired iPhone; a view-only
+or shared-chat link cannot send files.
+
 ### What is missing
 
 It is early. Compared to the terminal you still lose plan-mode controls, interrupting a turn

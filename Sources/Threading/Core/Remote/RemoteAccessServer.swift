@@ -189,6 +189,9 @@ final class RemoteAccessServer: @unchecked Sendable {
     private var connectionsByID: [ObjectIdentifier: RemoteConnection] = [:]
     private var authLimiter = RemoteAuthRateLimiter()
     private var mutationReplayCache: [MutationReplayKey: MutationReplayEntry] = [:]
+    /// Files a composer handed over but has not yet named in a prompt. Queue-confined, like the
+    /// replay cache above it, and swept on the same request that sweeps that.
+    private var attachmentUploads = RemoteAttachmentUploadStore()
 
     private struct MutationReplayKey: Hashable {
         let requestID: String
@@ -256,6 +259,7 @@ final class RemoteAccessServer: @unchecked Sendable {
             for connection in connections { connection.cancel() }
             authLimiter = RemoteAuthRateLimiter()
             mutationReplayCache.removeAll()
+            attachmentUploads.discardAll()
         }
         listeners.stop()
     }
@@ -319,6 +323,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         mutationReplayCache = mutationReplayCache.filter {
             now.timeIntervalSince($0.value.createdAt) < RemoteAccessDefaults.mutationReplayLifetime
         }
+        attachmentUploads.reap(now: now)
         let key = MutationReplayKey(
             requestID: requestID,
             bearerDigest: Data(SHA256.hash(data: Data(bearer.utf8))),
@@ -464,6 +469,15 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 identity: identity,
                 respond: respond
             )
+            return
+        }
+
+        // The one route a paired client may write a file through. Owner scope and interact
+        // capability are both required, and the staged bytes are refused unless the host would
+        // preview the assembled file — see `RemoteAttachmentUploadStore`.
+        if request.method == "POST",
+           let sessionID = RemoteRouter.attachmentUploadSessionID(forPath: path) {
+            handleAttachmentUpload(request, sessionID: sessionID, respond: respond)
             return
         }
 
@@ -616,6 +630,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection,
                 text: parsed.text,
                 contextAttachments: parsed.contextAttachments,
+                attachmentUploadIDs: parsed.attachmentUploadIDs,
                 requestID: parsed.requestID
             )
         case "terminalSubmit":
@@ -1701,6 +1716,54 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
+    /// Takes one chunk of a file a composing client wants to send with its next prompt.
+    ///
+    /// Every refusal answers 400 with no detail. The alternative — saying which bound was hit —
+    /// would let something that has not proved it owns any staged state enumerate the host's:
+    /// whether an id exists, whose device it belongs to, how far a transfer got.
+    ///
+    /// The bytes are staged, not attached. Nothing reaches the session, the attachments pane or
+    /// the agent until a prompt names this upload's id, which is what keeps an interrupted
+    /// attach from leaving a half-sent picture in somebody's conversation.
+    private func handleAttachmentUpload(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.principal == .ownerDevice,
+              authorization.scope == .allSessions,
+              authorization.capability == .interact else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let sessionID = SessionID(uuidString: rawSessionID),
+              authorization.scope.covers(sessionID) else {
+            respond(.respond(RemoteRouter.error(404, "Not Found")))
+            return
+        }
+        guard let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+            request.header(RemoteRouter.deviceHeader)
+        ), let upload = try? JSONDecoder().decode(
+            RemoteAttachmentUploadRequestDTO.self,
+            from: request.body
+        ) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        guard let result = attachmentUploads.accept(
+            upload,
+            sessionID: sessionID.uuidString,
+            deviceID: deviceID
+        ) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        respond(.respond(RemoteRouter.json(result)))
+    }
+
     private func handleAttachments(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
@@ -2406,6 +2469,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         _ connection: RemoteConnection,
         text: String?,
         contextAttachments: [RemoteConversationContextAttachmentDTO]?,
+        attachmentUploadIDs: [String]?,
         requestID rawRequestID: String?
     ) {
         guard let authorization = connection.authorization, authorization.capability == .interact else {
@@ -2429,24 +2493,76 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         let device = connection.deviceID
+
+        // Claimed here, on the queue that owns staging, and never on the main actor: the hop
+        // below is asynchronous, and two submits racing for the same upload would otherwise
+        // both find it present and both name a file only one of them still owns.
+        //
+        // A refusal ends the submission rather than sending the words alone. Somebody who
+        // attached a picture and pressed send meant to send the picture; a prompt that silently
+        // lost it and went anyway cannot be taken back.
+        var stagedPaths: [String] = []
+        if let attachmentUploadIDs, !attachmentUploadIDs.isEmpty {
+            guard let deviceID = device, authorization.principal == .ownerDevice,
+                  authorization.scope == .allSessions,
+                  attachmentUploadIDs.count
+                      <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
+                  let claimed = attachmentUploads.claim(
+                      ids: attachmentUploadIDs,
+                      sessionID: sessionID.uuidString,
+                      deviceID: deviceID
+                  ) else {
+                connection.sendText(encode(RemoteErrorDTO(code: "unknownAttachmentUpload")))
+                if let requestID {
+                    connection.sendText(encode(RemotePromptSubmissionResultDTO(
+                        requestID: requestID,
+                        status: .rejected
+                    )))
+                }
+                return
+            }
+            stagedPaths = claimed.map(\.path)
+        }
+
+        let claimedIDs = stagedPaths.isEmpty ? [] : (attachmentUploadIDs ?? [])
         DispatchQueue.main.async {
             guard self.authorizer?.isCurrent(authorization) == true else {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                self.resolveClaim(claimedIDs, accepted: false)
                 return
             }
             let status = self.services.mirrors.submitPrompt(
                 text,
                 contextAttachments: contextAttachments,
+                attachmentPaths: stagedPaths,
                 to: sessionID,
                 device: device,
                 authorization: authorization,
                 requestID: requestID
             )
+            // The outcome decides what happens to the loan. Accepted means custody was taken and
+            // the staged duplicate can go; anything else gives the files back, so the draft the
+            // composer is still showing can be sent again without re-uploading a thing.
+            self.resolveClaim(claimedIDs, accepted: status == .accepted)
             guard let requestID else { return }
             connection.sendText(self.encode(RemotePromptSubmissionResultDTO(
                 requestID: requestID,
                 status: status
             )))
+        }
+    }
+
+    /// Answers a `claim` from whichever thread the submission finished on, back on the queue that
+    /// owns staging.
+    private func resolveClaim(_ ids: [String], accepted: Bool) {
+        guard !ids.isEmpty else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            if accepted {
+                attachmentUploads.discardClaimed(ids: ids)
+            } else {
+                attachmentUploads.release(ids: ids)
+            }
         }
     }
 

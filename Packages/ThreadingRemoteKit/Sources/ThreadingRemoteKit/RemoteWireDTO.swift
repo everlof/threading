@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// The Codable wire types exchanged with a remote client. Shared between the macOS server and
@@ -1631,6 +1632,126 @@ public struct RemoteAttachmentsDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// One chunk of a file a composing client is handing to the host.
+///
+/// The transfer is chunk-shaped from its first version even though a phone normally re-encodes
+/// an image small enough to send in one request. A single-shot upload is simply chunk 0 of 1, so
+/// full-fidelity transfer later is additive on the client — more chunks — rather than a second
+/// route and a changed contract. The bytes are base64 inside the same JSON body every other
+/// mutation here uses; at these sizes one decoding path is worth more than the 33% it costs.
+public struct RemoteAttachmentUploadRequestDTO: Codable, Equatable, Sendable {
+    /// The host-minted id returned by chunk 0, and nil on chunk 0 itself.
+    ///
+    /// The client does not choose it. An id it minted would be a name for a slot on the Mac
+    /// supplied by the network, which is the shape that lets one connection append to another's
+    /// staged file or claim an upload it never made.
+    public let uploadID: String?
+    /// The file as the person sees it named. Presentation only: the host re-derives the
+    /// extension it trusts from `mediaType` and never resolves this against a directory.
+    public let name: String
+    /// The uniform type identifier the client believes it is sending.
+    public let mediaType: String
+    /// The complete file's size, declared up front so the host can refuse an oversized transfer
+    /// on its first chunk instead of after storing most of it.
+    public let totalBytes: Int
+    public let chunkIndex: Int
+    public let chunkCount: Int
+    /// This chunk's bytes, base64-encoded.
+    public let chunk: String
+
+    public init(
+        uploadID: String? = nil,
+        name: String,
+        mediaType: String,
+        totalBytes: Int,
+        chunkIndex: Int,
+        chunkCount: Int,
+        chunk: String
+    ) {
+        self.uploadID = uploadID
+        self.name = name
+        self.mediaType = mediaType
+        self.totalBytes = totalBytes
+        self.chunkIndex = chunkIndex
+        self.chunkCount = chunkCount
+        self.chunk = chunk
+    }
+}
+
+/// Bounds on composer uploads that both sides have to agree about.
+///
+/// The host enforces every one of these; the client reads them so it can refuse a file *before*
+/// spending a transfer on it and say why, rather than watching a 400 come back. Neither number
+/// may drift: `RemoteAttachmentUploadLimitsTests` asserts each against the host-side policy that
+/// actually does the refusing.
+public enum RemoteAttachmentUploadLimits {
+    /// The largest single file, matching the ceiling the download side already applies.
+    public static let maximumBytesPerFile = 24 * 1024 * 1024
+
+    /// How many staged files one message may carry, and so how many the strip holds.
+    public static let maximumPerMessage = 8
+
+    /// The file extensions a composing client should offer to pick from.
+    ///
+    /// These mirror the host's own built-in attachment kinds, so the picker greys out a file the
+    /// upload would refuse rather than letting somebody choose it, wait for a transfer, and then
+    /// be told no. It is deliberately the *static* set: the host also admits extensions an
+    /// installed extension registered and ambiguous ones it probes by content, and neither is
+    /// knowable from a phone. Offering less than the host accepts is safe; offering more is the
+    /// bug this list exists to prevent, and `RemoteAttachmentUploadLimitsTests` proves every
+    /// entry is one the host would keep.
+    public static let offeredFileExtensions: [String] = [
+        // Images
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp",
+        // Documents the pane previews natively
+        "pdf", "html", "htm",
+        // Archives
+        "zip", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "7z", "rar",
+        // Open document formats
+        "odt", "ods", "odp", "docx", "xlsx", "pptx", "rtf",
+        // Diagram sources
+        "dot", "gv", "mmd", "mermaid",
+    ]
+}
+
+/// What a composing client sends, and how much of a file it puts in one request.
+public enum RemoteAttachmentUploadClientDefaults {
+    /// Raw bytes per chunk.
+    ///
+    /// Sized against the host's 1 MB whole-request ceiling with base64's 4/3 inflation and the
+    /// JSON envelope both accounted for: 512 KB of file becomes about 683 KB of payload, which
+    /// leaves the rest of the budget for the name, the type and the framing. The host does not
+    /// read this value — it enforces its own request bound — so the two are kept honest by a
+    /// test rather than by a shared constant neither side could own.
+    public static let chunkBytes = 512 * 1024
+
+    /// The longest edge a photo is re-encoded to before sending, unless full fidelity is asked
+    /// for. A modern phone photo is several times this in each direction and many megabytes on
+    /// disk; an agent reading a screenshot or a photo of a whiteboard needs neither.
+    public static let downscaledMaximumDimension: CGFloat = 2048
+
+    /// JPEG quality for that re-encode. High enough that text in a photographed screen stays
+    /// readable, which is the case that actually matters here.
+    public static let downscaledCompressionQuality: CGFloat = 0.8
+}
+
+/// What the host has of one upload so far.
+///
+/// `receivedBytes` lets a client that lost a response resume without guessing: re-sending the
+/// chunk the host already has returns this unchanged rather than appending it twice.
+public struct RemoteAttachmentUploadResponseDTO: Codable, Equatable, Sendable {
+    public let uploadID: String
+    public let receivedBytes: Int
+    /// Whether every declared chunk has arrived. Only a complete upload may be named by a prompt.
+    public let isComplete: Bool
+
+    public init(uploadID: String, receivedBytes: Int, isComplete: Bool) {
+        self.uploadID = uploadID
+        self.receivedBytes = receivedBytes
+        self.isComplete = isComplete
+    }
+}
+
 /// One Mac-owned browser tab exposed to an owner device's read-only Workspace.
 ///
 /// The phone deliberately receives display state rather than a URL it should load itself:
@@ -1754,6 +1875,12 @@ public enum RemoteWebSocketFeature: String, Codable, CaseIterable, Sendable {
     case focusedInputControl
     /// Native conversation rows and prompt submissions carry structured references/comments.
     case conversationContextAttachments
+    /// A composing client may hand the host file bytes and submit them beside its prompt.
+    ///
+    /// Advertised only when the connection could actually use it. Uploading is an owner-scope
+    /// write into the host's own attachment custody, so a view-only or guest connection never
+    /// sees the feature and never renders an attach affordance it would be refused for.
+    case composerAttachmentUploads
 }
 
 /// A live theme change while a session is already open.
@@ -2711,6 +2838,12 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
     public let requestID: String?
     /// Structured references/comments submitted by a capable conversation client.
     public let contextAttachments: [RemoteConversationContextAttachmentDTO]?
+    /// Completed uploads to hand over with this prompt, in the order the person attached them.
+    ///
+    /// Ids, never paths: the bytes already crossed over a separate authenticated route and the
+    /// host resolves each id inside the routed session. A client never learns where the file
+    /// landed, so it cannot name one it did not upload or one belonging to another session.
+    public let attachmentUploadIDs: [String]?
 
     public init(
         type: String,
@@ -2730,7 +2863,8 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         limit: Int? = nil,
         recipientID: String? = nil,
         requestID: String? = nil,
-        contextAttachments: [RemoteConversationContextAttachmentDTO]? = nil
+        contextAttachments: [RemoteConversationContextAttachmentDTO]? = nil,
+        attachmentUploadIDs: [String]? = nil
     ) {
         self.type = type
         self.token = token
@@ -2750,5 +2884,6 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         self.recipientID = recipientID
         self.requestID = requestID
         self.contextAttachments = contextAttachments
+        self.attachmentUploadIDs = attachmentUploadIDs
     }
 }

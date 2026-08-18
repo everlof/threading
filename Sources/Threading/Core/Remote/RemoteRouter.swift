@@ -176,6 +176,10 @@ struct RemoteRouter {
         sessionID(forPath: path, action: "attachment")
     }
 
+    static func attachmentUploadSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: "attachment-upload")
+    }
+
     static func workspaceSessionID(forPath path: String) -> String? {
         sessionID(forPath: path, action: "workspace")
     }

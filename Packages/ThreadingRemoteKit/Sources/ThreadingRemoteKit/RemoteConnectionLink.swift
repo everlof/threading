@@ -257,6 +257,11 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         return components?.url
     }
 
+    /// Where a composing client hands over file bytes before naming them in a prompt.
+    public func attachmentUploadURL(sessionID: String) -> URL {
+        sessionActionURL(sessionID: sessionID, action: "attachment-upload")
+    }
+
     public func workspaceURL(sessionID: String) -> URL {
         sessionActionURL(sessionID: sessionID, action: "workspace")
     }

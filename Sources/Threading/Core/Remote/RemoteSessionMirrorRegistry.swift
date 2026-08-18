@@ -447,6 +447,26 @@ final class RemoteSessionMirrorRegistry {
         return count
     }
 
+    /// The features this connection is told about, which is not always every feature there is.
+    ///
+    /// Composer uploads are the first one that has to be filtered. Handing bytes over is an
+    /// owner-scope write into the Mac's own attachment custody, and a client that renders an
+    /// attach button from an advertised feature it would then be refused for has been told a
+    /// lie by the host. A view-only or guest connection simply never sees it, so its composer
+    /// draws nothing to press.
+    static func advertisedFeatures(for authorization: RemoteAuthorization?) -> [String] {
+        RemoteWebSocketFeature.allCases.filter { feature in
+            switch feature {
+            case .composerAttachmentUploads:
+                return authorization?.principal == .ownerDevice
+                    && authorization?.scope == .allSessions
+                    && authorization?.capability == .interact
+            default:
+                return true
+            }
+        }.map(\.rawValue)
+    }
+
     private func attachTerminal(
         _ connection: RemoteConnection,
         sessionID: SessionID,
@@ -466,7 +486,7 @@ final class RemoteSessionMirrorRegistry {
             title: snapshot.title,
             theme: RemoteThemeBridge.appTheme(),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
-            features: RemoteWebSocketFeature.allCases.map(\.rawValue)
+            features: Self.advertisedFeatures(for: connection.authorization)
         )
         connection.sendText(encode(hello))
         sendLatestWorkspaceActivity(to: connection, sessionID: sessionID)
@@ -523,7 +543,7 @@ final class RemoteSessionMirrorRegistry {
             title: ProjectStore.shared.session(withID: sessionID)?.displayTitle ?? "",
             theme: RemoteThemeBridge.appTheme(),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
-            features: RemoteWebSocketFeature.allCases.map(\.rawValue)
+            features: Self.advertisedFeatures(for: authorization)
         )))
         sendLatestWorkspaceActivity(to: connection, sessionID: sessionID)
         let revision = mirrors[sessionID]?.conversationRevision ?? 0
@@ -739,9 +759,13 @@ final class RemoteSessionMirrorRegistry {
         releaseViewport(for: connection, sessionID: sessionID)
     }
 
+    /// - Parameter attachmentPaths: staged uploads the server already claimed for this exact
+    ///   session and device. They are paths into the host's own staging directory, never
+    ///   anything a client named: the claim happened before this call and cannot be repeated.
     func submitPrompt(
         _ text: String,
         contextAttachments remoteContext: [RemoteConversationContextAttachmentDTO]? = nil,
+        attachmentPaths: [String] = [],
         to sessionID: SessionID,
         device: String?,
         authorization: RemoteAuthorization,
@@ -764,6 +788,12 @@ final class RemoteSessionMirrorRegistry {
             )
         }
         var fingerprintSource = Data(("conversation\0" + text + "\0").utf8)
+        // Staged uploads are part of what makes this submission itself. Without them a retry
+        // carrying different pictures would match the first attempt's fingerprint and replay
+        // its status instead of being seen as the conflict it is.
+        if !attachmentPaths.isEmpty {
+            fingerprintSource.append(Data((attachmentPaths.joined(separator: "\0") + "\0").utf8))
+        }
         if let remoteContext {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -792,8 +822,12 @@ final class RemoteSessionMirrorRegistry {
                   conversation.isRunning {
             if !conversation.remoteSnapshot.canSend {
                 status = .busy
-            } else if conversation.sendRemotePrompt(
+            } else if let prompt = promptText(
                 text,
+                stagedAttachmentPaths: attachmentPaths,
+                for: sessionID
+            ), conversation.sendRemotePrompt(
+                prompt,
                 context: normalizedContext,
                 authorization: authorization
             ) {
@@ -810,6 +844,44 @@ final class RemoteSessionMirrorRegistry {
             promptReplayCache.store(status, for: replayKey, fingerprint: fingerprint)
         }
         return status
+    }
+
+    /// The prompt as the agent will see it: the words, then the pictures.
+    ///
+    /// Uploads take custody through the same door the Mac's own composer uses, so a file sent
+    /// from a phone is filed as `origin: .user`, appears in the attachments pane beside what the
+    /// agent makes of it, and is quoted into the text by the one spelling both composers share.
+    /// Staging is a temporary directory nothing else owns; naming those paths directly would be
+    /// the vanishing-attachments bug again, one device further away.
+    ///
+    /// Nil means the hand-over failed — no working directory, or custody refused every file. The
+    /// caller turns that into a rejection rather than sending words that promise a picture the
+    /// agent will not find.
+    private func promptText(
+        _ text: String,
+        stagedAttachmentPaths: [String],
+        for sessionID: SessionID
+    ) -> String? {
+        guard !stagedAttachmentPaths.isEmpty else { return text }
+
+        // The staged files are on loan, not handed over: the server released or discarded them
+        // by the status this call returns. Deleting them here would take them away from a
+        // rejected submission the composer is about to retry.
+        guard let folder = ProjectStore.shared.workingDirectory(forSessionID: sessionID) else {
+            return nil
+        }
+        let handed = ComposerAttachmentHandover.handOver(
+            paths: stagedAttachmentPaths,
+            sessionID: sessionID,
+            projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
+        )
+        // `handOver` falls back to the caller's own paths when custody could not be taken, which
+        // is right for a Mac drop naming a file the user still has. Here that fallback would name
+        // staging, which the server is about to reclaim, so anything short of custody for every
+        // file is a refusal instead.
+        guard handed.count == stagedAttachmentPaths.count,
+              handed != stagedAttachmentPaths else { return nil }
+        return ComposerAttachmentHandover.appending(paths: handed, to: text)
     }
 
     /// Sends one locally composed terminal line as one PTY write. Every device keeps its own

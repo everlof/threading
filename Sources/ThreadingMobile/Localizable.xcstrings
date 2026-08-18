@@ -5020,6 +5020,116 @@
           }
         }
       }
+    },
+    "Attach a photo or file": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bifoga ett foto eller en fil"
+          }
+        }
+      }
+    },
+    "Photo Library": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bildbibliotek"
+          }
+        }
+      }
+    },
+    "Photo": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Foto"
+          }
+        }
+      }
+    },
+    "Remove %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort %@"
+          }
+        }
+      }
+    },
+    "%@, sending": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, skickas"
+          }
+        }
+      }
+    },
+    "%@, attached": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, bifogad"
+          }
+        }
+      }
+    },
+    "%@, couldn’t be sent": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, kunde inte skickas"
+          }
+        }
+      }
+    },
+    "%@ couldn’t be sent to your Mac.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ kunde inte skickas till din Mac."
+          }
+        }
+      }
+    },
+    "That is as many files as one message can carry.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fler filer än så får inte plats i ett meddelande."
+          }
+        }
+      }
+    },
+    "Threading can’t send that file.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading kan inte skicka den filen."
+          }
+        }
+      }
+    },
+    "That file couldn’t be read.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filen kunde inte läsas."
+          }
+        }
+      }
     }
   },
   "version": "1.2"

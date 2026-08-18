@@ -175,6 +175,7 @@
 				Threading/Resources/Info.plist,
 				ThreadingMobile/Localizable.xcstrings,
 				ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings,
+				ThreadingMobile/ComposerAttachmentTray.swift,
 				ThreadingMobile/DemoExperience.swift,
 				ThreadingMobile/PairingView.swift,
 				ThreadingMobile/HostedRemoteConnectionManager.swift,

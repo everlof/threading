@@ -1,7 +1,9 @@
 import Combine
+import PhotosUI
 import SwiftUI
 import ThreadingRemoteKit
 import UIKit
+import UniformTypeIdentifiers
 
 /// Owns the edge treatment for every native conversation host.
 ///
@@ -83,7 +85,16 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private let composerOutline = MobileThemeOutlineView()
     private let composerStack = UIStackView()
     private let capabilityButton = UIButton(type: .system)
+    private let attachButton = UIButton(type: .system)
     private let attentionButton = UIButton(type: .system)
+    /// The strip and the row of controls, stacked. The panel used to hold the control row
+    /// directly; attachments needed something above it that scrolls independently of the text.
+    private let composerContentStack = UIStackView()
+    private let attachmentStrip = ComposerAttachmentStripView()
+    /// Created once a client exists, which is why it is not a `let`: the controller is built
+    /// before the app model has necessarily resolved one, and a composer with no client simply
+    /// shows no attach button.
+    private var attachmentTray: ComposerAttachmentTray?
     private let textView = IntrinsicTextView()
     private let placeholderLabel = UILabel()
     private let sendButton = UIButton(type: .system)
@@ -333,7 +344,6 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         composerStack.alignment = .top
         composerStack.spacing = MobileDesign.Spacing.small
         composerShell.addSubview(composerPanel)
-        composerPanel.addSubview(composerStack)
         composerPanel.layer.cornerCurve = .continuous
         composerPanel.clipsToBounds = true
         composerOutline.translatesAutoresizingMaskIntoConstraints = false
@@ -343,6 +353,11 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             capabilityButton,
             symbol: "plus",
             accessibilityLabel: MobileL10n.string("Browse commands and skills")
+        )
+        configureCircleButton(
+            attachButton,
+            symbol: "paperclip",
+            accessibilityLabel: MobileL10n.string("Attach a photo or file")
         )
         configureCircleButton(
             attentionButton,
@@ -374,7 +389,20 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             placeholderLabel.topAnchor.constraint(equalTo: textView.topAnchor, constant: 10),
         ])
 
-        [capabilityButton, attentionButton, textView, sendButton].forEach(composerStack.addArrangedSubview)
+        [capabilityButton, attachButton, attentionButton, textView, sendButton]
+            .forEach(composerStack.addArrangedSubview)
+
+        // The panel now holds a column: staged files above, controls below. The strip hides
+        // itself when nothing is attached, so a composer with an empty tray keeps exactly the
+        // silhouette it had before attachments existed.
+        composerContentStack.translatesAutoresizingMaskIntoConstraints = false
+        composerContentStack.axis = .vertical
+        composerContentStack.alignment = .fill
+        composerContentStack.spacing = MobileDesign.Spacing.tight
+        composerContentStack.addArrangedSubview(attachmentStrip)
+        composerContentStack.addArrangedSubview(composerStack)
+        attachmentStrip.isHidden = true
+        composerPanel.addSubview(composerContentStack)
         composerLeadingConstraint = composerPanel.leadingAnchor.constraint(
             equalTo: composerShell.leadingAnchor,
             constant: MobileDesign.Spacing.small
@@ -391,12 +419,12 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             equalTo: composerShell.safeAreaLayoutGuide.bottomAnchor,
             constant: -MobileDesign.Spacing.small
         )
-        composerStackSafeBottomConstraint = composerStack.bottomAnchor.constraint(
+        composerStackSafeBottomConstraint = composerContentStack.bottomAnchor.constraint(
             equalTo: composerShell.safeAreaLayoutGuide.bottomAnchor,
             constant: -MobileDesign.Spacing.small
         )
         composerStackSafeBottomConstraint.priority = .defaultHigh
-        composerStackPanelBottomConstraint = composerStack.bottomAnchor.constraint(
+        composerStackPanelBottomConstraint = composerContentStack.bottomAnchor.constraint(
             equalTo: composerPanel.bottomAnchor,
             constant: -MobileDesign.Spacing.composerVertical
         )
@@ -409,20 +437,20 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             composerTrailingConstraint,
             composerTopConstraint,
             composerBottomConstraint,
-            composerStack.leadingAnchor.constraint(
+            composerContentStack.leadingAnchor.constraint(
                 equalTo: composerPanel.leadingAnchor,
                 constant: MobileDesign.Spacing.composerHorizontal
             ),
-            composerStack.trailingAnchor.constraint(
+            composerContentStack.trailingAnchor.constraint(
                 equalTo: composerPanel.trailingAnchor,
                 constant: -MobileDesign.Spacing.composerHorizontal
             ),
-            composerStack.topAnchor.constraint(
+            composerContentStack.topAnchor.constraint(
                 equalTo: composerPanel.topAnchor,
                 constant: MobileDesign.Spacing.composerVertical
             ),
             composerStackSafeBottomConstraint,
-            composerStack.bottomAnchor.constraint(
+            composerContentStack.bottomAnchor.constraint(
                 lessThanOrEqualTo: composerPanel.bottomAnchor,
                 constant: -MobileDesign.Spacing.composerVertical
             ),
@@ -462,6 +490,12 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             showsCapabilityCatalog.toggle()
             updateCapabilities()
         }, for: .touchUpInside)
+        attachButton.addAction(UIAction { [weak self] _ in
+            self?.presentAttachmentSources()
+        }, for: .touchUpInside)
+        attachmentStrip.onRemove = { [weak self] id in
+            self?.attachmentTray?.remove(id)
+        }
         attentionButton.addAction(UIAction { [weak self] _ in
             self?.presentAttentionRequest()
         }, for: .touchUpInside)
@@ -579,13 +613,15 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         placeholderLabel.textColor = theme.uiTertiaryLabel
         capabilityButton.backgroundColor = theme.uiControlResting
         capabilityButton.tintColor = theme.uiLabel
+        attachButton.backgroundColor = theme.uiControlResting
+        attachButton.tintColor = theme.uiLabel
         attentionButton.backgroundColor = theme.uiControlResting
         attentionButton.tintColor = theme.uiLabel
         let controlRadius = min(
             MobileDesign.Size.minimumTapTarget / 2,
             max(theme.controlRadius, theme.panelRadius - MobileDesign.Spacing.small)
         )
-        [capabilityButton, attentionButton, sendButton].forEach {
+        [capabilityButton, attachButton, attentionButton, sendButton].forEach {
             $0.layer.cornerRadius = controlRadius
             $0.layer.cornerCurve = .continuous
         }
@@ -768,6 +804,12 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             submissionLabel.text = submissionNotice
             submissionLabel.textColor = theme.uiWarning
             submissionLabel.isHidden = false
+        } else if let attachmentNotice = attachmentTray?.notice {
+            // Attachment refusals share the composer's one notice line: two places to look for
+            // "why didn't that work" is one more than anybody checks.
+            submissionLabel.text = attachmentNotice
+            submissionLabel.textColor = theme.uiWarning
+            submissionLabel.isHidden = false
         } else {
             submissionLabel.isHidden = true
         }
@@ -783,16 +825,28 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         textView.isEditable = enabled
         capabilityButton.isEnabled = connection.capability == .interact
             && !connection.composerCapabilities.isEmpty
+        // Hidden rather than disabled when the host does not offer uploads: a guest or view-only
+        // connection is never told the feature exists, so a dimmed paperclip would be advertising
+        // something this link can never do.
+        attachButton.isHidden = !(connection.supportsComposerAttachmentUploads
+            && configureAttachmentTray())
+        attachButton.isEnabled = enabled && attachmentTray?.canAcceptMore == true
         attentionButton.isHidden = !(
             connection.phase == .connected
                 && connection.capability == .interact
                 && connection.supportsAttentionRequests
                 && !connection.attentionRecipients.isEmpty
         )
-        sendButton.isEnabled = enabled && hasText
+        // A picture on its own is a message. Send stays held while one is still travelling,
+        // because a prompt naming an upload the Mac has not finished receiving is refused —
+        // better to wait a moment than to reject something the person already pressed send on.
+        let tray = attachmentTray
+        let hasAttachments = tray?.readyUploadIDs.isEmpty == false
+        sendButton.isEnabled = enabled && (hasText || hasAttachments) && tray?.isSettling != true
         sendButton.backgroundColor = sendButton.isEnabled ? theme.uiAccent : theme.uiControlResting
         sendButton.tintColor = sendButton.isEnabled ? theme.uiGround : theme.uiSecondaryLabel
         placeholderLabel.isHidden = !textView.text.isEmpty
+        attachmentStrip.update(items: tray?.items ?? [], theme: theme)
     }
 
     private func updateCapabilities() {
@@ -886,7 +940,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             openSkillCatalog(preserving: nil)
             return
         }
-        if let requestID = connection.submit(textView.text) {
+        if let requestID = connection.submit(
+            textView.text,
+            attachmentUploadIDs: attachmentTray?.readyUploadIDs ?? []
+        ) {
             pendingSubmissionID = requestID
             showsCapabilityCatalog = false
             capabilityKindFilter = nil
@@ -894,6 +951,83 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             updateCapabilities()
             updateSubmission()
         }
+    }
+
+    // MARK: - Attachments
+
+    /// Builds the tray the first time a client exists, and answers whether there is one.
+    ///
+    /// Called from `updateComposer` rather than only from `viewDidLoad`, because the app model
+    /// may still be resolving a client when this controller is created. Doing it once at load
+    /// would leave the paperclip permanently hidden on exactly the launch where a session was
+    /// restored before pairing finished.
+    @discardableResult
+    private func configureAttachmentTray() -> Bool {
+        if attachmentTray != nil { return true }
+        guard let client = model.client else { return false }
+        let tray = ComposerAttachmentTray(client: client, sessionID: connection.session.id)
+        tray.onChange = { [weak self] in
+            guard let self else { return }
+            updateComposer()
+            updateSubmission()
+        }
+        attachmentTray = tray
+        return true
+    }
+
+    /// Offers the two places a file can come from on a phone.
+    ///
+    /// Photos and files are deliberately separate entries rather than one combined picker: the
+    /// photo library needs `PHPickerViewController` to stay out of the user's whole library
+    /// (nothing is granted, and the app never asks for photo permission), while a document needs
+    /// the security-scoped file picker. One sheet offering both is the honest shape.
+    private func presentAttachmentSources() {
+        guard let tray = attachmentTray, tray.canAcceptMore else { return }
+
+        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(
+            title: MobileL10n.string("Photo Library"),
+            style: .default
+        ) { [weak self] _ in self?.presentPhotoPicker() })
+        sheet.addAction(UIAlertAction(
+            title: MobileL10n.string("Files"),
+            style: .default
+        ) { [weak self] _ in self?.presentDocumentPicker() })
+        sheet.addAction(UIAlertAction(title: MobileL10n.string("Cancel"), style: .cancel))
+        // An action sheet with no anchor is a crash on iPad, not a layout compromise.
+        sheet.popoverPresentationController?.sourceView = attachButton
+        sheet.popoverPresentationController?.sourceRect = attachButton.bounds
+        sheet.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+        sheet.view.tintColor = theme.uiAccent
+        present(sheet, animated: true)
+    }
+
+    private func presentPhotoPicker() {
+        var configuration = PHPickerConfiguration()
+        configuration.filter = .images
+        configuration.selectionLimit = remainingAttachmentSlots
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = self
+        picker.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+        present(picker, animated: true)
+    }
+
+    private func presentDocumentPicker() {
+        // The host takes what its attachments pane can show. Asking for exactly that set here
+        // means an unsupported file is greyed out in the picker rather than refused after the
+        // person chose it.
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: ComposerAttachmentSources.documentTypes,
+            asCopy: true
+        )
+        picker.delegate = self
+        picker.allowsMultipleSelection = true
+        picker.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+        present(picker, animated: true)
+    }
+
+    private var remainingAttachmentSlots: Int {
+        max(1, RemoteAttachmentUploadLimits.maximumPerMessage - (attachmentTray?.items.count ?? 0))
     }
 
     private func openSkillCatalog(preserving arguments: String?) {
@@ -914,6 +1048,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
                 textView.text = ""
                 textDidChange()
             }
+            // Cleared on acceptance and never before: the Mac has claimed these uploads, so the
+            // strip is now showing files that no longer exist anywhere the composer can reach.
+            // A rejected prompt keeps them, which is what lets the person simply press send again.
+            attachmentTray?.clear()
             submissionNotice = nil
             return
         }
@@ -1145,7 +1283,12 @@ private final class InsetsLabel: UILabel {
 
 /// Draws theme material from its current semantic values instead of freezing a `CGColor` in a
 /// layer. The view is transparent to touches so it can sit above a scroll view or composer.
-private final class MobileThemeOutlineView: UIView {
+/// A themed stroke drawn from a `UIColor` each time the view draws, rather than a `CGColor`
+/// frozen onto a layer — which is the whole point of the mobile theme boundary's border rule: a
+/// stored `CGColor` does not follow a live theme change or a trait collection.
+///
+/// Internal rather than private because the composer's attachment chips need the same stroke.
+final class MobileThemeOutlineView: UIView {
     private var color: UIColor = .clear
     private var radius: CGFloat = 0
     private var width: CGFloat = 0
@@ -1279,4 +1422,80 @@ private final class RemoteConversationNavigationTitleView: UIControl {
     }
 }
 
+// MARK: - Attachment Sources
 
+/// What the phone offers to pick from, matched to what the Mac will keep.
+enum ComposerAttachmentSources {
+    /// The document picker's allow-list, derived from the shared
+    /// `RemoteAttachmentUploadLimits.offeredFileExtensions` rather than written out again here.
+    ///
+    /// Two lists would drift, and the drift is not symmetric: offering a type the host refuses
+    /// spends a whole transfer to reach a 400 the person cannot act on. An extension iOS has no
+    /// uniform type for is simply dropped, which offers less than the host accepts — the safe
+    /// direction.
+    static let documentTypes: [UTType] = RemoteAttachmentUploadLimits.offeredFileExtensions
+        .compactMap { UTType(filenameExtension: $0) }
+}
+
+// MARK: - Picking
+
+extension RemoteConversationViewController: PHPickerViewControllerDelegate {
+    nonisolated func picker(
+        _ picker: PHPickerViewController,
+        didFinishPicking results: [PHPickerResult]
+    ) {
+        Task { @MainActor in
+            picker.dismiss(animated: true)
+            for result in results {
+                await loadPickedImage(result)
+            }
+        }
+    }
+
+    /// Reads one picked photo as bytes.
+    ///
+    /// `loadDataRepresentation` rather than `loadObject(ofClass: UIImage.self)`: the latter hands
+    /// back a decoded image, which throws away the original encoding and would turn every pick
+    /// into a re-encode even when the file was already small enough to send untouched.
+    private func loadPickedImage(_ result: PHPickerResult) async {
+        let provider = result.itemProvider
+        let identifier = provider.registeredTypeIdentifiers.first {
+            UTType($0)?.conforms(to: .image) == true
+        }
+        guard let identifier, let type = UTType(identifier) else { return }
+        let name = provider.suggestedName.map { "\($0).\(type.preferredFilenameExtension ?? "img")" }
+            ?? MobileL10n.string("Photo")
+
+        let data: Data? = await withCheckedContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
+                continuation.resume(returning: data)
+            }
+        }
+        guard let data else {
+            attachmentTray?.reportUnreadableFile()
+            return
+        }
+        attachmentTray?.add(data: data, name: name, type: type)
+    }
+}
+
+extension RemoteConversationViewController: UIDocumentPickerDelegate {
+    func documentPicker(
+        _ controller: UIDocumentPickerViewController,
+        didPickDocumentsAt urls: [URL]
+    ) {
+        for url in urls {
+            // `asCopy: true` already put these in the app's own container, so no security-scoped
+            // access is needed — but a file that vanished between picking and reading still has
+            // to say so rather than silently adding nothing.
+            guard let data = try? Data(contentsOf: url) else {
+                attachmentTray?.reportUnreadableFile()
+                continue
+            }
+            let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)
+                ?? UTType(filenameExtension: url.pathExtension)
+                ?? .data
+            attachmentTray?.add(data: data, name: url.lastPathComponent, type: type)
+        }
+    }
+}

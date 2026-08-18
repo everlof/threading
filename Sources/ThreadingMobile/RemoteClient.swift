@@ -481,6 +481,58 @@ struct RemoteClient {
         return data
     }
 
+    /// Hands one composer attachment to the Mac, a chunk at a time, and answers its upload id.
+    ///
+    /// The id is the only thing the phone learns: where the file landed is the Mac's business,
+    /// and a prompt names the upload rather than a path. Nothing is attached to the session yet
+    /// — a completed upload waits in staging until a prompt claims it, or until the Mac reaps it.
+    ///
+    /// Cancelling mid-transfer simply stops: the partial upload is left for that reaper rather
+    /// than raced with a delete the phone may not be online to send.
+    func uploadAttachment(
+        sessionID: String,
+        name: String,
+        mediaType: String,
+        data: Data,
+        onProgress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> String {
+        guard !data.isEmpty else { throw RemoteClientError.invalidResponse }
+
+        let url = link.attachmentUploadURL(sessionID: sessionID)
+        let chunkSize = RemoteAttachmentUploadClientDefaults.chunkBytes
+        let chunkCount = max(1, (data.count + chunkSize - 1) / chunkSize)
+        var uploadID: String?
+
+        for index in 0..<chunkCount {
+            try Task.checkCancellation()
+            let start = index * chunkSize
+            let end = min(start + chunkSize, data.count)
+            let body = RemoteAttachmentUploadRequestDTO(
+                uploadID: uploadID,
+                name: name,
+                mediaType: mediaType,
+                totalBytes: data.count,
+                chunkIndex: index,
+                chunkCount: chunkCount,
+                chunk: data[start..<end].base64EncodedString()
+            )
+            // Each chunk carries its own request id: they are distinct mutations, and sharing one
+            // would make the Mac's replay cache treat chunk two as a retry of chunk one.
+            let result: RemoteAttachmentUploadResponseDTO = try await postResponse(
+                body,
+                to: url,
+                requestID: UUID().uuidString
+            )
+            uploadID = result.uploadID
+            onProgress?(Double(result.receivedBytes) / Double(data.count))
+            if result.isComplete { return result.uploadID }
+        }
+
+        // Every chunk was accepted and the Mac still does not consider the file whole. Nothing
+        // usable came of it, so this is a failure rather than an id the composer would name.
+        throw RemoteClientError.invalidResponse
+    }
+
     func workspace(sessionID: String) async throws -> RemoteWorkspaceDTO {
         try await get(
             RemoteWorkspaceDTO.self,
