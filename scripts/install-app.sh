@@ -104,7 +104,7 @@ sweep_parked_bundles() {
         pids="${aside##*.parked-}"
         in_use=0
         for pid in ${pids//-/ }; do
-            process_path="$(ps -o comm= -p "$pid" 2>/dev/null)"
+            process_path="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
             if [[ "$process_path" == *"/$SCHEME.app/Contents/MacOS/$SCHEME" \
                 || "$process_path" == "$aside/Contents/MacOS/$SCHEME" ]]; then
                 in_use=1
