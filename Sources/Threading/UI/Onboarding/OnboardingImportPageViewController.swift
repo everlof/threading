@@ -21,23 +21,22 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
 
     private static let relativeDate = RelativeDateTimeFormatter()
 
-    /// One folder's live selection state — invisible in the list, but still the unit the
-    /// import creates projects from.
-    @MainActor
-    private final class Group {
-        let data: DiscoveredProjectImports
-        var rows: [(session: ImportableSession, checkbox: ThemedCheckbox)] = []
-
-        init(data: DiscoveredProjectImports) {
-            self.data = data
-        }
-
-        var selected: [ImportableSession] {
-            rows.filter { $0.checkbox.state == .on }.map(\.session)
-        }
+    /// A value row is all that survives outside the viewport. AppKit constructs the checkbox,
+    /// icon and age only while this row intersects the scroll view.
+    private struct ConversationEntry {
+        let session: ImportableSession
     }
 
-    private var groups: [Group] = []
+    private enum PresentationRow: Equatable {
+        case failures
+        case conversation(Int)
+    }
+
+    private var groups: [DiscoveredProjectImports] = []
+    private var conversations: [ConversationEntry] = []
+    private var presentationRows: [PresentationRow] = []
+    private var selectedConversationIDs: Set<String> = []
+    private var relativeDateReference = Date()
     private var scanResult: GlobalScanResult?
     /// The enabled logins the current scan covered. The accounts page sits *before* this one
     /// and can now switch logins off, so a cached result is only current while that set is —
@@ -46,6 +45,36 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
     private var scanGeneration = 0
     private let summaryLabel = NSTextField(wrappingLabelWithString: "")
     private let listHost = NSView()
+
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("OnboardingImportContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = Design.Size.fieldHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        return scroll
+    }()
 
     override func loadView() {
         view = NSView()
@@ -74,6 +103,17 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
     /// The scan's landing point — internal so a render test can put a known result on screen
     /// without a disk full of fixtures.
     func apply(result: GlobalScanResult) {
+        let conversationCount = result.groups.reduce(0) { $0 + $1.conversations.count }
+        let span = PerformanceRecorder.shared.begin(
+            "onboarding.import-list.rebuild",
+            category: "ui",
+            metadata: [
+                "groups": String(result.groups.count),
+                "conversations": String(conversationCount),
+                "failures": String(result.totalFailureCount)
+            ]
+        )
+        defer { span.end() }
         scanResult = result
         rebuildList()
     }
@@ -82,11 +122,13 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
     /// batch adoption saves once per group rather than once per conversation.
     func pageWillContinue() {
         for group in groups {
-            let selected = group.selected
+            let selected = group.conversations.filter {
+                selectedConversationIDs.contains($0.id)
+            }
             guard !selected.isEmpty else { continue }
 
             guard let project = ProjectStore.shared.addProject(
-                folderURL: URL(fileURLWithPath: group.data.folder)
+                folderURL: URL(fileURLWithPath: group.folder)
             ) else { continue }
             ProjectStore.shared.importSessions(selected, into: project.id)
         }
@@ -128,10 +170,26 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         rebuildList()
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
+    }
+
     // MARK: - List
 
     private func rebuildList() {
         listHost.subviews.forEach { $0.removeFromSuperview() }
+        groups = []
+        conversations = []
+        presentationRows = []
+        selectedConversationIDs = []
+        tableView.cardDecorations = []
+        tableView.reloadData()
 
         guard let result = scanResult else {
             summaryLabel.stringValue = L10n.string("Looking through your past conversations…")
@@ -148,7 +206,8 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         }
 
         let now = Date()
-        groups = result.groups.map(Group.init)
+        relativeDateReference = now
+        groups = result.groups
 
         guard !groups.isEmpty || result.totalFailureCount > 0 else {
             summaryLabel.stringValue = L10n.string(
@@ -157,66 +216,33 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
             return
         }
 
-        var cards: [NSView] = []
-        if let failureCard = failureCard(for: result) {
-            cards.append(failureCard)
+        if result.totalFailureCount > 0 {
+            presentationRows.append(.failures)
         }
 
         // One flat card, newest first across every folder — the folder is import bookkeeping,
-        // not something the user has to triage by.
-        let ordered: [(session: ImportableSession, group: Group)] = groups
-            .flatMap { group in group.data.conversations.map { (session: $0, group: group) } }
+        // not something the user has to triage by. The array is value-only: converting all of
+        // it to controls is the exact scaling failure this table boundary prevents.
+        conversations = groups
+            .flatMap { group in
+                group.conversations.map {
+                    ConversationEntry(session: $0)
+                }
+            }
             .sorted { $0.session.lastActiveAt > $1.session.lastActiveAt }
-        if !ordered.isEmpty {
-            cards.append(SettingsCard(rows: ordered.map { entry in
-                conversationRow(for: entry.session, in: entry.group, now: now)
-            }))
-        }
+        selectedConversationIDs = Set(conversations.compactMap { entry in
+            GlobalSessionScan.isPrechecked(entry.session, now: now) ? entry.session.id : nil
+        })
+        presentationRows.append(contentsOf: conversations.indices.map(PresentationRow.conversation))
+        updateCardDecorations()
+        tableView.reloadData()
 
-        let column = NSStackView(views: cards)
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = Design.Spacing.inset
-        column.translatesAutoresizingMaskIntoConstraints = false
-        cards.forEach { $0.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
-
-        // The settings-page scroll shape: a flipped document so the first group sits at the
-        // top, themed scrollers, no background of its own.
-        let document = SettingsFlippedView()
-        document.addSubview(column)
-
-        let scroll = ThemedScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.automaticallyAdjustsContentInsets = false
-        scroll.documentView = document
-        document.translatesAutoresizingMaskIntoConstraints = false
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-
-        listHost.addSubview(scroll)
+        listHost.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: listHost.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: listHost.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: listHost.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: listHost.trailingAnchor),
-
-            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
-            document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
-
-            column.topAnchor.constraint(equalTo: document.topAnchor),
-            column.leadingAnchor.constraint(
-                equalTo: document.leadingAnchor,
-                constant: Design.Size.glowGutter
-            ),
-            column.trailingAnchor.constraint(
-                equalTo: document.trailingAnchor,
-                constant: -Design.Size.glowGutter
-            ),
-            // The same halo gutter below, so the card's glow survives scrolling to the end.
-            column.bottomAnchor.constraint(
-                equalTo: document.bottomAnchor,
-                constant: -Design.Size.glowGutter
-            )
+            scrollView.topAnchor.constraint(equalTo: listHost.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: listHost.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: listHost.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: listHost.trailingAnchor)
         ])
 
         refreshSummary()
@@ -256,18 +282,14 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         return SettingsCard(rows: rows)
     }
 
-    private func conversationRow(
-        for session: ImportableSession,
-        in group: Group,
-        now: Date
-    ) -> NSView {
+    private func conversationRow(for session: ImportableSession, now: Date) -> NSView {
+        let sessionID = session.id
         let checkbox = ThemedCheckbox(
             title: session.title,
-            state: GlobalSessionScan.isPrechecked(session, now: now) ? .on : .off
-        ) { [weak self] _ in
-            self?.refreshSummary()
+            state: selectedConversationIDs.contains(sessionID) ? .on : .off
+        ) { [weak self] state in
+            self?.setSelected(state == .on, conversationID: sessionID)
         }
-        group.rows.append((session, checkbox))
 
         let icon = NSImageView()
         icon.image = session.kind.icon
@@ -301,11 +323,38 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
         return SettingsUI.fullRow(content)
     }
 
+    private func setSelected(_ isSelected: Bool, conversationID: String) {
+        if isSelected {
+            selectedConversationIDs.insert(conversationID)
+        } else {
+            selectedConversationIDs.remove(conversationID)
+        }
+        refreshSummary()
+    }
+
+    private func updateCardDecorations() {
+        guard let first = presentationRows.firstIndex(where: {
+            if case .conversation = $0 { return true }
+            return false
+        }), let last = presentationRows.lastIndex(where: {
+            if case .conversation = $0 { return true }
+            return false
+        }) else {
+            tableView.cardDecorations = []
+            return
+        }
+
+        tableView.cardDecorations = [ThemedTableCardDecoration(
+            rows: first ... last,
+            bottomInset: Design.Size.glowGutter
+        )]
+    }
+
     private func refreshSummary() {
         guard let result = scanResult else { return }
 
-        let total = groups.reduce(0) { $0 + $1.data.conversations.count }
-        let selected = groups.reduce(0) { $0 + $1.selected.count }
+        let total = conversations.count
+        let selected = selectedConversationIDs.count
 
         if total == 0, result.totalFailureCount > 0 {
             summaryLabel.stringValue = L10n.string(
@@ -335,5 +384,60 @@ final class OnboardingImportPageViewController: NSViewController, OnboardingPage
             summary += " " + failureSummary
         }
         summaryLabel.stringValue = summary
+    }
+}
+
+// MARK: - Virtualized Conversation List
+
+extension OnboardingImportPageViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in _: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_: NSTableView, shouldSelectRow _: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor _: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("OnboardingImportVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+
+        let row = presentationRows[tableRow]
+        let topInset: CGFloat
+        let bottomInset: CGFloat
+        let content: NSView
+        switch row {
+        case .failures:
+            content = scanResult.flatMap { failureCard(for: $0) } ?? NSView()
+            topInset = 0
+            bottomInset = Design.Spacing.inset
+        case let .conversation(index):
+            guard conversations.indices.contains(index) else { return nil }
+            content = conversationRow(
+                for: conversations[index].session,
+                now: relativeDateReference
+            )
+            topInset = 0
+            bottomInset = tableRow == presentationRows.count - 1
+                ? Design.Size.glowGutter
+                : 0
+        }
+        host.install(
+            content,
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset,
+            bottomInset: bottomInset
+        )
+        return host
     }
 }

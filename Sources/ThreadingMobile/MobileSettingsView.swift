@@ -23,7 +23,7 @@ struct MobileSettingsView: View {
                         }
 
                         if model.canManageThemes {
-                            ThemedSettingsDivider()
+                            ThemedRowDivider()
                             SettingsNavigationRow(
                                 symbol: "paintpalette",
                                 title: "Mac appearance",
@@ -43,7 +43,7 @@ struct MobileSettingsView: View {
                             CollaborationSettingsView()
                         }
 
-                        ThemedSettingsDivider()
+                        ThemedRowDivider()
                         SettingsNavigationRow(
                             symbol: "keyboard",
                             title: "Terminal keys",
@@ -52,7 +52,7 @@ struct MobileSettingsView: View {
                             TerminalKeyboardAgentList()
                         }
 
-                        ThemedSettingsDivider()
+                        ThemedRowDivider()
                         SettingsActionRow(
                             symbol: "bell",
                             title: "Notifications",
@@ -116,7 +116,7 @@ struct MobileSettingsView: View {
                 .font(.headline)
                 .foregroundStyle(theme.label)
                 .padding(.horizontal, MobileDesign.Spacing.inset)
-            ThemedSettingsGroup(content: content)
+            ThemedRowGroup(content: content)
         }
     }
 
@@ -174,33 +174,6 @@ private struct SettingsRow: View {
     }
 }
 
-private struct ThemedSettingsGroup<Content: View>: View {
-    @Environment(\.remoteTheme) private var theme
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(spacing: 0, content: content)
-            .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: theme.panelRadius)
-                    .stroke(theme.border, lineWidth: theme.borderWidth)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: theme.panelRadius))
-            .remoteThemeGlow(theme)
-    }
-}
-
-private struct ThemedSettingsDivider: View {
-    @Environment(\.remoteTheme) private var theme
-
-    var body: some View {
-        Rectangle()
-            .fill(theme.divider)
-            .frame(height: max(theme.borderWidth, 1 / UIScreen.main.scale))
-            .padding(.horizontal, MobileDesign.Spacing.inset)
-    }
-}
-
 private struct SettingsNavigationRow<Destination: View>: View {
     @Environment(\.remoteTheme) private var theme
     let symbol: String
@@ -252,15 +225,15 @@ struct CollaborationSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-                ThemedSettingsGroup {
+                ThemedRowGroup {
                     Toggle("People in open sessions", isOn: $notifications.peoplePresenceEnabled)
                         .padding(.horizontal, MobileDesign.Spacing.inset)
                         .padding(.vertical, MobileDesign.Spacing.small)
-                    ThemedSettingsDivider()
+                    ThemedRowDivider()
                     Toggle("Typing indicators", isOn: $notifications.typingIndicatorsEnabled)
                         .padding(.horizontal, MobileDesign.Spacing.inset)
                         .padding(.vertical, MobileDesign.Spacing.small)
-                    ThemedSettingsDivider()
+                    ThemedRowDivider()
                     Toggle(
                         "Independent terminal drafts",
                         isOn: $notifications.independentTerminalDraftsEnabled

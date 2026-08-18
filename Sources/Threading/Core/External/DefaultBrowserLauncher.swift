@@ -13,7 +13,7 @@ enum DefaultBrowserLauncher {
         guard !urls.isEmpty,
               let probeURL = URL(string: DefaultBrowserLauncherDefaults.handlerProbeAddress),
               let applicationURL = NSWorkspace.shared.urlForApplication(toOpen: probeURL) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             ThreadingLogger.browser.error("No default browser is registered")
             return false
         }
@@ -27,7 +27,7 @@ enum DefaultBrowserLauncher {
         ) { _, error in
             guard let error else { return }
             Task { @MainActor in
-                NSSound.beep()
+                SystemAlert.refuse()
                 ThreadingLogger.browser.error(
                     "Could not open local document in the default browser: \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )

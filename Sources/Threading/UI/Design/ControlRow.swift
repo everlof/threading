@@ -92,10 +92,11 @@ protocol ControlRowMember: NSView {
 ///   two halves, so the leading members hold one edge and the trailing ones the other. The
 ///   Compare tab had been holding its actions out with an *empty label* set to hug loosely,
 ///   which is not a spring: the label collapsed and the actions huddled against the chip.
-/// - **The outer edges align by ink.** A chip's frame is its pill, an icon button's frame
-///   carries the padding its hover surface needs; pinned alike they start a few points apart on
-///   a margin the content below shares. `OpticalInsetProviding` is subtracted at both ends —
-///   `PaneHeaderView`'s rule, which until now every inline row had to re-derive or get wrong.
+/// - **The outer edges align by interaction surface.** A chip is ink-only at rest, but its frame
+///   is also the hover, menu and keyboard-focus plate. Pulling that frame outside the row to put
+///   only the resting text on the margin makes the control visibly break the pane margin the
+///   instant it is used. The full stable silhouette stays inside the row instead; content ink
+///   gets the component's own padding, just like the content inside the cards below it.
 ///
 /// Nothing is drawn here. The row is geometry: the members ink themselves, and the ground under
 /// it is the host's.
@@ -165,10 +166,6 @@ final class ControlRowView: NSView {
     private lazy var heightConstraint = heightAnchor.constraint(
         equalToConstant: metrics.height
     )
-    private lazy var leadingMargin = runs.leadingAnchor.constraint(equalTo: leadingAnchor)
-    private lazy var trailingMargin = runs.trailingAnchor.constraint(
-        equalTo: trailingAnchor
-    )
     private let appEvents = AppEventObservations()
 
     /// The height the row last handed out, so a layout pass that changes nothing writes nothing.
@@ -179,7 +176,7 @@ final class ControlRowView: NSView {
     // MARK: - Initialization
 
     /// Both arrays run leading to trailing. The first leading view and the last trailing view
-    /// touch the row's edges and are the two aligned by ink.
+    /// touch the row's edges with their full interaction surfaces.
     init(scale: ControlRowScale = .compact, leading: [NSView] = [], trailing: [NSView] = []) {
         self.scale = scale
         super.init(frame: .zero)
@@ -251,8 +248,11 @@ final class ControlRowView: NSView {
 
         NSLayoutConstraint.activate([
             heightConstraint,
-            leadingMargin,
-            trailingMargin,
+            // A member's stable frame is its complete hover, menu and focus silhouette. Keep
+            // that frame on the declared row edge; the component owns any inset from its plate
+            // to its title or glyph.
+            runs.leadingAnchor.constraint(equalTo: leadingAnchor),
+            runs.trailingAnchor.constraint(equalTo: trailingAnchor),
             // Centred on the row rather than pinned to its edges, so the air above the controls
             // and the air below them are the same air. The stack is constrained only sideways,
             // which is what stops a member taller than the row — a field dropped into a compact
@@ -293,33 +293,10 @@ final class ControlRowView: NSView {
                 member.adopt(metrics)
             }
         }
-        // After adoption, never before: promoting a button changes the padding around its glyph,
-        // so an inset taken first would align the row to a size the button no longer has.
-        alignMargins()
-    }
-
-    /// Puts the outermost *visible* control's ink on the row's edges.
-    ///
-    /// Visible, because a hidden member is not on the margin — Git Review's Back button is
-    /// usually hidden and carries five points of padding, so aligning to it regardless indented
-    /// the chip beside it five points past the cards below. That pane had the correction written
-    /// by hand in its show/hide method, which is one more thing every row would have had to
-    /// remember; here it falls out of laying out.
-    ///
-    /// Run on every pass rather than with the height, because what changed is which member is
-    /// first, not how tall anything is. Both writes are guarded, so a pass that moves nothing
-    /// dirties nothing.
-    private func alignMargins() {
-        write(-opticalInset(of: leadingViews.first { !$0.isHidden }), to: leadingMargin)
-        write(opticalInset(of: trailingViews.last { !$0.isHidden }), to: trailingMargin)
     }
 
     private func write(_ constant: CGFloat, to constraint: NSLayoutConstraint) {
         guard constraint.constant != constant else { return }
         constraint.constant = constant
-    }
-
-    private func opticalInset(of view: NSView?) -> CGFloat {
-        (view as? OpticalInsetProviding)?.opticalHorizontalInset ?? 0
     }
 }

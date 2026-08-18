@@ -204,7 +204,7 @@ final class ImageCompareView: NSView {
         }
         expandButton.onPress = { [weak self] in
             guard self?.expand() == false else { return }
-            NSSound.beep()
+            SystemAlert.refuse()
         }
 
         addSubview(canvas)

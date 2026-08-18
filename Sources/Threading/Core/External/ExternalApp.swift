@@ -404,7 +404,7 @@ final class ExternalAppLauncher {
         setPreferred(app)
 
         guard app.accepts(target) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -415,7 +415,7 @@ final class ExternalAppLauncher {
 
         guard let applicationURL = applicationURL(for: app) else {
             refresh()
-            NSSound.beep()
+            SystemAlert.refuse()
             ThreadingLogger.agent.warning(
                 "Cannot open in \(app.name, privacy: .public): not installed"
             )
@@ -434,7 +434,7 @@ final class ExternalAppLauncher {
     @discardableResult
     func openInPreferredApp(_ target: ExternalAppTarget) -> Bool {
         guard let app = preferred(for: target) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return false
         }
         open(target, in: app)
@@ -464,7 +464,7 @@ final class ExternalAppLauncher {
         ) { _, error in
             guard let error else { return }
             Task { @MainActor in
-                NSSound.beep()
+                SystemAlert.refuse()
                 ThreadingLogger.agent.error(
                     "Could not open in \(name, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
@@ -505,7 +505,7 @@ final class ExternalAppLauncher {
         do {
             try process.run()
         } catch {
-            NSSound.beep()
+            SystemAlert.refuse()
             ThreadingLogger.agent.error(
                 "Could not run \(name, privacy: .public)'s command: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )

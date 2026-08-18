@@ -1,9 +1,10 @@
 import AppKit
 
-/// Accounts preferences: an icon and name for each discovered agent login.
+/// Accounts preferences: add or reconnect a provider login, then customise every discovered
+/// login's presentation and availability.
 ///
-/// Accounts themselves are discovered from disk and cannot be added or removed here; this
-/// pane only customises how they are presented. It is built from the settings design kit
+/// Provider CLIs still own credentials and removal. Threading owns the isolated-home setup and
+/// verification flow, plus the presentation choices below. It is built from the settings kit
 /// (`SettingsUI`, `SettingsCard`, `ThemedButton`) as a card of flat account rows rather than a
 /// table, so it reads as one piece with the other preference panes.
 final class AccountsPreferencesViewController: NSViewController {
@@ -12,6 +13,9 @@ final class AccountsPreferencesViewController: NSViewController {
 
     /// Holds the freshly rebuilt page; cleared and repopulated on every `reload()`.
     private let pageContainer = NSView()
+
+    private let accountsProvider: () -> [AgentAccount]
+    private let setupController: AccountSetupCardViewController
 
     private var accounts: [AgentAccount] = []
 
@@ -23,10 +27,33 @@ final class AccountsPreferencesViewController: NSViewController {
     /// the person using it.
     private let limits = AccountLimitsSectionController()
 
+    init(
+        accountsProvider: @escaping () -> [AgentAccount] = {
+            AgentKind.allCases
+                .filter(\.supportsAccounts)
+                .flatMap { AgentAccountDiscovery.allAccounts(for: $0) }
+        },
+        setupCoordinator: AgentAccountSetupCoordinator = AgentAccountSetupCoordinator()
+    ) {
+        self.accountsProvider = accountsProvider
+        self.setupController = AccountSetupCardViewController(coordinator: setupCoordinator)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     // MARK: - Lifecycle
 
     override func loadView() {
         view = NSView()
+        addChild(setupController)
+        setupController.onAccountReady = { [weak self] _ in
+            self?.reload()
+            self?.notifyAccountsChanged()
+        }
         pageContainer.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(pageContainer)
         NSLayoutConstraint.activate([
@@ -48,9 +75,7 @@ final class AccountsPreferencesViewController: NSViewController {
     private func reload() {
         // Every discovered login, including the ones switched off: this is the one page where a
         // disabled account has to appear, since it is where it is switched back on.
-        accounts = AgentKind.allCases
-            .filter(\.supportsAccounts)
-            .flatMap { AgentAccountDiscovery.allAccounts(for: $0) }
+        accounts = accountsProvider()
 
         pageContainer.subviews.forEach { $0.removeFromSuperview() }
 
@@ -63,6 +88,7 @@ final class AccountsPreferencesViewController: NSViewController {
         limits.reload(accounts: accounts)
 
         let page = SettingsUI.page(title: "Accounts", sections: [
+            SettingsUI.section("Add or Reconnect", setupController.view),
             SettingsUI.section("Agent Accounts", card),
             SettingsUI.note(AccountsPreferencesStrings.explanation),
             limits.view
@@ -96,6 +122,16 @@ final class AccountsPreferencesViewController: NSViewController {
         restore.toolTip = AccountsPreferencesStrings.restorePresentationTooltip
         restore.setContentHuggingPriority(.required, for: .horizontal)
 
+        let reconnect = SettingsUI.button(
+            AccountsPreferencesStrings.reconnectButton,
+            target: self,
+            action: #selector(reconnectClicked(_:)),
+            localizes: false
+        )
+        reconnect.tag = index
+        reconnect.toolTip = AccountsPreferencesStrings.reconnectTooltip
+        reconnect.setContentHuggingPriority(.required, for: .horizontal)
+
         let enabled = SettingsUI.toggle(
             isOn: account.isEnabled,
             target: self,
@@ -112,17 +148,34 @@ final class AccountsPreferencesViewController: NSViewController {
         icon.alphaValue *= dimmed
         labels.alphaValue = dimmed
 
-        // A dedicated spacer takes all the slack, so the trailing controls sit at the edge of
-        // every row rather than trailing whatever width the labels happen to be.
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let stack = NSStackView(views: [icon, labels, spacer, restore, enabled])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = Design.Spacing.medium
+        // Keep identity and availability on the first line. The two text actions have their own
+        // trailing line so the real 396-point Settings pane does not crush the account name.
+        let identitySpacer = NSView()
+        identitySpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        identitySpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let identity = NSStackView(views: [icon, labels, identitySpacer, enabled])
+        identity.orientation = .horizontal
+        identity.alignment = .centerY
+        identity.spacing = Design.Spacing.medium
         labels.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+
+        let actions = SettingsUI.controlGroup(
+            [restore, reconnect],
+            spacing: Design.Spacing.small
+        )
+        let actionSpacer = NSView()
+        actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        actionSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let actionLine = NSStackView(views: [actionSpacer, actions])
+        actionLine.orientation = .horizontal
+        actionLine.alignment = .centerY
+
+        let stack = NSStackView(views: [identity, actionLine])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        identity.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        actionLine.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         return padded(stack)
     }
@@ -251,6 +304,14 @@ final class AccountsPreferencesViewController: NSViewController {
         notifyAccountsChanged()
     }
 
+    /// Runs the provider-owned browser login again under this account's existing config home.
+    /// Credentials and transcripts remain provider-owned; no directory is removed or replaced.
+    @objc private func reconnectClicked(_ sender: ThemedButton) {
+        guard let account = account(at: sender.tag) else { return }
+        setupController.reconnect(account)
+        setupController.view.scrollToVisible(setupController.view.bounds)
+    }
+
     /// Takes an account out of use, or puts it back.
     ///
     /// Nothing on disk is touched: the config directory stays, its conversations stay, and the
@@ -317,11 +378,11 @@ enum AccountsPreferencesLayout {
 enum AccountsPreferencesStrings {
     static var explanation: String {
         L10n.string("""
-            Accounts are found automatically from your Claude and Codex config directories. \
-            Click an icon to pick an emoji, or rename an account to tell them apart in the \
-            sidebar. Clearing a name restores the one from your shell alias. Switch an account \
-            off to stop it being offered for new sessions — nothing is deleted, and sessions \
-            already running on it keep working.
+            Add and reconnect logins with the provider's own secure browser flow; Threading \
+            stores only the isolated config location, never a credential. Existing Claude and \
+            Codex config directories are still found automatically. Click an icon or rename a \
+            login to tell them apart. Switch one off to stop offering it for new sessions — \
+            nothing is deleted, and sessions already running on it keep working.
             """)
     }
     static var iconWellTooltip: String { L10n.string("Choose an icon") }
@@ -334,7 +395,13 @@ enum AccountsPreferencesStrings {
     static var enabledTooltip: String {
         L10n.string("Offer this account for new sessions")
     }
-    static var emptyMessage: String { L10n.string("No agent accounts found.") }
+    static var reconnectButton: String { L10n.string("Reconnect") }
+    static var reconnectTooltip: String {
+        L10n.string("Run this provider's secure sign-in again")
+    }
+    static var emptyMessage: String {
+        L10n.string("No agent accounts yet. Set up one to get started.")
+    }
 
     static func enabledLabel(_ accountName: String) -> String {
         L10n.format("Use %@ for new sessions", accountName)

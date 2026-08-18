@@ -75,6 +75,54 @@ final class TitlebarActionWindow: NSWindow {
         return MainWindowFrame.held(frameRect, within: bounds)
     }
 
+    /// What a picture dropped on the titlebar strip does, or nil while nothing is listening.
+    ///
+    /// The strip is the other half of "drop it on the icon": the Dock's icon is the one a person
+    /// reaches for when Threading is behind the thing they photographed, and this is the one they
+    /// reach for when it is already in front of them. Both open the same sheet.
+    ///
+    /// A closure rather than a delegate call, for `doubleClickAction`'s reason: the window is a
+    /// piece of chrome and the report belongs to the controller, and a test can state the answer.
+    var onScreenshotDropped: ((URL) -> Void)? {
+        didSet {
+            if onScreenshotDropped == nil {
+                unregisterDraggedTypes()
+            } else {
+                registerForDraggedTypes([.fileURL])
+            }
+        }
+    }
+
+    func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        droppableScreenshot(in: sender) == nil ? [] : .copy
+    }
+
+    func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        droppableScreenshot(in: sender) == nil ? [] : .copy
+    }
+
+    func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let url = droppableScreenshot(in: sender) else { return false }
+        onScreenshotDropped?(url)
+        return true
+    }
+
+    /// One image, dropped on the strip. Deliberately narrow on both counts: the strip is a target
+    /// a person cannot see, so it may only claim a drag it is certain about, and everything it
+    /// refuses falls through to whatever the window's content does with it.
+    private func droppableScreenshot(in sender: any NSDraggingInfo) -> URL? {
+        guard onScreenshotDropped != nil,
+              isInTitlebarStrip(sender.draggingLocation),
+              let urls = sender.draggingPasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+              ) as? [URL],
+              urls.count == 1,
+              let url = urls.first,
+              DroppedScreenshotReport.isReportable(url) else { return nil }
+        return url
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard event.clickCount == TitlebarDoubleClick.clickCount,
               isInTitlebarStrip(event.locationInWindow) else {

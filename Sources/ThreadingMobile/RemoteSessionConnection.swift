@@ -33,21 +33,46 @@ enum MobileCollaborationPresentation {
         return hasOtherParticipant(state)
     }
 
-    static func usesIndependentTerminalComposer(
+    /// How a terminal session takes typing on this phone. One answer rather than two booleans,
+    /// because "no composer" and "keystrokes go straight to the PTY" are not the same thing and
+    /// a caller that reads only one of them will eventually offer both or neither.
+    static func terminalInputMode(
         settingEnabled: Bool,
         supportsAtomicSubmission: Bool,
         capability: RemoteCapability,
         inputControlFeatureSupported: Bool,
+        canWrite: Bool,
         state: RemoteInputControlStateDTO?
-    ) -> Bool {
-        guard settingEnabled, supportsAtomicSubmission, capability == .interact else {
-            return false
+    ) -> MobileTerminalInputMode {
+        guard capability == .interact else { return .none }
+        guard settingEnabled, supportsAtomicSubmission else {
+            return canWrite ? .direct : .none
         }
-        // Preserve the safe atomic path until a new host sends its authoritative roster, and
-        // with an older host that cannot state whether another participant has joined.
-        guard inputControlFeatureSupported, let state else { return true }
-        return hasOtherParticipant(state)
+        // An older host cannot state whether another participant has joined, and never will, so
+        // the safe atomic path is its settled answer rather than a placeholder.
+        guard inputControlFeatureSupported else { return .independentComposer }
+        // A host that does send a roster has not necessarily sent it yet: `hello` and the first
+        // `inputControl` frame are two messages with a render between them. Answering
+        // `.independentComposer` for that gap put the line composer on screen for a frame and
+        // then took it away again on every solo terminal session — a flash of the non-TUI text
+        // area on the way into the TUI. Offer nothing until the roster settles it; the wait is
+        // one frame, and it is the same wait that keeps raw keystrokes from starting before we
+        // know whether somebody else holds the session.
+        guard let state else { return .none }
+        if hasOtherParticipant(state) { return .independentComposer }
+        return canWrite ? .direct : .none
     }
+}
+
+/// What a terminal session offers this phone for typing.
+enum MobileTerminalInputMode: Equatable {
+    /// Keystrokes reach the PTY as they are typed.
+    case direct
+    /// A whole line is composed here and submitted atomically, so two people cannot splice one
+    /// terminal line between them.
+    case independentComposer
+    /// Nothing: this viewer cannot write, or the host has not yet said who else is here.
+    case none
 }
 
 struct RemotePromptSubmissionFeedback: Equatable {
@@ -72,6 +97,35 @@ private struct PendingRemoteSubmission {
 private struct PendingAttentionRequest {
     let requestID: String
     let recipientID: String
+}
+
+/// Whether the agent is mid-turn, read from what one chat client can actually see.
+///
+/// The Mac never sends a status word over the wire, but it does send `canSend`, which each
+/// transport defines as `isRunning && input != nil && !isTurnInFlight && pendingPrompt == nil`
+/// and the server then narrows to this viewer's own capability. So on a connected session a
+/// client that *would* be allowed to type and is told it cannot is being told a turn is in
+/// flight — the mobile reading of the Mac's `isTurnInFlight`, which is what gates the orb there.
+///
+/// The two narrowings matter as much as the signal. A view-only viewer is sent `canSend: false`
+/// with no turn running at all, and a collaborator holding the input control makes it false for
+/// everyone else; neither is the agent working, so both answer `false` rather than spinning an
+/// orb about someone else's keyboard.
+enum MobileAgentTurnActivity {
+    static func isWorking(
+        isConnected: Bool,
+        capability: RemoteCapability,
+        canWrite: Bool,
+        canSend: Bool,
+        isPromptSubmissionPending: Bool
+    ) -> Bool {
+        guard isConnected, capability == .interact else { return false }
+        // A prompt still being acknowledged is the very start of a turn: the Mac has it and has
+        // not answered yet, so the composer is already closed on this side.
+        if isPromptSubmissionPending { return true }
+        guard canWrite else { return false }
+        return !canSend
+    }
 }
 
 @MainActor
@@ -158,6 +212,18 @@ final class RemoteSessionConnection: ObservableObject {
     }
     var onWorkspaceChanged: ((RemoteWorkspaceChangedDTO) -> Void)?
 
+    /// True while this session's agent is working on a turn — what the navigation title's orb
+    /// is drawn for. See `MobileAgentTurnActivity` for why `canSend` is the signal.
+    var isAgentWorking: Bool {
+        MobileAgentTurnActivity.isWorking(
+            isConnected: phase == .connected,
+            capability: capability,
+            canWrite: inputControl?.canWrite != false,
+            canSend: conversationCanSend,
+            isPromptSubmissionPending: isPromptSubmissionPending
+        )
+    }
+
     var shouldPresentInputControl: Bool {
         MobileCollaborationPresentation.showsInputControl(
             featureSupported: supportsFocusedInputControl,
@@ -166,12 +232,13 @@ final class RemoteSessionConnection: ObservableObject {
         )
     }
 
-    func usesIndependentTerminalComposer(settingEnabled: Bool) -> Bool {
-        MobileCollaborationPresentation.usesIndependentTerminalComposer(
+    func terminalInputMode(settingEnabled: Bool) -> MobileTerminalInputMode {
+        MobileCollaborationPresentation.terminalInputMode(
             settingEnabled: settingEnabled,
             supportsAtomicSubmission: supportsAtomicTerminalSubmission,
             capability: capability,
             inputControlFeatureSupported: supportsFocusedInputControl,
+            canWrite: inputControl?.canWrite != false,
             state: inputControl
         )
     }
@@ -1146,11 +1213,10 @@ final class RemoteSessionConnection: ObservableObject {
                 "› ",
             ]
         case "terminal-claude-tui":
-            // Claude's tool marker must stay a single terminal cell. U+23FA ("⏺") falls
-            // back to an emoji glyph on iOS, occupies two cells in SwiftTerm, and visually
-            // collides with the following label. U+25CF is the text glyph Claude renders
-            // for completed tool activity and remains one cell across the supported chromes.
-            let completedTool = "\u{25CF}"
+            // Keep Claude's actual one-cell marker in the fixture. SwiftTerm's renderer requests
+            // text presentation for narrow emoji-capable symbols, while genuine wide emoji stay
+            // color; substituting a safer bullet here would stop the evidence from testing that.
+            let completedTool = "\u{23FA}"
             lines = [
                 "\u{1b}[2J\u{1b}[H\u{1b}[1;35mClaude Code\u{1b}[0m",
                 "\u{1b}[2mSonnet · plan mode · AnotherTerminal\u{1b}[0m",

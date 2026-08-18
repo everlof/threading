@@ -670,9 +670,14 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         // alone would tear the plate it shares.
         guard drawsSurface else {
             applyThemeControlGlow(nil, radius: corner)
+            // In the tone the title is already cut from, for the reason the unwelded primary
+            // states below: on a plate the host filled with the accent, an accent ring is a ring
+            // painted on itself. The band outside it is the plate's fill rather than this half's,
+            // which is the one difference, and it does not change what the ring has to read on.
             drawKeyboardFocus(
                 around: ThemedSurface.Shape(rect: bounds, radius: corner),
-                color: Design.Surface.accent
+                color: isProminent ? foreground : Design.Surface.accent,
+                keepingEdge: isProminent ? Design.Accessibility.focusRingWidth : 0
             )
             drawContent(in: bounds)
             return
@@ -711,7 +716,9 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         defer { context?.restoreGState() }
 
         let raisedPrimary = isProminent && buttonStyle.primaryTreatment == .raised
-        let faceBounds = raisedPrimary ? bounds.insetBy(dx: 1, dy: 1) : bounds
+        let faceBounds = raisedPrimary
+            ? bounds.insetBy(dx: Plate.faceInset, dy: Plate.faceInset)
+            : bounds
 
         // A Win32 default button is not a blue action. It is the same raised button face as its
         // siblings, set apart by one additional dark frame around the bevel. The frame is always
@@ -1204,6 +1211,99 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         // a theme role is a dynamic colour and has no alpha to read until it is.
         let resolved = colour.usingColorSpace(.sRGB) ?? colour
         return resolved.withAlphaComponent(resolved.alphaComponent * Layout.disabledAlpha)
+    }
+
+    // MARK: - Welded Plates
+
+    /// The faces a **plate** paints when it welds a press of one emphasis to a second control.
+    ///
+    /// `SplitButtonView` draws one surface for two halves, so the halves draw none
+    /// (`drawsSurface`) and the plate draws this. Stated here rather than there because a welded
+    /// pair that resolved its own faces would drift from the button standing beside it the first
+    /// time a theme moved one of them.
+    struct Plate {
+        /// The resting face, drawn to the plate's whole silhouette.
+        let fill: NSColor
+        let border: NSColor?
+
+        /// What the half under the pointer fills with, painted **over** `fill` rather than
+        /// replacing it. That is the one place a plate cannot copy the button: a filled primary
+        /// raises with a wash of its own ink, because raising it with the accent again would
+        /// paint the colour it is already wearing and report nothing.
+        let raisedFill: NSColor
+
+        /// The extra outer frame a classic default pushbutton wears, filled to the plate's
+        /// silhouette with the face inset inside it. Nil for every other treatment.
+        let outerFrame: NSColor?
+
+        let shadow: AppTheme.Glow?
+        let collapsesShadowOnHover: Bool
+
+        /// Whether the face sits inside the plate, leaving `outerFrame` visible around it — the
+        /// frame's other half, and false wherever there is no frame.
+        var insetsFace: Bool { outerFrame != nil }
+
+        /// How far inside the frame the face sits. One point, because a default pushbutton's
+        /// extra frame is a rule rather than a border: the bevel is the face's own.
+        static let faceInset: CGFloat = 1
+    }
+
+    /// The plate for a press of this emphasis, under the material drawing it.
+    static func plate(for emphasis: Emphasis, material: AppTheme.Material) -> Plate {
+        let style = material.buttonStyle
+        let secondaryShadow: AppTheme.Glow?
+        switch style.secondaryShadow {
+        case .control: secondaryShadow = material.controlGlow
+        case .panel: secondaryShadow = material.glow
+        case .none: secondaryShadow = nil
+        }
+        let secondaryFace = AppThemePalette.color(style.secondaryRole)
+        let secondaryRaise = AppThemePalette.color(style.secondaryHoverRole)
+
+        // Tertiary shares the secondary plate: a plain press carries no surface of its own, but
+        // the *plate* is a surface by definition, and a welded pair is not the place to discover
+        // that one of its halves wanted to be invisible.
+        guard emphasis == .primary else {
+            return Plate(
+                fill: secondaryFace,
+                border: Design.Surface.border,
+                raisedFill: secondaryRaise,
+                outerFrame: nil,
+                shadow: secondaryShadow,
+                collapsesShadowOnHover: style.collapseShadowOnHover
+            )
+        }
+
+        let primary = AppThemePalette.color(style.primaryRole)
+        switch style.primaryTreatment {
+        case .filled:
+            return Plate(
+                fill: primary,
+                border: style.primaryBorderRole.map { AppThemePalette.color($0) },
+                raisedFill: Design.Ink.primaryAction.surface,
+                outerFrame: nil,
+                shadow: material.controlGlow,
+                collapsesShadowOnHover: style.collapseShadowOnHover
+            )
+        case .outlined:
+            return Plate(
+                fill: .clear,
+                border: primary,
+                raisedFill: primary.withAlphaComponent(1 - Layout.pressedDim),
+                outerFrame: nil,
+                shadow: material.controlGlow,
+                collapsesShadowOnHover: style.collapseShadowOnHover
+            )
+        case .raised:
+            return Plate(
+                fill: secondaryFace,
+                border: nil,
+                raisedFill: secondaryRaise,
+                outerFrame: primary,
+                shadow: material.controlGlow,
+                collapsesShadowOnHover: style.collapseShadowOnHover
+            )
+        }
     }
 
     private var surfaceFill: NSColor {

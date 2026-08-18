@@ -9,6 +9,14 @@ import UIKit
 /// to reveal its own button has to keep revealing its entry — a share that may recolour a
 /// terminal but not manage the session still needs the menu to appear.
 enum MobileSessionChrome {
+    /// The catalogue carries `AgentSession.displayTitle`, including an explicit rename. The
+    /// live socket title is a transient surface caption and may still hold the value from when
+    /// the detail connection opened, so it is only a bootstrap fallback for an empty catalogue
+    /// value rather than an authority over session chrome.
+    static func navigationTitle(catalogTitle: String, liveTitle: String?) -> String {
+        catalogTitle.isEmpty ? (liveTitle ?? catalogTitle) : catalogTitle
+    }
+
     static func canOpenWorkspace(canManageSessions: Bool, hasClient: Bool) -> Bool {
         canManageSessions && hasClient
     }
@@ -88,7 +96,10 @@ struct SessionDetailView: View {
                 }
             }
         }
-        .navigationTitle(connection?.title ?? currentSession.title)
+        .navigationTitle(MobileSessionChrome.navigationTitle(
+            catalogTitle: currentSession.title,
+            liveTitle: connection?.title
+        ))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if showsSessionMenu {
@@ -629,17 +640,15 @@ struct TerminalRemoteView: View {
         return Color(color)
     }
 
-    private var usesIndependentComposer: Bool {
-        connection.usesIndependentTerminalComposer(
+    private var inputMode: MobileTerminalInputMode {
+        connection.terminalInputMode(
             settingEnabled: notifications.independentTerminalDraftsEnabled
         )
     }
 
-    private var allowsDirectInput: Bool {
-        connection.capability == .interact
-            && !usesIndependentComposer
-            && connection.inputControl?.canWrite != false
-    }
+    private var usesIndependentComposer: Bool { inputMode == .independentComposer }
+
+    private var allowsDirectInput: Bool { inputMode == .direct }
 
     var body: some View {
         VStack(spacing: 0) {

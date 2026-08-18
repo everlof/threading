@@ -77,6 +77,25 @@ truth: a machine with several installs (a native `~/.local/bin/claude` beside a 
 `/usr/local/bin` npm one) shows whichever the *login shell* resolves, because that is the one
 a session will actually run.
 
+The account page is also a complete way in for somebody who has no alternate config homes yet.
+`AccountSetupCardViewController` is shared with Settings ▸ Accounts and puts **Add a login**
+before discovery's result, so the empty state never tells a new user to leave the app and invent
+one. The person chooses Claude or Codex and gives the login a local name; the coordinator derives
+a bounded `~/.claude-<slug>` or `~/.codex-<slug>` home, runs the installed provider CLI's official
+browser login under `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, and verifies the result with that CLI's
+status command. Login stdin and stdout are `/dev/null`: Threading neither asks for nor captures a
+token, URL or device code. Codex app-created homes explicitly choose its file credential store so
+the provider-owned credential remains isolated per `CODEX_HOME`; the file itself is never read by
+this flow. Cancellation terminates the login's process group, the browser wait is bounded to ten
+minutes, and a login is registered only after the provider status exits successfully.
+
+Provider choice, naming, browser wait, missing-CLI guidance, ordinary failure and verified success
+are explicit states rather than alerts layered over the page. The same card powers **Reconnect**
+in Accounts Settings against the existing config home, without deleting credentials, transcripts
+or presentation choices. UI evidence captures the empty, single-account, multiple-account and
+every setup/reconnect state in the real onboarding flow and production Settings page, System light
+and dark (`account-setup-layouts`).
+
 **Conversations** runs `GlobalSessionScan` — `SessionImporter`'s direction inverted. The
 project-scoped importer answers "what ran in this folder"; onboarding has no folders yet, so
 the scan enumerates everything each enabled account holds and derives the folder from each
@@ -93,7 +112,13 @@ user to reason about projects before they had any. The last 48 hours
 group (`addProject` dedups by path) and adopts the checked conversations through
 `ProjectStore.importSessions` — the batch exists because the single `importSession` saves and
 notifies per call, and a heavy user's import would stutter through hundreds of sidebar
-reloads. Because the accounts page sits before this one and can now switch logins off, the
+reloads. The flat list is a `ThemedGroupedTableView`: all conversations and their selected ids
+remain cheap values, while AppKit constructs only the checkbox rows intersecting the viewport.
+This boundary is load-bearing — a 1,495-conversation scan converted wholesale to a `SettingsCard`
+created 1,495 checkboxes, 2,989 arranged subviews and about 97,000 constraints, leaving the main
+thread in `NSStackView.updateConstraints` for seven minutes and pushing physical memory past 13 GB.
+The 1,500-row scaling fixture pins the repaired shape by requiring fewer than 40 checkbox views.
+Because the accounts page sits before this one and can now switch logins off, the
 scan result is cached against the *enabled-account set* that produced it; coming forward
 after a toggle rescans (generation-guarded) instead of showing a list a disabled login fed. Adopted sessions are `.resumable` with their account handle, so resume routes
 `--resume`/`codex resume` through the right `CLAUDE_CONFIG_DIR`/`CODEX_HOME` exactly as
@@ -120,9 +145,11 @@ flip cannot leave half the controls describing the old one.
 
 - It never fires a permission prompt unbidden — the notifications ask is behind an explicit
   button, and no other permission is touched (`permissions.md` still holds).
-- It writes no behavioural settings besides what the user toggles on the notifications page
-  after granting. Three-state settings (`defaultPermissionMode`, `claudeRemoteControl`) are
-  not offered — collapsing "no opinion" into a boolean would override CLI configuration.
+- It writes no unrelated behavioural settings. Account setup stores only a verified provider,
+  handle, config path and the local display name the person entered; notifications write only
+  what the person toggles after granting. Three-state settings (`defaultPermissionMode`,
+  `claudeRemoteControl`) are not offered — collapsing "no opinion" into a boolean would override
+  CLI configuration.
 - It does not create a "first project" — with nothing imported, the main window opens onto
   the composer's nil-project mode (see [`sessions.md`](sessions.md), "The Composer"), which
   is the richer version of that page.

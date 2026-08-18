@@ -957,6 +957,26 @@ filed, and ✕ dismisses the band. The band takes no focus, blocks nothing, and 
 answer it. It appears once for each unexpected quit, whether or not you restore, and the launch
 after it is an ordinary one.
 
+### Reporting a problem
+
+Two ways in. **Help ▸ Report a Problem…** is a form. **View ▸ Inspect…** captures the window and
+opens the same sheet on the picture, where clicking the image marks a place and the marks are
+written into the report as prose and as coordinates.
+
+**A screenshot you took yourself opens the sheet too.** Drop an image file on Threading's icon in
+the Dock, or on the strip beside the traffic lights at the top of the window, and the report sheet
+opens on that picture with the marking and the description already there. This exists for the
+things the inspector cannot photograph: a hover, a tooltip, a menu open over the thing it is
+covering. Take it with ⌘⇧4 while the state is on screen, then drop the file. A folder dropped on
+the icon still becomes a project.
+
+The sheet has one action, and the ways to take it sit under the chevron beside it: **Copy Report**
+puts the whole thing on the pasteboard, and the last one you used is the one the button offers
+next time. The main action is named after where it actually goes. **Send to Developer** appears
+when the build has a report service configured; otherwise it says **Send to Outbox**, saves to a
+folder on your Mac, and tells you how many reports are there. Nothing is deleted once it is
+delivered, so the folder is a record of everything you filed.
+
 ### Continuing with another provider
 
 Right-click a recorded chat and choose **Continue with…** to start a new session with any other
@@ -2215,12 +2235,26 @@ connection icon says which surface you will land in: a terminal for the agent's 
 bubble for a Native conversation. Rows are two lines tall, so a long chat title is shortened here
 and shown in full once the chat is open.
 
-You can also pair one iPhone with several Macs. **Devices** shows the current Mac and compact
-switch targets for the others; choosing one swaps the session list without re-pairing. The app
-remembers the selected Mac and the last open session. Because continuity uses the paired host
-identity rather than its current URL, switching between Tailscale and relay keeps the same saved
-state, while two different Macs that happen to expose the same provider session id remain
-separate.
+Starting a chat from the phone opens it. The **+** button's sheet closes onto the new chat's own
+screen rather than back onto the list, and stays there while the Mac starts the agent — a new
+session shows "Resuming on your Mac…" for as long as that takes.
+
+While the agent is working on a turn, the dotted thinking orb takes the place of the connection dot
+under the chat's title, tinted with the app theme's accent, exactly as it appears beside the
+conversation status on the Mac. It picks one of its nine animations per turn, never the one the
+previous turn used, and gives the dot its place back when the turn is done.
+
+The dashboard title names the connected Mac and shows its connection status underneath. Its
+leading Mac button replaces the old device card: choose another paired Mac there to swap the
+session list without re-pairing. The app remembers the selected Mac and the last open session.
+Because continuity uses the paired host identity rather than its current URL, switching between
+Tailscale and relay keeps the same saved state, while two different Macs that happen to expose
+the same provider session id remain separate.
+
+Choose a project heading to open that project. This screen contains only the project's chats;
+its title keeps the connection status visible, and the **+** in the navigation bar starts a chat
+already set to that project. Return to the Mac dashboard to browse another project or the recent
+list.
 
 On your own paired iPhone, open the dashboard's **…** menu and choose **Usage**. The native sheet
 contains the same **Overview** and **Limit History** subjects as the Mac, with independent 7-, 30-

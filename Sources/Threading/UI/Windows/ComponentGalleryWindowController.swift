@@ -1111,25 +1111,44 @@ final class ComponentGalleryViewController: NSViewController {
     }
 
     /// The titled counterpart on the pane's own ground — the attachments footer's press. Here
-    /// for the same reason as the icon plate above: what matters is the join, and that only a
-    /// *neutral* press can share one (`SplitButtonView`'s own doc states the emphasis rule).
+    /// for the same reason as the icon plate above: what matters is the join, and both emphases
+    /// are drawn side by side because that join is the whole component. The primary is the one
+    /// worth looking at under every theme: its plate is a block of the theme's primary role, and
+    /// the chevron on it is a glyph built for the chrome standing on a ground the chrome's roles
+    /// were never measured against (`InkSource.primaryAction`).
     private func makeTitledSplitStory() -> NSView {
-        let press = ThemedButton(
-            title: L10n.string("Copy Path"),
-            target: self,
-            action: #selector(titledSplitPressed)
-        )
+        row([
+            titledSplit(
+                title: L10n.string("Copy Path"),
+                accessibility: L10n.string("Attachment actions"),
+                emphasis: .secondary
+            ),
+            titledSplit(
+                title: L10n.string("Send to Developer"),
+                accessibility: L10n.string("Other ways to send"),
+                emphasis: .primary
+            ),
+        ])
+    }
+
+    private func titledSplit(
+        title: String,
+        accessibility: String,
+        emphasis: ThemedButton.Emphasis
+    ) -> SplitButtonView {
+        let press = ThemedButton(title: title, target: self, action: #selector(titledSplitPressed))
+        press.emphasis = emphasis
 
         let chevron = ThemedIconButton(
             symbolName: DesignSymbols.chevron,
-            accessibility: L10n.string("Attachment actions"),
+            accessibility: accessibility,
             target: .titledSplitMenu
         )
         chevron.onPress = { [weak self] in
-            self?.showReceipt(L10n.format("Pressed %@.", L10n.string("Attachment actions")))
+            self?.showReceipt(L10n.format("Pressed %@.", accessibility))
         }
 
-        return row([SplitButtonView(action: press, chevron: chevron)])
+        return SplitButtonView(action: press, chevron: chevron)
     }
 
     @objc private func titledSplitPressed() {

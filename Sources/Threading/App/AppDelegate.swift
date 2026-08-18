@@ -987,7 +987,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         return true
     }
 
-    /// Folders dropped on the app icon are added as projects.
+    /// What the app icon does with what is dropped on it: a folder becomes a project, and a
+    /// picture opens the report sheet on it (`DroppedScreenshotReport`).
+    ///
+    /// Two meanings for one target, told apart by what the file *is* rather than by a mode. They
+    /// do not compete: nobody drops a screenshot meaning to add its enclosing folder, and a
+    /// screenshot is the one file type this app has a second obvious thing to do with.
     func application(_ application: NSApplication, open urls: [URL]) {
         // Same reachability, worse consequence: *instantiating* `ProjectStore` writes
         // projects.json, which is the exact clobber the lock exists to prevent — so an instance
@@ -996,10 +1001,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         for url in urls {
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else { continue }
-
-            ProjectStore.shared.addProject(folderURL: url)
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+                continue
+            }
+            if isDirectory.boolValue {
+                ProjectStore.shared.addProject(folderURL: url)
+                continue
+            }
+            guard DroppedScreenshotReport.isReportable(url) else { continue }
+            // A drop on the Dock icon usually arrives while Threading is behind whatever the
+            // person just photographed, and a sheet nobody can see is not a report being filed.
+            NSApp.activate(ignoringOtherApps: true)
+            mainWindowController?.presentDroppedScreenshotReport(at: url, from: .appIcon)
         }
     }
 
@@ -2530,7 +2543,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // this and previous launches, and nothing else in the app asks about them. The read
             // is bounded by `MetricKitReadBudget`, which is what makes it safe to do inline on a
             // menu command that is already writing a file.
-            metricKitDiagnostics: MetricKitDiagnosticReader().read()
+            metricKitDiagnostics: MetricKitDiagnosticReader().read(),
+            // Unlike MetricKit's delayed delivery, this is present immediately after the
+            // watchdog fires — including when the user force-quit before main recovered.
+            mainThreadStallIncidents: MainThreadStallIncidentStore.shared.read()
         )
     }
 

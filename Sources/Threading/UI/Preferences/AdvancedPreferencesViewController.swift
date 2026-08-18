@@ -21,9 +21,17 @@ final class AdvancedPreferencesViewController: NSViewController {
         view = NSView()
     }
 
+#if DEBUG
+    /// Nil until the count has been read, which is what lets the row draw before it is known.
+    private var outboxRecordCount: Int?
+#endif
+
     override func viewDidLoad() {
         super.viewDidLoad()
         rebuild()
+#if DEBUG
+        refreshOutboxRecordCount()
+#endif
     }
 
     // MARK: - Build
@@ -33,18 +41,7 @@ final class AdvancedPreferencesViewController: NSViewController {
 
         let page = SettingsUI.page(title: "Advanced", sections: [
             SettingsUI.note(AdvancedStrings.explanation),
-            SettingsUI.section(AdvancedStrings.locationsSection, SettingsCard(rows: [
-                locationRow(
-                    title: AdvancedStrings.settingsLocationTitle,
-                    detail: abbreviate(AppDataLocations.preferencesFile),
-                    action: #selector(revealPreferences)
-                ),
-                locationRow(
-                    title: AdvancedStrings.dataLocationTitle,
-                    detail: abbreviate(AppDataLocations.supportDirectory),
-                    action: #selector(revealSupportDirectory)
-                )
-            ])),
+            SettingsUI.section(AdvancedStrings.locationsSection, SettingsCard(rows: locationRows())),
             SettingsUI.section(AdvancedStrings.tourSection, SettingsCard(rows: [
                 resetRow(
                     title: AdvancedStrings.tourTitle,
@@ -98,6 +95,35 @@ final class AdvancedPreferencesViewController: NSViewController {
 
     /// A path with a button that opens it. The path is the *detail*, not the title, because it
     /// is the long half and wrapping a title reads as a mistake.
+    /// Where things are. The third row is Debug-only and is the whole developer-facing half of
+    /// the report outbox: with no intake configured, reports accumulate in a folder nobody is
+    /// collecting from, and a folder you cannot find is indistinguishable from a report that was
+    /// never filed. A count and a way to open it is the entire feature — the triage is `cat`,
+    /// or an agent pointed at the same path.
+    private func locationRows() -> [NSView] {
+        var rows = [
+            locationRow(
+                title: AdvancedStrings.settingsLocationTitle,
+                detail: abbreviate(AppDataLocations.preferencesFile),
+                action: #selector(revealPreferences)
+            ),
+            locationRow(
+                title: AdvancedStrings.dataLocationTitle,
+                detail: abbreviate(AppDataLocations.supportDirectory),
+                action: #selector(revealSupportDirectory)
+            )
+        ]
+#if DEBUG
+        let location = abbreviate(MacIssueReportOutbox.shared.recordsLocation)
+        rows.append(locationRow(
+            title: AdvancedStrings.outboxLocationTitle,
+            detail: outboxRecordCount.map { L10n.format("%@ (%lld)", location, $0) } ?? location,
+            action: #selector(revealOutbox)
+        ))
+#endif
+        return rows
+    }
+
     private func locationRow(
         title: String,
         detail: String,
@@ -163,6 +189,25 @@ final class AdvancedPreferencesViewController: NSViewController {
     }
 
     // MARK: - Actions
+
+#if DEBUG
+    /// Read off the main actor and folded back in, because it is a directory listing whose size
+    /// is the user's own doing: the page draws immediately with the path, and gains the count.
+    private func refreshOutboxRecordCount() {
+        Task { @MainActor [weak self] in
+            let count = await MacIssueReportOutbox.shared.recordCount()
+            guard let self, outboxRecordCount != count else { return }
+            outboxRecordCount = count
+            rebuild()
+        }
+    }
+
+    @objc private func revealOutbox() {
+        let location = MacIssueReportOutbox.shared.recordsLocation
+        try? FileManager.default.createDirectory(at: location, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(location)
+    }
+#endif
 
     @objc private func revealPreferences() {
         reveal(AppDataLocations.preferencesFile)
@@ -277,6 +322,7 @@ enum AdvancedStrings {
     }
 
     static var locationsSection: String { L10n.string("Locations") }
+    static var outboxLocationTitle: String { L10n.string("Report Outbox") }
     static var settingsLocationTitle: String { L10n.string("Settings") }
     static var dataLocationTitle: String { L10n.string("Projects, sessions and caches") }
     static var reveal: String { L10n.string("Reveal") }

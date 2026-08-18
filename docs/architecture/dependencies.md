@@ -187,19 +187,46 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     pair sets are independently capped because a process controls 24-bit colour cardinality.
     `TerminalSession` defers the callback out of the draw pass and turns it into the app's
     dismissible diagnostic; see [`themes.md`](themes.md).
+  - **Emoji presentation follows the terminal grid, not CoreText's fallback taste.** A simple
+    emoji-capable grapheme stored in a one-column cell is rendered with Unicode text presentation
+    (VS15), preventing Apple Color Emoji from painting a glossy two-column bitmap over the next
+    cell. Two-column emoji, joined sequences, modifiers and keycaps remain untouched. This is a
+    render-only transform: the buffer still owns the exact bytes for copy and extraction, and the
+    attributed line maps cell boundaries to UTF-16 offsets so selection remains aligned after the
+    invisible selector is added. `SwiftTermUnicode` pins the presentation, buffer and selection
+    sides; the iPhone Claude TUI fixture carries the real U+23FA marker as rendered evidence.
   - **Still unclaimed, and dead the same way:** `deleteToBeginningOfLine:` (Cmd-Delete). Option
     with *forward* delete never reaches `doCommand(by:)` at all — `NSDeleteFunctionKey` carries
     `.function`, so `keyDown`'s function branch answers it first and sends plain forward-delete,
     dropping the modifier. Fixing that one means touching that branch, not this switch.
 
 - **ThinkingOrbs** (local fork): the dotted "working" thought-orb drawn beside the
-  conversation status while a turn is in flight.
+  conversation status while a turn is in flight — on the Mac, and in the iPhone chat's
+  navigation title.
   - Location: `./Packages/Vendor/ThinkingOrbs/` (git submodule), referenced as a local Swift package through
-    `XCLocalSwiftPackageReference` and mirrored entries in `project.pbxproj`.
+    `XCLocalSwiftPackageReference` and mirrored entries in `project.pbxproj`. Both app targets
+    link it.
   - Upstream: https://github.com/everlof/thinking-orbs-swift — **our fork**, mod it directly.
-  - The app uses only the AppKit `ThinkingOrbView` (a plain `NSView` drawing through a
-    CoreGraphics engine, display link on 14+ / 60Hz timer on 13). SwiftUI ships in the package
-    but the app touches none of it, so the app itself stays AppKit-only.
+  - The app uses only the two native front ends: the AppKit `ThinkingOrbView` (a plain `NSView`
+    drawing through a CoreGraphics engine, display link on 14+ / 60Hz timer on 13) and the
+    UIKit one. SwiftUI ships in the package but neither app touches it, so each stays in its
+    own framework.
+  - **The UIKit front end is ours.** Upstream ships SwiftUI and AppKit; `ThinkingOrbUIView.swift`
+    adds the same class over the same engine for UIKit, behind
+    `#if canImport(UIKit) && !canImport(AppKit)`. Two things differ from a transliteration. It
+    flips the CTM before handing the context over, because the engine's geometry is written for
+    an unflipped `NSView` and a mode with an up/down reading — the globe's scan meridian, the
+    wave — would otherwise run mirrored against the same orb on the Mac. And where AppKit stops
+    the display link on window occlusion and enclosing clip views, UIKit stops it on
+    `didMoveToWindow`, hidden/transparent ancestors, a bounds/window intersection, and
+    background/foreground notifications (tracked from the notifications rather than read from
+    `UIApplication.shared`, which app extensions cannot touch).
+  - **`staticFrameTime` is ours too**, and it is not `paused`. Pausing freezes whichever frame
+    was current, which is a different picture on every launch; a screenshot fixture needs the
+    same one every run, so this pins the clock position and stops the link. Reduce Motion takes
+    the same path at 0.6. `MobileWorkingOrbView` sets it under
+    `THREADING_MOBILE_UI_EVIDENCE_ID`, and pins the variant there too — a per-turn random
+    animation is the other thing a baseline cannot survive.
   - The fork tracks upstream's nine tuned states at both 64pt and 20pt: working/orbits,
     searching/globe, solving/rubik, listening/wave, connecting/web, weaving/braid,
     composing/ribbon, breathing/ring, and shaping/morph. Threading exposes all nine as fixed
@@ -210,7 +237,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     instead of luminance (an ink mark's visibility is `1 - white` on either substrate), so a
     tinted orb reads identically in light and dark, only in the accent's hue. `WorkingOrbView`
     (in `UI/Design/`) is the theme boundary that drives it from `Design.Surface.accent`,
-    re-resolved on a live theme switch and an appearance change.
+    re-resolved on a live theme switch and an appearance change. `MobileWorkingOrbView` (in
+    `Sources/ThreadingMobile/`) is the phone's counterpart and the only place there that names a
+    ThinkingOrbs type; it takes the accent from the palette the Mac sent, and takes the orb's
+    light/dark substrate from that theme's mode rather than from iOS's appearance, since the two
+    can disagree.
 
 - **LabelMorph** (local fork): the single-line label that morphs a name character by
   character when it changes, used for every session, project and checkout name the app shows.
@@ -341,3 +372,30 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - `ImageCompareView` lives in the app (`UI/Design/`), not the package, for now — hoisting
     it beside the text renderer is the intended move once its modes settle, and its theme
     adapter seam was cut to make that mechanical.
+
+- **InjectionNext** (downloaded developer tool, never a product dependency): opt-in function-body
+  hot reloading for the macOS Debug app.
+  - `scripts/injection_next.sh` pins release `2.0.1` and its archive SHA-256, then verifies the
+    bundle id, version, Developer ID team, code signature and Gatekeeper assessment before caching
+    it under the user's Library. Its signed client has an `/Applications/InjectionNext.app`
+    install name, so the script prepares a separate ad-hoc-signed cache copy with a cache-local
+    install name; neither the tool, package nor sources enter this repository, `Package.resolved`,
+    the app bundle or a Release build.
+  - `scripts/config/injection-next.xcconfig` exists outside every target configuration. Only the
+    script passes it through `XCODE_XCCONFIG_FILE` to the Xcode process InjectionNext supervises;
+    normal Xcode, command-line builds, hosted tests, profiling, CI and releases retain their
+    ordinary linker and compilation-cache behavior. The config also gates itself to Debug and
+    keys linker flags by wrapper extension, so Release and the three command-line helpers built
+    beside `Threading.app` do not load an injection client or lose their own `OTHER_LDFLAGS`.
+  - In that supervised Debug process the config disables Xcode's compilation cache, emits frontend
+    commands, links `libmacosxInjection.dylib` with `-interposable`, and supplies runpaths for the
+    client's XCTest support libraries from the selected Xcode. The script uses InjectionNext's
+    supervised-Xcode path rather than its fallback file watcher: command-line `xcodebuild` does not
+    create the IDE activity log the fallback needs, and watching the repository root makes the
+    upstream app offer to patch `project.pbxproj`. The supervised path uses ordinary user state:
+    every Xcode and InjectionNext process must quit before the wrapper starts, and every Threading
+    process must quit before Run so the injected app remains the sole owner of its live stores.
+  - This is an iteration aid, never evidence. It may replace existing function bodies but cannot
+    change type layout, stored properties, signatures or the source-file graph. A normal build and
+    the relevant tests remain the completion gate, rendered evidence remains the appearance gate,
+    and Release remains the performance and shipping gate.

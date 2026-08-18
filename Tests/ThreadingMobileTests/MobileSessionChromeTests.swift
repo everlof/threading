@@ -4,6 +4,26 @@ import XCTest
 @testable import ThreadingMobile
 
 final class MobileSessionChromeTests: XCTestCase {
+    func testRenamedCatalogueTitleReplacesTheStaleLiveDetailTitle() {
+        XCTAssertEqual(
+            MobileSessionChrome.navigationTitle(
+                catalogTitle: "Renamed session",
+                liveTitle: "Original session"
+            ),
+            "Renamed session"
+        )
+    }
+
+    func testLiveTitleBootstrapsChromeWhenTheCatalogueHasNoTitleYet() {
+        XCTAssertEqual(
+            MobileSessionChrome.navigationTitle(
+                catalogTitle: "",
+                liveTitle: "Connecting session"
+            ),
+            "Connecting session"
+        )
+    }
+
     func testOwnerSeesWorkspaceInTheMenu() {
         XCTAssertTrue(MobileSessionChrome.canOpenWorkspace(
             canManageSessions: true,

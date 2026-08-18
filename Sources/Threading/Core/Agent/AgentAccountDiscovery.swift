@@ -138,6 +138,12 @@ enum AgentAccountDiscovery {
         preferredAccount(for: provider)?.handle ?? .standard
     }
 
+    /// Drops the short filesystem cache after an in-app login has created or reverified a
+    /// provider home. Preference edits do not need this because they are layered after reads.
+    static func invalidate() {
+        cache.invalidate()
+    }
+
     // MARK: - Claude
 
     /// The standard `~/.claude` directory plus any `~/.claude-*` directory holding a config
@@ -170,6 +176,12 @@ enum AgentAccountDiscovery {
                 aliases: aliases
             ))
         }
+
+        appendRegisteredAccounts(
+            for: .claude,
+            aliases: aliases,
+            to: &accounts
+        )
 
         return accounts
     }
@@ -235,6 +247,12 @@ enum AgentAccountDiscovery {
             admit(handle: handle(for: directory), directory: directory)
         }
 
+        appendRegisteredAccounts(
+            for: .codex,
+            aliases: aliases,
+            to: &accounts
+        )
+
         return accounts
     }
 
@@ -274,6 +292,28 @@ enum AgentAccountDiscovery {
             configPath: path,
             displayName: displayName
         )
+    }
+
+    /// Merges locations verified through Threading's setup flow with marker-based legacy
+    /// discovery. This is what keeps a Codex login visible when its CLI uses the OS keyring and
+    /// therefore has no `auth.json` marker for a filesystem-only scan to find.
+    private static func appendRegisteredAccounts(
+        for provider: AgentKind,
+        aliases: [String: String],
+        to accounts: inout [AgentAccount]
+    ) {
+        var seen = Set(accounts.map { URL(fileURLWithPath: $0.configPath).standardizedFileURL.path })
+        for record in AgentAccountLocationRegistry.shared.records(for: provider) {
+            let directory = URL(fileURLWithPath: record.configPath).standardizedFileURL
+            guard isDirectory(directory), seen.insert(directory.path).inserted else { continue }
+            if provider == .claude, isClaudeScienceDataDirectory(directory) { continue }
+            accounts.append(makeAccount(
+                provider: provider,
+                handle: record.handle,
+                directory: directory,
+                aliases: aliases
+            ))
+        }
     }
 
     private static func applyingPreferences(to account: AgentAccount) -> AgentAccount {

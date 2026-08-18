@@ -466,6 +466,30 @@ then
   failed=1
 fi
 
+# A refusal beep is a sound, and this app has one switch for those. Fifty-eight call sites rang
+# `NSSound.beep()` themselves, which is how Silence Sounds came to silence the bell and the
+# banners while leaving the app's most frequent sound audible — and how a hosted test bundle,
+# which drives exactly the branches that beep, came to make noise in the developer's room from a
+# process nothing on screen accounts for. `SystemAlert.refuse()` asks the same gate the other two
+# sounds ask, and answers for the automated lanes as well.
+#
+# `NotificationSound.swift` is exempt because `SoundPlayer.playSystemAlertAdmitted` is not a
+# refusal: it is the *bell's* system sound, whose gate `TerminalBell.ring` consults ahead of the
+# rate limiter, and which the settings audition reaches deliberately ungated.
+#
+# Comment lines are skipped rather than the files holding them: three of the notes explaining this
+# seam quote the call they replaced, and a rule that made those unwriteable would erase the only
+# record of why the seam exists.
+if rg -n --pcre2 '^(?!\s*//).*NSSound\.beep\(\)' \
+  "${repository_directory}/Sources/Threading" \
+  --glob '*.swift' \
+  --glob '!**/Core/Session/SystemAlert.swift' \
+  --glob '!**/Core/Session/NotificationSound.swift'; then
+  echo "architecture-boundary: refuse with SystemAlert.refuse(), not NSSound.beep() — a sound the" >&2
+  echo "  user cannot silence is the one bug a silence switch does not survive" >&2
+  failed=1
+fi
+
 if (( failed )); then
   exit 1
 fi

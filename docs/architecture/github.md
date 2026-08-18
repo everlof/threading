@@ -111,16 +111,16 @@ retrying would risk filing a duplicate.
 Debug builds only. The same reviewed report, opened as a chat in the repository the running
 binary was compiled from, instead of being posted to the private intake.
 
-The reason is not convenience. `MacIssueReportOutbox` is durable by design: a report the intake
-service does not accept stays on disk and retries, so nothing is lost. While that service is
-still a checklist rather than a deployment (see
-[`issue-reporting-setup.md`](../operations/issue-reporting-setup.md)), *every* report a
-developer files behaves that way — two sat in `~/Library/Application Support/Threading/
-IssueReports/Outbox/` for two days, exactly as specified, and told nobody anything. A queue for
-a service that does not answer yet is not a way to say something to someone.
+The reason is not convenience. It is that a chat is a *reader*, and for a long time the private
+route had none: `MacIssueReportOutbox` retried a service that was still a checklist rather than a
+deployment (see [`issue-reporting-setup.md`](../operations/issue-reporting-setup.md)), so two
+reports sat in `~/Library/Application Support/Threading/IssueReports/Outbox/` for two days,
+exactly as specified, and told nobody anything.
 
-So the button takes, in one press, the path a developer takes by hand: Copy Report, new chat,
-paste, Return.
+The outbox now says which of those two things it is doing (see **Where a private report goes**
+below), so the sheet no longer promises a retry nothing can perform. This button remains the
+fastest way to be *read*: it takes, in one press, the path a developer takes by hand — Copy
+Report, new chat, paste, Return.
 
 Four decisions are worth their words:
 
@@ -151,6 +151,68 @@ new-session path, which is already the one shape that creates and launches a ses
 opening prompt. It differs in one respect, and on purpose: this one **selects** the new row. A
 schedule firing at 09:00 must not reach across whatever the user is reading; a button pressed a
 moment ago is being waited on, and the chat coming up is the receipt.
+
+## Where a private report goes (`MacIssueReportOutbox`)
+
+Every report is written to disk before anything is sent, and delivery never consumes it. Two
+directories under `~/Library/Application Support/Threading/IssueReports/`:
+
+- **`Outbox/<id>/`** — the record. `report.md` is the report as it reads to someone standing on
+  this machine, `screenshot.png` is the capture at the size it was taken, and `submission.json`
+  and `receipt.json` join it once a package has actually been delivered. Unbounded on purpose:
+  filing a hundred of these and having an agent triage the folder is a supported way to work, and
+  no code path reads the folder as a whole beyond a bounded count for a status line.
+- **`Pending/<id>.json`** — the delivery queue. The bounded wire package, present only while
+  there is an endpoint to send to and it has not arrived, retried on launch and on every
+  `didBecomeActive`. Same UUID on every attempt, so a lost response returns the first receipt.
+
+**The record and the package are two documents, not one truncated twice.** The package is bounded
+(64 KB, a 12 KB JPEG preview, the capture's path stripped) because an intake service is entitled
+to an opinion about size and a temporary path here means nothing to it. The record keeps the
+full-resolution PNG and the path, because it is read by a person in Finder or an agent with
+`cat`, and a UI defect is often a few pixels that a 480-point preview has already thrown away.
+A report too large to send is therefore still a report that was kept.
+
+**Delivery is attempted only against a configured endpoint.** There is no compiled-in fallback
+URL: `THREADING_REPORT_INTAKE_URL` (Debug only, what `./dev` sets) or `ThreadingReportIntakeURL`
+in Info.plist, or nowhere. A build that states neither writes the record, reports **saved** rather
+than queued, and does not post — which is the everyday state of a developer build, and was
+previously indistinguishable from a delivery that had failed. Because the queue only exists when
+somewhere to send exists, its bound is never what stops a report being filed.
+
+## The sheet's one action (`DeveloperReportSubmitControl`)
+
+Copy Report, Send to Chat and Send to Developer were three buttons in a row, ranked by a layout
+rather than by what the person filing the report does with it. They are one control now: the press
+is whichever was taken last (`PreferenceStore`, re-resolved against what this build actually
+offers, so a remembered Chat is not a Release build's press to nowhere), and the chevron holds the
+rest. A sheet with one action draws no chevron, which is the rule the attachments pane's scope
+band already follows.
+
+The press is the sheet's accent action *and* welded to its chevron, which was not possible until
+the plate learned to carry an emphasis — see `SplitButtonView` and
+[`design-system.md`](design-system.md). Its title is the outbox rule above, said in a word:
+**Send to Developer** with an endpoint configured, **Send to Outbox** without one.
+
+## A picture taken outside Threading (`DroppedScreenshotReport`)
+
+The inspector photographs the window, which is the wrong evidence for a **hover**: the capture is
+taken from a menu the pointer had to travel to, so the highlight, the tooltip, or the open menu is
+the one thing missing from the picture. macOS's own ⌘⇧4 has no such problem.
+
+So the report sheet accepts a file, through two doors that are both "the app icon" in the sense
+that matters: the Dock's icon (`application(_:open:)`, which already turned dropped folders into
+projects and now tells the two apart by declared type), and the titlebar strip beside the traffic
+lights (`TitlebarActionWindow.onScreenshotDropped`). Neither is discoverable by looking, and both
+are where a Mac user already drops a file.
+
+The strip is narrow on purpose: one file, an image, and only while the pointer is above
+`contentLayoutRect` — the same geometry that restores the window's double-click. Everything else
+falls through to whatever the content below does with it, because an invisible target that claims
+a drag a pane wanted is worse than no target.
+
+What such a report loses is the geometry the inspector knows by construction. What it keeps is the
+picture and the marks put on it, which is what the sheet was worth opening for.
 
 ## GitHub pull-request adapter (`GitHubPullRequestClient`)
 

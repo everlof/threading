@@ -3,7 +3,7 @@ import XCTest
 @testable import Threading
 
 /// The row of controls that belongs to content: one height across every member, the two runs at
-/// opposite edges, and the outer two aligned by ink.
+/// opposite edges, and the outer two interaction surfaces held inside the row.
 ///
 /// The bug behind it was reported on the Compare tab — *the buttons next to Wipe feel unbalanced
 /// and too small* — and every claim here is one half of that sentence. "Too small" is the height
@@ -166,24 +166,46 @@ final class ControlRowTests: XCTestCase {
         let row = ControlRowView(leading: [chip, caption], trailing: [export, expand])
         _ = laidOut(row)
 
-        // The ink, not the frame: an icon button's frame carries the padding its hover surface
-        // needs, and the row pulls that back out so the mark lands on the margin.
-        let trailingInk = placed(expand, in: row).maxX - expand.opticalHorizontalInset
         XCTAssertEqual(
-            trailingInk, row.bounds.maxX, accuracy: 0.5,
-            "the last action's mark sits \(row.bounds.maxX - trailingInk)pt off the row's edge"
+            placed(expand, in: row).maxX, row.bounds.maxX, accuracy: 0.5,
+            "the last action's interaction surface does not end on the row's edge"
         )
-        // The chip states an inset of its own now that its plate is only drawn under the
-        // pointer, so what lands on the margin is its title rather than the edge of a shape
-        // nobody is looking at.
         XCTAssertEqual(
-            placed(chip, in: row).minX + chip.opticalHorizontalInset,
-            row.bounds.minX,
-            accuracy: 0.5
+            placed(chip, in: row).minX, row.bounds.minX, accuracy: 0.5,
+            "the chip's hover and focus plate should stay inside the row margin"
         )
         XCTAssertGreaterThan(
             placed(export, in: row).minX - placed(chip, in: row).maxX, Fixture.width / 2,
             "the actions collapsed back against the chip instead of holding the far edge"
+        )
+    }
+
+    @MainActor
+    func testRelatedButtonsFormOneTightRunAndAdoptTheRowsHeight() {
+        let jump = makeAction("doc.text.magnifyingglass")
+        let layout = makeAction("rectangle.split.2x1")
+        let files = makeAction("sidebar.right")
+        let group = ControlButtonGroupView(buttons: [jump, layout, files])
+        let row = ControlRowView(leading: [makeChip()], trailing: [group])
+        _ = laidOut(row)
+
+        for button in group.buttons {
+            XCTAssertEqual(button.frame.height, row.frame.height, accuracy: 0.5)
+        }
+        XCTAssertEqual(
+            layout.frame.minX - jump.frame.maxX,
+            Design.Spacing.tight,
+            accuracy: 0.5,
+            "related controls should use the group's compact internal spacing"
+        )
+        XCTAssertEqual(
+            files.frame.minX - layout.frame.maxX,
+            Design.Spacing.tight,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            placed(group, in: row).maxX, row.bounds.maxX, accuracy: 0.5,
+            "the grouped run's final hover target should stay on the row margin"
         )
     }
 
@@ -249,9 +271,7 @@ final class ControlRowTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(
-            placed(chip, in: row).minX + chip.opticalHorizontalInset,
-            row.bounds.minX,
-            accuracy: 0.5,
+            placed(chip, in: row).minX, row.bounds.minX, accuracy: 0.5,
             "the chip stayed indented past a button that is not on screen"
         )
     }
@@ -326,9 +346,8 @@ final class ControlRowTests: XCTestCase {
         let last = try XCTUnwrap(
             actions.max { placed($0, in: row).maxX < placed($1, in: row).maxX }
         )
-        let inkRight = placed(last, in: row).maxX - last.opticalHorizontalInset
         XCTAssertEqual(
-            inkRight, row.bounds.maxX, accuracy: 0.5,
+            placed(last, in: row).maxX, row.bounds.maxX, accuracy: 0.5,
             "the actions do not reach the header's trailing edge"
         )
     }
@@ -697,9 +716,8 @@ final class ControlRowTests: XCTestCase {
     /// scaffolding — this one did, and the compression it was accusing the row of skipping was
     /// working the whole time.
     ///
-    /// The row is inset like a pane's content, for the same reason: a control aligned by ink has
-    /// its hover surface reaching past the margin its glyph sits on, and flush against the host
-    /// there is nowhere for that overhang to go.
+    /// The row is inset like a pane's content so the fixture exercises the same declared margin
+    /// the real hosts do. Every interaction surface must remain inside it.
     @MainActor
     @discardableResult
     private func laidOut(

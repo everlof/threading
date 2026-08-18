@@ -317,7 +317,7 @@ extension MainWindowController: NSToolbarDelegate {
     /// Opens the visible page's checkout in the app used last. Also the ⌘O command's whole body.
     func openInPreferredApp() {
         guard let folder = currentFolderURL else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -335,7 +335,7 @@ extension MainWindowController: NSToolbarDelegate {
         ExternalAppLauncher.shared.refresh()
 
         guard let folder = currentFolderURL else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 

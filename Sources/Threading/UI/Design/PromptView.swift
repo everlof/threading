@@ -63,6 +63,11 @@ final class PromptView: NSView, ThemedComponent {
     private let footerSpacer = NSView()
     private let completionPresenter = PromptCompletionPresenter()
     private var attachments: [PromptImageAttachment] = []
+    /// Paths are cheap queue state. File inspection and ImageIO rasterization happen serially on
+    /// a worker, and only the bounded finished frame returns to this AppKit component.
+    private var pendingAttachmentPaths: [String] = []
+    private var attachmentPreparationTask: Task<Void, Never>?
+    private var attachmentPreparationGeneration = 0
     private(set) var contextAttachments: [ConversationContextAttachment] = []
     private var isTextFocused = false
 
@@ -318,8 +323,11 @@ final class PromptView: NSView, ThemedComponent {
     ///
     /// The paths stay out of `stringValue`: a filesystem name is transport detail, and putting
     /// it into the editor is what made a pasted screenshot look like accidental prompt text.
+    /// Pending paths participate in draft/stash ownership immediately even though submission
+    /// waits for their preview classification; changing composer modes must not lose a file whose
+    /// worker has not returned yet.
     var attachmentPaths: [String] {
-        attachments.map(\.path)
+        attachments.map(\.path) + pendingAttachmentPaths
     }
 
     /// What the agent receives: the words exactly as typed, followed by quoted image paths.
@@ -332,7 +340,7 @@ final class PromptView: NSView, ThemedComponent {
 
     /// The answer used by both an in-box submit and an owner-provided outside action.
     var isSubmissionAvailable: Bool {
-        hasSubmittableContent && isSubmissionEnabled
+        hasSubmittableContent && pendingAttachmentPaths.isEmpty && isSubmissionEnabled
     }
 
     // MARK: - Initialization
@@ -1017,7 +1025,11 @@ final class PromptView: NSView, ThemedComponent {
     /// file, and silently carrying one from one project's composer to another is worse than
     /// asking for it again.
     func clearAttachments() {
-        guard !attachments.isEmpty else { return }
+        guard !attachments.isEmpty || !pendingAttachmentPaths.isEmpty else { return }
+        attachmentPreparationGeneration += 1
+        attachmentPreparationTask?.cancel()
+        attachmentPreparationTask = nil
+        pendingAttachmentPaths.removeAll()
         attachments.removeAll()
         attachmentStack.arrangedSubviews.forEach {
             attachmentStack.removeArrangedSubview($0)
@@ -1102,7 +1114,7 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private func submit(intent: PromptSubmitIntent) {
-        guard isSubmissionEnabled else { return }
+        guard isSubmissionEnabled, pendingAttachmentPaths.isEmpty else { return }
 
         // ⌘Return joins the running turn where the transport allows it. Everywhere else it is an
         // ordinary send — which, while a turn is in flight, the owner reads as "queue this".
@@ -1131,57 +1143,103 @@ final class PromptView: NSView, ThemedComponent {
             return
         }
 
-        var literalPaths: [String] = []
-
-        for path in paths {
-            guard let image = BoundedImageDecoder.image(
-                at: URL(fileURLWithPath: path),
-                policy: .composerPreview
-            ), image.isValid else {
-                literalPaths.append(path)
-                continue
-            }
-
-            let attachment = PromptImageAttachment(path: path, image: image)
-            attachments.append(attachment)
-
-            let thumbnail = PromptAttachmentThumbnail(attachment: attachment)
-            thumbnail.inspectorSelectionProvider = { [weak self] in
-                guard let self,
-                      let selectedIndex = self.attachments.firstIndex(where: {
-                          $0.id == attachment.id
-                      })
-                else { return nil }
-
-                let items = self.attachments.map {
-                    MediaInspectorItem(
-                        url: URL(fileURLWithPath: $0.path),
-                        title: $0.name,
-                        image: $0.image
-                    )
-                }
-                return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
-            }
-            thumbnail.onRemove = { [weak self, weak thumbnail] in
-                guard let self, let thumbnail else { return }
-                self.removeAttachment(id: attachment.id, thumbnail: thumbnail)
-            }
-            if onRequestImageComment != nil {
-                thumbnail.onComment = { [weak self] in
-                    self?.onRequestImageComment?(attachment.path)
-                }
-            }
-            attachmentStack.addArrangedSubview(thumbnail)
-        }
-
-        if !attachments.isEmpty {
-            attachmentScrollView.isHidden = false
-            layoutAttachmentStrip()
-        }
-
-        insertLiteralPaths(literalPaths)
+        // Thumbnails are convenience, not a reason to create one view and one retained bitmap
+        // per dropped path forever. Overflow remains fully sendable as ordinary quoted paths.
+        let available = max(
+            PromptViewDefaults.maximumImageAttachments
+                - attachments.count
+                - pendingAttachmentPaths.count,
+            0
+        )
+        let candidates = Array(paths.prefix(available))
+        let overflow = Array(paths.dropFirst(candidates.count))
+        pendingAttachmentPaths.append(contentsOf: candidates)
+        insertLiteralPaths(overflow)
         updateSubmitState()
         updateHeight()
+        prepareNextAttachmentIfNeeded()
+    }
+
+    /// Serial preparation bounds both concurrent file pressure and the number of decoded images
+    /// retained by the composer. A generation invalidates an in-flight worker when the draft is
+    /// cleared, so a late frame cannot resurrect an attachment after submission or cancellation.
+    private func prepareNextAttachmentIfNeeded() {
+        guard attachmentPreparationTask == nil, !pendingAttachmentPaths.isEmpty else { return }
+        let expectedGeneration = attachmentPreparationGeneration
+
+        attachmentPreparationTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let path = self?.pendingAttachmentPaths.first else { break }
+                let frame: CGImage? = await Task.detached(priority: .userInitiated) {
+                    let policy = BoundedImageDecodePolicy.composerAttachmentThumbnail
+                    guard let data = try? BoundedFileReader.read(
+                        URL(fileURLWithPath: path),
+                        maximumBytes: policy.maximumBytes
+                    ) else { return nil }
+                    return BoundedImageDecoder.thumbnailFrame(data, policy: policy)
+                }.value
+
+                guard !Task.isCancelled,
+                      let self,
+                      self.attachmentPreparationGeneration == expectedGeneration else {
+                    return
+                }
+                guard self.pendingAttachmentPaths.first == path else { continue }
+                self.pendingAttachmentPaths.removeFirst()
+
+                if let frame {
+                    self.installAttachment(path: path, frame: frame)
+                } else {
+                    self.insertLiteralPaths([path])
+                }
+                self.updateSubmitState()
+                self.updateHeight()
+            }
+
+            guard let self,
+                  self.attachmentPreparationGeneration == expectedGeneration else { return }
+            self.attachmentPreparationTask = nil
+            self.updateSubmitState()
+        }
+    }
+
+    private func installAttachment(path: String, frame: CGImage) {
+        let image = NSImage(
+            cgImage: frame,
+            size: NSSize(width: frame.width, height: frame.height)
+        )
+        let attachment = PromptImageAttachment(path: path, image: image)
+        attachments.append(attachment)
+
+        let thumbnail = PromptAttachmentThumbnail(attachment: attachment)
+        thumbnail.inspectorSelectionProvider = { [weak self] in
+            guard let self,
+                  let selectedIndex = self.attachments.firstIndex(where: {
+                      $0.id == attachment.id
+                  })
+            else { return nil }
+
+            let items = self.attachments.map {
+                MediaInspectorItem(
+                    url: URL(fileURLWithPath: $0.path),
+                    title: $0.name,
+                    image: $0.image
+                )
+            }
+            return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
+        }
+        thumbnail.onRemove = { [weak self, weak thumbnail] in
+            guard let self, let thumbnail else { return }
+            self.removeAttachment(id: attachment.id, thumbnail: thumbnail)
+        }
+        if onRequestImageComment != nil {
+            thumbnail.onComment = { [weak self] in
+                self?.onRequestImageComment?(attachment.path)
+            }
+        }
+        attachmentStack.addArrangedSubview(thumbnail)
+        attachmentScrollView.isHidden = false
+        layoutAttachmentStrip()
     }
 
     private func insertLiteralPaths(_ paths: [String]) {
@@ -1335,12 +1393,15 @@ final class PromptView: NSView, ThemedComponent {
             contentTrailingBesideChevron?.isActive = true
         }
 
-        scheduleChevron.isEnabled = hasContent && isSubmissionEnabled
+        scheduleChevron.isEnabled = hasContent
+            && pendingAttachmentPaths.isEmpty
+            && isSubmissionEnabled
     }
 
     private var hasSubmittableContent: Bool {
         !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !attachments.isEmpty
+            || !pendingAttachmentPaths.isEmpty
             || !contextAttachments.isEmpty
     }
 
@@ -1365,7 +1426,10 @@ final class PromptView: NSView, ThemedComponent {
     /// at the keystroke, and this is called on every edit, every enable change and every
     /// placement change — so the words follow the setting without observing it.
     private func refreshSubmitTitle() {
-        submitButton.toolTip = submissionDisabledReason ?? submitTitle
+        submitButton.toolTip = submissionDisabledReason
+            ?? (!pendingAttachmentPaths.isEmpty && !composerMode.canStop
+                ? L10n.string("Preparing attachments…")
+                : submitTitle)
     }
 
     /// The glyph's own name, which changes with what it will do.
@@ -1640,7 +1704,7 @@ private final class PromptAttachmentThumbnail: ThemedControl {
                 )
             }
         guard let selection, MediaInspectorPresenter.present(selection, from: self) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return false
         }
         return true
@@ -1685,21 +1749,21 @@ private final class PromptAttachmentThumbnail: ThemedControl {
 
     private func openQuickLook() {
         guard QuickLookPresenter.shared.present(existingFileURL) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
     }
 
     private func openInDefaultApp() {
         guard let url = existingFileURL, NSWorkspace.shared.open(url) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
     }
 
     private func revealInFinder() {
         guard let url = existingFileURL else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -1719,7 +1783,7 @@ private final class PromptAttachmentThumbnail: ThemedControl {
 
     private func copyFilePath() {
         guard let url = existingFileURL else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -2200,6 +2264,7 @@ enum PromptSubmitIntent: Equatable {
 
 enum PromptViewDefaults {
     static let submitSize = Design.Size.compactSubmitHeight
+    static let maximumImageAttachments = 32
 
     /// Below every control the footer row can hold, so the empty middle between the two runs is
     /// what stretches when there is room and what disappears when there is not. Any real

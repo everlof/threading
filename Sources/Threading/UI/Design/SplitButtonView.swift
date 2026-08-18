@@ -22,16 +22,21 @@ extension ThemedButton: SplitControlHalf {}
 /// `SplitIconButtonView` states the construction — one silhouette, halves that draw no surface
 /// of their own, a raise filled *inside* the plate — for the toolbar's icon pair, on the window
 /// backdrop. This is the same control on the pane's own ground for a press with a title: the
-/// plate draws exactly what a secondary `ThemedButton` would (its material's resting fill,
-/// hairline and depth), so a welded pair reads as one member of the button family rather than
-/// as a new kind of thing.
+/// plate draws exactly what the press it holds would have drawn for itself (its material's
+/// resting fill, hairline and depth at that emphasis), so a welded pair reads as one member of
+/// the button family rather than as a new kind of thing.
 ///
-/// **Welding follows emphasis, not the pairing.** Two neutral secondaries can share a plate,
-/// because nothing is drawn between them at rest. An accent-filled primary cannot: the join
-/// against a neutral chevron would be a permanent colour seam, which is the one thing this
-/// construction exists to remove. That is why the composer's Start Session keeps its clock
-/// *beside* it (`ThemedIconButton.Target.besidePrimary`) — the spread form is the primary's
-/// ranking, not a missing weld.
+/// **Welding follows matched emphasis.** Nothing is drawn between the halves at rest, so a plate
+/// holds no seam as long as both halves are standing on the same ground. What cannot share a
+/// plate is a *mismatch*: an accent-filled press against a chevron still reading the chrome's
+/// roles is a permanent colour seam, which is the one thing this construction exists to remove.
+///
+/// So the plate takes the press's emphasis and then says so, rather than refusing the pairing.
+/// It paints the face `ThemedButton` would paint (`ThemedButton.plate(for:material:)`) and names
+/// the ground it painted to the chevron (`hostGround`), which is how a glyph built for the chrome
+/// comes out legible on a block of accent. The two forms are then a real choice: the composer's
+/// Start Session keeps its clock *beside* it (`ThemedIconButton.Target.besidePrimary`) because a
+/// send and a schedule act on different things, not because the weld was unavailable.
 ///
 /// The halves are deliberately not the same width (`Design.Size.splitMenuWidth`), for the
 /// ranking both split plates draw: the press is the point of the control and the chevron is
@@ -61,12 +66,6 @@ final class SplitButtonView: NSView, ThemedComponent {
     // MARK: - Initialization
 
     init(action: ThemedButton, chevron: ThemedIconButton) {
-        // Welding follows emphasis — see the type's documentation. A primary press against a
-        // neutral chevron would hold the permanent seam this plate exists to remove.
-        assert(
-            action.emphasis != .primary,
-            "a primary press cannot share a plate — keep the pair beside each other instead"
-        )
         self.action = action
         self.chevron = chevron
         super.init(frame: .zero)
@@ -119,25 +118,38 @@ final class SplitButtonView: NSView, ThemedComponent {
     /// recorded to go stale — `ThemeRedraw` asks, the material answers.
     override func draw(_ dirtyRect: NSRect) {
         let material = AppThemePalette.current.material(for: effectiveAppearance)
-        let style = material.buttonStyle
+        // The faces the press would have drawn for itself, so the welded pair and the button
+        // beside it cannot come out different depths, fills or frames.
+        let plate = ThemedButton.plate(for: action.emphasis, material: material)
         let corner = Design.Radius.control(fitting: bounds.size)
 
-        // The resting secondary depth, exactly as `ThemedButton` states it — a welded pair must
-        // not read flatter than the buttons it stands with. Collapsed under the pointer only
-        // where the material says a lifted control sets down when reached for.
-        let shadow: AppTheme.Glow?
-        switch style.secondaryShadow {
-        case .control: shadow = material.controlGlow
-        case .panel: shadow = material.glow
-        case .none: shadow = nil
+        // The chevron is told which ground it is standing on rather than handed an ink, so a
+        // theme switch is answered at the next draw instead of keeping the colour the plate
+        // started under. Resolved here rather than at init because `emphasis` stays the caller's
+        // to set: a "last used wins" press is retitled, and re-ranked, by its own menu.
+        // `hostGround` ignores a value it already holds, so a redraw that changed nothing costs
+        // one comparison.
+        chevron.hostGround = action.emphasis == .primary ? .primaryAction : nil
+
+        // A welded pair must not read flatter than the buttons it stands with. Collapsed under
+        // the pointer only where the material says a lifted control sets down when reached for.
+        let collapses = plate.collapsesShadowOnHover && halves.contains { $0.isRaised }
+        applyThemeControlGlow(collapses ? nil : plate.shadow, radius: corner)
+
+        // A classic default pushbutton is the ordinary face inside one extra frame. Filled to the
+        // plate's *silhouette*, not its box: on a rounded material a square frame leaves a corner
+        // of frame colour outside every curve, which reads as a tab behind the control.
+        if let outerFrame = plate.outerFrame {
+            outerFrame.setFill()
+            ThemedSurface.Shape(rect: bounds, radius: corner).path.fill()
         }
-        let collapses = style.collapseShadowOnHover && halves.contains { $0.isRaised }
-        applyThemeControlGlow(collapses ? nil : shadow, radius: corner)
 
         let shape = ThemedSurface.draw(
-            bounds,
-            fill: AppThemePalette.color(style.secondaryRole),
-            border: Design.Surface.border,
+            plate.insetsFace
+                ? bounds.insetBy(dx: ThemedButton.Plate.faceInset, dy: ThemedButton.Plate.faceInset)
+                : bounds,
+            fill: plate.fill,
+            border: plate.border,
             radius: corner
         )
 
@@ -149,7 +161,7 @@ final class SplitButtonView: NSView, ThemedComponent {
         // and the inner edge is straight, which is what makes a raised half read as part of the
         // control and not as a second control inside it.
         shape.inset(by: edgeInset).path.addClip()
-        AppThemePalette.color(style.secondaryHoverRole).setFill()
+        plate.raisedFill.setFill()
         raised.frame.fill()
     }
 

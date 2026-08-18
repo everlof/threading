@@ -56,9 +56,81 @@ final class SwiftTermUnicode: XCTestCase {
         XCTAssertEqual(char0_1, "👦")
         XCTAssertEqual(char1_1, "🏿")
     }
+
+    func testNarrowEmojiCapableSymbolUsesTextPresentationOnlyWhileRendering ()
+    {
+        let view = TerminalView(
+            frame: CGRect(origin: .zero, size: CGSize(width: 480, height: 120))
+        )
+        let terminal = view.getTerminal()
+        terminal.feed(text: "A⏺B🙂C")
+
+        let line = terminal.buffer.lines[0]
+        let rendered = view.buildAttributedString(row: 0, line: line, cols: terminal.cols)
+
+        XCTAssertTrue(rendered.attrStr.string.hasPrefix("A⏺︎B🙂 C"))
+        XCTAssertEqual(
+            terminal.getCharacter(col: 1, row: 0),
+            "⏺",
+            "the render-only variation selector must not change copied terminal content"
+        )
+        let presentationSamples: [(Character, Character)] = [
+            ("⏺️", "⏺︎"),
+            ("✳️", "✳︎"),
+            ("▶️", "▶︎"),
+        ]
+        for (emojiPresentation, textPresentation) in presentationSamples {
+            XCTAssertEqual(
+                TerminalGlyphPresentation.character(for: emojiPresentation, cellWidth: 1),
+                textPresentation,
+                "every simple one-cell emoji-capable symbol follows the same presentation rule"
+            )
+        }
+        XCTAssertEqual(
+            TerminalGlyphPresentation.character(for: "🙂", cellWidth: 2),
+            "🙂",
+            "genuine wide emoji keep their color presentation"
+        )
+    }
+
+    func testSelectionUsesCellOffsetsAfterTextPresentationIsAdded ()
+    {
+        let view = TerminalView(
+            frame: CGRect(origin: .zero, size: CGSize(width: 480, height: 120))
+        )
+        let terminal = view.getTerminal()
+        terminal.feed(text: "A⏺B")
+        view.selection.setSelection(
+            start: Position(col: 1, row: 0),
+            end: Position(col: 2, row: 0)
+        )
+
+        let line = terminal.buffer.lines[0]
+        let rendered = view.buildAttributedString(row: 0, line: line, cols: terminal.cols)
+        let symbolRange = (rendered.attrStr.string as NSString).range(of: "⏺︎")
+        let followingRange = (rendered.attrStr.string as NSString).range(of: "B")
+
+        XCTAssertNotNil(rendered.attrStr.attribute(
+            .selectionBackgroundColor,
+            at: symbolRange.location,
+            effectiveRange: nil
+        ))
+        XCTAssertNotNil(rendered.attrStr.attribute(
+            .selectionBackgroundColor,
+            at: NSMaxRange(symbolRange) - 1,
+            effectiveRange: nil
+        ))
+        XCTAssertNil(rendered.attrStr.attribute(
+            .selectionBackgroundColor,
+            at: followingRange.location,
+            effectiveRange: nil
+        ))
+    }
     
     static var allTests = [
         ("testCombiningCharacters", testCombiningCharacters),
+        ("testNarrowEmojiCapableSymbolUsesTextPresentationOnlyWhileRendering", testNarrowEmojiCapableSymbolUsesTextPresentationOnlyWhileRendering),
+        ("testSelectionUsesCellOffsetsAfterTextPresentationIsAdded", testSelectionUsesCellOffsetsAfterTextPresentationIsAdded),
     ]
 
 }

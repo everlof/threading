@@ -292,11 +292,9 @@ final class SessionAttachmentsViewController: NSViewController {
     /// it — the same misreading the header's Open in control was welded to remove.
     ///
     /// This used to be the spread form, matching the composer's schedule chevron beside its
-    /// send. That match was the wrong axis: the composer's pair is *forced* apart by emphasis —
-    /// its press is the accent-filled primary, and a shared plate would hold a permanent colour
-    /// seam between the accent and the chevron's neutral. This press is a neutral secondary, so
-    /// the weld is available, and welding is what says "one file, one decision"
-    /// (`design-system.md`).
+    /// send. That match was the wrong axis: the composer's pair is apart because a send and a
+    /// schedule act on different things, while these two act on **one** file, and welding is what
+    /// says "one file, one decision" (`design-system.md`).
     private lazy var actionsControl = SplitButtonView(
         action: primaryActionButton,
         chevron: actionsChevron

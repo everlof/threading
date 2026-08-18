@@ -671,6 +671,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             title: connection.title,
             status: connectionStatusLabel,
             statusColor: connectionStatusColor,
+            isWorking: connection.isAgentWorking,
             recovery: connection.phase.failure.map { failure in
                 (failure.recoveryTitle, { [weak self] in self?.recover(from: failure) })
             }
@@ -1355,11 +1356,18 @@ private final class RemoteConversationNavigationTitleView: UIControl {
     private let titleLabel = UILabel()
     private let statusLabel = UILabel()
     private let dot = UIView()
+    /// In the status dot's place, not beside the title. Beside the title it took a column of
+    /// its own and pushed the name off the bar's centre every time a turn started, and it left
+    /// two marks on one line saying two different things at once. Standing where the dot stands
+    /// costs no width, and the dot has nothing to add while a turn runs: the orb appears only
+    /// on a connected session, which is the one thing a green dot was there to say.
+    private let orb = MobileWorkingOrbView(diameter: MobileDesign.Size.navigationWorkingOrb)
     private var reconnect: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        let statusStack = UIStackView(arrangedSubviews: [dot, statusLabel])
+        orb.isHidden = true
+        let statusStack = UIStackView(arrangedSubviews: [dot, orb, statusLabel])
         statusStack.axis = .horizontal
         statusStack.alignment = .center
         statusStack.spacing = MobileDesign.Spacing.tight
@@ -1405,20 +1413,35 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         title: String,
         status: String,
         statusColor: UIColor,
+        isWorking: Bool,
         recovery: (title: String, action: () -> Void)?
     ) {
         titleLabel.text = title
         statusLabel.text = status
         dot.backgroundColor = statusColor
+        // One variant per working period, chosen on the hidden→visible edge, so a turn keeps
+        // the animation it started with instead of re-rolling on every render.
+        if isWorking, orb.isHidden {
+            orb.prepareForWorking()
+        }
+        orb.isHidden = !isWorking
+        // One mark at a time. Both are stack-hidden rather than merely transparent, so the row
+        // reflows around whichever is speaking instead of holding a gap for the other.
+        dot.isHidden = isWorking
         self.reconnect = recovery?.action
         isUserInteractionEnabled = recovery != nil
-        accessibilityLabel = [title, status].joined(separator: ", ")
+        // The orb is a picture of the same fact, so VoiceOver hears it as a word rather than
+        // hearing nothing at all.
+        accessibilityLabel = [title, status, isWorking ? MobileL10n.string("Working…") : nil]
+            .compactMap { $0 }
+            .joined(separator: ", ")
         accessibilityHint = recovery?.title
     }
 
     func applyTheme(_ theme: RemoteThemePalette) {
         titleLabel.textColor = theme.uiLabel
         statusLabel.textColor = theme.uiSecondaryLabel
+        orb.applyTheme(theme)
     }
 }
 

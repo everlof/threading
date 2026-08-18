@@ -37,7 +37,9 @@ final class IssueReportingRenderTests: XCTestCase {
             }
         }
         let submission = makeSubmission()
-        let pendingURL = directory.appendingPathComponent("\(submission.id).json")
+        let pendingURL = directory
+            .appendingPathComponent("Pending", isDirectory: true)
+            .appendingPathComponent("\(submission.id).json")
         let capture = IssueReportRequestCapture()
         let outbox = MacIssueReportOutbox(
             directory: directory,
@@ -78,6 +80,146 @@ final class IssueReportingRenderTests: XCTestCase {
             submission
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: pendingURL.path))
+
+        // Delivery empties the *queue*, not the archive: what the author reads afterwards is the
+        // record, and the receipt is filed beside it.
+        let record = directory
+            .appendingPathComponent("Outbox", isDirectory: true)
+            .appendingPathComponent(submission.id, isDirectory: true)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: record.appendingPathComponent("receipt.json").path
+            ),
+            "a delivered report kept no receipt"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: record.appendingPathComponent("submission.json").path
+            ),
+            "the package that was sent was deleted rather than filed with its record"
+        )
+    }
+
+    /// A build that never stated an intake has nowhere to send to, and says so instead of
+    /// promising a retry. This is the everyday case on a developer's machine, and it shipped the
+    /// other way round: two reports sat on disk for two days while the sheet said they were queued
+    /// for a service that does not exist.
+    func testMacOutboxSavesWithoutSendingWhenNoEndpointIsConfigured() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mac-report-unconfigured-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let attempted = IssueReportRequestCapture()
+        let outbox = MacIssueReportOutbox(
+            directory: directory,
+            environment: [:],
+            infoDictionary: nil,
+            transport: { request in
+                await attempted.record(request)
+                throw URLError(.badURL)
+            }
+        )
+
+        let configured = await outbox.isDeliveryConfigured
+        XCTAssertFalse(configured, "an unstated endpoint is not a configured one")
+
+        let captureURL = directory.appendingPathComponent("capture.png")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 8,
+            pixelsHigh: 8,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: captureURL)
+
+        let saved = try await outbox.save(
+            MacIssueReportRecord(
+                id: UUID().uuidString.lowercased(),
+                markdown: "# A hover that never settles\n\nfile:///tmp/shot.png\n",
+                screenshotURL: captureURL
+            )
+        )
+
+        XCTAssertEqual(saved, 1, "the record was not counted")
+        let attemptedRequest = await attempted.request
+        XCTAssertNil(attemptedRequest, "an unconfigured build tried to post anyway")
+
+        let records = directory.appendingPathComponent("Outbox", isDirectory: true)
+        let folders = try FileManager.default.contentsOfDirectory(
+            at: records,
+            includingPropertiesForKeys: nil
+        )
+        let folder = try XCTUnwrap(folders.first, "no record was written")
+        let markdown = try String(
+            contentsOf: folder.appendingPathComponent("report.md"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            markdown.contains("file:///tmp/shot.png"),
+            "the local record stripped the capture's path, which is the one thing an agent "
+                + "standing on this machine can act on"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: folder.appendingPathComponent("screenshot.png").path
+            ),
+            "the capture was not copied beside its report, so it is lost when the temporary "
+                + "file is swept"
+        )
+    }
+
+    /// The first shape of this directory was one loose `<id>.json` per undelivered report. Those
+    /// are real reports somebody filed, so they become records rather than being left behind.
+    func testMacOutboxMigratesLooseReportsIntoRecords() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mac-report-migration-\(UUID().uuidString)", isDirectory: true)
+        let records = directory.appendingPathComponent("Outbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: records, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let submission = makeSubmission()
+        try JSONEncoder().encode(submission).write(
+            to: records.appendingPathComponent("\(submission.id).json")
+        )
+
+        let outbox = MacIssueReportOutbox(
+            directory: directory,
+            environment: [:],
+            infoDictionary: nil,
+            transport: { _ in throw URLError(.badURL) }
+        )
+        _ = try await outbox.save(
+            MacIssueReportRecord(id: UUID().uuidString.lowercased(), markdown: "# New\n", screenshotURL: nil)
+        )
+
+        let migrated = records.appendingPathComponent(submission.id, isDirectory: true)
+        let markdown = try String(
+            contentsOf: migrated.appendingPathComponent("report.md"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            markdown.contains(submission.description),
+            "the migrated record lost what the report said"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: migrated.appendingPathComponent("submission.json").path
+            ),
+            "the original package was dropped rather than filed"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: records.appendingPathComponent("\(submission.id).json").path
+            ),
+            "the loose file was left beside the folder that replaced it"
+        )
     }
 
     func testMacOutboxUsesTheDebugReportIntakeOverride() async throws {
@@ -128,7 +270,9 @@ final class IssueReportingRenderTests: XCTestCase {
             }
         }
         let submission = makeSubmission()
-        let pendingURL = directory.appendingPathComponent("\(submission.id).json")
+        let pendingURL = directory
+            .appendingPathComponent("Pending", isDirectory: true)
+            .appendingPathComponent("\(submission.id).json")
         let offline = MacIssueReportOutbox(
             directory: directory,
             endpoint: URL(string: "https://reports.example/v1/reports")!,
@@ -460,6 +604,251 @@ final class IssueReportingRenderTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // MARK: - The sheet's one action
+
+    /// What the memory names may stop being on offer: Send to Chat is a Debug build's action, and
+    /// a Release build must not come up offering a press that does nothing.
+    func testTheRememberedActionIsReResolvedAgainstWhatIsAvailable() {
+        XCTAssertEqual(
+            DeveloperReportAction.resolvePreferred(storedID: "copy", among: [.send, .copy]),
+            .copy
+        )
+        XCTAssertEqual(
+            DeveloperReportAction.resolvePreferred(storedID: "chat", among: [.send, .copy]),
+            .send,
+            "a remembered Chat survived into a build that has no chat to send to"
+        )
+        XCTAssertEqual(
+            DeveloperReportAction.resolvePreferred(storedID: nil, among: [.send, .copy]),
+            .send,
+            "the first action is the one a sheet opens on"
+        )
+        XCTAssertEqual(
+            DeveloperReportAction.resolvePreferred(storedID: "nonsense", among: [.send, .copy]),
+            .send
+        )
+    }
+
+    /// The press is named after what it will do, and what it will do depends on whether this
+    /// build states an intake. Naming it Send to Developer either way is the promise that had two
+    /// reports sitting on disk for two days.
+    func testTheSendActionIsNamedAfterWhereItActuallyGoes() {
+        XCTAssertEqual(
+            DeveloperReportAction.send.title(deliversToService: true),
+            L10n.string("Send to Developer")
+        )
+        XCTAssertEqual(
+            DeveloperReportAction.send.title(deliversToService: false),
+            L10n.string("Send to Outbox")
+        )
+        XCTAssertEqual(
+            DeveloperReportAction.copy.title(deliversToService: false),
+            L10n.string("Copy Report"),
+            "only the send moves — the other two do the same thing either way"
+        )
+    }
+
+    /// Pressing takes the remembered action, and taking one remembers it. The control owns which
+    /// action is offered; the sheet owns what each one does.
+    @MainActor
+    func testThePressTakesTheRememberedActionAndRemembersWhatWasTaken() {
+        PreferenceStore.shared.set("copy", forKey: DeveloperReportDefaults.lastActionKey)
+        defer { PreferenceStore.shared.removeObject(forKey: DeveloperReportDefaults.lastActionKey) }
+
+        var taken: [DeveloperReportAction] = []
+        let control = DeveloperReportSubmitControl(available: [.send, .copy])
+        control.onPerform = { taken.append($0) }
+
+        XCTAssertEqual(control.action, .copy)
+        XCTAssertEqual(control.press.title, L10n.string("Copy Report"))
+
+        XCTAssertTrue(control.press.accessibilityPerformPress())
+        XCTAssertEqual(taken, [.copy])
+        XCTAssertEqual(
+            PreferenceStore.shared.string(forKey: DeveloperReportDefaults.lastActionKey),
+            "copy"
+        )
+    }
+
+    /// A sheet with one action offers no chevron, for the reason the attachments pane hides its
+    /// scope band: a control that is present whatever it would do teaches nothing.
+    @MainActor
+    func testASingleActionDrawsNoChevron() {
+        let one = DeveloperReportSubmitControl(available: [.send])
+        XCTAssertNil(
+            one.subviews.first as? SplitButtonView,
+            "a lone action was welded to a chevron with nothing behind it"
+        )
+
+        let several = DeveloperReportSubmitControl(available: [.send, .copy])
+        XCTAssertNotNil(several.subviews.first as? SplitButtonView)
+    }
+
+    // MARK: - A picture taken outside Threading
+
+    func testOnlyAnImageOpensTheReportSheet() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dropped-screenshot-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let png = directory.appendingPathComponent("shot.png")
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 12,
+            pixelsHigh: 8,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: png)
+
+        let text = directory.appendingPathComponent("notes.txt")
+        try Data("not a picture".utf8).write(to: text)
+
+        XCTAssertTrue(DroppedScreenshotReport.isReportable(png))
+        XCTAssertFalse(DroppedScreenshotReport.isReportable(text))
+        XCTAssertFalse(
+            DroppedScreenshotReport.isReportable(directory),
+            "a folder keeps its other meaning on the app icon: it becomes a project"
+        )
+
+        // Pixels, not points: a Retina screenshot is half its own resolution when asked politely,
+        // and half is the number that makes an agent measuring the PNG disagree with the report.
+        let image = try XCTUnwrap(NSImage(contentsOf: png))
+        let markdown = DroppedScreenshotReport.markdown(for: png, image: image)
+        XCTAssertTrue(markdown.contains("12×8 pixels"), markdown)
+        XCTAssertTrue(markdown.contains(png.path))
+    }
+
+    /// The dropped capture's path is local evidence, exactly like the window capture's, so it is
+    /// stripped from what may be sent and kept in what is written here.
+    @MainActor
+    func testADroppedCapturesPathStaysOnThisMachine() throws {
+        let url = URL(fileURLWithPath: "/tmp/threading-hover-20260818.png")
+        let sheet = InspectorReportViewController(
+            heading: "Screenshot Report",
+            subheading: url.lastPathComponent,
+            markdown: "## Screenshot report\n- Image: 100×50 pixels\n"
+                + "- Dropped screenshot, taken outside Threading: \(url.path)",
+            environment: "Threading 1.0 (1)",
+            screenshot: nil,
+            screenshotURL: url
+        )
+        _ = sheet.view
+
+        let draft = sheet.reportDraft()
+        XCTAssertFalse(
+            draft.details.contains(url.path),
+            "the capture's path was about to be sent to an intake service"
+        )
+        XCTAssertTrue(draft.details.contains("100×50 pixels"), "the reviewable facts were stripped too")
+        XCTAssertTrue(
+            try XCTUnwrap(draft.local).details.contains(url.path),
+            "the local record lost the one form of the picture an agent can open"
+        )
+    }
+
+    /// The strip beside the traffic lights takes one image and nothing else.
+    ///
+    /// Three refusals matter as much as the acceptance, because this target cannot be seen: it
+    /// must not claim a drag that belongs to the content under it, must not claim a file it
+    /// cannot open, and must not claim anything at all while nothing is listening.
+    @MainActor
+    func testTheTitlebarStripTakesOneDroppedImageAndRefusesTheRest() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("titlebar-drop-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let png = directory.appendingPathComponent("shot.png")
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 4,
+            pixelsHigh: 4,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: png)
+        let notes = directory.appendingPathComponent("notes.txt")
+        try Data("not a picture".utf8).write(to: notes)
+
+        let window = TitlebarActionWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        let strip = NSPoint(x: 60, y: window.frame.height - 2)
+        let content = NSPoint(x: 60, y: 20)
+
+        // Nothing listening: the window must not take a file it has nowhere to put.
+        XCTAssertEqual(drag(png, to: strip, on: window), [])
+
+        var dropped: [URL] = []
+        window.onScreenshotDropped = { dropped.append($0) }
+
+        XCTAssertEqual(drag(png, to: strip, on: window), .copy)
+        XCTAssertEqual(
+            drag(png, to: content, on: window), [],
+            "the strip claimed a drop over the content, where a pane may have its own destination"
+        )
+        XCTAssertEqual(
+            drag(notes, to: strip, on: window), [],
+            "the strip claimed a file the report sheet cannot open"
+        )
+        XCTAssertEqual(
+            drag([png, notes], to: strip, on: window), [],
+            "a multi-file drag has no single report to open"
+        )
+
+        XCTAssertTrue(window.performDragOperation(draggingInfo([png], at: strip, on: window)))
+        XCTAssertEqual(dropped, [png])
+    }
+
+    @MainActor
+    private func drag(
+        _ urls: [URL],
+        to point: NSPoint,
+        on window: TitlebarActionWindow
+    ) -> NSDragOperation {
+        window.draggingEntered(draggingInfo(urls, at: point, on: window))
+    }
+
+    @MainActor
+    private func drag(
+        _ url: URL,
+        to point: NSPoint,
+        on window: TitlebarActionWindow
+    ) -> NSDragOperation {
+        drag([url], to: point, on: window)
+    }
+
+    @MainActor
+    private func draggingInfo(
+        _ urls: [URL],
+        at point: NSPoint,
+        on window: NSWindow
+    ) -> any NSDraggingInfo {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("threading.test.drag.\(UUID())"))
+        pasteboard.clearContents()
+        pasteboard.writeObjects(urls.map { $0 as NSURL })
+        return StubDraggingInfo(
+            pasteboard: pasteboard,
+            location: point,
+            destinationWindow: window
+        )
+    }
+
     private func makeSubmission() -> PublicIssueReportSubmissionDTO {
         let journal = RemoteDiagnosticJournal(
             directory: FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -617,4 +1006,40 @@ final class IssueReportingRenderTests: XCTestCase {
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
     }
+}
+
+/// The parts of a drag this window actually reads: where it is, what is on the pasteboard, and
+/// which window it is over. Everything else is what `NSDraggingInfo` requires rather than what is
+/// under test, and is answered with the least interesting legal value.
+private final class StubDraggingInfo: NSObject, NSDraggingInfo {
+
+    let draggingPasteboard: NSPasteboard
+    let draggingLocation: NSPoint
+    let draggingDestinationWindow: NSWindow?
+
+    init(pasteboard: NSPasteboard, location: NSPoint, destinationWindow: NSWindow?) {
+        draggingPasteboard = pasteboard
+        draggingLocation = location
+        draggingDestinationWindow = destinationWindow
+    }
+
+    var draggingSourceOperationMask: NSDragOperation = .copy
+    var draggedImage: NSImage? { nil }
+    var draggedImageLocation: NSPoint { .zero }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 0 }
+    var draggingFormation: NSDraggingFormation = .default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    func resetSpringLoading() {}
+    func enumerateDraggingItems(
+        options enumOpts: NSDraggingItemEnumerationOptions,
+        for view: NSView?,
+        classes classArray: [AnyClass],
+        searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+        using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
 }

@@ -120,7 +120,7 @@ final class GitReviewViewController: NSViewController {
     }()
     private(set) lazy var fileNavigatorButton: ThemedIconButton = {
         let button = ThemedIconButton(
-            symbolName: "folder",
+            symbolName: "sidebar.right",
             accessibility: L10n.string("Show changed files"),
             target: .inline,
             inkSource: .chrome
@@ -132,7 +132,7 @@ final class GitReviewViewController: NSViewController {
     }()
     private(set) lazy var diffLayoutButton: ThemedIconButton = {
         let button = ThemedIconButton(
-            symbolName: "rectangle.split.2x1",
+            symbolName: "rectangle",
             accessibility: L10n.string("Switch to split diff"),
             target: .inline,
             inkSource: .chrome
@@ -142,26 +142,36 @@ final class GitReviewViewController: NSViewController {
         button.onPress = { [weak self] in self?.toggleDiffLayout() }
         return button
     }()
-    private lazy var menuButton: ThemedButton = {
-        let button = ThemedButton(
-            symbol: "ellipsis",
+    private(set) lazy var menuButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "ellipsis",
             accessibility: L10n.string("Diff options"),
-            target: self,
-            action: #selector(showOverflowMenu(_:))
+            target: .inline,
+            inkSource: .chrome
         )
-        button.isBordered = false
         button.toolTip = L10n.string("Diff options")
+        button.presentsMenu = true
+        button.onPress = { [weak self, weak button] in
+            guard let button else { return }
+            self?.showOverflowMenu(button)
+        }
         return button
     }()
+    private lazy var navigationButtonGroup = ControlButtonGroupView(buttons: [
+        jumpToFileButton,
+        diffLayoutButton,
+        fileNavigatorButton
+    ])
+    private lazy var textSizeButtonGroup = ControlButtonGroupView(buttons: [
+        decreaseTextSizeButton,
+        increaseTextSizeButton
+    ])
     private lazy var headerRow = ControlRowView(
         scale: .compact,
         leading: [backButton, modeChip, turnChip, counterLabel],
         trailing: [
-            jumpToFileButton,
-            diffLayoutButton,
-            fileNavigatorButton,
-            decreaseTextSizeButton,
-            increaseTextSizeButton,
+            navigationButtonGroup,
+            textSizeButtonGroup,
             menuButton
         ]
     )
@@ -281,8 +291,9 @@ final class GitReviewViewController: NSViewController {
         host.isHidden = true
         return host
     }()
+    private let stickyFileHeaderViewport = GitReviewStickyHeaderViewport()
     private lazy var stickyFileHeaderTop = stickyFileHeaderHost.topAnchor.constraint(
-        equalTo: scrollView.topAnchor
+        equalTo: stickyFileHeaderViewport.topAnchor
     )
     private lazy var stickyFileHeaderHeight: NSLayoutConstraint = {
         let height = stickyFileHeaderHost.heightAnchor.constraint(equalToConstant: 0)
@@ -313,6 +324,10 @@ final class GitReviewViewController: NSViewController {
     var fileNavigatorVisibleForTesting: Bool { showsFileNavigator }
     var fileNavigatorWidthForTesting: CGFloat { fileNavigatorWidth.constant }
     var stickyFileHeaderHeightForTesting: CGFloat { stickyFileHeaderHeight.constant }
+    var stickyFileHeaderTopForTesting: CGFloat { stickyFileHeaderTop.constant }
+    var stickyFileHeaderFrameInViewForTesting: NSRect {
+        stickyFileHeaderHost.convert(stickyFileHeaderHost.bounds, to: view)
+    }
     var stickyFileHeaderRowForTesting: GitReviewFileRow? {
         stickyFileHeaderHost.installedHeader
     }
@@ -711,7 +726,8 @@ final class GitReviewViewController: NSViewController {
         view.addSubview(findBar)
         view.addSubview(findBarSeparator)
         view.addSubview(placeholderLabel)
-        view.addSubview(stickyFileHeaderHost)
+        view.addSubview(stickyFileHeaderViewport)
+        stickyFileHeaderViewport.addSubview(stickyFileHeaderHost)
         view.addSubview(jumpToEndButton)
     }
 
@@ -812,14 +828,24 @@ final class GitReviewViewController: NSViewController {
                 constant: -Design.Spacing.inset
             ),
 
-            stickyFileHeaderTop,
-            stickyFileHeaderHost.leadingAnchor.constraint(
+            stickyFileHeaderViewport.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            stickyFileHeaderViewport.leadingAnchor.constraint(
                 equalTo: scrollView.leadingAnchor,
                 constant: inset
             ),
-            stickyFileHeaderHost.trailingAnchor.constraint(
+            stickyFileHeaderViewport.trailingAnchor.constraint(
                 equalTo: scrollView.trailingAnchor,
                 constant: -inset
+            ),
+            stickyFileHeaderViewport.heightAnchor.constraint(
+                equalTo: stickyFileHeaderHost.heightAnchor
+            ),
+            stickyFileHeaderTop,
+            stickyFileHeaderHost.leadingAnchor.constraint(
+                equalTo: stickyFileHeaderViewport.leadingAnchor
+            ),
+            stickyFileHeaderHost.trailingAnchor.constraint(
+                equalTo: stickyFileHeaderViewport.trailingAnchor
             ),
             stickyFileHeaderHeight
         ])
@@ -901,15 +927,42 @@ final class GitReviewViewController: NSViewController {
         }
 
         let distanceToNextFile = rowRect.maxY - visibleY
-        stickyFileHeaderTop.constant = min(0, distanceToNextFile - stickyFileHeaderHeight.constant)
+        // The real cards keep `Spacing.small` between their silhouettes. The retained heading
+        // lives above the table, so without carrying that same gap into the push calculation it
+        // touches — and, by z-order, appears to cover — the incoming real heading. Start moving
+        // one card gap earlier and preserve that air throughout the transition.
+        positionStickyFileHeader(at: min(
+            0,
+            distanceToNextFile
+                - stickyFileHeaderHeight.constant
+                - Design.Spacing.small
+        ))
         stickyFileHeaderHost.isHidden = false
         stickyFileHeaderPathForTesting = file.path
     }
 
     private func hideStickyFileHeader() {
         stickyFileHeaderHost.isHidden = true
-        stickyFileHeaderTop.constant = 0
+        positionStickyFileHeader(at: 0)
         stickyFileHeaderPathForTesting = nil
+    }
+
+    /// Scroll bounds move immediately, while a constraint edit may wait for the window's next
+    /// layout pass. Move this one retained view by the same delta now so the old header cannot
+    /// spend a frame painted over the incoming real one. Asking the root view to lay out here
+    /// would also settle the virtual table on every wheel event; this O(1) frame update is adopted
+    /// by the already-updated constraint at the next ordinary pass.
+    private func positionStickyFileHeader(at visualTopOffset: CGFloat) {
+        let previousOffset = stickyFileHeaderTop.constant
+        guard abs(visualTopOffset - previousOffset) > 0.01 else { return }
+        stickyFileHeaderTop.constant = visualTopOffset
+
+        guard let superview = stickyFileHeaderHost.superview,
+              stickyFileHeaderHost.frame.height > 0 else { return }
+        var origin = stickyFileHeaderHost.frame.origin
+        let delta = visualTopOffset - previousOffset
+        origin.y += superview.isFlipped ? delta : -delta
+        stickyFileHeaderHost.setFrameOrigin(origin)
     }
 
     func syncFileNavigator(with files: [GitFileDiff]) {
@@ -951,11 +1004,12 @@ final class GitReviewViewController: NSViewController {
         fileNavigatorHost.isHidden = !showsFileNavigator
         fileNavigatorWidth.constant = showsFileNavigator ? 260 : 0
         fileNavigatorButton.setSymbol(
-            showsFileNavigator ? "folder.fill" : "folder",
+            "sidebar.right",
             accessibility: showsFileNavigator
                 ? L10n.string("Hide changed files")
                 : L10n.string("Show changed files")
         )
+        fileNavigatorButton.isSelected = showsFileNavigator
         fileNavigatorButton.toolTip = showsFileNavigator
             ? L10n.string("Hide changed files")
             : L10n.string("Show changed files")
@@ -973,9 +1027,10 @@ final class GitReviewViewController: NSViewController {
             ? L10n.string("Switch to split diff")
             : L10n.string("Switch to unified diff")
         diffLayoutButton.setSymbol(
-            diffLayout == .unified ? "rectangle.split.2x1" : "rectangle",
+            diffLayout == .unified ? "rectangle" : "rectangle.split.2x1",
             accessibility: title
         )
+        diffLayoutButton.isSelected = diffLayout == .split
         diffLayoutButton.toolTip = title
         measuredFileRowHeights.removeAll(keepingCapacity: true)
         fileRowHeightWidth = 0
@@ -1515,35 +1570,87 @@ final class GitReviewViewController: NSViewController {
 
 // MARK: - Sticky File Header
 
+/// The retained heading belongs to the scroll viewport, even though it cannot live inside the
+/// scrolling document. This transparent structural host makes that ownership literal: when the
+/// next file pushes the retained row upward, no pixel can escape into Review's toolbar above.
+final class GitReviewStickyHeaderViewport: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.masksToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Only a control returned by the retained header owns a press. The transparent remainder of
+    /// this clip forwards wheel and pointer traffic to the scroll view below it.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
+}
+
 /// Keeps one real file-header row above the scrolling document. Reusing `GitReviewFileRow` is
 /// deliberate: the retained heading must have the same geometry, hover actions, staging action,
 /// theme response and accessibility controls as the row it stands in for.
 final class GitReviewStickyHeaderHost: NSView {
     private(set) weak var installedHeader: GitReviewFileRow?
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        // A retained heading floats above source text. The ordinary row's quiet translucent
-        // control wash is correct inside its card but cannot occlude content scrolling beneath
-        // an overlay, so the host supplies the design system's opaque floating-card surface.
-        applySurface(
+    /// The sticky heading is an overlay above semantic red/green diff washes. A rounded layer
+    /// alone has transparent corner pixels, so those washes show through its top arc. This
+    /// square source-background surface occludes the scrolling document before the rounded
+    /// heading is composited over it. The outer pane ground is intentionally not used: in a theme
+    /// whose source surface is navy, it would replace the diff ink with a hard-black corner wedge.
+    let occlusionSurface: ThemedSurfaceView = {
+        let surface = ThemedSurfaceView()
+        surface.applySurface(
+            fill: Design.Surface.background,
+            radius: .fixed(0),
+            bevel: .none
+        )
+        return surface
+    }()
+
+    /// The visible retained-card silhouette. Its lower corners stay square because the file's
+    /// content continues below this heading; only the exposed top corners turn.
+    let headingSurface: ThemedSurfaceView = {
+        let surface = ThemedSurfaceView()
+        surface.applySurface(
             fill: Design.Surface.elevated,
             radius: .control,
             corners: .top,
             clipsContent: true
         )
+        return surface
+    }()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        [occlusionSurface, headingSurface].forEach(addSubview)
+        NSLayoutConstraint.activate([
+            occlusionSurface.topAnchor.constraint(equalTo: topAnchor),
+            occlusionSurface.leadingAnchor.constraint(equalTo: leadingAnchor),
+            occlusionSurface.trailingAnchor.constraint(equalTo: trailingAnchor),
+            occlusionSurface.bottomAnchor.constraint(equalTo: bottomAnchor),
+            headingSurface.topAnchor.constraint(equalTo: topAnchor),
+            headingSurface.leadingAnchor.constraint(equalTo: leadingAnchor),
+            headingSurface.trailingAnchor.constraint(equalTo: trailingAnchor),
+            headingSurface.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
     }
 
     func install(_ header: GitReviewFileRow) {
-        subviews.forEach { $0.removeFromSuperview() }
+        headingSurface.subviews.forEach { $0.removeFromSuperview() }
         installedHeader = header
         header.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(header)
+        headingSurface.addSubview(header)
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: topAnchor),
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: trailingAnchor),
-            header.bottomAnchor.constraint(equalTo: bottomAnchor)
+            header.topAnchor.constraint(equalTo: headingSurface.topAnchor),
+            header.leadingAnchor.constraint(equalTo: headingSurface.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: headingSurface.trailingAnchor),
+            header.bottomAnchor.constraint(equalTo: headingSurface.bottomAnchor)
         ])
     }
 

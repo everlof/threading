@@ -36,6 +36,38 @@ struct ViewLineInfo {
     var images: [TerminalImage]?
 }
 
+/// Chooses the glyph presentation without changing the character held by the terminal buffer.
+///
+/// CoreText is free to satisfy a missing glyph from Apple Color Emoji. That is correct for a
+/// two-cell emoji, but wrong for an emoji-capable symbol whose terminal width is one cell: the
+/// fallback bitmap is wider than the grid slot and collides with the following character. VS15
+/// requests the Unicode text presentation from the fallback cascade instead. Restricting the
+/// rewrite to simple one- or two-scalar graphemes leaves joined emoji, modifiers and keycaps
+/// untouched, and the stored character remains available verbatim for copy and extraction.
+enum TerminalGlyphPresentation {
+    private static let textVariationSelector = UnicodeScalar(0xFE0E)!
+    private static let emojiVariationSelector = UnicodeScalar(0xFE0F)!
+
+    static func character(for character: Character, cellWidth: Int8) -> Character {
+        guard cellWidth == 1,
+              let base = character.unicodeScalars.first,
+              base.value > 0x7F,
+              base.properties.isEmoji
+        else { return character }
+
+        let scalars = character.unicodeScalars
+        guard scalars.count <= 2 else { return character }
+        if scalars.count == 2 {
+            guard let selector = scalars.last,
+                  selector == textVariationSelector || selector == emojiVariationSelector
+            else { return character }
+            if selector == textVariationSelector { return character }
+        }
+
+        return Character(String(base) + String(textVariationSelector))
+    }
+}
+
 extension TerminalView {
     typealias CellDimension = CGSize
     
@@ -478,6 +510,11 @@ extension TerminalView {
         
         var str = prefix
         var col = 0
+        let tracksSelectionOffsets = selection?.active == true
+        var renderedUTF16Length = tracksSelectionOffsets ? prefix.utf16.count : 0
+        var cellUTF16Offsets = tracksSelectionOffsets
+            ? Array(repeating: renderedUTF16Length, count: cols + 1)
+            : []
 
         func appendRun(_ string: String, attribute: Attribute, hasUrl: Bool) {
             guard !string.isEmpty else { return }
@@ -520,13 +557,40 @@ extension TerminalView {
             // inverted background, which painted a white box over the glyph's second half.
             let notWide = ch.width < 2
             if notWide  {
-                str.append(code == 0 ? " " : ch.getCharacter ())
+                if tracksSelectionOffsets {
+                    cellUTF16Offsets[col] = renderedUTF16Length
+                }
+                let storedCharacter = code == 0 ? Character(" ") : ch.getCharacter()
+                // ASCII is overwhelmingly the common case and cannot enter this policy. Keep
+                // its hot path to the same scalar-free append SwiftTerm used before.
+                let renderedCharacter = code > 0x7F
+                    ? TerminalGlyphPresentation.character(
+                        for: storedCharacter,
+                        cellWidth: ch.width
+                    )
+                    : storedCharacter
+                str.append(renderedCharacter)
+                if tracksSelectionOffsets {
+                    renderedUTF16Length += String(renderedCharacter).utf16.count
+                    cellUTF16Offsets[col + 1] = renderedUTF16Length
+                }
             } else {
                 // If we have a wide character, we flush the contents we have so far
                 appendRun(str, attribute: attr, hasUrl: hasUrl)
                 // Then add the character, and add an extra space, so that the space gets the same attributes as the previous
                 // cell - see https://github.com/migueldeicaza/SwiftTerm/pull/387
-                appendRun("\(ch.getCharacter()) ", attribute: attr, hasUrl: hasUrl)
+                let renderedCharacter = ch.getCharacter()
+                appendRun("\(renderedCharacter) ", attribute: attr, hasUrl: hasUrl)
+
+                if tracksSelectionOffsets {
+                    cellUTF16Offsets[col] = renderedUTF16Length
+                    renderedUTF16Length += String(renderedCharacter).utf16.count
+                    cellUTF16Offsets[col + 1] = renderedUTF16Length
+                    renderedUTF16Length += 1
+                    if col + 2 <= cols {
+                        cellUTF16Offsets[col + 2] = renderedUTF16Length
+                    }
+                }
 
                 str = ""
                 col += 1
@@ -534,7 +598,12 @@ extension TerminalView {
             col += 1
         }
         appendRun(str, attribute: attr, hasUrl: hasUrl)
-        updateSelectionAttributesIfNeeded(attributedLine: res, row: row, cols: cols)
+        updateSelectionAttributesIfNeeded(
+            attributedLine: res,
+            row: row,
+            cols: cols,
+            cellUTF16Offsets: cellUTF16Offsets
+        )
         // This gives us a large chunk of our performance back, from 7.5 to 5.5 seconds on
         // time for x in 1 2 3 4 5 6; do cat UTF-8-demo.txt; done
         //res.fixAttributes(in: NSRange(location: 0, length: res.length))
@@ -770,7 +839,12 @@ extension TerminalView {
     
     /// Apply selection attributes
     /// TODO: Optimize the logic below
-    func updateSelectionAttributesIfNeeded(attributedLine attributedString: NSMutableAttributedString, row: Int, cols: Int) {
+    func updateSelectionAttributesIfNeeded(
+        attributedLine attributedString: NSMutableAttributedString,
+        row: Int,
+        cols: Int,
+        cellUTF16Offsets: [Int]
+    ) {
         guard let selection = self.selection, selection.active else {
             attributedString.removeAttribute(.selectionBackgroundColor)
             return
@@ -834,7 +908,26 @@ extension TerminalView {
             assert (selectionRange.length >= 0)
             if (selectionRange.location + selectionRange.length >= cols) {
             }
-            attributedString.addAttribute(.selectionBackgroundColor, value: selectedTextBackgroundColor, range: selectionRange)
+            let startCell = min(selectionRange.location, cols)
+            let endCell = min(selectionRange.location + selectionRange.length, cols)
+            guard cellUTF16Offsets.indices.contains(startCell),
+                  cellUTF16Offsets.indices.contains(endCell)
+            else { return }
+
+            let renderedStart = cellUTF16Offsets[startCell]
+            let renderedEnd = cellUTF16Offsets[endCell]
+            let renderedRange = NSRange(
+                location: renderedStart,
+                length: renderedEnd - renderedStart
+            )
+            guard renderedRange.length > 0,
+                  renderedRange.location + renderedRange.length <= attributedString.length
+            else { return }
+            attributedString.addAttribute(
+                .selectionBackgroundColor,
+                value: selectedTextBackgroundColor,
+                range: renderedRange
+            )
         }
     }
 

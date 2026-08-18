@@ -43,6 +43,14 @@ discovery, and child processes therefore see one disposable scenario home rather
 developer's state. Cleanup refuses any directory that lacks both the exact generated shape and
 the harness marker.
 
+`THREADING_UI_SCENARIO_HOME` is that home's name, and it is also how the application recognises
+that a machine rather than a person is driving it. `AutomatedRun` reads it, so the refusal beep an
+unavailable command makes, and any bell a fixture agent rings, stay silent for the whole lane: a scenario clicks and
+types its way through states where an action legitimately cannot proceed, and there is nobody in
+the room those beeps are for. The scenario marker is used rather than a flag of its own because
+`UIScenarioBootstrap` already fails closed without it, so the two cannot disagree about whether a
+scenario is running. See [`session-activity.md`](session-activity.md) for the gate itself.
+
 After the first window appears, the harness gives it a 1,400×900 point target, bounded by the
 current screen's visible frame, and verifies the resulting frame through XCUITest. Feature
 scenarios therefore exercise the full multi-pane layout instead of accidentally testing the
