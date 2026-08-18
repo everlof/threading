@@ -474,11 +474,22 @@ final class RemoteAppModel: ObservableObject {
             if let index = hosts.firstIndex(where: { $0.id == hostID }) {
                 let old = hosts[index]
                 var updated = old
-                updated.merge(
+                // A pin is refined or followed only on the word of a channel that proved the
+                // pinned key; over anything else the response may still be adopted where the
+                // record allows it, and a foreign identity is refused and said so.
+                let overPinnedChannel = !connection.isHosted
+                    && successfulLink.baseURL.host.map {
+                        RemoteHostTrust.liveVerdict($0.lowercased()) == .accepted
+                    } == true
+                let pinOutcome = updated.merge(
                     identity: response.host,
                     successfulLink: successfulLink,
-                    isHosted: connection.isHosted
+                    isHosted: connection.isHosted,
+                    overPinnedChannel: overPinnedChannel
                 )
+                if pinOutcome == .refused {
+                    MobileDiagnostics.logDegraded(.hostTrust, code: .pinChangeRefused)
+                }
                 let metadataChanged = old.name != updated.name
                     || old.link != updated.link
                     || old.endpoints != updated.endpoints

@@ -141,17 +141,31 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         isOwnerDevice ? name : MobileL10n.string("%@ · Shared chat", name)
     }
 
+    /// What became of the fingerprints an owner response carried.
+    enum PinMergeOutcome: Equatable {
+        /// Nothing to learn: no fingerprint in the response, or not an owner record.
+        case unchanged
+        /// The response's identity was adopted (first learn, a refinement of a scanned code, or
+        /// a rotation this record had been told about).
+        case adopted
+        /// The response named an identity that neither matches what is stored nor was announced
+        /// as its successor; the stored pin was kept and the caller should say so.
+        case refused
+    }
+
+    @discardableResult
     mutating func merge(
         identity: RemoteHostDTO?,
         successfulLink: RemoteConnectionLink,
-        isHosted: Bool = false
-    ) {
+        isHosted: Bool = false,
+        overPinnedChannel: Bool = false
+    ) -> PinMergeOutcome {
         if !isHosted { link = successfulLink }
         activeEndpointKind = isHosted
             ? RemoteHostEndpointKind.hosted
             : kind(ofAdvertised: successfulLink.baseURL, in: identity?.endpoints ?? endpoints)
         lastConnectedAt = Date()
-        guard let identity else { return }
+        guard let identity else { return .unchanged }
         hostID = identity.id
         name = identity.name
         if let advertised = identity.endpoints {
@@ -160,28 +174,58 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         if let policy = identity.connectionPolicy {
             connectionPolicy = policy
         }
-        mergePins(from: identity)
+        return mergePins(from: identity, overPinnedChannel: overPinnedChannel)
     }
 
-    /// Adopts the fingerprints an owner response carried, including a successor.
+    /// Adopts the fingerprints an owner response carried, within what a stored pin allows.
     ///
-    /// A response that arrived at all passed one of the two trust checks: the pin matched, or
-    /// the system's own evaluation of a publicly issued certificate did. There is no third case,
-    /// because a refused challenge produces no response to read. So the identity is the Mac's,
-    /// and a fingerprint it names replaces what is stored here. That is what makes rotation
-    /// work: the successor announced last week is the current one today, and this record follows
-    /// without anybody scanning anything.
+    /// A pin, once held, is only ever *refined* or *followed*, never replaced on a channel's say-so:
+    /// the identity a response names is adopted when nothing was pinned yet (the first `/api/me`
+    /// after a legacy pairing), when it is the same identity spelled in full (a scanned 128-bit
+    /// code becoming the whole digest), or when it is the successor this record was already told
+    /// about (a rotation activated). Anything else is a different Mac or a reset one, and the
+    /// stored pin stays so the pinned doors refuse it by name and the person scans again. That is
+    /// the difference between "the Mac told me" and "something on the path told me": a relay
+    /// terminates TLS, and even a public-CA channel authenticates a name, not this key.
+    ///
+    /// A successor announcement is honoured only over a pinned channel (plan §16): the old key
+    /// vouching for the new one is the whole reason no re-pairing is needed, and a channel that
+    /// did not prove the old key cannot vouch for anything.
     ///
     /// **Absence never clears a pin.** A host that says nothing about its identity is an older
     /// Mac or one whose doors are all publicly trusted, not an instruction to stop pinning; a
     /// Mac that really did reset its identity produces a named mismatch and a re-scan, which is
     /// the loud path this trades for.
-    private mutating func mergePins(from identity: RemoteHostDTO) {
+    private mutating func mergePins(
+        from identity: RemoteHostDTO,
+        overPinnedChannel: Bool
+    ) -> PinMergeOutcome {
         // A guest capability never learns an identity. The host does not send one to a guest
         // share, and a phone must not pin a Mac on the word of a one-chat token.
-        guard isOwnerDevice, identity.pinSet != nil else { return }
-        pinnedFingerprint = identity.pinnedFingerprint
-        nextPinnedFingerprint = identity.nextPinnedFingerprint
+        guard isOwnerDevice,
+              let claimedHex = identity.pinnedFingerprint,
+              let claimed = RemoteHostFingerprint(hex: claimedHex) else { return .unchanged }
+
+        let held = storedPinSet
+            ?? link.pinnedFingerprintCode
+                .flatMap(RemoteHostPin.init(pairingCode:))
+                .map { RemoteHostPinSet(current: $0) }
+
+        if let held {
+            let sameIdentity = held.current.matches(digest: claimed.digest)
+            let announcedSuccessor = held.next?.matches(digest: claimed.digest) ?? false
+            guard sameIdentity || announcedSuccessor else { return .refused }
+        }
+
+        pinnedFingerprint = claimed.hex
+        if overPinnedChannel {
+            nextPinnedFingerprint = identity.nextPinnedFingerprint
+        } else if held?.next.map({ $0.matches(digest: claimed.digest) }) == true {
+            // The successor went live and this response is the first sight of it; whatever this
+            // channel is, the announced-then-activated pair is what was vouched for.
+            nextPinnedFingerprint = nil
+        }
+        return .adopted
     }
 
     /// What the Mac itself calls the address that answered, falling back to the guess.

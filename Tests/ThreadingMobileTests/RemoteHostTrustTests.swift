@@ -109,7 +109,8 @@ final class RemoteHostTrustTests: XCTestCase {
         ])
         host.merge(
             identity: identity(current: fingerprint, next: nextFingerprint),
-            successfulLink: host.link
+            successfulLink: host.link,
+            overPinnedChannel: true
         )
         RemoteHostTrust.register([host], with: delegate)
 
@@ -128,10 +129,16 @@ final class RemoteHostTrustTests: XCTestCase {
         ])
         host.merge(
             identity: identity(current: fingerprint, next: nextFingerprint),
-            successfulLink: host.link
+            successfulLink: host.link,
+            overPinnedChannel: true
         )
 
-        host.merge(identity: identity(current: nextFingerprint), successfulLink: host.link)
+        let outcome = host.merge(
+            identity: identity(current: nextFingerprint),
+            successfulLink: host.link,
+            overPinnedChannel: true
+        )
+        XCTAssertEqual(outcome, .adopted)
         RemoteHostTrust.register([host], with: delegate)
 
         XCTAssertEqual(host.pinnedFingerprint, nextFingerprint.hex)
@@ -142,6 +149,85 @@ final class RemoteHostTrustTests: XCTestCase {
             pins.matches(certificateDER: Self.certificate),
             "the retired certificate stops being accepted once the Mac says it has moved on"
         )
+    }
+
+    /// A pin is refined or followed, never replaced. A response naming some other identity is
+    /// what a reset Mac, or something on the path, produces; the stored pin stays so the pinned
+    /// doors refuse it by name and the person scans again.
+    func testAForeignFingerprintIsRefusedAndTheStoredPinKept() throws {
+        let delegate = RemoteCertificatePinningDelegate()
+        var host = ownerHost(endpoints: [
+            endpoint(kind: RemoteHostEndpointKind.lan, "https://192.168.1.42:8760/", pinned: true),
+        ])
+        host.merge(identity: identity(current: fingerprint), successfulLink: host.link, overPinnedChannel: true)
+
+        let foreign = RemoteHostFingerprint(certificateDER: Data("some other Mac".utf8))
+        for pinnedChannel in [true, false] {
+            let outcome = host.merge(
+                identity: identity(current: foreign),
+                successfulLink: host.link,
+                overPinnedChannel: pinnedChannel
+            )
+            XCTAssertEqual(outcome, .refused, "over a pinned channel: \(pinnedChannel)")
+        }
+        XCTAssertEqual(host.pinnedFingerprint, fingerprint.hex)
+        RemoteHostTrust.register([host], with: delegate)
+        let pins = try XCTUnwrap(delegate.pins(forHost: "192.168.1.42"))
+        XCTAssertTrue(pins.matches(certificateDER: Self.certificate))
+        XCTAssertFalse(pins.matches(certificateDER: Data("some other Mac".utf8)))
+    }
+
+    /// The scanned code is 128 bits of the digest. The first `/api/me` spells the whole digest;
+    /// that is the same identity and is adopted, while a full digest with a different prefix is
+    /// not, over any channel.
+    func testAScannedCodeIsRefinedOnlyByTheDigestItPrefixes() throws {
+        let scannedLink = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: try XCTUnwrap(URL(string: "https://192.168.1.42:8760/")),
+            token: Self.bearer,
+            pinnedFingerprintCode: fingerprint.pairingCode
+        ))
+        var host = ownerHost(endpoints: [
+            endpoint(kind: RemoteHostEndpointKind.lan, "https://192.168.1.42:8760/", pinned: true),
+        ])
+        host.link = scannedLink
+        XCTAssertNil(host.pinnedFingerprint, "nothing learned yet, only scanned")
+
+        let foreign = RemoteHostFingerprint(certificateDER: Data("some other Mac".utf8))
+        XCTAssertEqual(
+            host.merge(identity: identity(current: foreign), successfulLink: scannedLink),
+            .refused
+        )
+        XCTAssertNil(host.pinnedFingerprint)
+
+        XCTAssertEqual(
+            host.merge(identity: identity(current: fingerprint), successfulLink: scannedLink),
+            .adopted
+        )
+        XCTAssertEqual(host.pinnedFingerprint, fingerprint.hex)
+    }
+
+    /// The old key vouching for the new one is what makes rotation free of re-pairing, so only a
+    /// channel that proved the old key may carry the announcement.
+    func testASuccessorAnnouncedOverAnUnpinnedChannelIsNotHonoured() throws {
+        var host = ownerHost(endpoints: [
+            endpoint(kind: RemoteHostEndpointKind.lan, "https://192.168.1.42:8760/", pinned: true),
+        ])
+        host.merge(identity: identity(current: fingerprint), successfulLink: host.link, overPinnedChannel: true)
+
+        let outcome = host.merge(
+            identity: identity(current: fingerprint, next: nextFingerprint),
+            successfulLink: host.link,
+            overPinnedChannel: false
+        )
+        XCTAssertEqual(outcome, .adopted, "the current identity is unchanged, so the response is fine")
+        XCTAssertNil(host.nextPinnedFingerprint, "but the successor is not taken from an unpinned channel")
+
+        host.merge(
+            identity: identity(current: fingerprint, next: nextFingerprint),
+            successfulLink: host.link,
+            overPinnedChannel: true
+        )
+        XCTAssertEqual(host.nextPinnedFingerprint, nextFingerprint.hex)
     }
 
     /// A Mac that says nothing about its identity is an older Mac or one whose doors are all
@@ -166,7 +252,8 @@ final class RemoteHostTrustTests: XCTestCase {
         ])
         host.merge(
             identity: identity(current: fingerprint, next: nextFingerprint),
-            successfulLink: host.link
+            successfulLink: host.link,
+            overPinnedChannel: true
         )
 
         let decoded = try JSONDecoder().decode(
