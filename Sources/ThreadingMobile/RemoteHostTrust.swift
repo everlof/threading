@@ -19,7 +19,7 @@ import ThreadingRemoteKit
 ///
 /// - **A pin is only ever applied to a host the Mac flagged.** `identity: "pinned"` means the
 ///   endpoint presents the Mac's own certificate. An endpoint without it presents somebody
-///   else's, and pinning that host would refuse the one endpoint that works — Tailscale Serve
+///   else's, and pinning that host would refuse the one endpoint that works: Tailscale Serve
 ///   holds a real certificate for its `*.ts.net` name, and the phone must keep stock evaluation
 ///   there.
 /// - **A guest never teaches this phone a pin.** A one-chat capability is not the owner of the
@@ -61,6 +61,23 @@ enum RemoteHostTrust {
         let pins = RemoteHostPinSet(current: pin)
         delegate.setPins(pins, forHost: host)
         return pins
+    }
+
+    /// Drops the pins a forgotten Mac held, then restates what the remaining records pin.
+    ///
+    /// The second half is not tidiness: one Mac can be present twice, once as an owner pairing
+    /// and again through a guest share of one chat, and both records name the same addresses.
+    /// Clearing without restating would leave the surviving record unpinned until the next
+    /// launch, which is the launch it could not connect to make.
+    static func forget(
+        _ host: PairedRemoteHost,
+        remaining: [PairedRemoteHost],
+        with delegate: RemoteCertificatePinningDelegate = RemoteClient.pinningDelegate
+    ) {
+        for name in host.pinnedHosts.keys {
+            delegate.setPins(nil, forHost: name)
+        }
+        register(remaining, with: delegate)
     }
 
     /// How the answer to "what did the pin check decide for this host name" is obtained.

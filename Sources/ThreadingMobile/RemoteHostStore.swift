@@ -168,7 +168,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
     /// A response that arrived at all passed one of the two trust checks: the pin matched, or
     /// the system's own evaluation of a publicly issued certificate did. There is no third case,
     /// because a refused challenge produces no response to read. So the identity is the Mac's,
-    /// and a fingerprint it names replaces what is stored here — which is what makes rotation
+    /// and a fingerprint it names replaces what is stored here. That is what makes rotation
     /// work: the successor announced last week is the current one today, and this record follows
     /// without anybody scanning anything.
     ///
@@ -218,8 +218,8 @@ struct RemoteHostConnectionCandidate: Equatable {
     /// A `lan` address on the sticky range contributes the rest of that range in the listener's
     /// own order, because the Mac walks the same list when its configured port is taken and a
     /// collision must not cost a re-pair. Bounded by the range and deterministic: ten addresses
-    /// tried one after another, never in parallel. Every other kind contributes itself alone —
-    /// a tailnet name, a relay hostname and a VPN address are not ports somebody guessed.
+    /// tried one after another, never in parallel. Every other kind contributes itself alone,
+    /// because a tailnet name, a relay hostname and a VPN address are not ports somebody guessed.
     static func attempts(
         baseURL: URL,
         kind: String,

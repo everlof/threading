@@ -2208,6 +2208,24 @@ The iPhone still shows that Mac once even when it knows both a Tailscale and rel
 follows the connection policy chosen on the Mac, shows the active route beside its connection
 status, and can fail over or adopt an advertised stable relay address without being paired again.
 
+A connection that cannot be made says so rather than spinning. A Mac that accepts the connection
+and never answers is reported after a short wait, and the chat title stays tappable to retry. Two
+failures are named because retrying them changes nothing: **This Mac’s address has changed. Scan
+its QR code again.** when something other than that Mac answers on the remembered address, which
+happens when a relay address was reused after a restart, and **Threading needs Local Network
+access to reach this Mac on Wi-Fi. Turn it on in Settings.** when iOS is blocking the connection.
+Tapping the title takes you to the pairing screen or to Settings rather than repeating the
+attempt.
+
+When the code you scan carries this Mac's identity, the pairing screen says so: the iPhone will
+then trust exactly that Mac's certificate and nothing else, with no certificate authority in the
+path. Choose Mac shows the 26-character identity code beside each paired Mac, and it is the same
+code the Mac's own Remote Access settings print, so the two can be compared by eye. A certificate
+that does not match is reported by name, **This Mac’s identity does not match the one you paired
+with**, and never as a network error or a changed address. If Remote Access was reset on the Mac,
+scan its code again; a Mac that replaces its certificate the ordinary way announces the
+replacement first, and paired phones follow it with nothing to do.
+
 Each chat in the iPhone list is named by its agent, not by its screen: the row carries the agent's
 own mark, and a login other than the CLI's default one adds its chip on the mark's corner and its
 name beside the chat's state — the same two facts the Mac sidebar carries. A small glyph after the

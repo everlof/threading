@@ -414,6 +414,7 @@ final class RemoteAppModel: ObservableObject {
             hosts = previousHosts
             return
         }
+        RemoteHostTrust.forget(host, remaining: hosts)
         invalidateRefreshes()
         if activeHostID == host.id {
             disconnectThemeEvents()

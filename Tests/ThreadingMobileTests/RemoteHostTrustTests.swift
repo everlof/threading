@@ -228,6 +228,35 @@ final class RemoteHostTrustTests: XCTestCase {
         XCTAssertTrue(older.first?.pinnedHosts.isEmpty == true)
     }
 
+    /// Forgetting a Mac drops its pin, and the same Mac reached through a guest share of one
+    /// chat keeps its own, because both records name the same addresses.
+    func testForgettingAMacDropsItsPinAndLeavesASharedAddressPinned() throws {
+        let delegate = RemoteCertificatePinningDelegate()
+        var owner = ownerHost(endpoints: [
+            endpoint(kind: RemoteHostEndpointKind.lan, "https://192.168.1.42:8760/", pinned: true),
+        ])
+        owner.merge(identity: identity(current: fingerprint), successfulLink: owner.link)
+        var guest = owner
+        guest.scope = "session"
+        guest.link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: try XCTUnwrap(URL(string: "https://192.168.1.42:8760/")),
+            token: Self.bearer,
+            pinnedFingerprintCode: fingerprint.pairingCode
+        ))
+        RemoteHostTrust.register([owner, guest], with: delegate)
+
+        RemoteHostTrust.forget(owner, remaining: [guest], with: delegate)
+
+        let pins = try XCTUnwrap(
+            delegate.pins(forHost: "192.168.1.42"),
+            "the shared chat on the same Mac still has to reach it"
+        )
+        XCTAssertTrue(pins.matches(certificateDER: Self.certificate))
+
+        RemoteHostTrust.forget(guest, remaining: [], with: delegate)
+        XCTAssertNil(delegate.pins(forHost: "192.168.1.42"))
+    }
+
     // MARK: - The refusal has a name
 
     func testAFingerprintMismatchIsItsOwnFailureAndAsksForAFreshCode() {
