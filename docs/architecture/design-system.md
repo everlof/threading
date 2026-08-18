@@ -1055,6 +1055,16 @@ into it (see the `maxSize` rule under [Themed Controls](#themed-controls)). Whic
 is why the scroller is decided *before* the height guard in `updateHeight`: by the time text
 overflows, the box is already at its cap and the constant has stopped moving.
 
+**Undo has two owners, and both are required.** `ThemedTextView.allowsUndo` makes user edits enter
+the text system's manager; the application menu then reaches that manager through AppKit's window
+responder actions, `undo:` and `redo:`. Those colons are load-bearing. `UndoManager.undo` and
+`.redo` expose different zero-argument selectors, so sending them through the responder chain
+finds no target even while the focused prompt has an operation waiting. A component test that
+calls the manager directly proves only the first half; `PromptInputTests` drives ⌘Z and ⇧⌘Z through
+the real main-menu items and a fixture window's responder chain so the shipping route is covered
+too. Hosted `xcodebuild` cannot make that window genuinely key, so the test supplies it as the
+otherwise-targetless items' target — the same window `NSApplication` selects in the running app.
+
 **A drag the composer can take lights the whole box while it is over it**: the accent ring at
 focus width over a well tinted `Design.Surface.fieldDropTarget` — the row wash's accent-at-alpha
 sentence composited over the field fill, because `applySurface` records exactly one fill and a
