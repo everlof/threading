@@ -31,6 +31,9 @@ enum RemotePairingCardState: Equatable {
     case keychainUnavailable
     /// A scannable payload exists; the card shows the code.
     case ready(payload: String)
+    /// Remote Access is on and no way in is switched on, so nothing routable is being started.
+    /// A dead end rather than a wait: the card says which switch produces a code.
+    case noWayIn
     /// The selected connection reported a reason it cannot carry traffic, and the fix for it
     /// when the readiness model knows one.
     case connectionUnavailable(reason: String, remedy: RemotePairingRemedy?)
@@ -40,17 +43,25 @@ enum RemotePairingCardState: Equatable {
     /// The connection is up but no pairing payload could be built from it.
     case codeUnavailable
 
+    /// `hasWayIn` defaults to true so the callers that are only asking about a transport — the
+    /// readiness tests, and every state that predates the door switches — keep reading the same.
     static func resolve(
         ownerDevicePersistenceError: String?,
         pairingCodePayload: String?,
         transport: RemoteTransportState,
-        tailscaleReadiness: TailscaleReadiness? = nil
+        tailscaleReadiness: TailscaleReadiness? = nil,
+        hasWayIn: Bool = true
     ) -> RemotePairingCardState {
         if ownerDevicePersistenceError != nil {
             return .keychainUnavailable
         }
         if let pairingCodePayload {
             return .ready(payload: pairingCodePayload)
+        }
+        // Checked after the payload: a code that exists is proof something is reachable, and it
+        // is the answer the person came for either way.
+        if !hasWayIn {
+            return .noWayIn
         }
         switch transport {
         case .unavailable(let reason):

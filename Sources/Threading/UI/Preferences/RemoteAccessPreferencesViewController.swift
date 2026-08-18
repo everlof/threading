@@ -11,9 +11,21 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     // MARK: - Controls
 
     private let remoteAccessToggle = ThemedToggle()
-    private let connectionModeControl = ThemedSegmentedControl()
-    private let ownerRelayFallbackToggle = ThemedToggle()
-    private let keepRelayReadyToggle = ThemedToggle()
+    private let thisNetworkToggle = ThemedToggle()
+    private let tailscaleToggle = ThemedToggle()
+    private let tailscaleServeToggle = ThemedToggle()
+    /// The Serve sub-option's whole row, held so it can stay off the page until Serve stops
+    /// being the tailnet door itself. See `configureControls`.
+    private var tailscaleServeRow: NSView?
+    private var wayInStatusViews: [RemoteAccessWayIn: WayInStatusViews] = [:]
+    private var threadingDirectSection: NSView?
+    private let identityCode = NSTextField(labelWithString: "")
+    private let identityDetail = NSTextField(wrappingLabelWithString: "")
+    private let identitySuccessor = NSTextField(wrappingLabelWithString: "")
+    private let identityResetButton = ThemedButton()
+    private let identityPrepareButton = ThemedButton()
+    private let identityActivateButton = ThemedButton()
+    private var identityTask: Task<Void, Never>?
     private let hostedSignInButton = HostedServiceSignInButton()
     private let hostedSignOutButton = ThemedButton()
     private let hostedDeleteAccountButton = ThemedButton()
@@ -83,33 +95,45 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         remoteAccessToggle.action = #selector(remoteAccessChanged)
         remoteAccessToggle.setAccessibilityIdentifier("settings.remote-access.enabled")
 
-        connectionModeControl.configure(
-            titles: RemoteAccessConnectionMode.allCases.map(\.settingsTitle),
-            selectedIndex: RemoteAccessConnectionMode.allCases.firstIndex(
-                of: AppSettings.shared.remoteAccessConnectionMode
-            ) ?? 0
-        )
-        connectionModeControl.onSelect = { index in
-            guard RemoteAccessConnectionMode.allCases.indices.contains(index) else { return }
-            RemoteAccessCoordinator.shared.setConnectionMode(
-                RemoteAccessConnectionMode.allCases[index]
-            )
-        }
-        connectionModeControl.setAccessibilityIdentifier("settings.remote-access.connection-mode")
-        connectionModeControl.translatesAutoresizingMaskIntoConstraints = false
-        connectionModeControl.widthAnchor.constraint(
-            equalToConstant: SettingsUIDefaults.wideSegmentedControlWidth
-        ).isActive = true
+        thisNetworkToggle.target = self
+        thisNetworkToggle.action = #selector(thisNetworkDoorChanged)
+        thisNetworkToggle.setAccessibilityIdentifier(Identifier.doorToggle(.thisNetwork))
+        thisNetworkToggle.setAccessibilityLabel(RemoteAccessWayIn.thisNetwork.title)
 
-        ownerRelayFallbackToggle.target = self
-        ownerRelayFallbackToggle.action = #selector(ownerRelayFallbackChanged)
-        ownerRelayFallbackToggle.setAccessibilityIdentifier(
-            "settings.remote-access.owner-relay-fallback"
-        )
-        keepRelayReadyToggle.target = self
-        keepRelayReadyToggle.action = #selector(keepRelayReadyChanged)
-        keepRelayReadyToggle.setAccessibilityIdentifier(
-            "settings.remote-access.keep-relay-ready"
+        tailscaleToggle.target = self
+        tailscaleToggle.action = #selector(tailscaleDoorChanged)
+        tailscaleToggle.setAccessibilityIdentifier(Identifier.doorToggle(.tailscale))
+        tailscaleToggle.setAccessibilityLabel(RemoteAccessWayIn.tailscale.title)
+
+        tailscaleServeToggle.target = self
+        tailscaleServeToggle.action = #selector(tailscaleServeChanged)
+        tailscaleServeToggle.setAccessibilityIdentifier("settings.remote-access.tailscale-serve")
+        tailscaleServeToggle.setAccessibilityLabel(L10n.string("Open in a browser on your tailnet"))
+
+        identityCode.applyFont(.code())
+        identityCode.textColor = Design.Text.label
+        identityCode.isSelectable = true
+        identityCode.setAccessibilityIdentifier("settings.remote-access.identity-code")
+        identityDetail.applyFont(.subheading)
+        identityDetail.textColor = Design.Text.secondary
+        identityDetail.setAccessibilityIdentifier("settings.remote-access.identity-detail")
+        identitySuccessor.applyFont(.subheading)
+        identitySuccessor.textColor = Design.Text.secondary
+        identitySuccessor.setAccessibilityIdentifier("settings.remote-access.identity-successor")
+
+        identityResetButton.title = L10n.string("Reset Identity…")
+        identityResetButton.target = self
+        identityResetButton.action = #selector(resetIdentity)
+        identityResetButton.setAccessibilityIdentifier("settings.remote-access.identity-reset")
+        identityPrepareButton.title = L10n.string("Prepare Rotation")
+        identityPrepareButton.target = self
+        identityPrepareButton.action = #selector(prepareIdentityRotation)
+        identityPrepareButton.setAccessibilityIdentifier("settings.remote-access.identity-prepare")
+        identityActivateButton.title = L10n.string("Activate Rotation")
+        identityActivateButton.target = self
+        identityActivateButton.action = #selector(activateIdentityRotation)
+        identityActivateButton.setAccessibilityIdentifier(
+            "settings.remote-access.identity-activate"
         )
 
         hostedSignInButton.configure(target: self, action: #selector(signInHostedService))
@@ -233,14 +257,20 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             tailscaleReadinessCard()
         )
         tailscaleReadinessSection = readiness
+        let threadingDirect = SettingsUI.section(nil, wayInCard(.threadingDirect))
+        threadingDirectSection = threadingDirect
         let page = SettingsUI.page(title: "Remote Access", sections: [
             SettingsUI.note(
                 "Continue chats from Threading on iPhone or a private browser. "
                     + "Nothing is exposed until you turn it on."
             ),
             SettingsUI.section("Connection", connectionCard()),
+            SettingsUI.section("Ways In", wayInCard(.thisNetwork)),
+            SettingsUI.section(nil, wayInCard(.tailscale)),
+            threadingDirect,
             readiness,
             SettingsUI.section("Set Up Your iPhone", pairingCard()),
+            SettingsUI.section("This Mac’s Identity", identityCard()),
             SettingsUI.section("Sharing & Security", securityCard()),
             SettingsUI.note(
                 "Remote Access publishes only Threading’s authenticated remote surface. "
@@ -267,32 +297,202 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 control: remoteAccessToggle
             ),
             SettingsUI.row(
-                title: "Connection",
-                subtitle: "Relay supports ordinary share links. Tailscale keeps access inside "
-                    + "your private tailnet. Private + Sharing uses Tailscale for pairing and "
-                    + "starts the public relay only when it is needed.",
-                control: connectionModeControl
-            ),
-            SettingsUI.row(
                 title: "Hosted Direct",
                 subtitle: "Uses Threading’s service only to introduce this Mac and iPhone, then "
                     + "prefers a direct encrypted connection. TURN is used only when direct "
                     + "network traversal cannot connect.",
                 control: hostedAccountControls
             ),
-            SettingsUI.row(
-                title: "Owner Relay Fallback",
-                subtitle: "In Private + Sharing, let your paired devices use Relay when "
-                    + "Tailscale cannot be reached. Off fails closed on the private path.",
-                control: ownerRelayFallbackToggle
-            ),
-            SettingsUI.row(
-                title: "Keep Sharing Relay Ready",
-                subtitle: "Start the public relay immediately instead of waiting until you "
-                    + "create a public share link.",
-                control: keepRelayReadyToggle
-            ),
             SettingsUI.fullRow(connectionStatusRow())
+        ])
+    }
+
+    /// One way in: what it is, its switch, what it is doing right now, and the four questions
+    /// every way in answers in the same order and the same words.
+    ///
+    /// The four lines are not behind a disclosure triangle. A method whose four lines are
+    /// embarrassing is one to fix or remove, and one whose lines are fine has nothing to hide
+    /// behind a triangle either — so they are on the page, under the status they qualify.
+    private func wayInCard(_ wayIn: RemoteAccessWayIn) -> SettingsCard {
+        var rows: [NSView] = [
+            SettingsUI.row(
+                title: wayIn.title,
+                subtitle: wayIn.promise,
+                control: toggle(for: wayIn)
+            )
+        ]
+        if wayIn.hasSwitch || wayIn == .threadingDirect {
+            rows.append(SettingsUI.fullRow(statusRow(for: wayIn)))
+        }
+        rows.append(SettingsUI.fullRow(disclosureRows(for: wayIn)))
+        if let note = wayIn.note {
+            rows.append(SettingsUI.fullRow(noteLabel(note)))
+        }
+        if wayIn == .tailscale {
+            rows.append(contentsOf: tailscaleServeRows())
+            // "Through a VPN" is the same door reached from a tunnel, so it belongs to the
+            // network card rather than to a switch of its own.
+        }
+        if wayIn == .thisNetwork {
+            rows.append(contentsOf: throughAVPNRows())
+        }
+        return SettingsCard(rows: rows)
+    }
+
+    private func toggle(for wayIn: RemoteAccessWayIn) -> NSView? {
+        switch wayIn {
+        case .thisNetwork: return thisNetworkToggle
+        case .tailscale: return tailscaleToggle
+        case .throughAVPN, .threadingDirect: return nil
+        }
+    }
+
+    /// The VPN note's rows, inside the network card it follows.
+    private func throughAVPNRows() -> [NSView] {
+        var rows: [NSView] = [
+            SettingsUI.row(
+                title: RemoteAccessWayIn.throughAVPN.title,
+                subtitle: RemoteAccessWayIn.throughAVPN.promise,
+                localizes: false
+            ),
+            SettingsUI.fullRow(disclosureRows(for: .throughAVPN))
+        ]
+        if let note = RemoteAccessWayIn.throughAVPN.note {
+            rows.append(SettingsUI.fullRow(noteLabel(note)))
+        }
+        return rows
+    }
+
+    /// The Serve sub-option, built and **not shown**.
+    ///
+    /// Today the tailnet door *is* `tailscale serve` (`RemoteTailscaleDoorImplementation`), so a
+    /// switch offering to turn Serve off would take the phone's only tailnet route with it, and
+    /// a switch shown disabled would be a promise with no date on it. It appears when the door
+    /// becomes a bind to this Mac's own tailnet address and Serve becomes what §8 of the
+    /// transport plan describes: a way for a *browser* on the tailnet to skip the certificate
+    /// warning. The row is assembled here so that change is one line rather than a rewrite.
+    private func tailscaleServeRows() -> [NSView] {
+        let row = SettingsUI.row(
+            title: "Open in a browser on your tailnet",
+            subtitle: "Lets a browser on your tailnet open Threading without a certificate "
+                + "warning. The Threading app does not need this.",
+            control: tailscaleServeToggle
+        )
+        let note = noteLabel(L10n.string(
+            "Turning it on publishes this Mac’s name and your tailnet name in public "
+                + "certificate logs."
+        ))
+        let noteRow = SettingsUI.fullRow(note)
+        row.isHidden = true
+        noteRow.isHidden = true
+        tailscaleServeRow = row
+        return [row, noteRow]
+    }
+
+    private func noteLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.applyFont(.subheading)
+        label.textColor = Design.Text.secondary
+        return label
+    }
+
+    /// One way in's live status: a mark, the fact, and the remedy when the fact alone does not
+    /// say what to do about it.
+    private func statusRow(for wayIn: RemoteAccessWayIn) -> NSView {
+        let glyph = NSTextField(labelWithString: "–")
+        glyph.applyFont(.body)
+        glyph.setContentHuggingPriority(.required, for: .horizontal)
+        let spinner = ThemedSpinner()
+
+        let text = NSTextField(wrappingLabelWithString: "")
+        text.applyFont(.body)
+        text.textColor = Design.Text.label
+        text.setAccessibilityIdentifier(Identifier.status(wayIn))
+        let hint = NSTextField(wrappingLabelWithString: "")
+        hint.applyFont(.subheading)
+        hint.textColor = Design.Text.secondary
+        hint.setAccessibilityIdentifier(Identifier.statusHint(wayIn))
+
+        let labels = NSStackView(views: [text, hint])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = Design.Spacing.hairline
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [markSlot(glyph: glyph, spinner: spinner), labels])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.distribution = .fill
+        row.spacing = Design.Spacing.medium
+
+        wayInStatusViews[wayIn] = WayInStatusViews(
+            glyph: glyph,
+            spinner: spinner,
+            text: text,
+            hint: hint
+        )
+        return row
+    }
+
+    /// The four lines. The questions share one column, sized by the longest of them rather than
+    /// by a number typed in here, so a theme with a wider face moves the answers with it.
+    private func disclosureRows(for wayIn: RemoteAccessWayIn) -> NSView {
+        var questions: [NSTextField] = []
+        var lines: [NSView] = []
+        for line in wayIn.disclosure.lines {
+            let question = NSTextField(labelWithString: line.question)
+            question.applyFont(.subheading)
+            question.textColor = Design.Text.tertiary
+            question.setContentHuggingPriority(.required, for: .horizontal)
+            question.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+            let answer = NSTextField(wrappingLabelWithString: line.answer)
+            answer.applyFont(.subheading)
+            answer.textColor = Design.Text.secondary
+            answer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+            let row = NSStackView(views: [question, answer])
+            row.orientation = .horizontal
+            row.alignment = .firstBaseline
+            row.distribution = .fill
+            row.spacing = Design.Spacing.medium
+            questions.append(question)
+            lines.append(row)
+        }
+
+        let stack = NSStackView(views: lines)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        stack.setHuggingPriority(.defaultLow, for: .horizontal)
+        stack.setAccessibilityIdentifier(Identifier.disclosure(wayIn))
+        for question in questions.dropFirst() {
+            question.widthAnchor.constraint(equalTo: questions[0].widthAnchor).isActive = true
+        }
+        for line in lines {
+            line.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return stack
+    }
+
+    /// This Mac's certificate: the code a phone compares, and the two operations that change it.
+    private func identityCard() -> SettingsCard {
+        let actions = SettingsUI.controlGroup(
+            [identityPrepareButton, identityActivateButton, identityResetButton],
+            spacing: Design.Spacing.small
+        )
+        let text = NSStackView(views: [identityCode, identityDetail, identitySuccessor])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = Design.Spacing.small
+        text.setHuggingPriority(.defaultLow, for: .horizontal)
+        text.setHuggingPriority(.required, for: .vertical)
+        identityDetail.widthAnchor.constraint(equalTo: text.widthAnchor).isActive = true
+        identitySuccessor.widthAnchor.constraint(equalTo: text.widthAnchor).isActive = true
+
+        return SettingsCard(rows: [
+            SettingsUI.fullRow(text),
+            SettingsUI.fullRow(actions)
         ])
     }
 
@@ -504,15 +704,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
         let coordinator = RemoteAccessCoordinator.shared
         remoteAccessToggle.state = AppSettings.shared.remoteAccessEnabled ? .on : .off
-        connectionModeControl.selectedIndex = RemoteAccessConnectionMode.allCases.firstIndex(
-            of: AppSettings.shared.remoteAccessConnectionMode
-        ) ?? 0
-        let usesHybrid = AppSettings.shared.remoteAccessConnectionMode == .tailscaleAndRelay
-        ownerRelayFallbackToggle.state = AppSettings.shared.remoteAccessAllowsOwnerRelayFallback
-            ? .on : .off
-        ownerRelayFallbackToggle.isEnabled = usesHybrid
-        keepRelayReadyToggle.state = AppSettings.shared.remoteAccessKeepsRelayReady ? .on : .off
-        keepRelayReadyToggle.isEnabled = usesHybrid
         inputControlDefault.selectedIndex = RemoteInputControlDefault.allCases.firstIndex(
             of: AppSettings.shared.remoteInputControlDefault
         ) ?? 0
@@ -520,19 +711,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             at: PhoneReportWorkspacePolicy.allCases
                 .firstIndex(of: AppSettings.shared.phoneReportWorkspace) ?? 0
         )
-        tailscaleReadinessSection?.isHidden =
-            AppSettings.shared.remoteAccessConnectionMode == .relay
         updateTailscaleReadiness(coordinator.tailscaleReadiness)
         openLocallyButton.isHidden = coordinator.localURL == nil
         openLocallyButton.isEnabled = coordinator.localURL != nil
         rebuildPairedDevices(coordinator.pairedOwnerDevices, error: coordinator.ownerDevicePersistenceError)
         updateHostedAccount(coordinator)
+        apply(doorsPresentation(coordinator))
 
         switch coordinator.status {
         case .disabled:
-            let selectedConnection = AppSettings.shared.remoteAccessConnectionMode == .relay
-                ? L10n.string("the HTTPS relay")
-                : L10n.string("your Tailscale tailnet")
             updateConnection(
                 title: L10n.string("Off"),
                 detail: L10n.string("This Mac is not reachable from another device."),
@@ -540,9 +727,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             )
             updatePairing(
                 title: L10n.string("Connect your iPhone"),
-                detail: L10n.format(
-                    "Turn on Remote Access. Threading will start a local mirror and connect it to %@.",
-                    selectedConnection
+                detail: L10n.string(
+                    "Turn on Remote Access. Threading starts a local mirror and answers on the "
+                    + "ways in you have switched on below."
                 ),
                 action: L10n.string("Turn On Remote Access"),
                 actionEnabled: true,
@@ -566,27 +753,17 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             )
 
         case .listening(let port):
-            let transport = AppSettings.shared.remoteAccessConnectionMode == .relay
-                ? coordinator.relayStatus
-                : coordinator.tailscaleStatus
-            let readiness = AppSettings.shared.remoteAccessConnectionMode == .relay
-                ? nil
-                : coordinator.tailscaleReadiness
             applyListeningState(
                 connection: RemoteConnectionStatusPresentation.resolve(
-                    mode: AppSettings.shared.remoteAccessConnectionMode,
-                    relay: coordinator.relayStatus,
-                    tailscale: coordinator.tailscaleStatus,
-                    tailscaleReadiness: coordinator.tailscaleReadiness,
-                    allowsOwnerRelayFallback:
-                        AppSettings.shared.remoteAccessAllowsOwnerRelayFallback,
+                    statuses: doorsPresentation(coordinator).offeredStatuses,
                     localPort: port
                 ),
                 card: RemotePairingCardState.resolve(
                     ownerDevicePersistenceError: coordinator.ownerDevicePersistenceError,
                     pairingCodePayload: coordinator.pairingCodePayload,
-                    transport: transport,
-                    tailscaleReadiness: readiness
+                    transport: coordinator.tailscaleStatus,
+                    tailscaleReadiness: coordinator.tailscaleReadiness,
+                    hasWayIn: coordinator.hasEnabledWayIn
                 )
             )
 
@@ -606,6 +783,116 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 prominent: true
             )
         }
+    }
+
+    /// What the ways in are doing, read from the coordinator once.
+    ///
+    /// Every value the page prints comes through here, which is what lets the render tests
+    /// photograph a bound LAN address, a Mac with no interface and a firewall that may be
+    /// swallowing connections without any of them existing on the machine running the test.
+    private func doorsPresentation(
+        _ coordinator: RemoteAccessCoordinator
+    ) -> RemoteAccessDoorsPresentation {
+        let isOn = AppSettings.shared.remoteAccessEnabled
+        var statuses: [RemoteAccessWayIn: RemoteDoorStatus] = [:]
+        if isOn {
+            statuses[.thisNetwork] = .thisNetwork(
+                isEnabled: coordinator.isThisNetworkDoorEnabled,
+                state: coordinator.thisNetworkDoorState,
+                firewall: coordinator.listenerStatus.firewall,
+                preferredPort: AppSettings.shared.remoteAccessListenerPort
+            )
+            statuses[.tailscale] = .tailscale(
+                isEnabled: coordinator.isTailscaleDoorEnabled,
+                transport: coordinator.tailscaleStatus,
+                readiness: coordinator.tailscaleReadiness
+            )
+            statuses[.threadingDirect] = .threadingDirect(coordinator.hostedServiceState)
+        } else {
+            for wayIn in RemoteAccessWayIn.allCases where wayIn != .throughAVPN {
+                statuses[wayIn] = .remoteAccessOff()
+            }
+        }
+        return RemoteAccessDoorsPresentation(
+            thisNetworkIsOn: coordinator.isThisNetworkDoorEnabled,
+            tailscaleIsOn: coordinator.isTailscaleDoorEnabled,
+            showsThreadingDirect: coordinator.canIssueHostedDeviceCredentials,
+            statuses: statuses,
+            identity: .resolve(coordinator.identitySnapshot)
+        )
+    }
+
+    /// Renders the ways in. The one entry point a test drives, for the same reason
+    /// `applyListeningState` is: none of these states can be reached on a developer's machine
+    /// on purpose.
+    func apply(_ doors: RemoteAccessDoorsPresentation) {
+        thisNetworkToggle.state = doors.thisNetworkIsOn ? .on : .off
+        tailscaleToggle.state = doors.tailscaleIsOn ? .on : .off
+        tailscaleServeToggle.state =
+            AppSettings.shared.remoteAccessTailscaleServeEnabled ? .on : .off
+        threadingDirectSection?.isHidden = !doors.showsThreadingDirect
+        tailscaleReadinessSection?.isHidden = !doors.tailscaleIsOn
+        for (wayIn, views) in wayInStatusViews {
+            apply(doors.status(of: wayIn), to: views)
+        }
+        apply(doors.identity)
+    }
+
+    private func apply(_ status: RemoteDoorStatus?, to views: WayInStatusViews) {
+        guard let status else {
+            views.text.stringValue = ""
+            views.hint.stringValue = ""
+            views.hint.isHidden = true
+            views.glyph.isHidden = true
+            views.spinner.isAnimating = false
+            return
+        }
+        views.text.stringValue = status.text
+        views.hint.stringValue = status.hint ?? ""
+        views.hint.isHidden = status.hint == nil
+        views.spinner.setAccessibilityLabel(status.text)
+        views.spinner.isAnimating = status.isBusy
+        views.glyph.isHidden = status.isBusy
+        // A mark as well as a colour: status has to be identifiable without colour alone, and
+        // this is also the page's only signal under Differentiate Without Colour.
+        views.glyph.stringValue = Self.mark(for: status.tone)
+        views.glyph.textColor = Self.ink(for: status.tone)
+    }
+
+    private static func mark(for tone: RemoteDoorStatus.Tone) -> String {
+        switch tone {
+        case .ready: return DoorMark.ready
+        case .attention: return DoorMark.attention
+        case .off, .working: return DoorMark.idle
+        }
+    }
+
+    private static func ink(for tone: RemoteDoorStatus.Tone) -> NSColor {
+        switch tone {
+        case .ready: return Design.Status.positive
+        case .attention: return Design.Status.warning
+        case .off, .working: return Design.Text.tertiary
+        }
+    }
+
+    private func apply(_ identity: RemoteIdentityCardPresentation) {
+        identityCode.stringValue = identity.pairingCode ?? ""
+        identityCode.isHidden = identity.pairingCode == nil
+        identityDetail.stringValue = identity.failure
+            ?? (identity.pairingCode == nil
+                ? RemoteIdentityCardPresentation.notMintedYet
+                : RemoteIdentityCardPresentation.explanation)
+        identitySuccessor.isHidden = identity.nextPairingCode == nil
+        identitySuccessor.stringValue = identity.nextPairingCode.map {
+            L10n.format(
+                "A successor is announced and not in use yet: %@. Every device that has "
+                    + "connected since then already trusts it.",
+                $0
+            )
+        } ?? ""
+        identityPrepareButton.isEnabled = identity.canPrepareRotation && identityTask == nil
+        identityActivateButton.isEnabled = identity.canActivateRotation && identityTask == nil
+        identityResetButton.isEnabled = identityTask == nil
     }
 
     private func updateHostedAccount(_ coordinator: RemoteAccessCoordinator) {
@@ -782,6 +1069,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 actionEnabled: true,
                 prominent: false,
                 pairingPayload: payload
+            )
+
+        case .noWayIn:
+            updatePairing(
+                title: L10n.string("No way in is switched on"),
+                detail: L10n.string(
+                    "Remote Access is on and nothing outside this Mac can reach it. Turn on "
+                        + "This network, or Tailscale, to get a pairing code."
+                ),
+                action: L10n.string("Pairing Unavailable"),
+                actionEnabled: false,
+                prominent: false
             )
 
         case .connectionUnavailable(let reason, let remedy):
@@ -1057,15 +1356,88 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         refresh()
     }
 
-    @objc private func ownerRelayFallbackChanged() {
-        RemoteAccessCoordinator.shared.setAllowsOwnerRelayFallback(
-            ownerRelayFallbackToggle.state == .on
+    /// The `lan` door. `vpn` is deliberately not selected with it: a tunnel into this network
+    /// hands the phone an address inside it, so the LAN listener is what answers, and the `vpn`
+    /// door is for the day a listener binds the tunnel's own address.
+    @objc private func thisNetworkDoorChanged() {
+        var doors = AppSettings.shared.remoteAccessDoors
+        if thisNetworkToggle.state == .on {
+            doors.insert(.lan)
+        } else {
+            doors.remove(.lan)
+        }
+        RemoteAccessCoordinator.shared.setDoors(doors)
+        refresh()
+    }
+
+    @objc private func tailscaleDoorChanged() {
+        RemoteAccessCoordinator.shared.setTailscaleDoorEnabled(tailscaleToggle.state == .on)
+        refresh()
+    }
+
+    @objc private func tailscaleServeChanged() {
+        RemoteAccessCoordinator.shared.setTailscaleServeEnabled(
+            tailscaleServeToggle.state == .on
         )
         refresh()
     }
 
-    @objc private func keepRelayReadyChanged() {
-        RemoteAccessCoordinator.shared.setKeepsRelayReady(keepRelayReadyToggle.state == .on)
+    /// Throws this Mac's certificate away and mints a new one. The one operation on this page
+    /// that unpairs devices, so it says so in the words it will actually cost.
+    @objc private func resetIdentity() {
+        guard identityTask == nil else { return }
+        let request = ConfirmationRequest(
+            prompt: .resetRemoteAccessIdentity,
+            title: L10n.string("Reset this Mac’s identity?"),
+            message: L10n.string(
+                "Threading mints a new certificate and a new pairing code. Every paired device "
+                    + "stops trusting this Mac and has to scan the new code before it can "
+                    + "connect again. Use Prepare Rotation instead if this Mac’s certificate is "
+                    + "still working."
+            ),
+            confirmTitle: L10n.string("Reset Identity")
+        )
+        guard ConfirmationAlert.ask(request) else { return }
+        runIdentityOperation { await RemoteAccessCoordinator.shared.resetIdentity() }
+    }
+
+    /// Mints the successor and announces it over the pinned channel, without presenting it. A
+    /// phone connected since the announcement has already pinned it.
+    @objc private func prepareIdentityRotation() {
+        guard identityTask == nil else { return }
+        runIdentityOperation { await RemoteAccessCoordinator.shared.prepareIdentityRotation() }
+    }
+
+    @objc private func activateIdentityRotation() {
+        guard identityTask == nil else { return }
+        let request = ConfirmationRequest(
+            prompt: .activateRemoteAccessIdentityRotation,
+            title: L10n.string("Switch to the new identity?"),
+            message: L10n.string(
+                "Every device that has connected to this Mac since the successor was announced "
+                    + "keeps working without doing anything. A device that has not connected "
+                    + "since then has to scan the new pairing code."
+            ),
+            confirmTitle: L10n.string("Switch")
+        )
+        guard ConfirmationAlert.ask(request) else { return }
+        runIdentityOperation { await RemoteAccessCoordinator.shared.activateIdentityRotation() }
+    }
+
+    /// One task at a time, and the buttons state that while it runs. The operations themselves
+    /// read and write files and import a container, which the coordinator already does off the
+    /// main actor.
+    private func runIdentityOperation(
+        _ operation: @escaping @MainActor () async -> Result<
+            RemoteHostFingerprint, RemoteIdentityFailure
+        >
+    ) {
+        identityTask = Task { [weak self] in
+            _ = await operation()
+            guard let self else { return }
+            identityTask = nil
+            refresh()
+        }
         refresh()
     }
 
@@ -1150,5 +1522,41 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         formatter.unitsStyle = .abbreviated
         return formatter
     }()
+
+    /// The views one way in's status line writes into. Held rather than rebuilt: a status line
+    /// changes on every interface event, and rebuilding a card to change two strings is how a
+    /// page starts flickering under a network that is settling.
+    private struct WayInStatusViews {
+        let glyph: NSTextField
+        let spinner: ThemedSpinner
+        let text: NSTextField
+        let hint: NSTextField
+    }
+
+    /// The mark beside a status line, so the state survives Differentiate Without Colour.
+    private enum DoorMark {
+        static let ready = "✓"
+        static let attention = "!"
+        static let idle = "–"
+    }
+
+    /// Accessibility identifiers, built once so a test and the page cannot spell them apart.
+    enum Identifier {
+        static func doorToggle(_ wayIn: RemoteAccessWayIn) -> String {
+            "settings.remote-access.door.\(wayIn.identifierComponent)"
+        }
+
+        static func status(_ wayIn: RemoteAccessWayIn) -> String {
+            "settings.remote-access.status.\(wayIn.identifierComponent)"
+        }
+
+        static func statusHint(_ wayIn: RemoteAccessWayIn) -> String {
+            "settings.remote-access.status-hint.\(wayIn.identifierComponent)"
+        }
+
+        static func disclosure(_ wayIn: RemoteAccessWayIn) -> String {
+            "settings.remote-access.disclosure.\(wayIn.identifierComponent)"
+        }
+    }
 
 }

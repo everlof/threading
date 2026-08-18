@@ -57,6 +57,9 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessConnectionMode
     case remoteAccessAllowsOwnerRelayFallback
     case remoteAccessKeepsRelayReady
+    case remoteAccessDoorMigration
+    case remoteAccessTailscaleEnabled
+    case remoteAccessTailscaleServeEnabled
     case remoteAccessListenerPort
     case remoteAccessDoors
     case remoteAccessAdvertisedHostname
@@ -988,29 +991,67 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 0, "Connection", "Remote Access",
                             ["iPhone", "remote", "sharing"])]
     )
+    /// **Kept for one migration and read nowhere else.**
+    ///
+    /// A mode forced one choice between overlapping things: Relay, Tailscale, or both. Doors do
+    /// not, so the three settings below are gone from the page and from every decision the
+    /// coordinator makes. They stay in the registry only long enough for
+    /// `AppSettings.migrateRemoteAccessConnectionMode()` to carry a stored `tailscale` or
+    /// `tailscaleAndRelay` over to `remoteAccessTailscaleEnabled`; a stored `relay` carries
+    /// nothing, because the relay stopped being an owner pairing route. Removing the keys is a
+    /// later step of the transport plan, once the migration has shipped.
     static let remoteAccessConnectionMode = AppSettingDescriptor<String>(
         identity: .remoteAccessConnectionMode,
         persistenceKey: "remoteAccessConnectionMode",
         absence: .fallback("relay"),
-        validation: .allowedStrings(Set(RemoteAccessConnectionMode.allCases.map(\.rawValue))),
-        presentations: [
-            row("remote-access", 1, "Connection", "Connection", ["relay", "Tailscale"]),
-            row("remote-access", 2, "Connection", "Hosted Direct", ["direct", "introduce"])
-        ]
+        validation: .allowedStrings(Set(RemoteAccessConnectionMode.allCases.map(\.rawValue)))
     )
     static let remoteAccessAllowsOwnerRelayFallback = AppSettingDescriptor<Bool>(
         identity: .remoteAccessAllowsOwnerRelayFallback,
         persistenceKey: "remoteAccessAllowsOwnerRelayFallback",
-        absence: .registered(false),
-        presentations: [row("remote-access", 3, "Connection", "Owner Relay Fallback",
-                            ["relay", "fallback"])]
+        absence: .registered(false)
     )
     static let remoteAccessKeepsRelayReady = AppSettingDescriptor<Bool>(
         identity: .remoteAccessKeepsRelayReady,
         persistenceKey: "remoteAccessKeepsRelayReady",
+        absence: .registered(false)
+    )
+    /// Written once the mode has been carried over to the door switches.
+    ///
+    /// Never seeded, and written last, so an interrupted migration re-runs. Re-running is safe:
+    /// it reads a mode nothing writes any more and turns a door **on**, so a person who later
+    /// switched Tailscale off is not undone by the next launch — the marker is already there.
+    static let remoteAccessDoorMigration = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessDoorMigration,
+        persistenceKey: "didMigrateRemoteAccessDoors",
+        absence: .falseValue,
+        notification: .none
+    )
+    /// Whether this Mac is reachable on its tailnet.
+    ///
+    /// One door, one switch. Off by default, and turning it on does not put Threading on any
+    /// other network: every door is bound separately, which is the guarantee
+    /// `docs/REMOTE_ACCESS.md` makes about publishing "only inside the owner's tailnet".
+    static let remoteAccessTailscaleEnabled = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessTailscaleEnabled,
+        persistenceKey: "remoteAccessTailscaleEnabled",
         absence: .registered(false),
-        presentations: [row("remote-access", 4, "Connection", "Keep Sharing Relay Ready",
-                            ["relay", "share links"])]
+        presentations: [row("remote-access", 3, "Ways In", "Tailscale",
+                            ["tailnet", "Tailscale", "VPN", "away from home"])]
+    )
+    /// The browser convenience on the tailnet, and nothing else.
+    ///
+    /// **Not operative yet, and deliberately not on the page yet.** Today the `tailscale` door
+    /// *is* Tailscale Serve (`RemoteTailscaleDoorImplementation.serveTransport`), so a switch
+    /// offering to turn Serve off would take the phone's only tailnet route with it. When the
+    /// raw tailnet bind lands, Serve becomes what §8 of the transport plan describes — "Open
+    /// Threading in a browser on your tailnet without a certificate warning" — and this is the
+    /// switch for it. It has no catalogue row until then, because a search result must lead to a
+    /// row that is on the page.
+    static let remoteAccessTailscaleServeEnabled = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessTailscaleServeEnabled,
+        persistenceKey: "remoteAccessTailscaleServeEnabled",
+        absence: .registered(false)
     )
     /// The port the listener tries first.
     ///
@@ -1028,17 +1069,21 @@ enum AppSettingDefinitions {
     )
     /// Which routable doors get a listener.
     ///
-    /// Empty by default, which is the shipped exposure today: loopback only, exactly as before
-    /// this setting existed. **The `lan` door is deliberately not offered in the UI until the
-    /// listener presents a TLS identity.** A LAN door over plain HTTP puts a bearer token on
-    /// whatever Wi-Fi the Mac has joined, so Phase 1 and Phase 2 of the transport plan are one
-    /// shipped unit even though they are separate commits. Until then this is reachable only by
-    /// writing the defaults key, which is how the tests and a manual check use it.
+    /// `lan` by default now that the listener presents a pinned TLS identity: the door is
+    /// offered, and "This network" is the primary way a phone reaches this Mac rather than a
+    /// fallback. Loopback is never in here — it is bound whenever Remote Access is on and is
+    /// not a door the user sees.
+    ///
+    /// **The encoding is deliberately `propertyList` rather than `removeEmpty`.** An empty set
+    /// is a decision ("no network may reach this Mac"), and removing the key would hand the read
+    /// back to the registered default, so switching the only door off would silently switch it
+    /// on again at the next launch.
     static let remoteAccessDoors = AppSettingDescriptor<[String]>(
         identity: .remoteAccessDoors,
         persistenceKey: "remoteAccessDoors",
-        absence: .emptyCollection,
-        encoding: .removeEmpty
+        absence: .registered([RemoteAccessDoor.lan.rawValue]),
+        presentations: [row("remote-access", 2, "Ways In", "This network",
+                            ["Wi-Fi", "LAN", "local network", "VPN", "Teleport"])]
     )
     /// An address to advertise beside the ones enumerated from the interfaces.
     ///
@@ -1057,7 +1102,7 @@ enum AppSettingDefinitions {
         persistenceKey: "phoneReportWorkspace",
         absence: .registered(PhoneReportWorkspacePolicy.sameCheckout.rawValue),
         validation: .allowedStrings(Set(PhoneReportWorkspacePolicy.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 6, "Sharing & Security", "Reports from your phone",
+        presentations: [row("remote-access", 5, "Sharing & Security", "Reports from your phone",
                             ["shake", "report", "worktree", "workspace", "isolated"])]
     )
     static let remoteInputControlDefault = AppSettingDescriptor<String>(
@@ -1065,7 +1110,7 @@ enum AppSettingDefinitions {
         persistenceKey: "remoteInputControlDefault",
         absence: .registered(RemoteInputControlDefault.collaborative.rawValue),
         validation: .allowedStrings(Set(RemoteInputControlDefault.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 5, "Sharing & Security", "New shared chats",
+        presentations: [row("remote-access", 4, "Sharing & Security", "New shared chats",
                             ["security", "collaborative", "focused", "share"])],
         remotePolicy: .ownerMutable
     )
@@ -1156,7 +1201,9 @@ enum AppSettingDefinitions {
         .init(claudeRemoteControl), .init(claudeStartupSpeed), .init(codexStartupSpeed),
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
         .init(remoteAccessConnectionMode), .init(remoteAccessAllowsOwnerRelayFallback),
-        .init(remoteAccessKeepsRelayReady), .init(remoteAccessListenerPort),
+        .init(remoteAccessKeepsRelayReady), .init(remoteAccessDoorMigration),
+        .init(remoteAccessTailscaleEnabled), .init(remoteAccessTailscaleServeEnabled),
+        .init(remoteAccessListenerPort),
         .init(remoteAccessDoors), .init(remoteAccessAdvertisedHostname),
         .init(remoteInputControlDefault),
         .init(phoneReportWorkspace),
@@ -1197,6 +1244,12 @@ enum AppSettingDefinitions {
         surfaced("usageWindows.limitRecovery", pageID: "usage-windows", order: 5,
                   section: "Limit recovery", title: "When a session hits its usage limit",
                   "rate limit", "session limit"),
+        // Sign-in rather than a stored setting, so it is surfaced instead of persisted. It used
+        // to borrow the connection mode's second presentation, and that descriptor is now a
+        // migration record with no row of its own.
+        surfaced("remoteAccess.hostedDirect", pageID: "remote-access", order: 1,
+                  section: "Connection", title: "Hosted Direct",
+                  "direct", "introduce", "sign in", "Threading Direct"),
         surfaced("github.ghCLI", pageID: "github", order: 1,
                   section: "Command-Line Fallbacks", title: "gh CLI",
                   "gh", "token", "credentials"),

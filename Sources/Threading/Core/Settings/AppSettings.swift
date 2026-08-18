@@ -53,6 +53,7 @@ final class AppSettings {
         migrateLegacyCodexHookPreferences(from: legacyPreferences)
         migrateClosingConfirmation()
         migrateAttentionAlertSoundSwitch()
+        migrateRemoteAccessConnectionMode()
     }
 
     // MARK: - Settings
@@ -1011,9 +1012,13 @@ final class AppSettings {
         }
     }
 
-    /// Which network doors publish the dedicated remote-access listener. An absent or unknown
-    /// value stays on the relay for compatibility with installations that predate private
-    /// tailnet access; an unknown future value must not silently enable an additional endpoint.
+    /// **Superseded by the door switches, and kept as the value they migrate from.**
+    ///
+    /// Nothing reads this to decide what to start any more: owner routes come from
+    /// `remoteAccessDoors` and `remoteAccessTailscaleEnabled`.
+    /// `migrateRemoteAccessConnectionMode()` reads it exactly once. An absent or unknown value
+    /// still answers `.relay`, because that is what a mode this build cannot understand meant on
+    /// the way in, and it is the mode that migrates to nothing.
     var remoteAccessConnectionMode: RemoteAccessConnectionMode {
         get {
             guard let raw = AppSettingDefinitions.remoteAccessConnectionMode.read(from: defaults)
@@ -1027,9 +1032,34 @@ final class AppSettings {
         }
     }
 
-    /// Whether an owner's paired device may use the public relay when private Tailscale access
-    /// is unavailable in Private + Sharing mode. Off is deliberately fail-closed: enabling a
-    /// public sharing door must not silently make private owner traffic use it too.
+    /// Whether this Mac answers on its tailnet.
+    ///
+    /// The `tailscale` door's switch. What that door *is* today is
+    /// `RemoteTailscaleDoorImplementation.serveTransport`; the setting says nothing about the
+    /// implementation, which is what lets the raw tailnet bind replace it without the settings
+    /// page changing.
+    var remoteAccessTailscaleEnabled: Bool {
+        get { AppSettingDefinitions.remoteAccessTailscaleEnabled.read(from: defaults) ?? false }
+        set {
+            AppSettingDefinitions.remoteAccessTailscaleEnabled.write(newValue, to: defaults)
+        }
+    }
+
+    /// Whether a browser on the tailnet may open Threading without a certificate warning.
+    ///
+    /// **Reserved.** It becomes operative when the `tailscale` door binds this Mac's own tailnet
+    /// address; until then Serve *is* that door and this switch would contradict it. See the
+    /// descriptor for why it carries no settings row yet.
+    var remoteAccessTailscaleServeEnabled: Bool {
+        get {
+            AppSettingDefinitions.remoteAccessTailscaleServeEnabled.read(from: defaults) ?? false
+        }
+        set {
+            AppSettingDefinitions.remoteAccessTailscaleServeEnabled.write(newValue, to: defaults)
+        }
+    }
+
+    /// **Superseded by the door switches**, and read only by the migration that retires them.
     var remoteAccessAllowsOwnerRelayFallback: Bool {
         get { AppSettingDefinitions.remoteAccessAllowsOwnerRelayFallback.read(from: defaults) ?? false }
         set {
@@ -1037,9 +1067,10 @@ final class AppSettings {
         }
     }
 
-    /// Keeps the public relay warm in Private + Sharing mode even when no share exists. Off is
-    /// the privacy-preserving default; the coordinator otherwise starts it on the first public
-    /// share and stops it after the final share is revoked or expires.
+    /// **Superseded by the door switches**, and read only by the migration that retires them.
+    ///
+    /// The relay is no longer started for owner pairing at all, and a guest share still starts
+    /// it on demand, so there is nothing left for this to keep warm.
     var remoteAccessKeepsRelayReady: Bool {
         get { AppSettingDefinitions.remoteAccessKeepsRelayReady.read(from: defaults) ?? false }
         set {
@@ -1068,9 +1099,10 @@ final class AppSettings {
 
     /// The routable doors that get a listener.
     ///
-    /// Empty is the shipped default and means loopback only, which is the exposure Threading has
-    /// always had. An unrecognised value in the stored array is dropped rather than guessed at:
-    /// a door is a decision to listen on a network, so an unknown one fails closed.
+    /// `lan` is the shipped default: the listener presents this Mac's pinned identity, so the
+    /// door is offered. Empty means loopback only, which reaches this Mac and nothing else. An
+    /// unrecognised value in the stored array is dropped rather than guessed at: a door is a
+    /// decision to listen on a network, so an unknown one fails closed.
     var remoteAccessDoors: Set<RemoteAccessDoor> {
         get {
             let stored = AppSettingDefinitions.remoteAccessDoors.read(from: defaults) ?? []
@@ -1292,6 +1324,40 @@ final class AppSettings {
             )
         }
         legacy.remove(from: defaults, notifying: false)
+    }
+
+    /// `remoteAccessConnectionMode` was one choice between overlapping things; a door is a
+    /// switch per network.
+    ///
+    /// The carry is deliberately narrow. `tailscale` and `tailscaleAndRelay` both mean "this Mac
+    /// answers on my tailnet", so both turn the `tailscale` door on. `relay` carries **nothing**:
+    /// the Cloudflare Quick Tunnel stopped being an owner pairing route, because its address
+    /// changes every launch and pairing cannot survive that. Somebody who was on Relay therefore
+    /// lands on the shipped default, `This network`, which is the route that replaced it. The
+    /// relay is still started on demand for a one-chat guest share, and no setting on the
+    /// Remote Access page starts it.
+    ///
+    /// `remoteAccessDoors` is not touched here. Its registered default moved to `lan` in the
+    /// same release, so an install that never wrote the key gets the LAN door by reading it, and
+    /// an install that did write one already stated a decision this migration must not overrule.
+    ///
+    /// The marker is written last and never seeded, so an interrupted migration re-runs; the
+    /// carry is idempotent, and a person who later switches Tailscale off keeps that answer
+    /// because the marker is already there. Writes suppress notification because this runs while
+    /// the settings object is still being built.
+    private func migrateRemoteAccessConnectionMode() {
+        let marker = AppSettingDefinitions.remoteAccessDoorMigration
+        guard !marker.containsValue(in: defaults) else { return }
+        let mode = AppSettingDefinitions.remoteAccessConnectionMode.read(from: defaults)
+            .flatMap(RemoteAccessConnectionMode.init(rawValue:))
+        if let mode, mode.usesTailscale {
+            AppSettingDefinitions.remoteAccessTailscaleEnabled.write(
+                true,
+                to: defaults,
+                notifying: false
+            )
+        }
+        marker.write(true, to: defaults, notifying: false)
     }
 
     /// The seeded values, and the one place they are registered on the standard defaults.

@@ -315,24 +315,40 @@ final class RefusedRemoteTransport: RemoteRelayTransport, RemoteTailnetTransport
     func stop() {}
 }
 
-/// How the user wants another device to reach the one remote-access listener.
+/// What the `tailscale` door is made of.
 ///
-/// Relay remains the compatibility default. `tailscaleAndRelay` keeps owner pairing on the
-/// private tailnet and starts the public relay lazily for one-chat invitations. Separate settings
-/// may opt owner devices into relay fallback or keep that relay ready.
+/// The door is a switch on the settings page; this is the seam behind it. Today the switch runs
+/// `TailscaleRemoteTransport`, which asks `tailscale serve` to publish the loopback listener on
+/// the tailnet's HTTPS port. §8 of the transport plan replaces that with a listener bound to this
+/// Mac's own tailnet address, presenting the same pinned identity as every other routable door —
+/// at which point Serve becomes only the browser convenience
+/// (`remoteAccessTailscaleServeEnabled`) and this value becomes `.listenerDoor`.
+///
+/// It exists so that swap is one constant rather than a settings rewrite: nothing above the
+/// coordinator knows which of the two is carrying the door.
+enum RemoteTailscaleDoorImplementation: Equatable, Sendable {
+    /// `tailscale serve --https=8443` proxying to the loopback listener.
+    case serveTransport
+    /// An `NWListener` on this Mac's tailnet address, with the pinned identity.
+    case listenerDoor
+
+    /// What this build does. One line to change when the raw bind lands.
+    static let current: RemoteTailscaleDoorImplementation = .serveTransport
+}
+
+/// **Superseded by the per-door switches.** Read only by the one migration that carries a stored
+/// mode over to them (`AppSettings.migrateRemoteAccessConnectionMode()`).
+///
+/// A mode forced a single choice between overlapping things, which is what made the settings
+/// screen dishonest: "Tailscale" said nothing about who could see the traffic, and "Relay" said
+/// nothing about the address dying on restart. Doors are one switch per network, each with its
+/// own four lines.
 enum RemoteAccessConnectionMode: String, CaseIterable, Sendable {
     case relay
     case tailscale
     case tailscaleAndRelay
 
-    var usesRelay: Bool { self != .tailscale }
+    /// The half of the old mode the migration carries: both tailnet modes mean "this Mac
+    /// answers on my tailnet".
     var usesTailscale: Bool { self != .relay }
-
-    var settingsTitle: String {
-        switch self {
-        case .relay: return L10n.string("Relay")
-        case .tailscale: return L10n.string("Tailscale")
-        case .tailscaleAndRelay: return L10n.string("Private + Sharing")
-        }
-    }
 }

@@ -18,6 +18,9 @@ enum RemoteAccessDefaults {
     /// it, and it reaches this Mac only, so it already answers "who can see the traffic".
     static let cleartextScheme = "http"
 
+    /// The port `https` implies, and therefore the one a status line does not print.
+    static let defaultTLSPort = 443
+
     /// The scheme every routable door speaks. A LAN door over plain HTTP would put a bearer
     /// token on whatever Wi-Fi this Mac has joined, so there is no cleartext fallback for one:
     /// a door with no identity to present reports itself unreachable instead.
