@@ -41,8 +41,10 @@ enum RemoteAccessDoor: String, CaseIterable, Sendable {
     ///
     /// Loopback is the one exception and stays cleartext: `PeerTunnelNetworkBridge` opens plain
     /// TCP to it and Tailscale Serve proxies plain HTTP to it, and neither should have to learn
-    /// about a certificate. Every routable door answers `true` — the listener does not yet have
-    /// an identity to present, which is exactly why no routable door is offered in the UI.
+    /// about a certificate. If loopback ever gains TLS, Serve's target has to become
+    /// `https+insecure://127.0.0.1:<port>` and the bridge has to speak TLS; that cost is the
+    /// reason not to. Every routable door answers `true`, and a door that cannot get an identity
+    /// binds nothing rather than falling back to cleartext.
     var requiresTLS: Bool { self != .loopback }
 
     /// The wire vocabulary an address on this door is advertised under.
@@ -224,13 +226,16 @@ struct RemoteListenerBinding: Equatable, Hashable, Sendable {
     let address: RemoteNetworkAddress
     let port: UInt16
 
-    /// The origin a client would use. `http` until the listener has a TLS identity to present.
+    /// The origin a client would use: `https` on every routable door, and `http` on loopback,
+    /// which is the one door that stays cleartext.
     ///
     /// The host is the bracketed form: `URLComponents` returns nil for a bare IPv6 literal, so an
     /// unbracketed address would advertise nothing at all rather than advertise something wrong.
     var origin: URL? {
         var components = URLComponents()
-        components.scheme = RemoteAccessDefaults.cleartextScheme
+        components.scheme = door.requiresTLS
+            ? RemoteAccessDefaults.tlsScheme
+            : RemoteAccessDefaults.cleartextScheme
         components.host = address.urlHost
         components.port = Int(port)
         components.path = "/"
@@ -249,11 +254,15 @@ enum RemoteDoorUnreachableReason: String, Equatable, Sendable {
     case portInUse
     /// This build classifies the door but does not bind it yet.
     case notAvailableYet
+    /// This Mac has no certificate to present, so nothing routable may be bound at all. The
+    /// identity's own state says which of missing, unreadable or unwritable it is.
+    case identityUnavailable
 
-    /// Which reason a door reports when its addresses disagree. Something sitting on the port is
-    /// the answer a person can act on, so it outranks an address that simply is not here.
+    /// Which reason a door reports when its addresses disagree. A missing identity outranks
+    /// everything, because no address can answer without one; something sitting on the port is
+    /// the next most actionable, and it outranks an address that simply is not here.
     static let reportingPriority: [RemoteDoorUnreachableReason] = [
-        .portInUse, .noInterface, .notAvailableYet
+        .identityUnavailable, .portInUse, .noInterface, .notAvailableYet
     ]
 }
 

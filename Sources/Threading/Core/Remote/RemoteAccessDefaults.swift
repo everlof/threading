@@ -14,10 +14,14 @@ enum RemoteAccessDefaults {
     /// bridge and Tailscale Serve both forward to it, and never advertised to another device.
     static let host = "127.0.0.1"
 
-    /// The scheme the listener speaks today. Loopback keeps it permanently (a bridge and a Serve
-    /// handler talk plain HTTP to it); the routable doors keep it only until the listener has a
-    /// TLS identity to present, which is why no routable door is offered in the UI yet.
+    /// The scheme loopback speaks, permanently: a bridge and a Serve handler talk plain HTTP to
+    /// it, and it reaches this Mac only, so it already answers "who can see the traffic".
     static let cleartextScheme = "http"
+
+    /// The scheme every routable door speaks. A LAN door over plain HTTP would put a bearer
+    /// token on whatever Wi-Fi this Mac has joined, so there is no cleartext fallback for one:
+    /// a door with no identity to present reports itself unreachable instead.
+    static let tlsScheme = "https"
 
     /// The port tried first, and the one a paired client remembers.
     ///
@@ -52,6 +56,10 @@ enum RemoteAccessDefaults {
     /// One interface change arrives as several path updates while the interface settles. The
     /// listener set rebuilds once per burst rather than once per callback.
     static let pathChangeCoalescing: TimeInterval = 0.5
+
+    /// Where the system configuration store keeps the interface carrying the default IPv4
+    /// route. A pairing code names one address, and this is how it picks which.
+    static let globalIPv4StateKey = "State:/Network/Global/IPv4"
 
     /// What macOS calls this Mac on the local network. Advertised beside the LAN addresses
     /// because it survives a DHCP move that the addresses do not.

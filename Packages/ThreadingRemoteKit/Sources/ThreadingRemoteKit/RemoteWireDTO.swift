@@ -603,6 +603,32 @@ public enum RemoteHostEndpointKind {
     /// Every kind this build understands. A client uses it to notice an unknown kind rather
     /// than to reject one: an endpoint it cannot classify is ignored, not fatal.
     public static let known: Set<String> = [loopback, lan, vpn, tailscale, hosted, relay]
+
+    /// The kinds that reach the Mac over a network the user is already on, whoever runs it.
+    ///
+    /// These are the three `privateOnly` admits. They are grouped rather than listed at each call
+    /// site because the grouping is the policy: `lan` and `vpn` are the same door with different
+    /// addresses on it, and a tailnet address is the Mac's own address too. `hosted` is not here
+    /// because it is governed by sign-in rather than by the connection policy, and `relay` is not
+    /// here because a third party terminates its TLS.
+    public static let privateNetwork: Set<String> = [lan, vpn, tailscale]
+}
+
+/// How a client establishes trust in what an endpoint presents.
+///
+/// Absent means public trust: stock system evaluation, which is what a Tailscale Serve endpoint
+/// needs, because Serve holds a real certificate for the `*.ts.net` name. `pinned` means the Mac
+/// presents its own self-signed identity and the client must compare the leaf certificate's
+/// SHA-256 against the fingerprint it learned when it paired.
+///
+/// It is a field of its own rather than something inferred from `kind` because **one host
+/// advertises both at once**: the LAN and VPN addresses carry the Mac's own identity while a
+/// Serve endpoint carries a public one, and no phone can be asked to know which host version
+/// meant which. Absent is the safe reading for an old host, which only ever advertised endpoints
+/// terminated by somebody with a real certificate.
+public enum RemoteHostEndpointIdentity {
+    /// The Mac's own certificate. The client checks the fingerprint and nothing else.
+    public static let pinned = "pinned"
 }
 
 /// One currently usable route to the Mac's single authenticated remote-access server.
@@ -615,18 +641,33 @@ public struct RemoteHostEndpointDTO: Codable, Equatable, Hashable, Sendable {
     public let kind: String
     public let baseURL: URL
     public let isStable: Bool
+    /// `RemoteHostEndpointIdentity.pinned`, or absent for public trust. Optional so an older
+    /// phone ignores it and an older Mac, which had nothing to pin, keeps meaning what it said.
+    public let identity: String?
 
-    public init(kind: String, baseURL: URL, isStable: Bool) {
+    public init(kind: String, baseURL: URL, isStable: Bool, identity: String? = nil) {
         self.kind = kind
         self.baseURL = baseURL
         self.isStable = isStable
+        self.identity = identity
     }
+
+    /// Whether this endpoint expects the client to check a fingerprint instead of a CA.
+    public var expectsPinnedIdentity: Bool { identity == RemoteHostEndpointIdentity.pinned }
 }
 
 /// The connection policy an owner selected on the Mac.
 ///
 /// Unknown values are interpreted by clients as private-only. Adding a policy in a later host
 /// must never make an older phone silently route private work through a public endpoint.
+///
+/// **This enum outlives the setting that produced it.** The Mac's connection modes are being
+/// replaced by one switch per door, and there is no relay left to prefer, so a current host
+/// always sends `privateOnly`. The other two cases stay on the wire because an installed phone
+/// decodes this field and maps anything it does not recognise to `privateOnly`; removing a case
+/// would change nothing there and deleting the enum would change what those phones read. On a
+/// current client all three therefore mean the same fail-closed thing, and only the ordering
+/// differs. Do not delete this without an installed base that no longer sends it.
 public enum RemoteHostConnectionPolicy: String, Codable, Equatable, Hashable, Sendable {
     case privateOnly
     case relayOnly
@@ -641,6 +682,17 @@ public enum RemoteHostConnectionPolicy: String, Codable, Equatable, Hashable, Se
 
 /// Selects validated endpoint candidates without knowing about URLSession or credentials.
 /// Keeping this pure lets every native client use the same fail-closed ordering.
+///
+/// Three rules, and each of them has cost something:
+///
+/// - **`https` only.** A cleartext candidate is dropped whatever its kind, which is what kept a
+///   `lan` endpoint out of use for the whole of the phase before the listener had an identity.
+/// - **`privateOnly` admits every private-network kind**, not just the one this file was written
+///   for. `lan`, `vpn` and `tailscale` are all addresses of the Mac on a network the user is
+///   already on; before doors existed only `tailscale` could be, so only that one was listed.
+/// - **No preference between the private kinds.** They tie on rank and fall to a deterministic
+///   URL order, because which of a Mac's own addresses is reachable is a fact about where the
+///   phone is standing, and the phone finds that out by trying them in order.
 public enum RemoteHostEndpointSelection {
     public static func ordered(
         _ endpoints: [RemoteHostEndpointDTO],
@@ -656,12 +708,12 @@ public enum RemoteHostEndpointSelection {
         let allowed: [RemoteHostEndpointDTO]
         switch policy {
         case .privateOnly:
-            allowed = valid.filter { $0.kind == RemoteHostEndpointKind.tailscale }
+            allowed = valid.filter { RemoteHostEndpointKind.privateNetwork.contains($0.kind) }
         case .relayOnly:
             allowed = valid.filter { $0.kind == RemoteHostEndpointKind.relay }
         case .preferPrivate:
             allowed = valid.filter {
-                $0.kind == RemoteHostEndpointKind.tailscale
+                RemoteHostEndpointKind.privateNetwork.contains($0.kind)
                     || $0.kind == RemoteHostEndpointKind.relay
             }
         }
@@ -674,7 +726,7 @@ public enum RemoteHostEndpointSelection {
                     // address without asking the user to pair the same Mac again.
                     return endpoint.isStable ? 0 : (endpoint.baseURL == currentBaseURL ? 1 : 2)
                 case .preferPrivate:
-                    if endpoint.kind == RemoteHostEndpointKind.tailscale { return 0 }
+                    if RemoteHostEndpointKind.privateNetwork.contains(endpoint.kind) { return 0 }
                     if endpoint.isStable { return 1 }
                     if endpoint.baseURL == currentBaseURL { return 2 }
                     return 3
@@ -697,19 +749,50 @@ public struct RemoteHostDTO: Codable, Equatable, Sendable {
     public let platform: String
     public let endpoints: [RemoteHostEndpointDTO]?
     public let connectionPolicy: RemoteHostConnectionPolicy?
+    /// SHA-256 over the DER of the certificate this Mac's pinned endpoints present, as 64
+    /// lower-case hex characters. Absent when nothing is pinned.
+    ///
+    /// Hex rather than base64 because this value is read in support reports and typed into
+    /// comparisons by hand, and because the QR spelling is a different length anyway: the code on
+    /// the screen is the first 128 bits in base32, and `RemoteHostFingerprint` owns both. Owner
+    /// responses only. A guest never learns it, for the same reason a guest never learns the
+    /// endpoint list.
+    public let pinnedFingerprint: String?
+    /// The successor identity this Mac has minted but not yet started presenting, in the same
+    /// spelling.
+    ///
+    /// Arriving over an already pinned connection makes it the holder of the current private key
+    /// saying what the next one will be, which is what lets a certificate be replaced without
+    /// every paired device re-scanning a code. A client ignores it on any other connection.
+    public let nextPinnedFingerprint: String?
 
     public init(
         id: String,
         name: String,
         platform: String = "macOS",
         endpoints: [RemoteHostEndpointDTO]? = nil,
-        connectionPolicy: RemoteHostConnectionPolicy? = nil
+        connectionPolicy: RemoteHostConnectionPolicy? = nil,
+        pinnedFingerprint: String? = nil,
+        nextPinnedFingerprint: String? = nil
     ) {
         self.id = id
         self.name = name
         self.platform = platform
         self.endpoints = endpoints
         self.connectionPolicy = connectionPolicy
+        self.pinnedFingerprint = pinnedFingerprint
+        self.nextPinnedFingerprint = nextPinnedFingerprint
+    }
+
+    /// The pins a client should hold for this host, or nil when it advertises none.
+    public var pinSet: RemoteHostPinSet? {
+        guard let pinnedFingerprint, let current = RemoteHostPin(hex: pinnedFingerprint) else {
+            return nil
+        }
+        return RemoteHostPinSet(
+            current: current,
+            next: nextPinnedFingerprint.flatMap(RemoteHostPin.init(hex:))
+        )
     }
 }
 

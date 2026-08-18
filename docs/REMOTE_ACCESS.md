@@ -694,11 +694,42 @@ feature lock.
   because the Hosted Direct bridge and Tailscale Serve both forward to it, and it stays cleartext
   for the same reason. **No routable door is offered in Settings yet**, so a shipped build still
   listens only on `127.0.0.1`. A `lan` door exists in the model and can be turned on by writing
-  the `remoteAccessDoors` default, but it is deliberately not in the UI until the listener
-  presents its own TLS identity: a LAN listener over plain HTTP would put a bearer token on
-  whatever Wi-Fi the Mac has joined. While it is on, the Mac advertises each bound address, its
-  `.local` name and any `remoteAccessAdvertisedHostname` override as `lan` endpoints, and an
-  iPhone drops them, because it keeps only `https` candidates.
+  the `remoteAccessDoors` default; it is out of the UI until the settings rewrite describes it.
+  While it is on, the Mac advertises each bound address, its `.local` name and any
+  `remoteAccessAdvertisedHostname` override as `https` `lan` endpoints, each marked as presenting
+  the Mac's own identity.
+- **A routable door presents a certificate of this Mac's own, and the phone trusts exactly the one
+  whose fingerprint it scanned.** There is no certificate authority in the path, which is not a
+  downgrade from a public certificate but stronger: no authority can be induced to issue a second
+  certificate for the same name, because a name is not what is being trusted. It also means one
+  identity serves every address the Mac ever has, so the same pairing keeps working from a VPN, a
+  tailnet, or a new DHCP lease. The certificate lists this Mac's addresses and `.local` name as
+  subject alternative names for tidiness; **the client checks none of them**, and hostname
+  verification is deliberately not performed for a pinned host.
+- The private key and its certificate are `0600` files in Threading's own Application Support
+  directory, under `RemoteIdentity`, and the identity is rebuilt from them on every launch.
+  Deliberately not a Keychain item: an agent's shell can delete a login-keychain item with
+  `security delete-generic-password` and no prompt, and this app launches agents with an
+  unrestricted shell, so a stray deletion would silently invalidate every pairing. The trade is
+  that any process running as this user can read the file, and for a trust root the deletion
+  failure is the one that matters. A missing or unreadable identity is a named state, never a
+  quiet regenerate: a door with nothing to present binds nothing at all rather than falling back
+  to cleartext, and the identity is minted only on first enable and on an explicit reset.
+- The pairing code carries the fingerprint. `SHA-256` over the leaf certificate's DER, truncated
+  to 128 bits and written base32 upper case, is 26 characters entirely inside QR's alphanumeric
+  mode, and it rides as a second fragment component: `HTTPS://192.168.1.42:8760#<token>.<code>`.
+  Neither the pairing token's alphabet nor a bearer's contains `.`, so the split is unambiguous,
+  and a client written before this reads the whole fragment as one bearer and is refused with a
+  401 rather than connecting unpinned. `/api/me` carries the whole 64-character hex fingerprint to
+  an owner, so a phone that scanned 128 bits holds all 256 immediately afterwards.
+- **The identity can be replaced without re-pairing.** A phone connected over the pinned channel
+  is talking to the holder of the private key, so a successor announced there is authenticated by
+  the identity it replaces: the Mac mints the next certificate, advertises it as
+  `nextPinnedFingerprint`, and switches to it when asked, on the same port and without touching
+  loopback. A device that has read the announcement pins both and does not notice. An announcement
+  arriving over an unpinned connection is not one. "Reset identity" therefore becomes the path for
+  a *lost* key rather than the only path there is, and it is the one action that does unpair every
+  device that did not receive an announcement.
 - The listener's port is sticky. It tries the configured port, `8760` by default and editable
   between 1024 and 65535, and on a collision walks `8760` to `8769` in order and reports the port
   it actually took. It never falls back to a port the kernel picked: an ephemeral port meant the
@@ -852,11 +883,16 @@ with no AppKit window graph or ambient project/runtime lookup.
 ## Implementation map
 
 - `Sources/Threading/Core/Remote`: the HTTP/WebSocket server and its per-door listener set
-  (`RemoteListenerSet`, `RemoteAccessDoors`), durable owner-device registry, authentication,
-  pluggable Cloudflare/Tailscale transports, routing, the application command capability, and
-  live session mirrors.
-- `Sources/Threading/Resources/RemoteClient`: dependency-free browser client.
-- `ThreadingRemoteKit`: versioned wire DTOs and pairing-link parsing shared by macOS and iOS.
+  (`RemoteListenerSet`, `RemoteAccessDoors`), the pinned identity the routable doors present
+  (`RemoteAccessIdentity` and the `RemoteIdentity*` encoders behind it), durable owner-device
+  registry, authentication, pluggable Cloudflare/Tailscale transports, routing, the application
+  command capability, and live session mirrors.
+- `Sources/Threading/Resources/RemoteClient`: dependency-free browser client. A browser on the
+  LAN or the tailnet meets a certificate interstitial against a pinned self-signed identity;
+  Tailscale Serve stays as the opt-in way around that on a tailnet, and the iOS app is unaffected
+  because it pins.
+- `ThreadingRemoteKit`: versioned wire DTOs, pairing-link parsing, and the fingerprint codec and
+  pinning policy (`RemoteHostPinning`) shared by macOS and iOS.
 - `Sources/ThreadingMobile`: SwiftUI iOS shell, UIKit Native-conversation timeline and SwiftTerm
   terminal surface.
 - `docs/NOTIFICATION_E2E.md`: opt-in real APNs and Claude → MCP → APNs verification.
