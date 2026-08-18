@@ -212,12 +212,20 @@ final class RemoteAccessServer: @unchecked Sendable {
     private let router = RemoteRouter()
     private let listeners: RemoteListenerSet
 
+    /// The identity provider has no default on purpose: this server is composed by its root,
+    /// and naming the shared store here would put a global lookup inside the one file the
+    /// architecture lint keeps free of them.
     init(
         services: RemoteAccessServerServices,
-        addressSource: @escaping RemoteNetworkAddressSource = RemoteNetworkInterfaces.current
+        addressSource: @escaping RemoteNetworkAddressSource = RemoteNetworkInterfaces.current,
+        identityProvider: any RemoteAccessIdentityProviding
     ) {
         self.services = services
-        self.listeners = RemoteListenerSet(queue: queue, addressSource: addressSource)
+        self.listeners = RemoteListenerSet(
+            queue: queue,
+            addressSource: addressSource,
+            identityProvider: identityProvider
+        )
         listeners.onConnection = { [weak self] connection in self?.accept(connection) }
     }
 
@@ -247,6 +255,12 @@ final class RemoteAccessServer: @unchecked Sendable {
     /// Re-reads the interface list and rebuilds only the listeners whose address changed.
     func refreshListenerAddresses() {
         listeners.refreshAddresses()
+    }
+
+    /// Rebuilds the routable listeners so they present the identity store's current certificate.
+    /// The port does not move, and loopback is not disturbed.
+    func reloadIdentity() {
+        listeners.reloadIdentity()
     }
 
     func stop() {

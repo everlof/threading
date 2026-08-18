@@ -137,6 +137,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private let server: RemoteAccessServer
+    private let identityStore: RemoteAccessIdentityStore
     private let mirrors: RemoteSessionMirrorRegistry
     private let tunnel: any RemoteRelayTransport
     private let tailscale: any RemoteTailnetTransport
@@ -169,14 +170,17 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         hostedService: RemoteHostedServiceController? = nil,
         serverServices: RemoteAccessServerServices? = nil,
         relayTransport: (any RemoteRelayTransport)? = nil,
-        tailnetTransport: (any RemoteTailnetTransport)? = nil
+        tailnetTransport: (any RemoteTailnetTransport)? = nil,
+        identityStore: RemoteAccessIdentityStore? = nil
     ) {
         self.appSettings = appSettings
         tunnel = relayTransport ?? Self.defaultRelayTransport()
         tailscale = tailnetTransport ?? Self.defaultTailnetTransport()
         let services = serverServices ?? Self.makeServerServices(appSettings: appSettings)
         mirrors = services.mirrors
-        server = RemoteAccessServer(services: services)
+        let identity = identityStore ?? RemoteAccessIdentityStore.shared
+        self.identityStore = identity
+        server = RemoteAccessServer(services: services, identityProvider: identity)
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
         self.hostedService = hostedService ?? RemoteHostedServiceController()
@@ -453,22 +457,89 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 ? .preferPrivate
                 : .privateOnly
         }
-        return RemoteHostDTO(
-            id: identity.id,
-            name: identity.name,
-            platform: identity.platform,
+        return Self.ownerHost(
+            identity,
             endpoints: endpoints,
-            connectionPolicy: policy
+            policy: policy,
+            identity: identityStore.snapshot
         )
+    }
+
+    /// The owner's view of this Mac: who it is, how to reach it, and what to trust when you do.
+    ///
+    /// The fingerprints ride along **only when something pinned is on offer**. A fingerprint
+    /// beside a list of endpoints none of which present it is a value with nothing to check
+    /// against, and a phone that stored it would refuse the Serve endpoint it is actually using.
+    nonisolated static func ownerHost(
+        _ host: RemoteHostDTO,
+        endpoints: [RemoteHostEndpointDTO],
+        policy: RemoteHostConnectionPolicy,
+        identity: RemoteAccessIdentitySnapshot
+    ) -> RemoteHostDTO {
+        let pinned = endpoints.contains(where: \.expectsPinnedIdentity) ? identity : .unloaded
+        return RemoteHostDTO(
+            id: host.id,
+            name: host.name,
+            platform: host.platform,
+            endpoints: endpoints,
+            connectionPolicy: policy,
+            pinnedFingerprint: pinned.fingerprint?.hex,
+            nextPinnedFingerprint: pinned.nextFingerprint?.hex
+        )
+    }
+
+    /// What this Mac's certificate is, for a settings screen and for the pairing card.
+    var identitySnapshot: RemoteAccessIdentitySnapshot { identityStore.snapshot }
+
+    /// Throws this Mac's identity away and mints a new one, then rebuilds the listeners so they
+    /// present it.
+    ///
+    /// Every paired device that did not receive a rotation announcement has to scan a new code
+    /// afterwards, which is why this is only ever a person's explicit choice.
+    @discardableResult
+    func resetIdentity() async -> Result<RemoteHostFingerprint, RemoteIdentityFailure> {
+        let store = identityStore
+        // Off the main actor deliberately: this reads and writes files, derives a key and
+        // imports a container.
+        let outcome = await Task.detached { store.reset() }.value
+        server.reloadIdentity()
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        return outcome.map(\.fingerprint)
+    }
+
+    /// Mints the successor identity and announces it, without presenting it yet.
+    ///
+    /// A phone connected over the pinned channel is talking to the holder of the current private
+    /// key, so the announcement is authenticated by the identity it replaces. That is what makes
+    /// the switch free of re-pairing, and it is why the announcement is only ever read from a
+    /// pinned connection.
+    @discardableResult
+    func prepareIdentityRotation() async -> Result<RemoteHostFingerprint, RemoteIdentityFailure> {
+        let store = identityStore
+        let outcome = await Task.detached { store.prepareRotation() }.value
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        return outcome
+    }
+
+    /// Switches the listeners to the prepared successor. The port does not move and loopback is
+    /// untouched, so nothing that talks to `127.0.0.1` notices.
+    @discardableResult
+    func activateIdentityRotation() async -> Result<RemoteHostFingerprint, RemoteIdentityFailure> {
+        let store = identityStore
+        let outcome = await Task.detached { store.activateRotation() }.value
+        if case .success = outcome { server.reloadIdentity() }
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        return outcome.map(\.fingerprint)
     }
 
     /// The routes a routable door is currently answering on.
     ///
     /// Every entry is stable: the port is sticky and the addresses come from interfaces the Mac
-    /// holds, so a phone that learns one can use it again tomorrow. The scheme is `http` until
-    /// the listener presents a TLS identity, which means an installed phone drops these
-    /// candidates today — `RemoteHostEndpointSelection.ordered` keeps only `https`. That is the
-    /// intended fail-closed behaviour and the reason the door is not offered in the UI yet.
+    /// holds, so a phone that learns one can use it again tomorrow. Every entry is also `https`
+    /// and carries `identity: pinned`, because a routable listener presents this Mac's own
+    /// certificate. **That flag cannot be inferred from `kind`**: a Serve endpoint is advertised
+    /// as `tailscale` too and holds a publicly trusted certificate, so a phone told to pin it
+    /// would break the next time Let's Encrypt renewed.
     ///
     /// Loopback is never advertised. It reaches this Mac only, so an entry for it would be a
     /// route no other device can take.
@@ -480,24 +551,29 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         var endpoints: [RemoteHostEndpointDTO] = []
         var seen: Set<URL> = []
 
-        func append(_ url: URL?, kind: String) {
+        func append(_ url: URL?, door: RemoteAccessDoor) {
             guard let url, seen.insert(url).inserted else { return }
-            endpoints.append(RemoteHostEndpointDTO(kind: kind, baseURL: url, isStable: true))
+            endpoints.append(RemoteHostEndpointDTO(
+                kind: door.endpointKind,
+                baseURL: url,
+                isStable: true,
+                identity: door.requiresTLS ? RemoteHostEndpointIdentity.pinned : nil
+            ))
         }
 
         for door in RemoteAccessDoor.selectable {
             let bindings = status.state(of: door).bindings
             for binding in bindings {
-                append(binding.origin, kind: door.endpointKind)
+                append(binding.origin, door: door)
             }
             // The `.local` name and the override are LAN-shaped answers to the same question the
             // LAN addresses answer, so they ride with that door and appear only when it is up.
             guard door == .lan, let port = bindings.first?.port else { continue }
             if let localHostname, localHostname.hasSuffix(RemoteAccessDefaults.localHostnameSuffix) {
-                append(Self.origin(host: localHostname, port: port), kind: door.endpointKind)
+                append(Self.origin(host: localHostname, port: port, door: door), door: door)
             }
             if !advertisedHostname.isEmpty {
-                append(Self.origin(host: advertisedHostname, port: port), kind: door.endpointKind)
+                append(Self.origin(host: advertisedHostname, port: port, door: door), door: door)
             }
         }
         return endpoints
@@ -515,9 +591,15 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         return name + RemoteAccessDefaults.localHostnameSuffix
     }
 
-    private nonisolated static func origin(host: String, port: UInt16) -> URL? {
+    private nonisolated static func origin(
+        host: String,
+        port: UInt16,
+        door: RemoteAccessDoor
+    ) -> URL? {
         var components = URLComponents()
-        components.scheme = RemoteAccessDefaults.cleartextScheme
+        components.scheme = door.requiresTLS
+            ? RemoteAccessDefaults.tlsScheme
+            : RemoteAccessDefaults.cleartextScheme
         components.host = host
         components.port = Int(port)
         components.path = "/"
@@ -598,14 +680,22 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     /// The HTTPS door intended for another device. Nil while the selected pairing transport is
     /// still starting or unavailable; the local browser link remains usable independently.
+    ///
+    /// The same credential as the QR code, written the way a person pasting a link expects to
+    /// see it. Both carry the fingerprint when the destination is a pinned door, because a link
+    /// that pairs without one produces a phone that trusts whatever answers at that address.
     var remoteURL: URL? {
-        guard ownerDevices.persistenceError == nil,
-              let origin = pairingOrigin,
-              let pairingBootstrapToken else { return nil }
-        var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)
-        components?.path = "/"
-        components?.fragment = pairingBootstrapToken
-        return components?.url
+        guard ownerDevices.persistenceError == nil else { return nil }
+        return pairingLink?.shareURL
+    }
+
+    private var pairingLink: RemoteConnectionLink? {
+        guard let destination = pairingDestination, let pairingBootstrapToken else { return nil }
+        return RemoteConnectionLink(
+            baseURL: destination.origin,
+            token: pairingBootstrapToken,
+            pinnedFingerprintCode: destination.pinnedFingerprintCode
+        )
     }
 
     /// The same door as `remoteURL`, written the way a QR code wants to read it.
@@ -625,10 +715,77 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
            !hostedPairingLink.isExpired {
             return hostedPairingLink.scannablePayload
         }
-        guard let origin = pairingOrigin,
-              let link = RemoteConnectionLink(baseURL: origin, token: pairingBootstrapToken)
-        else { return nil }
-        return link.scannablePayload
+        return pairingLink?.scannablePayload
+    }
+
+    /// Where a scanning phone is sent, and what it should pin when it arrives.
+    ///
+    /// A bound LAN door wins over every transport somebody else terminates: it is the address
+    /// this Mac actually holds, it survives a restart, and the certificate at the far end is
+    /// this Mac's own. When no LAN door is bound the answer is what it has always been, and the
+    /// code carries no fingerprint, because a Serve or relay origin presents a certificate that
+    /// is not ours to pin.
+    private var pairingDestination: (origin: URL, pinnedFingerprintCode: String?)? {
+        Self.pairingDestination(
+            lanBindings: listenerStatus.state(of: .lan).bindings,
+            primaryInterfaceName: Self.primaryInterfaceName(),
+            pinnedFingerprint: identityStore.snapshot.fingerprint,
+            fallbackOrigin: pairingOrigin
+        )
+    }
+
+    nonisolated static func pairingDestination(
+        lanBindings: [RemoteListenerBinding],
+        primaryInterfaceName: String?,
+        pinnedFingerprint: RemoteHostFingerprint?,
+        fallbackOrigin: URL?
+    ) -> (origin: URL, pinnedFingerprintCode: String?)? {
+        if let binding = preferredPairingBinding(
+            lanBindings,
+            primaryInterfaceName: primaryInterfaceName
+        ), let origin = binding.origin, let pinnedFingerprint {
+            return (origin, pinnedFingerprint.pairingCode)
+        }
+        guard let fallbackOrigin else { return nil }
+        return (fallbackOrigin, nil)
+    }
+
+    /// The one LAN address a pairing code names, out of however many this Mac is answering on.
+    ///
+    /// A QR code holds one origin, so this picks: the address on the interface carrying the
+    /// default route first, then IPv4 over IPv6 within that interface, then the sorted first.
+    /// The default route is the right guess because it is the network the Mac itself reaches the
+    /// world through, which is almost always the one the phone in the room is on. The phone
+    /// learns every other address from `/api/me` immediately afterwards, so this choice costs
+    /// nothing after the first connection.
+    nonisolated static func preferredPairingBinding(
+        _ bindings: [RemoteListenerBinding],
+        primaryInterfaceName: String?
+    ) -> RemoteListenerBinding? {
+        bindings.min { lhs, rhs in
+            func rank(_ binding: RemoteListenerBinding) -> (Int, Int) {
+                (
+                    binding.address.interfaceName == primaryInterfaceName ? 0 : 1,
+                    binding.address.isIPv6 ? 1 : 0
+                )
+            }
+            let left = rank(lhs)
+            let right = rank(rhs)
+            if left != right { return left < right }
+            return lhs.address < rhs.address
+        }
+    }
+
+    /// The interface carrying the default IPv4 route, from the system configuration store.
+    ///
+    /// The store answers from memory, which is what makes this safe to ask on the main actor;
+    /// enumerating routes or resolving names would not be.
+    nonisolated static func primaryInterfaceName() -> String? {
+        guard let global = SCDynamicStoreCopyValue(
+            nil,
+            RemoteAccessDefaults.globalIPv4StateKey as CFString
+        ) as? [String: Any] else { return nil }
+        return global[kSCDynamicStorePropNetPrimaryInterface as String] as? String
     }
 
     private var pairingOrigin: URL? {
