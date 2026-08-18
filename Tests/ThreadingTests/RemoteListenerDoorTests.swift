@@ -240,6 +240,41 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         )
     }
 
+    func testADoorListenerThatFailedIsRebuiltOnTheNextRefresh() throws {
+        let port = try quietPort()
+        addresses.withLock { $0 = [Self.lanAddress] }
+        // Something else already holds the LAN address at the port the door will want.
+        guard let squatter = tryOccupy(host: Self.lanAddress.address, port: port) else {
+            throw XCTSkip("Could not hold \(Self.lanAddress.address):\(port) to stage the collision")
+        }
+        occupied.append(squatter)
+
+        XCTAssertEqual(start(RemoteListenerConfiguration(preferredPort: port)), .listening(port: port))
+        server.updateDoors([.lan])
+        waitUntil("the lan door reports the collision") {
+            self.server.listenerStatus.state(of: .lan) == .notReachable(.portInUse)
+        }
+
+        // The squatter leaves. Nothing about the door selection changes; only the world did.
+        let released = expectation(description: "the squatter has let go")
+        squatter.stateUpdateHandler = { state in
+            if case .cancelled = state { released.fulfill() }
+        }
+        squatter.cancel()
+        occupied.removeAll { $0 === squatter }
+        wait(for: [released], timeout: 5)
+
+        // A refresh is what an interface change triggers; a door is never toggled here. The
+        // kernel can hold the port for a moment after the close, so the refresh is repeated
+        // until the door is up rather than trusting one attempt.
+        waitUntil("the lan door binds on a refresh without being toggled") {
+            if self.server.listenerStatus.state(of: .lan).bindings.count == 1 { return true }
+            self.server.refreshListenerAddresses()
+            return false
+        }
+        XCTAssertEqual(server.port, port, "and the port did not move")
+    }
+
     func testEnablingOneDoorBindsNothingBelongingToAnother() throws {
         let port = try quietPort()
         addresses.withLock { $0 = [Self.lanAddress, Self.tailscaleAddress, Self.vpnAddress] }
@@ -524,9 +559,13 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
     private static let quietPortRange: ClosedRange<UInt16> = 20_000...39_000
 
     private func tryOccupy(port: UInt16) -> NWListener? {
+        tryOccupy(host: RemoteAccessDefaults.host, port: port)
+    }
+
+    private func tryOccupy(host: String, port: UInt16) -> NWListener? {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(
-            host: NWEndpoint.Host(RemoteAccessDefaults.host),
+            host: NWEndpoint.Host(host),
             port: NWEndpoint.Port(rawValue: port)!
         )
         parameters.allowLocalEndpointReuse = true

@@ -30,6 +30,12 @@ final class RemoteListenerSet: @unchecked Sendable {
         var isReady = false
         var failure: RemoteDoorUnreachableReason?
 
+        /// A listener that is not answering and has said why is not going to recover on its own:
+        /// a `.failed` listener is already cancelled, and a `.waiting` one is only retried by
+        /// Network.framework on its own terms. The next rebuild replaces it rather than trusting
+        /// its presence in the set as proof that the address is covered.
+        var isStale: Bool { !isReady && failure != nil }
+
         init(listener: NWListener, door: RemoteAccessDoor, address: RemoteNetworkAddress, port: UInt16) {
             self.listener = listener
             self.door = door
@@ -331,7 +337,11 @@ final class RemoteListenerSet: @unchecked Sendable {
                 : []
             var existing = listeners[door] ?? [:]
 
-            for (address, entry) in existing where !wanted.contains(address) {
+            // An address that is no longer wanted goes; so does one whose listener has failed,
+            // so that a port freed since the last pass, or an address that had not finished
+            // configuring, is bound again on this pass rather than reported dead until the door
+            // is toggled.
+            for (address, entry) in existing where !wanted.contains(address) || entry.isStale {
                 cancel(entry)
                 existing[address] = nil
             }
@@ -377,9 +387,9 @@ final class RemoteListenerSet: @unchecked Sendable {
             case .failed(let error):
                 entry.isReady = false
                 entry.failure = Self.reason(for: error)
-                // A failed listener stays in the set holding its reason. The next path change
-                // rebuilds it; leaving it out would report the door as merely "no interface"
-                // when something is actually sitting on its port.
+                // A failed listener stays in the set holding its reason until the next rebuild,
+                // which replaces it (see `isStale`); leaving it out would report the door as
+                // merely "no interface" when something is actually sitting on its port.
                 listener.cancel()
                 self.publish()
             default:

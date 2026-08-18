@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import SystemConfiguration
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 
@@ -474,7 +475,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     nonisolated static func doorEndpoints(
         _ status: RemoteListenerStatus,
         advertisedHostname: String,
-        localHostname: String? = ProcessInfo.processInfo.hostName
+        localHostname: String? = bonjourLocalHostname()
     ) -> [RemoteHostEndpointDTO] {
         var endpoints: [RemoteHostEndpointDTO] = []
         var seen: Set<URL> = []
@@ -500,6 +501,18 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             }
         }
         return endpoints
+    }
+
+    /// This Mac's Bonjour name with the `.local` suffix, from the system configuration store.
+    ///
+    /// Not `ProcessInfo.hostName`: that answers with whatever reverse DNS says, which on some
+    /// networks is not a `.local` name at all, and it can block on the lookup, while this is
+    /// called on the main actor for every owner `/api/me`. The store answers from memory.
+    nonisolated static func bonjourLocalHostname() -> String? {
+        guard let name = SCDynamicStoreCopyLocalHostName(nil) as String?, !name.isEmpty else {
+            return nil
+        }
+        return name + RemoteAccessDefaults.localHostnameSuffix
     }
 
     private nonisolated static func origin(host: String, port: UInt16) -> URL? {
