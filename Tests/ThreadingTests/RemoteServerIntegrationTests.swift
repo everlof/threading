@@ -97,9 +97,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             )
         }
 
+        // A port the kernel just handed out and gave back, rather than the shipped default: the
+        // listener's port is sticky now, so a test that took the real one would fight the app
+        // the developer is running.
         let ready = expectation(description: "listening")
-        server.start { resolved in
-            self.port = resolved
+        server.start(configuration: RemoteListenerConfiguration(preferredPort: FreeLocalPort.take())) {
+            outcome in
+            self.port = outcome.port
             ready.fulfill()
         }
         wait(for: [ready], timeout: 5)

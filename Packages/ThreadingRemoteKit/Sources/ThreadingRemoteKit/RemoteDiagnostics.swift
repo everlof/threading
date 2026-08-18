@@ -16,6 +16,10 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     case hostRefreshFailed
     case hostListenerStarted
     case hostListenerFailed
+    /// One door of the host's listener set started answering on its addresses.
+    case hostDoorBound
+    /// One enabled door has nothing listening for it right now. The `reason` field says why.
+    case hostDoorUnreachable
     case relayConnected
     case relayFailed
     case authenticationRefused

@@ -103,16 +103,18 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     }
 }
 
-/// The second loopback HTTP/WebSocket server — the one a tunnel forwards to. It is deliberately
-/// separate from `MCPServer` and `ExtensionHostService`: those broker tool permissions and host
+/// The second HTTP/WebSocket server — the one a tunnel forwards to. It is deliberately separate
+/// from `MCPServer` and `ExtensionHostService`: those broker tool permissions and host
 /// extensions, and nothing reachable through a public tunnel may touch them.
 ///
-/// The listener mirrors `MCPServer.start`: a loopback ephemeral port, a latched ready-or-failed
-/// completion, and a `queue.sync` stop that has cancelled everything by the time it returns.
+/// One server, one identity, one authorization path. Which addresses it answers on is
+/// `RemoteListenerSet`'s question, not this type's: it owns the sticky port and one `NWListener`
+/// per door. What remains here is a latched ready-or-failed completion and a `queue.sync` stop
+/// that has cancelled everything by the time it returns.
 ///
-/// Mutable listener, connection, and rate-limit state belongs to `queue`. The dependency and
-/// published-port values have separate locks. This queue ownership is why passing the server's
-/// identity into Network.framework callbacks is safe.
+/// Mutable connection and rate-limit state belongs to `queue`, which is also the listener set's
+/// queue. The dependency values have separate locks. This queue ownership is why passing the
+/// server's identity into Network.framework callbacks is safe.
 final class RemoteAccessServer: @unchecked Sendable {
 
     // MARK: - Properties
@@ -154,10 +156,36 @@ final class RemoteAccessServer: @unchecked Sendable {
     }
 
     var port: UInt16? {
-        portStorage.withLock { $0 }
+        listeners.status.port
     }
 
-    private var listener: NWListener?
+    /// What every door is doing, for the coordinator to publish and a later settings screen to
+    /// render. Readable from any executor.
+    var listenerStatus: RemoteListenerStatus { listeners.status }
+
+    /// What each live listener was asked to bind, whatever state it reached.
+    var requestedBindings: [RemoteListenerBinding] { listeners.requestedBindings }
+
+    /// The object identity of each live listener, so a door change can be proven to have left
+    /// the other doors alone.
+    var listenerIdentities: [RemoteNetworkAddress: ObjectIdentifier] { listeners.listenerIdentities }
+
+    /// Called on the server queue whenever a door changes state.
+    var onListenerStatusChange: (@Sendable (RemoteListenerStatus) -> Void)? {
+        get { listeners.onStatusChange }
+        set { listeners.onStatusChange = newValue }
+    }
+
+    /// Where a door transition is journalled. Injectable for the same reason
+    /// `receiveClientDiagnostics` is: a hosted test would otherwise append to the developer's
+    /// own support journal.
+    var recordListenerDiagnostic: (
+        @Sendable (RemoteDiagnosticEvent, RemoteDiagnosticLevel, [RemoteDiagnosticField: String]) -> Void
+    ) {
+        get { listeners.journal }
+        set { listeners.journal = newValue }
+    }
+
     private var connectionsByID: [ObjectIdentifier: RemoteConnection] = [:]
     private var authLimiter = RemoteAuthRateLimiter()
     private var mutationReplayCache: [MutationReplayKey: MutationReplayEntry] = [:]
@@ -177,80 +205,45 @@ final class RemoteAccessServer: @unchecked Sendable {
 
     private let dependencies = RemoteAccessServerDependencies()
     private let services: RemoteAccessServerServices
-    private let portStorage = OSAllocatedUnfairLock<UInt16?>(initialState: nil)
     private let queue = DispatchQueue(label: RemoteAccessDefaults.queueLabel, qos: .userInitiated)
     private let router = RemoteRouter()
+    private let listeners: RemoteListenerSet
 
-    init(services: RemoteAccessServerServices) {
+    init(
+        services: RemoteAccessServerServices,
+        addressSource: @escaping RemoteNetworkAddressSource = RemoteNetworkInterfaces.current
+    ) {
         self.services = services
+        self.listeners = RemoteListenerSet(queue: queue, addressSource: addressSource)
+        listeners.onConnection = { [weak self] connection in self?.accept(connection) }
     }
 
     // MARK: - Lifecycle
 
-    func start(completion: @escaping @MainActor @Sendable (_ port: UInt16?) -> Void) {
-        guard listener == nil else {
-            let existingPort = port
-            Task { @MainActor in completion(existingPort) }
-            return
+    /// Binds loopback and every enabled door, and reports the port actually taken.
+    ///
+    /// The configuration is the caller's, not a constant here: the port is a user setting with a
+    /// deterministic fallback range, and which routable doors get a listener is a decision the
+    /// coordinator reads from settings. The completion latches, so a listener that flaps between
+    /// states after the first answer does not call it twice.
+    func start(
+        configuration: RemoteListenerConfiguration,
+        completion: @escaping @MainActor @Sendable (RemoteListenerStartOutcome) -> Void
+    ) {
+        listeners.start(configuration: configuration) { outcome in
+            Task { @MainActor in completion(outcome) }
         }
+    }
 
-        let completionState = OSAllocatedUnfairLock<Bool>(initialState: false)
-        let finish: @Sendable (UInt16?) -> Void = { resolvedPort in
-            let shouldFinish = completionState.withLock { hasCompleted in
-                guard !hasCompleted else { return false }
-                hasCompleted = true
-                return true
-            }
-            guard shouldFinish else { return }
-            Task { @MainActor in completion(resolvedPort) }
-        }
+    /// Applies a changed door selection without disturbing the doors that did not change, and
+    /// without touching loopback.
+    func updateDoors(_ doors: Set<RemoteAccessDoor>) {
+        listeners.update(doors: doors)
+    }
 
-        do {
-            let parameters = NWParameters.tcp
-            parameters.requiredLocalEndpoint = .hostPort(
-                host: NWEndpoint.Host(RemoteAccessDefaults.host),
-                port: .any
-            )
-            parameters.allowLocalEndpointReuse = true
-
-            let listener = try NWListener(using: parameters)
-            self.listener = listener
-
-            listener.stateUpdateHandler = { [weak self] state in
-                switch state {
-                case .ready:
-                    let resolved = listener.port?.rawValue
-                    self?.portStorage.withLock { $0 = resolved }
-            ThreadingLogger.remote.info(
-                "Remote access server listening on port \(resolved ?? 0, privacy: .public)"
-            )
-                    finish(resolved)
-                case .failed(let error):
-            ThreadingLogger.remote.error(
-                "Remote access server failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-                    if self?.listener === listener {
-                        self?.portStorage.withLock { $0 = nil }
-                        self?.listener = nil
-                    }
-                    listener.cancel()
-                    finish(nil)
-                default:
-                    break
-                }
-            }
-
-            listener.newConnectionHandler = { [weak self] connection in
-                self?.accept(connection)
-            }
-
-            listener.start(queue: queue)
-        } catch {
-            ThreadingLogger.remote.error(
-                "Remote access server could not start: \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-            finish(nil)
-        }
+    /// Re-reads the interface list and rebuilds only the listeners whose address changed.
+    func refreshListenerAddresses() {
+        listeners.refreshAddresses()
     }
 
     func stop() {
@@ -261,12 +254,10 @@ final class RemoteAccessServer: @unchecked Sendable {
             let connections = Array(connectionsByID.values)
             connectionsByID.removeAll()
             for connection in connections { connection.cancel() }
-            listener?.cancel()
-            listener = nil
-            portStorage.withLock { $0 = nil }
             authLimiter = RemoteAuthRateLimiter()
             mutationReplayCache.removeAll()
         }
+        listeners.stop()
     }
 
     /// Revocation applies to already-open sockets as well as future authentication. Without

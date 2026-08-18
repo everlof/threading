@@ -582,8 +582,34 @@ feature lock.
 
 ## Security model
 
-- The remote server listens only on `127.0.0.1` and is separate from Threading's MCP and extension
-  servers.
+- The remote server is separate from Threading's MCP and extension servers, and it binds one
+  listener per **door** rather than one listener bound to everything. A door is a network the Mac
+  will answer on, and each of its listeners is pinned to one address with `requiredLocalEndpoint`;
+  `0.0.0.0` is never bound. Turning one door on therefore cannot start answering on another
+  network, which is what keeps "publishes Threading only inside the owner's tailnet" true at bind
+  time instead of in a later token check.
+- Loopback is not a door anyone chooses. `127.0.0.1` is bound whenever Remote Access is on,
+  because the Hosted Direct bridge and Tailscale Serve both forward to it, and it stays cleartext
+  for the same reason. **No routable door is offered in Settings yet**, so a shipped build still
+  listens only on `127.0.0.1`. A `lan` door exists in the model and can be turned on by writing
+  the `remoteAccessDoors` default, but it is deliberately not in the UI until the listener
+  presents its own TLS identity: a LAN listener over plain HTTP would put a bearer token on
+  whatever Wi-Fi the Mac has joined. While it is on, the Mac advertises each bound address, its
+  `.local` name and any `remoteAccessAdvertisedHostname` override as `lan` endpoints, and an
+  iPhone drops them, because it keeps only `https` candidates.
+- The listener's port is sticky. It tries the configured port, `8760` by default and editable
+  between 1024 and 65535, and on a collision walks `8760` to `8769` in order and reports the port
+  it actually took. It never falls back to a port the kernel picked: an ephemeral port meant the
+  Mac's address changed on every launch, which is what made a paired phone re-scan after a
+  restart. A client walks the same range before deciding the Mac has moved. If every port in the
+  range is taken, Remote Access fails with that as the reason rather than starting somewhere
+  nobody can predict.
+- Interfaces come and go, so the listener set is rebuilt when the network path changes rather
+  than enumerated once at start. A door whose interfaces are absent reports itself as not
+  currently reachable and takes nothing else down with it. `socketfilterfw` supplies a
+  best-effort hint about the macOS Application Firewall; it is only ever a hint, because a probe
+  from this Mac to its own address is local traffic the firewall does not filter. Only a phone
+  that connected proves reachability.
 - In **Relay**, or while **Private + Sharing** needs a public share/fallback, `cloudflared` opens
   an outbound tunnel to that one listener. No router
   port or inbound firewall rule is opened. Traffic passes through Cloudflare, where TLS is
@@ -717,9 +743,10 @@ with no AppKit window graph or ambient project/runtime lookup.
 
 ## Implementation map
 
-- `Sources/Threading/Core/Remote`: loopback HTTP/WebSocket server, durable owner-device registry,
-  authentication, pluggable Cloudflare/Tailscale transports, routing, the application command
-  capability, and live session mirrors.
+- `Sources/Threading/Core/Remote`: the HTTP/WebSocket server and its per-door listener set
+  (`RemoteListenerSet`, `RemoteAccessDoors`), durable owner-device registry, authentication,
+  pluggable Cloudflare/Tailscale transports, routing, the application command capability, and
+  live session mirrors.
 - `Sources/Threading/Resources/RemoteClient`: dependency-free browser client.
 - `ThreadingRemoteKit`: versioned wire DTOs and pairing-link parsing shared by macOS and iOS.
 - `Sources/ThreadingMobile`: SwiftUI iOS shell, UIKit Native-conversation timeline and SwiftTerm

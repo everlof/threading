@@ -1047,6 +1047,62 @@ final class AppSettings {
         }
     }
 
+    /// The port the remote-access listener tries first.
+    ///
+    /// Sticky across launches, which is what lets a paired phone reconnect tomorrow without
+    /// scanning again. A value outside the allowed range is refused on the way in and on the way
+    /// out, so a privileged port cannot reach the listener however it was written.
+    var remoteAccessListenerPort: UInt16 {
+        get {
+            let stored = AppSettingDefinitions.remoteAccessListenerPort.read(from: defaults)
+                ?? Int(RemoteAccessDefaults.defaultListenerPort)
+            guard let port = UInt16(exactly: stored) else {
+                return RemoteAccessDefaults.defaultListenerPort
+            }
+            return port
+        }
+        set {
+            AppSettingDefinitions.remoteAccessListenerPort.write(Int(newValue), to: defaults)
+        }
+    }
+
+    /// The routable doors that get a listener.
+    ///
+    /// Empty is the shipped default and means loopback only, which is the exposure Threading has
+    /// always had. An unrecognised value in the stored array is dropped rather than guessed at:
+    /// a door is a decision to listen on a network, so an unknown one fails closed.
+    var remoteAccessDoors: Set<RemoteAccessDoor> {
+        get {
+            let stored = AppSettingDefinitions.remoteAccessDoors.read(from: defaults) ?? []
+            return Set(stored.compactMap(RemoteAccessDoor.init(rawValue:)))
+                .intersection(RemoteAccessDoor.selectable)
+        }
+        set {
+            let raw = newValue
+                .intersection(RemoteAccessDoor.selectable)
+                .map(\.rawValue)
+                .sorted()
+            AppSettingDefinitions.remoteAccessDoors.write(raw, to: defaults)
+        }
+    }
+
+    /// An extra address to advertise beside the ones the interfaces report.
+    ///
+    /// Empty means none. This is the escape hatch for a static DNS name or a fixed address on
+    /// the far side of a VPN, neither of which this Mac can enumerate.
+    var remoteAccessAdvertisedHostname: String {
+        get {
+            (AppSettingDefinitions.remoteAccessAdvertisedHostname.read(from: defaults) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        set {
+            AppSettingDefinitions.remoteAccessAdvertisedHostname.write(
+                newValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                to: defaults
+            )
+        }
+    }
+
     /// How a newly shared session starts. The choice is only a default: the owner can switch
     /// the live session between collaborative and focused control at any time.
     var remoteInputControlDefault: RemoteInputControlDefault {

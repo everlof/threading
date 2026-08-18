@@ -204,6 +204,18 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "remoteAccessKeepsRelayReady",
                 valueType: .boolean
             ),
+            .remoteAccessListenerPort: .init(
+                key: "remoteAccessListenerPort",
+                valueType: .integer
+            ),
+            .remoteAccessDoors: .init(
+                key: "remoteAccessDoors",
+                valueType: .stringArray
+            ),
+            .remoteAccessAdvertisedHostname: .init(
+                key: "remoteAccessAdvertisedHostname",
+                valueType: .string
+            ),
             .remoteInputControlDefault: .init(
                 key: "remoteInputControlDefault",
                 valueType: .string

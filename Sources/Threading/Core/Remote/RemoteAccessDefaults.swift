@@ -10,8 +10,63 @@ enum RemoteAccessDefaults {
 
     // MARK: - Listener
 
-    /// Loopback only. A selected transport forwards to this port; nothing binds to a routable address.
+    /// The loopback address. Bound whenever Remote Access is on, because the Hosted Direct
+    /// bridge and Tailscale Serve both forward to it, and never advertised to another device.
     static let host = "127.0.0.1"
+
+    /// The scheme the listener speaks today. Loopback keeps it permanently (a bridge and a Serve
+    /// handler talk plain HTTP to it); the routable doors keep it only until the listener has a
+    /// TLS identity to present, which is why no routable door is offered in the UI yet.
+    static let cleartextScheme = "http"
+
+    /// The port tried first, and the one a paired client remembers.
+    ///
+    /// The listener used to take an ephemeral port, so the Mac's address changed on every launch
+    /// and pairing could not survive a restart. `8760` carries no common assignment and nothing
+    /// on the development machine answered on it or on the nine ports above it.
+    static let defaultListenerPort: UInt16 = 8760
+
+    /// Where the port may land when the configured one is taken.
+    ///
+    /// Small, fixed and public: a client walks the same list before deciding the Mac has moved,
+    /// so one collision does not cost a re-pair. Exhausting it is a named failure — never a
+    /// silent ephemeral port, which is the behaviour this replaces.
+    static let listenerPortFallbackRange: ClosedRange<UInt16> = 8760...8769
+
+    /// Privileged ports are refused. Threading is not a root process and a person who types `80`
+    /// into a port field is describing a listener this app must not try to open.
+    static let minimumListenerPort = 1024
+    static let maximumListenerPort = 65535
+
+    /// How long the whole listener may take to answer before the start is called failed.
+    ///
+    /// A wait with no deadline is not a state. Without this the settings page would sit in
+    /// Starting for the life of the process when a listener never leaves `waiting`, which is the
+    /// failure shape the relay already produced once.
+    static let listenerStartTimeout: TimeInterval = 10
+
+    /// How long `stop()` waits for the kernel to release the listener's port. Cancellation is
+    /// milliseconds in practice; the bound is here so a wedged listener cannot hold the caller.
+    static let listenerCancelTimeout: TimeInterval = 2
+
+    /// One interface change arrives as several path updates while the interface settles. The
+    /// listener set rebuilds once per burst rather than once per callback.
+    static let pathChangeCoalescing: TimeInterval = 0.5
+
+    /// What macOS calls this Mac on the local network. Advertised beside the LAN addresses
+    /// because it survives a DHCP move that the addresses do not.
+    static let localHostnameSuffix = ".local"
+
+    /// A hostname override is a name, not a document. This bounds what a `defaults write` can
+    /// put in front of the URL builder.
+    static let maximumAdvertisedHostnameBytes = 253
+
+    /// How long the Application Firewall probe may take before its answer is "unknown".
+    ///
+    /// Two `socketfilterfw` reads that each returned in under 20 ms on the development machine.
+    /// The bound exists because it is a child process on a status path, not because it is slow.
+    static let firewallProbeTimeout: TimeInterval = 3
+    static let firewallProbeOutputBytes = 4 * 1024
 
     /// The serial queue that owns the listener, every connection's I/O, WebSocket framing and
     /// the broadcast fan-out. Stores and AppKit are main-only, so anything touching them hops.
@@ -141,4 +196,38 @@ enum RemoteAccessDefaults {
     /// How long the device-approval poll (`GET /api/me` returning `pendingApproval`) waits
     /// between polls, echoed to the client so the two agree.
     static let approvalPollSeconds: TimeInterval = 2
+}
+
+/// How an interface name and address become a door.
+///
+/// Names rather than numbers, because that is what the platform gives us and what the rules are
+/// actually about. Everything here is a prefix or a range that BSD, Apple or Tailscale defines;
+/// nothing is a preference.
+enum RemoteInterfaceDefaults {
+
+    /// Wi-Fi, Ethernet and Thunderbolt bridges all appear as `en*`.
+    static let lanInterfacePrefix = "en"
+
+    /// Every VPN and the tailnet arrive on a `utun*`.
+    static let tunnelInterfacePrefix = "utun"
+
+    /// The kernel's own loopback interface.
+    static let loopbackInterfacePrefix = "lo"
+
+    /// Apple's peer-to-peer radios. They carry link-local addresses only, no phone can route to
+    /// them, and binding them would put a listener on a link the user never chose. They do not
+    /// match the LAN prefix today; they are named because the rule is about them, not about the
+    /// spelling of their names.
+    static let excludedInterfaceNames: Set<String> = ["awdl0", "llw0"]
+
+    /// `169.254.0.0/16`. A self-assigned address means DHCP did not answer.
+    static let ipv4LinkLocalPrefix = "169.254."
+
+    /// `fe80::/10`. Needs a zone identifier that no advertised URL can carry.
+    static let ipv6LinkLocalPrefixes = ["fe8", "fe9", "fea", "feb"]
+
+    /// `100.64.0.0/10`, the carrier-grade NAT range Tailscale assigns tailnet addresses from.
+    /// A `utun` holding one of these is the tailnet; any other `utun` is somebody's VPN.
+    static let tailscaleCGNATFirstOctet: UInt8 = 100
+    static let tailscaleCGNATSecondOctets: ClosedRange<UInt8> = 64...127
 }
