@@ -186,6 +186,29 @@ OpenCode and OpenRouter rows with `complete`, `partial`, `unavailable` or `faile
 record counts, and a reason where useful. A plausible-looking total can therefore never imply
 whole-machine coverage when one runtime is unreadable.
 
+### Session receipts
+
+The Session Status Card, Overview ▸ Info and Subagents pane read a second projection of the same
+provider-neutral ledger; none reads a provider transcript or invents a character-to-token
+estimate. `UsageLedgerBuilder` retains lifetime cells at
+`session × runtime/biller × account × exact model`, including records without a usable timestamp.
+That is deliberately separate from the dashboard's 90-day daily cells: an old conversation still
+means its whole lifetime, while an old cached report says **Last 90 days** until the next rebuild
+rather than silently relabelling a partial total.
+
+`SessionUsageService` indexes those lifetime cells by provider session identity once per completed
+scan on its utility queue. A selected session then folds only its parent and known child aliases.
+The immutable result reconciles Total = Main agent + Subagents and preserves token categories,
+provider-reported versus catalog-priced cost, unpriced tokens, requests, models, catalog version
+and runtime coverage. A live child counter may lead the transcript index; only that positive delta
+is shown as **Awaiting index**, without assigning it a token category or cost.
+
+Presentation stays intentionally tiered. The Session Status Card shows one compact total and a
+delegated subtotal, both routes into the surfaces that own detail. Overview ▸ Info has a fixed form
+and keeps only the six leading model rows after aggregating every model. The existing Subagents
+pane remains the child navigator and adds one brief receipt to each existing virtualized row; it
+does not build a second agents sidebar.
+
 ### Pricing honesty
 
 Pricing follows this order:
@@ -213,13 +236,16 @@ miss and is replaced only after the source is parsed; metadata preflight is not 
 authority.
 
 `UsageLedgerBuilder` deduplicates once, prices once, resolves checkout roots once per directory and
-aggregates at the bounded cell grain:
+aggregates at two bounded cell grains:
 
 `day × runtime/biller × account × exact model × checkout`
 
+`session × runtime/biller × account × exact model`
+
 The persisted report keeps at most 90 daily cells per combination plus nine days of quarter-hour
-buckets used by the existing spend forecast. Selecting 7, 30 or 90 days folds those cells into
-daily provider series and model, account, checkout or provider breakdowns without rescanning disk.
+buckets used by the existing spend forecast. Lifetime session cells keep no response text or
+per-response value. Selecting 7, 30 or 90 days folds the daily cells into provider series and
+model, account, checkout or provider breakdowns without rescanning disk.
 
 ## Durable limit history
 
@@ -372,6 +398,14 @@ expiry and projected exhaustion. A series retains the full reset count and resto
 its summary even when its visible reset markers are sampled. `nil` reset-credit inventory remains
 distinct from authoritative zero throughout this value boundary.
 
+Session projection has its own smaller gate. The report index is built once per scan off-main;
+each refresh visits only the selected parent and child identities. The service remembers at most
+32 recently requested sessions, Overview retains at most six model rows, the Session Status Card
+constructs a fixed number of native rows, and Subagents adds values only to the navigator rows it
+already virtualizes. The million-response ledger fixture asserts that lifetime receipts aggregate
+to the session/model route rather than retaining one item per response; `SessionUsageTests` also
+projects one parent and child through an index containing 10,000 unrelated sessions.
+
 `UsageDashboardPerformanceTests` is part of the fast plan at meaningful default sizes. The opt-in
 `scripts/profile_usage_dashboard.sh` builds the test bundle, then invokes `xctest` directly so the
 stress environment reaches the test host (ordinary `xcodebuild test` sanitizes it). The 2026-08-09
@@ -402,6 +436,8 @@ there to expose accidental raw-array work in animation and interaction paths.
 
 - `UsageLedgerTests`, `UsageProviderAdapterTests` and `UsageScanCacheTests`: normalization,
   pricing provenance, direct/routed names, deduplication and cold/warm equality.
+- `SessionUsageTests`: lifetime versus 90-day compatibility, parent/child reconciliation, live
+  unindexed deltas, model-row caps and indexed isolation from unrelated sessions.
 - `UsageLimitHistoryTests` and `UsageLimitHistoryJournalTests`: reset proof, projection,
   adversarial bounds, permissions, retention, corruption tolerance and legacy joining.
 - `ThemedTimeSeriesChartTests`: independent and stacked geometry, extrema/segment preservation,

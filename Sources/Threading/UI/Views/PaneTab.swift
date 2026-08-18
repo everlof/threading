@@ -71,9 +71,8 @@ final class PaneTab {
     case browser(BrowserViewController)
     case audit(ExecutionAuditViewController)
     case review(GitReviewViewController)
-    case info(SessionInfoViewController)
+    case overview(SessionOverviewViewController)
     case terminal(ShellDrawerViewController)
-    case files(FileTreeViewController)
     case attachments(SessionAttachmentsViewController)
     case subagents(SubagentTranscriptViewController)
     case sharing(SessionSharingViewController)
@@ -139,20 +138,21 @@ final class PaneTab {
     return nil
   }
 
-  var info: SessionInfoViewController? {
-    if case .info(let info) = body { return info }
+  var overview: SessionOverviewViewController? {
+    if case .overview(let overview) = body { return overview }
     return nil
   }
+
+  /// Compatibility accessors for callers that need the selected section's existing controller.
+  /// They never create the other section merely because a tab list is being inspected.
+  var info: SessionInfoViewController? { overview?.infoControllerIfLoaded }
 
   var terminal: ShellDrawerViewController? {
     if case .terminal(let terminal) = body { return terminal }
     return nil
   }
 
-  var files: FileTreeViewController? {
-    if case .files(let files) = body { return files }
-    return nil
-  }
+  var files: FileTreeViewController? { overview?.activityControllerIfLoaded }
 
   var attachments: SessionAttachmentsViewController? {
     if case .attachments(let attachments) = body { return attachments }
@@ -199,9 +199,8 @@ final class PaneTab {
     case .browser(let browser): return browser
     case .audit(let audit): return audit
     case .review(let review): return review
-    case .info(let info): return info
+    case .overview(let overview): return overview
     case .terminal(let terminal): return terminal
-    case .files(let files): return files
     case .attachments(let attachments): return attachments
     case .subagents(let subagents): return subagents
     case .sharing(let sharing): return sharing
@@ -226,12 +225,10 @@ final class PaneTab {
       return "checklist.checked"
     case .review:
       return "plus.forwardslash.minus"
-    case .info:
-      return "info.circle"
+    case .overview:
+      return "rectangle.grid.1x2"
     case .terminal:
       return "terminal"
-    case .files:
-      return "folder"
     case .attachments:
       return "paperclip"
     case .subagents:
@@ -270,12 +267,10 @@ final class PaneTab {
       return L10n.string("Execution audit")
     case .review:
       return "Review"
-    case .info:
-      return "Info"
+    case .overview:
+      return L10n.string("Overview")
     case .terminal(let terminal):
       return terminal.currentTitle
-    case .files:
-      return L10n.string("Activity")
     case .attachments:
       return "Attachments"
     case .subagents:

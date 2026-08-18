@@ -239,6 +239,11 @@ final class DisplayPaneController: NSViewController {
     uuidString: "846E2D46-2DF4-43A7-A591-91A384582D39"
   )!
 
+  /// The honest first surface when the user opens a session's otherwise empty panel by hand.
+  /// It is not in `tabsBySession`, is never returned to an agent and is never persisted. A
+  /// deliberate surface command materializes an ordinary Overview tab instead.
+  private var syntheticOverview: (sessionID: SessionID, tab: DisplayTab)?
+
   private var tabsBySession: [SessionID: [DisplayTab]] = [:]
   private var activeTabIDBySession: [SessionID: UUID] = [:]
   /// The browser the agent and user most recently selected. Kept separately from the visible
@@ -454,9 +459,9 @@ final class DisplayPaneController: NSViewController {
         }
       ),
       (
-        "Activity", "folder", true,
+        L10n.string("Overview"), "rectangle.grid.1x2", true,
         {
-          [weak self] in _ = self?.activateFiles(for: sessionID)
+          [weak self] in _ = self?.activateOverview(for: sessionID)
         }
       ),
       (
@@ -469,12 +474,6 @@ final class DisplayPaneController: NSViewController {
         "Compare Files…", "rectangle.on.rectangle", true,
         {
           [weak self] in self?.chooseFilesToCompare(for: sessionID)
-        }
-      ),
-      (
-        "Info", "info.circle", true,
-        {
-          [weak self] in _ = self?.activateInfo(for: sessionID)
         }
       ),
       (
@@ -977,14 +976,17 @@ final class DisplayPaneController: NSViewController {
   }
 
   /// A session that just stopped working probably changed the tree; its review, if on
-  /// screen, should say so without being asked. The info panel gets the same treatment for the
-  /// same reason: a turn that ends is a turn that may have just started or killed a server.
+  /// screen, should say so without being asked. Overview gets the same treatment for the same
+  /// reason: a turn may have changed either its files or the server processes it is running.
   func noteSessionStoppedWorking(_ sessionID: SessionID) {
     guard sessionID == currentSessionID else { return }
 
     activeTab(for: sessionID)?.review?.refreshModePresentation()
     activeTab(for: sessionID)?.review?.refresh(force: false)
-    activeTab(for: sessionID)?.info?.refresh()
+    activeTab(for: sessionID)?.overview?.sessionDidStopWorking()
+    if syntheticOverview?.sessionID == sessionID {
+      syntheticOverview?.tab.overview?.sessionDidStopWorking()
+    }
     // A comparison on screen through a turn is probably of files the turn was rewriting.
     activeTab(for: sessionID)?.compare?.refresh(force: true)
   }
@@ -996,24 +998,30 @@ final class DisplayPaneController: NSViewController {
     activeTab(for: sessionID)?.review?.refreshModePresentation()
   }
 
-  // MARK: - Public — Info Tab
+  // MARK: - Public — Overview Tab
 
-  /// Returns the session's info tab, creating and activating one if it has none. Info remains a
-  /// singleton because it describes the session rather than a navigable resource.
+  /// Returns the session's Overview, creating and activating its one tab if needed.
   @discardableResult
-  func activateInfo(for sessionID: SessionID) -> SessionInfoViewController? {
+  func activateOverview(
+    for sessionID: SessionID,
+    section: SessionOverviewSection = .info
+  ) -> SessionOverviewViewController? {
     restoreIfNeeded(sessionID)
+    if syntheticOverview?.sessionID == sessionID { discardSyntheticOverview() }
     var tabs = tabsBySession[sessionID] ?? []
 
-    if let existing = tabs.first(where: { $0.info != nil }) {
+    if let existing = tabs.first(where: { $0.overview != nil }),
+      let overview = existing.overview
+    {
+      overview.select(section)
       activeTabIDBySession[sessionID] = existing.id
       persist(sessionID)
       if sessionID == currentSessionID { render() }
-      return existing.info
+      return overview
     }
 
-    guard let controller = makeInfo(for: sessionID) else { return nil }
-    let tab = DisplayTab(body: .info(controller))
+    guard let controller = makeOverview(for: sessionID, initialSection: section) else { return nil }
+    let tab = DisplayTab(body: .overview(controller), owningSessionID: sessionID)
     tabs.append(tab)
     tabsBySession[sessionID] = tabs
     activeTabIDBySession[sessionID] = tab.id
@@ -1023,24 +1031,54 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
-  /// Builds an info view controller for the session's project folder. Returns nil for a session
-  /// with no project — there is no directory to describe.
-  private func makeInfo(for sessionID: SessionID) -> SessionInfoViewController? {
+  /// Compatibility route for **View ▸ Session Info**. It now focuses Info inside Overview.
+  @discardableResult
+  func activateInfo(for sessionID: SessionID) -> SessionInfoViewController? {
+    activateOverview(for: sessionID, section: .info)?.selectInfo()
+  }
+
+  /// Builds the two-section surface without loading either section's view. Returns nil for a
+  /// session with no project — neither the filesystem nor its runtime has a directory context.
+  private func makeOverview(
+    for sessionID: SessionID,
+    initialSection: SessionOverviewSection
+  ) -> SessionOverviewViewController? {
     guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return nil }
 
-    let controller = SessionInfoViewController(sessionID: sessionID, folderPath: project.folderPath)
+    let controller = SessionOverviewViewController(
+      sessionID: sessionID,
+      initialSection: initialSection,
+      activityFactory: {
+        FileTreeViewController(
+          folderPath: project.folderPath,
+          workTarget: .session(
+            projectID: project.id,
+            sessionID: sessionID,
+            rootPath: project.folderPath,
+            detailed: true
+          )
+        )
+      },
+      infoFactory: { [weak self] in
+        let info = SessionInfoViewController(
+          sessionID: sessionID,
+          folderPath: project.folderPath
+        )
+
+        // The shell drawer lives on the terminal container, which the window owns and this pane
+        // does not see; the resolver is wired in from there.
+        info.shellRootProvider = { [weak self] in self?.shellRootResolver?(sessionID) }
+
+        // A port the user clicks lands in this session's browser tab, which is the surface that
+        // already exists for showing a page.
+        info.onOpenURL = { [weak self] url in
+          self?.activateBrowser(for: sessionID).navigate(to: url.absoluteString)
+        }
+        return info
+      }
+    )
     addChild(controller)
-
-    // The shell drawer lives on the terminal container, which the window owns and this pane
-    // does not see; the resolver is wired in from there.
-    controller.shellRootProvider = { [weak self] in self?.shellRootResolver?(sessionID) }
-
-    // A port the user clicks lands in this session's browser tab, which is the surface that
-    // already exists for showing a page.
-    controller.onOpenURL = { [weak self] url in
-      self?.activateBrowser(for: sessionID).navigate(to: url.absoluteString)
-    }
-
+    controller.onSectionChange = { [weak self] _ in self?.persist(sessionID) }
     return controller
   }
 
@@ -1234,54 +1272,12 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
-  // MARK: - Public — Activity Tab
+  // MARK: - Public — Activity Section
 
-  /// Returns the session's activity tree, creating and activating one if it has none. A second
-  /// tree would show the same session and directory twice.
+  /// Compatibility route for **View ▸ Activity**. It now focuses Activity inside Overview.
   @discardableResult
   func activateFiles(for sessionID: SessionID) -> FileTreeViewController? {
-    restoreIfNeeded(sessionID)
-    // Opening the tab is the moment its reading has to be current. For a session Threading
-    // renders, it already is; for a terminal session this is where its transcript is folded in,
-    // including one that has not run since a previous launch. The render path asks as well, for
-    // the tab that comes back already open; both go through the same coalescer.
-    AgentWorkHydration.hydrate(sessionID: sessionID)
-    var tabs = tabsBySession[sessionID] ?? []
-
-    if let existing = tabs.first(where: { $0.files != nil }) {
-      activeTabIDBySession[sessionID] = existing.id
-      persist(sessionID)
-      if sessionID == currentSessionID { render() }
-      return existing.files
-    }
-
-    guard let controller = makeFiles(for: sessionID) else { return nil }
-    let tab = DisplayTab(id: UUID(), body: .files(controller))
-    tabs.append(tab)
-    tabsBySession[sessionID] = tabs
-    activeTabIDBySession[sessionID] = tab.id
-    persist(sessionID)
-
-    if sessionID == currentSessionID { render() }
-    return controller
-  }
-
-  /// Builds an activity tree rooted at the session's project folder. Nil for a session with no
-  /// project — there is no directory or trace scope to show.
-  private func makeFiles(for sessionID: SessionID) -> FileTreeViewController? {
-    guard let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return nil }
-
-    let controller = FileTreeViewController(
-      folderPath: project.folderPath,
-      workTarget: .session(
-        projectID: project.id,
-        sessionID: sessionID,
-        rootPath: project.folderPath,
-        detailed: true
-      )
-    )
-    addChild(controller)
-    return controller
+    activateOverview(for: sessionID, section: .activity)?.selectActivity()
   }
 
   // MARK: - Public — Attachments Tab
@@ -1452,7 +1448,7 @@ final class DisplayPaneController: NSViewController {
       return controller
     }
 
-    let controller = SubagentTranscriptViewController()
+    let controller = SubagentTranscriptViewController(sessionID: sessionID)
     addChild(controller)
     wireSubagentSelection(controller, sessionID: sessionID)
     controller.update(agent)
@@ -1487,7 +1483,7 @@ final class DisplayPaneController: NSViewController {
       return controller
     }
 
-    let controller = SubagentTranscriptViewController()
+    let controller = SubagentTranscriptViewController(sessionID: sessionID)
     addChild(controller)
     wireSubagentSelection(controller, sessionID: sessionID)
     controller.update(timeline, selectedThreadID: selectedThreadID)
@@ -1676,6 +1672,7 @@ final class DisplayPaneController: NSViewController {
   /// accessibility — the pointerless route to reordering and to movement.
   func tabContextEntries(for id: UUID) -> [ThemedMenuEntry] {
     guard id != Self.currentThemeTabID else { return [] }
+    guard syntheticOverview?.tab.id != id else { return [] }
     // A proxy's menu is about the window it points at, not about a tab this pane holds — so it
     // replaces the standard entries rather than joining them. "Close Other Tabs" beside a chip
     // that is not one of the tabs would be answering a different question.
@@ -1736,6 +1733,7 @@ final class DisplayPaneController: NSViewController {
   /// global inspector first. Ordinary session selection uses `showSession` and intentionally
   /// preserves it.
   func showSessionTabs(_ sessionID: SessionID?) {
+    discardSyntheticOverview()
     currentSessionID = sessionID
     if let sessionID {
       restoreIfNeeded(sessionID)
@@ -1747,11 +1745,40 @@ final class DisplayPaneController: NSViewController {
 
   /// Switches the panel to a session's tabs. Passing nil empties it.
   func showSession(_ sessionID: SessionID?) {
+    discardSyntheticOverview()
     currentSessionID = sessionID
     if let sessionID {
       restoreIfNeeded(sessionID)
       reconcileSupervisionTab(for: sessionID)
     }
+    render()
+  }
+
+  /// Opens a session by hand, supplying Overview when its persisted strip is empty.
+  ///
+  /// This is intentionally a different route from session selection: the window still closes
+  /// for an empty session selected in the sidebar, while pressing the panel toggle has something
+  /// useful to reveal. The synthetic tab joins neither persistence nor the agent-facing tab list.
+  func showSessionWithDefaultOverview(_ sessionID: SessionID?) {
+    discardSyntheticOverview()
+    currentSessionID = sessionID
+    guard let sessionID else {
+      render()
+      return
+    }
+
+    restoreIfNeeded(sessionID)
+    reconcileSupervisionTab(for: sessionID)
+    if tabsBySession[sessionID]?.isEmpty == true,
+      let overview = makeOverview(for: sessionID, initialSection: .info)
+    {
+      overview.onSectionChange = nil
+      syntheticOverview = (
+        sessionID,
+        DisplayTab(body: .overview(overview), owningSessionID: sessionID)
+      )
+    }
+    isShowingCurrentTheme = false
     render()
   }
 
@@ -1765,6 +1792,9 @@ final class DisplayPaneController: NSViewController {
   /// Drops every session not in the given set, tearing down any live surface it held, so
   /// deleted sessions do not keep their tabs — and their web content processes — alive forever.
   func retainOnly(sessionIDs: Set<SessionID>) {
+    if let syntheticOverview, !sessionIDs.contains(syntheticOverview.sessionID) {
+      discardSyntheticOverview()
+    }
     for (sessionID, tabs) in tabsBySession where !sessionIDs.contains(sessionID) {
       tabs.forEach { teardownHosted($0) }
     }
@@ -1788,6 +1818,7 @@ final class DisplayPaneController: NSViewController {
 
   /// Tears down one deleted session without filtering every resident panel.
   func removeSession(_ sessionID: SessionID) {
+    if syntheticOverview?.sessionID == sessionID { discardSyntheticOverview() }
     tabsBySession.removeValue(forKey: sessionID)?.forEach { teardownHosted($0) }
     activeTabIDBySession.removeValue(forKey: sessionID)
     activeBrowserTabIDBySession.removeValue(forKey: sessionID)
@@ -1799,6 +1830,7 @@ final class DisplayPaneController: NSViewController {
 
   private func userActivatedTab(_ id: UUID) {
     guard id != Self.currentThemeTabID else { return }
+    if syntheticOverview?.tab.id == id { return }
     if let proxy = detachedWindowProxy(id) {
       proxy.onFocus()
       return
@@ -1810,6 +1842,11 @@ final class DisplayPaneController: NSViewController {
   private func userClosedTab(_ id: UUID) {
     if id == Self.currentThemeTabID {
       hideCurrentTheme()
+      onClose?()
+      return
+    }
+    if syntheticOverview?.tab.id == id {
+      discardSyntheticOverview()
       onClose?()
       return
     }
@@ -1871,6 +1908,12 @@ final class DisplayPaneController: NSViewController {
     controller.removeFromParent()
   }
 
+  private func discardSyntheticOverview() {
+    guard let syntheticOverview else { return }
+    self.syntheticOverview = nil
+    teardownHosted(syntheticOverview.tab)
+  }
+
   // MARK: - Rendering
 
   private func activeTab(for sessionID: SessionID?) -> DisplayTab? {
@@ -1887,10 +1930,17 @@ final class DisplayPaneController: NSViewController {
     // Nothing is lost by skipping: `viewDidLoad` renders once they do.
     guard isViewLoaded else { return }
 
-    let tabs = isShowingCurrentTheme
+    let persistedTabs = isShowingCurrentTheme
       ? []
       : currentSessionID.flatMap { tabsBySession[$0] } ?? []
-    let active = isShowingCurrentTheme ? nil : activeTab(for: currentSessionID)
+    if !persistedTabs.isEmpty { discardSyntheticOverview() }
+    let fallback = currentSessionID.flatMap { sessionID in
+      syntheticOverview?.sessionID == sessionID ? syntheticOverview?.tab : nil
+    }
+    let tabs = persistedTabs.isEmpty ? fallback.map { [$0] } ?? [] : persistedTabs
+    let active = isShowingCurrentTheme
+      ? nil
+      : activeTab(for: currentSessionID) ?? fallback
     let performanceSpan = PerformanceRecorder.shared.begin(
       "display-pane.render",
       category: "display-pane.ui",
@@ -2078,6 +2128,15 @@ final class DisplayPaneController: NSViewController {
       // Loads only when actually shown, the same deferred rule as the browser's page.
       review.refresh(force: false)
 
+    case .overview(let overview):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(overview)
+      overview.refreshSelectedSection()
+
     case .compare(let compare):
       imageView.image = nil
       imageView.isHidden = true
@@ -2098,17 +2157,6 @@ final class DisplayPaneController: NSViewController {
       // ephemeral rather than persisted.
       installHosted(comparison)
 
-    case .info(let info):
-      imageView.image = nil
-      imageView.isHidden = true
-      hideHTML()
-      captionLabel.isHidden = true
-      contentMenuButton.isHidden = true
-      installHosted(info)
-      // The panel's own on-screen gate starts its polling; this is the immediate first
-      // reading, so switching to the tab does not show a two-second-stale one.
-      info.refresh()
-
     case .terminal(let terminal):
       imageView.image = nil
       imageView.isHidden = true
@@ -2119,24 +2167,6 @@ final class DisplayPaneController: NSViewController {
       // The same deferred rule the browser's page and the review's git call follow: a
       // restored terminal tab costs no process until it is actually looked at.
       terminal.startIfNeeded()
-
-    case .files(let files):
-      imageView.image = nil
-      imageView.isHidden = true
-      hideHTML()
-      captionLabel.isHidden = true
-      contentMenuButton.isHidden = true
-      installHosted(files)
-      // Reads the root on first show and re-reads what is open on later ones, so a file an
-      // agent just wrote is there without the folder being collapsed and reopened.
-      files.refresh()
-      // The reading beside those files follows the same rule. This covers the tab restored from
-      // a previous launch, which is shown without ever being activated. Renders are frequent —
-      // an agent rewrites its terminal title constantly — so the ask is coalesced rather than
-      // rationed by the caller; see `AgentWorkHydrationThrottle`.
-      if let sessionID = currentSessionID {
-        AgentWorkHydration.hydrate(sessionID: sessionID)
-      }
 
     case .attachments(let attachments):
       imageView.image = nil
@@ -2289,9 +2319,8 @@ final class DisplayPaneController: NSViewController {
     case .browser: return "browser"
     case .audit: return "audit"
     case .review: return "review"
-    case .info: return "info"
+    case .overview: return "overview"
     case .terminal: return "terminal"
-    case .files: return "files"
     case .attachments: return "attachments"
     case .subagents: return "subagents"
     case .sharing: return "sharing"
@@ -2323,6 +2352,14 @@ final class DisplayPaneController: NSViewController {
     // is only a no-op once `tabsBySession` holds something. Recording inside this loop restores
     // the same layout again on every file, which recurses until the stack is gone.
     var imagesToConvert: [(source: URL?, cacheFile: String?, wasActive: Bool)] = []
+    let storedOverviewTabs = panel.panelTabs.filter {
+      $0.kind == .files || $0.kind == .info
+    }
+    // Old layouts may contain both singleton tabs. The active one wins; otherwise Activity is
+    // the useful default. Exactly one identity and strip position survive the merge.
+    let storedOverview = storedOverviewTabs.first { $0.id == panel.activeTabID }
+      ?? storedOverviewTabs.first { $0.kind == .files }
+      ?? storedOverviewTabs.first
     for persisted in panel.panelTabs {
       let id = UUID(uuidString: persisted.id) ?? UUID()
       switch persisted.kind {
@@ -2394,9 +2431,14 @@ final class DisplayPaneController: NSViewController {
         tabs.append(DisplayTab(id: id, body: .review(controller)))
 
       case .info:
-        // Nothing is read until the tab is shown: the panel polls off its own visibility.
-        guard let controller = makeInfo(for: sessionID) else { continue }
-        tabs.append(DisplayTab(id: id, body: .info(controller)))
+        guard persisted.id == storedOverview?.id,
+          let controller = makeOverview(for: sessionID, initialSection: .info)
+        else { continue }
+        tabs.append(DisplayTab(
+          id: id,
+          body: .overview(controller),
+          owningSessionID: sessionID
+        ))
 
       case .terminal:
         // The tab comes back, the process does not — a shell's state was never on disk.
@@ -2405,10 +2447,14 @@ final class DisplayPaneController: NSViewController {
         tabs.append(DisplayTab(id: id, body: .terminal(controller)))
 
       case .files:
-        // No directory is read until the tab is shown, so a background session's tree
-        // costs nothing but the controller.
-        guard let controller = makeFiles(for: sessionID) else { continue }
-        tabs.append(DisplayTab(id: id, body: .files(controller)))
+        guard persisted.id == storedOverview?.id,
+          let controller = makeOverview(for: sessionID, initialSection: .activity)
+        else { continue }
+        tabs.append(DisplayTab(
+          id: id,
+          body: .overview(controller),
+          owningSessionID: sessionID
+        ))
 
       case .attachments:
         guard let controller = makeAttachments(for: sessionID) else { continue }
@@ -2441,6 +2487,20 @@ final class DisplayPaneController: NSViewController {
         )
         tabs.append(DisplayTab(id: id, body: .compare(controller)))
       }
+    }
+
+    // Finish the migration in storage as well as memory. Transform the stored payload rather
+    // than serializing the restored controllers: an extension panel can legitimately be
+    // unavailable this early, and merging Overview must not erase unrelated tabs with it.
+    if storedOverviewTabs.count > 1, let storedOverview {
+      let migratedPanelTabs = panel.panelTabs.filter { tab in
+        (tab.kind != .files && tab.kind != .info) || tab.id == storedOverview.id
+      }
+      DisplayPaneStore.shared.saveLayout(
+        tabs: migratedPanelTabs,
+        activeID: panel.activeTabID,
+        for: sessionID
+      )
     }
 
     tabsBySession[sessionID] = tabs
@@ -2556,13 +2616,6 @@ final class DisplayPaneController: NSViewController {
       )
     }
 
-    if tab.info != nil {
-      return PersistedTab(
-        id: tab.id.uuidString, kind: .info, title: tab.title,
-        subtitle: "", url: nil, html: nil, cacheFile: nil
-      )
-    }
-
     if tab.terminal != nil {
       return PersistedTab(
         id: tab.id.uuidString, kind: .terminal, title: tab.title,
@@ -2570,9 +2623,11 @@ final class DisplayPaneController: NSViewController {
       )
     }
 
-    if tab.files != nil {
+    if let overview = tab.overview {
       return PersistedTab(
-        id: tab.id.uuidString, kind: .files, title: tab.title,
+        id: tab.id.uuidString,
+        kind: overview.selectedSection == .activity ? .files : .info,
+        title: tab.title,
         subtitle: "", url: nil, html: nil, cacheFile: nil
       )
     }

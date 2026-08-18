@@ -61,7 +61,7 @@ extension PersistedPanel {
         detail = "git review panel (the user's diff view; they may stage and commit from it)"
       case .info:
         detail =
-          "session info panel (the user can see this session's processes and "
+          "Overview panel on Info (the user can see this session's processes and "
           + "listening ports, so a dev server you start is visible to them)"
       case .terminal:
         detail =
@@ -69,7 +69,7 @@ extension PersistedPanel {
           + "cannot type into it, and what they run there is not in your transcript)"
       case .files:
         detail =
-          "the Activity tree for this conversation (the user is browsing the project "
+          "Overview panel on Activity (the user is browsing the project "
           + "filesystem with your exact read and edit counts)"
       case .attachments:
         detail = "visual files referenced in this session (images and PDFs)"

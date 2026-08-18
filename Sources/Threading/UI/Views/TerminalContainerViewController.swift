@@ -308,6 +308,11 @@ final class TerminalContainerViewController: NSViewController {
             guard event.sessionID == self?.currentSessionID else { return }
             self?.refreshGitStatusOverlayAttachments()
         }
+        appEvents.observe(SessionUsageDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.currentSessionID else { return }
+            self?.refreshGitStatusOverlayUsage()
+            self?.refreshGitStatusOverlaySubagents()
+        }
         appEvents.observe(TerminalTextVisibilityIssueDetected.self) { [weak self] event in
             self?.terminalTextVisibilityIssueDetected(event.issue)
         }
@@ -1756,6 +1761,10 @@ private extension TerminalContainerViewController {
             guard let self else { return }
             self.delegate?.terminalContainerDidRequestGitReview(self)
         }
+        gitStatusOverlay.onOpenUsage = { [weak self] in
+            guard let self else { return }
+            self.delegate?.terminalContainerDidRequestSessionInfo(self)
+        }
         gitStatusOverlay.onOpenSubagents = { [weak self] in
             self?.openSubagents()
         }
@@ -1838,11 +1847,16 @@ private extension TerminalContainerViewController {
         }
         gitStatusOverlay.clear()
         gitStatusOverlay.showSession(currentSessionID?.uuidString.lowercased())
+        refreshGitStatusOverlayUsage()
         refreshGitStatusOverlaySubagents()
         refreshGitStatusOverlayModel()
         refreshGitStatusOverlayWorkspace()
         refreshGitStatusOverlayAudience()
         refreshGitStatusOverlayAttachments()
+
+        if let currentSessionID {
+            SessionUsageService.shared.refresh(currentSessionID)
+        }
 
         guard let sessionID = currentSessionID,
               let project = ProjectStore.shared.executionProject(forSessionID: sessionID) else { return }
@@ -2102,9 +2116,24 @@ private extension TerminalContainerViewController {
             ?? currentSessionID.map {
                 AgentRuntime.shared.subagentState(for: $0).timeline
             }
+        let usage = currentSessionID.flatMap {
+            SessionUsageService.shared.snapshot(for: $0)?.subagents
+        }
         gitStatusOverlay.updateSubagents(
             workingCount: timeline?.workingCount ?? 0,
-            doneCount: timeline?.doneCount ?? 0
+            doneCount: timeline?.doneCount ?? 0,
+            tokenCount: usage?.processedTokens
+        )
+    }
+
+    /// Installs the immutable parent-plus-children receipt already projected off-main.
+    func refreshGitStatusOverlayUsage() {
+        guard let sessionID = currentSessionID else {
+            gitStatusOverlay.updateUsage(nil)
+            return
+        }
+        gitStatusOverlay.updateUsage(
+            SessionUsageService.shared.snapshot(for: sessionID)?.total
         )
     }
 
@@ -2413,6 +2442,7 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
 
     func agentSessionSubagentsDidChange(_ controller: AgentSessionViewController) {
         guard controller.sessionID == currentSessionID else { return }
+        SessionUsageService.shared.subagentsDidChange(for: controller.sessionID)
         refreshGitStatusOverlaySubagents()
         delegate?.terminalContainer(
             self,
@@ -2501,6 +2531,8 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     )
     /// The Git portion of the floating session status card was clicked.
     func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController)
+    /// Its usage row was clicked: open the detailed receipt in Overview › Info.
+    func terminalContainerDidRequestSessionInfo(_ container: TerminalContainerViewController)
     /// Its audience row was clicked: open who can reach this chat and who is on it.
     func terminalContainerDidRequestSharing(_ container: TerminalContainerViewController)
     /// One attachment row, or the bounded "View all" row, asked for the Attachments pane.
@@ -2570,6 +2602,7 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
 
     func conversationSubagentsDidChange(_ controller: ConversationViewController) {
         guard controller.sessionID == currentSessionID else { return }
+        SessionUsageService.shared.subagentsDidChange(for: controller.sessionID)
         refreshGitStatusOverlaySubagents()
         delegate?.terminalContainer(
             self,

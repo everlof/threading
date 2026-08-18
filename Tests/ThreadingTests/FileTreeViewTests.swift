@@ -229,6 +229,7 @@ final class FileTreeViewTests: XCTestCase {
         XCTAssertTrue(spokenActivity.contains("2 files, 3 reads, 1 edits"))
         XCTAssertTrue(spokenActivity.contains("2 reads, 1 edits"))
         XCTAssertTrue(spokenActivity.contains("1 reads, 0 edits"))
+        XCTAssertTrue(summary.isAccessibilityElement())
         XCTAssertEqual(summary.accessibilityIdentifier(), "activity.summary")
         try writeActivityRender(host)
     }

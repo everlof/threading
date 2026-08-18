@@ -2107,7 +2107,8 @@ approved. Use the Terminal surface when a task needs Codex's full interactive ap
 
 When Claude or Codex delegates work, both Chat and Terminal show a **Subagents** summary with live working/done
 counts and, when the provider reports them, the child's current tool, elapsed time, tool count,
-and token count. Select a child to open its conversation in the display panel; child output
+and token count. The display-panel navigator also adds the indexed token total, cost and request
+count for each child when its transcript provides them. Select a child to open its conversation in the display panel; child output
 stays out of the parent's transcript. Both providers show structured child text, thinking, tool
 calls, and results, including nested delegated agents.
 
@@ -2392,8 +2393,10 @@ as a table" — and the panel opens beside the terminal, taking about a third of
 first time and the width you last dragged it to after that. Drag its divider to resize it; drag
 it all the way to the edge and the panel closes. It can also be opened and closed by hand with
 the **panel toggle** at the top-right of the window, or **View ▸ Display Panel** — so its tabs
-(the browser, Git Review, Session Info) are reachable without an agent putting content there
-first. Both wait for a session: the panel holds one conversation's tabs, so on a project's start
+(the browser, Git Review, Overview) are reachable without an agent putting content there first.
+If the panel has no tabs, opening it by hand shows Overview on Info immediately; that temporary
+fallback is not saved unless you explicitly choose a panel surface. Both controls wait for a
+session: the panel holds one conversation's tabs, so on a project's start
 page, where no session is selected yet, the toggle and the menu item are unavailable.
 
 **The toggle stays where you pressed it.** It sits at the right end of the session header while
@@ -2467,14 +2470,25 @@ that slot. Let go anywhere else and everything springs back. The same move is in
 secondary-click menu — **Move to Shell Drawer** on a panel tab, **Move to Display Panel** on
 a drawer tab. Either way the tab moves live — a shell keeps its process and scrollback, a
 browser keeps its page — and the new home survives a relaunch. The panel-only surfaces
-(Review, Info, Activity, comparisons) stay where they are one of a kind.
+(Review, Overview, comparisons) stay where they are one of a kind.
 
-### Session Info
+### Overview
 
-**View ▸ Session Info** (**⌘⇧I**) opens the panel's Info tab: what the session is actually
-running, right now. At the top is where the agent is working — its current directory and branch,
-with **Finder** and **Copy** buttons — and below it two lists that refresh every couple of
-seconds while the tab is visible.
+Overview combines the two ways to inspect a session in one tab. Its **Activity** section accounts
+for work in the checkout; its **Info** section shows what the session is running right now. Use
+the control at the top to switch between them. Info is the right-hand section and is focused when
+you open an otherwise empty panel or choose Overview from the **+** menu. **Cmd+P** focuses Activity and **View ▸ Session
+Info** (**⌘⇧I**) focuses Info without creating a second tab. The selected section survives a
+relaunch.
+
+Info begins with the session's lifetime transcript receipt: processed tokens and cost for the
+whole session, its main agent and delegated work, followed by token categories and the leading
+models. Provider-reported and catalog-estimated dollars remain distinguished, and incomplete
+runtime coverage is stated instead of being folded into a plausible-looking total.
+
+The top also shows where the agent is working — its current directory and branch, with
+**Finder** and **Copy** buttons — and below it two lists that refresh every couple of seconds only
+while Info is visible.
 
 **Processes** is the session's process tree: the agent (and, when the shell drawer is open, your
 shell) with every process under it, children indented beneath the process that started them.
@@ -2533,7 +2547,7 @@ installed are listed, and a terminal is only ever offered a folder. The control 
 Settings page, which has no checkout.
 
 The same **Open in ▸** submenu appears wherever a folder or a file is named: on a project row
-and a session row in the sidebar, on a row of the **Activity** tab, and — the useful one — on a
+and a session row in the sidebar, on a row in **Overview ▸ Activity**, and — the useful one — on a
 right-click in **Git Review**, where it opens the file *at the first line the diff changes*.
 
 The **⋯** beside the page's name opens the same full menu as the session row's `⋯`: pinning,
@@ -2547,13 +2561,14 @@ Four buttons sit at that end, and each one decides what this pane shows:
 
 - **Interface** — switches directly to the other renderer. Its icon points at the destination:
   chat for Threading's native UI, terminal for Claude Code's or Codex's own UI.
-- **Status card** — shows or hides the Git status card floating over the session.
+- **Session Status Card** — shows or hides the compact session card floating over the session.
 - **Shell** — shows or hides the shell drawer under the session (same as ⌃`).
 - **Panel** — shows or hides the display panel.
 
-Open **Activity** from the display panel's **+** menu (or press **Cmd+P**) to see what the selected
-agent has done in the checkout. The overview at the top shows the repository-wide shape of the
-work and its recent actions; below it, the ordinary filesystem hierarchy carries exact read/edit
+Open **Overview** from the display panel's **+** menu (or press **Cmd+P** to focus its Activity
+section) to see what the selected agent has done in the checkout. The summary at the top shows the
+repository-wide shape of the work and its recent actions; below it, the ordinary filesystem
+hierarchy carries exact read/edit
 counts. A folder's count is the total for the touched files below it, so expanding `Sources`, for
 example, moves naturally from the aggregate into the individual files. Untouched files remain in
 the tree without a badge. Closed folders stay lazy and only visible rows ask for activity, so a
@@ -3105,14 +3120,14 @@ anonymous write. For GitLab, install the official `glab` CLI and run `glab auth 
 GitLab.com. Threading asks `glab` to make authenticated API requests without reading or copying its
 token, and does not offer an unauthenticated browser fallback.
 
-### The status card
+### Session Status Card
 
-Whenever the selected session's project is a git checkout, a menu-like floating card sits at the
-session pane's top-right corner showing the current branch and the uncommitted totals
-(`+N −M`, untracked files included). It updates live as the agent writes — the same watcher
-the Review tab uses. A clean checkout shows just the branch; a project that is not a repository
-shows no Git rows at all. The opaque themed surface and its shadow keep the card distinct from
-the terminal or conversation it covers.
+The menu-like floating card at the session pane's top-right is the **Session Status Card**. It
+collects the compact facts worth keeping in sight and routes each one to its detailed surface. For
+a git checkout it shows the current branch and uncommitted totals (`+N −M`, untracked files
+included), updating live from the same watcher Git Review uses. A clean checkout shows just the
+branch; a project that is not a repository shows no Git rows. The opaque themed surface and its
+shadow keep the card distinct from the terminal or conversation it covers.
 
 **A chat running in an isolated managed worktree says so on the card's top line**, above the
 branch, together with what happens to that checkout: `Isolated worktree · merges into master`,
@@ -3135,6 +3150,18 @@ most recent session attachments below a separator; click one to open it in Attac
 **View all N attachments** for the complete chronology. The list remains fixed-size even when a
 session has hundreds of attachments.
 
+The usage row gives the selected session's processed-token total and cost when the transcript can
+provide one. Cost is labelled provider reported, estimated from the built-in list-price catalog,
+or mixed; a `+` means some live or unpriced usage is not in that dollar figure. Click it for the
+full receipt in **Overview ▸ Info**: Total, Main agent and Subagents; input/cache/output/reasoning;
+requests, models, price-catalog version and coverage. A child counter that has moved ahead of the
+transcript index stays separately labelled **Awaiting index** instead of being assigned a guessed
+category or price.
+
+The Subagents row remains brief: working/done counts and their token subtotal. Click it for the
+existing **Subagents** pane, which is the detailed agents sidebar: its navigator lists every child
+with brief tokens, cost and request count where available, above the selected child's transcript.
+
 The card holds more than one destination, so **the pointer says which part goes where**. Every
 interactive hover covers the whole cell: branch, totals and review rows open Git Review; the
 children row opens Subagents; the audience row opens Sharing; attachment rows open Attachments.
@@ -3146,7 +3173,7 @@ host-rendered icon, compact text and status. When more belongs behind it, the ex
 disclosure summary and structured detail; Threading owns the menu-like reveal, theme, sizing,
 accessibility and action routing, so extensions never inject AppKit controls into the card.
 
-**You can switch the card off.** The header's `▣` button (View ▸ Status Card, rebindable in
+**You can switch the card off.** The header's `▣` button (View ▸ Session Status Card, rebindable in
 Settings ▸ Shortcuts) hides and shows it, and the choice sticks across launches. The card fades
 out and tucks toward the top of the pane rather than blinking away.
 
@@ -3421,9 +3448,9 @@ not show it at all. Requires macOS 14.
 - **Cmd+Ctrl+S**, or the toggle button at the left of the header: show/hide the sidebar
 
 Agent and project rows stay visually quiet: their lower edge is no longer an activity strip and
-hovering them only shows the ordinary row information. Open the display panel's **Activity** tab
-for the repository map, recent action ribbon, work counts, and exact filesystem hierarchy for the
-selected agent. The map stays a fixed visual size even in very large projects, and new files
+hovering them only shows the ordinary row information. Open **Overview ▸ Activity** in the display
+panel for the repository map, recent action ribbon, work counts, and exact filesystem hierarchy
+for the selected agent. The map stays a fixed visual size even in very large projects, and new
 collect in a stable end cell rather than rearranging the existing file layout.
 
 ### Text and terminal size
@@ -4328,13 +4355,13 @@ screen says so and leads with the offers further down the list instead.
 | Headings for Lone Branches | Cmd+Option+B |
 | Terminal (display panel tab) | Cmd+T |
 | Browser | Cmd+Shift+B |
-| Activity (display panel tab) | Cmd+P |
+| Activity (Overview section) | Cmd+P |
 | Git Review | Cmd+Shift+R |
 | Jump to Review File… | Cmd+J |
 | Save as Baseline… (the visible browser page) | unbound by default — assign one in Settings ▸ Keyboard |
-| Session Info | Cmd+Shift+I |
+| Session Info (Overview section) | Cmd+Shift+I |
 | Shell drawer | Ctrl+` |
-| Status Card (the session pane's floating corner card) | unbound by default — assign one in Settings ▸ Keyboard |
+| Session Status Card (the session pane's floating corner card) | unbound by default — assign one in Settings ▸ Keyboard |
 | Previous / Next tab (in the focused tab strip — drawer or panel) | Cmd+Shift+[ / Cmd+Shift+] |
 | Tab by its place in the strip | Cmd+1 … Cmd+9 |
 | Inspect… | Cmd+Option+I |

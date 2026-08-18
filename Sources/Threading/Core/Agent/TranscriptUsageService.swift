@@ -58,6 +58,29 @@ struct TranscriptUsageReport: Codable, Equatable, Sendable {
         var costUSD: Double { providerReportedCostUSD + catalogCostUSD }
     }
 
+    /// One session's lifetime ledger at the smallest grain the session surfaces need.
+    ///
+    /// The Usage page keeps ninety daily cells because its charts have a fixed range. A session
+    /// can be older than that, though, and "this session" must not silently mean "the last
+    /// ninety days of this session." These cells are therefore aggregated before the date
+    /// window is applied. They retain model, account, and billing origin for an honest detailed
+    /// breakdown without retaining one value per response.
+    struct SessionCell: Codable, Equatable, Sendable {
+        let sessionID: String
+        let origin: UsageOrigin
+        let accountID: String
+        let accountName: String
+        let model: String
+        var tokens: UsageTokenCounts
+        var providerReportedCostUSD: Double
+        var catalogCostUSD: Double
+        var unpricedTokens: Int64
+        var cacheSavingsUSD: Double
+        var records: Int
+
+        var costUSD: Double { providerReportedCostUSD + catalogCostUSD }
+    }
+
     struct ScanStatistics: Codable, Equatable, Sendable {
         var sourceFiles: Int = 0
         var cacheHits: Int = 0
@@ -68,6 +91,9 @@ struct TranscriptUsageReport: Codable, Equatable, Sendable {
     }
 
     var cells: [Cell] = []
+    /// Optional for decoding reports built before lifetime session attribution was retained.
+    /// Consumers fall back to the ninety-day cells and say so until the next scan replaces it.
+    var sessionCells: [SessionCell]? = nil
     var buckets: [Bucket] = []
     var coverage: [UsageSourceCoverage] = []
     var scan = ScanStatistics()
@@ -312,6 +338,13 @@ enum UsageLedgerBuilder {
         let checkoutPath: String
     }
 
+    private struct SessionCellKey: Hashable {
+        let sessionID: String
+        let origin: UsageOrigin
+        let accountID: String
+        let model: String
+    }
+
     static func build(
         records rawRecords: [UsageLedgerRecord],
         coverage: [UsageSourceCoverage],
@@ -329,14 +362,50 @@ enum UsageLedgerBuilder {
         var rootsByDirectory: [String: String] = [:]
         var labelsByRoot: [String: String] = [:]
         var byCell: [CellKey: TranscriptUsageReport.Cell] = [:]
+        var bySessionCell: [SessionCellKey: TranscriptUsageReport.SessionCell] = [:]
         var byBucket: [Date: TranscriptUsageReport.Bucket] = [:]
         var distinct = 0
 
         for raw in rawRecords {
             guard seen.insert(raw.identity).inserted else { continue }
             distinct += 1
-            guard let at = raw.at else { continue }
             let priced = UsagePricingCatalog.price(raw)
+
+            let sessionKey = SessionCellKey(
+                sessionID: priced.sessionID,
+                origin: priced.origin,
+                accountID: priced.accountID,
+                model: priced.model
+            )
+            var sessionCell = bySessionCell[sessionKey] ?? .init(
+                sessionID: priced.sessionID,
+                origin: priced.origin,
+                accountID: priced.accountID,
+                accountName: priced.accountName,
+                model: priced.model,
+                tokens: .init(),
+                providerReportedCostUSD: 0,
+                catalogCostUSD: 0,
+                unpricedTokens: 0,
+                cacheSavingsUSD: 0,
+                records: 0
+            )
+            sessionCell.tokens += priced.tokens
+            sessionCell.records += 1
+            sessionCell.cacheSavingsUSD += priced.cacheSavingsUSD
+            switch priced.costSource {
+            case .providerReported:
+                sessionCell.providerReportedCostUSD += priced.costUSD ?? 0
+            case .catalogPriced:
+                sessionCell.catalogCostUSD += priced.costUSD ?? 0
+            case .unpriced:
+                sessionCell.unpricedTokens += priced.tokens.processed
+            }
+            bySessionCell[sessionKey] = sessionCell
+
+            // Missing provider timestamps still contribute to the lifetime session receipt, but
+            // cannot honestly be placed on a day chart or in a quarter-hour spend bucket.
+            guard let at = raw.at else { continue }
             let day = calendar.startOfDay(for: at)
 
             let root: String
@@ -411,6 +480,13 @@ enum UsageLedgerBuilder {
         return TranscriptUsageReport(
             cells: byCell.values.sorted { lhs, rhs in
                 if lhs.day != rhs.day { return lhs.day < rhs.day }
+                if lhs.origin.seriesID != rhs.origin.seriesID {
+                    return lhs.origin.seriesID < rhs.origin.seriesID
+                }
+                return lhs.model < rhs.model
+            },
+            sessionCells: bySessionCell.values.sorted { lhs, rhs in
+                if lhs.sessionID != rhs.sessionID { return lhs.sessionID < rhs.sessionID }
                 if lhs.origin.seriesID != rhs.origin.seriesID {
                     return lhs.origin.seriesID < rhs.origin.seriesID
                 }

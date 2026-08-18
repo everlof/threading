@@ -250,8 +250,8 @@ extension MainWindowController: NSToolbarDelegate {
             // session rather than beside it — which is exactly why it needs a way off.
             makePaneToggleButton(
                 symbolName: "rectangle.inset.topright.filled",
-                label: "Status card",
-                toolTip: "Show or Hide the Status Card",
+                label: "Session Status Card",
+                toolTip: "Show or Hide the Session Status Card",
                 store: { [weak self] in self?.statusCardToolbarButton = $0 }
             ) { [weak self] in
                 self?.toggleStatusCard()

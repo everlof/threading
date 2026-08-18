@@ -30,8 +30,8 @@ extension AgentToolCoordinator {
                 kind = "git review"
             } else if tab.terminal != nil {
                 kind = "terminal"
-            } else if tab.files != nil {
-                kind = "file tree"
+            } else if tab.overview != nil {
+                kind = "overview"
             } else if tab.attachments != nil {
                 kind = "attachments"
             } else if tab.subagents != nil {

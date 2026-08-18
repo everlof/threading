@@ -2957,11 +2957,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Opens the display panel on the current session's tabs, or closes it.
     ///
     /// The toolbar button's job: the panel otherwise opens only when content arrives or a
-    /// View-menu surface asks for it, which left no way to just look. An empty panel shows
-    /// its placeholder, which is honest.
+    /// View-menu surface asks for it, which left no way to just look. An otherwise empty panel
+    /// presents a synthetic Overview without turning that manual peek into persisted tab state.
     func toggleDisplayPane() {
         if displayItem.isCollapsed {
-            displayPaneController.showSession(containerViewController.currentSessionID)
+            displayPaneController.showSessionWithDefaultOverview(
+                containerViewController.currentSessionID
+            )
             setDisplayPaneVisible(true)
         } else {
             setDisplayPaneVisible(false)
@@ -4133,6 +4135,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         showReview()
     }
 
+    func terminalContainerDidRequestSessionInfo(_ container: TerminalContainerViewController) {
+        showInfo()
+    }
+
     func terminalContainerDidRequestSharing(_ container: TerminalContainerViewController) {
         showSharing()
     }
@@ -4207,6 +4213,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
         // An agent that just stopped working may have switched branches on the way.
         if environment.agentRuntime.activity(sessionID: sessionID) != .working {
+            // A finished turn is the useful freshness boundary for this receipt. The global
+            // scan is off-main and warm files resolve through the usage cache.
+            SessionUsageService.shared.refresh(sessionID, forceIndex: true)
+
             // The hook-less half of observed-work capture. A reporting session already caught up
             // on its `turnFinished` hook; this edge is inferred from output, so it is later and
             // vaguer, but it is the only "something happened" a session without lifecycle hooks

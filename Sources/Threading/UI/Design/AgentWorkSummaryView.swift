@@ -69,6 +69,7 @@ final class AgentWorkSummaryView: NSView, ThemedComponent {
     }
 
     private func setup() {
+        setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel(L10n.string("Observed agent work"))
 

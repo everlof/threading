@@ -393,11 +393,12 @@ startup, rate-limit and machine-path traffic was deliberately not copied into th
 1. launch an isolated project and native conversation;
 2. submit a prompt;
 3. stream an assistant response with one tool/file mutation;
-4. show the completed turn and Git Review result;
+4. open an empty panel on Overview's right-hand Info section, switch to Activity, and show the Git Review result;
 5. quit, relaunch into the same isolated home, and prove transcript recovery.
 
 The test crosses the shipping child-process boundary, JSON-RPC parser, conversation renderer,
-checkout watcher, Git Review surface, provider transcript importer, and durable project store.
+checkout watcher, Overview's Activity/Info lifecycle, Git Review surface, provider transcript
+importer, and durable project store.
 Permission, provider failure, rate-limit, and remote/mobile promises remain future
 journeys rather than variants of this one.
 

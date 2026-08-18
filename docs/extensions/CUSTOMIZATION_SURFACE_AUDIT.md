@@ -40,7 +40,8 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Permission card | `conversation.permission-card@1` | display-only protected hook | queue, context, decisions, remote mirroring | Implemented |
 | Display-pane header | `display.pane-header@1` | protected command/status hook | tab ownership, close/select/order, overflow, persistence, `+` menu | Implemented |
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
-| Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity presentation, refresh, the whole reveal gesture | Implemented |
+| Session Overview body | — | host-only | Activity attribution and lazy tree, usage/accounting truth, Info polling/process controls/port routing, section lifecycle, persistence and empty-panel fallback | Host-only |
+| Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
 
 The standalone terminal row remains host-only because no published extension entity or data
@@ -49,6 +50,15 @@ would create a visual contract that cannot truthfully describe the process behin
 therefore keeps its identity, selection, foreground-command spinner and lifecycle actions
 host-owned; a future public row starts by publishing the typed terminal context rather than by
 leaking the AppKit cell.
+
+Session Overview is host-only because its two sections expose host-owned operational truth rather
+than a presentation-only document: exact versus observed work attribution, transcript-accounted
+usage and price provenance, live processes, terminate confirmations, listening-port routing,
+filesystem hydration and bounded lazy loading.
+The host also owns the section lifecycle—only the visible reading may poll or attach—and the
+synthetic, non-persisted Overview shown when a person opens an empty panel. Extensions can still
+compose into the surrounding `display.pane-header@1` and `display.tab-header@1`; publishing the
+body would require separate typed, brokered data contracts rather than access to these controllers.
 
 Image annotation persistence and publication remain deliberately host-owned inside the existing
 attachment-preview contract. A replacement preview may draw the file body, but it cannot replace
@@ -136,11 +146,13 @@ checkout's branch and counters today, and may show agents or attachments tomorro
 when a leading card ships, it becomes an additive `top-leading` slot on the same contract
 version rather than a rename or a sibling component.
 
-The slot's **row** is display-only. Built-in segments own navigation — Git opens Review and
-child-agent status opens Subagents — so an extension button inside the same compact line would
-fight the host's hit targets. Rows ride the native card's visibility. Git state usually supplies
-that visibility, while child-agent state can keep the session card present without a Git
-sentence; there is still no extension-only presentation.
+The slot's **row** is display-only. Built-in segments own navigation — Git opens Review, the
+session receipt opens Overview ▸ Info, and child-agent status opens Subagents — so an extension
+button inside the same compact line would fight the host's hit targets. Threading also owns the
+usage values and their provider-reported/estimated wording; customization cannot relabel an
+estimate as billed cost. Rows ride the native card's visibility. Git, usage or child-agent state
+can keep the Session Status Card present without one another; there is still no extension-only
+presentation.
 
 "Extensions with more to say use hover cards or a panel" was the answer to that rule, and for
 one version it pointed at a door that did not exist: an extension could compose into a hover

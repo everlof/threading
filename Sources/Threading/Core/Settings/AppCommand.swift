@@ -288,7 +288,7 @@ enum AppCommands {
                    scope: .session),
         AppCommand(id: ID.displayPanel, group: .view, title: "Display Panel",
                    defaultShortcut: nil, isEditable: true, scope: .session),
-        AppCommand(id: ID.statusCard, group: .view, title: "Status Card",
+        AppCommand(id: ID.statusCard, group: .view, title: "Session Status Card",
                    defaultShortcut: nil, isEditable: true, scope: .session),
         AppCommand(id: ID.currentTheme, group: .view, title: "Current Theme",
                    defaultShortcut: nil, isEditable: true, scope: .session),

@@ -3107,6 +3107,66 @@ final class SubagentSummaryViewTests: XCTestCase {
         )
     }
 
+    func testSubagentNavigatorAddsUsageToExistingRows() throws {
+        let view = SubagentSummaryView()
+        view.selectionStyle = .navigation
+        view.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "child-1",
+                    title: "Parser audit",
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: "24K tokens",
+                    usageDetail: "$0.42 est. · 3 requests",
+                    detailLines: []
+                )
+            ],
+            workingCount: 0,
+            doneCount: 1,
+            usageText: "61K tokens"
+        )
+        _ = laidOut(view)
+
+        let labels = descendants(of: view)
+            .compactMap { $0 as? NSTextField }
+            .map(\.stringValue)
+        XCTAssertTrue(labels.contains("1 done · 61K tokens"))
+        XCTAssertTrue(labels.contains("24K tokens"))
+        XCTAssertTrue(labels.contains("$0.42 est. · 3 requests"))
+        XCTAssertEqual(
+            descendants(of: view).compactMap { $0 as? ThemedButton }.count,
+            1,
+            "usage should annotate the existing child navigator, not build a second list"
+        )
+
+        guard let outputPath = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] else {
+            return
+        }
+        let margin = Design.Spacing.large
+        let host = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: view.frame.width + margin * 2,
+            height: view.frame.height + margin * 2
+        ))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+        view.removeFromSuperview()
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.frame.origin = NSPoint(x: margin, y: margin)
+        host.addSubview(view)
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        let directory = URL(fileURLWithPath: outputPath, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: directory.appendingPathComponent("subagents-usage-system-dark.png"))
+    }
+
     func testSelectionExpandsChildActivityWithoutChangingTheSummaryWidth() {
         let view = SubagentSummaryView()
         let items = [

@@ -89,9 +89,9 @@ final class TabStripRenderTests: XCTestCase {
         ("Terminal", "terminal"),
         ("Browser", "globe"),
         ("Review", "plus.forwardslash.minus"),
-        ("Activity", "folder"),
-        ("Info", "info.circle"),
-        ("Compare", "rectangle.on.rectangle")
+        ("Overview", "rectangle.grid.1x2"),
+        ("Compare", "rectangle.on.rectangle"),
+        ("Attachments", "paperclip")
     ]
 
     private func stripImage(

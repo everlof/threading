@@ -138,9 +138,9 @@
       "kind": "component",
       "status": "implemented",
       "priority": "important",
-      "title": "Session environment status card",
-      "description": "The complete menu-like session status card over pane content, with connected review checks, bounded attachment rows, a full-cell hover, native and extension section dividers, and an icon-bearing extension disclosure.",
-      "states": ["Connected pull request", "Pending checks", "Recent attachments", "View all", "Extension disclosure", "Hovered attachment row"],
+      "title": "Session Status Card",
+      "description": "The complete menu-like Session Status Card over pane content, with compact session and delegated token receipts, connected review checks, bounded attachment rows, a full-cell hover, native and extension section dividers, and an icon-bearing extension disclosure.",
+      "states": ["Session usage", "Delegated usage", "Connected pull request", "Pending checks", "Recent attachments", "View all", "Extension disclosure", "Hovered attachment row"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],
@@ -152,6 +152,48 @@
       },
       "capture": {
         "glob": "status-card-*.png"
+      }
+    },
+    {
+      "id": "session-subagents-usage",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Subagents usage navigator",
+      "description": "The existing Subagents navigator enriched in place with its delegated token subtotal and the selected child's cost and request detail.",
+      "states": ["Delegated subtotal", "Per-child tokens", "Per-child cost", "Per-child requests"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Dark"],
+        "sizes": ["560-point navigator"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ConversationRenderTests.swift",
+        "test": "ThreadingTests/SubagentSummaryViewTests/testSubagentNavigatorAddsUsageToExistingRows"
+      },
+      "capture": {
+        "glob": "subagents-usage-*.png"
+      }
+    },
+    {
+      "id": "session-overview-info",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Overview Info",
+      "description": "The detailed session receipt and live runtime lists in Overview Info, including reconciled main/subagent usage, token categories, price provenance, bounded model rows, processes and ports.",
+      "states": ["Session total", "Main agent", "Subagents", "Token breakdown", "Models", "Processes", "Ports"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["420×760 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SessionInfoRenderTests.swift",
+        "test": "ThreadingTests/SessionInfoRenderTests/testRendersTheRunningPanelStorybook"
+      },
+      "capture": {
+        "glob": "info-panel-*.png"
       }
     },
     {
@@ -730,8 +772,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "File change and relaunch recovery",
-      "description": "A recorded Codex turn mutates the synthetic checkout, exposes Git Review and survives an application relaunch with its transcript intact.",
-      "states": ["Streaming file change", "Completed review", "Recovered after relaunch"],
+      "description": "A recorded Codex turn mutates the synthetic checkout, exercises both sections of the unified Overview, exposes Git Review and survives an application relaunch with its transcript intact.",
+      "states": ["Completed turn", "Overview Info", "Overview Activity", "Completed review", "Recovered after relaunch"],
       "matrix": {
         "providers": ["Codex fixture agent"],
         "sizes": ["1400×900 points"]

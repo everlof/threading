@@ -104,9 +104,9 @@ enum AgentWorkHydration {
     /// Folds anything new in the session's transcript into its trace.
     ///
     /// Safe to call on any edge that might mean "the session did something" — a turn ending, the
-    /// Activity tab being shown, an activity change, a pane render. Repeats inside a one-second
-    /// window collapse into a single trailing pass, and a pass with nothing new to read stops at a
-    /// file-size comparison on the store's own queue.
+    /// Overview being shown on Activity, an activity change, a pane render. Repeats inside a
+    /// one-second window collapse into a single trailing pass, and a pass with nothing new to read
+    /// stops at a file-size comparison on the store's own queue.
     static func hydrate(sessionID: SessionID) {
         switch throttle.admit(sessionID, now: Date()) {
         case .alreadyScheduled:

@@ -40,11 +40,15 @@ final class SessionInfoViewController: NSViewController {
 
     private let reader = SessionInfoReader()
     private let pollTimer = MainRunLoopTimer()
+    private let appEvents = AppEventObservations()
 
     /// What the rows currently on screen are drawn from. A reading with the same shape updates
     /// them in place; a different one rebuilds.
     private var renderedShape: String?
     private var processRows: [pid_t: SessionInfoRowView] = [:]
+    private var lastSnapshot: SessionInfoSnapshot?
+    private var lastIsRunning = false
+    private var usageSnapshot: SessionUsageSnapshot?
 
     private lazy var directoryLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
@@ -108,6 +112,12 @@ final class SessionInfoViewController: NSViewController {
         setupHeader()
         setupBody()
         setupConstraints()
+        appEvents.observe(SessionUsageDidChange.self) { [weak self] event in
+            guard let self, event.sessionID == self.sessionID else { return }
+            self.applyUsage(self.currentUsageSnapshot)
+        }
+        SessionUsageService.shared.refresh(sessionID)
+        applyUsage(currentUsageSnapshot)
         refresh()
     }
 
@@ -161,6 +171,13 @@ final class SessionInfoViewController: NSViewController {
     /// instead of resolving live roots and walking the machine — so the poll re-applies the
     /// fixture rather than racing it with real processes. Production leaves it nil.
     var readSource: ((@escaping @MainActor (SessionInfoSnapshot) -> Void) -> Void)?
+
+    /// Deterministic render seam. Production reads the shared off-main projection.
+    var usageSource: (() -> SessionUsageSnapshot?)? {
+        didSet {
+            if isViewLoaded { applyUsage(currentUsageSnapshot) }
+        }
+    }
 
     /// Re-reads now, whatever the poll was going to do. Called when the tab is shown and when the
     /// session stops working, which is when an agent has most likely just started or killed
@@ -225,6 +242,8 @@ final class SessionInfoViewController: NSViewController {
     /// Installs a known reading. Kept internal for behavior/render tests — live refreshes use
     /// the exact same path after the reader walks the real machine.
     func apply(_ snapshot: SessionInfoSnapshot, isRunning: Bool) {
+        lastSnapshot = snapshot
+        lastIsRunning = isRunning
         let shape = self.shape(of: snapshot, isRunning: isRunning)
 
         guard shape != renderedShape else {
@@ -234,6 +253,15 @@ final class SessionInfoViewController: NSViewController {
 
         renderedShape = shape
         rebuild(snapshot, isRunning: isRunning)
+    }
+
+    func applyUsage(_ snapshot: SessionUsageSnapshot?) {
+        guard snapshot != usageSnapshot else { return }
+        usageSnapshot = snapshot
+        renderedShape = nil
+        if let lastSnapshot {
+            apply(lastSnapshot, isRunning: lastIsRunning)
+        }
     }
 
     /// Everything about a reading except the facts that move. Two readings with the same shape
@@ -311,6 +339,8 @@ final class SessionInfoViewController: NSViewController {
         list.clear()
         processRows.removeAll()
 
+        addUsage(usageSnapshot)
+
         guard isRunning else {
             list.addNote(L10n.string("This session isn’t running."))
             return
@@ -335,6 +365,181 @@ final class SessionInfoViewController: NSViewController {
                 group.ports.forEach(add(port:))
             }
         }
+    }
+
+    private var currentUsageSnapshot: SessionUsageSnapshot? {
+        usageSource?() ?? SessionUsageService.shared.snapshot(for: sessionID)
+    }
+
+    /// A fixed form over an unbounded ledger: the projector has already aggregated the full
+    /// session and capped model rows before this method constructs any views.
+    private func addUsage(_ snapshot: SessionUsageSnapshot?) {
+        list.addSection(L10n.string("Usage"))
+        guard let snapshot else {
+            list.addNote(L10n.string("Session usage is being indexed."))
+            return
+        }
+
+        let total = snapshot.total
+        guard !total.isEmpty else {
+            list.addNote(L10n.string("No usage recorded yet"))
+            addUsageIndexNote(snapshot)
+            return
+        }
+
+        addUsageRow(
+            symbolName: SessionInfoSymbols.usage,
+            primary: L10n.string("Total"),
+            secondary: SessionUsageFormat.responseCount(total.records),
+            values: usageValues(total)
+        )
+        addUsageRow(
+            symbolName: SessionInfoSymbols.mainAgent,
+            primary: L10n.string("Main agent"),
+            secondary: SessionUsageFormat.responseCount(snapshot.main.records),
+            values: usageValues(snapshot.main)
+        )
+        if !snapshot.children.isEmpty || !snapshot.subagents.isEmpty {
+            addUsageRow(
+                symbolName: SessionInfoSymbols.subagents,
+                primary: L10n.string("Subagents"),
+                secondary: SessionUsageFormat.responseCount(snapshot.subagents.records),
+                values: usageValues(snapshot.subagents)
+            )
+        }
+
+        addUsageSubheading(L10n.string("Token breakdown"))
+        addUsageRow(
+            symbolName: SessionInfoSymbols.input,
+            primary: L10n.string("Input"),
+            secondary: L10n.string("Uncached input"),
+            values: [SessionUsageFormat.tokenCount(total.tokens.uncachedInput)]
+        )
+        addUsageRow(
+            symbolName: SessionInfoSymbols.cache,
+            primary: L10n.string("Cache"),
+            secondary: L10n.format(
+                "%@ read · %@ written",
+                UsageFormat.tokens(total.tokens.cachedInput),
+                UsageFormat.tokens(total.tokens.cacheWrite)
+            ),
+            values: [SessionUsageFormat.tokenCount(
+                total.tokens.cachedInput + total.tokens.cacheWrite
+            )]
+        )
+        addUsageRow(
+            symbolName: SessionInfoSymbols.output,
+            primary: L10n.string("Output"),
+            secondary: total.tokens.reasoning > 0
+                ? L10n.format("%@ reasoning", UsageFormat.tokens(total.tokens.reasoning))
+                : "",
+            values: [SessionUsageFormat.tokenCount(total.tokens.output)]
+        )
+        addUsageRow(
+            symbolName: SessionInfoSymbols.cost,
+            primary: L10n.string("Cost"),
+            secondary: L10n.string(
+                "Provider-reported cost where available; catalog estimate otherwise."
+            ),
+            values: [SessionUsageFormat.detailedCost(total)]
+        )
+        if total.unindexedTokens > 0 {
+            addUsageRow(
+                symbolName: SessionInfoSymbols.pending,
+                primary: L10n.string("Awaiting index"),
+                secondary: L10n.string("Live child total; category and cost not available yet"),
+                values: [SessionUsageFormat.tokenCount(total.unindexedTokens)]
+            )
+        }
+
+        if !total.models.isEmpty {
+            addUsageSubheading(L10n.string("Models"))
+            for model in total.models {
+                let reading = SessionUsageSnapshot.Reading(
+                    tokens: model.tokens,
+                    cost: model.cost,
+                    records: model.records
+                )
+                addUsageRow(
+                    symbolName: SessionInfoSymbols.model,
+                    primary: ModelName.display(for: model.name),
+                    secondary: SessionUsageFormat.responseCount(model.records),
+                    values: usageValues(reading)
+                )
+            }
+            if total.remainingModelCount > 0 {
+                list.addNote(L10n.format(
+                    "%lld more models are included in the total.",
+                    Int64(total.remainingModelCount)
+                ))
+            }
+        }
+        addUsageIndexNote(snapshot)
+    }
+
+    private func usageValues(_ reading: SessionUsageSnapshot.Reading) -> [String] {
+        var values = [SessionUsageFormat.tokenCount(reading.processedTokens)]
+        if let cost = SessionUsageFormat.compactCost(reading) { values.append(cost) }
+        return values
+    }
+
+    private func addUsageRow(
+        symbolName: String,
+        primary: String,
+        secondary: String,
+        values: [String]
+    ) {
+        let spoken = ([primary, secondary] + values)
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+        list.addRow(SessionInfoRowView(
+            symbolName: symbolName,
+            symbolColor: Design.Text.secondary,
+            primary: primary,
+            secondary: secondary,
+            valueSegments: values,
+            accessibilityLabel: spoken
+        ))
+    }
+
+    private func addUsageSubheading(_ text: String) {
+        let label = NSTextField(labelWithString: text)
+        label.applyFont(.detail())
+        label.textColor = Design.Text.tertiary
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: Design.Spacing.small),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: host.trailingAnchor),
+            label.topAnchor.constraint(equalTo: host.topAnchor, constant: Design.Spacing.tight),
+            label.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+        list.addRow(host)
+    }
+
+    private func addUsageIndexNote(_ snapshot: SessionUsageSnapshot) {
+        var parts: [String] = []
+        switch snapshot.indexedRange {
+        case .lifetime:
+            parts.append(L10n.string("Lifetime transcript index"))
+        case .lastNinetyDays:
+            parts.append(L10n.string("Last 90 days; rebuilding lifetime index"))
+        case .unavailable:
+            parts.append(L10n.string("Transcript index unavailable"))
+        }
+        if let builtAt = snapshot.builtAt {
+            parts.append(L10n.format("Updated %@", UsageFormat.age(of: builtAt)))
+        }
+        if let version = snapshot.pricingCatalogVersion {
+            parts.append(L10n.format("Price catalog %@", version))
+        }
+        if let coverage = snapshot.coverage, coverage.state != .complete {
+            parts.append(coverage.detail ?? L10n.string("Partial"))
+        }
+        list.addNote(parts.joined(separator: " · "))
     }
 
     private func add(process: SessionProcess) {
@@ -520,6 +725,16 @@ final class SessionInfoViewController: NSViewController {
 // MARK: - Defaults
 
 enum SessionInfoSymbols {
+    static let usage = "chart.bar.xaxis"
+    static let mainAgent = "cpu"
+    static let subagents = "person.2"
+    static let input = "arrow.down"
+    static let cache = "internaldrive"
+    static let output = "arrow.up"
+    static let cost = "dollarsign.circle"
+    static let pending = "clock"
+    static let model = "cpu"
+
     /// A process is a running thing, not a file — the filled dot is the status vocabulary the
     /// sidebar already uses for "alive".
     static let process = "circle.fill"
