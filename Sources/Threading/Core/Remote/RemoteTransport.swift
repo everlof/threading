@@ -117,6 +117,10 @@ enum TailscaleReadinessIssue: String, Equatable, Sendable {
     case portInUse
     case serveFailed
 
+    /// The sentence the transport reports as `RemoteTransportState.unavailable`, which is what
+    /// a *remote* caller is told when a share cannot be prepared. The settings page reads
+    /// `rowDetail` and `explanation` instead: a row can be terse because it is titled, and the
+    /// panel needs both halves.
     var message: String {
         switch self {
         case .notInstalled:
