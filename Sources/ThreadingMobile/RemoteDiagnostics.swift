@@ -28,6 +28,7 @@ enum MobileDiagnosticSurface: String {
     case gitRepositoryFiles = "git_repository_files"
     case gitRepositoryFile = "git_repository_file"
     case hostStorage = "host_storage"
+    case hostTrust = "host_trust"
     case issueReportDelivery = "issue_report_delivery"
     case issueReportExport = "issue_report_export"
     case keyboardStorage = "keyboard_storage"
@@ -42,6 +43,9 @@ enum MobileDiagnosticFailureCode: String {
     case newerFormat = "newer_format"
     case validation = "validation"
     case writeVerification = "write_verification"
+    /// An owner response named an identity that is neither the pinned one nor its announced
+    /// successor; the stored pin was kept.
+    case pinChangeRefused = "pin_change_refused"
 }
 
 enum MobileDiagnosticErrorDomain: String {

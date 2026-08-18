@@ -21,6 +21,10 @@ struct PairingView: View {
 
                     linkCard
 
+                    if scannedPinnedIdentity {
+                        pinnedIdentityNote
+                    }
+
                     if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.triangle")
                             .font(.footnote)
@@ -176,6 +180,31 @@ struct PairingView: View {
             RoundedRectangle(cornerRadius: theme.panelRadius)
                 .stroke(theme.border, lineWidth: theme.borderWidth)
         }
+    }
+
+    /// Whether the code in hand names a certificate, which is what the note below states.
+    ///
+    /// Read from the link rather than from the scanner, so a pasted link says the same thing a
+    /// photographed one does.
+    private var scannedPinnedIdentity: Bool {
+        RemoteConnectionLink(string: linkText)?.pinnedFingerprintCode != nil
+    }
+
+    /// One line, at the moment it is true and before anything is trusted.
+    ///
+    /// A code that carries a fingerprint is a promise this app can keep exactly: it will accept
+    /// this Mac's own certificate and nothing else, with no certificate authority in the path.
+    /// Saying so here is the only place the person can weigh it, and the detail beside the Mac
+    /// in Choose Mac shows the same code for comparing against the Mac's settings page.
+    private var pinnedIdentityNote: some View {
+        Label(
+            MobileL10n.string("This iPhone will trust only this Mac’s identity."),
+            systemImage: "checkmark.shield"
+        )
+        .font(.footnote)
+        .foregroundStyle(theme.secondaryLabel)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, MobileDesign.Spacing.tight)
     }
 
     private var pairingHelp: some View {

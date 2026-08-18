@@ -36,6 +36,9 @@
 		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
 		A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61700010000000000000002 /* RemoteConnectionFailureTests.swift */; };
 		A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */; };
+		A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000002 /* RemoteHostTrustTests.swift */; };
+		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
+		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
@@ -161,6 +164,9 @@
 		A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileConnectionDiagnosticsTests.swift; sourceTree = "<group>"; };
 		A6563DF6216A83E7016B0C5B /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A63100010000000000000002 /* RemoteHostTrustTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostTrustTests.swift; sourceTree = "<group>"; };
+		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
+		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70000010000000000000001 /* Sources/Threading/Resources/Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
@@ -203,6 +209,7 @@
 				ThreadingMobile/RemoteExtensionPanelView.swift,
 				ThreadingMobile/RemoteGitReviewView.swift,
 				ThreadingMobile/RemoteHostStore.swift,
+				ThreadingMobile/RemoteHostTrust.swift,
 				ThreadingMobile/RemoteNotifications.swift,
 				ThreadingMobile/RemoteSessionConnection.swift,
 				ThreadingMobile/RemoteTheme.swift,
@@ -338,6 +345,9 @@
 			isa = PBXGroup;
 			children = (
 				B20000010000000000000004 /* NotificationDeepLinkTests.swift */,
+				A63100010000000000000002 /* RemoteHostTrustTests.swift */,
+				A63200010000000000000002 /* RemoteHostCandidateTests.swift */,
+				A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */,
 				A61200010000000000000002 /* RemoteConversationStoreTests.swift */,
 				A61100010000000000000002 /* RemoteUsageDashboardTests.swift */,
 				A61300010000000000000002 /* SessionDashboardTests.swift */,
@@ -914,6 +924,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */,
+				A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */,
+				A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */,
+				A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */,
 				A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */,
 				A61100010000000000000001 /* RemoteUsageDashboardTests.swift in Sources */,
 				A61300010000000000000001 /* SessionDashboardTests.swift in Sources */,
@@ -1144,6 +1157,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
 				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -1182,6 +1196,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
 				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

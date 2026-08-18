@@ -65,7 +65,11 @@ enum RemoteLocalNetworkAddress {
 enum RemoteClientError: LocalizedError {
     case invalidResponse
     case unauthorized
-    case upgradeRequired(String)
+    /// A `426` naming the side that is behind. The direction is kept because it decides the
+    /// sentence: the same refusal means "update this app" one way and "this Mac needs a newer
+    /// app" the other, and telling somebody to update the wrong device is worse than saying
+    /// nothing.
+    case upgradeRequired(RemoteUpdateTarget)
     case server(Int)
 
     var errorDescription: String? {
@@ -76,14 +80,34 @@ enum RemoteClientError: LocalizedError {
             return MobileL10n.string(
                 "This invitation is expired or already used, or this membership was revoked."
             )
-        case .upgradeRequired:
-            return MobileL10n.string(
-                "This version of Threading can’t connect to this Mac. Update Threading and try again."
-            )
+        case .upgradeRequired(let target):
+            return Self.upgradeMessage(for: target)
         case .server(let status):
             return MobileL10n.string("The Mac returned HTTP %lld.", status)
         }
     }
+
+    static func upgradeMessage(for target: RemoteUpdateTarget) -> String {
+        switch target {
+        case .client:
+            return MobileL10n.string(
+                "This version of Threading can’t connect to this Mac. Update Threading and try again."
+            )
+        case .host:
+            return MobileL10n.string(
+                "This Mac needs a newer version of Threading. Update Threading on the Mac and try again."
+            )
+        }
+    }
+}
+
+/// Where a person goes to get the newer app either side of a refused protocol version.
+///
+/// One address for both directions on purpose: it is the page that hands out the Mac app and
+/// links the iPhone one, so it is right whichever side the Mac says is behind. Replace it with a
+/// direct App Store product link for the `client` direction once that listing exists.
+enum RemoteUpdateDefaults {
+    static let downloadPage = URL(string: "https://threading.codes")!
 }
 
 /// Why a remote connection stopped, in a form a screen can act on.
@@ -99,16 +123,27 @@ struct RemoteConnectionFailure: Equatable {
         case reconnect
         case pairAgain
         case openLocalNetworkSettings
+        case openUpdatePage(URL)
     }
 
     enum Cause: String, Equatable {
         /// The address answered, and what answered was not this Mac's listener. A Quick Tunnel
         /// hostname outlives the tunnel, so a paired phone keeps reaching a stranger's 404.
         case addressChanged
+        /// The address answered with a certificate that is not the one this phone pinned.
+        ///
+        /// Never folded into `addressChanged` or into a generic network error: those two say
+        /// "the Mac moved" and "the network is unhappy", and this says something presented a
+        /// different identity at the Mac's address. It is the one failure whose only honest
+        /// remedy is scanning the code again, and only after checking that the Mac is the one
+        /// that changed.
+        case pinnedIdentityMismatch
         /// iOS refused the connection because Local Network access was never granted. It is a
         /// no-route POSIX error on a private address, which is indistinguishable from an absent
         /// host until the address is taken into account.
         case localNetworkDenied
+        /// One side is too old for the other. The message says which.
+        case upgradeRequired
         /// The socket opened and the Mac never greeted it.
         case helloTimeout
         /// The Mac refused an action over an otherwise healthy socket.
@@ -119,11 +154,22 @@ struct RemoteConnectionFailure: Equatable {
 
     let cause: Cause
     let message: String
+    /// Where the person is sent for `upgradeRequired`, which is the only cause carrying an
+    /// address of its own.
+    let updatePage: URL?
+
+    init(cause: Cause, message: String, updatePage: URL? = nil) {
+        self.cause = cause
+        self.message = message
+        self.updatePage = updatePage
+    }
 
     var recovery: Recovery {
         switch cause {
-        case .addressChanged: return .pairAgain
+        case .addressChanged, .pinnedIdentityMismatch: return .pairAgain
         case .localNetworkDenied: return .openLocalNetworkSettings
+        case .upgradeRequired:
+            return .openUpdatePage(updatePage ?? RemoteUpdateDefaults.downloadPage)
         case .helloTimeout, .remoteAction, .transport: return .reconnect
         }
     }
@@ -134,6 +180,7 @@ struct RemoteConnectionFailure: Equatable {
         case .reconnect: return MobileL10n.string("Reconnect")
         case .pairAgain: return MobileL10n.string("Scan the QR code again")
         case .openLocalNetworkSettings: return MobileL10n.string("Open Settings")
+        case .openUpdatePage: return MobileL10n.string("Open the download page")
         }
     }
 
@@ -152,13 +199,54 @@ struct RemoteConnectionFailure: Equatable {
         RemoteConnectionFailure(cause: .transport, message: message)
     }
 
+    static func upgradeRequired(_ target: RemoteUpdateTarget) -> RemoteConnectionFailure {
+        RemoteConnectionFailure(
+            cause: .upgradeRequired,
+            message: RemoteClientError.upgradeMessage(for: target),
+            updatePage: RemoteUpdateDefaults.downloadPage
+        )
+    }
+
+    static func pinnedIdentityMismatch() -> RemoteConnectionFailure {
+        RemoteConnectionFailure(
+            cause: .pinnedIdentityMismatch,
+            message: MobileL10n.string(
+                "This Mac’s identity does not match the one you paired with. "
+                    + "If Remote Access was reset on the Mac, scan its QR code again."
+            )
+        )
+    }
+
     /// Classifies a transport error against the address it was aimed at.
     ///
     /// The address is part of the diagnosis rather than decoration: Local Network denial and an
     /// absent host produce the same POSIX code, and only a private destination makes the
     /// permission the likelier of the two. Nothing here is mapped to "address changed" unless
     /// the socket really did get an HTTP answer that was not an upgrade.
+    ///
+    /// The pinning check is read first and from the delegate rather than from the error,
+    /// because a cancelled server-trust challenge arrives as `URLError(-999)` with no underlying
+    /// error and is indistinguishable from a user cancelling a request. The delegate's own
+    /// verdict for that host is the only place the reason exists.
     static func transport(_ error: Error, host: String?) -> RemoteConnectionFailure {
+        transport(
+            error,
+            host: host,
+            trustVerdict: host.flatMap { RemoteClient.pinningDelegate.verdict(forHost: $0) }
+        )
+    }
+
+    static func transport(
+        _ error: Error,
+        host: String?,
+        trustVerdict: RemoteTrustVerdict?
+    ) -> RemoteConnectionFailure {
+        if trustVerdict == .rejectedFingerprintMismatch {
+            return pinnedIdentityMismatch()
+        }
+        if let remote = error as? RemoteClientError, case .upgradeRequired(let target) = remote {
+            return upgradeRequired(target)
+        }
         if isLocalNetworkDenial(error, host: host) {
             return RemoteConnectionFailure(
                 cause: .localNetworkDenied,
@@ -207,6 +295,33 @@ struct RemoteConnectionFailure: Equatable {
     ]
 }
 
+/// A named failure travelling as an error, for the two paths that hand one to a screen rather
+/// than to a connection phase: pairing, and anything else that reports `localizedDescription`.
+extension RemoteConnectionFailure: LocalizedError {
+    var errorDescription: String? { message }
+}
+
+/// One failed attempt, carrying the address it was aimed at.
+///
+/// A Mac has several addresses and the phone tries them in order, so by the time the last error
+/// reaches a screen the record's remembered address is not necessarily the one that failed. The
+/// diagnosis depends on which: the same no-route code means "grant Local Network access" on a
+/// private address and "that machine is not answering" on a public one.
+struct RemoteConnectionAttempt: LocalizedError {
+    let underlying: Error
+    let host: String?
+
+    /// The wrapper is a carrier, not a replacement: anything that reads a sentence off it gets
+    /// the failure's own, never Foundation's "the operation could not be completed".
+    var errorDescription: String? { underlying.localizedDescription }
+
+    /// The original error, whether or not it was wrapped. Diagnostics reduce errors to a
+    /// structural code, and the wrapper is not one of the codes worth recording.
+    static func underlying(_ error: Error) -> Error {
+        (error as? RemoteConnectionAttempt)?.underlying ?? error
+    }
+}
+
 struct RemoteClient {
     let link: RemoteConnectionLink
     let requestTimeout: TimeInterval?
@@ -216,13 +331,27 @@ struct RemoteClient {
         self.requestTimeout = requestTimeout
     }
 
+    /// The one pinning delegate, shared by every session this client opens.
+    ///
+    /// A server-trust challenge goes to the *session-level* delegate whenever that method
+    /// exists, which is what makes a `URLSessionWebSocketTask` go through the same check as a
+    /// REST call. A socket on a session without it silently keeps stock evaluation, and stock
+    /// evaluation refuses a Mac's self-signed leaf outright, so the failure would be a TLS error
+    /// on the socket path alone. It is one object rather than two so a pin learned once is in
+    /// force everywhere, and `RemoteHostTrust` is the only thing that writes to it.
+    static let pinningDelegate = RemoteCertificatePinningDelegate()
+
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.timeoutIntervalForRequest = RemoteClientDefaults.requestTimeoutSeconds
         configuration.timeoutIntervalForResource = RemoteClientDefaults.resourceTimeoutSeconds
         configuration.waitsForConnectivity = true
-        return URLSession(configuration: configuration)
+        return URLSession(
+            configuration: configuration,
+            delegate: pinningDelegate,
+            delegateQueue: nil
+        )
     }()
 
     /// The WebSocket half deliberately does not share the request session's configuration.
@@ -241,7 +370,11 @@ struct RemoteClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.waitsForConnectivity = false
-        return URLSession(configuration: configuration)
+        return URLSession(
+            configuration: configuration,
+            delegate: pinningDelegate,
+            delegateQueue: nil
+        )
     }()
 
     func fetchMe(timeout: TimeInterval? = nil) async throws -> RemoteMeDTO {
@@ -632,6 +765,11 @@ struct RemoteClient {
         socketSession.configuration.waitsForConnectivity
     }
 
+    /// The delegate each session actually installed, so a test can prove they are the same
+    /// object rather than two that happen to be configured alike.
+    static var requestSessionDelegate: URLSessionDelegate? { session.delegate }
+    static var socketSessionDelegate: URLSessionDelegate? { socketSession.delegate }
+
     private func request(url: URL) -> URLRequest {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(link.token)", forHTTPHeaderField: "Authorization")
@@ -711,9 +849,12 @@ struct RemoteClient {
         if response.statusCode == 401 {
             throw RemoteClientError.unauthorized
         }
-        if response.statusCode == 426,
-           let upgrade = try? JSONDecoder().decode(RemoteUpgradeRequiredDTO.self, from: data) {
-            throw RemoteClientError.upgradeRequired(upgrade.message)
+        if response.statusCode == 426 {
+            // The body names the side that is behind. Without it the refusal is still terminal,
+            // and "this app is too old" is the safer of the two guesses to make about a host
+            // that could not say.
+            let upgrade = try? JSONDecoder().decode(RemoteUpgradeRequiredDTO.self, from: data)
+            throw RemoteClientError.upgradeRequired(upgrade?.update ?? .client)
         }
         guard accepted.contains(response.statusCode) else {
             throw RemoteClientError.server(response.statusCode)

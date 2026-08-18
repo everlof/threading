@@ -815,6 +815,56 @@ feature lock.
 Treat the owner QR code and every copied share URL like passwords. The owner code is intentionally
 much stronger than a guest URL; only show it to devices you control.
 
+### iPhone trust evaluation
+
+<!-- Owned by the iOS client. Self-contained on purpose: nothing above or below depends on it. -->
+
+The phone trusts one public key, learned by photographing a code on the Mac's own screen. There
+is no certificate authority in that path, and therefore no authority that can be induced to issue
+a second certificate for the same address.
+
+- **One pinning delegate, both sessions.** `RemoteClient` owns a request session and a WebSocket
+  session, and `RemoteCertificatePinningDelegate` is attached to both. A server-trust challenge
+  goes to the session-level delegate, so a socket on a session without one silently keeps stock
+  evaluation, which refuses a Mac's self-signed leaf outright. `RemoteHostTrustTests` asserts the
+  two sessions hold the same object rather than two configured alike.
+- **Two sources for a pin, and no third.** The scanned pairing link pins its own host before the
+  first request is made over it. An owner `/api/me` response pins the host of every advertised
+  endpoint carrying `identity: "pinned"`. An endpoint without that flag keeps stock evaluation,
+  because Tailscale Serve presents a publicly issued certificate for its `*.ts.net` name and
+  pinning that host would refuse the one endpoint that works. A guest capability never teaches a
+  phone a pin.
+- **Why a `/api/me` response is trustworthy.** It exists only because the pin matched or because
+  the system validated a publicly issued certificate; a refused challenge produces no response to
+  read. So the fingerprints in it are the Mac's own word about its identity.
+- **Rotation without re-pairing.** `nextPinnedFingerprint` is accepted beside the current one, so
+  a Mac can announce its successor over the pinned channel and start presenting it later with no
+  device scanning anything. When a later response reports the successor as current, the phone's
+  record follows and the retired certificate stops being accepted. Absence never clears a pin: a
+  host that says nothing about its identity is an older Mac, not an instruction to stop pinning.
+- **Hostname verification is deliberately not performed for a pinned host.** The certificate
+  covers no name a certificate authority could vouch for, and one identity serving every address
+  the Mac ever has is what makes a VPN address, a tailnet address and a new DHCP lease work with
+  the same pin.
+- **A mismatch is its own named failure.** A cancelled server-trust challenge surfaces as
+  `URLError(-999)` with no underlying error, so the delegate records its own verdict per host and
+  the client reads that. The phone says "This Mac's identity does not match the one you paired
+  with", offers re-pairing, and never presents it as a generic network error or as a changed
+  address. A support report carries the verdict as a token; the fingerprint itself is not a fact
+  a report contains.
+- **Persisted with the pairing.** Both fingerprints live on the paired-host Keychain record, so
+  the pin is in force on the first request after a relaunch rather than only after the request
+  that would have learned it. The 26-character code is shown beside the Mac in Choose Mac for
+  comparison against the Mac's own settings page.
+- **The port walk is not a trust decision.** A `lan` address on the sticky range is retried on
+  the remaining ports of that range, in the listener's own order, and only while nothing has
+  answered. An HTTP status, an authentication refusal or a refused certificate ends that door
+  immediately.
+- **Local Network access.** `NSLocalNetworkUsageDescription` ships with the `lan` door because
+  iOS prompts on the first unicast to a same-subnet private address, not only on Bonjour. A
+  denial produces an ordinary no-route error, which the phone tells apart from an absent host by
+  the address it was aimed at, and reports as its own state with the Settings link.
+
 ## Beta limitations
 
 Hosted Direct is implemented but not production-deployed by this repository checkout. The

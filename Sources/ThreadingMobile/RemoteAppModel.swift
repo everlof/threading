@@ -161,6 +161,9 @@ final class RemoteAppModel: ObservableObject {
             storageIssue = error.localizedDescription
         }
         hosts = loaded
+        // Before anything is fetched: the first request after a relaunch is the one that needs
+        // the pin, so the record's own fingerprints are in force ahead of it.
+        RemoteHostTrust.register(loaded)
         let restoredHostID = continuity.activeHostID.flatMap { candidate in
             loaded.contains(where: { $0.id == candidate }) ? candidate : nil
         }
@@ -213,6 +216,7 @@ final class RemoteAppModel: ObservableObject {
             storageIssue = error.localizedDescription
         }
         hosts = loaded
+        RemoteHostTrust.register(loaded)
         hostedProvisioningRetryAfter.removeAll(keepingCapacity: false)
         activeHostID = loaded.first?.id
         continuity.setActiveHostID(activeHostID)
@@ -253,21 +257,41 @@ final class RemoteAppModel: ObservableObject {
     func pair(_ invitationLink: RemoteConnectionLink, displayName: String) async throws {
         phase = .connecting
         MobileDiagnostics.record(.hostPairingStarted)
+        // The scanned code is the out-of-band half of the trust story, so it is in force before
+        // the very first request rather than after the Mac has answered one.
+        RemoteHostTrust.register(link: invitationLink)
         let acceptance: RemoteAcceptInvitationResponseDTO
         do {
             acceptance = try await RemoteClient(link: invitationLink)
                 .acceptInvitation(displayName: displayName)
         } catch {
-            MobileDiagnostics.record(
-                .hostPairingFailed,
-                level: .error,
-                fields: [.code: MobileDiagnostics.errorCode(error)]
+            let verdict = invitationLink.baseURL.host.flatMap {
+                RemoteClient.pinningDelegate.verdict(forHost: $0)
+            }
+            var fields: [RemoteDiagnosticField: String] = [
+                .code: MobileDiagnostics.errorCode(error),
+            ]
+            if let verdict { fields[.detail] = RemoteHostTrust.token(for: verdict) }
+            MobileDiagnostics.record(.hostPairingFailed, level: .error, fields: fields)
+            // A refused pin arrives as a cancelled request, which reads as "cancelled" and
+            // explains nothing. The pairing screen gets the sentence that names it instead.
+            let failure = RemoteConnectionFailure.transport(
+                error,
+                host: invitationLink.baseURL.host,
+                trustVerdict: verdict
             )
+            if failure.cause == .pinnedIdentityMismatch || failure.cause == .upgradeRequired {
+                throw failure
+            }
             throw error
         }
         guard let link = RemoteConnectionLink(
             baseURL: invitationLink.baseURL,
-            token: acceptance.accessToken
+            token: acceptance.accessToken,
+            // The durable credential keeps the scanned fingerprint. Without it the pin would be
+            // in force for this launch only and a relaunch would fall back to stock evaluation,
+            // which refuses the Mac's own certificate.
+            pinnedFingerprintCode: invitationLink.pinnedFingerprintCode
         ) else {
             throw RemoteClientError.invalidResponse
         }
@@ -309,8 +333,13 @@ final class RemoteAppModel: ObservableObject {
             connectionPolicy: identity?.connectionPolicy,
             activeEndpointKind: PairedRemoteHost.endpointKind(for: link.baseURL),
             hostedServiceURL: hostedServiceURL,
-            hostedCredential: hostedCredential
+            hostedCredential: hostedCredential,
+            // Owner responses only: a guest capability is not the Mac's owner and never teaches
+            // this phone which certificate to trust.
+            pinnedFingerprint: me.share.scope == "all" ? identity?.pinnedFingerprint : nil,
+            nextPinnedFingerprint: me.share.scope == "all" ? identity?.nextPinnedFingerprint : nil
         )
+        RemoteHostTrust.register([host])
 
         let previousHosts = hosts
         if let index = hosts.firstIndex(where: { $0.id == id }) {
@@ -400,6 +429,7 @@ final class RemoteAppModel: ObservableObject {
             hosts = previousHosts
             return
         }
+        RemoteHostTrust.forget(host, remaining: hosts)
         invalidateRefreshes()
         if activeHostID == host.id {
             disconnectThemeEvents()
@@ -459,16 +489,29 @@ final class RemoteAppModel: ObservableObject {
             if let index = hosts.firstIndex(where: { $0.id == hostID }) {
                 let old = hosts[index]
                 var updated = old
-                updated.merge(
+                // A pin is refined or followed only on the word of a channel that proved the
+                // pinned key; over anything else the response may still be adopted where the
+                // record allows it, and a foreign identity is refused and said so.
+                let overPinnedChannel = !connection.isHosted
+                    && successfulLink.baseURL.host.map {
+                        RemoteHostTrust.liveVerdict($0.lowercased()) == .accepted
+                    } == true
+                let pinOutcome = updated.merge(
                     identity: response.host,
                     successfulLink: successfulLink,
-                    isHosted: connection.isHosted
+                    isHosted: connection.isHosted,
+                    overPinnedChannel: overPinnedChannel
                 )
+                if pinOutcome == .refused {
+                    MobileDiagnostics.logDegraded(.hostTrust, code: .pinChangeRefused)
+                }
                 let metadataChanged = old.name != updated.name
                     || old.link != updated.link
                     || old.endpoints != updated.endpoints
                     || old.connectionPolicy != updated.connectionPolicy
                     || old.activeEndpointKind != updated.activeEndpointKind
+                    || old.pinnedFingerprint != updated.pinnedFingerprint
+                    || old.nextPinnedFingerprint != updated.nextPinnedFingerprint
                 // Persist only a real connection transition or identity change, rather than
                 // rewriting the credential-bearing Keychain item after every event-driven
                 // catalogue refresh.
@@ -476,6 +519,10 @@ final class RemoteAppModel: ObservableObject {
                     hosts[index] = updated
                     _ = persistHosts()
                 }
+                // A pin the Mac just announced covers every address it flagged, including the
+                // ones this phone has not used yet. That is what lets a phone paired on the
+                // couch use the tailnet address from the train with no further ceremony.
+                RemoteHostTrust.register([updated])
                 ensureThemeEvents(for: updated)
             }
             await reconcileHostedCredential(
@@ -488,19 +535,46 @@ final class RemoteAppModel: ObservableObject {
             return
         } catch {
             guard activeHostID == hostID, refreshGeneration == generation else { return }
-            phase = .offline(error.localizedDescription)
+            let failure = connectionFailure(for: host, error: error)
+            phase = .offline(failure.message)
             scheduleThemeEventsRecovery(for: hostID)
             if !wasOffline {
-                MobileDiagnostics.record(
-                    .hostRefreshFailed,
-                    level: .error,
-                    fields: [
-                        .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
-                        .code: MobileDiagnostics.errorCode(error),
-                    ]
-                )
+                var fields: [RemoteDiagnosticField: String] = [
+                    .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
+                    .code: MobileDiagnostics.errorCode(RemoteConnectionAttempt.underlying(error)),
+                    .reason: failure.cause.rawValue,
+                ]
+                // A token, never a fingerprint: a report says whether the identity check passed,
+                // refused or never ran, which is the difference between "the Mac is off" and
+                // "something else is answering at the Mac's address".
+                if let verdict = RemoteHostTrust.verdictToken(for: host) {
+                    fields[.detail] = verdict
+                }
+                MobileDiagnostics.record(.hostRefreshFailed, level: .error, fields: fields)
             }
         }
+    }
+
+    /// Names a failed refresh, in the same vocabulary a failed session socket uses.
+    ///
+    /// A pin refusal is read first and from the delegate, because the error it produces is a
+    /// cancelled request with nothing in it. After that the classification is the address's:
+    /// the same no-route code means "grant Local Network access" on a private address and
+    /// "that machine is not answering" on a public one, which is why the attempt carries the
+    /// host it was aimed at rather than the one the record happens to remember.
+    private func connectionFailure(
+        for host: PairedRemoteHost,
+        error: Error
+    ) -> RemoteConnectionFailure {
+        if RemoteHostTrust.rejectedIdentity(for: host) {
+            return .pinnedIdentityMismatch()
+        }
+        let attempt = error as? RemoteConnectionAttempt
+        return RemoteConnectionFailure.transport(
+            attempt?.underlying ?? error,
+            host: attempt?.host ?? host.link.baseURL.host,
+            trustVerdict: nil
+        )
     }
 
     /// Establishes the dashboard's authoritative snapshot. Healthy updates arrive on the event
@@ -814,6 +888,10 @@ final class RemoteAppModel: ObservableObject {
     private struct ConnectionCandidate {
         let link: RemoteConnectionLink
         let isHosted: Bool
+        /// Which advertised door this attempt belongs to, so the rest of a port walk can be
+        /// abandoned once that door has answered. Nil for the hosted route, which is one
+        /// rendezvous rather than an address with ports on it.
+        let doorID: String?
     }
 
     private struct SuccessfulConnection {
@@ -825,7 +903,12 @@ final class RemoteAppModel: ObservableObject {
     private func fetchMe(from host: PairedRemoteHost) async throws -> SuccessfulConnection {
         let prepared = await connectionCandidates(for: host)
         var lastError: Error = prepared.error ?? RemoteClientError.invalidResponse
+        // A door that has answered is done, whatever it answered. The remaining attempts on it
+        // are the sticky port range, and knocking on nine more ports after the Mac has refused a
+        // bearer, named a protocol version, or presented the wrong certificate finds nothing.
+        var answeredDoors: Set<String> = []
         for (index, candidate) in prepared.candidates.enumerated() {
+            if let doorID = candidate.doorID, answeredDoors.contains(doorID) { continue }
             do {
                 let timeout: TimeInterval? = prepared.candidates.count > 1
                     && index < prepared.candidates.count - 1
@@ -839,11 +922,28 @@ final class RemoteAppModel: ObservableObject {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                lastError = error
+                lastError = RemoteConnectionAttempt(
+                    underlying: error,
+                    host: candidate.link.baseURL.host
+                )
+                if let doorID = candidate.doorID,
+                   Self.doorHasAnswered(error, host: candidate.link.baseURL.host) {
+                    answeredDoors.insert(doorID)
+                }
                 if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
             }
         }
         throw lastError
+    }
+
+    /// Whether a failure means something was there, rather than nothing being there.
+    ///
+    /// An HTTP status and a refused certificate both came from a server; a refused or timed-out
+    /// connection did not. Only the second is a reason to try the next port of the range.
+    private static func doorHasAnswered(_ error: Error, host: String?) -> Bool {
+        if error is RemoteClientError { return true }
+        guard let host else { return false }
+        return RemoteClient.pinningDelegate.verdict(forHost: host) == .rejectedFingerprintMismatch
     }
 
     /// Tries every policy-approved endpoint with one request id. A timeout after the Mac has
@@ -859,7 +959,9 @@ final class RemoteAppModel: ObservableObject {
         let requestID = UUID().uuidString.lowercased()
         let prepared = await connectionCandidates(for: host)
         var lastError: Error = prepared.error ?? RemoteClientError.invalidResponse
+        var answeredDoors: Set<String> = []
         for (index, candidate) in prepared.candidates.enumerated() {
+            if let doorID = candidate.doorID, answeredDoors.contains(doorID) { continue }
             do {
                 let timeout: TimeInterval? = prepared.candidates.count > 1
                     && index < prepared.candidates.count - 1
@@ -892,6 +994,7 @@ final class RemoteAppModel: ObservableObject {
                 // id keeps trying the next route safe even if the Mac did receive it.
                 if case .server(let status) = error, [502, 503, 504].contains(status) {
                     lastError = error
+                    if let doorID = candidate.doorID { answeredDoors.insert(doorID) }
                     if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
                     continue
                 }
@@ -899,6 +1002,10 @@ final class RemoteAppModel: ObservableObject {
                 throw error
             } catch {
                 lastError = error
+                if let doorID = candidate.doorID,
+                   Self.doorHasAnswered(error, host: candidate.link.baseURL.host) {
+                    answeredDoors.insert(doorID)
+                }
                 if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
             }
         }
@@ -912,7 +1019,9 @@ final class RemoteAppModel: ObservableObject {
         var preparationError: Error?
         do {
             if let hostedLink = try await hostedConnections.link(for: host) {
-                candidates.append(ConnectionCandidate(link: hostedLink, isHosted: true))
+                candidates.append(
+                    ConnectionCandidate(link: hostedLink, isHosted: true, doorID: nil)
+                )
                 if activeHostID == host.id {
                     activeHostedHostID = host.id
                     activeHostedLink = hostedLink
@@ -924,8 +1033,13 @@ final class RemoteAppModel: ObservableObject {
             preparationError = error
             await hostedConnectionFailed(hostID: host.id)
         }
-        for link in host.candidateLinks where !candidates.contains(where: { $0.link == link }) {
-            candidates.append(ConnectionCandidate(link: link, isHosted: false))
+        for candidate in host.candidates
+        where !candidates.contains(where: { $0.link == candidate.link }) {
+            candidates.append(ConnectionCandidate(
+                link: candidate.link,
+                isHosted: false,
+                doorID: candidate.doorID
+            ))
         }
         return (candidates, preparationError)
     }

@@ -22,31 +22,117 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
     /// Mac-issued remote capability and never copied into an ordinary share link.
     var hostedServiceURL: URL? = nil
     var hostedCredential: PeerDeviceServiceCredential? = nil
+    /// The certificate this Mac's pinned doors present, as the 64 lower-case hex characters
+    /// `/api/me` carries. Persisted so the pin is in force on the first request after a relaunch
+    /// rather than only after a successful `/api/me`, which is the request that would need it.
+    var pinnedFingerprint: String? = nil
+    /// The successor the Mac has announced but not yet started presenting. Held beside the
+    /// current one so a certificate can be replaced without this phone scanning a code again.
+    var nextPinnedFingerprint: String? = nil
 
     var displayAddress: String {
         link.baseURL.host ?? link.baseURL.absoluteString
     }
 
+    /// The pins learned over a trusted channel, if any. A record that has only ever seen a QR
+    /// code has none of these and pins from `link.pinnedFingerprintCode` instead.
+    var storedPinSet: RemoteHostPinSet? {
+        guard let pinnedFingerprint, let current = RemoteHostPin(hex: pinnedFingerprint) else {
+            return nil
+        }
+        return RemoteHostPinSet(
+            current: current,
+            next: nextPinnedFingerprint.flatMap(RemoteHostPin.init(hex:))
+        )
+    }
+
+    /// The pin this record shows a person, in the spelling printed on the Mac's settings page.
+    ///
+    /// The stored fingerprint leads because it follows a rotation; the scanned code is what a
+    /// record has before its first `/api/me`.
+    var pinnedFingerprintCode: String? {
+        if let pinnedFingerprint, let fingerprint = RemoteHostFingerprint(hex: pinnedFingerprint) {
+            return fingerprint.pairingCode
+        }
+        return link.pinnedFingerprintCode
+    }
+
+    /// Every host name this record pins, with the pins it accepts for it.
+    ///
+    /// Two sources and no others. The scanned link pins **its own host**, because that is the
+    /// address whose code was photographed. An advertised endpoint pins its host only when the
+    /// Mac flagged it `pinned`; an endpoint without the flag is somebody else's TLS (Tailscale
+    /// Serve holds a real certificate for its `*.ts.net` name) and must keep stock evaluation,
+    /// or the phone would refuse the very endpoint that works.
+    var pinnedHosts: [String: RemoteHostPinSet] {
+        var result: [String: RemoteHostPinSet] = [:]
+        let learned = storedPinSet
+        if let code = link.pinnedFingerprintCode,
+           let scanned = RemoteHostPin(pairingCode: code),
+           let host = link.baseURL.host {
+            result[host.lowercased()] = learned ?? RemoteHostPinSet(current: scanned)
+        }
+        guard let learned else { return result }
+        for endpoint in endpoints ?? [] where endpoint.expectsPinnedIdentity {
+            guard let host = endpoint.baseURL.host else { continue }
+            result[host.lowercased()] = learned
+        }
+        return result
+    }
+
     var isOwnerDevice: Bool { scope == nil || scope == "all" }
 
     var candidateLinks: [RemoteConnectionLink] {
+        candidates.map(\.link)
+    }
+
+    /// Every address this phone will try for this Mac, in order.
+    ///
+    /// One entry per attempt, and each one names the door it belongs to. The door matters
+    /// because of the port walk: a `lan` address on the sticky range contributes the remaining
+    /// ports of that range as further attempts, and an answer from any of them (an HTTP status,
+    /// an authentication refusal, a certificate that is not the pinned one) ends that door.
+    /// Continuing to knock on nine more ports after the Mac has spoken finds nothing.
+    var candidates: [RemoteHostConnectionCandidate] {
         // `nil` is a legacy record from before hosts advertised routes. An explicitly empty
         // list is different: the Mac currently authorizes no endpoint under its policy, so
         // falling back to a remembered relay here would violate private-only.
-        guard let endpoints else { return [link] }
+        guard let endpoints else {
+            return RemoteHostConnectionCandidate.attempts(
+                baseURL: link.baseURL,
+                kind: Self.endpointKind(for: link.baseURL),
+                token: link.token,
+                doorID: link.baseURL.absoluteString
+            )
+        }
         guard !endpoints.isEmpty else { return [] }
-        return RemoteHostEndpointSelection.ordered(
+        let ordered = RemoteHostEndpointSelection.ordered(
             endpoints,
             policy: connectionPolicy ?? .privateOnly,
             currentBaseURL: link.baseURL
-        ).compactMap { RemoteConnectionLink(baseURL: $0.baseURL, token: link.token) }
+        )
+        var seen: Set<URL> = []
+        var result: [RemoteHostConnectionCandidate] = []
+        for endpoint in ordered {
+            for candidate in RemoteHostConnectionCandidate.attempts(
+                baseURL: endpoint.baseURL,
+                kind: endpoint.kind,
+                token: link.token,
+                doorID: endpoint.baseURL.absoluteString
+            ) where seen.insert(candidate.link.baseURL).inserted {
+                result.append(candidate)
+            }
+        }
+        return result
     }
 
     var connectionLabel: String {
         switch activeEndpointKind ?? Self.endpointKind(for: link.baseURL) {
-        case "tailscale": return MobileL10n.string("Tailscale")
-        case "relay": return MobileL10n.string("Relay")
-        case "hosted": return MobileL10n.string("Direct")
+        case RemoteHostEndpointKind.tailscale: return MobileL10n.string("Tailscale")
+        case RemoteHostEndpointKind.relay: return MobileL10n.string("Relay")
+        case RemoteHostEndpointKind.lan: return MobileL10n.string("This network")
+        case RemoteHostEndpointKind.vpn: return MobileL10n.string("VPN")
+        case RemoteHostEndpointKind.hosted: return MobileL10n.string("Direct")
         default: return MobileL10n.string("Direct")
         }
     }
@@ -55,15 +141,31 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         isOwnerDevice ? name : MobileL10n.string("%@ · Shared chat", name)
     }
 
+    /// What became of the fingerprints an owner response carried.
+    enum PinMergeOutcome: Equatable {
+        /// Nothing to learn: no fingerprint in the response, or not an owner record.
+        case unchanged
+        /// The response's identity was adopted (first learn, a refinement of a scanned code, or
+        /// a rotation this record had been told about).
+        case adopted
+        /// The response named an identity that neither matches what is stored nor was announced
+        /// as its successor; the stored pin was kept and the caller should say so.
+        case refused
+    }
+
+    @discardableResult
     mutating func merge(
         identity: RemoteHostDTO?,
         successfulLink: RemoteConnectionLink,
-        isHosted: Bool = false
-    ) {
+        isHosted: Bool = false,
+        overPinnedChannel: Bool = false
+    ) -> PinMergeOutcome {
         if !isHosted { link = successfulLink }
-        activeEndpointKind = isHosted ? "hosted" : Self.endpointKind(for: successfulLink.baseURL)
+        activeEndpointKind = isHosted
+            ? RemoteHostEndpointKind.hosted
+            : kind(ofAdvertised: successfulLink.baseURL, in: identity?.endpoints ?? endpoints)
         lastConnectedAt = Date()
-        guard let identity else { return }
+        guard let identity else { return .unchanged }
         hostID = identity.id
         name = identity.name
         if let advertised = identity.endpoints {
@@ -72,11 +174,123 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         if let policy = identity.connectionPolicy {
             connectionPolicy = policy
         }
+        return mergePins(from: identity, overPinnedChannel: overPinnedChannel)
     }
 
+    /// Adopts the fingerprints an owner response carried, within what a stored pin allows.
+    ///
+    /// A pin, once held, is only ever *refined* or *followed*, never replaced on a channel's say-so:
+    /// the identity a response names is adopted when nothing was pinned yet (the first `/api/me`
+    /// after a legacy pairing), when it is the same identity spelled in full (a scanned 128-bit
+    /// code becoming the whole digest), or when it is the successor this record was already told
+    /// about (a rotation activated). Anything else is a different Mac or a reset one, and the
+    /// stored pin stays so the pinned doors refuse it by name and the person scans again. That is
+    /// the difference between "the Mac told me" and "something on the path told me": a relay
+    /// terminates TLS, and even a public-CA channel authenticates a name, not this key.
+    ///
+    /// A successor announcement is honoured only over a pinned channel (plan §16): the old key
+    /// vouching for the new one is the whole reason no re-pairing is needed, and a channel that
+    /// did not prove the old key cannot vouch for anything.
+    ///
+    /// **Absence never clears a pin.** A host that says nothing about its identity is an older
+    /// Mac or one whose doors are all publicly trusted, not an instruction to stop pinning; a
+    /// Mac that really did reset its identity produces a named mismatch and a re-scan, which is
+    /// the loud path this trades for.
+    private mutating func mergePins(
+        from identity: RemoteHostDTO,
+        overPinnedChannel: Bool
+    ) -> PinMergeOutcome {
+        // A guest capability never learns an identity. The host does not send one to a guest
+        // share, and a phone must not pin a Mac on the word of a one-chat token.
+        guard isOwnerDevice,
+              let claimedHex = identity.pinnedFingerprint,
+              let claimed = RemoteHostFingerprint(hex: claimedHex) else { return .unchanged }
+
+        let held = storedPinSet
+            ?? link.pinnedFingerprintCode
+                .flatMap(RemoteHostPin.init(pairingCode:))
+                .map { RemoteHostPinSet(current: $0) }
+
+        if let held {
+            let sameIdentity = held.current.matches(digest: claimed.digest)
+            let announcedSuccessor = held.next?.matches(digest: claimed.digest) ?? false
+            guard sameIdentity || announcedSuccessor else { return .refused }
+        }
+
+        pinnedFingerprint = claimed.hex
+        if overPinnedChannel {
+            nextPinnedFingerprint = identity.nextPinnedFingerprint
+        } else if held?.next.map({ $0.matches(digest: claimed.digest) }) == true {
+            // The successor went live and this response is the first sight of it; whatever this
+            // channel is, the announced-then-activated pair is what was vouched for.
+            nextPinnedFingerprint = nil
+        }
+        return .adopted
+    }
+
+    /// What the Mac itself calls the address that answered, falling back to the guess.
+    ///
+    /// The guess reads an address; the advertised list is the Mac saying which door this is.
+    /// They differ for exactly the cases that matter: a VPN address is in a private range and a
+    /// tailnet address is not `.ts.net` when it is written as `100.x`.
+    private func kind(ofAdvertised baseURL: URL, in advertised: [RemoteHostEndpointDTO]?) -> String {
+        advertised?.first { $0.baseURL == baseURL }?.kind ?? Self.endpointKind(for: baseURL)
+    }
+
+    /// A guess at which door an address belongs to, for a record that has no advertised list to
+    /// consult. Used for labels and diagnostics only; nothing is authorized by it.
     static func endpointKind(for baseURL: URL) -> String {
         guard let host = baseURL.host?.lowercased() else { return "direct" }
-        return host.hasSuffix(".ts.net") ? "tailscale" : "relay"
+        if host.hasSuffix(".ts.net") { return RemoteHostEndpointKind.tailscale }
+        if RemoteLocalNetworkAddress.isPrivate(host) { return RemoteHostEndpointKind.lan }
+        return RemoteHostEndpointKind.relay
+    }
+}
+
+/// One address the phone will try, and the door it belongs to.
+struct RemoteHostConnectionCandidate: Equatable {
+    let link: RemoteConnectionLink
+    /// Attempts sharing this identifier are the same advertised door at another port of the
+    /// sticky range. An answer from one of them ends the walk over the rest.
+    let doorID: String
+    /// True for the ports the walk added, which is what makes them skippable as a group without
+    /// also skipping the address the Mac actually advertised.
+    let isPortWalk: Bool
+
+    /// The attempts one advertised address contributes.
+    ///
+    /// A `lan` address on the sticky range contributes the rest of that range in the listener's
+    /// own order, because the Mac walks the same list when its configured port is taken and a
+    /// collision must not cost a re-pair. Bounded by the range and deterministic: ten addresses
+    /// tried one after another, never in parallel. Every other kind contributes itself alone,
+    /// because a tailnet name, a relay hostname and a VPN address are not ports somebody guessed.
+    static func attempts(
+        baseURL: URL,
+        kind: String,
+        token: String,
+        doorID: String
+    ) -> [RemoteHostConnectionCandidate] {
+        var result: [RemoteHostConnectionCandidate] = []
+        if let link = RemoteConnectionLink(baseURL: baseURL, token: token) {
+            result.append(
+                RemoteHostConnectionCandidate(link: link, doorID: doorID, isPortWalk: false)
+            )
+        }
+        guard kind == RemoteHostEndpointKind.lan,
+              let port = baseURL.port.flatMap({ UInt16(exactly: $0) }),
+              RemoteListenerPorts.fallbackRange.contains(port) else {
+            return result
+        }
+        for candidate in RemoteListenerPorts.candidates(preferred: port).dropFirst() {
+            var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+            components?.port = Int(candidate)
+            guard let url = components?.url,
+                  let link = RemoteConnectionLink(baseURL: url, token: token) else { continue }
+            result.append(
+                RemoteHostConnectionCandidate(link: link, doorID: doorID, isPortWalk: true)
+            )
+        }
+        return result
     }
 }
 
