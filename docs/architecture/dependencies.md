@@ -187,6 +187,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     pair sets are independently capped because a process controls 24-bit colour cardinality.
     `TerminalSession` defers the callback out of the draw pass and turns it into the app's
     dismissible diagnostic; see [`themes.md`](themes.md).
+  - **Emoji presentation follows the terminal grid, not CoreText's fallback taste.** A simple
+    emoji-capable grapheme stored in a one-column cell is rendered with Unicode text presentation
+    (VS15), preventing Apple Color Emoji from painting a glossy two-column bitmap over the next
+    cell. Two-column emoji, joined sequences, modifiers and keycaps remain untouched. This is a
+    render-only transform: the buffer still owns the exact bytes for copy and extraction, and the
+    attributed line maps cell boundaries to UTF-16 offsets so selection remains aligned after the
+    invisible selector is added. `SwiftTermUnicode` pins the presentation, buffer and selection
+    sides; the iPhone Claude TUI fixture carries the real U+23FA marker as rendered evidence.
   - **Still unclaimed, and dead the same way:** `deleteToBeginningOfLine:` (Cmd-Delete). Option
     with *forward* delete never reaches `doCommand(by:)` at all — `NSDeleteFunctionKey` carries
     `.function`, so `keyDown`'s function branch answers it first and sends plain forward-delete,

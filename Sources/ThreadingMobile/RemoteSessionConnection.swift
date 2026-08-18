@@ -1187,11 +1187,10 @@ final class RemoteSessionConnection: ObservableObject {
                 "› ",
             ]
         case "terminal-claude-tui":
-            // Claude's tool marker must stay a single terminal cell. U+23FA ("⏺") falls
-            // back to an emoji glyph on iOS, occupies two cells in SwiftTerm, and visually
-            // collides with the following label. U+25CF is the text glyph Claude renders
-            // for completed tool activity and remains one cell across the supported chromes.
-            let completedTool = "\u{25CF}"
+            // Keep Claude's actual one-cell marker in the fixture. SwiftTerm's renderer requests
+            // text presentation for narrow emoji-capable symbols, while genuine wide emoji stay
+            // color; substituting a safer bullet here would stop the evidence from testing that.
+            let completedTool = "\u{23FA}"
             lines = [
                 "\u{1b}[2J\u{1b}[H\u{1b}[1;35mClaude Code\u{1b}[0m",
                 "\u{1b}[2mSonnet · plan mode · AnotherTerminal\u{1b}[0m",
