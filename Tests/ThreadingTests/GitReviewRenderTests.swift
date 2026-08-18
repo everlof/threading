@@ -645,6 +645,36 @@ final class GitReviewRenderTests: XCTestCase {
                 cardWidth, Render.width - Design.Spacing.inset * 2, accuracy: 0.5,
                 "\(name): a file card did not span the pane"
             )
+
+            // The reported state: the resting chip is ink-only, so only the hovered render can
+            // prove its latent plate stays on the same margin as the cards below it.
+            var chipHoverData: Data?
+            let renderChipHover = {
+                let pane = self.laidOutPane(files, appearance: appearance)
+                let chip = pane.controller.modeChip
+                guard let event = NSEvent.enterExitEvent(
+                    with: .mouseEntered,
+                    location: chip.convert(
+                        NSPoint(x: chip.bounds.midX, y: chip.bounds.midY),
+                        to: nil
+                    ),
+                    modifierFlags: [],
+                    timestamp: 0,
+                    windowNumber: chip.window?.windowNumber ?? 0,
+                    context: nil,
+                    eventNumber: 0,
+                    trackingNumber: 0,
+                    userData: nil
+                ) else { return }
+                chip.mouseEntered(with: event)
+                pane.view.layoutSubtreeIfNeeded()
+                chipHoverData = self.png(of: pane.view)
+            }
+            appearance?.performAsCurrentDrawingAppearance(renderChipHover)
+            try XCTUnwrap(chipHoverData, "failed to render \(name) mode-chip hover")
+                .write(to: directory.appendingPathComponent(
+                    "git-review-pane-toolbar-hover-\(name).png"
+                ))
         }
 
         AppThemePalette.set(.system)
@@ -665,47 +695,84 @@ final class GitReviewRenderTests: XCTestCase {
                 .write(to: directory.appendingPathComponent("git-review-pane-\(name).png"))
         }
 
-        // One canonical interaction state proves the retained heading is a real file header,
-        // rather than a path-only model update or a decorative clone with dead controls.
+        // These interaction states prove both halves of sticky-heading composition: semantic
+        // diff ink cannot leak through its rounded top, and the retained overlay moves away
+        // before the next real file heading reaches it.
         let stickyAppearance = NSAppearance(named: .darkAqua)
-        var stickyData: Data?
-        let renderSticky = {
-            let pane = self.laidOutPane(files, appearance: stickyAppearance)
-            pane.controller.renderedFileRoot = URL(fileURLWithPath: "/tmp")
-            pane.controller.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 100))
-            pane.controller.scrollView.reflectScrolledClipView(
-                pane.controller.scrollView.contentView
-            )
-            pane.controller.updateScrollControls()
-            pane.view.layoutSubtreeIfNeeded()
+        let stickyEvidenceFiles = stickyTransitionFiles()
+        for (suffix, theme, evidenceFiles, pushesIntoNextHeader) in [
+            ("dark", AppTheme.system, files, false),
+            ("threading-dark", AppThemeStyles.threading, stickyEvidenceFiles, false),
+            ("push-threading-dark", AppThemeStyles.threading, stickyEvidenceFiles, true),
+        ] {
+            AppThemePalette.set(theme)
+            var stickyData: Data?
+            let renderSticky = {
+                let pane = self.laidOutPane(evidenceFiles, appearance: stickyAppearance)
+                pane.controller.renderedFileRoot = URL(fileURLWithPath: "/tmp")
+                pane.controller.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 100))
+                pane.controller.scrollView.reflectScrolledClipView(
+                    pane.controller.scrollView.contentView
+                )
+                pane.controller.updateScrollControls()
+                pane.view.layoutSubtreeIfNeeded()
 
-            guard let header = pane.controller.stickyFileHeaderRowForTesting,
-                  let event = NSEvent.enterExitEvent(
-                    with: .mouseEntered,
-                    location: header.convert(
-                        NSPoint(x: header.bounds.midX, y: header.bounds.midY),
-                        to: nil
-                    ),
-                    modifierFlags: [],
-                    timestamp: 0,
-                    windowNumber: header.window?.windowNumber ?? 0,
-                    context: nil,
-                    eventNumber: 0,
-                    trackingNumber: 0,
-                    userData: nil
-                  ) else { return }
-            header.mouseEntered(with: event)
-            pane.view.layoutSubtreeIfNeeded()
-            XCTAssertGreaterThan(pane.controller.stickyFileHeaderHeightForTesting, 30)
-            let visibleActions = header.subviews.compactMap { $0 as? ThemedIconButton }.filter {
-                !$0.isHidden && $0.alphaValue > 0.99
+                let stickyHeight = pane.controller.stickyFileHeaderHeightForTesting
+                XCTAssertGreaterThan(stickyHeight, 30)
+                if pushesIntoNextHeader {
+                    let firstRowRect = pane.controller.fileTableView.rect(ofRow: 0)
+                    let requestedNextHeaderY = stickyHeight / 2 + Design.Spacing.small
+                    pane.controller.scrollView.contentView.scroll(to: NSPoint(
+                        x: 0,
+                        y: firstRowRect.maxY - requestedNextHeaderY
+                    ))
+                    pane.controller.scrollView.reflectScrolledClipView(
+                        pane.controller.scrollView.contentView
+                    )
+                    pane.controller.updateScrollControls()
+                    pane.view.layoutSubtreeIfNeeded()
+
+                    let nextHeaderY = firstRowRect.maxY
+                        - pane.controller.scrollView.documentVisibleRect.minY
+                    let retainedHeaderBottom = pane.controller.stickyFileHeaderTopForTesting
+                        + stickyHeight
+                    XCTAssertLessThan(pane.controller.stickyFileHeaderTopForTesting, 0)
+                    XCTAssertEqual(
+                        nextHeaderY - retainedHeaderBottom,
+                        Design.Spacing.small,
+                        accuracy: 0.5
+                    )
+                }
+
+                guard let header = pane.controller.stickyFileHeaderRowForTesting,
+                      let event = NSEvent.enterExitEvent(
+                        with: .mouseEntered,
+                        location: header.convert(
+                            NSPoint(x: header.bounds.midX, y: header.bounds.midY),
+                            to: nil
+                        ),
+                        modifierFlags: [],
+                        timestamp: 0,
+                        windowNumber: header.window?.windowNumber ?? 0,
+                        context: nil,
+                        eventNumber: 0,
+                        trackingNumber: 0,
+                        userData: nil
+                      ) else { return }
+                header.mouseEntered(with: event)
+                pane.view.layoutSubtreeIfNeeded()
+                let visibleActions = header.subviews.compactMap { $0 as? ThemedIconButton }.filter {
+                    !$0.isHidden && $0.alphaValue > 0.99
+                }
+                XCTAssertEqual(visibleActions.count, 2)
+                stickyData = self.png(of: pane.view)
             }
-            XCTAssertEqual(visibleActions.count, 2)
-            stickyData = self.png(of: pane.view)
+            stickyAppearance?.performAsCurrentDrawingAppearance(renderSticky)
+            try XCTUnwrap(stickyData, "failed to render \(suffix) sticky heading")
+                .write(to: directory.appendingPathComponent(
+                    "git-review-pane-sticky-\(suffix).png"
+                ))
         }
-        stickyAppearance?.performAsCurrentDrawingAppearance(renderSticky)
-        try XCTUnwrap(stickyData, "failed to render sticky heading actions")
-            .write(to: directory.appendingPathComponent("git-review-pane-sticky-dark.png"))
 
         for (suffix, theme) in [
             ("dark", AppTheme.system),
@@ -775,6 +842,32 @@ final class GitReviewRenderTests: XCTestCase {
         }
 
         print("Rendered the review pane to \(directory.path)")
+    }
+
+    private func stickyTransitionFiles() -> [GitFileDiff] {
+        (0..<2).map { fileIndex in
+            let lines = (0..<48).map { lineIndex in
+                let number = lineIndex + 1
+                let kind: GitDiffLine.Kind = switch lineIndex % 5 {
+                case 0: .removed
+                case 1: .added
+                default: .context
+                }
+                return GitDiffLine(
+                    kind: kind,
+                    text: "let reviewValue\(lineIndex) = StickyHeader\(fileIndex).value + \(lineIndex)",
+                    oldNumber: kind == .added ? nil : number,
+                    newNumber: kind == .removed ? nil : number
+                )
+            }
+            return GitFileDiff(
+                path: "Sources/Threading/Review/StickyHeader\(fileIndex).swift",
+                change: .modified,
+                hunks: [GitHunk(header: "@@ -1,48 +1,48 @@", lines: lines)],
+                added: lines.lazy.filter { $0.kind == .added }.count,
+                removed: lines.lazy.filter { $0.kind == .removed }.count
+            )
+        }
     }
 
     /// The product capture is the real native conversation beside the real Git Review pane.

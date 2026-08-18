@@ -112,7 +112,9 @@ final class ThemedSegmentedControl: NSView {
         segmentViews = titles.enumerated().map { index, title in
             let segment = SegmentView(title: title)
             segment.onActivate = { [weak self] in self?.choose(index) }
-            segment.onMove = { [weak self] offset in self?.move(from: index, by: offset) }
+            segment.onMove = { [weak self] offset, event in
+                self?.move(from: index, by: offset, focusEvent: event)
+            }
             stack.addArrangedSubview(segment)
             return segment
         }
@@ -138,11 +140,15 @@ final class ThemedSegmentedControl: NSView {
     /// Arrow keys walk the run and take the selection with them, which is what a radio group does
     /// on this platform. The ends do not wrap: a run of three is short enough that wrapping reads
     /// as the selection jumping rather than moving.
-    private func move(from index: Int, by offset: Int) {
+    private func move(from index: Int, by offset: Int, focusEvent: NSEvent?) {
         let target = index + offset
         guard segmentViews.indices.contains(target) else { return }
         choose(target)
         window?.makeFirstResponder(segmentViews[target])
+        // A fixture may call `keyDown` directly, where `NSApp.currentEvent` is nil, and AppKit
+        // may move focus after the key has left the event queue. The key that moved the choice
+        // is still the honest origin of the new segment's focus.
+        segmentViews[target].focusArrived(from: focusEvent)
     }
 
     private func updateSelection() {
@@ -160,7 +166,7 @@ final class ThemedSegmentedControl: NSView {
 private final class SegmentView: ThemedControl {
 
     var onActivate: (() -> Void)?
-    var onMove: ((Int) -> Void)?
+    var onMove: ((Int, NSEvent?) -> Void)?
 
     var isSelected = false {
         didSet {
@@ -170,6 +176,13 @@ private final class SegmentView: ThemedControl {
     }
 
     private let titleLabel = NSTextField(labelWithString: "")
+    private var focusOrigin = KeyboardFocusOrigin()
+
+    /// A pointer press keeps this segment as first responder so the next arrow key can continue
+    /// the choice, but the accent ring is keyboard guidance rather than a second selection mark.
+    private var showsKeyboardFocusRing: Bool {
+        hasKeyboardFocus && focusOrigin.isFromKeyboard
+    }
 
     init(title: String) {
         super.init(frame: .zero)
@@ -231,14 +244,39 @@ private final class SegmentView: ThemedControl {
             foreground = isHovered || hasKeyboardFocus ? Design.Text.label : Design.Text.secondary
         }
 
-        drawKeyboardFocus(
-            around: ThemedSurface.Shape(
-                rect: bounds,
-                radius: Design.Radius.pill(height: bounds.height)
+        if showsKeyboardFocusRing {
+            drawKeyboardFocus(
+                around: ThemedSurface.Shape(
+                    rect: bounds,
+                    radius: Design.Radius.pill(height: bounds.height)
+                )
             )
-        )
+        }
 
         titleLabel.textColor = foreground
+    }
+
+    // MARK: - Focus
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { focusArrived(from: NSApp.currentEvent) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            focusOrigin.resigned()
+            needsDisplay = true
+        }
+        return resigned
+    }
+
+    /// Internal to the component so an arrow can carry the event that moved focus to its target.
+    func focusArrived(from event: NSEvent?) {
+        focusOrigin.arrived(from: event)
+        needsDisplay = true
     }
 
     // MARK: - Interaction
@@ -246,6 +284,9 @@ private final class SegmentView: ThemedControl {
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         window?.makeFirstResponder(self)
+        // `makeFirstResponder` is a no-op when this segment already owns focus, so explicitly
+        // replace a preceding keyboard origin. The selection plate remains; only the ring leaves.
+        focusArrived(from: event)
         onActivate?()
     }
 
@@ -255,11 +296,12 @@ private final class SegmentView: ThemedControl {
             return
         }
 
+        focusArrived(from: event)
         switch event.charactersIgnoringModifiers {
         case String(UnicodeScalar(NSLeftArrowFunctionKey)!):
-            onMove?(-1)
+            onMove?(-1, event)
         case String(UnicodeScalar(NSRightArrowFunctionKey)!):
-            onMove?(1)
+            onMove?(1, event)
         default:
             super.keyDown(with: event)
         }

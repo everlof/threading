@@ -64,7 +64,7 @@ final class DetachedBrowserHostViewController: NSViewController {
         button.toolTip = L10n.string("New Browser Tab")
         button.onPress = { [weak self] in
             guard let self else { return }
-            if addBrowserTab() == nil { NSSound.beep() }
+            if addBrowserTab() == nil { SystemAlert.refuse() }
         }
         return button
     }()

@@ -39,6 +39,14 @@ enum InkSource: Equatable {
     /// what a host names through `BackdropThemedControl.hostGround`.
     case selection
 
+    /// The face of a **primary action**, for a control welded onto one.
+    ///
+    /// `selection` one control further in: `SplitButtonView` may fill its whole plate with the
+    /// theme's primary role, and the chevron welded to that plate is then reading against a
+    /// colour the chrome's roles were never measured on, without having moved at all. Named by
+    /// the plate through `hostGround`, never a control's own `inkSource`.
+    case primaryAction
+
     /// The title band a chrome-takeover theme draws across the window's top — the third
     /// ground, whose gradient the theme authors directly rather than through roles. Only the
     /// controls the band itself hosts sit on it (`WindowTitleBandView`).
@@ -50,6 +58,7 @@ enum InkSource: Equatable {
         case .backdrop: WindowBackdrop.ink
         case .selection: Design.Ink.selection
         case .titleBand: WindowChromeAppearance.bandInk
+        case .primaryAction: Design.Ink.primaryAction
         }
     }
 
@@ -62,6 +71,7 @@ enum InkSource: Equatable {
         case .backdrop: WindowBackdrop.color
         case .selection: Design.Surface.selectionFill
         case .titleBand: WindowChromeAppearance.bandGround
+        case .primaryAction: Design.Surface.primaryActionFace
         }
     }
 }

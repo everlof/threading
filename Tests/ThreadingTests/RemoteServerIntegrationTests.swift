@@ -21,6 +21,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     private var appSettingsDefaults: UserDefaults!
     private var appSettingsSuiteName: String!
     private var eventRecorder: RecordingRemoteEventRecorder!
+    private var identityStore: RemoteAccessIdentityStore!
+    private var identityDirectory: URL!
     private var port: UInt16!
 
     override func setUp() {
@@ -38,6 +40,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         runtimeStatus = RecordingRemoteRuntimeStatus(runtime: .shared)
         settingsMutator = RecordingRemoteSettingsMutator(appSettings: appSettings)
         eventRecorder = RecordingRemoteEventRecorder()
+        let identity = RemoteIdentityTestStore.make(label: "RemoteServerIntegrationTests")
+        identityStore = identity.store
+        identityDirectory = identity.directory
         server = RemoteAccessServer(services: RemoteAccessServerServices(
             sessionQueries: sessionAccess,
             sessionMutations: sessionAccess,
@@ -52,7 +57,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             extensions: live.extensions,
             usageDashboard: live.usageDashboard,
             usageLimit: live.usageLimit
-        ))
+        ), identityProvider: identity.store)
         server.authorizer = authority
         sessionCommands = RecordingRemoteSessionCommands()
         server.sessionCommands = sessionCommands
@@ -418,6 +423,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     override func tearDown() {
         server.stop()
         server = nil
+        RemoteIdentityTestStore.erase(identityDirectory)
+        identityDirectory = nil
+        identityStore = nil
         authority = nil
         settingsMutator = nil
         appSettings = nil

@@ -34,6 +34,7 @@ struct MacSupportReportDetails {
     private let crashLoopDecision: CrashLoopDecision?
     private let launchLedgerRead: LaunchLedgerRead?
     private let metricKitDiagnostics: MetricKitDiagnosticReading?
+    private let mainThreadStallIncidents: MainThreadStallIncidentReading?
 
     init(
         privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus],
@@ -48,7 +49,8 @@ struct MacSupportReportDetails {
         previousLaunchWasClean: Bool?,
         crashLoopDecision: CrashLoopDecision? = nil,
         launchLedgerRead: LaunchLedgerRead? = nil,
-        metricKitDiagnostics: MetricKitDiagnosticReading? = nil
+        metricKitDiagnostics: MetricKitDiagnosticReading? = nil,
+        mainThreadStallIncidents: MainThreadStallIncidentReading? = nil
     ) {
         self.privacyStatuses = privacyStatuses
         self.remoteAccessEnabled = remoteAccessEnabled
@@ -63,6 +65,7 @@ struct MacSupportReportDetails {
         self.crashLoopDecision = crashLoopDecision
         self.launchLedgerRead = launchLedgerRead
         self.metricKitDiagnostics = metricKitDiagnostics
+        self.mainThreadStallIncidents = mainThreadStallIncidents
     }
 
     // MARK: - Output
@@ -125,6 +128,10 @@ struct MacSupportReportDetails {
                     fields[.metricKitLastCrash] = facts
                 }
             }
+        }
+
+        if let mainThreadStallIncidents {
+            fields[.mainThreadStalls] = Self.summary(of: mainThreadStallIncidents)
         }
 
         return fields
@@ -203,6 +210,31 @@ struct MacSupportReportDetails {
         if let value = crash.signal { parts.append("signal=\(value)") }
         if let value = crash.terminationReason { parts.append("reason=\(value)") }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
+    /// Immediate app watchdog findings. Operation names come from `StaticString` trace schema;
+    /// the store re-validates their machine-token alphabet before they reach this boundary.
+    private static func summary(of reading: MainThreadStallIncidentReading) -> String {
+        switch reading {
+        case .noDirectory:
+            return "absent"
+        case .empty:
+            return "none"
+        case .unreadable(let files):
+            return "unreadable files=\(files)"
+        case .read(let summary):
+            var parts = [
+                "incidents=\(summary.incidentCount)",
+                "incomplete=\(summary.incompleteCount)",
+                "longest_ms=\(summary.longestObservedMilliseconds)",
+                "unreadable=\(summary.unreadableCount)",
+                "skipped=\(summary.skippedCount)"
+            ]
+            if !summary.operationNames.isEmpty {
+                parts.append("operations=\(summary.operationNames.joined(separator: ","))")
+            }
+            return parts.joined(separator: " ")
+        }
     }
 
     /// Days rather than instants, and UTC rather than the reporter's zone: neither the hour a Mac

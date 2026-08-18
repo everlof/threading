@@ -622,6 +622,11 @@ and are re-derived from the transcripts — the agent's own title where one exis
 prompt otherwise. Idempotent by construction: a backfilled session no longer carries a
 placeholder title, so later launches skip it without reading anything.
 
+The iPhone session header follows the same authority ladder through the catalogue's
+`RemoteSessionSummaryDTO.title`. Its live session socket also carries a title, but that value is
+the surface caption captured when the connection opened and may lag an explicit rename. It is a
+bootstrap fallback only while the catalogue has no title; it never overrides the catalogue.
+
 ## Launch and Resume
 
 ```

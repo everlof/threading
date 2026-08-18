@@ -140,6 +140,34 @@ extension MainWindowController {
         return (image, WindowSnapshot.writePNG(rep))
     }
 
+    /// Opens the report sheet on a picture taken outside Threading.
+    ///
+    /// Two doors lead here, and both are the app icon in the sense that matters: the Dock's, and
+    /// the strip beside the traffic lights. Neither is discoverable by looking, which is the one
+    /// weakness of the feature and the reason it is worth having anyway — the person who needs it
+    /// has just pressed ⌘⇧4 and is holding a file, and both are where a Mac user already drops
+    /// one.
+    ///
+    /// The sheet is the same sheet. What differs is the capture's provenance, which is why the
+    /// report says so in its first line rather than pretending the window took it.
+    func presentDroppedScreenshotReport(at url: URL, from source: DroppedScreenshotReport.Source) {
+        guard DroppedScreenshotReport.isReportable(url), let image = NSImage(contentsOf: url) else {
+            return
+        }
+        MacRemoteDiagnostics.record(.issueReportOpened, fields: [
+            .reason: source.rawValue,
+            .surface: "droppedScreenshot",
+        ])
+        showWindow(nil)
+        presentReport(
+            heading: L10n.string("Screenshot Report"),
+            subheading: url.lastPathComponent,
+            markdown: DroppedScreenshotReport.markdown(for: url, image: image),
+            screenshot: image,
+            screenshotURL: url
+        )
+    }
+
     /// The environment is read here rather than by each report, because it is the same reading
     /// for all three and it belongs to the *window* the capture was taken from — which is the
     /// one thing an `ElementReport` built from a detached view in a test cannot have.

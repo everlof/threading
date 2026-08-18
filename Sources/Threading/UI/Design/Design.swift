@@ -1187,6 +1187,24 @@ enum Design {
                 : AppThemePalette.color(.accentMuted)
         }
 
+        /// The ground a **primary action** paints, whatever treatment the theme states for it.
+        ///
+        /// Three answers because "primary" is a ranking rather than a colour. `.filled` is a
+        /// block of the primary role. `.outlined` paints nothing until it is reached for, so
+        /// what is under its title is the chrome's own ground. `.raised` keeps the ordinary
+        /// control face and says primary with an extra frame instead.
+        ///
+        /// Stated here rather than inside the button because a **plate** may paint it for a
+        /// control that is not the button — see `Design.Ink.primaryAction`.
+        static var primaryActionFace: NSColor {
+            let style = AppThemePalette.current.material.buttonStyle
+            switch style.primaryTreatment {
+            case .filled: return AppThemePalette.color(style.primaryRole)
+            case .outlined: return ground
+            case .raised: return AppThemePalette.color(style.secondaryRole)
+            }
+        }
+
         /// The ground behind the run of a string a search matched.
         ///
         /// Derived from the accent rather than authored per theme: a match is the one thing on
@@ -1500,6 +1518,46 @@ enum Design {
         /// AppKit's own, so the ink is measured against AppKit's; a styled theme paints its own
         /// accent, so the ink is measured against that.
         static var selection: Ink { Text.on(Design.Surface.selectionFill) }
+
+        /// The face of a **primary action**, as an `Ink` — what a control welded onto one draws
+        /// from.
+        ///
+        /// `selection`'s problem, one control further in. `SplitButtonView` draws a single plate
+        /// under a titled press and a chevron, so a primary plate lays the theme's accent under a
+        /// chevron whose own source was measured against the chrome, in the one control the eye
+        /// is already on. Only the plate knows what it painted, so the plate is what says so.
+        ///
+        /// Treatment-aware, because a primary is not always a block of accent: on `.raised` the
+        /// face is the ordinary control's and on `.outlined` there is no face at all, so on both
+        /// the chrome's ink is still the measured answer and only the glyph's tone moves.
+        static var primaryAction: Ink {
+            let style = AppThemePalette.current.material.buttonStyle
+            switch style.primaryTreatment {
+            case .raised:
+                return .chrome
+            case .outlined:
+                // The rule and the title are the accent itself over the chrome's own ground.
+                // Rest and hover are the same tone here because the press beside it does not move
+                // either: `ThemedButton` draws an outlined title in `primaryRole` whether the
+                // pointer is on it or not, and a chevron that brightened alone would report a
+                // hover the half next to it is not reporting.
+                let tint = AppThemePalette.color(style.primaryRole)
+                let chrome = Ink.chrome
+                return Ink(
+                    base: tint,
+                    label: tint,
+                    secondary: tint,
+                    tertiary: chrome.tertiary,
+                    quaternary: chrome.quaternary,
+                    surface: chrome.surface,
+                    surfaceHover: chrome.surfaceHover,
+                    border: chrome.border,
+                    rule: chrome.rule
+                )
+            case .filled:
+                return Text.on(Design.Surface.primaryActionFace)
+            }
+        }
 
         /// The chrome's own ground, as an `Ink`.
         ///

@@ -212,19 +212,19 @@ final class DetachedBrowserWindowController: ThemedWindowController {
 extension DetachedBrowserWindowController {
 
     @objc func closeActiveTab() {
-        if !host.closeActiveTab() { NSSound.beep() }
+        if !host.closeActiveTab() { SystemAlert.refuse() }
     }
 
     @objc func selectPreviousTab() {
-        if !host.selectAdjacentTab(offset: -1) { NSSound.beep() }
+        if !host.selectAdjacentTab(offset: -1) { SystemAlert.refuse() }
     }
 
     @objc func selectNextTab() {
-        if !host.selectAdjacentTab(offset: 1) { NSSound.beep() }
+        if !host.selectAdjacentTab(offset: 1) { SystemAlert.refuse() }
     }
 
     @objc func selectTabByNumber(_ sender: NSMenuItem) {
-        if !host.selectTab(atIndex: sender.tag - 1) { NSSound.beep() }
+        if !host.selectTab(atIndex: sender.tag - 1) { SystemAlert.refuse() }
     }
 }
 

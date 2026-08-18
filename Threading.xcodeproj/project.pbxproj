@@ -7,68 +7,63 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		5CC000010000000000000001 /* scc in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 5CC000010000000000000002 /* scc */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		7A0000010000000000000001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000011 /* main.swift */; };
-		7A0000010000000000000002 /* ThreadingWasmRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000010000000000000091 /* ThreadingWasmRuntime */; };
-		7A0000010000000000000003 /* ThreadingWasmExtensionRunner in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000014 /* ThreadingWasmExtensionRunner */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		09EEC39439CEDA7EAFBC697C /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
-		56AEA0E2733EBEE96BA2A24F /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
+		5AAA00010000000000000011 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5AAA00010000000000000001 /* Sparkle */; };
+		5CC000010000000000000001 /* scc in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 5CC000010000000000000002 /* scc */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		6746DE83B248339F7A44A795 /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
-		723062734D38CA186B79347F /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
-		89DB8D32FAE049571D22D568 /* ThreadingExtensionHelperNetwork in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* ThreadingExtensionHelperNetwork */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		7A0000010000000000000001 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000011 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift */; };
+		7A0000010000000000000002 /* ThreadingWasmRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000010000000000000091 /* ThreadingWasmRuntime */; };
+		7A0000010000000000000003 /* threading-wasm-extension-runner in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000014 /* threading-wasm-extension-runner */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
 		A09CD2FDD17E4E72005ECE03 /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
-		A39A300DF9F7CA8D21A7B7C3 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
-		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
-		B81F7A1E07A694FFB193A1BD /* ThreadingExtensionHelper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = C20CE9CA503B8DC639CAB992 /* ThreadingExtensionHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		5AAA00010000000000000011 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5AAA00010000000000000001 /* Sparkle */; };
-		D1FF00010000000000000011 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000001 /* NativeDiffCore */; };
-		D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000002 /* NativeDiffAppKit */; };
-		D1FF00010000000000000013 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000003 /* NativeDiffCore */; };
-		D1FF00010000000000000014 /* NativeDiffUIKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000004 /* NativeDiffUIKit */; };
-		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
-		F1000001000000000000037 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
-		F1000001000000000000038 /* LabelMorph in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000005 /* LabelMorph */; };
-		F1000001000000000000042 /* BorderBeamKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000011 /* BorderBeamKit */; };
-		F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
-		F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000009 /* ThreadingRemoteKit */; };
-		D0A100010000000000000001 /* ThreadingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A100010000000000000003 /* ThreadingDomain */; };
-		D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = D3EE00010000000000000004 /* ThreadingPeerTransport */; };
-		F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		A20000010000000000000012 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000010 /* SwiftTerm */; };
 		A20000010000000000000013 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
-		D3EE00010000000000000002 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = D3EE00010000000000000005 /* ThreadingPeerTransport */; };
+		A20000010000000000000016 /* Sources/Threading/AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015 /* Sources/Threading/AppIcon.icon */; };
 		A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
-		A20000010000000000000016 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015 /* AppIcon.icon */; };
-		B70000010000000000000002 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Fonts */; };
-		D2E00001000000000000000C /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
-		D2E00001000000000000000D /* NotificationDeliveryE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */; };
-		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
+		A20000010000000000000018 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
+		A39A300DF9F7CA8D21A7B7C3 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
 		A61100010000000000000001 /* RemoteUsageDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61100010000000000000002 /* RemoteUsageDashboardTests.swift */; };
 		A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61200010000000000000002 /* RemoteConversationStoreTests.swift */; };
 		A61300010000000000000001 /* SessionDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61300010000000000000002 /* SessionDashboardTests.swift */; };
 		A61400010000000000000001 /* MobileCollaborationPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */; };
 		A61500010000000000000001 /* MobileSessionChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61500010000000000000002 /* MobileSessionChromeTests.swift */; };
-		A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */; };
 		A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61900010000000000000002 /* RemoteTerminalScrollTests.swift */; };
+		A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */; };
+		A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62100010000000000000002 /* MobileWorkingOrbTests.swift */; };
+		A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */; };
+		A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62300010000000000000002 /* MobileAgentIdentityTests.swift */; };
 		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
 		A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61700010000000000000002 /* RemoteConnectionFailureTests.swift */; };
 		A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */; };
 		A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000002 /* RemoteHostTrustTests.swift */; };
 		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
 		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
+		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
+		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
+		B70000010000000000000002 /* Sources/Threading/Resources/Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Sources/Threading/Resources/Fonts */; };
+		B81F7A1E07A694FFB193A1BD /* threading-extension-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = C20CE9CA503B8DC639CAB992 /* threading-extension-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		D0A100010000000000000001 /* ThreadingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A100010000000000000003 /* ThreadingDomain */; };
+		D1FF00010000000000000011 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000001 /* NativeDiffCore */; };
+		D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000002 /* NativeDiffAppKit */; };
+		D1FF00010000000000000013 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000003 /* NativeDiffCore */; };
+		D1FF00010000000000000014 /* NativeDiffUIKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000004 /* NativeDiffUIKit */; };
+		D2E00001000000000000000C /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
+		D2E00001000000000000000D /* NotificationDeliveryE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */; };
+		D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = D3EE00010000000000000004 /* ThreadingPeerTransport */; };
+		D3EE00010000000000000002 /* ThreadingPeerTransport in Frameworks */ = {isa = PBXBuildFile; productRef = D3EE00010000000000000005 /* ThreadingPeerTransport */; };
+		F1000001000000000000036 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000001 /* SwiftTerm */; };
+		F1000001000000000000037 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
+		F1000001000000000000038 /* LabelMorph in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000005 /* LabelMorph */; };
+		F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
+		F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
+		F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000009 /* ThreadingRemoteKit */; };
+		F1000001000000000000042 /* BorderBeamKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000011 /* BorderBeamKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		7A0000010000000000000021 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = F8000001000000000000001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7A0000010000000000000051;
-			remoteInfo = ThreadingWasmExtensionRunner;
-		};
 		04945DA7B3517A8184BC0A01 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F8000001000000000000001 /* Project object */;
@@ -83,14 +78,14 @@
 			remoteGlobalIDString = DB14898531F8EFBEA7892331;
 			remoteInfo = ThreadingExtensionHelper;
 		};
-		95814D89024CC2AED2A443AC /* PBXContainerItemProxy */ = {
+		7A0000010000000000000021 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F8000001000000000000001 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = F6000001000000000000001;
-			remoteInfo = Threading;
+			remoteGlobalIDString = 7A0000010000000000000051;
+			remoteInfo = ThreadingWasmExtensionRunner;
 		};
-		D2E000010000000000000007 /* PBXContainerItemProxy */ = {
+		95814D89024CC2AED2A443AC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F8000001000000000000001 /* Project object */;
 			proxyType = 1;
@@ -111,6 +106,13 @@
 			remoteGlobalIDString = F6000001000000000000001;
 			remoteInfo = Threading;
 		};
+		D2E000010000000000000007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F6000001000000000000001;
+			remoteInfo = Threading;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -121,9 +123,9 @@
 			dstSubfolderSpec = 1;
 			files = (
 				5CC000010000000000000001 /* scc in Embed Extension Helpers */,
-				B81F7A1E07A694FFB193A1BD /* ThreadingExtensionHelper in Embed Extension Helpers */,
-				89DB8D32FAE049571D22D568 /* ThreadingExtensionHelperNetwork in Embed Extension Helpers */,
-				7A0000010000000000000003 /* ThreadingWasmExtensionRunner in Embed Extension Helpers */,
+				B81F7A1E07A694FFB193A1BD /* threading-extension-helper in Embed Extension Helpers */,
+				89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */,
+				7A0000010000000000000003 /* threading-wasm-extension-runner in Embed Extension Helpers */,
 			);
 			name = "Embed Extension Helpers";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -131,67 +133,71 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		5CC000010000000000000002 /* scc */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = scc; sourceTree = "<group>"; };
-		7A0000010000000000000011 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift; sourceTree = SOURCE_ROOT; };
-		7A0000010000000000000012 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Targets/WasmRunner/Info.plist; sourceTree = SOURCE_ROOT; };
-		7A0000010000000000000013 /* threading-wasm-extension-runner.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = Targets/WasmRunner/threading-wasm-extension-runner.entitlements; sourceTree = SOURCE_ROOT; };
-		7A0000010000000000000014 /* ThreadingWasmExtensionRunner */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingWasmExtensionRunner; sourceTree = BUILT_PRODUCTS_DIR; };
 		09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExtensionRunnerRequest.swift; sourceTree = "<group>"; };
-		161EB5CC2018AEE0E4E9F95F /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
+		161EB5CC2018AEE0E4E9F95F /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
 		19157F0EEE4BA2AFB5105E44 /* Info-network.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "Info-network.plist"; sourceTree = "<group>"; };
-		3F3EFEC8D4B4F821C9695ABA /* ThreadingExtensionHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingExtensionHelper; sourceTree = BUILT_PRODUCTS_DIR; };
-		543E83291094AE2E9DCA09FB /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
+		3F3EFEC8D4B4F821C9695ABA /* ThreadingExtensionHelper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = ThreadingExtensionHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		543E83291094AE2E9DCA09FB /* threading-extension-helper-network */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-extension-helper-network"; sourceTree = BUILT_PRODUCTS_DIR; };
 		595C17B45A239472429DDEC8 /* threading-extension-helper.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-extension-helper.entitlements"; sourceTree = "<group>"; };
-		661FF20242AD94BEA7B16F91 /* ThreadingExtensionHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingExtensionHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		5CC000010000000000000002 /* scc */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = scc; sourceTree = "<group>"; };
+		661FF20242AD94BEA7B16F91 /* ThreadingExtensionHelper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = ThreadingExtensionHelper; sourceTree = BUILT_PRODUCTS_DIR; };
 		724489E037A877AC092F16DE /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		72E4FC8EDC79F143EA49545C /* ThreadingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		D2E000010000000000000002 /* ThreadingNotificationE2ETests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingNotificationE2ETests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeliveryE2ETests.swift; sourceTree = "<group>"; };
-		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
+		7A0000010000000000000011 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000012 /* Targets/WasmRunner/Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Targets/WasmRunner/Info.plist; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000013 /* Targets/WasmRunner/threading-wasm-extension-runner.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "Targets/WasmRunner/threading-wasm-extension-runner.entitlements"; sourceTree = SOURCE_ROOT; };
+		7A0000010000000000000014 /* threading-wasm-extension-runner */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = "threading-wasm-extension-runner"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000010000000000000002 /* ThreadingMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThreadingMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000010000000000000015 /* Sources/Threading/AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Sources/Threading/AppIcon.icon; sourceTree = "<group>"; };
 		A61100010000000000000002 /* RemoteUsageDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteUsageDashboardTests.swift; sourceTree = "<group>"; };
 		A61200010000000000000002 /* RemoteConversationStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteConversationStoreTests.swift; sourceTree = "<group>"; };
 		A61300010000000000000002 /* SessionDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionDashboardTests.swift; sourceTree = "<group>"; };
 		A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileCollaborationPresentationTests.swift; sourceTree = "<group>"; };
 		A61500010000000000000002 /* MobileSessionChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionChromeTests.swift; sourceTree = "<group>"; };
-		A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardDismissalTests.swift; sourceTree = "<group>"; };
 		A61900010000000000000002 /* RemoteTerminalScrollTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalScrollTests.swift; sourceTree = "<group>"; };
+		A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardDismissalTests.swift; sourceTree = "<group>"; };
+		A62100010000000000000002 /* MobileWorkingOrbTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileWorkingOrbTests.swift; sourceTree = "<group>"; };
+		A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionNavigationTransitionTests.swift; sourceTree = "<group>"; };
+		A62300010000000000000002 /* MobileAgentIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAgentIdentityTests.swift; sourceTree = "<group>"; };
 		A61600010000000000000002 /* MobileThemeChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeChromeTests.swift; sourceTree = "<group>"; };
 		A61700010000000000000002 /* RemoteConnectionFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteConnectionFailureTests.swift; sourceTree = "<group>"; };
 		A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileConnectionDiagnosticsTests.swift; sourceTree = "<group>"; };
+		A6563DF6216A83E7016B0C5B /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A63100010000000000000002 /* RemoteHostTrustTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostTrustTests.swift; sourceTree = "<group>"; };
 		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
 		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
+		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A6563DF6216A83E7016B0C5B /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
-		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		C20CE9CA503B8DC639CAB992 /* ThreadingExtensionHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = ThreadingExtensionHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		B70000010000000000000001 /* Sources/Threading/Resources/Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
+		C0D100010000000000000002 /* ThreadingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C20CE9CA503B8DC639CAB992 /* threading-extension-helper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-extension-helper"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2E000010000000000000002 /* ThreadingNotificationE2ETests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingNotificationE2ETests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeliveryE2ETests.swift; sourceTree = "<group>"; };
 		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		F2000001000000000000038 /* Threading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threading.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000010000000000000002 /* ThreadingMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThreadingMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000010000000000000015 /* AppIcon.icon */ = {isa = PBXFileReference; path = Sources/Threading/AppIcon.icon; sourceTree = "<group>"; };
-		B70000010000000000000001 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
 		F446C4C52994905237C3BE9B /* threading-extension-helper-network.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-extension-helper-network.entitlements"; sourceTree = "<group>"; };
-		C0D100010000000000000002 /* ThreadingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		63D8F4BA2EE47C9A007F49BD /* Exceptions for "Sources" folder in "Threading" target */ = {
+		63D8F4BA2EE47C9A007F49BD /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Threading/Resources/Info.plist,
-				ThreadingMobile/Localizable.xcstrings,
-				ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings,
 				ThreadingMobile/ComposerAttachmentTray.swift,
 				ThreadingMobile/DemoExperience.swift,
-				ThreadingMobile/PairingView.swift,
 				ThreadingMobile/HostedRemoteConnectionManager.swift,
+				ThreadingMobile/Localizable.xcstrings,
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileIssueReporting.swift,
-				ThreadingMobile/MobileSettingsChrome.swift,
-				ThreadingMobile/MobileThemeEnvironment.swift,
-				ThreadingMobile/MobileSettingsView.swift,
-				ThreadingMobile/MobileWorkspaceActivity.swift,
 				ThreadingMobile/MobileSessionContinuityStore.swift,
+				ThreadingMobile/MobileSettingsChrome.swift,
+				ThreadingMobile/MobileSettingsView.swift,
+				ThreadingMobile/MobileTerminalKeyboardStore.swift,
+				ThreadingMobile/MobileThemeEnvironment.swift,
+				ThreadingMobile/MobileWorkingOrbView.swift,
+				ThreadingMobile/MobileWorkspaceActivity.swift,
+				ThreadingMobile/PairingView.swift,
 				ThreadingMobile/RemoteAppModel.swift,
 				ThreadingMobile/RemoteAttachmentsView.swift,
 				ThreadingMobile/RemoteBrowserFollowView.swift,
@@ -201,9 +207,9 @@
 				ThreadingMobile/RemoteConversationViewController.swift,
 				ThreadingMobile/RemoteDiagnostics.swift,
 				ThreadingMobile/RemoteExtensionPanelView.swift,
+				ThreadingMobile/RemoteGitReviewView.swift,
 				ThreadingMobile/RemoteHostStore.swift,
 				ThreadingMobile/RemoteHostTrust.swift,
-				ThreadingMobile/RemoteGitReviewView.swift,
 				ThreadingMobile/RemoteNotifications.swift,
 				ThreadingMobile/RemoteSessionConnection.swift,
 				ThreadingMobile/RemoteTheme.swift,
@@ -213,72 +219,25 @@
 				ThreadingMobile/SessionDashboard.swift,
 				ThreadingMobile/SessionDetailView.swift,
 				ThreadingMobile/SessionWorkspaceView.swift,
-				ThreadingMobile/ThreadingMobileApp.swift,
-				ThreadingMobile/ThreadingMobile.entitlements,
-				ThreadingMobile/TerminalViewRepresentable.swift,
 				ThreadingMobile/TerminalKeyBar.swift,
 				ThreadingMobile/TerminalKeyboardEditorView.swift,
-				ThreadingMobile/MobileTerminalKeyboardStore.swift,
+				ThreadingMobile/TerminalViewRepresentable.swift,
 				ThreadingMobile/ThemedDialog.swift,
+				"ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings",
+				ThreadingMobile/ThreadingMobileApp.swift,
 			);
 			target = F6000001000000000000001 /* Threading */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		63D8F4952EE47C9A007F49BD /* Sources */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				63D8F4BA2EE47C9A007F49BD /* Exceptions for "Sources" folder in "Threading" target */,
-			);
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-				Threading/Resources/BrowserAutomation,
-				Threading/Resources/Icons,
-				Threading/Resources/RemoteClient,
-			);
-			path = Sources;
-			sourceTree = "<group>";
-		};
-		A20000010000000000000014 /* ThreadingMobile */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = Sources/ThreadingMobile;
-			sourceTree = "<group>";
-		};
-		C0D100010000000000000003 /* ThreadingUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = Tests/ThreadingUITests;
-			sourceTree = "<group>";
-		};
-		B1792448FB880E01F5D9086C /* Tests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			explicitFileTypes = {
-			};
-			explicitFolders = (
-			);
-			path = Tests/ThreadingTests;
-			sourceTree = "<group>";
-		};
+		63D8F4952EE47C9A007F49BD /* Sources */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (63D8F4BA2EE47C9A007F49BD /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (Threading/Resources/BrowserAutomation, Threading/Resources/Icons, Threading/Resources/RemoteClient, ); path = Sources; sourceTree = "<group>"; };
+		A20000010000000000000014 /* Sources/ThreadingMobile */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Sources/ThreadingMobile; sourceTree = "<group>"; };
+		B1792448FB880E01F5D9086C /* Tests/ThreadingTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Tests/ThreadingTests; sourceTree = "<group>"; };
+		C0D100010000000000000003 /* Tests/ThreadingUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Tests/ThreadingUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		7A0000010000000000000031 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				7A0000010000000000000002 /* ThreadingWasmRuntime in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		56FF87A7554976846335914F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -288,29 +247,11 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		F3000001000000000000001 /* Frameworks */ = {
+		7A0000010000000000000031 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F1000001000000000000036 /* SwiftTerm in Frameworks */,
-				F1000001000000000000037 /* ThinkingOrbs in Frameworks */,
-				F1000001000000000000038 /* LabelMorph in Frameworks */,
-				F1000001000000000000042 /* BorderBeamKit in Frameworks */,
-				F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */,
-				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
-				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
-				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
-				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
-				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
-				5AAA00010000000000000011 /* Sparkle in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		D2E000010000000000000005 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				D2E00001000000000000000C /* Cocoa.framework in Frameworks */,
+				7A0000010000000000000002 /* ThreadingWasmRuntime in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -322,6 +263,7 @@
 				A20000010000000000000013 /* ThreadingRemoteKit in Frameworks */,
 				D3EE00010000000000000002 /* ThreadingPeerTransport in Frameworks */,
 				A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */,
+				A20000010000000000000018 /* ThinkingOrbs in Frameworks */,
 				D1FF00010000000000000013 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000014 /* NativeDiffUIKit in Frameworks */,
 			);
@@ -343,9 +285,43 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D2E000010000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D2E00001000000000000000C /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F3000001000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F1000001000000000000036 /* SwiftTerm in Frameworks */,
+				F1000001000000000000037 /* ThinkingOrbs in Frameworks */,
+				F1000001000000000000038 /* LabelMorph in Frameworks */,
+				F1000001000000000000042 /* BorderBeamKit in Frameworks */,
+				F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */,
+				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
+				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
+				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
+				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
+				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
+				5AAA00010000000000000011 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		25B0E33ED576F9158763F7B2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D99AEB234BECE87FAD063CB3 /* OS X */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		5CC000010000000000000003 /* Bundled scc */ = {
 			isa = PBXGroup;
 			children = (
@@ -358,19 +334,45 @@
 		7A0000010000000000000041 /* Wasm Runner */ = {
 			isa = PBXGroup;
 			children = (
-				7A0000010000000000000011 /* main.swift */,
-				7A0000010000000000000012 /* Info.plist */,
-				7A0000010000000000000013 /* threading-wasm-extension-runner.entitlements */,
+				7A0000010000000000000011 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift */,
+				7A0000010000000000000012 /* Targets/WasmRunner/Info.plist */,
+				7A0000010000000000000013 /* Targets/WasmRunner/threading-wasm-extension-runner.entitlements */,
 			);
 			name = "Wasm Runner";
 			sourceTree = "<group>";
 		};
-		25B0E33ED576F9158763F7B2 /* Frameworks */ = {
+		B2000001000000000000000F /* Mobile Tests */ = {
 			isa = PBXGroup;
 			children = (
-				D99AEB234BECE87FAD063CB3 /* OS X */,
+				B20000010000000000000004 /* NotificationDeepLinkTests.swift */,
+				A63100010000000000000002 /* RemoteHostTrustTests.swift */,
+				A63200010000000000000002 /* RemoteHostCandidateTests.swift */,
+				A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */,
+				A61200010000000000000002 /* RemoteConversationStoreTests.swift */,
+				A61100010000000000000002 /* RemoteUsageDashboardTests.swift */,
+				A61300010000000000000002 /* SessionDashboardTests.swift */,
+				A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */,
+				A61500010000000000000002 /* MobileSessionChromeTests.swift */,
+				A61600010000000000000002 /* MobileThemeChromeTests.swift */,
+				A61700010000000000000002 /* RemoteConnectionFailureTests.swift */,
+				A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */,
+				A61900010000000000000002 /* RemoteTerminalScrollTests.swift */,
+				A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */,
+				A62100010000000000000002 /* MobileWorkingOrbTests.swift */,
+				A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */,
+				A62300010000000000000002 /* MobileAgentIdentityTests.swift */,
 			);
-			name = Frameworks;
+			name = "Mobile Tests";
+			path = Tests/ThreadingMobileTests;
+			sourceTree = "<group>";
+		};
+		D2E00001000000000000000E /* Notification E2E Tests */ = {
+			isa = PBXGroup;
+			children = (
+				D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */,
+			);
+			name = "Notification E2E Tests";
+			path = Tests/ThreadingNotificationE2ETests;
 			sourceTree = "<group>";
 		};
 		D99AEB234BECE87FAD063CB3 /* OS X */ = {
@@ -400,15 +402,15 @@
 			children = (
 				63D8F4952EE47C9A007F49BD /* Sources */,
 				5CC000010000000000000003 /* Bundled scc */,
-				A20000010000000000000014 /* ThreadingMobile */,
-				A20000010000000000000015 /* AppIcon.icon */,
-				B70000010000000000000001 /* Fonts */,
+				A20000010000000000000014 /* Sources/ThreadingMobile */,
+				A20000010000000000000015 /* Sources/Threading/AppIcon.icon */,
+				B70000010000000000000001 /* Sources/Threading/Resources/Fonts */,
 				F5000001000000000000020 /* Products */,
 				25B0E33ED576F9158763F7B2 /* Frameworks */,
-				B1792448FB880E01F5D9086C /* Tests */,
+				B1792448FB880E01F5D9086C /* Tests/ThreadingTests */,
 				B2000001000000000000000F /* Mobile Tests */,
 				D2E00001000000000000000E /* Notification E2E Tests */,
-				C0D100010000000000000003 /* ThreadingUITests */,
+				C0D100010000000000000003 /* Tests/ThreadingUITests */,
 				DEBA3EC0E0E1A6C00C62BAE7 /* Extension Helper */,
 				7A0000010000000000000041 /* Wasm Runner */,
 			);
@@ -427,66 +429,16 @@
 				A6563DF6216A83E7016B0C5B /* ThreadingExtensionHelperNetwork */,
 				661FF20242AD94BEA7B16F91 /* ThreadingExtensionHelper */,
 				161EB5CC2018AEE0E4E9F95F /* ThreadingExtensionHelperNetwork */,
-				C20CE9CA503B8DC639CAB992 /* ThreadingExtensionHelper */,
-				543E83291094AE2E9DCA09FB /* ThreadingExtensionHelperNetwork */,
-				7A0000010000000000000014 /* ThreadingWasmExtensionRunner */,
+				C20CE9CA503B8DC639CAB992 /* threading-extension-helper */,
+				543E83291094AE2E9DCA09FB /* threading-extension-helper-network */,
+				7A0000010000000000000014 /* threading-wasm-extension-runner */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		D2E00001000000000000000E /* Notification E2E Tests */ = {
-			isa = PBXGroup;
-			children = (
-				D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */,
-			);
-			name = "Notification E2E Tests";
-			path = Tests/ThreadingNotificationE2ETests;
-			sourceTree = "<group>";
-		};
-		B2000001000000000000000F /* Mobile Tests */ = {
-			isa = PBXGroup;
-			children = (
-				B20000010000000000000004 /* NotificationDeepLinkTests.swift */,
-				A61200010000000000000002 /* RemoteConversationStoreTests.swift */,
-				A61100010000000000000002 /* RemoteUsageDashboardTests.swift */,
-				A61300010000000000000002 /* SessionDashboardTests.swift */,
-				A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */,
-				A61500010000000000000002 /* MobileSessionChromeTests.swift */,
-				A61600010000000000000002 /* MobileThemeChromeTests.swift */,
-				A61700010000000000000002 /* RemoteConnectionFailureTests.swift */,
-				A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */,
-				A63100010000000000000002 /* RemoteHostTrustTests.swift */,
-				A63200010000000000000002 /* RemoteHostCandidateTests.swift */,
-				A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */,
-				A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */,
-				A61900010000000000000002 /* RemoteTerminalScrollTests.swift */,
-			);
-			name = "Mobile Tests";
-			path = Tests/ThreadingMobileTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		7A0000010000000000000051 /* ThreadingWasmExtensionRunner */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 7A0000010000000000000083 /* Build configuration list for PBXNativeTarget "ThreadingWasmExtensionRunner" */;
-			buildPhases = (
-				7A0000010000000000000032 /* Sources */,
-				7A0000010000000000000031 /* Frameworks */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = ThreadingWasmExtensionRunner;
-			packageProductDependencies = (
-				7A0000010000000000000091 /* ThreadingWasmRuntime */,
-			);
-			productName = ThreadingWasmExtensionRunner;
-			productReference = 7A0000010000000000000014 /* ThreadingWasmExtensionRunner */;
-			productType = "com.apple.product-type.tool";
-		};
 		1459DEBF5B7709D7DCD407A2 /* ThreadingExtensionHelperNetwork */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 513BC3CC78594F6C9DFC61E0 /* Build configuration list for PBXNativeTarget "ThreadingExtensionHelperNetwork" */;
@@ -499,7 +451,7 @@
 			);
 			name = ThreadingExtensionHelperNetwork;
 			productName = ThreadingExtensionHelperNetwork;
-			productReference = 543E83291094AE2E9DCA09FB /* ThreadingExtensionHelperNetwork */;
+			productReference = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */;
 			productType = "com.apple.product-type.tool";
 		};
 		20A00C033DC1347FA758CD10 /* ThreadingTests */ = {
@@ -516,7 +468,7 @@
 				44883DEA7DCAA5EAADC3CD6A /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				B1792448FB880E01F5D9086C /* Tests */,
+				B1792448FB880E01F5D9086C /* Tests/ThreadingTests */,
 			);
 			name = ThreadingTests;
 			packageProductDependencies = (
@@ -526,81 +478,24 @@
 			productReference = 72E4FC8EDC79F143EA49545C /* ThreadingTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		D2E000010000000000000001 /* ThreadingNotificationE2ETests */ = {
+		7A0000010000000000000051 /* ThreadingWasmExtensionRunner */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D2E00001000000000000000B /* Build configuration list for PBXNativeTarget "ThreadingNotificationE2ETests" */;
+			buildConfigurationList = 7A0000010000000000000083 /* Build configuration list for PBXNativeTarget "ThreadingWasmExtensionRunner" */;
 			buildPhases = (
-				D2E000010000000000000004 /* Sources */,
-				D2E000010000000000000005 /* Frameworks */,
-				D2E000010000000000000006 /* Resources */,
+				7A0000010000000000000032 /* Sources */,
+				7A0000010000000000000031 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				D2E000010000000000000008 /* PBXTargetDependency */,
 			);
-			name = ThreadingNotificationE2ETests;
+			name = ThreadingWasmExtensionRunner;
 			packageProductDependencies = (
+				7A0000010000000000000091 /* ThreadingWasmRuntime */,
 			);
-			productName = ThreadingNotificationE2ETests;
-			productReference = D2E000010000000000000002 /* ThreadingNotificationE2ETests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
-		DB14898531F8EFBEA7892331 /* ThreadingExtensionHelper */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 091BD013A1E26748129E077F /* Build configuration list for PBXNativeTarget "ThreadingExtensionHelper" */;
-			buildPhases = (
-				0EEAE3A785B7D334D6F7DBB7 /* Sources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = ThreadingExtensionHelper;
-			productName = ThreadingExtensionHelper;
-			productReference = C20CE9CA503B8DC639CAB992 /* ThreadingExtensionHelper */;
+			productName = ThreadingWasmExtensionRunner;
+			productReference = 7A0000010000000000000014 /* threading-wasm-extension-runner */;
 			productType = "com.apple.product-type.tool";
-		};
-		F6000001000000000000001 /* Threading */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = F7000001000000000000003 /* Build configuration list for PBXNativeTarget "Threading" */;
-			buildPhases = (
-				C0D3A1100000000000000001 /* Enforce Repository Boundaries */,
-				F6000001000000000000002 /* Sources */,
-				F3000001000000000000001 /* Frameworks */,
-				F6000001000000000000003 /* Resources */,
-				E77200010000000000000001 /* Embed Legal Notices */,
-				E77100010000000000000001 /* Embed Extension SDK */,
-				877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */,
-				E77300010000000000000001 /* Embed UI Scenario Helper */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */,
-				0B537AA731F40F54768A22BD /* PBXTargetDependency */,
-				7A0000010000000000000022 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				63D8F4952EE47C9A007F49BD /* Sources */,
-			);
-			name = Threading;
-			packageProductDependencies = (
-				F4000001000000000000001 /* SwiftTerm */,
-				F4000001000000000000003 /* ThinkingOrbs */,
-				F4000001000000000000005 /* LabelMorph */,
-				F4000001000000000000011 /* BorderBeamKit */,
-				F4000001000000000000007 /* ThreadingExtensionKit */,
-				F4000001000000000000009 /* ThreadingRemoteKit */,
-				D0A100010000000000000003 /* ThreadingDomain */,
-				D3EE00010000000000000004 /* ThreadingPeerTransport */,
-				D1FF00010000000000000001 /* NativeDiffCore */,
-				D1FF00010000000000000002 /* NativeDiffAppKit */,
-				5AAA00010000000000000001 /* Sparkle */,
-			);
-			productName = Threading;
-			productReference = F2000001000000000000038 /* Threading.app */;
-			productType = "com.apple.product-type.application";
 		};
 		A20000010000000000000001 /* ThreadingMobile */ = {
 			isa = PBXNativeTarget;
@@ -616,7 +511,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				A20000010000000000000014 /* ThreadingMobile */,
+				A20000010000000000000014 /* Sources/ThreadingMobile */,
 			);
 			name = ThreadingMobile;
 			packageProductDependencies = (
@@ -624,6 +519,7 @@
 				A20000010000000000000011 /* ThreadingRemoteKit */,
 				D3EE00010000000000000005 /* ThreadingPeerTransport */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
+				F4000001000000000000003 /* ThinkingOrbs */,
 				D1FF00010000000000000003 /* NativeDiffCore */,
 				D1FF00010000000000000004 /* NativeDiffUIKit */,
 			);
@@ -667,7 +563,7 @@
 				C0D100010000000000000008 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				C0D100010000000000000003 /* ThreadingUITests */,
+				C0D100010000000000000003 /* Tests/ThreadingUITests */,
 			);
 			name = ThreadingUITests;
 			packageProductDependencies = (
@@ -675,6 +571,82 @@
 			productName = ThreadingUITests;
 			productReference = C0D100010000000000000002 /* ThreadingUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		D2E000010000000000000001 /* ThreadingNotificationE2ETests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D2E00001000000000000000B /* Build configuration list for PBXNativeTarget "ThreadingNotificationE2ETests" */;
+			buildPhases = (
+				D2E000010000000000000004 /* Sources */,
+				D2E000010000000000000005 /* Frameworks */,
+				D2E000010000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D2E000010000000000000008 /* PBXTargetDependency */,
+			);
+			name = ThreadingNotificationE2ETests;
+			packageProductDependencies = (
+			);
+			productName = ThreadingNotificationE2ETests;
+			productReference = D2E000010000000000000002 /* ThreadingNotificationE2ETests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		DB14898531F8EFBEA7892331 /* ThreadingExtensionHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 091BD013A1E26748129E077F /* Build configuration list for PBXNativeTarget "ThreadingExtensionHelper" */;
+			buildPhases = (
+				0EEAE3A785B7D334D6F7DBB7 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ThreadingExtensionHelper;
+			productName = ThreadingExtensionHelper;
+			productReference = C20CE9CA503B8DC639CAB992 /* threading-extension-helper */;
+			productType = "com.apple.product-type.tool";
+		};
+		F6000001000000000000001 /* Threading */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F7000001000000000000003 /* Build configuration list for PBXNativeTarget "Threading" */;
+			buildPhases = (
+				C0D3A1100000000000000001 /* Enforce Repository Boundaries */,
+				F6000001000000000000002 /* Sources */,
+				F3000001000000000000001 /* Frameworks */,
+				F6000001000000000000003 /* Resources */,
+				E77200010000000000000001 /* Embed Legal Notices */,
+				E77100010000000000000001 /* Embed Extension SDK */,
+				877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */,
+				E77300010000000000000001 /* Embed UI Scenario Helper */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */,
+				0B537AA731F40F54768A22BD /* PBXTargetDependency */,
+				7A0000010000000000000022 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				63D8F4952EE47C9A007F49BD /* Sources */,
+			);
+			name = Threading;
+			packageProductDependencies = (
+				F4000001000000000000001 /* SwiftTerm */,
+				F4000001000000000000003 /* ThinkingOrbs */,
+				F4000001000000000000005 /* LabelMorph */,
+				F4000001000000000000011 /* BorderBeamKit */,
+				F4000001000000000000007 /* ThreadingExtensionKit */,
+				F4000001000000000000009 /* ThreadingRemoteKit */,
+				D0A100010000000000000003 /* ThreadingDomain */,
+				D3EE00010000000000000004 /* ThreadingPeerTransport */,
+				D1FF00010000000000000001 /* NativeDiffCore */,
+				D1FF00010000000000000002 /* NativeDiffAppKit */,
+				5AAA00010000000000000001 /* Sparkle */,
+			);
+			productName = Threading;
+			productReference = F2000001000000000000038 /* Threading.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -721,28 +693,28 @@
 			);
 			mainGroup = F5000001000000000000001;
 			packageReferences = (
-				F4000001000000000000002 /* XCLocalSwiftPackageReference "SwiftTerm" */,
-				F4000001000000000000004 /* XCLocalSwiftPackageReference "ThinkingOrbs" */,
-				F4000001000000000000006 /* XCLocalSwiftPackageReference "LabelMorph" */,
-				F4000001000000000000012 /* XCLocalSwiftPackageReference "BorderBeamKit" */,
-				F4000001000000000000008 /* XCLocalSwiftPackageReference "ThreadingExtensionKit" */,
-				F4000001000000000000010 /* XCLocalSwiftPackageReference "ThreadingRemoteKit" */,
-				D0A100010000000000000002 /* XCLocalSwiftPackageReference "ThreadingDomain" */,
-				D3EE00010000000000000003 /* XCLocalSwiftPackageReference "ThreadingPeerTransport" */,
+				F4000001000000000000002 /* XCLocalSwiftPackageReference "Packages/Vendor/SwiftTerm" */,
+				F4000001000000000000004 /* XCLocalSwiftPackageReference "Packages/Vendor/ThinkingOrbs" */,
+				F4000001000000000000006 /* XCLocalSwiftPackageReference "Packages/Vendor/LabelMorph" */,
+				F4000001000000000000012 /* XCLocalSwiftPackageReference "Packages/Vendor/BorderBeamKit" */,
+				F4000001000000000000008 /* XCLocalSwiftPackageReference "Packages/ThreadingExtensionKit" */,
+				F4000001000000000000010 /* XCLocalSwiftPackageReference "Packages/ThreadingRemoteKit" */,
+				D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */,
+				D3EE00010000000000000003 /* XCLocalSwiftPackageReference "Packages/ThreadingPeerTransport" */,
 				D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */,
 				5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
-				7A0000010000000000000090 /* XCLocalSwiftPackageReference "ThreadingWasmRuntime" */,
+				7A0000010000000000000090 /* XCLocalSwiftPackageReference "Packages/ThreadingWasmRuntime" */,
 			);
 			productRefGroup = F5000001000000000000020 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-				targets = (
-					F6000001000000000000001 /* Threading */,
-					A20000010000000000000001 /* ThreadingMobile */,
-					B2000001000000000000000B /* ThreadingMobileTests */,
-					20A00C033DC1347FA758CD10 /* ThreadingTests */,
-					D2E000010000000000000001 /* ThreadingNotificationE2ETests */,
-					C0D100010000000000000001 /* ThreadingUITests */,
+			targets = (
+				F6000001000000000000001 /* Threading */,
+				A20000010000000000000001 /* ThreadingMobile */,
+				B2000001000000000000000B /* ThreadingMobileTests */,
+				20A00C033DC1347FA758CD10 /* ThreadingTests */,
+				D2E000010000000000000001 /* ThreadingNotificationE2ETests */,
+				C0D100010000000000000001 /* ThreadingUITests */,
 				DB14898531F8EFBEA7892331 /* ThreadingExtensionHelper */,
 				1459DEBF5B7709D7DCD407A2 /* ThreadingExtensionHelperNetwork */,
 				7A0000010000000000000051 /* ThreadingWasmExtensionRunner */,
@@ -751,6 +723,29 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A20000010000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A20000010000000000000016 /* Sources/Threading/AppIcon.icon in Resources */,
+				B70000010000000000000002 /* Sources/Threading/Resources/Fonts in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B20000010000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0D100010000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C995024E6F941ADF45C13130 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -772,33 +767,10 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A20000010000000000000004 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A20000010000000000000016 /* AppIcon.icon in Resources */,
-				B70000010000000000000002 /* Fonts in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		B20000010000000000000008 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		C0D100010000000000000005 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		E77300010000000000000001 /* Embed UI Scenario Helper */ = {
+		C0D3A1100000000000000001 /* Enforce Repository Boundaries */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -807,16 +779,49 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/scripts/embed_ui_scenario_helper.sh",
+				"$(SRCROOT)/Sources",
+				"$(SRCROOT)/scripts/config/theme-boundary.json",
+				"$(SRCROOT)/scripts/check_theme_boundaries.sh",
+				"$(SRCROOT)/scripts/check_architecture_boundaries.sh",
+				"$(SRCROOT)/scripts/check_logging_boundaries.py",
+				"$(SRCROOT)/scripts/theme_boundary_lint.swift",
+				"$(SRCROOT)/docs/THEME_BOUNDARY.md",
+				"$(SRCROOT)/AGENTS.md",
+				"$(SRCROOT)/CLAUDE.md",
 			);
-			name = "Embed UI Scenario Helper";
+			name = "Enforce Repository Boundaries";
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(DERIVED_FILE_DIR)/theme-boundary-lint",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/scripts/embed_ui_scenario_helper.sh\"";
+			shellScript = "# set -e is load-bearing: without it only the LAST command's exit status gates the\n# build, and a theme or localization failure earlier in this phase is printed and then\n# swallowed  found August 2026 when peer findings sailed through an ordinary build.\nset -euo pipefail\n\"${SRCROOT}/scripts/check_theme_boundaries.sh\"\nif [[ -z \"${THREADING_MOBILE_ICON_OUTPUT_DIR:-}\" ]]; then\n  \"${SRCROOT}/scripts/check_architecture_boundaries.sh\"\nfi\n";
+		};
+		E77100010000000000000001 /* Embed Extension SDK */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Packages/ThreadingExtensionKit",
+				"$(SRCROOT)/Tests/Fixtures/Extensions/registration.wasm",
+				"$(SRCROOT)/scripts/embed_extension_sdk.sh",
+			);
+			name = "Embed Extension SDK";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ExtensionSDK/ThreadingExtensionKit/SDK_VERSION",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/FirstPartyExtensions/codes.threading.storm.threadingextension/threading-extension.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/scripts/embed_extension_sdk.sh\"";
 		};
 		E77200010000000000000001 /* Embed Legal Notices */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -860,7 +865,7 @@
 			shellPath = /bin/bash;
 			shellScript = "\"${SRCROOT}/scripts/embed_legal_notices.sh\"";
 		};
-		E77100010000000000000001 /* Embed Extension SDK */ = {
+		E77300010000000000000001 /* Embed UI Scenario Helper */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -869,61 +874,20 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/Packages/ThreadingExtensionKit",
-				"$(SRCROOT)/Tests/Fixtures/Extensions/registration.wasm",
-				"$(SRCROOT)/scripts/embed_extension_sdk.sh",
+				"$(SRCROOT)/scripts/embed_ui_scenario_helper.sh",
 			);
-			name = "Embed Extension SDK";
+			name = "Embed UI Scenario Helper";
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ExtensionSDK/ThreadingExtensionKit/SDK_VERSION",
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/FirstPartyExtensions/codes.threading.storm.threadingextension/threading-extension.json",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/scripts/embed_extension_sdk.sh\"";
-		};
-		C0D3A1100000000000000001 /* Enforce Repository Boundaries */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/Sources",
-				"$(SRCROOT)/scripts/config/theme-boundary.json",
-				"$(SRCROOT)/scripts/check_theme_boundaries.sh",
-				"$(SRCROOT)/scripts/check_architecture_boundaries.sh",
-				"$(SRCROOT)/scripts/check_logging_boundaries.py",
-				"$(SRCROOT)/scripts/theme_boundary_lint.swift",
-				"$(SRCROOT)/docs/THEME_BOUNDARY.md",
-				"$(SRCROOT)/AGENTS.md",
-				"$(SRCROOT)/CLAUDE.md",
-			);
-			name = "Enforce Repository Boundaries";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/theme-boundary-lint",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/bash;
-			shellScript = "# set -e is load-bearing: without it only the LAST command's exit status gates the\n# build, and a theme or localization failure earlier in this phase is printed and then\n# swallowed  found August 2026 when peer findings sailed through an ordinary build.\nset -euo pipefail\n\"${SRCROOT}/scripts/check_theme_boundaries.sh\"\nif [[ -z \"${THREADING_MOBILE_ICON_OUTPUT_DIR:-}\" ]]; then\n  \"${SRCROOT}/scripts/check_architecture_boundaries.sh\"\nfi\n";
+			shellScript = "\"${SRCROOT}/scripts/embed_ui_scenario_helper.sh\"";
 		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		7A0000010000000000000032 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				7A0000010000000000000001 /* main.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		0EEAE3A785B7D334D6F7DBB7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -940,28 +904,11 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		D2E000010000000000000004 /* Sources */ = {
+		7A0000010000000000000032 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D2E00001000000000000000D /* NotificationDeliveryE2ETests.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		CFDC27CF41471FFEBB7A7C93 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				09EEC39439CEDA7EAFBC697C /* main.swift in Sources */,
-				A09CD2FDD17E4E72005ECE03 /* ExtensionRunnerRequest.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		F6000001000000000000002 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */,
+				7A0000010000000000000001 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -977,6 +924,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */,
+				A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */,
+				A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */,
+				A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */,
 				A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */,
 				A61100010000000000000001 /* RemoteUsageDashboardTests.swift in Sources */,
 				A61300010000000000000001 /* SessionDashboardTests.swift in Sources */,
@@ -985,11 +935,11 @@
 				A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */,
 				A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */,
 				A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */,
-				A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */,
-				A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */,
-				A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */,
-				A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */,
 				A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */,
+				A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */,
+				A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */,
+				A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */,
+				A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1000,15 +950,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CFDC27CF41471FFEBB7A7C93 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				09EEC39439CEDA7EAFBC697C /* main.swift in Sources */,
+				A09CD2FDD17E4E72005ECE03 /* ExtensionRunnerRequest.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D2E000010000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D2E00001000000000000000D /* NotificationDeliveryE2ETests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F6000001000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		7A0000010000000000000022 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = ThreadingWasmExtensionRunner;
-			target = 7A0000010000000000000051 /* ThreadingWasmExtensionRunner */;
-			targetProxy = 7A0000010000000000000021 /* PBXContainerItemProxy */;
-		};
 		0B537AA731F40F54768A22BD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = ThreadingExtensionHelperNetwork;
@@ -1021,11 +990,17 @@
 			target = F6000001000000000000001 /* Threading */;
 			targetProxy = 95814D89024CC2AED2A443AC /* PBXContainerItemProxy */;
 		};
-		D2E000010000000000000008 /* PBXTargetDependency */ = {
+		7A0000010000000000000022 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			name = Threading;
-			target = F6000001000000000000001 /* Threading */;
-			targetProxy = D2E000010000000000000007 /* PBXContainerItemProxy */;
+			name = ThreadingWasmExtensionRunner;
+			target = 7A0000010000000000000051 /* ThreadingWasmExtensionRunner */;
+			targetProxy = 7A0000010000000000000021 /* PBXContainerItemProxy */;
+		};
+		A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = ThreadingExtensionHelper;
+			target = DB14898531F8EFBEA7892331 /* ThreadingExtensionHelper */;
+			targetProxy = 28376D7AA2BB73D3CD291113 /* PBXContainerItemProxy */;
 		};
 		B2000001000000000000000A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -1039,130 +1014,15 @@
 			target = F6000001000000000000001 /* Threading */;
 			targetProxy = C0D100010000000000000007 /* PBXContainerItemProxy */;
 		};
-		A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */ = {
+		D2E000010000000000000008 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			name = ThreadingExtensionHelper;
-			target = DB14898531F8EFBEA7892331 /* ThreadingExtensionHelper */;
-			targetProxy = 28376D7AA2BB73D3CD291113 /* PBXContainerItemProxy */;
+			name = Threading;
+			target = F6000001000000000000001 /* Threading */;
+			targetProxy = D2E000010000000000000007 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		7A0000010000000000000081 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = Targets/WasmRunner/threading-wasm-extension-runner.entitlements;
-				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
-				CODE_SIGN_STYLE = Automatic;
-				ENABLE_HARDENED_RUNTIME = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/WasmRunner/Info.plist",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.wasm-extension-runner;
-				PRODUCT_NAME = "threading-wasm-extension-runner";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		7A0000010000000000000082 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = Targets/WasmRunner/threading-wasm-extension-runner.entitlements;
-				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
-				CODE_SIGN_STYLE = Automatic;
-				ENABLE_HARDENED_RUNTIME = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/WasmRunner/Info.plist",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.wasm-extension-runner;
-				PRODUCT_NAME = "threading-wasm-extension-runner";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
-		0F5B132AD8A070E729F93431 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper-network.entitlements";
-				CODE_SIGN_STYLE = Automatic;
-				ENABLE_HARDENED_RUNTIME = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/ExtensionHelper/Info-network.plist",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper-network";
-				PRODUCT_NAME = "threading-extension-helper-network";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
-		39E37C55A3E2219555956D29 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper.entitlements";
-				CODE_SIGN_STYLE = Automatic;
-				ENABLE_HARDENED_RUNTIME = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/ExtensionHelper/Info.plist",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper";
-				PRODUCT_NAME = "threading-extension-helper";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		3DB3C9B15199B2029009DFDF /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper.entitlements";
-				CODE_SIGN_STYLE = Automatic;
-				ENABLE_HARDENED_RUNTIME = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/ExtensionHelper/Info.plist",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper";
-				PRODUCT_NAME = "threading-extension-helper";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
 		42E68C88D65AA8EAE7E7206F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1229,26 +1089,229 @@
 			};
 			name = Release;
 		};
-		7A66E846FFEEFD7F918F9A8D /* Debug */ = {
+		7A0000010000000000000081 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Targets/ExtensionHelper/threading-extension-helper-network.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Targets/WasmRunner/threading-wasm-extension-runner.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				ENABLE_HARDENED_RUNTIME = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_LDFLAGS = (
 					"-sectcreate",
 					__TEXT,
 					__info_plist,
-					"$(SRCROOT)/Targets/ExtensionHelper/Info-network.plist",
+					"$(SRCROOT)/Targets/WasmRunner/Info.plist",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.extension-helper-network";
-				PRODUCT_NAME = "threading-extension-helper-network";
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.wasm-extension-runner";
+				PRODUCT_NAME = "threading-wasm-extension-runner";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
+		};
+		7A0000010000000000000082 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Targets/WasmRunner/threading-wasm-extension-runner.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Targets/WasmRunner/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.wasm-extension-runner";
+				PRODUCT_NAME = "threading-wasm-extension-runner";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A20000010000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconThemeThreading AppIconThemeEditorial AppIconThemeCyberpunk AppIconThemeSwissMinimalist AppIconThemeBauhaus AppIconThemeArtDeco AppIconThemeNeoBrutalism AppIconThemeClaymorphism AppIconThemeVaporwave AppIconThemeNewsprint AppIconThemeBotanical AppIconThemeIndustrial AppIconThemePureBlack AppIconThemeCappuccino AppIconThemeSolarized AppIconThemeNord AppIconThemeDracula AppIconThemePlatinum AppIconThemeAqua AppIconThemeTiger AppIconThemeBeOS AppIconThemeOpenStep AppIconThemeIRIX AppIconThemeAmiga AppIconThemeWindows98 AppIconThemeTUI AppIconThemeClassicPlayer AppIconThemeChristmas";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Sources/ThreadingMobile/ThreadingMobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Threading;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
+				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A20000010000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APS_ENVIRONMENT = production;
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconThemeThreading AppIconThemeEditorial AppIconThemeCyberpunk AppIconThemeSwissMinimalist AppIconThemeBauhaus AppIconThemeArtDeco AppIconThemeNeoBrutalism AppIconThemeClaymorphism AppIconThemeVaporwave AppIconThemeNewsprint AppIconThemeBotanical AppIconThemeIndustrial AppIconThemePureBlack AppIconThemeCappuccino AppIconThemeSolarized AppIconThemeNord AppIconThemeDracula AppIconThemePlatinum AppIconThemeAqua AppIconThemeTiger AppIconThemeBeOS AppIconThemeOpenStep AppIconThemeIRIX AppIconThemeAmiga AppIconThemeWindows98 AppIconThemeTUI AppIconThemeClassicPlayer AppIconThemeChristmas";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Sources/ThreadingMobile/ThreadingMobile.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Threading;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
+				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.mobile;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B2000001000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.mobile.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ThreadingMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ThreadingMobile";
+			};
+			name = Debug;
+		};
+		B2000001000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.mobile.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ThreadingMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ThreadingMobile";
+			};
+			name = Release;
+		};
+		C0D100010000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.ui-tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Threading;
+			};
+			name = Debug;
+		};
+		C0D10001000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SMQ3E8Y57T;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.ui-tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Threading;
+			};
+			name = Release;
 		};
 		C663059E0D7D5F7C061F7848 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -1284,7 +1347,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.notification-e2e-tests;
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.notification-e2e-tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1306,7 +1369,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.notification-e2e-tests;
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.notification-e2e-tests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1430,7 +1493,6 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
-				DEVELOPMENT_TEAM = SMQ3E8Y57T;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -1462,6 +1524,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = SMQ3E8Y57T;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -1551,248 +1614,9 @@
 			};
 			name = Release;
 		};
-		A20000010000000000000007 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = (
-					AppIconThemeThreading,
-					AppIconThemeEditorial,
-					AppIconThemeCyberpunk,
-					AppIconThemeSwissMinimalist,
-					AppIconThemeBauhaus,
-					AppIconThemeArtDeco,
-					AppIconThemeNeoBrutalism,
-					AppIconThemeClaymorphism,
-					AppIconThemeVaporwave,
-					AppIconThemeNewsprint,
-					AppIconThemeBotanical,
-					AppIconThemeIndustrial,
-					AppIconThemePureBlack,
-					AppIconThemeCappuccino,
-					AppIconThemeSolarized,
-					AppIconThemeNord,
-					AppIconThemeDracula,
-					AppIconThemePlatinum,
-					AppIconThemeAqua,
-					AppIconThemeTiger,
-					AppIconThemeBeOS,
-					AppIconThemeOpenStep,
-					AppIconThemeIRIX,
-					AppIconThemeAmiga,
-					AppIconThemeWindows98,
-					AppIconThemeTUI,
-					AppIconThemeClassicPlayer,
-					AppIconThemeChristmas,
-				);
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
-				APS_ENVIRONMENT = development;
-				CODE_SIGN_ENTITLEMENTS = Sources/ThreadingMobile/ThreadingMobile.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Threading;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
-				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.mobile;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		A20000010000000000000008 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = (
-					AppIconThemeThreading,
-					AppIconThemeEditorial,
-					AppIconThemeCyberpunk,
-					AppIconThemeSwissMinimalist,
-					AppIconThemeBauhaus,
-					AppIconThemeArtDeco,
-					AppIconThemeNeoBrutalism,
-					AppIconThemeClaymorphism,
-					AppIconThemeVaporwave,
-					AppIconThemeNewsprint,
-					AppIconThemeBotanical,
-					AppIconThemeIndustrial,
-					AppIconThemePureBlack,
-					AppIconThemeCappuccino,
-					AppIconThemeSolarized,
-					AppIconThemeNord,
-					AppIconThemeDracula,
-					AppIconThemePlatinum,
-					AppIconThemeAqua,
-					AppIconThemeTiger,
-					AppIconThemeBeOS,
-					AppIconThemeOpenStep,
-					AppIconThemeIRIX,
-					AppIconThemeAmiga,
-					AppIconThemeWindows98,
-					AppIconThemeTUI,
-					AppIconThemeClassicPlayer,
-					AppIconThemeChristmas,
-				);
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
-				APS_ENVIRONMENT = production;
-				CODE_SIGN_ENTITLEMENTS = Sources/ThreadingMobile/ThreadingMobile.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = SMQ3E8Y57T;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Threading;
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
-				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.mobile;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		B2000001000000000000000C /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@loader_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.mobile.tests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ThreadingMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ThreadingMobile";
-			};
-			name = Debug;
-		};
-		B2000001000000000000000D /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = SMQ3E8Y57T;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@loader_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.mobile.tests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ThreadingMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ThreadingMobile";
-			};
-			name = Release;
-		};
-		C0D100010000000000000009 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-					"@loader_path/../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.ui-tests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = Threading;
-			};
-			name = Debug;
-		};
-		C0D10001000000000000000A /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = SMQ3E8Y57T;
-				GENERATE_INFOPLIST_FILE = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-					"@loader_path/../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_BUNDLE_IDENTIFIER = codes.threading.ui-tests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = Threading;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		7A0000010000000000000083 /* Build configuration list for PBXNativeTarget "ThreadingWasmExtensionRunner" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				7A0000010000000000000082 /* Release */,
-				7A0000010000000000000081 /* Debug */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		091BD013A1E26748129E077F /* Build configuration list for PBXNativeTarget "ThreadingExtensionHelper" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1820,29 +1644,11 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D2E00001000000000000000B /* Build configuration list for PBXNativeTarget "ThreadingNotificationE2ETests" */ = {
+		7A0000010000000000000083 /* Build configuration list for PBXNativeTarget "ThreadingWasmExtensionRunner" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D2E00001000000000000000A /* Release */,
-				D2E000010000000000000009 /* Debug */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		F7000001000000000000001 /* Build configuration list for PBXProject "Threading" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				F7000001000000000000004 /* Debug */,
-				F7000001000000000000005 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		F7000001000000000000003 /* Build configuration list for PBXNativeTarget "Threading" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				F7000001000000000000006 /* Debug */,
-				F7000001000000000000007 /* Release */,
+				7A0000010000000000000082 /* Release */,
+				7A0000010000000000000081 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1874,44 +1680,71 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		D2E00001000000000000000B /* Build configuration list for PBXNativeTarget "ThreadingNotificationE2ETests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D2E00001000000000000000A /* Release */,
+				D2E000010000000000000009 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F7000001000000000000001 /* Build configuration list for PBXProject "Threading" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F7000001000000000000004 /* Debug */,
+				F7000001000000000000005 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F7000001000000000000003 /* Build configuration list for PBXNativeTarget "Threading" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F7000001000000000000006 /* Debug */,
+				F7000001000000000000007 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		F4000001000000000000002 /* XCLocalSwiftPackageReference "SwiftTerm" */ = {
+		7A0000010000000000000090 /* XCLocalSwiftPackageReference "Packages/ThreadingWasmRuntime" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/Vendor/SwiftTerm;
+			relativePath = Packages/ThreadingWasmRuntime;
 		};
-		F4000001000000000000004 /* XCLocalSwiftPackageReference "ThinkingOrbs" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/Vendor/ThinkingOrbs;
-		};
-		F4000001000000000000006 /* XCLocalSwiftPackageReference "LabelMorph" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/Vendor/LabelMorph;
-		};
-		F4000001000000000000012 /* XCLocalSwiftPackageReference "BorderBeamKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/Vendor/BorderBeamKit;
-		};
-		F4000001000000000000008 /* XCLocalSwiftPackageReference "ThreadingExtensionKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/ThreadingExtensionKit;
-		};
-		F4000001000000000000010 /* XCLocalSwiftPackageReference "ThreadingRemoteKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/ThreadingRemoteKit;
-		};
-		D0A100010000000000000002 /* XCLocalSwiftPackageReference "ThreadingDomain" */ = {
+		D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingDomain;
 		};
-		D3EE00010000000000000003 /* XCLocalSwiftPackageReference "ThreadingPeerTransport" */ = {
+		D3EE00010000000000000003 /* XCLocalSwiftPackageReference "Packages/ThreadingPeerTransport" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingPeerTransport;
 		};
-		7A0000010000000000000090 /* XCLocalSwiftPackageReference "ThreadingWasmRuntime" */ = {
+		F4000001000000000000002 /* XCLocalSwiftPackageReference "Packages/Vendor/SwiftTerm" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/ThreadingWasmRuntime;
+			relativePath = Packages/Vendor/SwiftTerm;
+		};
+		F4000001000000000000004 /* XCLocalSwiftPackageReference "Packages/Vendor/ThinkingOrbs" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Vendor/ThinkingOrbs;
+		};
+		F4000001000000000000006 /* XCLocalSwiftPackageReference "Packages/Vendor/LabelMorph" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Vendor/LabelMorph;
+		};
+		F4000001000000000000008 /* XCLocalSwiftPackageReference "Packages/ThreadingExtensionKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingExtensionKit;
+		};
+		F4000001000000000000010 /* XCLocalSwiftPackageReference "Packages/ThreadingRemoteKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingRemoteKit;
+		};
+		F4000001000000000000012 /* XCLocalSwiftPackageReference "Packages/Vendor/BorderBeamKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Vendor/BorderBeamKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -1940,33 +1773,9 @@
 			package = 5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
 		};
-		F4000001000000000000001 /* SwiftTerm */ = {
+		7A0000010000000000000091 /* ThreadingWasmRuntime */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = SwiftTerm;
-		};
-		F4000001000000000000003 /* ThinkingOrbs */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ThinkingOrbs;
-		};
-		F4000001000000000000005 /* LabelMorph */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = LabelMorph;
-		};
-		F4000001000000000000011 /* BorderBeamKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = BorderBeamKit;
-		};
-		F4000001000000000000007 /* ThreadingExtensionKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ThreadingExtensionKit;
-		};
-		F4000001000000000000009 /* ThreadingRemoteKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ThreadingRemoteKit;
-		};
-		D0A100010000000000000003 /* ThreadingDomain */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ThreadingDomain;
+			productName = ThreadingWasmRuntime;
 		};
 		A20000010000000000000010 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1976,13 +1785,9 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingRemoteKit;
 		};
-		D3EE00010000000000000004 /* ThreadingPeerTransport */ = {
+		D0A100010000000000000003 /* ThreadingDomain */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = ThreadingPeerTransport;
-		};
-		D3EE00010000000000000005 /* ThreadingPeerTransport */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = ThreadingPeerTransport;
+			productName = ThreadingDomain;
 		};
 		D1FF00010000000000000001 /* NativeDiffCore */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -2000,9 +1805,37 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = NativeDiffUIKit;
 		};
-		7A0000010000000000000091 /* ThreadingWasmRuntime */ = {
+		D3EE00010000000000000004 /* ThreadingPeerTransport */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = ThreadingWasmRuntime;
+			productName = ThreadingPeerTransport;
+		};
+		D3EE00010000000000000005 /* ThreadingPeerTransport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPeerTransport;
+		};
+		F4000001000000000000001 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SwiftTerm;
+		};
+		F4000001000000000000003 /* ThinkingOrbs */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThinkingOrbs;
+		};
+		F4000001000000000000005 /* LabelMorph */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LabelMorph;
+		};
+		F4000001000000000000007 /* ThreadingExtensionKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingExtensionKit;
+		};
+		F4000001000000000000009 /* ThreadingRemoteKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingRemoteKit;
+		};
+		F4000001000000000000011 /* BorderBeamKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BorderBeamKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

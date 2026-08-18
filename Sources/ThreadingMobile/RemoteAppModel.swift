@@ -10,6 +10,21 @@ struct RemoteNotificationOpenRequest: Equatable, Identifiable {
     var id: String { eventID }
 }
 
+/// The phone's two durable navigation subjects.
+///
+/// Projects are navigation context only; continuity persists the open chat, never a project
+/// name pretending to be a session identifier. Keeping the cases typed also lets a chat opened
+/// from a project return to that project's list without encoding UI routes into opaque strings.
+enum MobileNavigationRoute: Hashable {
+    case project(String)
+    case session(String)
+
+    var sessionID: String? {
+        guard case .session(let id) = self else { return nil }
+        return id
+    }
+}
+
 @MainActor
 final class RemoteAppModel: ObservableObject {
     enum Phase: Equatable {
@@ -36,10 +51,10 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var storageIssue: String? = nil
     @Published private(set) var notificationOpenRequest: RemoteNotificationOpenRequest?
     @Published var isPairing = false
-    @Published var navigationPath: [String] = [] {
+    @Published var navigationPath: [MobileNavigationRoute] = [] {
         didSet {
             guard let activeHostID else { return }
-            if let sessionID = navigationPath.last {
+            if let sessionID = navigationPath.last?.sessionID {
                 continuity.setLastRoute(hostID: activeHostID, sessionID: sessionID)
             } else {
                 continuity.clearLastRoute()
@@ -844,8 +859,8 @@ final class RemoteAppModel: ObservableObject {
                   me?.sessions.contains(where: { $0.id == event.sessionID }) == true else {
                 return
             }
-            if navigationPath.last != event.sessionID {
-                navigationPath.append(event.sessionID)
+            if navigationPath.last != .session(event.sessionID) {
+                navigationPath.append(.session(event.sessionID))
             }
             notificationOpenRequest = RemoteNotificationOpenRequest(
                 eventID: event.id,
@@ -865,7 +880,7 @@ final class RemoteAppModel: ObservableObject {
               let route = continuity.lastRoute,
               route.hostID == hostID,
               response.sessions.contains(where: { $0.id == route.sessionID }) else { return }
-        navigationPath = [route.sessionID]
+        navigationPath = [.session(route.sessionID)]
     }
 
     // MARK: - Live app-theme events

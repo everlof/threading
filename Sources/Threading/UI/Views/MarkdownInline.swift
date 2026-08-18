@@ -201,4 +201,13 @@ enum MarkdownDefaults {
     static let blockSpacing: CGFloat = 6
     static let quoteBarWidth: CGFloat = 2
     static let tableColumnWidth: CGFloat = 180
+
+    /// AppKit work a single markdown surface may materialize at once. The source document stays
+    /// complete and the pager reaches every block; these are view/constraint budgets, not content
+    /// truncation limits.
+    static let maximumBlocksPerPage = 48
+    static let maximumSourceLinesPerPage = 96
+    static let maximumListItemsPerPage = 64
+    static let maximumTableRowsPerPage = 48
+    static let maximumTableColumnsPerPage = 8
 }

@@ -47,8 +47,9 @@ final class ToolbarChromeRenderTests: HostedStoreTestCase {
         written += try write(story: "04-pane-header-hover") { Self.paneHeaderRow() }
         written += try write(story: "05-open-in-states") { Self.openInStates() }
         written += try write(story: "06-page-title") { Self.pageTitleRow() }
+        written += try write(story: "07-titled-split-emphases") { Self.titledSplitEmphases() }
 
-        XCTAssertEqual(written, 12, "Every story should render on both backdrops")
+        XCTAssertEqual(written, 14, "Every story should render on both backdrops")
         print("Rendered toolbar chrome storybook to \(Render.directory.path)")
     }
 
@@ -553,6 +554,53 @@ final class ToolbarChromeRenderTests: HostedStoreTestCase {
         chosen.chevron.mouseEntered(with: hoverEvent())
 
         return strip([openIn(), hovered, chosen], spacing: Design.Spacing.large)
+    }
+
+    /// Both emphases of the titled plate, at rest and with each half raised.
+    ///
+    /// The primary row is the one this story was added for. Its plate is a block of the theme's
+    /// primary role, so the chevron beside the title is a glyph built for the chrome standing on
+    /// a ground the chrome's roles were never measured against, and the raise has to read *over*
+    /// an accent the plate is already wearing rather than under it. Both failures are a picture
+    /// and no assertion: a chevron that came out as a hole in the plate, and a hover that
+    /// reported nothing at all.
+    private static func titledSplitEmphases() -> NSView {
+        func plate(
+            _ emphasis: ThemedButton.Emphasis,
+            raise: ((SplitButtonView) -> NSView)? = nil
+        ) -> SplitButtonView {
+            let press = ThemedButton(title: "Send to Developer", target: nil, action: nil)
+            press.emphasis = emphasis
+            let control = SplitButtonView(
+                action: press,
+                chevron: ThemedIconButton(
+                    symbolName: DesignSymbols.chevron,
+                    accessibility: "Other ways to send",
+                    target: .titledSplitMenu
+                )
+            )
+            if let raise {
+                raise(control).mouseEntered(with: hoverEvent())
+            }
+            return control
+        }
+
+        let rows = [ThemedButton.Emphasis.secondary, .primary].map { emphasis in
+            strip(
+                [
+                    plate(emphasis),
+                    plate(emphasis) { $0.action },
+                    plate(emphasis) { $0.chevron }
+                ],
+                spacing: Design.Spacing.large
+            )
+        }
+
+        let column = NSStackView(views: rows)
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.large
+        return column
     }
 
     /// One Open In control, wearing Finder's mark because every Mac has it.

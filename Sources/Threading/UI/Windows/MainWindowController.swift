@@ -418,6 +418,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private init(window: NSWindow?, environment: AppEnvironment) {
         self.environment = environment
         super.init(window: window)
+        // Stated after `super.init` rather than in the window factory, which is static: the
+        // strip is chrome and the report is the controller's, so the window holds a closure
+        // rather than a reference back (see `TitlebarActionWindow.onScreenshotDropped`).
+        (window as? TitlebarActionWindow)?.onScreenshotDropped = { [weak self] url in
+            self?.presentDroppedScreenshotReport(at: url, from: .titlebar)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -1609,6 +1615,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 "Threading’s developer inbox received the crash summary. Reference: %@",
                 reference
             )
+        case .saved:
+            alert.messageText = L10n.string("Report saved")
+            alert.informativeText = L10n.string(
+                "The crash summary is in your outbox on this Mac."
+            )
         case .queued:
             alert.messageText = L10n.string("Report saved")
             alert.informativeText = L10n.string(
@@ -2047,7 +2058,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 }),
               let sessionID = tab.owningSessionID ?? currentSessionID
         else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return false
         }
 
@@ -2064,7 +2075,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             // Nothing moved, so nothing should have been built.
             forgetDetachedWindow(controller.windowID)
             controller.close()
-            NSSound.beep()
+            SystemAlert.refuse()
             return false
         }
 
@@ -2629,7 +2640,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                   index: insertionIndex,
                   sessionID: sessionID
               ) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -2666,7 +2677,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                host.closeTab(id: activeID, for: currentSessionID) {
                 return
             }
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -2676,7 +2687,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             || containerViewController.currentTerminalID != nil {
             closeActivePageTab()
         } else {
-            NSSound.beep()
+            SystemAlert.refuse()
         }
     }
 
@@ -2810,7 +2821,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// ⌃⌘← — retraces the window's page selection, Xcode's Go Back.
     func goBack() {
         guard let page = navigation.goBack() else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         present(page)
@@ -2821,14 +2832,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// exchanges and the tool calls inside them.
     func moveConversation(byTurn forward: Bool) {
         guard containerViewController.moveConversation(byTurn: forward) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
     }
 
     func moveConversation(byStep forward: Bool) {
         guard containerViewController.moveConversation(byStep: forward) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
     }
@@ -2838,7 +2849,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// ⌃⌘→ — the step back forward.
     func goForward() {
         guard let page = navigation.goForward() else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         present(page)
@@ -2977,7 +2988,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     func toggleCurrentTheme() {
         window?.makeKeyAndOrderFront(nil)
         guard MCPToolCatalog.hasEnabledThemeTools else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3012,7 +3023,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3093,7 +3104,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard containerViewController.currentSessionID != nil else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         containerViewController.toggleShellDrawer()
@@ -3204,7 +3215,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard let sessionID = currentSessionID,
               let session = environment.projectStore.session(withID: sessionID),
               session.kind.supportsNativeUI else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3222,7 +3233,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3237,7 +3248,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3253,7 +3264,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3266,7 +3277,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3306,7 +3317,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// way every tabbed mac app does.
     func selectAdjacentTab(offset: Int) {
         guard let host = activeTabHost() else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         let sessionID = currentSessionID
@@ -3314,7 +3325,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard tabs.count > 1,
               let activeID = host.activeTabID(for: sessionID),
               let index = tabs.firstIndex(where: { $0.id == activeID }) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3331,13 +3342,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// rather than clamp — ⌘9 is not a request for the last tab, it is a miss.
     func selectTab(atIndex index: Int) {
         guard let host = activeTabHost() else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         let sessionID = currentSessionID
         let tabs = host.tabs(for: sessionID)
         guard tabs.indices.contains(index) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3360,7 +3371,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -3380,7 +3391,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         guard let sessionID = containerViewController.currentSessionID,
               let browser = visibleBrowser(for: sessionID) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         BrowserBaselineUI.captureBaseline(from: browser, sessionID: sessionID)
@@ -3403,7 +3414,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 
@@ -4148,11 +4159,11 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         didRequestAttachments attachmentID: String?
     ) {
         guard let sessionID = container.currentSessionID else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         guard let controller = displayPaneController.activateAttachments(for: sessionID) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         if let attachmentID,
@@ -4178,7 +4189,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         didRequestOpenSession sessionID: SessionID
     ) {
         guard environment.projectStore.session(withID: sessionID) != nil else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         sidebarViewController.select(sessionID: sessionID)

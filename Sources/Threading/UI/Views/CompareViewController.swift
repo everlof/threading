@@ -428,27 +428,67 @@ final class CompareViewController: NSViewController {
             updateCompareHeight()
 
         case .text(let files):
-            for file in files {
-                for hunk in file.hunks {
-                    let diff = DiffView(
-                        gitLines: hunk.lines,
-                        displayCap: DiffDefaults.displayCap,
-                        path: newPath,
-                        wraps: true
+            // The old cap applied once per hunk, so a generated diff with thousands of tiny
+            // hunks still built thousands of text views and constraint pairs on the main
+            // thread. One comparison gets one global display budget and one view. `comparison`
+            // remains complete in `lastComparison`, so export still carries every hunk and line.
+            let display = Self.displayedTextLines(in: files)
+            let diff = DiffView(
+                gitLines: display.lines,
+                displayCap: display.lines.count,
+                path: newPath,
+                wraps: true
+            )
+            diff.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(diff)
+            NSLayoutConstraint.activate([
+                diff.leadingAnchor.constraint(
+                    equalTo: stack.leadingAnchor, constant: Design.Spacing.inset
+                ),
+                diff.trailingAnchor.constraint(
+                    equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset
+                )
+            ])
+
+            if display.hasMore {
+                let note = NSTextField(wrappingLabelWithString: L10n.format(
+                    "Showing the first %lld diff lines. Export the comparison for the complete diff.",
+                    Int64(display.lines.count)
+                ))
+                note.translatesAutoresizingMaskIntoConstraints = false
+                note.applyFont(.caption)
+                note.textColor = Design.Text.tertiary
+                stack.addArrangedSubview(note)
+                NSLayoutConstraint.activate([
+                    note.leadingAnchor.constraint(
+                        equalTo: stack.leadingAnchor, constant: Design.Spacing.inset
+                    ),
+                    note.trailingAnchor.constraint(
+                        equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset
                     )
-                    diff.translatesAutoresizingMaskIntoConstraints = false
-                    stack.addArrangedSubview(diff)
-                    NSLayoutConstraint.activate([
-                        diff.leadingAnchor.constraint(
-                            equalTo: stack.leadingAnchor, constant: Design.Spacing.inset
-                        ),
-                        diff.trailingAnchor.constraint(
-                            equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset
-                        )
-                    ])
-                }
+                ])
             }
         }
+    }
+
+    /// Takes at most the pane's complete line budget without first flattening or copying the
+    /// unbounded diff. Line numbers stay attached to each source line, so hunk/file boundaries
+    /// remain legible as jumps even though they no longer allocate separate views.
+    private static func displayedTextLines(
+        in files: [GitFileDiff]
+    ) -> (lines: [GitDiffLine], hasMore: Bool) {
+        var lines: [GitDiffLine] = []
+        lines.reserveCapacity(DiffDefaults.displayCap)
+
+        for file in files {
+            for hunk in file.hunks where !hunk.lines.isEmpty {
+                let remaining = DiffDefaults.displayCap - lines.count
+                guard remaining > 0 else { return (lines, true) }
+                lines.append(contentsOf: hunk.lines.prefix(remaining))
+                if hunk.lines.count > remaining { return (lines, true) }
+            }
+        }
+        return (lines, false)
     }
 
     /// What the header says about the comparison under it.
@@ -498,7 +538,7 @@ final class CompareViewController: NSViewController {
     /// then — there is nothing on screen waiting for it but the file appearing.
     func exportComparison() {
         guard let comparison = lastComparison, canExport(comparison) else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         let export = Self.makeExport(
@@ -510,7 +550,7 @@ final class CompareViewController: NSViewController {
             mode: compareMode
         )
         guard let export else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
 

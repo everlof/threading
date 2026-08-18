@@ -20,6 +20,14 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     case hostDoorBound
     /// One enabled door has nothing listening for it right now. The `reason` field says why.
     case hostDoorUnreachable
+    /// This Mac minted the identity its routable listeners present. `detail` carries a short
+    /// hash of the fingerprint, never the fingerprint and never anything about the key.
+    case hostIdentityCreated
+    /// The identity was thrown away and replaced, which unpairs every device that did not
+    /// receive a rotation announcement.
+    case hostIdentityReset
+    /// A prepared successor identity became the one the listeners present.
+    case hostIdentityRotated
     case relayConnected
     case relayFailed
     case authenticationRefused
@@ -162,6 +170,10 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Sendable {
     case metricKitDiagnostics
     case metricKitWindow
     case metricKitLastCrash
+
+    // The app's immediate watchdog, which survives a force-quit during the hang. Counts,
+    // duration and compile-time operation names only; sampled stacks remain owner-local.
+    case mainThreadStalls
 }
 
 public struct RemoteDiagnosticRecord: Codable, Equatable, Sendable {

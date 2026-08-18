@@ -274,7 +274,7 @@ final class BrowserComparisonViewController: NSViewController {
 
     @objc private func acceptRevision() {
         guard let approval = content.approval else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         onAcceptRevision?(approval)

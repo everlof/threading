@@ -117,7 +117,7 @@ extension DisplayPaneController {
       MediaInspectorItem(url: url, image: image),
       from: view
     ) else {
-      NSSound.beep()
+      SystemAlert.refuse()
       return
     }
   }
@@ -127,7 +127,7 @@ extension DisplayPaneController {
   @objc private func quickLookImage() {
     guard case .image(_, let url) = currentContent?.body else { return }
     guard QuickLookPresenter.shared.present(url) else {
-      NSSound.beep()
+      SystemAlert.refuse()
       return
     }
   }
@@ -190,7 +190,7 @@ extension DisplayPaneController {
       ThreadingLogger.mcp.error(
         "Display HTML export failed session=\(sessionID.uuidString, privacy: .public) destination=\(file.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
       )
-      NSSound.beep()
+      SystemAlert.refuse()
     }
   }
 

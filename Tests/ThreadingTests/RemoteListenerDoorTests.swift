@@ -34,6 +34,38 @@ enum FreeLocalPort {
         guard read == 0 else { return RemoteAccessDefaults.defaultListenerPort }
         return UInt16(bigEndian: resolved.sin_port)
     }
+
+    /// A port that is free right now and that nothing else is likely to take mid-test.
+    ///
+    /// Deliberately below the kernel's ephemeral range. A port the kernel just handed out is one
+    /// it is also handing to every outbound socket on the machine, and that raced: a `URLSession`
+    /// connection took the port between the check and the bind twice in one run.
+    static let quietRange: ClosedRange<UInt16> = 20_000...39_000
+
+    static func quiet() -> UInt16? {
+        for _ in 0..<40 {
+            let candidate = UInt16.random(in: quietRange)
+            if isFree(port: candidate) { return candidate }
+        }
+        return nil
+    }
+
+    static func isFree(port: UInt16) -> Bool {
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr.s_addr = inet_addr(RemoteAccessDefaults.host)
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return bound == 0
+    }
 }
 
 /// The listener half of the private-network transport: a sticky, configurable port, and one
@@ -65,6 +97,8 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
     )
 
     private var server: RemoteAccessServer!
+    private var identityStore: RemoteAccessIdentityStore!
+    private var identityDirectory: URL!
     private var appSettings: AppSettings!
     private var appSettingsDefaults: UserDefaults!
     private var appSettingsSuiteName: String!
@@ -80,9 +114,13 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         appSettings = AppSettings(defaults: appSettingsDefaults)
         addresses.withLock { $0 = [] }
         let source = addresses
+        let identity = RemoteIdentityTestStore.make(label: "RemoteListenerDoorTests")
+        identityStore = identity.store
+        identityDirectory = identity.directory
         server = RemoteAccessServer(
             services: RemoteAccessCoordinator.makeServerServices(appSettings: appSettings),
-            addressSource: { source.withLock { $0 } }
+            addressSource: { source.withLock { $0 } },
+            identityProvider: identity.store
         )
         // A hosted test runs inside the shipping app, so an unredirected journal call would
         // append door transitions to the developer's own support journal.
@@ -92,6 +130,9 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
     override func tearDown() {
         server?.stop()
         server = nil
+        RemoteIdentityTestStore.erase(identityDirectory)
+        identityDirectory = nil
+        identityStore = nil
         for listener in occupied { listener.cancel() }
         occupied.removeAll()
         if let appSettingsSuiteName {
@@ -376,15 +417,21 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         XCTAssertEqual(
             endpoints.map(\.baseURL.absoluteString),
             [
-                "http://[::1]:\(port)/",
-                "http://example.local:\(port)/",
-                "http://mac.example.com:\(port)/"
+                "https://[::1]:\(port)/",
+                "https://example.local:\(port)/",
+                "https://mac.example.com:\(port)/"
             ]
         )
         XCTAssertTrue(
-            RemoteHostEndpointSelection.ordered(endpoints, policy: .privateOnly).isEmpty,
-            "an installed phone drops a cleartext candidate, which is the intended fail-closed "
-                + "behaviour until the listener presents an identity"
+            endpoints.allSatisfy(\.expectsPinnedIdentity),
+            "every address on this door is the same self-signed certificate, and the phone has "
+                + "to be told that rather than infer it from the kind"
+        )
+        XCTAssertEqual(
+            RemoteHostEndpointSelection.ordered(endpoints, policy: .privateOnly).count,
+            endpoints.count,
+            "a phone under the fail-closed policy now has these to try, which it did not while "
+                + "the door spoke cleartext"
         )
     }
 
@@ -519,24 +566,18 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         return result
     }
 
-    /// A port that is free right now and that nothing else is likely to take mid-test.
-    ///
-    /// Deliberately below the kernel's ephemeral range. A port the kernel just handed out is one
-    /// it is also handing to every outbound socket on the machine, and that raced: a `URLSession`
-    /// connection took the port between the check and the bind twice in one run.
     private func quietPort() throws -> UInt16 {
-        for _ in 0..<40 {
-            let candidate = UInt16.random(in: Self.quietPortRange)
-            if isFree(port: candidate) { return candidate }
+        guard let port = FreeLocalPort.quiet() else {
+            throw XCTSkip("No free port in the quiet range")
         }
-        throw XCTSkip("No free port in the quiet range")
+        return port
     }
 
     /// Holds `occupying` consecutive ports for real and leaves `keepingFree` above them, so the
     /// fallback walk is tested against what the kernel says rather than what a mock would.
     private func occupiedRun(occupying: Int, keepingFree: Int) throws -> UInt16 {
         for _ in 0..<40 {
-            let base = UInt16.random(in: Self.quietPortRange)
+            let base = UInt16.random(in: FreeLocalPort.quietRange)
             let span = UInt16(occupying + keepingFree)
             guard UInt16.max - base > span else { continue }
             guard (0..<span).allSatisfy({ isFree(port: base + $0) }) else { continue }
@@ -556,7 +597,6 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         throw XCTSkip("No run of \(occupying + keepingFree) free ports in the quiet range")
     }
 
-    private static let quietPortRange: ClosedRange<UInt16> = 20_000...39_000
 
     private func tryOccupy(port: UInt16) -> NWListener? {
         tryOccupy(host: RemoteAccessDefaults.host, port: port)
@@ -593,22 +633,7 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         return listener
     }
 
-    private nonisolated func isFree(port: UInt16) -> Bool {
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = port.bigEndian
-        address.sin_addr.s_addr = inet_addr(RemoteAccessDefaults.host)
-        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
-        guard descriptor >= 0 else { return false }
-        defer { close(descriptor) }
-        let bound = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        return bound == 0
-    }
+    private nonisolated func isFree(port: UInt16) -> Bool { FreeLocalPort.isFree(port: port) }
 
     private func httpStatus(host: String, port: UInt16) -> Int? {
         var status: Int?

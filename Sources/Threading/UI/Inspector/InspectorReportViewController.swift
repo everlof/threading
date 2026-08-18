@@ -36,8 +36,18 @@ final class InspectorReportViewController: NSViewController {
     private let screenshotURL: URL?
 
     private let noteField = PromptView()
-    private let copyButton = ThemedButton()
-    private let submitButton = ThemedButton()
+    /// The sheet's one action, and the other ways to take it. Three buttons in a row said a
+    /// finished report was three decisions; it is one decision taken three ways, and the way
+    /// taken last is the one the press offers next time.
+    private lazy var actionsControl: DeveloperReportSubmitControl = {
+        var available: [DeveloperReportAction] = [.send, .copy]
+#if DEBUG
+        available.append(.chat)
+#endif
+        let control = DeveloperReportSubmitControl(available: available)
+        control.onPerform = { [weak self] action in self?.perform(action) }
+        return control
+    }()
     private let statusView = SubmissionStatusView()
 
     private let imageView = AnnotatedImageView()
@@ -57,7 +67,6 @@ final class InspectorReportViewController: NSViewController {
     private var isSubmitting = false
 
 #if DEBUG
-    private let chatButton = ThemedButton()
 #endif
 
     /// Called when the sheet is done, however it was closed.
@@ -510,17 +519,6 @@ final class InspectorReportViewController: NSViewController {
     }
 
     private func makeFooter() -> NSView {
-        submitButton.title = InspectorStrings.submitTitle
-        submitButton.isProminent = true
-        submitButton.target = self
-        submitButton.action = #selector(submitIssue)
-        submitButton.setAccessibilityIdentifier(InspectorReportIdentifiers.submit)
-
-        copyButton.title = InspectorStrings.copyTitle
-        copyButton.target = self
-        copyButton.action = #selector(copyReport)
-        copyButton.setAccessibilityIdentifier(InspectorReportIdentifiers.copy)
-
         let closeButton = ThemedButton(
             title: InspectorStrings.closeTitle,
             target: self,
@@ -531,24 +529,28 @@ final class InspectorReportViewController: NSViewController {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        var buttons: [NSView] = [spacer, closeButton, copyButton]
-#if DEBUG
-        // Beside Copy Report rather than beside Send to Developer, because that is what it is:
-        // the same local text, carried the rest of the way. The prominent button stays the one
-        // that files the report the way a shipped build files it.
-        chatButton.title = DeveloperReportChatStrings.buttonTitle
-        chatButton.target = self
-        chatButton.action = #selector(sendToChat)
-        chatButton.setAccessibilityIdentifier(InspectorReportIdentifiers.chat)
-        buttons.append(chatButton)
-#endif
-        buttons.append(submitButton)
-
-        let footer = NSStackView(views: buttons)
+        let footer = NSStackView(views: [spacer, closeButton, actionsControl])
         footer.orientation = .horizontal
         footer.spacing = Design.Spacing.small
 
         return footer
+    }
+
+    /// The dispatcher the control calls. It owns *which* action is offered; this owns what each
+    /// one does, which is the only half a sheet can answer.
+    private func perform(_ action: DeveloperReportAction) {
+        switch action {
+        case .send:
+            submitIssue()
+        case .copy:
+            copyReport()
+        case .chat:
+#if DEBUG
+            sendToChat()
+#else
+            break
+#endif
+        }
     }
 
     // MARK: - Actions
@@ -563,12 +565,10 @@ final class InspectorReportViewController: NSViewController {
 
         // The button is its own receipt; the sheet stays up in case the screenshot or the
         // chain still wants reading.
-        copyButton.title = InspectorStrings.copiedTitle
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + InspectorReportLayout.copiedResetDelay
-        ) { [weak self] in
-            self?.copyButton.title = InspectorStrings.copyTitle
-        }
+        actionsControl.flashTitle(
+            InspectorStrings.copiedTitle,
+            restoringAfter: InspectorReportLayout.copiedResetDelay
+        )
     }
 
 #if DEBUG
@@ -647,13 +647,24 @@ final class InspectorReportViewController: NSViewController {
             details: InspectorReportComposer.compose(
                 note: noteField.stringValue,
                 markdown: publicDetails
+            ),
+            // Both readings of the same sheet, handed over together: the reviewed one for a
+            // service, and the one that keeps the capture's path for the folder an agent reads.
+            local: DeveloperIssueReportDraft.Local(
+                details: InspectorReportComposer.compose(
+                    note: noteField.stringValue,
+                    markdown: details
+                ),
+                screenshotURL: screenshotURL
             )
         )
     }
 
     private var publicDetails: String {
         let safeCapture = markdown.split(separator: "\n", omittingEmptySubsequences: false)
-            .filter { !$0.contains("Window screenshot,") }
+            .filter { line in
+                !InspectorReportComposer.localPathMarkers.contains { line.contains($0) }
+            }
             .joined(separator: "\n")
         let capturedEnvironment = environment.isEmpty
             ? DeveloperIssueReportComposer.environment()
@@ -693,19 +704,19 @@ final class InspectorReportViewController: NSViewController {
 
     private func beginSubmitting() {
         isSubmitting = true
-        submitButton.isEnabled = false
-        submitButton.title = InspectorStrings.submittingTitle
+        actionsControl.setBusy(true, title: InspectorStrings.submittingTitle)
         statusView.show(InspectorStrings.submittingStatus, tone: .working)
     }
 
     private func finishSubmitting(_ outcome: DeveloperIssueReportSubmission) {
         isSubmitting = false
-        submitButton.isEnabled = true
-        submitButton.title = InspectorStrings.submitTitle
+        actionsControl.setBusy(false)
 
         switch outcome {
         case .delivered(let reference):
             statusView.show(InspectorStrings.received(reference: reference), tone: .done)
+        case .saved(let records):
+            statusView.show(InspectorStrings.saved(records: records), tone: .done)
         case .queued:
             statusView.show(InspectorStrings.queued, tone: .working)
         case .failed(let message):
@@ -744,6 +755,15 @@ extension InspectorReportViewController: MediaInspectorAnnotationHost {
 // MARK: - Report Composition
 
 enum InspectorReportComposer {
+
+    /// Lines that name a file on this machine, and therefore never cross the wire.
+    ///
+    /// A list rather than one string because there are two ways a capture gets into this sheet
+    /// and they cannot say the same sentence: one was taken from the window and marked at a
+    /// point, the other was taken by macOS and dropped in. Both keep their path locally for the
+    /// same reason, so both are stripped here by the same rule.
+    static let localPathMarkers = ["Window screenshot,", "Dropped screenshot,"]
+
 
     /// What Copy Report actually copies: the user's note first — a chat reads the
     /// instruction before the evidence — then the report. An empty note adds nothing.
@@ -812,16 +832,21 @@ enum InspectorStrings {
     }
     static var descriptionCaption: String { L10n.string("Description") }
     static var detailsCaption: String { L10n.string("Captured details") }
-    static var copyTitle: String { L10n.string("Copy Report") }
     static var copiedTitle: String { L10n.string("Copied") }
     static var closeTitle: String { L10n.string("Close") }
-    static var submitTitle: String { L10n.string("Send to Developer") }
     static var submittingTitle: String { L10n.string("Sending…") }
     static var submittingStatus: String { L10n.string("Sending to Threading’s private inbox…") }
 
     static func received(reference: String) -> String {
         L10n.format("Report received. Reference: %@", reference)
     }
+    /// The count is the receipt. Filing several of these in a row is the expected way to use an
+    /// outbox nobody is collecting from, and a number that goes up is what says the last one
+    /// landed somewhere real.
+    static func saved(records: Int) -> String {
+        L10n.format("Saved to your outbox (%lld).", records)
+    }
+
     static var queued: String {
         L10n.string("Report saved securely and queued for retry when Threading is active.")
     }

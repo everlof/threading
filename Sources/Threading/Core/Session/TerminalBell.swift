@@ -29,10 +29,15 @@ enum TerminalBell {
     ///
     /// A bell that is actually heard leaves a note behind it — see `playAndRegister` — which is
     /// how the attention alert about to describe the same edge knows not to sound twice.
+    ///
+    /// The gate reads two answers, and a bell held by either one is held for the same reason: it
+    /// is a sound nobody in the room asked for. A test driving a terminal is the second
+    /// (`AutomatedRun`), and it stays out of `SoundResolution.isSilenced` so that the setting the
+    /// sidebar and Settings draw remains the user's own.
     static func ring(cause: SoundEvent? = nil, owner: SoundOwner? = nil) {
         ring(
             cause: cause,
-            silenced: { AppSettings.shared.silencesAllSounds },
+            silenced: { AppSettings.shared.silencesAllSounds || AutomatedRun.isUnderway },
             admits: { player.admitsPlaybackNow() },
             resolve: { cause in
                 guard let cause else {

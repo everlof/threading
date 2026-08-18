@@ -55,7 +55,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         components?.query = nil
         components?.path = "/"
         components?.scheme = scheme
-        components?.host = host
+        components?.host = Self.urlHost(host)
         guard let normalized = components?.url,
               let shareURL = Self.makeShareURL(
                   baseURL: normalized,
@@ -111,7 +111,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         // would otherwise reach the relay in a `Host:` header and an SNI name for the rest of
         // the session.
         components?.scheme = scheme
-        components?.host = host
+        components?.host = Self.urlHost(host)
         guard let baseURL = components?.url else { return nil }
 
         if let fingerprintCode, RemoteHostPin(pairingCode: fingerprintCode) == nil { return nil }
@@ -131,6 +131,18 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
             return nil
         }
         self.init(url: url)
+    }
+
+    /// An IPv6 literal has to keep its brackets.
+    ///
+    /// `URL.host` hands back `::1` with the brackets stripped, and `URLComponents` refuses to
+    /// build a URL from that, so normalising the case of a host — which is what makes the QR
+    /// payload cheap — silently turned every IPv6 origin into no link at all. A LAN door
+    /// advertises whatever addresses the Mac holds, and on a dual-stack network half of those
+    /// are IPv6.
+    private static func urlHost(_ host: String) -> String {
+        guard host.contains(":"), !host.hasPrefix("[") else { return host }
+        return "[\(host)]"
     }
 
     private static func makeShareURL(
@@ -200,7 +212,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     public var scannablePayload: String {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         components?.scheme = baseURL.scheme?.uppercased()
-        components?.host = baseURL.host?.uppercased()
+        components?.host = baseURL.host.map { Self.urlHost($0.uppercased()) }
         components?.fragment = Self.fragment(
             token: token,
             pinnedFingerprintCode: pinnedFingerprintCode

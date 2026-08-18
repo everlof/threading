@@ -92,9 +92,18 @@ policy, prefers Tailscale when requested, records the successful route, and can 
 advertised route without creating a duplicate device. Unknown future policies fail closed to
 private-only. Guest shares never receive the Mac's private endpoint list.
 
-The iOS app shows all unarchived
-sessions grouped by project or ordered by recent activity, including dormant sessions. Pinned sessions
-stay at the top on both Mac and iPhone, and the archive is available from the dashboard.
+The iOS app shows all unarchived sessions grouped by project or ordered by recent activity,
+including dormant sessions. The navigation title names the connected Mac and carries its live
+connection status; the leading Mac button switches paired hosts, so the dashboard does not repeat
+that same device as a card in its content. Project headings are destinations. Opening one replaces
+the mixed dashboard with one plain, project-scoped chat list, names the project above the same
+connection status, and scopes the navigation-bar **+** to that project. Pinned sessions stay at the
+top on both Mac and iPhone, and the archive is available from the dashboard.
+
+This mobile browser is deliberately host-owned. Threading retains project/session navigation,
+launch scoping, connection truth, row actions and the native fallback; the macOS extension
+composition engine neither runs nor renders on iOS, so this surface does not advertise a visual
+replacement contract it cannot honor.
 
 **A row says who is talking, the way the Mac sidebar does.** Its tile is the runtime's own mark —
 Claude's starburst, OpenAI's knot, an SF Symbol for a runtime we bundle no artwork for — with an
@@ -341,6 +350,56 @@ Pairing and sharing are deliberately different actions:
 Use **Open in Browser** to test the browser client without leaving the Mac. The owner pairing link
 can also be copied from the pairing sheet, but it is intentionally not presented as a general
 sharing action.
+
+## Starting a chat from the phone, and seeing it work
+
+**Start opens the chat it started.** The New Session sheet's Start used to create the session and
+then leave you on the dashboard, watching a row appear. The Mac answers the create with the new
+session's id *and* the whole refreshed catalogue, so the row the navigation stack resolves against
+is already published by the time the sheet closes; the push therefore needs nothing but the
+result Start already had. It waits for `onDismiss` rather than pushing from the submit, because a
+push ordered while the sheet is still on screen is dropped by the stack. Tapping a row and
+starting a chat now go through one function, so a new chat is opened with the transition its
+surface can survive — a terminal still commits its final geometry immediately rather than being
+resized through every intermediate width. The session's own screen owns the wait: a brand-new
+session is not yet running, so it shows "Resuming on your Mac…" until the agent answers.
+
+**The chat's title says when the agent is working.** The navigation title's status line carries
+the dotted thinking orb — the same mark, the same nine animations and the same accent tint as the
+Mac's conversation status — while a turn is in flight. One variant is chosen per turn and never
+repeats the previous turn's.
+
+It stands **in the connection dot's place**, not beside the title. Beside the title it took a
+column of its own and pushed the session name off the bar's centre every time a turn started, and
+it left two marks on one line saying two different things at once. In the dot's place it costs no
+width and the title never moves; the dot has nothing to add meanwhile, because the orb only ever
+appears on a connected session, which is what the green dot was there to say. It is drawn at the
+caption line's size rather than the preset's own 20pt, since a taller status line would push a
+two-line title past the 44pt bar.
+
+The phone is never told "working" in words: no status word crosses the wire. What does cross is
+`canSend`, which each transport defines as `isRunning && input != nil && !isTurnInFlight &&
+pendingPrompt == nil` and the Mac then narrows to the asking viewer's own capability. So a client
+that *would* be allowed to type and is told it cannot is being told a turn is in flight, and that
+is the reading `MobileAgentTurnActivity` encodes. Both narrowings matter as much as the signal: a
+view-only viewer is sent `canSend: false` with no turn running at all, and a collaborator holding
+Focused input control makes it false for everyone else. Neither is the agent working, so both
+answer no rather than spinning an orb about someone else's keyboard. Our own prompt still being
+acknowledged answers yes, because that turn has begun on this side before the Mac has said so.
+
+**A terminal session decides how it takes typing, once.** `MobileTerminalInputMode` is one answer
+rather than two booleans: `direct` sends keystrokes to the PTY, `independentComposer` composes a
+whole line here and submits it atomically, and `none` offers nothing. A caller reading only one of
+two booleans eventually offers both surfaces or neither.
+
+The mode also waits for the roster. `hello` and the first `inputControl` frame are two messages
+with a render between them, and treating that gap as "roster unknown, keep the safe atomic path"
+put the line composer on screen for a frame and then removed it — a flash of the non-TUI text area
+on the way into every solo terminal session, since the default for independent drafts is on. A
+host that supports the roster is now given that one frame to send it, and only a host too old to
+send one at all — which never will — keeps the atomic composer as its settled answer. The wait
+costs nothing else: raw keystrokes should not start before we know whether somebody else holds the
+session either.
 
 ## Sending a file from the phone
 
@@ -635,11 +694,42 @@ feature lock.
   because the Hosted Direct bridge and Tailscale Serve both forward to it, and it stays cleartext
   for the same reason. **No routable door is offered in Settings yet**, so a shipped build still
   listens only on `127.0.0.1`. A `lan` door exists in the model and can be turned on by writing
-  the `remoteAccessDoors` default, but it is deliberately not in the UI until the listener
-  presents its own TLS identity: a LAN listener over plain HTTP would put a bearer token on
-  whatever Wi-Fi the Mac has joined. While it is on, the Mac advertises each bound address, its
-  `.local` name and any `remoteAccessAdvertisedHostname` override as `lan` endpoints, and an
-  iPhone drops them, because it keeps only `https` candidates.
+  the `remoteAccessDoors` default; it is out of the UI until the settings rewrite describes it.
+  While it is on, the Mac advertises each bound address, its `.local` name and any
+  `remoteAccessAdvertisedHostname` override as `https` `lan` endpoints, each marked as presenting
+  the Mac's own identity.
+- **A routable door presents a certificate of this Mac's own, and the phone trusts exactly the one
+  whose fingerprint it scanned.** There is no certificate authority in the path, which is not a
+  downgrade from a public certificate but stronger: no authority can be induced to issue a second
+  certificate for the same name, because a name is not what is being trusted. It also means one
+  identity serves every address the Mac ever has, so the same pairing keeps working from a VPN, a
+  tailnet, or a new DHCP lease. The certificate lists this Mac's addresses and `.local` name as
+  subject alternative names for tidiness; **the client checks none of them**, and hostname
+  verification is deliberately not performed for a pinned host.
+- The private key and its certificate are `0600` files in Threading's own Application Support
+  directory, under `RemoteIdentity`, and the identity is rebuilt from them on every launch.
+  Deliberately not a Keychain item: an agent's shell can delete a login-keychain item with
+  `security delete-generic-password` and no prompt, and this app launches agents with an
+  unrestricted shell, so a stray deletion would silently invalidate every pairing. The trade is
+  that any process running as this user can read the file, and for a trust root the deletion
+  failure is the one that matters. A missing or unreadable identity is a named state, never a
+  quiet regenerate: a door with nothing to present binds nothing at all rather than falling back
+  to cleartext, and the identity is minted only on first enable and on an explicit reset.
+- The pairing code carries the fingerprint. `SHA-256` over the leaf certificate's DER, truncated
+  to 128 bits and written base32 upper case, is 26 characters entirely inside QR's alphanumeric
+  mode, and it rides as a second fragment component: `HTTPS://192.168.1.42:8760#<token>.<code>`.
+  Neither the pairing token's alphabet nor a bearer's contains `.`, so the split is unambiguous,
+  and a client written before this reads the whole fragment as one bearer and is refused with a
+  401 rather than connecting unpinned. `/api/me` carries the whole 64-character hex fingerprint to
+  an owner, so a phone that scanned 128 bits holds all 256 immediately afterwards.
+- **The identity can be replaced without re-pairing.** A phone connected over the pinned channel
+  is talking to the holder of the private key, so a successor announced there is authenticated by
+  the identity it replaces: the Mac mints the next certificate, advertises it as
+  `nextPinnedFingerprint`, and switches to it when asked, on the same port and without touching
+  loopback. A device that has read the announcement pins both and does not notice. An announcement
+  arriving over an unpinned connection is not one. "Reset identity" therefore becomes the path for
+  a *lost* key rather than the only path there is, and it is the one action that does unpair every
+  device that did not receive an announcement.
 - The listener's port is sticky. It tries the configured port, `8760` by default and editable
   between 1024 and 65535, and on a collision walks `8760` to `8769` in order and reports the port
   it actually took. It never falls back to a port the kernel picked: an ephemeral port meant the
@@ -843,11 +933,16 @@ with no AppKit window graph or ambient project/runtime lookup.
 ## Implementation map
 
 - `Sources/Threading/Core/Remote`: the HTTP/WebSocket server and its per-door listener set
-  (`RemoteListenerSet`, `RemoteAccessDoors`), durable owner-device registry, authentication,
-  pluggable Cloudflare/Tailscale transports, routing, the application command capability, and
-  live session mirrors.
-- `Sources/Threading/Resources/RemoteClient`: dependency-free browser client.
-- `ThreadingRemoteKit`: versioned wire DTOs and pairing-link parsing shared by macOS and iOS.
+  (`RemoteListenerSet`, `RemoteAccessDoors`), the pinned identity the routable doors present
+  (`RemoteAccessIdentity` and the `RemoteIdentity*` encoders behind it), durable owner-device
+  registry, authentication, pluggable Cloudflare/Tailscale transports, routing, the application
+  command capability, and live session mirrors.
+- `Sources/Threading/Resources/RemoteClient`: dependency-free browser client. A browser on the
+  LAN or the tailnet meets a certificate interstitial against a pinned self-signed identity;
+  Tailscale Serve stays as the opt-in way around that on a tailnet, and the iOS app is unaffected
+  because it pins.
+- `ThreadingRemoteKit`: versioned wire DTOs, pairing-link parsing, and the fingerprint codec and
+  pinning policy (`RemoteHostPinning`) shared by macOS and iOS.
 - `Sources/ThreadingMobile`: SwiftUI iOS shell, UIKit Native-conversation timeline and SwiftTerm
   terminal surface.
 - `docs/NOTIFICATION_E2E.md`: opt-in real APNs and Claude → MCP → APNs verification.

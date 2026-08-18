@@ -21,7 +21,8 @@ final class MacSupportReportDetailsTests: XCTestCase {
         previousLaunchWasClean: Bool? = nil,
         crashLoopDecision: CrashLoopDecision? = nil,
         launchLedgerRead: LaunchLedgerRead? = nil,
-        metricKitDiagnostics: MetricKitDiagnosticReading? = nil
+        metricKitDiagnostics: MetricKitDiagnosticReading? = nil,
+        mainThreadStallIncidents: MainThreadStallIncidentReading? = nil
     ) -> [RemoteDiagnosticExtraField: String] {
         MacSupportReportDetails(
             privacyStatuses: privacyStatuses,
@@ -36,7 +37,8 @@ final class MacSupportReportDetailsTests: XCTestCase {
             previousLaunchWasClean: previousLaunchWasClean,
             crashLoopDecision: crashLoopDecision,
             launchLedgerRead: launchLedgerRead,
-            metricKitDiagnostics: metricKitDiagnostics
+            metricKitDiagnostics: metricKitDiagnostics,
+            mainThreadStallIncidents: mainThreadStallIncidents
         ).fields
     }
 
@@ -227,6 +229,25 @@ final class MacSupportReportDetailsTests: XCTestCase {
         )
     }
 
+    func testImmediateWatchdogIncidentsNameTheInFlightOperation() {
+        let fields = details(mainThreadStallIncidents: .read(
+            MainThreadStallIncidentSummary(
+                incidentCount: 2,
+                incompleteCount: 1,
+                unreadableCount: 0,
+                skippedCount: 0,
+                longestObservedMilliseconds: 423_326,
+                operationNames: ["onboarding.import-list.rebuild"]
+            )
+        ))
+
+        XCTAssertEqual(
+            fields[.mainThreadStalls],
+            "incidents=2 incomplete=1 longest_ms=423326 unreadable=0 skipped=0 "
+                + "operations=onboarding.import-list.rebuild"
+        )
+    }
+
     /// A count is only meaningful over the window it counts, and MetricKit's window is not the
     /// app's. Days and UTC: neither the hour a Mac crashed nor its time zone is anyone's business.
     func testTheCoveredWindowIsReportedInWholeUTCDays() {
@@ -321,7 +342,8 @@ final class MacSupportReportDetailsTests: XCTestCase {
         // They are named here rather than pattern-matched so a new free-form field cannot join
         // them by accident.
         let structured: Set<RemoteDiagnosticExtraField> = [
-            .agentAccountSummary, .metricKitDiagnostics, .metricKitWindow, .metricKitLastCrash
+            .agentAccountSummary, .metricKitDiagnostics, .metricKitWindow, .metricKitLastCrash,
+            .mainThreadStalls
         ]
 
         for (field, value) in fields {

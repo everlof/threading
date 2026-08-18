@@ -81,6 +81,7 @@ enum InWindowOverlay {
         let scrim = InWindowOverlayScrim()
         scrim.identifier = scrimIdentifier
         scrim.onDismiss = onDismiss
+        scrim.coveringSurface = overlay
         root.addSubview(scrim, positioned: .above, relativeTo: nil)
 
         overlay.translatesAutoresizingMaskIntoConstraints = false
@@ -155,6 +156,7 @@ enum InWindowOverlay {
 private final class InWindowOverlayScrim: ThemedControl {
 
     var onDismiss: (() -> Void)?
+    weak var coveringSurface: NSView?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -181,6 +183,18 @@ private final class InWindowOverlayScrim: ThemedControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // The wash extends under the surface so it can also dim the window chrome above it. It is
+        // only a dismissal target where that surface is *not*, however. A transparent gap in a
+        // descendant — the media inspector's thumbnail spacing is the reported case — must stay
+        // inert even if AppKit routes the press to this sibling underneath. Decide that from the
+        // surface's geometry rather than from the same descendant hit test that exposed the gap.
+        if let coveringSurface,
+           coveringSurface.window === window,
+           coveringSurface.bounds.contains(
+               coveringSurface.convert(event.locationInWindow, from: nil)
+           ) {
+            return
+        }
         onDismiss?()
     }
 

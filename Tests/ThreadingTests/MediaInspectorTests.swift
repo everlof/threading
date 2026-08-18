@@ -187,6 +187,65 @@ final class MediaInspectorTests: XCTestCase {
         XCTAssertEqual(inspector.selectedIndex, 1, "radio-style arrow navigation did not move")
     }
 
+    /// The filmstrip is part of the inspector, including the spacing between its thumbnails.
+    /// Only the dimmed ground *outside* the surface is a dismissal target; a transparent gap in
+    /// a child view must not turn into a hole through to that ground.
+    func testClickingBetweenCollectionThumbnailsKeepsTheInspectorOpen() throws {
+        let fixture = try imageFiles(count: 3)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let root = ThemedSurfaceView()
+        root.frame = NSRect(x: 0, y: 0, width: 800, height: 560)
+        root.translatesAutoresizingMaskIntoConstraints = true
+        let source = ThemedImagePreview(frame: NSRect(x: 20, y: 20, width: 200, height: 160))
+        source.translatesAutoresizingMaskIntoConstraints = true
+        source.image = fixture.items[0].image
+        source.fileURL = fixture.items[0].url
+        source.inspectorSelectionProvider = {
+            MediaInspectorSelection(items: fixture.items, selectedIndex: 0)
+        }
+        root.addSubview(source)
+
+        let window = fullSizeContentWindow(hosting: root)
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+        XCTAssertTrue(source.performPrimaryAction())
+        root.layoutSubtreeIfNeeded()
+
+        let inspector = try XCTUnwrap(
+            root.subviews.compactMap { $0 as? MediaInspectorView }.first
+        )
+        let thumbnailLabels = Set(fixture.items.map(\.title))
+        let thumbnails = descendants(of: inspector)
+            .filter {
+                $0.accessibilityRole() == .radioButton
+                    && thumbnailLabels.contains($0.accessibilityLabel() ?? "")
+            }
+            .sorted { inspector.convert($0.frame, from: $0.superview).minX
+                < inspector.convert($1.frame, from: $1.superview).minX }
+        XCTAssertEqual(thumbnails.count, 3)
+
+        let first = inspector.convert(thumbnails[0].frame, from: thumbnails[0].superview)
+        let second = inspector.convert(thumbnails[1].frame, from: thumbnails[1].superview)
+        let gap = NSPoint(x: (first.maxX + second.minX) / 2, y: first.midY)
+        let inWindow = inspector.convert(gap, to: nil)
+        let target = try XCTUnwrap(root.hitTest(inWindow))
+        let scrim = try XCTUnwrap(scrims(in: root).first)
+
+        XCTAssertFalse(
+            target.identifier == InWindowOverlay.scrimIdentifier,
+            "the filmstrip gutter hit the dismissal scrim"
+        )
+        // Exercise the backstop as well as the ordinary hit test. The running app reported this
+        // exact transparent child gap reaching the sibling scrim underneath; the scrim still has
+        // to distinguish a point geometrically inside its covering surface from outside ground.
+        scrim.mouseDown(with: try mouseEvent(.leftMouseDown, at: gap, in: inspector))
+
+        XCTAssertTrue(
+            MediaInspectorPresenter.isPresenting(in: window),
+            "an inert filmstrip gutter dismissed the inspector"
+        )
+    }
+
     func testPresentationIsInWindowRestoresFocusAndReplacesItself() throws {
         let fixture = try imageFiles(count: 2)
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
@@ -302,8 +361,21 @@ final class MediaInspectorTests: XCTestCase {
 
         XCTAssertTrue(source.performPrimaryAction())
         let scrim = try XCTUnwrap(scrims(in: root).first)
+        let inspector = try XCTUnwrap(
+            root.subviews.compactMap { $0 as? MediaInspectorView }.first
+        )
+        root.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(scrim.frame.maxY, inspector.frame.maxY)
+        let outsideSurface = NSPoint(
+            x: scrim.frame.midX,
+            y: (scrim.frame.maxY + inspector.frame.maxY) / 2
+        )
 
-        scrim.mouseDown(with: try clickEvent())
+        scrim.mouseDown(with: try mouseEvent(
+            .leftMouseDown,
+            at: outsideSurface,
+            in: root
+        ))
 
         XCTAssertFalse(MediaInspectorPresenter.isPresenting(in: window))
         XCTAssertTrue(
@@ -1066,20 +1138,6 @@ final class MediaInspectorTests: XCTestCase {
             charactersIgnoringModifiers: characters,
             isARepeat: false,
             keyCode: keyCode
-        ))
-    }
-
-    private func clickEvent() throws -> NSEvent {
-        try XCTUnwrap(NSEvent.mouseEvent(
-            with: .leftMouseDown,
-            location: .zero,
-            modifierFlags: [],
-            timestamp: 0,
-            windowNumber: 0,
-            context: nil,
-            eventNumber: 0,
-            clickCount: 1,
-            pressure: 1
         ))
     }
 

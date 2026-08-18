@@ -94,10 +94,13 @@ editors, Notifications, Diagnostics, Mac appearance, Ask for input and the issue
   was applied by hand, one screen at a time.
 - **`themedSettingsRow`** is the plate for a plain list whose rows sit on the page rather than in
   a grouped card.
-
-`ThemedSettingsGroup` in `MobileSettingsView` remains the vocabulary for a screen assembled from
-a plain `ScrollView`. A screen picks one: a `List` when its rows are editable or externally
-sized, the group when the form is a small fixed shape.
+- **`ThemedRowGroup`** is the same plate for a screen assembled from a plain `ScrollView`: rows
+  on one inset-grouped card, told apart by **`ThemedRowDivider`**, a hairline in the theme's
+  `divider` role inset to where the row's text begins. The settings pages and the session
+  dashboard both stand on it; a row inside paints no plate of its own, because the group paints
+  `panel` exactly once and a theme's panel may be translucent. A screen picks one: a `List` when
+  its rows are editable or reordered, the group when the form is a small fixed shape or the
+  screen already builds its rows lazily.
 
 ## Crossing a presentation boundary
 

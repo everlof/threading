@@ -67,6 +67,62 @@ final class OnboardingRenderTests: XCTestCase {
         XCTAssertEqual(AppThemeLibrary.current.name, "Swiss Minimalist")
     }
 
+    /// This is the production-sized scaling gate. The complete scan remains a value model while
+    /// only the viewport becomes AppKit controls; the previous retained stack built all 1,500
+    /// checkboxes and almost 3,000 arranged subviews here.
+    func testConversationImportBuildsOnlyTheVisibleRowsForALargeScan() throws {
+        let page = OnboardingImportPageViewController()
+        let root = page.view
+        root.frame = NSRect(origin: .zero, size: Render.size)
+        let sessions = (0..<1_500).map { index in
+            ImportableSession(
+                agentSessionID: TranscriptID("large-\(index)"),
+                kind: .claude,
+                accountHandle: .standard,
+                title: "Conversation \(index)",
+                lastActiveAt: Date(timeIntervalSinceNow: -Double(index))
+            )
+        }
+        page.apply(result: GlobalScanResult(
+            groups: [DiscoveredProjectImports(
+                folder: "/Users/dev/code/large-import",
+                conversations: sessions
+            )],
+            missingFolderConversations: 0
+        ))
+
+        root.layoutSubtreeIfNeeded()
+        let table = try XCTUnwrap(
+            descendants(of: root).compactMap { $0 as? ThemedGroupedTableView }.first
+        )
+        table.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(table.numberOfRows, 1_500)
+        let checkboxes = descendants(of: root).compactMap { $0 as? ThemedCheckbox }
+        XCTAssertGreaterThan(checkboxes.count, 0)
+        XCTAssertLessThan(
+            checkboxes.count,
+            40,
+            "The import page must retain controls by viewport, not by conversation count"
+        )
+        XCTAssertTrue(try XCTUnwrap(checkboxes.first).accessibilityPerformPress())
+        let visibleText = descendants(of: root)
+            .compactMap { $0 as? NSTextField }
+            .map(\.stringValue)
+        let expectedSummary = L10n.format(
+            "%lld conversations found. %lld selected to import.",
+            Int64(1_500),
+            Int64(1_499)
+        )
+        XCTAssertTrue(
+            visibleText.contains {
+                $0.contains(expectedSummary)
+            },
+            "Selection must live in the value model after a recycled checkbox changes it; "
+                + "visible text: \(visibleText)"
+        )
+    }
+
     func testRendersTheFlowUnderSystemAndTwoStyledThemes() throws {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -23,6 +23,12 @@ The repository-root `./dev` launcher directs both Debug apps at the loopback rep
 macOS `THREADING_REPORT_INTAKE_URL` override is compiled only into Debug builds; a production app
 cannot redirect reviewed customer reports through its process environment.
 
+An endpoint is stated or absent, never assumed: with neither the Debug override nor Info.plist's
+`ThreadingReportIntakeURL`, the Mac writes its record and posts nothing, and the sheet says
+**saved** rather than queued. A shipping build therefore has to set the Info.plist key or it
+delivers nothing at all, which is a release-checklist item rather than a default. See
+[`github.md`](github.md#where-a-private-report-goes-macissuereportoutbox).
+
 The Worker independently carries the same event/field allowlists. Adding a native event without
 adding and testing the corresponding intake event is incomplete because the server will reject
 the report. A platform log with no safe representation is not automatically a blind spot: it is

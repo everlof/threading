@@ -23,6 +23,10 @@ production Cloudflare account has been inspected.
   and is owned by the team.
 - [ ] Deploy through `npm run deploy`; verify `/ready` and confirm Worker logs contain metadata
   only.
+- [ ] Set `ThreadingReportIntakeURL` in the shipping app's Info.plist to the deployed intake URL,
+  and confirm a release build reports a receipt rather than **saved**. There is deliberately no
+  compiled-in fallback: a build that states no endpoint writes its record and posts nothing, so
+  omitting this key ships an app whose reports never leave the user's Mac.
 
 ## Abuse and availability
 

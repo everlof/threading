@@ -11,7 +11,7 @@ No one profiler should try to answer everything:
 | Layer | What it answers | Artifact |
 |---|---|---|
 | `PerformanceRecorder` | Which Threading operation was in flight, and for how long? | OS signposts plus bounded Chrome Trace JSON |
-| `MainThreadStallMonitor` | Did the main queue stop servicing events for at least 250 ms? | Automatic Chrome Trace snapshot |
+| `MainThreadStallMonitor` | Did the main queue stop servicing events for at least 250 ms? | Kill-safe incident plus automatic Chrome Trace snapshot |
 | `MetricKitDiagnostics` | What hangs, crashes, launch, CPU, memory, disk and responsiveness did shipped builds see? | Apple's metrics and diagnostic JSON |
 | `/usr/bin/sample` | Which stacks owned CPU during a reproduced slowdown? | Text stack sample |
 | `xcrun xctrace` | How did CPU, allocations, hitches, I/O and concurrency interact? | `.trace` bundles |
@@ -57,6 +57,7 @@ spans, and 20 files. It writes only under:
 
 ```text
 ~/Library/Application Support/Threading/Performance/
+├── Stalls/
 ├── Traces/
 └── MetricKit/
     ├── metrics/
@@ -70,13 +71,19 @@ record in a stall snapshot.
 ## Stall detection
 
 After the first window is shown, `MainThreadStallMonitor` sends a ping to the main queue every
-100 ms. If one is unanswered for 250 ms, it requests a trace immediately. Once the queue answers,
-it adds the full `main-thread.stall` interval. Automatic exports have a 30-second cooldown and
-are done on a utility queue.
+100 ms. If one is unanswered for 250 ms, it first writes a small incident JSON synchronously on
+the watchdog's utility queue, then requests a trace. The incident holds the threshold, main-thread
+id and at most 16 active semantic spans; if the user force-quits while the queue is still blocked,
+that incomplete record survives. Once the queue answers, the same file gains the full duration
+and the recorder adds the `main-thread.stall` interval. Both incident files and traces retain the
+newest 20; trace exports have a 30-second cooldown.
 
 The watchdog deliberately does not walk or suspend the main thread. Stack collection belongs to
 Apple's supported `sample` and `xctrace` tools; the watchdog's reliable job is to preserve the
-semantic context that existed before those tools were attached.
+semantic context that existed before those tools were attached. A support report includes only a
+share-safe incident summary — counts, longest observed duration and compile-time operation names.
+The bounded metadata and exact timestamps remain owner-local in the incident/trace files; MetricKit
+is still the production source for OS-collected hang stacks.
 
 ## MetricKit
 
@@ -224,6 +231,7 @@ external data reaches eager AppKit work.
 | Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
 | Resolved | Attachment preview cold open | The pane installs only the selected format's surface on first use, and its document boundary independently installs PDFKit or Quick Look only when that renderer is selected. Regression coverage pins the unused renderers as absent. |
 | Resolved | Agent charts | `ChartSpec` caps the product at 240 marks and one drawn chart view owns prepared geometry. Maximum-contract decode/update work stays below 0.45 ms per spec and synchronous paint below 5.5 ms per sampled frame. |
+| Resolved | Conversation Markdown, Compare text, Subagents summary and prompt images | A main-conversation answer plans pages before styling and materializes at most 48 Markdown blocks / 96 source lines per reachable page, preventing nested block budgets from multiplying; list pages hold 64 rows and table pages hold at most 48 body rows × 8 columns in the direct-layout table. Compare has one 300-line display budget and one TextKit view across the complete hunk set while retaining the complete export model. The child navigator pages before constructing more than 40 rows and moves to a new external selection without snapping back during live updates. The composer retains at most 32 thumbnails, prepares them serially with bounded ImageIO rasterization off-main, and keeps overflow as literal paths. |
 
 Installed-extension discovery has a separate refusal boundary from presentation: enumeration stops
 one entry past 1,024 visible names and inventory refuses more than 256 package directories before
@@ -234,7 +242,8 @@ The same sweep found bounded uses that should not be "fixed" merely because they
 search: Advanced, General, Profile and most Keyboard settings are fixed-schema; Keyboard already
 branches before constructing collapsed command detail; Usage virtualizes repeating breakdown rows
 and bounds both retained report cells and chart geometry;
-File and project trees use virtual outline cells; conversation Markdown uses virtual block rows;
+File and project trees use virtual outline cells; conversation Markdown uses virtual or bounded
+block pages, with independently bounded list/table pages;
 and cell hosts removing old subviews during reuse is the intended ownership boundary.
 
 The stress sweep below replaced that risk-only ordering with measurements. Extensions preferences,
@@ -2197,7 +2206,8 @@ every cell as a wrapper, and every value with a constraint graph. The virtual tr
 width path now uses `ThemedDocumentTableView`: selectable cell labels are measured once and placed
 directly, while the design component draws the themed header and separators, forwards vertical
 wheel momentum to the transcript and reflows when the pane width changes. The general Markdown
-path remains unchanged where no settled width is known.
+path uses the same direct-layout table with a readable bootstrap width, then reflows to its actual
+width; both paths page rows and columns before constructing cells.
 
 The Release startup build then exposed a compiler-sensitive allocation pattern in that component:
 Swift 6.3.2's ownership optimizer aborted in `ThemedDocumentTableCanvas.init` while optimizing the

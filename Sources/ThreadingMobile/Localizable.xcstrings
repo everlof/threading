@@ -2888,6 +2888,16 @@
         }
       }
     },
+    "Shows this project’s sessions": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visar projektets sessioner"
+          }
+        }
+      }
+    },
     "Share chat": {
       "localizations": {
         "sv": {

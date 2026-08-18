@@ -105,6 +105,9 @@ final class RemoteListenerSet: @unchecked Sendable {
 
     private let queue: DispatchQueue
     private let addressSource: RemoteNetworkAddressSource
+    /// What a routable listener presents. Asked for on this queue, once per rebuild, and never
+    /// on the main actor: resolving it reads files and imports a PKCS#12 container.
+    private let identityProvider: any RemoteAccessIdentityProviding
     private let connectionHandlerStorage =
         OSAllocatedUnfairLock<(@Sendable (NWConnection) -> Void)?>(initialState: nil)
     private let journalStorage = OSAllocatedUnfairLock<
@@ -126,6 +129,9 @@ final class RemoteListenerSet: @unchecked Sendable {
     private var firewall: RemoteFirewallHint = .unknown
     private var pathMonitor: NWPathMonitor?
     private var pendingRebuild = false
+    /// Why the routable doors have nothing to present, when they have nothing to present.
+    /// Queue-owned like every other listener fact.
+    private var identityFailure: RemoteIdentityFailure?
     private var startCompletion: (@Sendable (RemoteListenerStartOutcome) -> Void)?
     /// Which start a deadline belongs to. Without it, a stop-and-start inside the deadline
     /// window lets the old start's timer fail the new one.
@@ -136,10 +142,12 @@ final class RemoteListenerSet: @unchecked Sendable {
 
     init(
         queue: DispatchQueue,
-        addressSource: @escaping RemoteNetworkAddressSource = RemoteNetworkInterfaces.current
+        addressSource: @escaping RemoteNetworkAddressSource = RemoteNetworkInterfaces.current,
+        identityProvider: any RemoteAccessIdentityProviding = RemoteAccessIdentityStore.shared
     ) {
         self.queue = queue
         self.addressSource = addressSource
+        self.identityProvider = identityProvider
     }
 
     // MARK: - Lifecycle
@@ -331,6 +339,22 @@ final class RemoteListenerSet: @unchecked Sendable {
         let enabled = configuration.bindableDoors
         let classified = RemoteDoorClassification.doors(for: addressSource())
 
+        // One resolution per rebuild, and only when a door that needs one is enabled: the
+        // shipped default binds loopback alone and must not mint a certificate for it.
+        var identity: RemoteAccessIdentity?
+        identityFailure = nil
+        if enabled.contains(where: { $0.requiresTLS && !(classified[$0] ?? []).isEmpty }) {
+            switch identityProvider.currentIdentity() {
+            case .success(let resolved):
+                identity = resolved
+            case .failure(let failure):
+                identityFailure = failure
+                ThreadingLogger.remote.error(
+                    "Remote access identity unavailable: \(failure.rawValue, privacy: .public)"
+                )
+            }
+        }
+
         for door in RemoteAccessDoor.allCases where door != .loopback {
             let wanted: [RemoteNetworkAddress] = enabled.contains(door)
                 ? (classified[door] ?? [])
@@ -346,9 +370,12 @@ final class RemoteListenerSet: @unchecked Sendable {
                 existing[address] = nil
             }
             for address in wanted where existing[address] == nil {
-                guard let entry = makeListener(door: door, address: address, port: port) else {
-                    continue
-                }
+                guard let entry = makeListener(
+                    door: door,
+                    address: address,
+                    port: port,
+                    identity: identity
+                ) else { continue }
                 existing[address] = entry
             }
             listeners[door] = existing.isEmpty ? nil : existing
@@ -358,12 +385,27 @@ final class RemoteListenerSet: @unchecked Sendable {
         publish()
     }
 
+    /// One listener, pinned to one address, presenting this Mac's identity when the door is a
+    /// routable one.
+    ///
+    /// A door that needs an identity and has none binds **nothing**. There is no cleartext
+    /// fallback on purpose: falling back would put a bearer token on the network the identity
+    /// exists to protect, and it would do it silently.
     private func makeListener(
         door: RemoteAccessDoor,
         address: RemoteNetworkAddress,
-        port: UInt16
+        port: UInt16,
+        identity: RemoteAccessIdentity?
     ) -> DoorListener? {
-        let parameters = NWParameters.tcp
+        let parameters: NWParameters
+        if door.requiresTLS {
+            guard let identity, let options = Self.tlsOptions(for: identity) else { return nil }
+            // The HTTP and WebSocket phases above this are unchanged: `NWConnection` hands them
+            // the decrypted stream, so TLS is a property of the parameters and of nothing else.
+            parameters = NWParameters(tls: options, tcp: NWProtocolTCP.Options())
+        } else {
+            parameters = NWParameters.tcp
+        }
         parameters.requiredLocalEndpoint = .hostPort(
             host: NWEndpoint.Host(address.address),
             port: NWEndpoint.Port(rawValue: port) ?? .any
@@ -405,6 +447,38 @@ final class RemoteListenerSet: @unchecked Sendable {
         }
         listener.start(queue: queue)
         return entry
+    }
+
+    /// The security parameters a routable listener answers with.
+    ///
+    /// TLS 1.2 is the floor rather than the negotiated version: a current phone and this Mac
+    /// settle on TLS 1.3 with `TLS_AES_256_GCM_SHA384` and ECDSA P-256, which is what the spike
+    /// measured, and stating a floor keeps that from silently becoming something older.
+    private static func tlsOptions(for identity: RemoteAccessIdentity) -> NWProtocolTLS.Options? {
+        guard let secIdentity = sec_identity_create(identity.secIdentity) else { return nil }
+        let options = NWProtocolTLS.Options()
+        sec_protocol_options_set_local_identity(options.securityProtocolOptions, secIdentity)
+        sec_protocol_options_set_min_tls_protocol_version(
+            options.securityProtocolOptions,
+            .TLSv12
+        )
+        return options
+    }
+
+    /// Rebuilds every routable listener so it presents whatever the identity store now holds.
+    ///
+    /// This is the second half of a rotation: the store has already promoted the successor, and
+    /// the sockets have to be replaced to present it. The port does not move and loopback is not
+    /// touched, so the Hosted bridge and Serve carry on through the change.
+    func reloadIdentity() {
+        queue.async { [weak self] in
+            guard let self, self.isRunning else { return }
+            for (door, entries) in self.listeners where door != .loopback {
+                for entry in entries.values { self.cancel(entry) }
+                self.listeners[door] = nil
+            }
+            self.rebuildRoutableDoors()
+        }
     }
 
     private func cancel(_ entry: DoorListener) {
@@ -477,6 +551,9 @@ final class RemoteListenerSet: @unchecked Sendable {
         guard configuration.doors.contains(door) else { return .off }
         guard door.isBindable else { return .notReachable(.notAvailableYet) }
         guard resolvedPort != nil else { return .binding }
+        if door.requiresTLS, identityFailure != nil {
+            return .notReachable(.identityUnavailable)
+        }
 
         let entries = (listeners[door] ?? [:]).values
         guard !entries.isEmpty else { return .notReachable(.noInterface) }

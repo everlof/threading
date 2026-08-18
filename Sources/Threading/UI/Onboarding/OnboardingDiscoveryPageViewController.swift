@@ -1,12 +1,10 @@
 import AppKit
 
-/// The walkthrough's second page: who is already signed in, and whether the CLIs those logins
-/// belong to are actually reachable.
+/// The walkthrough's second page: who is already signed in, a complete path to adding another
+/// login, and whether the CLIs those logins belong to are actually reachable.
 ///
-/// Discovery itself is `AgentAccountDiscovery`'s existing scan — this page only presents it.
-/// The CLI check is the one thing nothing else does: `AgentLauncher` trusts the login shell's
-/// PATH, so a missing CLI otherwise surfaces as `command not found` inside the first session's
-/// terminal. Here it is a sentence and an install command instead.
+/// The provider still owns authentication. Threading scopes its official CLI to a new config
+/// home, waits for the browser flow, verifies it, and only then lets discovery offer the login.
 final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingPage {
 
     private enum Layout {
@@ -18,14 +16,39 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
 
     private let accountsCardHost = NSView()
     private let cliCardHost = NSView()
+    private let accountsProvider: () -> [AgentAccount]
+    private let setupController: AccountSetupCardViewController
     private var probeSpinner: ThemedSpinner?
     private var cliResults: [AgentCLIProbe.Result]?
     /// The accounts the rows were built from, so a toggle's tag maps back to its account.
     private var shownAccounts: [AgentAccount] = []
     private let appEvents = AppEventObservations()
 
+    init(
+        accountsProvider: @escaping () -> [AgentAccount] = {
+            AgentAccountDiscovery.allAccounts(for: .claude)
+                + AgentAccountDiscovery.allAccounts(for: .codex)
+        },
+        cliResults: [AgentCLIProbe.Result]? = nil,
+        setupCoordinator: AgentAccountSetupCoordinator = AgentAccountSetupCoordinator()
+    ) {
+        self.accountsProvider = accountsProvider
+        self.cliResults = cliResults
+        self.setupController = AccountSetupCardViewController(coordinator: setupCoordinator)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func loadView() {
         view = NSView()
+        addChild(setupController)
+        setupController.onAccountReady = { [weak self] _ in
+            self?.rebuildAccountRows()
+        }
         setupViews()
 
         // Person names fill in as the email probe answers; re-render then.
@@ -50,15 +73,15 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
     }
 
     private func setupViews() {
-        let heading = NSTextField(labelWithString: L10n.string("Already signed in"))
+        let heading = NSTextField(labelWithString: L10n.string("Set up your agent logins"))
         heading.applyFont(.heading)
         heading.textColor = Design.Text.label
         heading.alignment = .center
 
         let caption = NSTextField(
             wrappingLabelWithString: L10n.string(
-                "Threading found these agent logins on this Mac. Sessions can start on any "
-                    + "switched-on login. Name them later in Settings ▸ Accounts."
+                "Use a login already on this Mac, or add one here. The provider's own CLI "
+                    + "handles the secure browser sign-in and keeps the credential."
             )
         )
         caption.applyFont(.body)
@@ -72,27 +95,69 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         cliHeading.applyFont(.emphasizedBody)
         cliHeading.textColor = Design.Text.label
 
+        let accountsHeading = NSTextField(labelWithString: L10n.string("Available logins"))
+        accountsHeading.applyFont(.emphasizedBody)
+        accountsHeading.textColor = Design.Text.label
+
+        let setupHeading = NSTextField(labelWithString: L10n.string("Add a login"))
+        setupHeading.applyFont(.emphasizedBody)
+        setupHeading.textColor = Design.Text.label
+
+        let setupView = setupController.view
+        setupView.translatesAutoresizingMaskIntoConstraints = false
+
         let stack = NSStackView(views: [
-            heading, caption, accountsCardHost, cliHeading, cliCardHost
+            heading,
+            caption,
+            setupHeading,
+            setupView,
+            accountsHeading,
+            accountsCardHost,
+            cliHeading,
+            cliCardHost
         ])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = Design.Spacing.inset
         stack.setCustomSpacing(Design.Spacing.large, after: caption)
+        stack.setCustomSpacing(Design.Spacing.small, after: setupHeading)
+        stack.setCustomSpacing(Design.Spacing.large, after: setupView)
+        stack.setCustomSpacing(Design.Spacing.small, after: accountsHeading)
         stack.setCustomSpacing(Design.Spacing.large, after: accountsCardHost)
         stack.setCustomSpacing(Design.Spacing.small, after: cliHeading)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        view.addSubview(stack)
+        let document = SettingsFlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = document
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scroll)
+
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: Design.Spacing.pane),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: Design.Spacing.pane),
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stack.bottomAnchor.constraint(
-                lessThanOrEqualTo: view.bottomAnchor,
+                equalTo: document.bottomAnchor,
                 constant: -Design.Spacing.pane
             ),
             caption.widthAnchor.constraint(lessThanOrEqualToConstant: Layout.contentWidth),
+            accountsHeading.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
             accountsCardHost.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
+            setupHeading.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
+            setupView.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
             cliCardHost.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
             cliHeading.widthAnchor.constraint(equalToConstant: Layout.contentWidth)
         ])
@@ -104,16 +169,15 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
     // MARK: - Accounts
 
     private func rebuildAccountRows() {
-        let accounts = AgentAccountDiscovery.allAccounts(for: .claude)
-            + AgentAccountDiscovery.allAccounts(for: .codex)
+        let accounts = accountsProvider()
         shownAccounts = accounts
 
         let rows: [NSView]
         if accounts.isEmpty {
             let empty = NSTextField(
                 wrappingLabelWithString: L10n.string(
-                    "No agent logins found. Sign in to Claude Code or Codex from a terminal "
-                        + "first. Threading picks logins up from their config folders."
+                    "No agent logins yet. Set up Claude Code or Codex, then finish the "
+                        + "provider's secure browser sign-in."
                 )
             )
             empty.applyFont(.body)

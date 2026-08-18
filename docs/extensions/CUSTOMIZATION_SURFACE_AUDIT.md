@@ -32,6 +32,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
+| Account setup and reconnect | — | host-only | provider identity, isolated-home routing, child-process lifecycle, login verification, credential non-capture, native failure and installation fallback | Host-only |
 | Start composer accessories | `composer.session-start@1` | protected horizontal hook | text input, submission, keyboard, drafts | Implemented |
 | Reply composer accessories | `composer.conversation-reply@1` | protected horizontal hook | text input, submission, keyboard, stream/permission state | Implemented |
 | User message | `conversation.user-message@1` | protected vertical hook | transcript order, content, turn boundary | Implemented |
@@ -50,6 +51,14 @@ would create a visual contract that cannot truthfully describe the process behin
 therefore keeps its identity, selection, foreground-command spinner and lifecycle actions
 host-owned; a future public row starts by publishing the typed terminal context rather than by
 leaking the AppKit cell.
+
+Account setup and reconnect remain host-only because the presentation is inseparable from an
+authentication boundary. Threading must keep the selected provider paired with the exact
+`CLAUDE_CONFIG_DIR`/`CODEX_HOME`, own cancellation and timeout of the child process, verify through
+the provider before registering a location, and preserve a native missing-CLI/install-guide
+fallback. The provider CLI owns the browser UI and credential. Allowing an extension to replace
+this surface could visually claim a different provider, solicit a credential, or report success
+without the host's verification; additive decoration has no use worth that ambiguity.
 
 Session Overview is host-only because its two sections expose host-owned operational truth rather
 than a presentation-only document: exact versus observed work attribution, transcript-accounted
