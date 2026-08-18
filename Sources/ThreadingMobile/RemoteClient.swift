@@ -307,9 +307,13 @@ extension RemoteConnectionFailure: LocalizedError {
 /// reaches a screen the record's remembered address is not necessarily the one that failed. The
 /// diagnosis depends on which: the same no-route code means "grant Local Network access" on a
 /// private address and "that machine is not answering" on a public one.
-struct RemoteConnectionAttempt: Error {
+struct RemoteConnectionAttempt: LocalizedError {
     let underlying: Error
     let host: String?
+
+    /// The wrapper is a carrier, not a replacement: anything that reads a sentence off it gets
+    /// the failure's own, never Foundation's "the operation could not be completed".
+    var errorDescription: String? { underlying.localizedDescription }
 
     /// The original error, whether or not it was wrapped. Diagnostics reduce errors to a
     /// structural code, and the wrapper is not one of the codes worth recording.
