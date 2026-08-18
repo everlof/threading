@@ -378,6 +378,20 @@ Focused input control makes it false for everyone else. Neither is the agent wor
 answer no rather than spinning an orb about someone else's keyboard. Our own prompt still being
 acknowledged answers yes, because that turn has begun on this side before the Mac has said so.
 
+**A terminal session decides how it takes typing, once.** `MobileTerminalInputMode` is one answer
+rather than two booleans: `direct` sends keystrokes to the PTY, `independentComposer` composes a
+whole line here and submits it atomically, and `none` offers nothing. A caller reading only one of
+two booleans eventually offers both surfaces or neither.
+
+The mode also waits for the roster. `hello` and the first `inputControl` frame are two messages
+with a render between them, and treating that gap as "roster unknown, keep the safe atomic path"
+put the line composer on screen for a frame and then removed it — a flash of the non-TUI text area
+on the way into every solo terminal session, since the default for independent drafts is on. A
+host that supports the roster is now given that one frame to send it, and only a host too old to
+send one at all — which never will — keeps the atomic composer as its settled answer. The wait
+costs nothing else: raw keystrokes should not start before we know whether somebody else holds the
+session either.
+
 ## Sending a file from the phone
 
 The composer's paperclip attaches a photo or a document to the next prompt. It is the only route

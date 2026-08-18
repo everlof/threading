@@ -33,21 +33,46 @@ enum MobileCollaborationPresentation {
         return hasOtherParticipant(state)
     }
 
-    static func usesIndependentTerminalComposer(
+    /// How a terminal session takes typing on this phone. One answer rather than two booleans,
+    /// because "no composer" and "keystrokes go straight to the PTY" are not the same thing and
+    /// a caller that reads only one of them will eventually offer both or neither.
+    static func terminalInputMode(
         settingEnabled: Bool,
         supportsAtomicSubmission: Bool,
         capability: RemoteCapability,
         inputControlFeatureSupported: Bool,
+        canWrite: Bool,
         state: RemoteInputControlStateDTO?
-    ) -> Bool {
-        guard settingEnabled, supportsAtomicSubmission, capability == .interact else {
-            return false
+    ) -> MobileTerminalInputMode {
+        guard capability == .interact else { return .none }
+        guard settingEnabled, supportsAtomicSubmission else {
+            return canWrite ? .direct : .none
         }
-        // Preserve the safe atomic path until a new host sends its authoritative roster, and
-        // with an older host that cannot state whether another participant has joined.
-        guard inputControlFeatureSupported, let state else { return true }
-        return hasOtherParticipant(state)
+        // An older host cannot state whether another participant has joined, and never will, so
+        // the safe atomic path is its settled answer rather than a placeholder.
+        guard inputControlFeatureSupported else { return .independentComposer }
+        // A host that does send a roster has not necessarily sent it yet: `hello` and the first
+        // `inputControl` frame are two messages with a render between them. Answering
+        // `.independentComposer` for that gap put the line composer on screen for a frame and
+        // then took it away again on every solo terminal session — a flash of the non-TUI text
+        // area on the way into the TUI. Offer nothing until the roster settles it; the wait is
+        // one frame, and it is the same wait that keeps raw keystrokes from starting before we
+        // know whether somebody else holds the session.
+        guard let state else { return .none }
+        if hasOtherParticipant(state) { return .independentComposer }
+        return canWrite ? .direct : .none
     }
+}
+
+/// What a terminal session offers this phone for typing.
+enum MobileTerminalInputMode: Equatable {
+    /// Keystrokes reach the PTY as they are typed.
+    case direct
+    /// A whole line is composed here and submitted atomically, so two people cannot splice one
+    /// terminal line between them.
+    case independentComposer
+    /// Nothing: this viewer cannot write, or the host has not yet said who else is here.
+    case none
 }
 
 struct RemotePromptSubmissionFeedback: Equatable {
@@ -207,12 +232,13 @@ final class RemoteSessionConnection: ObservableObject {
         )
     }
 
-    func usesIndependentTerminalComposer(settingEnabled: Bool) -> Bool {
-        MobileCollaborationPresentation.usesIndependentTerminalComposer(
+    func terminalInputMode(settingEnabled: Bool) -> MobileTerminalInputMode {
+        MobileCollaborationPresentation.terminalInputMode(
             settingEnabled: settingEnabled,
             supportsAtomicSubmission: supportsAtomicTerminalSubmission,
             capability: capability,
             inputControlFeatureSupported: supportsFocusedInputControl,
+            canWrite: inputControl?.canWrite != false,
             state: inputControl
         )
     }

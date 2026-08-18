@@ -629,17 +629,15 @@ struct TerminalRemoteView: View {
         return Color(color)
     }
 
-    private var usesIndependentComposer: Bool {
-        connection.usesIndependentTerminalComposer(
+    private var inputMode: MobileTerminalInputMode {
+        connection.terminalInputMode(
             settingEnabled: notifications.independentTerminalDraftsEnabled
         )
     }
 
-    private var allowsDirectInput: Bool {
-        connection.capability == .interact
-            && !usesIndependentComposer
-            && connection.inputControl?.canWrite != false
-    }
+    private var usesIndependentComposer: Bool { inputMode == .independentComposer }
+
+    private var allowsDirectInput: Bool { inputMode == .direct }
 
     var body: some View {
         VStack(spacing: 0) {
