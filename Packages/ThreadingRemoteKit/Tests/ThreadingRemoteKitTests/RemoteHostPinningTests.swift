@@ -300,6 +300,40 @@ final class RemoteHostPinningTests: XCTestCase {
         XCTAssertEqual(old.shareURL.absoluteString, "https://example.com/#PLAINTOKEN")
     }
 
+    func testAnIPv6LanOriginIsAUsableLink() throws {
+        let fingerprint = RemoteHostFingerprint(certificateDER: Self.certificate)
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: try XCTUnwrap(URL(string: "https://[fd00::4]:8760/")),
+            token: "MFRGGZDFMZTWQ2LK",
+            pinnedFingerprintCode: fingerprint.pairingCode
+        ))
+
+        XCTAssertEqual(link.baseURL.absoluteString, "https://[fd00::4]:8760/")
+        XCTAssertEqual(link.meURL.absoluteString, "https://[fd00::4]:8760/api/me")
+        XCTAssertEqual(
+            link.eventsWebSocketURL?.absoluteString,
+            "wss://[fd00::4]:8760/ws/events"
+        )
+        XCTAssertEqual(
+            RemoteConnectionLink(string: link.scannablePayload),
+            link,
+            "the brackets survive the upper-casing that makes the QR payload cheap"
+        )
+
+        let endpoint = RemoteHostEndpointDTO(
+            kind: RemoteHostEndpointKind.lan,
+            baseURL: try XCTUnwrap(URL(string: "https://[fd00::4]:8760/")),
+            isStable: true,
+            identity: RemoteHostEndpointIdentity.pinned
+        )
+        XCTAssertEqual(
+            RemoteHostEndpointSelection.ordered([endpoint], policy: .privateOnly),
+            [endpoint],
+            "a dual-stack network advertises half its LAN addresses as IPv6, and selection "
+                + "validates candidates by building a link from them"
+        )
+    }
+
     func testAPairingPayloadWithABrokenFingerprintIsRefusedRatherThanUnpinned() throws {
         let origin = try XCTUnwrap(URL(string: "https://192.168.1.42:8760/"))
         XCTAssertNil(
