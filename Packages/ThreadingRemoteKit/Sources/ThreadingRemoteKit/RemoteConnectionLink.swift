@@ -10,13 +10,25 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     public let baseURL: URL
     public let token: String
     public let shareURL: URL
+    /// The Mac's certificate fingerprint as it travels in a pairing code: the first 128 bits of
+    /// the SHA-256, base32 upper case, exactly 26 characters. Nil for an origin whose TLS
+    /// somebody else terminates, and for every link written before this existed.
+    public let pinnedFingerprintCode: String?
 
     private enum CodingKeys: String, CodingKey {
         case baseURL
         case token
+        case pinnedFingerprintCode
     }
 
-    public init?(baseURL: URL, token: String) {
+    /// The fragment separator between the bearer and the fingerprint.
+    ///
+    /// `.` is unambiguous: pairing tokens are base32 `A-Z2-7`, bearers are base64url, and neither
+    /// alphabet contains it. It is also one of QR's alphanumeric characters, so carrying it costs
+    /// no mode switch.
+    private static let fingerprintSeparator: Character = "."
+
+    public init?(baseURL: URL, token: String, pinnedFingerprintCode: String? = nil) {
         let normalizedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let scheme = baseURL.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
@@ -24,8 +36,19 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
               !host.isEmpty,
               baseURL.user == nil,
               baseURL.password == nil,
-              !normalizedToken.isEmpty else {
+              !normalizedToken.isEmpty,
+              !normalizedToken.contains(Self.fingerprintSeparator) else {
             return nil
+        }
+        let normalizedCode: String?
+        if let pinnedFingerprintCode {
+            let candidate = pinnedFingerprintCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A fingerprint that is not a fingerprint is refused rather than dropped: pairing
+            // without the pin would silently produce a client that trusts whatever answers.
+            guard RemoteHostPin(pairingCode: candidate) != nil else { return nil }
+            normalizedCode = candidate
+        } else {
+            normalizedCode = nil
         }
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         components?.fragment = nil
@@ -34,12 +57,17 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         components?.scheme = scheme
         components?.host = host
         guard let normalized = components?.url,
-              let shareURL = Self.makeShareURL(baseURL: normalized, token: normalizedToken) else {
+              let shareURL = Self.makeShareURL(
+                  baseURL: normalized,
+                  token: normalizedToken,
+                  pinnedFingerprintCode: normalizedCode
+              ) else {
             return nil
         }
         self.baseURL = normalized
         self.token = normalizedToken
         self.shareURL = shareURL
+        self.pinnedFingerprintCode = normalizedCode
     }
 
     public init?(url: URL) {
@@ -50,10 +78,29 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
               url.user == nil,
               url.password == nil,
               url.query == nil,
-              let token = url.fragment?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !token.isEmpty else {
+              let fragment = url.fragment?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !fragment.isEmpty else {
             return nil
         }
+
+        // Two forms, and both have to parse: `#<token>` is every code produced before the
+        // listener had an identity to pin, and `#<token>.<fingerprint>` is what a pinned door
+        // writes. The split is on the separator rather than on a length, so a code from a host
+        // that changes either half still reads.
+        let parts = fragment.split(separator: Self.fingerprintSeparator, omittingEmptySubsequences: false)
+        let token: String
+        let fingerprintCode: String?
+        switch parts.count {
+        case 1:
+            token = String(parts[0])
+            fingerprintCode = nil
+        case 2:
+            token = String(parts[0])
+            fingerprintCode = String(parts[1])
+        default:
+            return nil
+        }
+        guard !token.isEmpty else { return nil }
 
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.fragment = nil
@@ -67,10 +114,16 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         components?.host = host
         guard let baseURL = components?.url else { return nil }
 
-        guard let shareURL = Self.makeShareURL(baseURL: baseURL, token: token) else { return nil }
+        if let fingerprintCode, RemoteHostPin(pairingCode: fingerprintCode) == nil { return nil }
+        guard let shareURL = Self.makeShareURL(
+            baseURL: baseURL,
+            token: token,
+            pinnedFingerprintCode: fingerprintCode
+        ) else { return nil }
         self.baseURL = baseURL
         self.token = token
         self.shareURL = shareURL
+        self.pinnedFingerprintCode = fingerprintCode
     }
 
     public init?(string: String) {
@@ -80,20 +133,34 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         self.init(url: url)
     }
 
-    private static func makeShareURL(baseURL: URL, token: String) -> URL? {
+    private static func makeShareURL(
+        baseURL: URL,
+        token: String,
+        pinnedFingerprintCode: String?
+    ) -> URL? {
         guard var components = URLComponents(
             url: baseURL,
             resolvingAgainstBaseURL: false
         ) else { return nil }
-        components.fragment = token
+        components.fragment = Self.fragment(token: token, pinnedFingerprintCode: pinnedFingerprintCode)
         return components.url
+    }
+
+    private static func fragment(token: String, pinnedFingerprintCode: String?) -> String {
+        guard let pinnedFingerprintCode else { return token }
+        return "\(token)\(fingerprintSeparator)\(pinnedFingerprintCode)"
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedBaseURL = try container.decode(URL.self, forKey: .baseURL)
         let decodedToken = try container.decode(String.self, forKey: .token)
-        guard let validated = Self(baseURL: decodedBaseURL, token: decodedToken) else {
+        let decodedCode = try container.decodeIfPresent(String.self, forKey: .pinnedFingerprintCode)
+        guard let validated = Self(
+            baseURL: decodedBaseURL,
+            token: decodedToken,
+            pinnedFingerprintCode: decodedCode
+        ) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
                 debugDescription: "Remote connection link has an invalid origin or bearer token."
@@ -106,6 +173,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(baseURL, forKey: .baseURL)
         try container.encode(token, forKey: .token)
+        try container.encodeIfPresent(pinnedFingerprintCode, forKey: .pinnedFingerprintCode)
     }
 
     /// The same credential, written for a QR code.
@@ -125,11 +193,18 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     /// The `#` cannot be avoided: it is absent from the alphanumeric charset, so it costs a
     /// mode switch either way. Keeping the bearer in the fragment — where no HTTP request,
     /// proxy log, or referrer carries it — is worth far more than the ~33 bits that costs.
+    /// A pinned door adds `.<fingerprint>` to the fragment. Both halves are base32 upper case
+    /// and the separator is alphanumeric-mode too, so the addition costs 26 characters in the
+    /// same segment rather than a mode switch. An older client reads the whole fragment as one
+    /// bearer, is refused with a 401, and says so; it cannot silently connect unpinned.
     public var scannablePayload: String {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         components?.scheme = baseURL.scheme?.uppercased()
         components?.host = baseURL.host?.uppercased()
-        components?.fragment = token
+        components?.fragment = Self.fragment(
+            token: token,
+            pinnedFingerprintCode: pinnedFingerprintCode
+        )
         return components?.url?.absoluteString ?? shareURL.absoluteString
     }
 
