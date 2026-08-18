@@ -125,7 +125,8 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
                     executable: executable,
                     arguments: Self.serveArguments(localPort: port),
                     stage: "publish",
-                    launchID: launchID
+                    launchID: launchID,
+                    timeout: RemoteTailscaleDefaults.publishTimeoutSeconds
                 ) { [weak self] serveStatus, serveData in
                     guard let self, self.launchID == launchID else { return }
                     if serveStatus == 0 {
@@ -208,6 +209,7 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
         arguments: [String],
         stage: String,
         launchID: UUID,
+        timeout: TimeInterval = RemoteTailscaleDefaults.commandTimeoutSeconds,
         completion: @escaping @MainActor @Sendable (Int32, Data) -> Void
     ) {
         let pipe: ChildPipe
@@ -258,7 +260,7 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
         }
         commandDeadline = ChildProcessDeadline(
             child: process,
-            timeout: RemoteTailscaleDefaults.commandTimeoutSeconds,
+            timeout: timeout,
             terminationGrace: BoundedChildDefaults.terminationGrace
         )
         let pid = process.processIdentifier
@@ -560,4 +562,12 @@ private enum RemoteTailscaleDefaults {
     static let maximumCommandOutputBytes = 64 * 1024
     static let retainedCommandOutputBytes = 32 * 1024
     static let commandTimeoutSeconds: TimeInterval = 12
+
+    /// `tailscale serve` blocks on the tailnet's **first** certificate issuance, which was
+    /// measured at close to a minute on 2026-08-18. At the twelve seconds every other command
+    /// gets, the app terminated the publish and reported a failure while Serve was still coming
+    /// up — the handler landed anyway, so the door opened a minute after the page said it could
+    /// not. This is the ceiling on that wait, not an expected duration; the settings page states
+    /// what it is waiting for for the whole of it.
+    static let publishTimeoutSeconds: TimeInterval = 90
 }

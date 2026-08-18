@@ -24,6 +24,23 @@ changes who can route packets to Threading; it never expands what a bearer may d
    optional compatibility/private choices; their readiness cards identify setup problems.
 3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
+**A reason never lives only in a readiness row.** `TailscaleReadinessIssue` carries the row's
+line, the failure stated as a fact, the remedy, the row it belongs to, and the title of the page
+that fixes it; the readiness card and the pairing panel both read that one value, and
+`RemotePairingCardState.connectionUnavailable` carries the resulting sentence and the optional
+remedy into the panel beside **Retry Connection**. Before that, the panel said only "Private
+connection unavailable" while "Enable Tailscale Serve for this tailnet" sat three rows above it.
+
+**Coming up is a state with a fact in it.** The transport observes the command it is running and
+nothing more: it has `tailscale status` in flight, or it has asked `tailscale serve` to publish
+and has not been answered. It does not probe the tailnet HTTPS endpoint, so the page says what it
+is waiting for rather than claiming to know why — `TailscaleReadiness.startupStatement` is that
+sentence, shown by the status row, the readiness row and the pairing panel alike, and it changes
+when the command's stage changes rather than on a timer. The publish stage also gets its own
+90-second ceiling (`RemoteTailscaleDefaults.publishTimeoutSeconds`) because a tailnet's *first*
+certificate issuance was measured at close to a minute, and the twelve seconds every other
+command gets had the app killing Serve and reporting a failure while the door was still opening.
+
 The hosted QR carries two independent scopes in its URL fragment: a temporary rendezvous-only
 credential that can form an encrypted ICE/TURN route to this Mac, and the existing one-time owner
 bootstrap that must still be redeemed by the loopback remote server. The Mac exchanges the
