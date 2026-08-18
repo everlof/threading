@@ -105,8 +105,11 @@ an unrelated future turn. If the child starts again during the grace, that event
 and the request survives until the later, real end.
 
 `Supervision` is the durable source of truth for manager, child, brief, state and outcome;
-`SupervisionEvent` records the bounded event stream. It is created by spawn or adoption and closed
-by release, archive, completion or revocation. `subscribe_to_children` uses
+`SupervisionEvent` records the bounded event stream. A supervision is one tenure: spawn or
+adoption creates it, and release, archive, completion or revocation closes it without replacing
+its history. A later adoption of the same child creates a new identity and audit stream. The
+database permits closed tenures to coexist and enforces at most one active manager for a child,
+so every admission path shares the same invariant. `subscribe_to_children` uses
 `SupervisionSubscriptionCenter` to deliver bounded Threading-framed notices over the same
 receipt-backed delivery seam as one-shot watches. `list_sessions`, the Chats host tab, row/hover
 attribution and Archived attribution all read this record rather than trying to recover fleet

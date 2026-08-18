@@ -34,6 +34,18 @@ final class SQLiteDatabase {
                 || (diagnostic.extendedCode & 0xff) == SQLITE_FULL
         }
 
+        /// A rejected relational invariant is an operation refusal, not evidence that the
+        /// database has become unreadable or unsafe to use.
+        ///
+        /// SQLite leaves the statement atomic, and `transaction` rolls back a deferred
+        /// constraint failure. Keeping this typed distinction prevents one invalid insert from
+        /// putting every unrelated store operation into recovery mode for the rest of the launch.
+        var isConstraintViolation: Bool {
+            guard let diagnostic else { return false }
+            return diagnostic.code == SQLITE_CONSTRAINT
+                || (diagnostic.extendedCode & 0xff) == SQLITE_CONSTRAINT
+        }
+
         private var diagnostic: Diagnostic? {
             switch self {
             case .open(let diagnostic), .statement(let diagnostic), .step(let diagnostic):

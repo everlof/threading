@@ -151,6 +151,8 @@ final class ProjectDatabase {
                 try database.execute(ProjectDatabaseSchema.version3)
             case 4:
                 try database.execute(ProjectDatabaseSchema.version4)
+            case 5:
+                try database.execute(ProjectDatabaseSchema.version5)
             default:
                 // Unreachable while `version` and the cases here are edited together, which is
                 // the point of failing loudly rather than silently skipping a step.
@@ -1021,7 +1023,7 @@ final class ProjectDatabase {
 
 enum ProjectDatabaseSchema {
 
-    static let version = 4
+    static let version = 5
 
     static let selectedSessionKey = "selectedSessionID"
 
@@ -1154,6 +1156,49 @@ enum ProjectDatabaseSchema {
             data           TEXT NOT NULL
         );
 
+        CREATE INDEX supervision_event_order ON supervision_event (supervision_id, at);
+        """
+
+    /// A supervision row is one tenure, not the lifetime identity of a manager/child pair.
+    ///
+    /// Version 4 made that pair unique, so adopting a child after releasing it created the new
+    /// historical record the model requires and then failed at the SQL boundary. Rebuild both
+    /// related tables together: dropping the old parent while its event table still referenced it
+    /// would apply `ON DELETE CASCADE` and erase the audit stream during migration.
+    ///
+    /// The replacement constraint states the real invariant instead: a child may have at most one
+    /// active manager, while any number of closed tenures remain queryable by their own ids.
+    static let version5 = """
+        CREATE TABLE supervision_v5 (
+            id                 TEXT PRIMARY KEY,
+            manager_session_id TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+            child_session_id   TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+            assigned_at        REAL NOT NULL,
+            state              TEXT NOT NULL,
+            data               TEXT NOT NULL
+        );
+
+        CREATE TABLE supervision_event_v5 (
+            id             TEXT PRIMARY KEY,
+            supervision_id TEXT NOT NULL REFERENCES supervision_v5(id) ON DELETE CASCADE,
+            at             REAL NOT NULL,
+            kind           TEXT NOT NULL,
+            data           TEXT NOT NULL
+        );
+
+        INSERT INTO supervision_v5 SELECT * FROM supervision;
+        INSERT INTO supervision_event_v5 SELECT * FROM supervision_event;
+
+        DROP TABLE supervision_event;
+        DROP TABLE supervision;
+
+        ALTER TABLE supervision_v5 RENAME TO supervision;
+        ALTER TABLE supervision_event_v5 RENAME TO supervision_event;
+
+        CREATE INDEX supervision_manager ON supervision (manager_session_id, state, assigned_at);
+        CREATE INDEX supervision_child ON supervision (child_session_id, state);
+        CREATE UNIQUE INDEX supervision_active_child ON supervision (child_session_id)
+            WHERE state = '\(SupervisionState.active.rawValue)';
         CREATE INDEX supervision_event_order ON supervision_event (supervision_id, at);
         """
 

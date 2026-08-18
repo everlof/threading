@@ -112,6 +112,7 @@ final class ProjectDatabaseTests: XCTestCase {
     /// here, once, with the header's own arithmetic.
     private enum SQLiteExtended {
         static let ioErrorWrite = SQLITE_IOERR | (3 << 8)
+        static let constraintUnique = SQLITE_CONSTRAINT | (8 << 8)
     }
 
     func testSQLiteFullKeepsItsTypedRecoverySignal() {
@@ -128,6 +129,23 @@ final class ProjectDatabaseTests: XCTestCase {
 
         XCTAssertTrue(full.isStorageExhausted)
         XCTAssertFalse(other.isStorageExhausted)
+    }
+
+    func testSQLiteConstraintKeepsItsTypedOperationRefusalSignal() {
+        let constraint = SQLiteDatabase.Failure.step(.init(
+            code: SQLITE_CONSTRAINT,
+            extendedCode: SQLiteExtended.constraintUnique,
+            message: "unique constraint failed"
+        ))
+        let other = SQLiteDatabase.Failure.step(.init(
+            code: SQLITE_IOERR,
+            extendedCode: SQLiteExtended.ioErrorWrite,
+            message: "I/O error"
+        ))
+
+        XCTAssertTrue(constraint.isConstraintViolation)
+        XCTAssertFalse(constraint.isStorageExhausted)
+        XCTAssertFalse(other.isConstraintViolation)
     }
 
     func testRecoveryProbePreservesTheAuthoritativeGraphAndLeavesNoRow() throws {
@@ -211,6 +229,158 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertEqual(try rowCount(ProjectDatabaseSchema.controlGrantTable), 0)
         XCTAssertEqual(try rowCount(ProjectDatabaseSchema.supervisionTable), 0)
         XCTAssertEqual(try rowCount(ProjectDatabaseSchema.supervisionEventTable), 0)
+    }
+
+    func testReleasedChildCanBeAdoptedAgainWithoutReplacingItsHistory() throws {
+        let database = try makeDatabase()
+        let manager = AgentSession(kind: .claude, title: "Manager")
+        let child = AgentSession(kind: .codex, title: "Child")
+        try database.save(ProjectsState(projects: [
+            makeProject("alpha", sessions: [manager, child])
+        ]))
+
+        var first = Supervision(
+            managerID: manager.id,
+            childID: child.id,
+            brief: "First tenure",
+            assignedAt: Date(timeIntervalSince1970: 100)
+        )
+        try database.saveSupervision(first)
+        let firstEvent = SupervisionEvent(
+            supervisionID: first.id,
+            at: Date(timeIntervalSince1970: 110),
+            kind: .assigned,
+            detail: first.brief
+        )
+        try database.saveSupervisionEvent(firstEvent)
+
+        first.state = .released
+        first.closedAt = Date(timeIntervalSince1970: 120)
+        first.outcome = "First tenure complete"
+        try database.saveSupervision(first)
+
+        let second = Supervision(
+            managerID: manager.id,
+            childID: child.id,
+            brief: "Second tenure",
+            assignedAt: Date(timeIntervalSince1970: 130)
+        )
+        try database.saveSupervision(second)
+
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertEqual(try database.supervisions(childID: child.id), [first, second])
+        XCTAssertEqual(try database.supervisionEvents(for: first.id), [firstEvent])
+        XCTAssertTrue(try database.supervisionEvents(for: second.id).isEmpty)
+    }
+
+    func testOnlyOneManagerCanActivelySuperviseAChild() throws {
+        let database = try makeDatabase()
+        let firstManager = AgentSession(kind: .claude, title: "First manager")
+        let secondManager = AgentSession(kind: .codex, title: "Second manager")
+        let child = AgentSession(kind: .codex, title: "Child")
+        try database.save(ProjectsState(projects: [
+            makeProject("alpha", sessions: [firstManager, secondManager, child])
+        ]))
+
+        var first = Supervision(
+            managerID: firstManager.id,
+            childID: child.id,
+            brief: "First"
+        )
+        let second = Supervision(
+            managerID: secondManager.id,
+            childID: child.id,
+            brief: "Second"
+        )
+        try database.saveSupervision(first)
+
+        XCTAssertThrowsError(try database.saveSupervision(second)) { error in
+            guard let failure = error as? SQLiteDatabase.Failure else {
+                return XCTFail("Expected a SQLite constraint refusal, got \(error)")
+            }
+            XCTAssertTrue(failure.isConstraintViolation)
+        }
+
+        first.state = .released
+        first.closedAt = Date()
+        try database.saveSupervision(first)
+        XCTAssertNoThrow(try database.saveSupervision(second))
+        XCTAssertEqual(try database.supervisions(childID: child.id), [first, second])
+    }
+
+    func testVersionFiveMigrationPreservesSupervisionHistoryAndEvents() throws {
+        let url = directory.appendingPathComponent("version-four.db")
+        let manager = AgentSession(kind: .claude, title: "Manager")
+        let child = AgentSession(kind: .codex, title: "Child")
+        let project = makeProject("alpha", sessions: [manager, child])
+        var closed = Supervision(
+            managerID: manager.id,
+            childID: child.id,
+            brief: "Migrated tenure",
+            assignedAt: Date(timeIntervalSince1970: 100)
+        )
+        closed.state = .released
+        closed.closedAt = Date(timeIntervalSince1970: 120)
+        closed.outcome = "Done"
+        let event = SupervisionEvent(
+            supervisionID: closed.id,
+            at: Date(timeIntervalSince1970: 120),
+            kind: .released,
+            detail: closed.outcome
+        )
+
+        let versionFour = try makeVersionFourDatabase(at: url)
+        try insert(project: project, into: versionFour)
+        try insert(supervision: closed, into: versionFour)
+        try insert(event: event, into: versionFour)
+        versionFour.close()
+
+        let migrated = try ProjectDatabase(url: url)
+        XCTAssertEqual(try migrated.supervisions(childID: child.id), [closed])
+        XCTAssertEqual(try migrated.supervisionEvents(for: closed.id), [event])
+
+        let readopted = Supervision(
+            managerID: manager.id,
+            childID: child.id,
+            brief: "New tenure",
+            assignedAt: Date(timeIntervalSince1970: 130)
+        )
+        try migrated.saveSupervision(readopted)
+        XCTAssertEqual(try migrated.supervisions(childID: child.id), [closed, readopted])
+        migrated.close()
+
+        let inspection = try SQLiteDatabase(path: url.path)
+        XCTAssertEqual(try inspection.scalar("PRAGMA user_version"), ProjectDatabaseSchema.version)
+        XCTAssertNil(try inspection.scalar("PRAGMA foreign_key_check"))
+    }
+
+    func testConstraintRefusalDoesNotDisableUnrelatedPersistence() throws {
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        let firstManager = AgentSession(kind: .claude, title: "First manager")
+        let secondManager = AgentSession(kind: .codex, title: "Second manager")
+        let child = AgentSession(kind: .codex, title: "Child")
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [
+            makeProject("alpha", sessions: [firstManager, secondManager, child])
+        ])))
+
+        XCTAssertTrue(manager.saveSupervision(Supervision(
+            managerID: firstManager.id,
+            childID: child.id,
+            brief: "First"
+        )))
+        XCTAssertFalse(manager.saveSupervision(Supervision(
+            managerID: secondManager.id,
+            childID: child.id,
+            brief: "Second"
+        )))
+
+        XCTAssertEqual(manager.persistenceHealth, .healthy)
+        XCTAssertTrue(manager.saveSelectedSessionID(child.id))
+        guard case .loaded(let state) = manager.loadProjectsState() else {
+            return XCTFail("A constraint refusal should leave the store readable")
+        }
+        XCTAssertEqual(state.selectedSessionID, child.id)
     }
 
     func testSupervisionEventRetentionIsBoundedAndSchemaVersionIsCurrent() throws {
@@ -818,6 +988,71 @@ final class ProjectDatabaseTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private func makeVersionFourDatabase(at url: URL) throws -> SQLiteDatabase {
+        let database = try SQLiteDatabase(path: url.path)
+        try database.migrate(to: 4) { version in
+            switch version {
+            case 1: try database.execute(ProjectDatabaseSchema.version1)
+            case 2: try database.execute(ProjectDatabaseSchema.version2)
+            case 3: try database.execute(ProjectDatabaseSchema.version3)
+            case 4: try database.execute(ProjectDatabaseSchema.version4)
+            default:
+                throw SQLiteDatabase.Failure.syntheticStep(
+                    "Unexpected historical schema version \(version)"
+                )
+            }
+        }
+        return database
+    }
+
+    private func insert(project: Project, into database: SQLiteDatabase) throws {
+        var payload = project
+        payload.sessions = []
+        try database.prepare(ProjectDatabaseSchema.upsertProject)
+            .bind(1, project.id.uuidString)
+            .bind(2, 0)
+            .bind(3, project.name)
+            .bind(4, project.folderPath)
+            .bind(5, try encoded(payload))
+            .run()
+
+        for (position, session) in project.sessions.enumerated() {
+            try database.prepare(ProjectDatabaseSchema.upsertSession)
+                .bind(1, session.id.uuidString)
+                .bind(2, project.id.uuidString)
+                .bind(3, position)
+                .bind(4, session.kind.rawValue)
+                .bind(5, session.lastActiveAt.timeIntervalSince1970)
+                .bind(6, try encoded(session))
+                .run()
+        }
+    }
+
+    private func insert(supervision: Supervision, into database: SQLiteDatabase) throws {
+        try database.prepare(ProjectDatabaseSchema.upsertSupervision)
+            .bind(1, supervision.id.uuidString)
+            .bind(2, supervision.managerID.uuidString)
+            .bind(3, supervision.childID.uuidString)
+            .bind(4, supervision.assignedAt.timeIntervalSince1970)
+            .bind(5, supervision.state.rawValue)
+            .bind(6, try encoded(supervision))
+            .run()
+    }
+
+    private func insert(event: SupervisionEvent, into database: SQLiteDatabase) throws {
+        try database.prepare(ProjectDatabaseSchema.insertSupervisionEvent)
+            .bind(1, event.id.uuidString.lowercased())
+            .bind(2, event.supervisionID.uuidString)
+            .bind(3, event.at.timeIntervalSince1970)
+            .bind(4, event.kind.rawValue)
+            .bind(5, try encoded(event))
+            .run()
+    }
+
+    private func encoded<Value: Encodable>(_ value: Value) throws -> String {
+        String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+    }
 
     private func rowCount(_ table: String) throws -> Int {
         let database = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
