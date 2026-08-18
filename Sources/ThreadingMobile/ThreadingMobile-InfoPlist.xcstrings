@@ -54,6 +54,24 @@
           }
         }
       }
+    },
+    "NSLocalNetworkUsageDescription": {
+      "comment": "Privacy - Local Network Usage Description",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Threading connects to your Mac over Wi-Fi to show and control your chats."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threading ansluter till din Mac via Wi-Fi för att visa och styra dina chattar."
+          }
+        }
+      }
     }
   },
   "version": "1.2"

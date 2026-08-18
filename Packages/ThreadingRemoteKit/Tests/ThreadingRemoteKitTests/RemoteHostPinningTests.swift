@@ -337,3 +337,33 @@ final class RemoteHostPinningTests: XCTestCase {
         )
     }
 }
+
+/// The sticky port contract, which both ends walk in the same order.
+final class RemoteListenerPortsTests: XCTestCase {
+
+    func testTheRememberedPortIsTriedFirstAndTheRangeFollowsItExactlyOnce() {
+        XCTAssertEqual(
+            RemoteListenerPorts.candidates(preferred: 8760),
+            [8760, 8761, 8762, 8763, 8764, 8765, 8766, 8767, 8768, 8769]
+        )
+        XCTAssertEqual(
+            RemoteListenerPorts.candidates(preferred: 8765),
+            [8765, 8760, 8761, 8762, 8763, 8764, 8766, 8767, 8768, 8769]
+        )
+    }
+
+    /// A port the Mac was configured onto is outside the range and still comes first: it is what
+    /// the Mac last reported, and the range is where a collision moved it, not a replacement.
+    func testAPortOutsideTheRangeLeadsAndTheRangeStillFollows() {
+        let candidates = RemoteListenerPorts.candidates(preferred: 9100)
+        XCTAssertEqual(candidates.first, 9100)
+        XCTAssertEqual(candidates.count, 11)
+        XCTAssertEqual(Array(candidates.dropFirst()), Array(RemoteListenerPorts.fallbackRange))
+    }
+
+    func testTheWalkIsBoundedByTheRange() {
+        XCTAssertEqual(RemoteListenerPorts.fallbackRange, 8760...8769)
+        XCTAssertEqual(RemoteListenerPorts.defaultPort, RemoteListenerPorts.fallbackRange.lowerBound)
+        XCTAssertEqual(RemoteListenerPorts.candidates(preferred: 8760).count, 10)
+    }
+}

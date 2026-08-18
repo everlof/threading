@@ -7,8 +7,28 @@
     "Hunt down the flaky test…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spåra upp det opålitliga testet…" } } }
     },
+    "Identity code %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identitetskod %@"
+          }
+        }
+      }
+    },
     "Make the impossible state impossible…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gör det omöjliga tillståndet omöjligt…" } } }
+    },
+    "Open the download page": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna nedladdningssidan"
+          }
+        }
+      }
     },
     "Polish the rough edges…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Putsa de grova kanterna…" } } }
@@ -67,11 +87,61 @@
     "Switch Mac": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Byt Mac" } } }
     },
+    "This Mac needs a newer version of Threading. Update Threading on the Mac and try again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här Mac-datorn behöver en nyare version av Threading. Uppdatera Threading på Mac-datorn och försök igen."
+          }
+        }
+      }
+    },
+    "This Mac’s identity does not match the one you paired with. If Remote Access was reset on the Mac, scan its QR code again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac-datorns identitet stämmer inte med den du parkopplade med. Om Fjärråtkomst återställdes på Mac-datorn skannar du dess QR-kod igen."
+          }
+        }
+      }
+    },
+    "This iPhone will trust only this Mac’s identity.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här iPhone-enheten litar bara på Mac-datorns identitet."
+          }
+        }
+      }
+    },
+    "This network": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det här nätverket"
+          }
+        }
+      }
+    },
     "Updated 3h ago": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdaterad för 3 tim sedan" } } }
     },
     "Use the private link from your Mac or an invited chat.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd den privata länken från din Mac eller en inbjuden chatt." } } }
+    },
+    "VPN": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN"
+          }
+        }
+      }
     },
     "What should the agent work on?": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Vad ska agenten arbeta med?" } } }

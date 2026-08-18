@@ -686,6 +686,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         case .openLocalNetworkSettings:
             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
             UIApplication.shared.open(url)
+        case .openUpdatePage(let url):
+            UIApplication.shared.open(url)
         }
     }
 

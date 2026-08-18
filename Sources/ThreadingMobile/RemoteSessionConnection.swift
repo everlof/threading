@@ -949,6 +949,13 @@ final class RemoteSessionConnection: ObservableObject {
         var fields = destinationFields
         fields[.code] = code ?? "connection.\(failure.cause.rawValue)"
         fields[.reason] = failure.cause.rawValue
+        // Whether the identity check passed, refused, or never ran. A token, never a
+        // fingerprint: the certificate is not a fact a support bundle carries, and without this
+        // a refused pin and an ordinary cancelled request are the same line in the journal.
+        if let host = destinationHost,
+           let verdict = RemoteClient.pinningDelegate.verdict(forHost: host) {
+            fields[.detail] = RemoteHostTrust.token(for: verdict)
+        }
         // 530, 502 and 404 behind the same -1011 mean three different things: a relay whose
         // origin is gone, a relay that could not reach it, and something else answering on that
         // address entirely.

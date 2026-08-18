@@ -793,6 +793,18 @@ private struct DashboardMacPickerView: View {
                             Text(host.menuTitle)
                                 .font(.body.weight(.medium))
                                 .foregroundStyle(theme.label)
+                            // The identity this phone pins, in the spelling the Mac's own
+                            // settings page prints, so the two can be compared by eye. It is
+                            // not a secret: it is the public half of a certificate, and the
+                            // whole point of it is being read aloud across a room.
+                            if let code = host.pinnedFingerprintCode {
+                                Text(code)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(theme.tertiaryLabel)
+                                    .accessibilityLabel(
+                                        MobileL10n.string("Identity code %@", code)
+                                    )
+                            }
                             if host.id == model.activeHostID {
                                 Text("Current Mac")
                                     .font(.caption)

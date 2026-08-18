@@ -576,6 +576,8 @@ private struct RemoteNavigationTitle: View {
         case .openLocalNetworkSettings:
             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
             openURL(url)
+        case .openUpdatePage(let url):
+            openURL(url)
         }
     }
 
