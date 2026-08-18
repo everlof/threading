@@ -162,6 +162,10 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Sendable {
     case metricKitDiagnostics
     case metricKitWindow
     case metricKitLastCrash
+
+    // The app's immediate watchdog, which survives a force-quit during the hang. Counts,
+    // duration and compile-time operation names only; sampled stacks remain owner-local.
+    case mainThreadStalls
 }
 
 public struct RemoteDiagnosticRecord: Codable, Equatable, Sendable {

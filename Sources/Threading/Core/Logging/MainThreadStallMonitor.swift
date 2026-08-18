@@ -2,9 +2,9 @@ import Foundation
 
 /// Detects long periods in which the main dispatch queue cannot service a trivial ping.
 ///
-/// This deliberately does not sample stacks; `sample` and `xctrace` do that better and without
-/// private APIs. Its job is to leave a timestamped trace of the app-level operation that was in
-/// flight, then let a repeatable CLI capture explain the stack.
+/// This deliberately does not sample stacks; MetricKit, `sample` and `xctrace` do that without
+/// private APIs. Its job is to immediately persist the app-level operation that was in flight,
+/// then leave the richer timestamped trace beside it.
 final class MainThreadStallMonitor: @unchecked Sendable {
 
     static let shared = MainThreadStallMonitor()
@@ -13,10 +13,13 @@ final class MainThreadStallMonitor: @unchecked Sendable {
         let id: UUID
         let sentAtNanoseconds: UInt64
         var detected = false
+        var incidentID: UUID?
     }
 
     private let recorder: PerformanceRecorder
+    private let incidentStore: MainThreadStallIncidentStore
     private let thresholdNanoseconds: UInt64
+    private let thresholdMilliseconds: Double
     private let queue = DispatchQueue(
         label: "codes.threading.performance.main-thread-watchdog",
         qos: .utility
@@ -29,16 +32,21 @@ final class MainThreadStallMonitor: @unchecked Sendable {
 
     init(
         recorder: PerformanceRecorder = .shared,
+        incidentStore: MainThreadStallIncidentStore = .shared,
         thresholdMilliseconds: Double = 250
     ) {
         self.recorder = recorder
+        self.incidentStore = incidentStore
         if thresholdMilliseconds <= 0 || thresholdMilliseconds.isNaN {
             thresholdNanoseconds = 0
+            self.thresholdMilliseconds = 0
         } else if !thresholdMilliseconds.isFinite
                     || thresholdMilliseconds >= Double(UInt64.max) / 1_000_000 {
             thresholdNanoseconds = .max
+            self.thresholdMilliseconds = Double(UInt64.max) / 1_000_000
         } else {
             thresholdNanoseconds = UInt64(thresholdMilliseconds * 1_000_000)
+            self.thresholdMilliseconds = thresholdMilliseconds
         }
     }
 
@@ -76,14 +84,21 @@ final class MainThreadStallMonitor: @unchecked Sendable {
         if var pendingPing {
             if !pendingPing.detected, now &- pendingPing.sentAtNanoseconds >= thresholdNanoseconds {
                 pendingPing.detected = true
+                pendingPing.incidentID = incidentStore.begin(
+                    thresholdMilliseconds: thresholdMilliseconds,
+                    mainThreadID: mainThreadID,
+                    activeOperations: recorder.activeSpanSnapshots()
+                )
                 self.pendingPing = pendingPing
                 recorder.requestAutomaticExport(reason: "main-thread-stall-detected")
-                ThreadingLogger.performance.error("Main thread unresponsive for at least 250 ms")
+                ThreadingLogger.performance.error(
+                    "Main thread unresponsive for at least \(self.thresholdMilliseconds, privacy: .public) ms"
+                )
             }
             return
         }
 
-        let ping = PendingPing(id: UUID(), sentAtNanoseconds: now)
+        let ping = PendingPing(id: UUID(), sentAtNanoseconds: now, incidentID: nil)
         pendingPing = ping
 
         DispatchQueue.main.async { [weak self] in
@@ -100,13 +115,20 @@ final class MainThreadStallMonitor: @unchecked Sendable {
         guard ping.detected else { return }
 
         let elapsed = answeredAtNanoseconds &- ping.sentAtNanoseconds
+        let durationMilliseconds = Double(elapsed) / 1_000_000
+        if let incidentID = ping.incidentID {
+            incidentStore.complete(
+                id: incidentID,
+                durationMilliseconds: durationMilliseconds
+            )
+        }
         recorder.recordCompletedInterval(
             "main-thread.stall",
             category: "responsiveness",
             startNanoseconds: ping.sentAtNanoseconds,
             endNanoseconds: answeredAtNanoseconds,
             threadID: mainThreadID,
-            metadata: ["duration_ms": String(format: "%.1f", Double(elapsed) / 1_000_000)]
+            metadata: ["duration_ms": String(format: "%.1f", durationMilliseconds)]
         )
         recorder.requestAutomaticExport(reason: "main-thread-stall-completed")
     }

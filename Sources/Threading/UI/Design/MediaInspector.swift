@@ -31,6 +31,15 @@ struct BoundedImageDecodePolicy: Equatable, Sendable {
         maximumRenderedPixelDimension: 4_096
     )
 
+    /// The composer rail never needs inspector-sized pixels. Keeping its own render bound makes
+    /// each queued decode cheap enough to hand back to the main actor as one finished frame.
+    static let composerAttachmentThumbnail = Self(
+        maximumBytes: 32 * 1_024 * 1_024,
+        maximumSourcePixelDimension: MCPDefaults.maximumImagePixelDimension,
+        maximumSourcePixelCount: MCPDefaults.maximumImagePixelCount,
+        maximumRenderedPixelDimension: 512
+    )
+
     static func thumbnail(maximumPixelDimension: Int) -> Self {
         Self(
             maximumBytes: MCPDefaults.maximumImageBytes,
@@ -48,10 +57,13 @@ enum BoundedImageDecoder {
             url,
             maximumBytes: policy.maximumBytes
         ), let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = decodedImage(from: source, policy: policy) else {
+              let image = decodedFrame(from: source, policy: policy) else {
             return nil
         }
-        return image
+        return NSImage(
+            cgImage: image,
+            size: NSSize(width: image.width, height: image.height)
+        )
     }
 
     /// A list-safe thumbnail path. The decoded allocation is authoritatively bounded by ImageIO's
@@ -60,6 +72,17 @@ enum BoundedImageDecoder {
     /// building a 32-row rail would turn a memory-safety rule into a predictable UI stall. The
     /// selected/full-size path above performs the one-byte-past authoritative read.
     static func thumbnail(at url: URL, policy: BoundedImageDecodePolicy) -> NSImage? {
+        guard let image = thumbnailFrame(at: url, policy: policy) else { return nil }
+        return NSImage(
+            cgImage: image,
+            size: NSSize(width: image.width, height: image.height)
+        )
+    }
+
+    /// A worker-safe thumbnail result for callers that must keep ImageIO source inspection and
+    /// rasterization off the main actor. `CGImage` is immutable; AppKit wrapping and view
+    /// installation remain the caller's main-actor work.
+    static func thumbnailFrame(at url: URL, policy: BoundedImageDecodePolicy) -> CGImage? {
         guard let values = try? url.resourceValues(
             forKeys: [.isRegularFileKey, .fileSizeKey]
         ), values.isRegularFile == true,
@@ -70,7 +93,7 @@ enum BoundedImageDecoder {
               ) else {
             return nil
         }
-        return decodedImage(from: source, policy: policy)
+        return decodedFrame(from: source, policy: policy)
     }
 
     /// The same bounded thumbnail decode for bytes a caller has already read and authenticated.
@@ -80,6 +103,14 @@ enum BoundedImageDecoder {
     /// second time. ImageIO still owns the rendered-size bound, so an approved full-page capture
     /// cannot become a full-size bitmap merely because it is shown in a list.
     static func thumbnail(_ data: Data, policy: BoundedImageDecodePolicy) -> NSImage? {
+        guard let image = thumbnailFrame(data, policy: policy) else { return nil }
+        return NSImage(
+            cgImage: image,
+            size: NSSize(width: image.width, height: image.height)
+        )
+    }
+
+    static func thumbnailFrame(_ data: Data, policy: BoundedImageDecodePolicy) -> CGImage? {
         guard data.count <= policy.maximumBytes,
               let source = CGImageSourceCreateWithData(
                   data as CFData,
@@ -87,13 +118,13 @@ enum BoundedImageDecoder {
               ) else {
             return nil
         }
-        return decodedImage(from: source, policy: policy)
+        return decodedFrame(from: source, policy: policy)
     }
 
-    private static func decodedImage(
+    private static func decodedFrame(
         from source: CGImageSource,
         policy: BoundedImageDecodePolicy
-    ) -> NSImage? {
+    ) -> CGImage? {
         guard CGImageSourceGetCount(source) > 0,
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
                 as? [CFString: Any],
@@ -112,10 +143,7 @@ enum BoundedImageDecoder {
               ) else {
             return nil
         }
-        return NSImage(
-            cgImage: decoded,
-            size: NSSize(width: decoded.width, height: decoded.height)
-        )
+        return decoded
     }
 
     private static func accepts(
@@ -1085,11 +1113,11 @@ final class MediaInspectorView: NSView, ThemedComponent {
             NSWorkspace.shared.activateFileViewerSelecting([item.url])
         })
         entries.append(menuItem("Open in Default App") {
-            if !NSWorkspace.shared.open(item.url) { NSSound.beep() }
+            if !NSWorkspace.shared.open(item.url) { SystemAlert.refuse() }
         })
         entries.append(.separator)
         entries.append(menuItem("Open in System Quick Look") {
-            if !QuickLookPresenter.shared.present(item.url) { NSSound.beep() }
+            if !QuickLookPresenter.shared.present(item.url) { SystemAlert.refuse() }
         })
 
         menuSession = ThemedMenuPresenter.present(

@@ -43,7 +43,7 @@ final class MobileSessionOpeningTests: XCTestCase {
 
         MobileSessionNavigationTransition.push(session(surface: .conversation), onto: model)
 
-        XCTAssertEqual(model.navigationPath, ["session-1"])
+        XCTAssertEqual(model.navigationPath, [.session("session-1")])
     }
 
     func testPushingATerminalSessionAlsoOpensIt() {
@@ -51,7 +51,7 @@ final class MobileSessionOpeningTests: XCTestCase {
 
         MobileSessionNavigationTransition.push(session(surface: .terminal), onto: model)
 
-        XCTAssertEqual(model.navigationPath, ["session-1"])
+        XCTAssertEqual(model.navigationPath, [.session("session-1")])
     }
 
     /// The session already on top is the one being looked at. A notification, a restored route
@@ -64,7 +64,22 @@ final class MobileSessionOpeningTests: XCTestCase {
         MobileSessionNavigationTransition.push(opened, onto: model)
         MobileSessionNavigationTransition.push(opened, onto: model)
 
-        XCTAssertEqual(model.navigationPath, ["session-1"])
+        XCTAssertEqual(model.navigationPath, [.session("session-1")])
+    }
+
+    func testOpeningAChatFromAProjectKeepsTheProjectAsTheBackDestination() {
+        let model = makeModel()
+        model.navigationPath = [.project("AnotherTerminal")]
+
+        MobileSessionNavigationTransition.push(
+            session(surface: .conversation),
+            onto: model
+        )
+
+        XCTAssertEqual(
+            model.navigationPath,
+            [.project("AnotherTerminal"), .session("session-1")]
+        )
     }
 
     private func makeModel() -> RemoteAppModel {

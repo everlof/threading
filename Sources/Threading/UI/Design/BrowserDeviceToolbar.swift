@@ -241,7 +241,7 @@ final class BrowserDeviceToolbar: NSView, ThemedComponent, NSTextFieldDelegate {
         guard let width = Int(widthField.stringValue),
               let height = Int(heightField.stringValue),
               onApplyCustomSize?(width, height) == true else {
-            NSSound.beep()
+            SystemAlert.refuse()
             setViewport(currentSize, preset: nil)
             return
         }

@@ -676,7 +676,7 @@
       "priority": "important",
       "title": "Remaining Settings destinations",
       "description": "Deterministic fixture seams and complete-page captures for the remaining data-backed Settings pages, without reading developer accounts, profiles, projects or installed extensions.",
-      "states": ["Keyboard", "Terminal profile", "Accounts", "Storage", "Archived", "Advanced", "Search results"],
+      "states": ["Keyboard", "Terminal profile", "Storage", "Archived", "Advanced", "Search results"],
       "matrix": {
         "themes": ["System", "Two contrasting authored themes"],
         "appearances": ["Light", "Dark"],
@@ -712,6 +712,38 @@
       },
       "capture": {
         "glob": "onboarding-*.png"
+      }
+    },
+    {
+      "id": "account-setup-layouts",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Account setup and reconnection",
+      "description": "The host-owned setup surface in the real onboarding flow and production Accounts Settings page, using deterministic account fixtures and every meaningful setup state without launching provider authentication.",
+      "states": [
+        "No accounts",
+        "One account",
+        "Multiple accounts",
+        "Provider choice",
+        "Login naming",
+        "Browser sign-in running",
+        "CLI missing",
+        "Verification failed",
+        "Login verified",
+        "Account reconnect running"
+      ],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Onboarding window", "Shared Settings width"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AccountSetupRenderTests.swift",
+        "test": "ThreadingTests/AccountSetupRenderTests/testRendersEveryAccountSetupStateInOnboardingAndSettings"
+      },
+      "capture": {
+        "glob": "account-setup-*.png"
       }
     },
     {

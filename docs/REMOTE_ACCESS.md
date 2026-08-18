@@ -92,9 +92,18 @@ policy, prefers Tailscale when requested, records the successful route, and can 
 advertised route without creating a duplicate device. Unknown future policies fail closed to
 private-only. Guest shares never receive the Mac's private endpoint list.
 
-The iOS app shows all unarchived
-sessions grouped by project or ordered by recent activity, including dormant sessions. Pinned sessions
-stay at the top on both Mac and iPhone, and the archive is available from the dashboard.
+The iOS app shows all unarchived sessions grouped by project or ordered by recent activity,
+including dormant sessions. The navigation title names the connected Mac and carries its live
+connection status; the leading Mac button switches paired hosts, so the dashboard does not repeat
+that same device as a card in its content. Project headings are destinations. Opening one replaces
+the mixed dashboard with one plain, project-scoped chat list, names the project above the same
+connection status, and scopes the navigation-bar **+** to that project. Pinned sessions stay at the
+top on both Mac and iPhone, and the archive is available from the dashboard.
+
+This mobile browser is deliberately host-owned. Threading retains project/session navigation,
+launch scoping, connection truth, row actions and the native fallback; the macOS extension
+composition engine neither runs nor renders on iOS, so this surface does not advertise a visual
+replacement contract it cannot honor.
 
 **A row says who is talking, the way the Mac sidebar does.** Its tile is the runtime's own mark —
 Claude's starburst, OpenAI's knot, an SF Symbol for a runtime we bundle no artwork for — with an

@@ -349,8 +349,13 @@ enum UsageDefaults {
     static let warningFraction = 0.75
     static let criticalFraction = 0.92
 
+    /// The mark that stands between one window and the next, without the spaces the written
+    /// form pads it with. A drawn reading sets those gaps from `Design.Spacing` instead, so the
+    /// two forms stay one decision — see `UsageReadingLabel.summary`.
+    static let segmentMark = "·"
+
     /// Between one window and the next in a written-out reading.
-    static let segmentSeparator = " · "
+    static let segmentSeparator = " \(segmentMark) "
 
     /// Between a scoped window's length and the model it meters — `7d Fable`. A space rather
     /// than `segmentSeparator`, which would make one window look like two in a joined list.

@@ -476,17 +476,29 @@ intercell height: half above every row *including the first*, which put the top 
 below the margin the sides were on. The vertical rhythm is `Spacing.inset` from the tab strip to
 the chip, `Spacing.inset` from the chip to the first card, `Spacing.small` between cards.
 
-The header sits on that margin at both ends: the chip's pill is its own ink, and the `···`
-is pulled out by its `opticalHorizontalInset` so the glyph — not the hover surface around it —
-lands where the cards end. Back does the same on the leading side when a commit is open, which
-is why its visibility goes through `setBackVisible(_:)` rather than `isHidden` directly.
-`GitReviewViewTests` holds all of it — chip, cards, overflow, and both gaps — to one measure.
+The header sits on that margin at both ends with the controls' complete interaction surfaces.
+That distinction matters for a chip whose plate appears only on hover, menu, or keyboard focus:
+aligning its resting text by pulling the stable frame outside the margin makes the plate visibly
+break the pane edge the instant the control is used. `ControlRowView` therefore keeps the chip's
+full plate and the overflow target on the same outside measure as the file cards, while each
+component owns the padding from its plate to its ink. Related actions form compact
+`ControlButtonGroupView` runs, so their internal spacing remains tighter than the gap between
+navigation, text-size, and overflow decisions. `GitReviewViewTests` holds all of it — chip,
+cards, overflow, and both vertical gaps — to one measure.
 The diff totals beside the chip use the same locale-aware compact notation as the status card;
 their tooltip retains the exact grouped values, and their accessibility label speaks the exact
 file, addition, and deletion totals. There is no second totals pill over the bottom of the diff:
 only the shared down-arrow appears while the reader is away from its end.
 The fixture and the `git.read.*`, `git.process`, `git.review.render`, and
 `git.review.render-files` spans are documented in [`performance.md`](performance.md).
+
+The 2026-08-18 toolbar ownership follow-up adds five fixed controls and two fixed groups; it does
+not add work proportional to files or diff lines. The final Debug build measured the ordinary
+174-file / 400-line forced-scroll fixture at **10.410 ms/frame**. Two sequential warm 8,985-file
+runs measured live-resize p95 at **7.868 and 8.407 ms**, continuous-scroll p95 at **15.463 and
+15.979 ms**, and full-index seek p95 at **14.352 and 14.697 ms**. Both retained
+`max_width_delta_drift=0.000` and `pending_layout_frames=0`; the standard and massive opt-in
+workloads passed.
 
 **Find is owned by this surface.** ⌘F routes to the active Review tab and inserts the shared
 theme-owned find chrome between its mode header and body; it never adds a view to the window's
@@ -542,13 +554,24 @@ response and geometry identical in the sticky state. Its height is measured from
 measuring the host while its hidden bootstrap constraint is still zero produces a one-point strip
 that updates the current path but shows no heading. The sticky host passes its non-control ground
 through to the scroller, while descendants of `ThemedControl` retain hit testing so Copy Path,
-Finder and staging remain usable. The row keeps its ordinary translucent control wash; its host
-adds the opaque `elevated` surface required of content floating over scrolling source, so lines do
-not remain legible through the retained heading. The ordinary file row clips its diff washes to
-one rounded card silhouette; the retained host owns only the visual top corners and leaves its
-lower corners square, because that edge is a seam into the source rather than the end of a pill.
-This corner selection belongs to the design-system surface API and is recorded for theme refresh,
-not spelled as a feature-owned Core Animation mask.
+Finder and staging remain usable. The row keeps its ordinary translucent control wash. The overlay
+composes two design-system surfaces: a square, opaque source-background occluder below, then the
+clipped `elevated` heading above. The underlay is load-bearing: a rounded overlay has transparent
+pixels outside its top arc, where a scrolling red or green diff wash would otherwise leak through;
+using the outer pane `ground` there instead produces a hard-black wedge in themes whose source
+surface is navy. The
+ordinary file row clips its diff washes to one rounded card silhouette; the retained heading owns
+only the visual top corners and leaves its lower corners square, because that edge is a seam into
+the source rather than the end of a pill. As the next file arrives, the retained heading starts
+moving one `Spacing.small` earlier, preserving the same inter-card gap instead of touching the real
+header below. A transparent structural viewport clips the retained host at the scroll view's top;
+without that boundary, a negative push offset lets the outgoing file heading paint upward over
+Review's real `Uncommitted` toolbar. The scroll callback applies the position directly to the one
+retained host as well as to its constraint; otherwise the document can advance one display frame
+before Auto Layout and let the outgoing overlay paint over the incoming heading. This constant-time
+adjustment avoids a full virtual-table layout on every wheel event. These surfaces and corner
+selections belong to the design-system surface API and remain recorded for theme refresh, not
+spelled as feature-owned Core Animation drawing.
 
 Each visible `Lines …` heading is a real compact `ThemedDisclosureRow`, so its familiar chevron
 actually hides and reveals that hunk. Collapse state is keyed by the changed-line endpoints rather

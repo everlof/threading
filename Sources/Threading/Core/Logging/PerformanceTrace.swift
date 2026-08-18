@@ -210,6 +210,27 @@ final class PerformanceRecorder: @unchecked Sendable {
         return identifier
     }
 
+    /// The bounded semantic context a watchdog can persist without touching the blocked thread.
+    /// Names are compile-time trace schema and metadata is subject to this recorder's aggregate,
+    /// low-cardinality contract. Oldest first, because the operation that began before the rest
+    /// is usually the one whose synchronous work owns the stall.
+    func activeSpanSnapshots(maximumCount: Int = 16) -> [PerformanceActiveSpanSnapshot] {
+        let now = DispatchTime.now().uptimeNanoseconds
+        return withLock {
+            activeSpans.values
+                .sorted { $0.startNanoseconds < $1.startNanoseconds }
+                .prefix(max(maximumCount, 0))
+                .map { span in
+                    PerformanceActiveSpanSnapshot(
+                        name: span.name,
+                        category: span.category,
+                        ageMilliseconds: Double(now &- span.startNanoseconds) / 1_000_000,
+                        metadata: span.metadata
+                    )
+                }
+        }
+    }
+
     /// Saturating conversion for configuration values. `UInt64(Double.infinity)` traps, and a
     /// diagnostic facility should never be able to take the app down because a threshold was
     /// deliberately disabled with a very large value.
@@ -330,6 +351,13 @@ final class PerformanceRecorder: @unchecked Sendable {
         }
         return result
     }
+}
+
+struct PerformanceActiveSpanSnapshot: Codable, Equatable, Sendable {
+    let name: String
+    let category: String
+    let ageMilliseconds: Double
+    let metadata: [String: String]
 }
 
 /// A manually-ended span token. Deinitialization closes abandoned spans so recorder state stays

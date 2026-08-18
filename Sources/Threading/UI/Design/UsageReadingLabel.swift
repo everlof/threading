@@ -136,17 +136,20 @@ final class UsageReadingLabel: NSView, InkSourced {
 
         for (index, reading) in readings.enumerated() {
             if index > 0 {
+                result.append(gap(Design.Spacing.small, font: Design.Typography.control()))
                 append(
-                    UsageDefaults.segmentSeparator,
+                    UsageDefaults.segmentMark,
                     font: Design.Typography.control(),
                     color: ink.tertiary
                 )
+                result.append(gap(Design.Spacing.small, font: Design.Typography.control()))
             }
             append(
-                "\(reading.name) ",
+                reading.name,
                 font: Design.Typography.caption(),
                 color: ink.tertiary
             )
+            result.append(gap(Design.Spacing.tight, font: Design.Typography.caption()))
             append(
                 reading.value,
                 font: Design.Typography.control(),
@@ -155,6 +158,27 @@ final class UsageReadingLabel: NSView, InkSourced {
         }
 
         return result
+    }
+
+    /// One space, set to the width the design system asked for rather than the width the font
+    /// happens to give it.
+    ///
+    /// A space is not a spacing token. At caption size the one between `5h` and `86%` measured
+    /// barely three points while the separator's own spaces measured three and a third, so
+    /// `5h 86% · 7d 41%` stood at four near-equal gaps: the line read as four loose tokens
+    /// instead of two readings, and the pair that belongs together was the tightest thing on
+    /// the row. It was reported as exactly that.
+    ///
+    /// The gap is a `.kern` on a real space rather than a substituted glyph, so `plainValue`,
+    /// the accessibility value and every test that reads the composed string still see the
+    /// sentence they always did — only its metrics changed. `max(0, …)` keeps a font whose
+    /// space is already wider than the token from being pulled backwards into a collision.
+    private static func gap(_ width: CGFloat, font: NSFont) -> NSAttributedString {
+        let space = NSAttributedString(string: " ", attributes: [.font: font])
+        return NSAttributedString(
+            string: " ",
+            attributes: [.font: font, .kern: max(0, width - space.size().width)]
+        )
     }
 
     // MARK: - Accessibility

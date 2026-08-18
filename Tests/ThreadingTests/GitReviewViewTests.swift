@@ -658,19 +658,34 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertTrue(recycledBody.arrangedSubviews[1].isHidden)
     }
 
-    func testReviewCardsClipDiffContentAndStickyHeadingHasASquareLowerSeam() throws {
+    func testReviewCardsClipDiffContentAndStickyHeadingOccludesItsRoundedTop() throws {
         let file = try XCTUnwrap(GitDiffParser.files(fromUnifiedDiff: fixture).first)
         let row = GitReviewFileRow(file: file, expanded: true)
         XCTAssertTrue(try XCTUnwrap(row.layer).masksToBounds)
         XCTAssertEqual(row.layer?.maskedCorners.rawValue.nonzeroBitCount, 4)
 
+        let viewport = GitReviewStickyHeaderViewport()
+        XCTAssertTrue(
+            try XCTUnwrap(viewport.layer).masksToBounds,
+            "a pushed sticky heading must not escape upward into the Review toolbar"
+        )
+
         let host = GitReviewStickyHeaderHost()
         let heading = GitReviewFileRow(file: file, expanded: false, headerOnly: true)
         host.install(heading)
-        let layer = try XCTUnwrap(host.layer)
-        XCTAssertTrue(layer.masksToBounds)
+
+        XCTAssertTrue(host.subviews.first === host.occlusionSurface)
+        XCTAssertTrue(host.subviews.last === host.headingSurface)
         XCTAssertEqual(
-            layer.maskedCorners.rawValue.nonzeroBitCount,
+            try XCTUnwrap(host.occlusionSurface.layer).cornerRadius,
+            0,
+            accuracy: 0.01,
+            "the source background below the rounded heading must cover scrolling diff ink"
+        )
+        let headingSurfaceLayer = try XCTUnwrap(host.headingSurface.layer)
+        XCTAssertTrue(headingSurfaceLayer.masksToBounds)
+        XCTAssertEqual(
+            headingSurfaceLayer.maskedCorners.rawValue.nonzeroBitCount,
             2,
             "only the retained heading's top turns"
         )
@@ -828,9 +843,11 @@ final class GitReviewViewTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(controller.diffLayout, .unified)
+        XCTAssertFalse(controller.diffLayoutButton.isSelected)
         XCTAssertTrue(controller.diffLayoutButton.performPrimaryAction())
         controller.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(controller.diffLayout, .split)
+        XCTAssertTrue(controller.diffLayoutButton.isSelected)
 
         let split = try XCTUnwrap(
             Self.firstDescendant(of: GitReviewSplitDiffView.self, in: controller.view)
@@ -845,6 +862,7 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertTrue(controller.diffLayoutButton.performPrimaryAction())
         controller.view.layoutSubtreeIfNeeded()
         XCTAssertEqual(controller.diffLayout, .unified)
+        XCTAssertFalse(controller.diffLayoutButton.isSelected)
         XCTAssertNil(Self.firstDescendant(of: GitReviewSplitDiffView.self, in: controller.view))
     }
 
@@ -1027,9 +1045,11 @@ final class GitReviewViewTests: XCTestCase {
         let initialWidth = controller.scrollView.bounds.width
 
         XCTAssertTrue(controller.canJumpToFile)
+        XCTAssertFalse(controller.fileNavigatorButton.isSelected)
         XCTAssertTrue(controller.fileNavigatorButton.performPrimaryAction())
         controller.view.layoutSubtreeIfNeeded()
         XCTAssertTrue(controller.fileNavigatorVisibleForTesting)
+        XCTAssertTrue(controller.fileNavigatorButton.isSelected)
         XCTAssertEqual(controller.fileNavigatorWidthForTesting, 260)
         XCTAssertLessThan(controller.scrollView.bounds.width, initialWidth)
 
@@ -1045,6 +1065,7 @@ final class GitReviewViewTests: XCTestCase {
         XCTAssertTrue(controller.fileNavigatorButton.performPrimaryAction())
         controller.view.layoutSubtreeIfNeeded()
         XCTAssertFalse(controller.fileNavigatorVisibleForTesting)
+        XCTAssertFalse(controller.fileNavigatorButton.isSelected)
         XCTAssertEqual(controller.fileNavigatorWidthForTesting, 0)
     }
 
@@ -1139,6 +1160,36 @@ final class GitReviewViewTests: XCTestCase {
         copy.mouseDown(with: press)
         copy.mouseUp(with: release)
         XCTAssertEqual(copiedURL?.path, "/tmp/\(files[0].path)")
+
+        let firstRowRect = controller.fileTableView.rect(ofRow: 0)
+        let stickyHeight = controller.stickyFileHeaderHeightForTesting
+        let requestedNextHeaderY = stickyHeight / 2 + Design.Spacing.small
+        controller.scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: firstRowRect.maxY - requestedNextHeaderY
+        ))
+        controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
+        controller.updateScrollControls()
+
+        let nextHeaderY = firstRowRect.maxY
+            - controller.scrollView.documentVisibleRect.minY
+        let retainedHeaderBottom = controller.stickyFileHeaderTopForTesting + stickyHeight
+        XCTAssertLessThan(controller.stickyFileHeaderTopForTesting, 0)
+        XCTAssertEqual(
+            nextHeaderY - retainedHeaderBottom,
+            Design.Spacing.small,
+            accuracy: 0.5,
+            "the retained heading must leave the ordinary inter-file gap before the next one"
+        )
+
+        let immediateFrame = controller.stickyFileHeaderFrameInViewForTesting
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            controller.stickyFileHeaderFrameInViewForTesting.origin.y,
+            immediateFrame.origin.y,
+            accuracy: 0.5,
+            "the sticky heading must move in the scroll callback, not one layout frame later"
+        )
 
         controller.scrollView.contentView.scroll(to: .zero)
         controller.scrollView.reflectScrolledClipView(controller.scrollView.contentView)
@@ -1344,14 +1395,12 @@ final class GitReviewViewTests: XCTestCase {
         let chipFrame = chip.convert(chip.bounds, to: controller.view)
 
         XCTAssertEqual(
-            cardFrame.minX,
-            chipFrame.minX + chip.opticalHorizontalInset,
-            accuracy: 0.5,
-            "a file card should start where the mode chip's ink does"
+            cardFrame.minX, chipFrame.minX, accuracy: 0.5,
+            "the mode chip's hover and focus plate should start where a file card does"
         )
         XCTAssertEqual(
             controller.view.bounds.maxX - cardFrame.maxX,
-            chipFrame.minX + chip.opticalHorizontalInset,
+            chipFrame.minX,
             accuracy: 0.5,
             "a file card's margins should be equal on both sides"
         )
@@ -1368,22 +1417,12 @@ final class GitReviewViewTests: XCTestCase {
             "the expanded diff should use the card's full trailing edge"
         )
 
-        // Aligned by ink: the button's frame carries the hover surface, its stated inset is how
-        // deep, and what has to land on the margin is what the eye sees.
-        let header = try XCTUnwrap(
-            Self.firstDescendant(of: ControlRowView.self, in: controller.view)
-        )
-        let overflow = try XCTUnwrap(
-            header.trailingViews
-                .compactMap { $0 as? ThemedButton }
-                .first { $0.toolTip == L10n.string("Diff options") }
-        )
+        // The complete hover/focus target stays on the card margin, not only its glyph.
+        let overflow = controller.menuButton
         let overflowFrame = overflow.convert(overflow.bounds, to: controller.view)
         XCTAssertEqual(
-            overflowFrame.maxX - overflow.opticalHorizontalInset,
-            cardFrame.maxX,
-            accuracy: 0.5,
-            "the overflow's glyph should end where a file card does"
+            overflowFrame.maxX, cardFrame.maxX, accuracy: 0.5,
+            "the overflow's interaction surface should end where a file card does"
         )
 
         // And the same margin vertically, so the header reads as the top of the list rather

@@ -111,3 +111,35 @@ final class MobileWorkingOrbView: UIView {
         static let evidenceFrameTime = 0.6
     }
 }
+
+/// The working orb for a SwiftUI host: the dashboard row shows one at its trailing edge, in the
+/// age's place, while the chat is mid-turn.
+///
+/// The row used to spell "Working" in its caption. The word cost the caption line its width and
+/// said less than motion does in a list — a still row and a moving row are told apart from across
+/// the room. The wrapper is the whole SwiftUI seam: it re-applies the theme when the Mac sends a
+/// new one, and picks the turn's variant once when the orb comes on screen. A row is built lazily
+/// and torn down when scrolled off, so the orb runs only while its row is visible.
+struct MobileWorkingOrb: UIViewRepresentable {
+    let diameter: CGFloat
+    let theme: RemoteThemePalette
+
+    func makeUIView(context: Context) -> MobileWorkingOrbView {
+        let orb = MobileWorkingOrbView(diameter: diameter)
+        orb.prepareForWorking()
+        orb.applyTheme(theme)
+        return orb
+    }
+
+    func updateUIView(_ orb: MobileWorkingOrbView, context: Context) {
+        orb.applyTheme(theme)
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: MobileWorkingOrbView,
+        context: Context
+    ) -> CGSize? {
+        CGSize(width: diameter, height: diameter)
+    }
+}

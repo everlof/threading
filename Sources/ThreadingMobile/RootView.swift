@@ -233,15 +233,21 @@ struct RootView: View {
             case "session":
                 model.startDemo()
                 if let first = model.me?.sessions.first {
-                    model.navigationPath = [first.id]
+                    model.navigationPath = [.session(first.id)]
                 }
             case "terminal":
                 model.startDemo()
                 if let terminal = model.me?.sessions.first(where: { $0.surface == .terminal }) {
-                    model.navigationPath = [terminal.id]
+                    model.navigationPath = [.session(terminal.id)]
                 }
             default:
                 break
+            }
+            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "project-sessions",
+               model.navigationPath.isEmpty,
+               let projectName = model.me?.sessions.first?.projectName {
+                model.navigationPath = [.project(projectName)]
             }
         }
 #endif
@@ -441,15 +447,23 @@ struct RootView: View {
                     SessionDashboard(openSettings: { showsSettings = true })
                 }
             }
-            .navigationDestination(for: String.self) { sessionID in
-                if let session = model.me?.sessions.first(where: { $0.id == sessionID }) {
-                    SessionDetailView(session: session)
-                } else {
-                    ContentUnavailableView(
-                        "Session unavailable",
-                        systemImage: "bubble.left.and.exclamationmark.bubble.right",
-                        description: Text("The link may have expired or the Mac may be offline.")
+            .navigationDestination(for: MobileNavigationRoute.self) { route in
+                switch route {
+                case .project(let projectName):
+                    SessionDashboard(
+                        projectName: projectName,
+                        openSettings: { showsSettings = true }
                     )
+                case .session(let sessionID):
+                    if let session = model.me?.sessions.first(where: { $0.id == sessionID }) {
+                        SessionDetailView(session: session)
+                    } else {
+                        ContentUnavailableView(
+                            "Session unavailable",
+                            systemImage: "bubble.left.and.exclamationmark.bubble.right",
+                            description: Text("The link may have expired or the Mac may be offline.")
+                        )
+                    }
                 }
             }
         }

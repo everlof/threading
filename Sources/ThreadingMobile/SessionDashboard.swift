@@ -55,6 +55,38 @@ private enum SessionOrganization: String, CaseIterable {
     }
 }
 
+enum MobileDashboardChrome {
+    static func title(projectName: String?, activeHostName: String?) -> String {
+        if let projectName {
+            return projectName.isEmpty ? MobileL10n.string("Other") : projectName
+        }
+        return activeHostName ?? MobileL10n.string("Threading Mac")
+    }
+
+    static func connectionStatus(
+        phase: RemoteAppModel.Phase,
+        connectionLabel: String?
+    ) -> String {
+        switch phase {
+        case .idle, .offline:
+            return MobileL10n.string("Not connected")
+        case .connecting:
+            return MobileL10n.string("Connecting…")
+        case .online:
+            return MobileL10n.string(
+                "Connected · %@",
+                connectionLabel ?? MobileL10n.string("Direct")
+            )
+        }
+    }
+}
+
+private struct DashboardProjectSection {
+    let projectName: String
+    let title: String
+    let sessions: [RemoteSessionSummaryDTO]
+}
+
 private enum DashboardSessionAction {
     case pin
     case rename
@@ -98,7 +130,6 @@ struct SessionDashboard: View {
     /// ordered while the sheet is still on screen is dropped by the navigation stack, so the
     /// new chat has to open from `onDismiss` rather than from the submit that made it.
     @State private var sessionToOpenAfterStart: RemoteSessionSummaryDTO?
-    @State private var showsMacPicker = false
     @State private var renamingSession: RemoteSessionSummaryDTO?
     @State private var renameText = ""
     @State private var actionError: String?
@@ -107,7 +138,13 @@ struct SessionDashboard: View {
     @State private var sharingSession: RemoteSessionSummaryDTO?
     @State private var sharedLink: SharedSessionLink?
     @State private var showsUsage = false
+    private let projectName: String?
     let openSettings: () -> Void
+
+    init(projectName: String? = nil, openSettings: @escaping () -> Void) {
+        self.projectName = projectName
+        self.openSettings = openSettings
+    }
 
     private var organization: SessionOrganization {
         SessionOrganization(rawValue: organizationRaw) ?? .project
@@ -120,7 +157,10 @@ struct SessionDashboard: View {
         let scoped = showsArchived ? all : all.filter {
             showsSnoozed ? $0.isSnoozed() : !$0.isSnoozed()
         }
-        let filtered = searchText.isEmpty ? scoped : scoped.filter {
+        let projectScoped = projectName.map { projectName in
+            scoped.filter { $0.projectName == projectName }
+        } ?? scoped
+        let filtered = searchText.isEmpty ? projectScoped : projectScoped.filter {
             $0.title.localizedCaseInsensitiveContains(searchText)
                 || $0.projectName.localizedCaseInsensitiveContains(searchText)
         }
@@ -130,10 +170,16 @@ struct SessionDashboard: View {
         }
     }
 
-    private var groupedSessions: [(String, [RemoteSessionSummaryDTO])] {
+    private var groupedSessions: [DashboardProjectSection] {
         Dictionary(grouping: sessions, by: \.projectName)
-            .map { ($0.key.isEmpty ? MobileL10n.string("Other") : $0.key, $0.value) }
-            .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
+            .map {
+                DashboardProjectSection(
+                    projectName: $0.key,
+                    title: $0.key.isEmpty ? MobileL10n.string("Other") : $0.key,
+                    sessions: $0.value
+                )
+            }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
     var body: some View {
@@ -145,66 +191,53 @@ struct SessionDashboard: View {
 
     private var dashboardContent: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
-                if model.isDemo {
+            LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
+                if projectName == nil, model.isDemo {
                     demoBanner
-                }
-
-                deviceSection
-
-                HStack {
-                    Text(MobileL10n.string(
-                        showsArchived ? "Archived" : (showsSnoozed ? "Snoozed" : "Sessions")
-                    ))
-                        .font(.title3.weight(.medium))
-                    Spacer()
-                    Text("\(sessions.count)")
-                        .font(.subheadline)
-                        .monospacedDigit()
-                        .foregroundStyle(theme.secondaryLabel)
-                    if model.canManageSessions, !showsArchived, organization == .recent {
-                        projectNewSessionButton(project: nil)
-                    }
                 }
 
                 if model.me == nil {
                     loadingCard
                 } else if sessions.isEmpty {
                     emptyCard
+                } else if projectName != nil {
+                    SessionRowGroup(
+                        sessions: sessions,
+                        isArchived: showsArchived,
+                        showsActions: model.canManageSessions,
+                        pendingActionSessionID: pendingActionSessionID,
+                        action: perform
+                    )
                 } else if organization == .project {
-                    ForEach(groupedSessions, id: \.0) { project, sessions in
+                    ForEach(groupedSessions, id: \.projectName) { project in
                         ProjectSessionGroup(
-                            project: project,
-                            sessions: sessions,
+                            projectName: project.projectName,
+                            title: project.title,
+                            sessions: project.sessions,
                             isArchived: showsArchived,
                             showsActions: model.canManageSessions,
                             pendingActionSessionID: pendingActionSessionID,
-                            action: perform,
-                            startNewSession: {
-                                newSessionProjectName = project
-                                showsNewSession = true
-                            }
+                            action: perform
                         )
                     }
                 } else {
-                    LazyVStack(spacing: MobileDesign.Spacing.small) {
-                        ForEach(sessions) { session in
-                            SessionListItem(
-                                session: session,
-                                isArchived: showsArchived,
-                                showsActions: model.canManageSessions,
-                                pendingActionSessionID: pendingActionSessionID,
-                                action: perform
-                            )
-                        }
-                    }
+                    SessionRowGroup(
+                        sessions: sessions,
+                        isArchived: showsArchived,
+                        showsActions: model.canManageSessions,
+                        pendingActionSessionID: pendingActionSessionID,
+                        action: perform
+                    )
                 }
 
-                if notifications.shouldOfferOnboarding {
+                if projectName == nil, notifications.shouldOfferOnboarding {
                     NotificationOnboardingCard()
                 }
             }
-            .padding(.horizontal, 20)
+            // A project starts with the row plate itself. Keep its halo inside the scroll
+            // viewport instead of settling it flush against—and clipping it at—the top edge.
+            .padding(.top, projectName == nil ? 0 : MobileDesign.Spacing.large)
+            .padding(.horizontal, MobileDesign.Spacing.large)
             .padding(.bottom, 36)
         }
     }
@@ -238,7 +271,7 @@ struct SessionDashboard: View {
         dashboardContent
         .refreshable { await model.refresh() }
         .searchable(text: $searchText, prompt: "Search sessions")
-        .navigationTitle("Code")
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }
         .task(id: model.activeHostID) { await model.activateDashboard() }
@@ -260,11 +293,6 @@ struct SessionDashboard: View {
                 initialProjectName: newSessionProjectName,
                 onStarted: { sessionToOpenAfterStart = $0 }
             )
-                .environmentObject(model)
-                .mobileTheme(theme)
-        }
-        .sheet(isPresented: $showsMacPicker) {
-            DashboardMacPickerView()
                 .environmentObject(model)
                 .mobileTheme(theme)
         }
@@ -409,36 +437,42 @@ struct SessionDashboard: View {
 
     @ToolbarContentBuilder
     private var dashboardToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Menu {
-                ForEach(model.hosts) { host in
-                    Button {
-                        model.selectHost(host.id)
-                    } label: {
-                        Label(
-                            host.menuTitle,
-                            systemImage: host.id == model.activeHostID
-                                ? "checkmark"
-                                : "laptopcomputer"
-                        )
+        if projectName == nil {
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    ForEach(model.hosts) { host in
+                        Button {
+                            model.selectHost(host.id)
+                        } label: {
+                            Label(
+                                host.menuTitle,
+                                systemImage: host.id == model.activeHostID
+                                    ? "checkmark"
+                                    : "laptopcomputer"
+                            )
+                        }
                     }
+                } label: {
+                    Image(systemName: "laptopcomputer")
+                        .frame(
+                            width: MobileDesign.Size.compactControl,
+                            height: MobileDesign.Size.compactControl
+                        )
+                        .background(theme.controlResting, in: Circle())
                 }
-            } label: {
-                Image(systemName: "line.3.horizontal")
-                    .frame(
-                        width: MobileDesign.Size.compactControl,
-                        height: MobileDesign.Size.compactControl
-                    )
-                    .background(theme.controlResting, in: Circle())
+                .accessibilityLabel("Choose Mac")
             }
-            .accessibilityLabel("Choose Mac")
         }
         ToolbarItem(placement: .principal) {
-            Text("Code").font(.headline)
+            MobileConnectionNavigationTitle(
+                title: navigationTitle,
+                status: statusText,
+                statusColor: statusColor
+            )
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
             Button {
-                newSessionProjectName = nil
+                newSessionProjectName = projectName
                 showsNewSession = true
             } label: {
                 Image(systemName: "plus")
@@ -448,104 +482,109 @@ struct SessionDashboard: View {
                     )
                     .background(theme.controlResting, in: Circle())
             }
-            .accessibilityLabel("New session")
+            .accessibilityLabel(
+                projectName.map { MobileL10n.string("New session in %@", $0) }
+                    ?? MobileL10n.string("New session")
+            )
 
-            Menu {
-                Section("Organize") {
-                    ForEach(SessionOrganization.allCases, id: \.rawValue) { option in
-                        Button {
-                            organizationRaw = option.rawValue
-                        } label: {
-                            Label(
-                                option.title,
-                                systemImage: organization == option
-                                    ? "checkmark"
-                                    : option.symbol
-                            )
-                        }
-                    }
-                }
-
-                if model.canManageSessions {
-                    Section("Manage") {
-                        Button {
-                            showsArchived = false
-                            showsSnoozed.toggle()
-                        } label: {
-                            Label(
-                                MobileL10n.string(showsSnoozed ? "Active sessions" : "Snoozed sessions"),
-                                systemImage: showsSnoozed ? "tray" : "moon.zzz"
-                            )
-                        }
-                        Button {
-                            showsArchived.toggle()
-                            if showsArchived { showsSnoozed = false }
-                        } label: {
-                            Label(
-                                MobileL10n.string(
-                                    showsArchived ? "Active sessions" : "Archived sessions"
-                                ),
-                                systemImage: showsArchived ? "tray" : "archivebox"
-                            )
-                        }
-                    }
-                }
-
-                if model.canManageThemes, let catalog = model.me?.themeCatalog {
-                    Menu {
-                        ForEach(catalog.appThemes, id: \.id) { option in
+            if projectName == nil {
+                Menu {
+                    Section("Organize") {
+                        ForEach(SessionOrganization.allCases, id: \.rawValue) { option in
                             Button {
-                                chooseAppTheme(option.id)
+                                organizationRaw = option.rawValue
                             } label: {
-                                if model.me?.theme?.id == option.id {
-                                    Label(option.name, systemImage: "checkmark")
-                                } else {
-                                    Text(option.name)
-                                }
+                                Label(
+                                    option.title,
+                                    systemImage: organization == option
+                                        ? "checkmark"
+                                        : option.symbol
+                                )
                             }
-                            .disabled(pendingThemeID != nil)
                         }
-                    } label: {
-                        Label("Appearance", systemImage: "paintpalette")
                     }
-                }
 
-                if model.canReadUsage {
+                    if model.canManageSessions {
+                        Section("Manage") {
+                            Button {
+                                showsArchived = false
+                                showsSnoozed.toggle()
+                            } label: {
+                                Label(
+                                    MobileL10n.string(showsSnoozed ? "Active sessions" : "Snoozed sessions"),
+                                    systemImage: showsSnoozed ? "tray" : "moon.zzz"
+                                )
+                            }
+                            Button {
+                                showsArchived.toggle()
+                                if showsArchived { showsSnoozed = false }
+                            } label: {
+                                Label(
+                                    MobileL10n.string(
+                                        showsArchived ? "Active sessions" : "Archived sessions"
+                                    ),
+                                    systemImage: showsArchived ? "tray" : "archivebox"
+                                )
+                            }
+                        }
+                    }
+
+                    if model.canManageThemes, let catalog = model.me?.themeCatalog {
+                        Menu {
+                            ForEach(catalog.appThemes, id: \.id) { option in
+                                Button {
+                                    chooseAppTheme(option.id)
+                                } label: {
+                                    if model.me?.theme?.id == option.id {
+                                        Label(option.name, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.name)
+                                    }
+                                }
+                                .disabled(pendingThemeID != nil)
+                            }
+                        } label: {
+                            Label("Appearance", systemImage: "paintpalette")
+                        }
+                    }
+
+                    if model.canReadUsage {
+                        Button {
+                            showsUsage = true
+                        } label: {
+                            Label("Usage", systemImage: "chart.bar.xaxis")
+                        }
+                    }
+
                     Button {
-                        showsUsage = true
+                        openSettings()
                     } label: {
-                        Label("Usage", systemImage: "chart.bar.xaxis")
+                        Label("Settings", systemImage: "gearshape")
                     }
-                }
 
-                Button {
-                    openSettings()
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-
-                Divider()
-                Button {
-                    model.isPairing = true
-                } label: {
-                    Label("Pair another Mac", systemImage: "qrcode.viewfinder")
-                }
-                if let host = model.activeHost {
-                    Button(role: .destructive) {
-                        isConfirmingForget = true
+                    Divider()
+                    Button {
+                        model.isPairing = true
                     } label: {
-                        Label("Forget \(host.name)", systemImage: "trash")
+                        Label("Pair another Mac", systemImage: "qrcode.viewfinder")
                     }
+                    if let host = model.activeHost {
+                        Button(role: .destructive) {
+                            isConfirmingForget = true
+                        } label: {
+                            Label("Forget \(host.name)", systemImage: "trash")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .frame(
+                            width: MobileDesign.Size.compactControl,
+                            height: MobileDesign.Size.compactControl
+                        )
+                        .background(theme.controlResting, in: Circle())
                 }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(
-                        width: MobileDesign.Size.compactControl,
-                        height: MobileDesign.Size.compactControl
-                    )
-                    .background(theme.controlResting, in: Circle())
+                .accessibilityLabel("Remote access options")
             }
-            .accessibilityLabel("Remote access options")
         }
     }
 
@@ -677,66 +716,11 @@ struct SessionDashboard: View {
         }
     }
 
-    private var deviceSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Macs").font(.title3.weight(.medium))
-                Spacer()
-                Text("\(model.hosts.count)")
-                    .font(.subheadline)
-                    .foregroundStyle(theme.secondaryLabel)
-            }
-
-            Button {
-                showsMacPicker = true
-            } label: {
-                HStack(spacing: 16) {
-                    Image(systemName: "laptopcomputer")
-                        .font(.system(size: 28, weight: .light))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(model.activeHost?.name ?? MobileL10n.string("Threading Mac"))
-                            .font(.headline)
-                        if model.me?.share.scope == "session" {
-                            let role = model.me?.share.capability == "interact"
-                                ? (model.me?.share.canApprovePermissions == true
-                                    ? MobileL10n.string("Collaborator + approvals")
-                                    : MobileL10n.string("Collaborator"))
-                                : MobileL10n.string("View only")
-                            Text(MobileL10n.string("Shared chat · %@", role))
-                                .font(.caption)
-                                .foregroundStyle(theme.accent)
-                        }
-                        HStack(spacing: 6) {
-                            Circle().fill(statusColor).frame(width: 7, height: 7)
-                            Text(statusText)
-                                .font(.subheadline)
-                                .foregroundStyle(theme.secondaryLabel)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(theme.tertiaryLabel)
-                }
-                .padding(20)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: theme.panelRadius)
-                    .stroke(theme.border, lineWidth: theme.borderWidth)
-            )
-            .remoteThemeGlow(theme)
-        }
-    }
-
-    private func projectNewSessionButton(project: String?) -> some View {
-        NewSessionButton(accessibilityLabel: MobileL10n.string("New session")) {
-            newSessionProjectName = project
-            showsNewSession = true
-        }
+    private var navigationTitle: String {
+        MobileDashboardChrome.title(
+            projectName: projectName,
+            activeHostName: model.activeHost?.name
+        )
     }
 
     private var statusColor: Color {
@@ -746,16 +730,10 @@ struct SessionDashboard: View {
     }
 
     private var statusText: String {
-        switch model.phase {
-        case .idle: return MobileL10n.string("Not connected")
-        case .connecting: return MobileL10n.string("Connecting…")
-        case .online:
-            return MobileL10n.string(
-                "Connected · %@",
-                model.activeHost?.connectionLabel ?? MobileL10n.string("Direct")
-            )
-        case .offline(let message): return message
-        }
+        MobileDashboardChrome.connectionStatus(
+            phase: model.phase,
+            connectionLabel: model.activeHost?.connectionLabel
+        )
     }
 
     private var loadingCard: some View {
@@ -789,119 +767,72 @@ struct SessionDashboard: View {
     }
 }
 
-private struct DashboardMacPickerView: View {
-    @EnvironmentObject private var model: RemoteAppModel
-    @Environment(\.remoteTheme) private var theme
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List(model.hosts) { host in
-                Button {
-                    model.selectHost(host.id)
-                    dismiss()
-                } label: {
-                    HStack(spacing: MobileDesign.Spacing.medium) {
-                        Image(systemName: "laptopcomputer")
-                            .foregroundStyle(theme.secondaryLabel)
-                            .frame(width: 28)
-                        VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
-                            Text(host.menuTitle)
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(theme.label)
-                            if host.id == model.activeHostID {
-                                Text("Current Mac")
-                                    .font(.caption)
-                                    .foregroundStyle(theme.positive)
-                            }
-                        }
-                        Spacer()
-                        if host.id == model.activeHostID {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(theme.accent)
-                        }
-                    }
-                    .frame(minHeight: MobileDesign.Size.minimumTapTarget)
-                }
-                .buttonStyle(.plain)
-                .themedSettingsRow(theme)
-            }
-            .listStyle(.plain)
-            .themedSettingsPage(theme)
-            .navigationTitle("Choose Mac")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(theme.surface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-}
-
-/// Starts a chat, in a project header or beside the connection card.
-///
-/// It carries no caption. The word sat next to a plus in a header that already names the
-/// project, which said the same thing twice and pushed the folder name into truncation on a
-/// phone-width row; the glyph alone is the same control the toolbar shows.
-struct NewSessionButton: View {
-    let accessibilityLabel: String
-    let action: () -> Void
-    @Environment(\.remoteTheme) private var theme
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "plus")
-                .font(.subheadline.weight(.semibold))
-                .frame(
-                    width: MobileDesign.Size.compactControl,
-                    height: MobileDesign.Size.compactControl
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(theme.accent)
-        .background(
-            theme.controlResting,
-            in: RoundedRectangle(cornerRadius: theme.controlRadius)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.controlRadius)
-                .strokeBorder(theme.border, lineWidth: theme.borderWidth)
-        }
-        .accessibilityLabel(accessibilityLabel)
-    }
-}
-
 private struct ProjectSessionGroup: View {
-    let project: String
+    let projectName: String
+    let title: String
     let sessions: [RemoteSessionSummaryDTO]
     let isArchived: Bool
     let showsActions: Bool
     let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
-    let startNewSession: () -> Void
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label(project, systemImage: "folder")
-                    .font(.headline)
-                    .foregroundStyle(theme.label)
-                Spacer()
-                if showsActions, !isArchived {
-                    NewSessionButton(
-                        accessibilityLabel: MobileL10n.string("New session in %@", project),
-                        action: startNewSession
-                    )
+            NavigationLink(value: MobileNavigationRoute.project(projectName)) {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    Label(title, systemImage: "folder")
+                        .font(.headline)
+                        .foregroundStyle(theme.label)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.tertiaryLabel)
                 }
+                .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+                .contentShape(Rectangle())
             }
-            VStack(spacing: MobileDesign.Spacing.small) {
-                ForEach(sessions) { session in
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows this project’s sessions")
+            SessionRowGroup(
+                sessions: sessions,
+                isArchived: isArchived,
+                showsActions: showsActions,
+                pendingActionSessionID: pendingActionSessionID,
+                action: action
+            )
+        }
+    }
+}
+
+/// A project's chats — or, in the flat list, all of them — on one plate.
+///
+/// Every chat used to be its own card: a border, a corner radius and eight points of air per row,
+/// which is a stack of panels rather than a list, and on a phone five of them filled the screen.
+/// The rows now sit on one `ThemedRowGroup` and are told apart by a hairline, the way iOS's own
+/// grouped tables are; the rule starts where the row's text starts, so it reads as belonging to
+/// the words rather than to the card, and runs to the card's trailing edge.
+///
+/// The rows are built lazily inside the plate. A project holds a handful of chats, but the flat
+/// list holds every chat on the Mac, and that list was lazy before it had a plate; the plate does
+/// not take that away.
+private struct SessionRowGroup: View {
+    let sessions: [RemoteSessionSummaryDTO]
+    let isArchived: Bool
+    let showsActions: Bool
+    let pendingActionSessionID: String?
+    let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
+
+    var body: some View {
+        ThemedRowGroup {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(sessions.enumerated()), id: \.element.id) { offset, session in
+                    if offset > 0 {
+                        ThemedRowDivider(
+                            leadingInset: SessionRow.textLeadingEdge,
+                            trailingInset: 0
+                        )
+                    }
                     SessionListItem(
                         session: session,
                         isArchived: isArchived,
@@ -931,15 +862,15 @@ enum MobileSessionNavigationTransition: Equatable {
     /// from the list. Pushing an id already on top is a no-op rather than a second copy.
     @MainActor
     static func push(_ session: RemoteSessionSummaryDTO, onto model: RemoteAppModel) {
-        guard model.navigationPath.last != session.id else { return }
+        guard model.navigationPath.last != .session(session.id) else { return }
         switch forSurface(session.surface) {
         case .standard:
-            model.navigationPath.append(session.id)
+            model.navigationPath.append(.session(session.id))
         case .immediate:
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
-                model.navigationPath.append(session.id)
+                model.navigationPath.append(.session(session.id))
             }
         }
     }
@@ -953,16 +884,37 @@ private struct SessionListItem: View {
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
+    /// The width the row was laid out at, so the lifted preview is the row and not a guess.
+    @State private var rowWidth: CGFloat?
 
     @ViewBuilder
     var body: some View {
         if showsActions {
             sessionRow
-                .contextMenu { sessionActions }
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.width
+                } action: { width in
+                    rowWidth = width
+                }
+                .contextMenu {
+                    sessionActions
+                } preview: {
+                    liftedRow
+                }
                 .accessibilityHint("Long press for session actions")
         } else {
             sessionRow
         }
+    }
+
+    /// The row as the long press lifts it. A row on the shared plate paints no plate of its own,
+    /// and the system's default preview would stand a transparent row on `systemBackground` — a
+    /// white or black platter under an authored theme, the slab this app keeps off its screens.
+    /// So the preview restates the panel the row came from, at the width it was drawn at.
+    private var liftedRow: some View {
+        SessionRow(session: session, showsChevron: false)
+            .frame(width: rowWidth)
+            .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
     }
 
     @ViewBuilder
@@ -1160,12 +1112,15 @@ struct SharedSessionLinkView: View {
 enum MobileSessionAgeFormat {
     private static let relativeCutoff: TimeInterval = 7 * 24 * 60 * 60
 
-    /// A compact age whose direction is stated as language rather than as a signed quantity.
+    /// A compact age: `6m`, `3h`, `1d`, then the date once a week has passed.
     ///
-    /// `RelativeDateTimeFormatter.UnitsStyle.abbreviated` renders yesterday as `−1 d` in
-    /// Swedish. That is a valid quantity, but it reads as broken beside the session title and
-    /// unlike the rest of Threading's relative-time vocabulary. `.short` retains compact units
-    /// while spelling the direction (`för 1 d sedan`, `1 day ago`).
+    /// The age is a column read down a list, and every row's used to end in "ago".
+    /// `RelativeDateTimeFormatter` has no shorter register: its `.abbreviated` writes yesterday as
+    /// a signed quantity in Swedish (`−1 d`), and `.short` spells the direction (`för 1 d sedan`,
+    /// `1 day ago`), which is the verbosity being removed. So the age is set as a duration in the
+    /// locale's narrowest unit — unsigned by construction, one word wide in every language — and
+    /// the direction is left to the column: nothing in this list is in the future, and a clock
+    /// skewed the other way reads as `now` rather than as a negative age.
     static func string(
         since date: Date,
         relativeTo now: Date = Date(),
@@ -1174,12 +1129,12 @@ enum MobileSessionAgeFormat {
         let seconds = max(0, now.timeIntervalSince(date))
         if seconds < 60 { return MobileL10n.string("now") }
         if seconds < relativeCutoff {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.locale = locale
-            formatter.unitsStyle = .short
-            return formatter.localizedString(for: date, relativeTo: now)
+            return Duration.seconds(seconds).formatted(
+                .units(allowed: [.days, .hours, .minutes], width: .narrow, maximumUnitCount: 1)
+                    .locale(locale)
+            )
         }
-        return date.formatted(.dateTime.day().month(.abbreviated))
+        return date.formatted(.dateTime.day().month(.abbreviated).locale(locale))
     }
 }
 
@@ -1196,10 +1151,30 @@ enum MobileSessionAgeFormat {
 /// rows between 74 and 110 points, which is a card, not a list row: five chats filled the screen.
 /// The title takes one line and the tile no longer sets the height, so the list is scannable and
 /// every row is the same height. The full title is one tap away in the session's own screen.
+///
+/// **It draws no plate.** The row sits on the plate its group paints (`SessionRowGroup`), so its
+/// background is clear and its whole rectangle is still the tap: without a fill of its own, the
+/// air between the caption and the age would otherwise fall through to nothing.
+///
+/// **State is shown, not spelled.** The caption used to read "Working", "Connected",
+/// "Disconnected" beside a laptop that was already green or slashed, so every row said its state
+/// twice and the words crowded out the one fact the caption has that nothing else carries: the
+/// login. Now the laptop alone says connected (green) or not (slashed), the amber dot on the tile
+/// says attention, and a chat that is working shows the orb at its trailing edge, in the age's
+/// place — motion reads from across the room, and a working chat's age is "now" by definition.
+/// The two states no glyph carries — a session that woke from its snooze, and one stopped at a
+/// usage limit — keep their word, in the warning colour, because each is a reason to look. The
+/// laptop carries the whole state for VoiceOver, so nothing a sighted reader sees is unsaid.
 private struct SessionRow: View {
     let session: RemoteSessionSummaryDTO
     var showsChevron = true
     @Environment(\.remoteTheme) private var theme
+
+    /// Where the row's text begins: the leading inset, the mark and the gap after it. The hairline
+    /// between two rows starts here, so it underlines the words rather than the tile.
+    static let textLeadingEdge = MobileDesign.Spacing.medium
+        + MobileDesign.Size.rowMark
+        + MobileDesign.Spacing.medium
 
     var body: some View {
         HStack(spacing: MobileDesign.Spacing.medium) {
@@ -1208,6 +1183,23 @@ private struct SessionRow: View {
                 account: session.account,
                 isDimmed: !session.isAvailable || session.isArchived
             )
+            // On the tile's top-trailing corner, centred on its edge: the account chip owns the
+            // other corner, and both facts belong to the tile they are badging. Hung on the tile
+            // rather than on the row so the row's height never moves it.
+            .overlay(alignment: .topTrailing) {
+                if session.state == "needsAttention" {
+                    Circle()
+                        .fill(theme.warning)
+                        .frame(
+                            width: MobileDesign.Size.rowAttentionDot,
+                            height: MobileDesign.Size.rowAttentionDot
+                        )
+                        .offset(
+                            x: MobileDesign.Offset.rowAttentionDotOverhang,
+                            y: -MobileDesign.Offset.rowAttentionDotOverhang
+                        )
+                }
+            }
 
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
                 Text(session.title)
@@ -1216,13 +1208,13 @@ private struct SessionRow: View {
                     .truncationMode(.tail)
                     .foregroundStyle(theme.label)
                 HStack(spacing: MobileDesign.Spacing.tight) {
-                    // Decorative: the state it stands for is spelled in the words beside it, and a
-                    // second reading of "Disconnected" is noise in a row VoiceOver already reads.
+                    // Green means connected and the slash means not; the glyph is the state now,
+                    // so it speaks the whole state for VoiceOver rather than hiding.
                     Image(systemName: session.isAvailable
                         ? "laptopcomputer"
                         : "laptopcomputer.slash")
                         .foregroundStyle(stateStyle)
-                        .accessibilityHidden(true)
+                        .accessibilityLabel(availabilityLabel)
                     // The surface is a glyph and the runtime is the mark, because spelling both in
                     // words cost about ninety points and truncated the one fact the row gained: the
                     // line read "Connected · Claude Code UI · Ver…" while the tile was already
@@ -1233,7 +1225,9 @@ private struct SessionRow: View {
                         : "terminal")
                         .foregroundStyle(theme.tertiaryLabel)
                         .accessibilityLabel(surfaceLabel)
-                    metaText
+                    if let metaText {
+                        metaText
+                    }
                 }
                 .font(.caption2)
                 .lineLimit(1)
@@ -1248,7 +1242,11 @@ private struct SessionRow: View {
                         .foregroundStyle(theme.accent)
                         .accessibilityLabel("Pinned")
                 }
-                if let lastActiveAt = session.lastActiveAt {
+                if isWorking {
+                    // The laptop already says "Working" to VoiceOver; the orb is the picture of it.
+                    MobileWorkingOrb(diameter: MobileDesign.Size.rowWorkingOrb, theme: theme)
+                        .accessibilityHidden(true)
+                } else if let lastActiveAt = session.lastActiveAt {
                     Text(MobileSessionAgeFormat.string(
                         since: Date(timeIntervalSince1970: lastActiveAt)
                     ))
@@ -1266,39 +1264,31 @@ private struct SessionRow: View {
         .padding(.horizontal, MobileDesign.Spacing.medium)
         .padding(.vertical, MobileDesign.Spacing.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: theme.panelRadius)
-                .stroke(theme.border, lineWidth: theme.borderWidth)
-        )
-        .remoteThemeGlow(theme)
-        .overlay(alignment: .topLeading) {
-            if session.state == "needsAttention" {
-                Circle()
-                    .fill(theme.warning)
-                    .frame(
-                        width: MobileDesign.Size.rowAttentionDot,
-                        height: MobileDesign.Size.rowAttentionDot
-                    )
-                    // On the mark's top-trailing corner: the account chip owns the other one, and
-                    // both facts belong to the tile they are badging.
-                    .offset(
-                        x: MobileDesign.Spacing.medium
-                            + MobileDesign.Size.rowMark
-                            - MobileDesign.Size.rowAttentionDot / 2,
-                        y: MobileDesign.Spacing.small
-                            - MobileDesign.Size.rowAttentionDot / 2
-                    )
-            }
-        }
+        .contentShape(Rectangle())
     }
 
-    /// The state in its own colour, then the login when it is not the CLI's default one. One `Text`,
-    /// so a long account name truncates the line rather than pushing the age out of the row.
-    private var metaText: Text {
-        let state = Text(availabilityLabel).foregroundStyle(stateStyle)
-        guard let account = session.account else { return state }
-        return state + Text(" · " + account.name).foregroundStyle(theme.secondaryLabel)
+    /// Mid-turn on a live surface. The Mac reports activity only for a session it is running, but
+    /// an animation claims "moving right now", so it also asks that there is somewhere to attach.
+    private var isWorking: Bool {
+        session.isAvailable && !session.isArchived && session.state == "working"
+    }
+
+    /// The caption's words: the state only when no glyph carries it, then the login when it is
+    /// not the CLI's default one. One `Text`, so a long account name truncates the line rather
+    /// than pushing the age out of the row; nil when there is nothing to say.
+    private var metaText: Text? {
+        var parts: [Text] = []
+        if let word = spelledStateLabel {
+            parts.append(Text(word).foregroundStyle(theme.warning))
+        }
+        if let account = session.account {
+            parts.append(Text(account.name).foregroundStyle(theme.secondaryLabel))
+        }
+        guard let first = parts.first else { return nil }
+        return parts.dropFirst().reduce(first) { line, part in
+            // localization-ignore: punctuation between already-localized metadata fragments
+            line + Text(verbatim: " · ").foregroundStyle(theme.secondaryLabel) + part
+        }
     }
 
     private var stateStyle: Color {
@@ -1318,11 +1308,24 @@ private struct SessionRow: View {
         }
     }
 
+    /// The whole state in words, for VoiceOver: what the laptop's colour, the dot and the orb
+    /// show a sighted reader.
     private var availabilityLabel: String {
         if session.isArchived { return MobileL10n.string("Archived") }
         if session.wokeAt != nil { return MobileL10n.string("Woke") }
         if session.isSnoozed() { return MobileL10n.string("Snoozed") }
         return session.isAvailable ? stateLabel : MobileL10n.string("Disconnected")
+    }
+
+    /// The states worth a word in the caption: the ones no glyph on the row carries. Archived and
+    /// snoozed rows live in lists whose header already says so.
+    private var spelledStateLabel: String? {
+        if session.isArchived { return nil }
+        if session.wokeAt != nil { return MobileL10n.string("Woke") }
+        if session.isAvailable, session.state == "limitReached" {
+            return MobileL10n.string("Usage limit reached")
+        }
+        return nil
     }
 
     /// What you are looking at, not who is talking — the mark already says that. A terminal surface

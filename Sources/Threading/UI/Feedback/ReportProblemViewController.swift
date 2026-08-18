@@ -17,7 +17,18 @@ final class ReportProblemViewController: NSViewController {
     private let titleField = ThemedTextField()
     private let detailField = PromptView()
     private let statusView = SubmissionStatusView()
-    private let submitButton = ThemedButton()
+    /// The same control the inspector's sheet uses. This sheet has no Copy Report — it is a form
+    /// rather than a capture, so there is nothing collected to carry anywhere — which means a
+    /// Release build has exactly one action and the control draws no chevron for it.
+    private lazy var actionsControl: DeveloperReportSubmitControl = {
+        var available: [DeveloperReportAction] = [.send]
+#if DEBUG
+        available.append(.chat)
+#endif
+        let control = DeveloperReportSubmitControl(available: available)
+        control.onPerform = { [weak self] action in self?.perform(action) }
+        return control
+    }()
 
     private var kind: DeveloperIssueReportKind = .problem
     private var isSubmitting = false
@@ -35,7 +46,6 @@ final class ReportProblemViewController: NSViewController {
     /// See `DeveloperReportChat`.
     var onSendToChat: ((DeveloperReportChatRequest) -> DeveloperReportChatOutcome)?
 
-    private let chatButton = ThemedButton()
 #endif
 
     // MARK: - Lifecycle
@@ -207,12 +217,6 @@ final class ReportProblemViewController: NSViewController {
     }
 
     private func makeFooter() -> NSView {
-        submitButton.title = ReportProblemStrings.submitTitle
-        submitButton.isProminent = true
-        submitButton.target = self
-        submitButton.action = #selector(submitIssue)
-        submitButton.setAccessibilityIdentifier(ReportProblemIdentifiers.submit)
-
         let cancelButton = ThemedButton(
             title: ReportProblemStrings.cancelTitle,
             target: self,
@@ -223,21 +227,26 @@ final class ReportProblemViewController: NSViewController {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        var buttons: [NSView] = [spacer, cancelButton]
-#if DEBUG
-        chatButton.title = DeveloperReportChatStrings.buttonTitle
-        chatButton.target = self
-        chatButton.action = #selector(sendToChat)
-        chatButton.setAccessibilityIdentifier(ReportProblemIdentifiers.chat)
-        buttons.append(chatButton)
-#endif
-        buttons.append(submitButton)
-
-        let footer = NSStackView(views: buttons)
+        let footer = NSStackView(views: [spacer, cancelButton, actionsControl])
         footer.orientation = .horizontal
         footer.spacing = Design.Spacing.small
 
         return footer
+    }
+
+    private func perform(_ action: DeveloperReportAction) {
+        switch action {
+        case .send:
+            submitIssue()
+        case .copy:
+            break
+        case .chat:
+#if DEBUG
+            sendToChat()
+#else
+            break
+#endif
+        }
     }
 
     // MARK: - Actions
@@ -254,8 +263,7 @@ final class ReportProblemViewController: NSViewController {
 
         let draft = reportDraft()
         isSubmitting = true
-        submitButton.isEnabled = false
-        submitButton.title = ReportProblemStrings.submittingTitle
+        actionsControl.setBusy(true, title: ReportProblemStrings.submittingTitle)
         statusView.show(ReportProblemStrings.submittingStatus, tone: .working)
 
         Task { @MainActor [weak self] in
@@ -327,12 +335,13 @@ final class ReportProblemViewController: NSViewController {
 
     private func finishSubmitting(_ outcome: DeveloperIssueReportSubmission) {
         isSubmitting = false
-        submitButton.isEnabled = true
-        submitButton.title = ReportProblemStrings.submitTitle
+        actionsControl.setBusy(false)
 
         switch outcome {
         case .delivered(let reference):
             statusView.show(ReportProblemStrings.received(reference: reference), tone: .done)
+        case .saved(let records):
+            statusView.show(ReportProblemStrings.saved(records: records), tone: .done)
         case .queued:
             statusView.show(ReportProblemStrings.queued, tone: .working)
         case .failed(let message):
@@ -380,7 +389,6 @@ enum ReportProblemStrings {
     static var detailHint: String {
         L10n.string("⌘Return sends the report · Return adds a line")
     }
-    static var submitTitle: String { L10n.string("Send to Developer") }
     static var submittingTitle: String { L10n.string("Sending…") }
     static var submittingStatus: String { L10n.string("Sending to Threading’s private inbox…") }
     static var cancelTitle: String { L10n.string("Cancel") }
@@ -391,6 +399,10 @@ enum ReportProblemStrings {
     static func received(reference: String) -> String {
         L10n.format("Report received. Reference: %@", reference)
     }
+    static func saved(records: Int) -> String {
+        L10n.format("Saved to your outbox (%lld).", records)
+    }
+
     static var queued: String {
         L10n.string("Report saved securely and queued for retry when Threading is active.")
     }

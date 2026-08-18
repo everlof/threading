@@ -372,3 +372,30 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - `ImageCompareView` lives in the app (`UI/Design/`), not the package, for now — hoisting
     it beside the text renderer is the intended move once its modes settle, and its theme
     adapter seam was cut to make that mechanical.
+
+- **InjectionNext** (downloaded developer tool, never a product dependency): opt-in function-body
+  hot reloading for the macOS Debug app.
+  - `scripts/injection_next.sh` pins release `2.0.1` and its archive SHA-256, then verifies the
+    bundle id, version, Developer ID team, code signature and Gatekeeper assessment before caching
+    it under the user's Library. Its signed client has an `/Applications/InjectionNext.app`
+    install name, so the script prepares a separate ad-hoc-signed cache copy with a cache-local
+    install name; neither the tool, package nor sources enter this repository, `Package.resolved`,
+    the app bundle or a Release build.
+  - `scripts/config/injection-next.xcconfig` exists outside every target configuration. Only the
+    script passes it through `XCODE_XCCONFIG_FILE` to the Xcode process InjectionNext supervises;
+    normal Xcode, command-line builds, hosted tests, profiling, CI and releases retain their
+    ordinary linker and compilation-cache behavior. The config also gates itself to Debug and
+    keys linker flags by wrapper extension, so Release and the three command-line helpers built
+    beside `Threading.app` do not load an injection client or lose their own `OTHER_LDFLAGS`.
+  - In that supervised Debug process the config disables Xcode's compilation cache, emits frontend
+    commands, links `libmacosxInjection.dylib` with `-interposable`, and supplies runpaths for the
+    client's XCTest support libraries from the selected Xcode. The script uses InjectionNext's
+    supervised-Xcode path rather than its fallback file watcher: command-line `xcodebuild` does not
+    create the IDE activity log the fallback needs, and watching the repository root makes the
+    upstream app offer to patch `project.pbxproj`. The supervised path uses ordinary user state:
+    every Xcode and InjectionNext process must quit before the wrapper starts, and every Threading
+    process must quit before Run so the injected app remains the sole owner of its live stores.
+  - This is an iteration aid, never evidence. It may replace existing function bodies but cannot
+    change type layout, stored properties, signatures or the source-file graph. A normal build and
+    the relevant tests remain the completion gate, rendered evidence remains the appearance gate,
+    and Release remains the performance and shipping gate.

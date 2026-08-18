@@ -2,9 +2,10 @@ import AppKit
 
 /// Lays out a rendered markdown document as a vertical stack of block views.
 ///
-/// One view per block rather than a single attributed string, because a code block wants its
-/// own monospace surface and a list wants a hanging indent — things a lone `NSTextField`
-/// cannot express. Text blocks are still plain labels, so selection and wrapping come for free.
+/// One view per block on the active bounded page rather than a single attributed string, because
+/// a code block wants its own monospace surface and a list wants a hanging indent — things a lone
+/// `NSTextField` cannot express. Text blocks are still plain labels, so selection and wrapping
+/// come for free.
 final class MarkdownView: NSStackView {
 
     /// The style as an *expression* rather than a value, so `rebuild` re-resolves whatever the
@@ -13,14 +14,15 @@ final class MarkdownView: NSStackView {
     /// following a switch; a caller that passes a stored style re-reads that same value, which
     /// is also what they asked for.
     private let style: () -> MarkdownStyle
-    /// Kept so the document can be laid out again, which is the only way this surface can follow
-    /// a theme — see `rebuild()`.
-    private let markdown: String
+    /// Cheap source blocks are the complete document model. Only one bounded page is parsed,
+    /// styled and turned into AppKit views at a time; keeping a giant answer as one virtual table
+    /// row must not recreate an unbounded view/constraint tree inside that row.
+    private let blockPages: [[String]]
     private let restyle = AppEventObservations()
 
     init(markdown: String, style: @autoclosure @escaping () -> MarkdownStyle = .assistant) {
         self.style = style
-        self.markdown = markdown
+        blockPages = MarkdownView.sourcePages(Markdown.sourceBlocks(markdown))
         super.init(frame: .zero)
 
         orientation = .vertical
@@ -37,9 +39,8 @@ final class MarkdownView: NSStackView {
         //
         // This is the surface the conversation font exists for, so leaving it stale would mean
         // the flagship case only applied to messages that had not arrived yet: a thread half in
-        // one face and half in another. Re-laying the document out is cheap — the parse is a
-        // scan over a string this view is already holding — and it is local, which a rebuild
-        // driven from the controller would not be.
+        // one face and half in another. Re-laying the active bounded page is local, which a
+        // rebuild driven from the controller would not be.
         restyle.observe(AppThemeDidChange.self) { [weak self] _ in self?.rebuild() }
     }
 
@@ -49,12 +50,204 @@ final class MarkdownView: NSStackView {
 
     private func build() {
         let style = self.style()
-        for block in Markdown.parse(markdown, style: style) {
-            let view = Self.blockView(for: block, style: style)
-            addArrangedSubview(view)
-            view.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
-            view.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+        let pages = blockPages
+
+        let document = MarkdownPagedContentView(
+            pageCount: pages.count,
+            pageDescription: { page in
+                return L10n.format(
+                    "Page %lld of %lld",
+                    Int64(page + 1),
+                    Int64(pages.count)
+                )
+            },
+            makePage: { page in
+                let pageStack = NSStackView()
+                pageStack.orientation = .vertical
+                pageStack.alignment = .leading
+                pageStack.spacing = MarkdownDefaults.blockSpacing
+                pageStack.translatesAutoresizingMaskIntoConstraints = false
+
+                for source in pages[page] {
+                    for block in Markdown.parse(source, style: style) {
+                        let view = Self.blockView(for: block, style: style)
+                        pageStack.addArrangedSubview(view)
+                        NSLayoutConstraint.activate([
+                            view.leadingAnchor.constraint(equalTo: pageStack.leadingAnchor),
+                            view.trailingAnchor.constraint(equalTo: pageStack.trailingAnchor)
+                        ])
+                    }
+                }
+                return pageStack
+            }
+        )
+        addArrangedSubview(document)
+        NSLayoutConstraint.activate([
+            document.leadingAnchor.constraint(equalTo: leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+    }
+
+    /// A second budget prevents nested limits from multiplying: 48 independently capped tables
+    /// must not all become the first page merely because each one is a single Markdown block.
+    /// Source-line counting is a byte scan (newline is ASCII), so page planning creates no styled
+    /// strings or AppKit objects for content outside the active page.
+    private static func sourcePages(_ sources: [String]) -> [[String]] {
+        guard !sources.isEmpty else { return [[]] }
+
+        let maximumBlocks = MarkdownDefaults.maximumBlocksPerPage
+        let maximumLines = MarkdownDefaults.maximumSourceLinesPerPage
+        var pages: [[String]] = []
+        var page: [String] = []
+        var pageLines = 0
+
+        for source in sources {
+            var sourceLines = 1
+            for byte in source.utf8 where byte == 0x0A && sourceLines < maximumLines {
+                sourceLines += 1
+            }
+
+            if !page.isEmpty,
+               page.count >= maximumBlocks || pageLines + sourceLines > maximumLines {
+                pages.append(page)
+                page.removeAll(keepingCapacity: true)
+                pageLines = 0
+            }
+
+            page.append(source)
+            pageLines += sourceLines
+
+            if page.count >= maximumBlocks || pageLines >= maximumLines {
+                pages.append(page)
+                page.removeAll(keepingCapacity: true)
+                pageLines = 0
+            }
         }
+
+        if !page.isEmpty { pages.append(page) }
+        return pages
+    }
+
+    private static func pageCount(itemCount: Int, pageSize: Int) -> Int {
+        max(1, (itemCount + pageSize - 1) / pageSize)
+    }
+
+    private static func pageRange(itemCount: Int, pageSize: Int, page: Int) -> Range<Int> {
+        let start = min(page * pageSize, itemCount)
+        return start..<min(start + pageSize, itemCount)
+    }
+
+    private static func pagedList(
+        _ items: [NSAttributedString],
+        ordered: Bool,
+        style: MarkdownStyle
+    ) -> NSView {
+        let pageSize = MarkdownDefaults.maximumListItemsPerPage
+        let pageCount = pageCount(itemCount: items.count, pageSize: pageSize)
+        return MarkdownPagedContentView(
+            pageCount: pageCount,
+            pageDescription: { page in
+                let range = pageRange(itemCount: items.count, pageSize: pageSize, page: page)
+                return L10n.format(
+                    "%lld–%lld of %lld items",
+                    Int64(range.lowerBound + 1),
+                    Int64(range.upperBound),
+                    Int64(items.count)
+                )
+            },
+            makePage: { page in
+                let range = pageRange(itemCount: items.count, pageSize: pageSize, page: page)
+                let values = Array(items[range])
+                let markers = ordered
+                    ? range.map { "\($0 + 1)." }
+                    : values.map { _ in "•" }
+                return list(values, markers: markers, style: style)
+            }
+        )
+    }
+
+    private static func pagedTable(
+        _ model: MarkdownTable,
+        availableWidth: CGFloat?
+    ) -> NSView {
+        let columnCount = max(
+            1,
+            max(
+                model.headers.count,
+                max(
+                    model.alignments.count,
+                    model.rows.lazy.map(\.count).max() ?? 0
+                )
+            )
+        )
+        let rowSize = MarkdownDefaults.maximumTableRowsPerPage
+        let columnSize = MarkdownDefaults.maximumTableColumnsPerPage
+        let rowPageCount = pageCount(itemCount: model.rows.count, pageSize: rowSize)
+        let columnPageCount = pageCount(itemCount: columnCount, pageSize: columnSize)
+        let totalPageCount = rowPageCount * columnPageCount
+        let tableWidth = availableWidth.flatMap { $0 > 0 ? $0 : nil }
+            ?? Design.Size.readableWidth
+
+        return MarkdownPagedContentView(
+            pageCount: totalPageCount,
+            pageDescription: { page in
+                let rowPage = page / columnPageCount
+                let columnPage = page % columnPageCount
+                let rows = pageRange(
+                    itemCount: model.rows.count,
+                    pageSize: rowSize,
+                    page: rowPage
+                )
+                let columns = pageRange(
+                    itemCount: columnCount,
+                    pageSize: columnSize,
+                    page: columnPage
+                )
+                return L10n.format(
+                    "Rows %lld–%lld of %lld · columns %lld–%lld of %lld",
+                    Int64(rows.lowerBound + 1),
+                    Int64(rows.upperBound),
+                    Int64(model.rows.count),
+                    Int64(columns.lowerBound + 1),
+                    Int64(columns.upperBound),
+                    Int64(columnCount)
+                )
+            },
+            makePage: { page in
+                let rowPage = page / columnPageCount
+                let columnPage = page % columnPageCount
+                let rowRange = pageRange(
+                    itemCount: model.rows.count,
+                    pageSize: rowSize,
+                    page: rowPage
+                )
+                let columnRange = pageRange(
+                    itemCount: columnCount,
+                    pageSize: columnSize,
+                    page: columnPage
+                )
+                let empty = NSAttributedString(string: "")
+                let headers = columnRange.map { index in
+                    index < model.headers.count ? model.headers[index] : empty
+                }
+                let alignments = columnRange.map { index in
+                    index < model.alignments.count ? model.alignments[index] : .left
+                }
+                let rows = rowRange.map { rowIndex in
+                    let source = model.rows[rowIndex]
+                    return columnRange.map { columnIndex in
+                        columnIndex < source.count ? source[columnIndex] : empty
+                    }
+                }
+                return ThemedDocumentTableView(
+                    headers: headers,
+                    rows: rows,
+                    alignments: alignments,
+                    availableWidth: tableWidth,
+                    minimumColumnWidth: MarkdownDefaults.tableColumnWidth
+                )
+            }
+        )
     }
 
     private func rebuild() {
@@ -87,10 +280,10 @@ final class MarkdownView: NSStackView {
             return label(text)
 
         case .bullets(let items):
-            return list(items, markers: items.map { _ in "•" }, style: style)
+            return pagedList(items, ordered: false, style: style)
 
         case .ordered(let items):
-            return list(items, markers: items.indices.map { "\($0 + 1)." }, style: style)
+            return pagedList(items, ordered: true, style: style)
 
         case .code(let code):
             return codeBlock(code, style: style)
@@ -99,16 +292,7 @@ final class MarkdownView: NSStackView {
             return quote(text, style: style)
 
         case .table(let model):
-            if let availableWidth, availableWidth > 0 {
-                return ThemedDocumentTableView(
-                    headers: model.headers,
-                    rows: model.rows,
-                    alignments: model.alignments,
-                    availableWidth: availableWidth,
-                    minimumColumnWidth: MarkdownDefaults.tableColumnWidth
-                )
-            }
-            return table(model, style: style)
+            return pagedTable(model, availableWidth: availableWidth)
         }
     }
 
@@ -236,119 +420,119 @@ final class MarkdownView: NSStackView {
         return container
     }
 
-    /// A compact GFM table. Columns keep a readable width and the block scrolls horizontally
-    /// when the detail pane cannot hold them, while vertical gestures continue scrolling the
-    /// conversation.
-    private static func table(_ model: MarkdownTable, style: MarkdownStyle) -> NSView {
-        let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        container.applySurface(
-            fill: style.codeBackground.withAlphaComponent(0.45),
-            radius: .control
-        )
+}
 
-        let scroll = ThemedScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.hasHorizontalScroller = true
-        scroll.hasVerticalScroller = false
-        scroll.horizontalScrollElasticity = .allowed
-        scroll.verticalScrollHandoff = .always
+/// A complete content model with a bounded AppKit footprint. The pager itself is native,
+/// host-owned document navigation; extension customization still receives the assistant message
+/// atomically and does not gain control over conversation ordering or content availability.
+private final class MarkdownPagedContentView: NSStackView {
+    private let pageCount: Int
+    private let pageDescription: (Int) -> String
+    private let makePage: (Int) -> NSView
+    private var pageIndex = 0
 
-        let rows = NSStackView()
-        rows.orientation = .vertical
-        rows.alignment = .leading
-        rows.spacing = 0
-        rows.translatesAutoresizingMaskIntoConstraints = false
-
-        addTableRow(
-            model.headers,
-            alignments: model.alignments,
-            style: style,
-            isHeader: true,
-            to: rows
-        )
-        for values in model.rows {
-            let separator = SeparatorView()
-            rows.addArrangedSubview(separator)
-            NSLayoutConstraint.activate([
-                separator.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
-                separator.trailingAnchor.constraint(equalTo: rows.trailingAnchor)
-            ])
-            addTableRow(
-                values,
-                alignments: model.alignments,
-                style: style,
-                isHeader: false,
-                to: rows
-            )
-        }
-
-        let document = NSView()
-        document.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(rows)
-        scroll.documentView = document
-        container.addSubview(scroll)
-
-        NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: container.topAnchor),
-            scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-
-            rows.topAnchor.constraint(equalTo: document.topAnchor),
-            rows.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            rows.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-            rows.bottomAnchor.constraint(equalTo: document.bottomAnchor),
-            document.widthAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.widthAnchor),
-            document.heightAnchor.constraint(equalTo: scroll.contentView.heightAnchor)
-        ])
-
-        return container
+    init(
+        pageCount: Int,
+        pageDescription: @escaping (Int) -> String,
+        makePage: @escaping (Int) -> NSView
+    ) {
+        self.pageCount = max(pageCount, 1)
+        self.pageDescription = pageDescription
+        self.makePage = makePage
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        spacing = MarkdownDefaults.blockSpacing
+        translatesAutoresizingMaskIntoConstraints = false
+        rebuild()
     }
 
-    private static func addTableRow(
-        _ values: [NSAttributedString],
-        alignments: [NSTextAlignment],
-        style: MarkdownStyle,
-        isHeader: Bool,
-        to table: NSStackView
-    ) {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.distribution = .fillEqually
-        row.spacing = 0
-        row.translatesAutoresizingMaskIntoConstraints = false
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
-        for (index, value) in values.enumerated() {
-            let cell = NSView()
-            cell.translatesAutoresizingMaskIntoConstraints = false
-            if isHeader {
-                cell.applySurface(fill: Design.Surface.controlHover, radius: .fixed(0))
-            }
-
-            let text = label(value)
-            text.alignment = alignments[index]
-            if isHeader {
-                text.textColor = Design.Text.label
-            }
-            cell.addSubview(text)
-
-            let inset = Design.Spacing.small
-            NSLayoutConstraint.activate([
-                cell.widthAnchor.constraint(
-                    greaterThanOrEqualToConstant: MarkdownDefaults.tableColumnWidth
-                ),
-                text.topAnchor.constraint(equalTo: cell.topAnchor, constant: inset),
-                text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: inset),
-                text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -inset),
-                text.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -inset)
-            ])
-            row.addArrangedSubview(cell)
+    private func rebuild() {
+        for view in arrangedSubviews {
+            removeArrangedSubview(view)
+            view.removeFromSuperview()
         }
 
-        table.addArrangedSubview(row)
-        row.leadingAnchor.constraint(equalTo: table.leadingAnchor).isActive = true
-        row.trailingAnchor.constraint(equalTo: table.trailingAnchor).isActive = true
+        let page = makePage(pageIndex)
+        addArrangedSubview(page)
+        NSLayoutConstraint.activate([
+            page.leadingAnchor.constraint(equalTo: leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+
+        guard pageCount > 1 else { return }
+
+        let previous = ThemedButton(
+            title: L10n.string("Previous"),
+            target: self,
+            action: #selector(showPreviousPage)
+        )
+        previous.emphasis = .tertiary
+        previous.isEnabled = pageIndex > 0
+
+        let position = NSTextField(labelWithString: pageDescription(pageIndex))
+        position.applyFont(.detail())
+        position.textColor = Design.Text.tertiary
+        position.setContentHuggingPriority(.required, for: .horizontal)
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let next = ThemedButton(
+            title: L10n.string("Next"),
+            target: self,
+            action: #selector(showNextPage)
+        )
+        next.emphasis = .tertiary
+        next.isEnabled = pageIndex + 1 < pageCount
+
+        let pager = NSStackView(views: [previous, position, spacer, next])
+        pager.orientation = .horizontal
+        pager.alignment = .centerY
+        pager.spacing = Design.Spacing.small
+        pager.translatesAutoresizingMaskIntoConstraints = false
+        addArrangedSubview(pager)
+        NSLayoutConstraint.activate([
+            pager.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pager.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+    }
+
+    @objc private func showPreviousPage() {
+        guard pageIndex > 0 else { return }
+        pageIndex -= 1
+        rebuildAndRemeasure()
+    }
+
+    @objc private func showNextPage() {
+        guard pageIndex + 1 < pageCount else { return }
+        pageIndex += 1
+        rebuildAndRemeasure()
+    }
+
+    private func rebuildAndRemeasure() {
+        rebuild()
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+
+        var ancestor = superview
+        while let view = ancestor {
+            view.invalidateIntrinsicContentSize()
+            view.needsLayout = true
+            if let table = view as? NSTableView {
+                let row = table.row(for: self)
+                if row >= 0 {
+                    table.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+                }
+                break
+            }
+            ancestor = view.superview
+        }
     }
 }

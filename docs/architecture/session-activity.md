@@ -616,6 +616,39 @@ the selected surface while silenced), the mirrored Settings row, and Threading �
 `AppSettingsDidChange` rather than each other. macOS Focus cannot do this job: it silences
 notification sounds but not the bell, which the app plays itself through `NSSound`.
 
+**The gate reaches a third sound** (`SystemAlert.swift`). Beside the bell and the alert, the app
+beeps when it cannot do what it was just asked to do: a menu item with no folder behind it, a back
+step with nothing behind it, a Quick Look that will not open, a tab that cannot be selected. That
+beep was written out longhand at fifty-eight call sites, so the gate — which reaches
+`SoundResolution` and `TerminalBell` — silenced two of the app's three sounds and left the most
+frequent one audible. It is the one shape of bug a silence switch does not survive: the user asks
+for quiet, hears a beep, and concludes the setting is broken. `SystemAlert.refuse()` is now the
+single way to make it, and it asks `SoundResolution.isSilenced` rather than reading the setting,
+so there is one seam and not two.
+
+It is a **gate and not a choice**: no `SoundEvent` case, no scope chain, no picker row. This is the
+platform's refusal tone rather than a sound anybody selected, and the only question worth asking of
+it is whether the app may be heard at all. Nothing visual is implied either — a refusal the user
+has to understand still needs words where they are looking, and this is only the sound that goes
+with them. `scripts/check_architecture_boundaries.sh` fails the build on a bare `NSSound.beep()`
+anywhere outside `SystemAlert` and `SoundPlayer`, because fifty-eight call sites is what a rule
+with nothing enforcing it looks like after a year.
+
+**An automated run makes none of it** (`AutomatedRun.swift`), refusal and bell alike. The two lanes are two
+processes and need two answers. `scripts/test.sh fast` and `all` host the test bundle *inside* the
+shipping app on the developer's own machine, which `StateManager.isHostedTest` already names — and
+a test drives exactly the branches this sound lives on, since a fixture has no window, no folder
+and no browser, so every refusal was audible in the room from a process with nothing on screen to
+account for it. `scripts/test.sh ui` loads no test class into the app at all; what it leaves is the
+disposable Cocoa home the runner builds, so the scenario marker `UIScenarioBootstrap` already fails
+closed without is the honest signal there. `TerminalBell.ring` reads the same value beside the
+user's gate, so a fixture writing `BEL` down a PTY is held for the identical reason. Both answers
+stay out of `SoundResolution.isSilenced` deliberately: the sidebar's speaker and the Settings row draw the
+*user's* answer, and a scenario screenshotting a silenced app would be photographing a state
+nobody is in. The exemption is the beep, not the judgement — `AttentionAlertCenter` and
+`ScheduledMessageNotifier` already refuse to post under test for the same reason.
+
+
 The stored preference is `attentionAlertSound`, unseeded: an absent key is the macOS tone, which
 is a real answer rather than a missing one. `AttentionAlertCenter.chosenSound(for:sessionID:)` is
 the one place that reads it, since the two posting paths had already drifted into asking half the

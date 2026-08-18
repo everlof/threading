@@ -40,7 +40,10 @@
         "BrowserCaptureGeometryTests",
         "BrowserOffScreenCaptureTests",
         "ThemedControlTests\/testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()",
-        "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()"
+        "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()",
+        "ThemedPresentationTests\/testAlertDismissEndsTheSheetWithoutAButtonAnswer()",
+        "ThemedPresentationTests\/testAlertEscapeEndsTheSheetAndReturnsFocus()",
+        "ThemedPresentationTests\/testPopoverEscapeClosesOnceAndReturnsFocus()"
       ],
       "target" : {
         "containerPath" : "container:Threading.xcodeproj",

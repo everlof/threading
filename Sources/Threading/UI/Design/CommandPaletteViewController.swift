@@ -198,14 +198,14 @@ final class CommandPaletteViewController: NSViewController {
         guard let selectedID,
               let command = visibleCommands.first(where: { $0.id == selectedID }),
               command.availability.isAvailable else {
-            NSSound.beep()
+            SystemAlert.refuse()
             return
         }
         switch invoke(command.id) {
         case .invoked:
             dismiss()
         case .refused:
-            NSSound.beep()
+            SystemAlert.refuse()
             reloadCatalog()
         }
     }

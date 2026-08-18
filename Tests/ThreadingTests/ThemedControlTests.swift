@@ -359,6 +359,48 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertEqual(control.selectedIndex, 1)
     }
 
+    /// Selection belongs to the filter and remains visible after a click; the accent ring belongs
+    /// to keyboard navigation. Drawing both after a pointer press made the selected segment look
+    /// like an outlined action rather than the filled choice shown before it was clicked.
+    func testPointerFocusKeepsTheSelectedPlateWithoutKeepingAKeyboardRing() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let (control, _) = makeSegmentedControl(selectedIndex: 0)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 220, height: 70),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(control)
+        let first = try XCTUnwrap(control.segment(at: 0))
+
+        let selected = try renderedPNG(of: first)
+        first.mouseDown(with: .init())
+
+        XCTAssertTrue(window.firstResponder === first, "the click did not retain arrow-key focus")
+        XCTAssertEqual(
+            try renderedPNG(of: first), selected,
+            "pointer focus added a keyboard ring around the selected plate"
+        )
+
+        let right = try keyEvent(
+            String(UnicodeScalar(NSRightArrowFunctionKey)!),
+            keyCode: 124,
+            in: window
+        )
+        first.keyDown(with: right)
+        let second = try XCTUnwrap(control.segment(at: 1))
+        XCTAssertTrue(window.firstResponder === second, "the arrow did not move focus with selection")
+        let keyboardFocused = try renderedPNG(of: second)
+
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        XCTAssertNotEqual(
+            keyboardFocused, try renderedPNG(of: second),
+            "keyboard navigation no longer draws a visible focus ring"
+        )
+    }
+
     func testASegmentIsActivatedFromTheKeyboardAndByAccessibility() throws {
         let (control, _) = makeSegmentedControl()
         let space = try keyEvent(" ", keyCode: 49)
@@ -6391,11 +6433,119 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertEqual(control.frame.height, Design.Size.chipHeight, accuracy: 0.5)
     }
 
+    /// A primary press keeps its own face when it is welded. The plate resolves it through
+    /// `ThemedButton.plate(for:material:)` rather than reading roles of its own, so that a theme
+    /// moving the primary treatment moves the welded pair and the button beside it together.
+    func testAPrimaryTitledPlateIsFilledUnlikeASecondaryOne() throws {
+        AppThemePalette.set(.system)
+
+        let secondary = try surfaceSamples(across: titledSplitControl())
+        let primary = try surfaceSamples(across: titledSplitControl(emphasis: .primary))
+
+        XCTAssertNotEqual(
+            primary.first, secondary.first,
+            "the primary plate came out wearing the secondary's face — the weld is still "
+                + "resolving one emphasis for every press it holds"
+        )
+        for sample in primary {
+            XCTAssertEqual(
+                sample, primary[0],
+                "the primary plate changes colour across its own width — the accent stops "
+                    + "where one half ends, which is the colour seam the weld exists to remove"
+            )
+        }
+    }
+
+    /// The chevron is a glyph built for the chrome standing on a block of accent. The plate is
+    /// the only thing that knows it painted one, so the plate is what says so — and saying so has
+    /// to leave the glyph *more* legible than the ink it would have used, not merely different.
+    func testThePrimaryTitledPlateNamesItsGroundToTheChevron() throws {
+        AppThemePalette.set(.system)
+
+        let secondary = titledSplitControl()
+        _ = try surfaceSamples(across: secondary)
+        XCTAssertNil(
+            secondary.chevron.hostGround,
+            "a secondary plate paints no ground of its own and must claim none"
+        )
+
+        let primary = titledSplitControl(emphasis: .primary)
+        _ = try surfaceSamples(across: primary)
+        XCTAssertEqual(
+            primary.chevron.hostGround, .primaryAction,
+            "the chevron was left reading the chrome's roles on a ground the chrome does not own"
+        )
+
+        let face = Design.Surface.primaryActionFace
+        XCTAssertGreaterThan(
+            ThemeContrast.ratio(primary.chevron.ink.label, face),
+            ThemeContrast.ratio(Design.Ink.chrome.label, face),
+            "the chevron's glyph reads no better on the accent than the chrome's own ink would "
+                + "— which is how a control becomes a hole in the plate it is welded to"
+        )
+    }
+
+    /// `emphasis` stays the caller's to set, and a "last used wins" press is re-ranked by its own
+    /// menu, so the plate answers again on every draw rather than once at init.
+    func testTheTitledPlateFollowsAnEmphasisChangedAfterItWasBuilt() throws {
+        AppThemePalette.set(.system)
+        let control = titledSplitControl()
+        let asSecondary = try surfaceSamples(across: control)
+
+        control.action.emphasis = .primary
+        let asPrimary = try surfaceSamples(across: control)
+
+        XCTAssertNotEqual(
+            asSecondary.first, asPrimary.first,
+            "the plate kept the face it was built with — it is resolving emphasis once"
+        )
+        XCTAssertEqual(control.chevron.hostGround, .primaryAction)
+    }
+
+    /// Primary is a ranking rather than a colour, and a theme states which of three ways it is
+    /// drawn. The plate has to carry all three, because the press it welds already does.
+    func testThePlateCarriesEveryPrimaryTreatment() {
+        var material = AppTheme.Material.system
+
+        material.buttonStyle.primaryTreatment = .filled
+        let filled = ThemedButton.plate(for: .primary, material: material)
+        XCTAssertNil(filled.outerFrame, "a filled primary wears no default-button frame")
+        XCTAssertFalse(filled.insetsFace)
+        XCTAssertGreaterThan(
+            filled.fill.alphaComponent, 0.5,
+            "a filled primary that paints nothing is not filled"
+        )
+
+        material.buttonStyle.primaryTreatment = .outlined
+        let outlined = ThemedButton.plate(for: .primary, material: material)
+        XCTAssertEqual(
+            outlined.fill.alphaComponent, 0,
+            "an outlined primary paints no face until it is reached for"
+        )
+        XCTAssertNotNil(outlined.border, "an outlined primary is its rule")
+
+        material.buttonStyle.primaryTreatment = .raised
+        let raised = ThemedButton.plate(for: .primary, material: material)
+        XCTAssertNotNil(raised.outerFrame, "a raised primary is the ordinary face plus a frame")
+        XCTAssertTrue(
+            raised.insetsFace,
+            "the face has to sit inside the frame, or the frame is the only thing drawn"
+        )
+        XCTAssertEqual(
+            raised.fill, AppThemePalette.color(material.buttonStyle.secondaryRole),
+            "a raised primary keeps the ordinary control face — that is what makes it classic"
+        )
+    }
+
     /// A titled plate laid out the way the attachments footer lays it out, in a window that is
     /// never shown.
-    private func titledSplitControl() -> SplitButtonView {
+    private func titledSplitControl(
+        emphasis: ThemedButton.Emphasis = .secondary
+    ) -> SplitButtonView {
+        let press = ThemedButton(title: "Copy Path", target: nil, action: nil)
+        press.emphasis = emphasis
         let control = SplitButtonView(
-            action: ThemedButton(title: "Copy Path", target: nil, action: nil),
+            action: press,
             chevron: ThemedIconButton(
                 symbolName: DesignSymbols.chevron,
                 accessibility: "Attachment actions",

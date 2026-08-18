@@ -239,6 +239,11 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     private let isEmphasized: Bool
     private let actionTarget: Target
 
+    /// A content control row is a bare surface even when a button was originally created for a
+    /// smaller nested slot. The row owns that presentation context along with the promoted size,
+    /// so its hover lift must not stay at the stronger nested-control tier.
+    private var rowHoverFill: KeyPath<Design.Ink, NSColor>?
+
     /// What the button is currently drawn at: the role's own measurements, until a control row
     /// it stands in states the row's.
     ///
@@ -460,7 +465,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         } else if active {
             fill = isHovered ? ink.surfaceHover : ink.surface
         } else {
-            fill = isHovered ? ink[keyPath: actionTarget.hoverFill] : .clear
+            fill = isHovered ? ink[keyPath: rowHoverFill ?? actionTarget.hoverFill] : .clear
         }
 
         let border = active ? ink.border : nil
@@ -656,6 +661,7 @@ extension ThemedIconButton: ControlRowMember {
     /// the same mark in a larger box — more padding, not more button — which reads as a target
     /// that missed rather than one that was sized.
     func adopt(_ metrics: ControlRowMetrics) {
+        rowHoverFill = \.surface
         let size = NSSize(width: metrics.height, height: metrics.height)
         guard size != drawnSize || metrics.glyphSlot != drawnGlyph else { return }
 

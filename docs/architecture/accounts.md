@@ -4,14 +4,29 @@ Multiple logins per CLI, how they are discovered and named, and the rate-limit r
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-Both CLIs support multiple logins via `CLAUDE_CONFIG_DIR` / `CODEX_HOME`. Accounts are
+Both CLIs support multiple logins via `CLAUDE_CONFIG_DIR` / `CODEX_HOME`. Legacy accounts are
 discovered from the filesystem, not from aliases, so they are found regardless of shell setup;
-aliases are read only to supply a friendly label.
+aliases are read only to supply a friendly label. Locations created through Threading are merged
+from `AgentAccountLocationRegistry`, a bounded `PreferenceStore` record of provider, handle and
+absolute config path. That second admission path matters for provider credential stores such as
+the system Keychain, where a completed login can be real without leaving the old filesystem marker.
 
-Admission requires proof of a real login (`.claude.json`/`settings.json` for Claude,
-`auth.json` for Codex). Two things are deliberately excluded: Claude Science data roots
+Admission requires either provider-owned filesystem proof (`.claude.json`/`settings.json` for
+Claude, `auth.json` for Codex) or a registry entry written only after the provider's own status
+command verified that exact isolated home. Registry discovery still requires the directory to
+exist, rejects duplicates and never reads credential material. Two things are deliberately
+excluded: Claude Science data roots
 (`~/.claude-science`, or any root carrying `install-id` + `runtime/` + `orgs/`), which hold
 Claude-shaped state but are not login slots; and aliases that set no config directory.
+
+`AgentAccountSetupCoordinator` is the only writer of those records. It derives a bounded alternate
+home from a user-facing name, starts `claude auth login` or `codex login` under the corresponding
+environment variable, waits without capturing login output, then runs `claude auth status --json`
+or `codex login status` in the same environment. Codex setup requests its documented file
+credential store so separate `CODEX_HOME` values remain separate; Threading records the location,
+not `auth.json`. Failed, cancelled, timed-out or unverified attempts are never admitted. Settings'
+**Reconnect** repeats the provider-owned browser login against the same home and does not replace
+or delete anything on disk.
 
 **Where a login is *chosen*, it is named after the person** (`AccountName`), not after the
 alias. An alias is named after the agent — `claude-dblock`, `claude-vlundborg` — so a menu of

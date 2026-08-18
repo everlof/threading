@@ -9,6 +9,14 @@ import UIKit
 /// to reveal its own button has to keep revealing its entry — a share that may recolour a
 /// terminal but not manage the session still needs the menu to appear.
 enum MobileSessionChrome {
+    /// The catalogue carries `AgentSession.displayTitle`, including an explicit rename. The
+    /// live socket title is a transient surface caption and may still hold the value from when
+    /// the detail connection opened, so it is only a bootstrap fallback for an empty catalogue
+    /// value rather than an authority over session chrome.
+    static func navigationTitle(catalogTitle: String, liveTitle: String?) -> String {
+        catalogTitle.isEmpty ? (liveTitle ?? catalogTitle) : catalogTitle
+    }
+
     static func canOpenWorkspace(canManageSessions: Bool, hasClient: Bool) -> Bool {
         canManageSessions && hasClient
     }
@@ -88,7 +96,10 @@ struct SessionDetailView: View {
                 }
             }
         }
-        .navigationTitle(connection?.title ?? currentSession.title)
+        .navigationTitle(MobileSessionChrome.navigationTitle(
+            catalogTitle: currentSession.title,
+            liveTitle: connection?.title
+        ))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if showsSessionMenu {

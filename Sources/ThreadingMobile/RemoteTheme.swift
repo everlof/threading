@@ -65,6 +65,9 @@ enum MobileDesign {
         static let accountChipEmoji: CGFloat = 10
         static let accountChipRing: CGFloat = 1.5
         static let rowAttentionDot: CGFloat = 8
+        /// The working orb at a row's trailing edge, standing where the age would be. Sized to
+        /// the caption line it replaces so a working row is no taller than an idle one.
+        static let rowWorkingOrb: CGFloat = 16
     }
 
     enum Offset {
@@ -72,6 +75,11 @@ enum MobileDesign {
         /// How far the account chip hangs past the mark's corner. Flush inside the tile it covered
         /// the middle of the mark; hanging it out keeps the mark recognisable underneath.
         static let accountChipOverhang: CGFloat = 3
+        /// How far the attention dot hangs past the mark's top-trailing corner so that its
+        /// centre sits on the tile's edge — the midpoint of the corner arc, not the corner of the
+        /// bounding box, which on a rounded tile floats the dot off the ink.
+        static let rowAttentionDotOverhang: CGFloat = Size.rowAttentionDot / 2
+            - Size.rowMarkRadius * (1 - 1 / 2.squareRoot())
     }
 
     /// Identity colour that is content rather than chrome, so it does not come from a theme role.

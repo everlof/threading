@@ -35,7 +35,29 @@ scripts/test.sh ui       # app-level XCUITest scenarios in an isolated Cocoa hom
 
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)
 open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Threading-*/Build/Products/Debug/Threading.app | head -1)"
+
+# Opt-in InjectionNext hot reload. Quit Threading and Xcode first; then Run in launched Xcode.
+scripts/injection_next.sh xcode
 ```
+
+**Agent shorthand:** when the user says **“injection mode”**, run
+`scripts/injection_next.sh xcode` without asking them to restate the workflow. Tell them when the
+supervised Xcode is ready so they can quit Threading and press Run. If Xcode or InjectionNext is
+already open, report that prerequisite instead of quitting either app without permission.
+
+`scripts/injection_next.sh` is the only InjectionNext path. It downloads one pinned, signed and
+notarized release to the user's cache, applies `scripts/config/injection-next.xcconfig` to that
+supervised Xcode's Debug builds through `XCODE_XCCONFIG_FILE`, and has InjectionNext launch that
+Xcode so it can observe compiler commands and source saves. In the launched Xcode, choose the
+Threading scheme and Run; do not accept any offer to patch the project or compiler. The wrapper
+does not enable file-watcher mode and does not modify `Threading.xcodeproj`. Xcode and
+InjectionNext must both be quit before running the wrapper, and every Threading must be
+quit before pressing Run because the experiment uses ordinary app state. Ordinary Xcode,
+command-line builds, tests, profiling, CI and Release do not link or start InjectionNext; use
+those ordinary paths for every completion check. Injection replaces function bodies, not type
+layout: adding stored properties, changing signatures, adding or renaming source files, and
+changing already-initialized stored constants still require a normal rebuild. Never use an
+injection build for tests, performance evidence or shipping verification.
 
 **A commit on master starts a background build.** `scripts/install_git_hooks.sh` installs
 post-commit and post-merge hooks that rebuild master's tip in a separate clone and install it over
@@ -449,13 +471,35 @@ the following cases genuinely need to be visible, and they are skipped by name i
   the detached-browser-window work rests on that still returning pixels. Today it does in all
   three conditions; the class exists so a macOS update changing that is a failing test rather
   than an agent quietly reading blank pages.
+- `BrowserCaptureGeometryTests` (the whole class) — the same platform question asked of a
+  window's geometry rather than its capture, and it needs the window server to answer for the
+  same reason.
 - `ThemedControlTests/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()` and
   `testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()` — both assert on first
   responder, which requires a key window.
+- `ThemedPresentationTests/testPopoverEscapeClosesOnceAndReturnsFocus()`,
+  `testAlertEscapeEndsTheSheetAndReturnsFocus()` and
+  `testAlertDismissEndsTheSheetWithoutAButtonAnswer()` — the three that share `testWindow()`, a
+  titled 420×260 fixture at (120,120) with `makeKeyAndOrderFront`. They present a real popover
+  panel and real sheets and assert who holds the keyboard afterwards, which is AppKit's
+  presentation machinery rather than ours. They were flashing a window three times per `fast`
+  run, which is the lane an agent re-runs all day; they still run in `all`, so the push gate is
+  unchanged.
 
 **Adding a test that needs a real window?** Add it to `skippedTests` in
 `TestPlans/Threading-Fast.xctestplan` and say why here. Anything that can be asserted against an
 unshown window belongs in `fast` — reach for `orderFront` only when the framework forces it.
+
+**A window can be ordered on screen and still be invisible, but only if it is borderless.**
+`GitReviewRenderTests` and `ExecutionAuditRenderTests` park their fixture at
+`NSPoint(x: -10_000, y: -10_000)` before `orderFront`, so WebKit and Core Animation treat it as a
+real window while nothing appears on any display. That works because both are `.borderless`: a
+`.titled` window is pulled back by `NSWindow.constrainFrameRect(_:to:)`, and a probe of this
+machine put one asking for (-10,000, -10,000) at (0,0) instead — on screen, top left, exactly
+where you would notice it. Overriding `constrainFrameRect(_:to:)` to return the proposed rect
+keeps a titled window parked. So a fixture that needs a real window does not automatically need a
+*visible* one: check whether it can be borderless or unconstrained first, and skip it from `fast`
+only when it genuinely has to be somewhere a person could see.
 
 **A fast fixture window is built, never shown, and has bounded ownership.** An unshown window still
 lays out, draws through `cacheDisplay`, and takes a first responder, which is everything these
