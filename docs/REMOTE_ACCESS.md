@@ -160,9 +160,11 @@ An owner pairing is stored as one logical Mac identity, not as one hostname. iOS
 durable hosted ICE/TURN credential first, then the private endpoints the Mac advertises. Owner
 responses carry the addresses each way in is currently answering on, tailnet included, plus an
 explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still
-decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed by that
-policy, prefers Tailscale when requested, records the successful route, and can move to another
-advertised route without creating a duplicate device. Unknown future policies fail closed to
+decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed
+by that policy, with no preference between the private-network kinds — which of this Mac's own
+addresses is reachable is a fact about where the phone is standing, and it finds out by trying them
+in order — records the successful route, and can move to another advertised route without creating
+a duplicate device. Unknown future policies fail closed to
 private-only. Guest shares never receive the Mac's private endpoint list.
 
 The iOS app shows all unarchived sessions grouped by project or ordered by recent activity,
@@ -977,10 +979,11 @@ a second certificate for the same address.
   two sessions hold the same object rather than two configured alike.
 - **Two sources for a pin, and no third.** The scanned pairing link pins its own host before the
   first request is made over it. An owner `/api/me` response pins the host of every advertised
-  endpoint carrying `identity: "pinned"`. An endpoint without that flag keeps stock evaluation,
-  because Tailscale Serve presents a publicly issued certificate for its `*.ts.net` name and
-  pinning that host would refuse the one endpoint that works. A guest capability never teaches a
-  phone a pin.
+  endpoint carrying `identity: "pinned"`, which now includes the tailnet address and this Mac's
+  MagicDNS name. An endpoint without that flag keeps stock evaluation, because it is terminated by
+  somebody else's certificate and pinning that host would refuse the one endpoint that works; no
+  build advertises one today, since Serve's origin is never sent. A guest capability never teaches
+  a phone a pin.
 - **Why a `/api/me` response is trustworthy.** It exists only because the pin matched or because
   the system validated a publicly issued certificate; a refused challenge produces no response to
   read. So the fingerprints in it are the Mac's own word about its identity.
