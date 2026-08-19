@@ -44,6 +44,8 @@ final class ConfirmationPromptTests: XCTestCase {
             "revokeChatAccess",
             "revokePairedDevice",
             "deleteHostedServiceAccount",
+            "resetRemoteAccessIdentity",
+            "activateRemoteAccessIdentityRotation",
             "deleteSession",
             "deleteArchivedSession",
             "deleteAppTheme",

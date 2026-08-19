@@ -2191,25 +2191,54 @@ interface.
 
 ## Remote Access (beta)
 
-Open **Settings > Remote Access**, choose **Relay**, **Tailscale**, or **Private + Sharing**, and turn on
-**Remote Access** to mirror Threading from a browser or the Threading iPhone app. Relay supports
-ordinary public share links; Tailscale keeps the connection inside your tailnet; Private +
-Sharing uses Tailscale for owner pairing and starts the relay when you create a one-chat link.
-**Owner Relay Fallback** separately lets your own devices use that relay if Tailscale is
-unreachable; **Keep Sharing Relay Ready** starts it immediately. Both are off by default. The
-Tailscale readiness card tells you whether installation, sign-in/running, or private HTTPS Serve
-needs attention. If your tailnet has not approved Tailscale Serve (or HTTPS certificates) yet,
+Open **Settings > Remote Access** and turn on **Remote Access** to reach Threading from the
+Threading iPhone app or a browser. Under it is a list of **ways in**, each with its own switch, a
+status line, and four lines saying who can reach it, who can see the traffic, what happens after a
+restart, and whether it works away from home.
+
+- **This network** (on). Your phone reaches this Mac when both are on the same Wi-Fi. The status
+  line names the address and port it is answering on, such as `Reachable at 192.168.1.42:8760`, or
+  the specific reason there is none. The port stays the same across restarts, so a paired phone
+  reconnects without scanning again.
+- **Through a VPN**. The same way in, reached from a VPN into this network, including UniFi
+  Teleport and WireGuard. It follows **This network** and has no switch of its own. Connect the VPN
+  on the phone first; a phone can run only one VPN at a time, so this and Tailscale cannot both be
+  connected.
+- **Tailscale** (off). Reach this Mac from anywhere on your tailnet. Turning it on does not put
+  Threading on any other network: every way in is bound separately, so "tailnet only" means this
+  one on and the others off.
+- **Threading Direct**. Future, and shown only when this Mac is signed in to Threading's service.
+
+A way in that cannot carry traffic says why on its own line, with the fix beside it. If the macOS
+firewall may be blocking the listener, the page says so and where to allow it; because a Mac cannot
+observe whether an incoming connection was allowed, it never claims to be reachable on that basis
+alone. With no way in switched on, the page says that too rather than waiting for a pairing code
+that is never coming.
+
+The Tailscale readiness card appears when that way in is on, and tells you whether installation,
+sign-in/running, or private HTTPS Serve needs attention. If your tailnet has not approved
+Tailscale Serve (or HTTPS certificates) yet,
 the card's endpoint row offers an **Enable Tailscale Serve…** / **Enable HTTPS…** button that
 opens the tailnet's approval page; approve there, then **Retry Connection**. The pairing panel
 below states the same reason and the same fix itself, with that button beside **Retry
 Connection**, so you never have to match a failure to a row elsewhere on the page. While the
 tailnet is coming up, the status line and the panel say what is being waited for: the first
 HTTPS certificate a tailnet issues can take up to a minute, and both say so until it answers.
-**Open in Browser** tests the
-client on the Mac, and the page shows an owner-device QR code for the native app. Pairing is for
-your own
-trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded
-Native permission requests. To involve somebody else, use a session's **… > Share Chat…** and
+**Open in Browser** tests the client on the Mac, and the page shows an owner-device QR code for
+the native app.
+
+**This Mac's Identity** prints the 26-character pairing code of the certificate every routable way
+in presents. Your phone pins that certificate when it scans the QR code and compares this code with
+what answers every time it connects, so the two can be checked by eye. **Prepare Rotation** mints
+the next certificate and announces it over the connection your devices already trust; **Activate
+Rotation** switches to it, and a device that has connected since the announcement keeps working
+with nothing to do. **Reset Identity…** throws the certificate away and mints a new one, which
+every paired device has to scan again; it asks first, and it is the answer for a lost or unreadable
+key rather than the ordinary way to change certificates.
+
+Pairing is for your own trusted devices: a paired owner can see your unarchived chats, manage
+them, and approve bounded Native permission requests. To involve somebody else, use a session's
+**… > Share Chat…** and
 choose an invitation for that chat alone. The sheet names each grant and what it withholds:
 **View only** follows the chat but cannot type, prompt, or answer a permission request;
 **Collaborator** adds typing and prompts while permission requests still come to you; and
@@ -2224,7 +2253,7 @@ member and chat; it never grants another chat, Mac settings, or the ability to c
 
 You can pair several phones and tablets with the same Mac. Each receives a separate Keychain
 credential and can control sessions concurrently; Settings lists and revokes them independently.
-The iPhone still shows that Mac once even when it knows both a Tailscale and relay address. It
+The iPhone still shows that Mac once even when it knows several of its addresses. It
 follows the connection policy chosen on the Mac, shows the active route beside its connection
 status, and can fail over or adopt an advertised stable relay address without being paired again.
 
@@ -2265,8 +2294,8 @@ previous turn used, and gives the dot its place back when the turn is done.
 The dashboard title names the connected Mac and shows its connection status underneath. Its
 leading Mac button replaces the old device card: choose another paired Mac there to swap the
 session list without re-pairing. The app remembers the selected Mac and the last open session.
-Because continuity uses the paired host identity rather than its current URL, switching between
-Tailscale and relay keeps the same saved state, while two different Macs that happen to expose
+Because continuity uses the paired host identity rather than its current URL, moving between this
+Mac's addresses keeps the same saved state, while two different Macs that happen to expose
 the same provider session id remain separate.
 
 Choose a project heading to open that project. This screen contains only the project's chats;

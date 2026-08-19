@@ -4055,9 +4055,16 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
         XCTAssertTrue(ids.contains("settings.remote-access.page"))
         XCTAssertTrue(ids.contains("settings.remote-access.enabled"))
-        XCTAssertTrue(ids.contains("settings.remote-access.connection-mode"))
-        XCTAssertTrue(ids.contains("settings.remote-access.owner-relay-fallback"))
-        XCTAssertTrue(ids.contains("settings.remote-access.keep-relay-ready"))
+        XCTAssertTrue(ids.contains(
+            RemoteAccessPreferencesViewController.Identifier.doorToggle(.thisNetwork)
+        ))
+        XCTAssertTrue(ids.contains(
+            RemoteAccessPreferencesViewController.Identifier.doorToggle(.tailscale)
+        ))
+        XCTAssertTrue(ids.contains(
+            RemoteAccessPreferencesViewController.Identifier.status(.thisNetwork)
+        ))
+        XCTAssertTrue(ids.contains("settings.remote-access.identity-reset"))
         XCTAssertTrue(ids.contains("settings.remote-access.input-control-default"))
         XCTAssertTrue(ids.contains("settings.remote-access.status"))
         XCTAssertTrue(ids.contains("settings.remote-access.pair"))
@@ -4065,19 +4072,13 @@ final class ThemedControlTests: HostedStoreTestCase {
     }
 
     func testRemoteAccessSetupPageRendersInBothAppearances() throws {
-        let previousMode = AppSettings.shared.remoteAccessConnectionMode
         let previousEnabled = AppSettings.shared.remoteAccessEnabled
-        let previousFallback = AppSettings.shared.remoteAccessAllowsOwnerRelayFallback
-        let previousKeepReady = AppSettings.shared.remoteAccessKeepsRelayReady
-        AppSettings.shared.remoteAccessConnectionMode = .tailscaleAndRelay
+        let previousTailscale = AppSettings.shared.remoteAccessTailscaleEnabled
         AppSettings.shared.remoteAccessEnabled = false
-        AppSettings.shared.remoteAccessAllowsOwnerRelayFallback = false
-        AppSettings.shared.remoteAccessKeepsRelayReady = false
+        AppSettings.shared.remoteAccessTailscaleEnabled = true
         defer {
-            AppSettings.shared.remoteAccessConnectionMode = previousMode
             AppSettings.shared.remoteAccessEnabled = previousEnabled
-            AppSettings.shared.remoteAccessAllowsOwnerRelayFallback = previousFallback
-            AppSettings.shared.remoteAccessKeepsRelayReady = previousKeepReady
+            AppSettings.shared.remoteAccessTailscaleEnabled = previousTailscale
         }
         let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
             URL(fileURLWithPath: $0, isDirectory: true)
