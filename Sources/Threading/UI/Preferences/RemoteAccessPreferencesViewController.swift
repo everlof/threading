@@ -861,7 +861,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 symbol: "person.2",
                 title: "Other people",
                 detail: "Use Share Chat… from that chat’s ⋯ menu. It grants only the selected "
-                    + "chat, with view, collaboration and approval rights chosen separately."
+                    + "chat, with view, collaboration and approval rights chosen separately. The "
+                    + "invitation points at a way in above, so the person needs the Threading app "
+                    + "and a way onto that network."
             ),
             pairedDevicesStack
         ])

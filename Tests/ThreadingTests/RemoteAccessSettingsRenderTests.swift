@@ -116,6 +116,40 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         }
     }
 
+    /// Nothing on the page offers, mentions or blames the public relay.
+    ///
+    /// The Cloudflare Quick Tunnel is gone, and two of the rows that shipped with it existed only
+    /// to start it. A word left behind would be describing a way in that no longer exists, which
+    /// is the exact failure the four-line rule was written against.
+    ///
+    /// Two ways in may still say "relay" and mean something true: Tailscale relays encrypted
+    /// WireGuard when peers cannot connect directly, and Threading Direct falls back to TURN.
+    /// Both are named in their own four lines as traffic the relay cannot read, which is the
+    /// disclosure working rather than a leftover. This network has no such caveat, so a relay
+    /// word in its card could only be the retired one.
+    func testNoWayInMentionsTheRelayThatNoLongerExists() throws {
+        let page = self.page(state: .lanBound)
+        for text in allLabels(in: page.view).map(\.stringValue) {
+            let lowered = text.lowercased()
+            for word in ["cloudflare", "cloudflared", "quick tunnel", "secure relay"] {
+                XCTAssertFalse(lowered.contains(word), "“\(text)” still names \(word)")
+            }
+        }
+
+        let network = try XCTUnwrap(
+            view(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.disclosure(.thisNetwork)
+            )
+        )
+        for text in allLabels(in: network).map(\.stringValue) {
+            XCTAssertFalse(
+                text.lowercased().contains("relay"),
+                "This network describes itself with a relay: “\(text)”"
+            )
+        }
+    }
+
     /// The VPN is the same door reached from a tunnel, so it is a note rather than a switch, and
     /// Threading Direct is future work that only appears once this Mac is signed in.
     func testOnlyTheTwoRealDoorsCarryASwitch() throws {
