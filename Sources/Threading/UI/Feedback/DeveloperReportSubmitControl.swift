@@ -45,7 +45,14 @@ enum DeveloperReportAction: String, CaseIterable, Sendable {
         case .copy:
             return L10n.string("Copy Report")
         case .chat:
+#if DEBUG
             return DeveloperReportChatStrings.buttonTitle
+#else
+            // Unreachable: every call site builds `available` with `.chat` behind the same
+            // guard, and the chat's strings live inside the feature's own `#if DEBUG` rather
+            // than shipping copy for a route a Release build does not have.
+            return ""
+#endif
         }
     }
 }

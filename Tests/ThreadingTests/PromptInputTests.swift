@@ -269,6 +269,7 @@ final class PromptInputTests: XCTestCase {
 
         let prompt = PromptView()
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         let quotedPath = "\"\(imageURL.path)\""
         XCTAssertEqual(prompt.stringValue, quotedPath)
@@ -375,6 +376,7 @@ final class PromptInputTests: XCTestCase {
         prompt.showsImageAttachments = true
         prompt.stringValue = "Compare this layout"
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         XCTAssertEqual(prompt.stringValue, "Compare this layout")
         XCTAssertEqual(prompt.attachmentPaths, [imageURL.path])
@@ -414,6 +416,7 @@ final class PromptInputTests: XCTestCase {
         let prompt = PromptView()
         prompt.showsImageAttachments = true
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         XCTAssertTrue(prompt.attachmentPaths.isEmpty)
         XCTAssertEqual(
@@ -435,6 +438,7 @@ final class PromptInputTests: XCTestCase {
         let window = makeWindow(hosting: prompt)
         defer { MediaInspectorPresenter.dismiss(in: window) }
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         let thumbnail = try XCTUnwrap(
             descendants(of: prompt).first {
@@ -470,6 +474,7 @@ final class PromptInputTests: XCTestCase {
         prompt.showsImageAttachments = true
         let window = makeWindow(hosting: prompt)
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         let thumbnail = try XCTUnwrap(
             descendants(of: prompt).first {
@@ -524,6 +529,7 @@ final class PromptInputTests: XCTestCase {
         prompt.onRequestImageComment = { commentedPaths.append($0) }
         let window = makeWindow(hosting: prompt)
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         let thumbnail = try XCTUnwrap(
             descendants(of: prompt).first {
@@ -547,6 +553,7 @@ final class PromptInputTests: XCTestCase {
         let prompt = PromptView()
         prompt.showsImageAttachments = true
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
         var submitted: String?
         prompt.onSubmit = { submitted = $0 }
 
@@ -590,6 +597,7 @@ final class PromptInputTests: XCTestCase {
 
         for prompt in prompts {
             prompt.attachFiles(at: [imageURL.path])
+            waitForAttachmentPreparation(prompt)
             XCTAssertEqual(prompt.stringValue, "")
             XCTAssertEqual(prompt.attachmentPaths, [imageURL.path])
             XCTAssertTrue(
@@ -850,6 +858,7 @@ final class PromptInputTests: XCTestCase {
 
         prompt.stringValue = "fixa testet"
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
         textView.setSelectedRange(NSRange(location: 4, length: 0))
 
         let remove = try XCTUnwrap(
@@ -1993,6 +2002,28 @@ final class PromptInputTests: XCTestCase {
         try XCTUnwrap(
             descendants(of: prompt).compactMap { $0 as? ThemedButton }.first,
             "The prompt has to hold its inline submit control"
+        )
+    }
+
+    /// Lets a just-attached file finish becoming a preview.
+    ///
+    /// The composer prepares attachments serially and decodes them off the main actor, so a
+    /// path handed over on this line is *pending* on the next one: no thumbnail yet, and no
+    /// submit, because a draft cannot be sent while a file it owns is still being classified.
+    /// A file that turns out to be undecodable resolves the same way — into literal text — so
+    /// waiting is what both outcomes have in common, and asserting either one before this
+    /// returns is asserting on a half-built composer.
+    private func waitForAttachmentPreparation(
+        _ prompt: PromptView,
+        timeout: TimeInterval = 5
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while prompt.isPreparingAttachments, Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+        }
+        XCTAssertFalse(
+            prompt.isPreparingAttachments,
+            "the composer never finished preparing its attachments"
         )
     }
 }

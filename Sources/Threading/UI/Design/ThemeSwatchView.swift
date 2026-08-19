@@ -39,9 +39,9 @@ final class ThemeSwatchView: NSView, ThemedComponent, SystemChromeBoundary {
         applySurface(
             fill: .clear,
             radius: .fixed(ThemeEditorLayout.swatchRadius),
-            border: Design.Surface.border
+            border: Design.Surface.border,
+            clipsContent: true
         )
-        layer?.masksToBounds = true
 
         well.translatesAutoresizingMaskIntoConstraints = false
         well.target = self
@@ -75,10 +75,14 @@ final class ThemeSwatchView: NSView, ThemedComponent, SystemChromeBoundary {
         // Through applySurface so the recorded surface *is* this colour: otherwise the app-theme
         // refresh sweep re-applies the `.clear` recorded at init and wipes every swatch to
         // transparent — which emptied the whole COLORS grid on a live theme switch.
+        // `clipsContent` is restated because the surface owns it: `applySurface` assigns
+        // `masksToBounds` on every call, so a swatch that clipped the well at init and then
+        // took a colour would let the well's square corners back out past the chip's.
         applySurface(
             fill: newColor,
             radius: .fixed(ThemeEditorLayout.swatchRadius),
-            border: Design.Surface.border
+            border: Design.Surface.border,
+            clipsContent: true
         )
         if well.color != newColor { well.color = newColor }
         toolTip = "\(name) · \(newColor.hexString)"

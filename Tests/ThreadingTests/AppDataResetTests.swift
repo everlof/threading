@@ -294,8 +294,13 @@ final class AppDataResetTests: XCTestCase {
         XCTAssertNil(page.hostPage, "an extension can contribute rows to the reset page")
     }
 
-    /// Both resets and both reveals are on it, and the reset buttons say so with an ellipsis —
+    /// Both resets and every reveal are on it, and the reset buttons say so with an ellipsis —
     /// the platform's own promise that a button asks before it acts.
+    ///
+    /// The reveal count is guarded the way the page itself is: a development build carries a
+    /// third location for the report outbox, because reports pile up in a folder nobody collects
+    /// from when no intake is configured. Asserting the same condition the page branches on keeps
+    /// this a count rather than a floor — a fourth row appearing unannounced still fails here.
     func testThePageOffersBothResetsAndBothLocations() throws {
         let page = try XCTUnwrap(
             SettingsPages.builtIn.first { $0.id == SettingsPages.advancedID }
@@ -308,7 +313,12 @@ final class AppDataResetTests: XCTestCase {
         let titles = descendants(of: controller.view)
             .compactMap { ($0 as? ThemedButton)?.title }
 
-        XCTAssertEqual(titles.filter { $0 == AdvancedStrings.reveal }.count, 2)
+#if DEBUG
+        let expectedReveals = 3
+#else
+        let expectedReveals = 2
+#endif
+        XCTAssertEqual(titles.filter { $0 == AdvancedStrings.reveal }.count, expectedReveals)
         XCTAssertTrue(titles.contains(AdvancedStrings.resetSettingsButton))
         XCTAssertTrue(titles.contains(AdvancedStrings.resetEverythingButton))
         XCTAssertTrue(
