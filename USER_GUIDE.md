@@ -2204,9 +2204,21 @@ restart, and whether it works away from home.
   Teleport and WireGuard. It follows **This network** and has no switch of its own. Connect the VPN
   on the phone first; a phone can run only one VPN at a time, so this and Tailscale cannot both be
   connected.
-- **Tailscale** (off). Reach this Mac from anywhere on your tailnet. Turning it on does not put
-  Threading on any other network: every way in is bound separately, so "tailnet only" means this
-  one on and the others off.
+- **Tailscale** (off). Reach this Mac from anywhere on your tailnet. Threading answers on the
+  address this Mac holds there, with the same certificate the other ways in present, so the status
+  line names it the same way: `Reachable at 100.65.47.126:8760`, and your Mac's `*.ts.net` name
+  beside it once Threading has read it. Turning it on does not put Threading on any other network:
+  every way in is bound separately, so "tailnet only" means this one on and the others off. If the
+  door is not up, the line says which of the three reasons it is: Tailscale is not installed, this
+  Mac is not signed in, or Tailscale is not connected. All three come back on their own once
+  Tailscale does; there is nothing to press.
+  - **Open in a browser on your tailnet** (off) is a sub-option under it, and not a way in. It runs
+    Tailscale Serve, which publishes Threading at your Mac's `*.ts.net` name with a publicly
+    trusted certificate, so a *browser* on your tailnet opens it without a certificate warning. The
+    Threading iPhone app does not need it: it pins the certificate this Mac holds and reaches the
+    tailnet address directly. Turning it on publishes this Mac's name and your tailnet name in
+    public certificate logs, so it is off unless you want the browser. Its own status line says
+    where it is serving, or which admin-console setting is missing, with the button that opens it.
 - **Threading Direct**. Future, and shown only when this Mac is signed in to Threading's service.
 
 A way in that cannot carry traffic says why on its own line, with the fix beside it. If the macOS
@@ -2215,17 +2227,14 @@ observe whether an incoming connection was allowed, it never claims to be reacha
 alone. With no way in switched on, the page says that too rather than waiting for a pairing code
 that is never coming.
 
-The Tailscale readiness card appears when that way in is on, and tells you whether installation,
-sign-in/running, or private HTTPS Serve needs attention. If your tailnet has not approved
-Tailscale Serve (or HTTPS certificates) yet,
-the card's endpoint row offers an **Enable Tailscale Serve…** / **Enable HTTPS…** button that
-opens the tailnet's approval page; approve there, then **Retry Connection**. The pairing panel
-below states the same reason and the same fix itself, with that button beside **Retry
-Connection**, so you never have to match a failure to a row elsewhere on the page. While the
-tailnet is coming up, the status line and the panel say what is being waited for: the first
-HTTPS certificate a tailnet issues can take up to a minute, and both say so until it answers.
-**Open in Browser** tests the client on the Mac, and the page shows an owner-device QR code for
-the native app.
+The Tailscale readiness card appears when that way in is on: Tailscale installed, signed in and
+running, and this Mac's tailnet address. The first two are what the `tailscale` command reports,
+and the third is what Threading actually bound. If your tailnet has not approved HTTPS
+certificates, that is a Serve problem rather than a way-in problem, so it appears on the **Open in
+a browser on your tailnet** row with an **Enable HTTPS…** button that opens the tailnet's approval
+page; approve there, then **Retry Connection**. The first certificate a tailnet issues can take up
+to a minute, and the row says so until it answers. **Open in Browser** tests the client on the Mac,
+and the page shows an owner-device QR code for the native app.
 
 **This Mac's Identity** prints the 26-character pairing code of the certificate every routable way
 in presents. Your phone pins that certificate when it scans the QR code and compares this code with
@@ -2470,15 +2479,15 @@ link. It is a one-time bootstrap exchanged for a unique device credential kept i
 both Mac and iPhone. Turning Remote Access off or quitting closes every connection and suspends
 both paired-owner and one-chat guest credentials. They are restored from the Mac login Keychain
 when Remote Access starts again; use **Stop Sharing** or revoke a named member/device to remove one
-permanently. A Tailscale pairing has a stable private origin and reconnects after restart.
-Threading refuses to replace an unrelated Tailscale Serve handler already using its HTTPS 8443
-endpoint. The current Cloudflare Quick Tunnel changes origin at restart. A phone that can still
-reach the Mac through Tailscale can learn the new route; a relay-only pairing still needs a new
-scan. The client now prefers a stable relay endpoint whenever the Mac advertises one, but this
-phase does not provision the planned named Cloudflare Tunnel. Without `cloudflared`, Relay is unavailable;
-without a signed-in Tailscale installation, Tailscale is unavailable. **Open in Browser** still
-works locally. See [Remote access](docs/REMOTE_ACCESS.md) for
-pairing, notifications, the complete security model, and beta limitations.
+permanently. A pairing on the tailnet has a stable private address and reconnects after a restart,
+because the port is sticky and a tailnet address does not move. If you also switch **Open in a
+browser on your tailnet** on, Threading refuses to replace an unrelated Tailscale Serve handler
+already using its HTTPS 8443 endpoint. Tailnet ACL rules written against port 8443 were written
+for Serve; the way in your phone uses is the listener's own port, `8760` by default, so a rule
+that restricts Threading has to name that one. Without a signed-in Tailscale installation the
+tailnet way in has no address to bind and says so. **Open in Browser** still works locally. See
+[Remote access](docs/REMOTE_ACCESS.md) for pairing, notifications, the complete security model,
+and beta limitations.
 
 ### Reporting a problem from your iPhone
 
@@ -4116,9 +4125,9 @@ than by scrubbing. Threading never uploads it; sending it is your decision.
 requests no camera, microphone, contacts, calendar, location or Full Disk Access.
 Remote Access asks for the Local Network permission only if you turn on the connection for this
 network and let Threading announce itself on it, which is what lets your phone find the Mac after
-its address changes. Until then the listener binds to `127.0.0.1` and the selected HTTPS relay or
-Tailscale Serve publishes only that loopback listener. Answering "Don't Allow" stops the
-announcement and nothing else.
+its address changes. Until then the listener binds to `127.0.0.1`, and a way in you switch on binds
+that network's addresses and no others. Answering "Don't Allow" stops the announcement and nothing
+else.
 
 The session status card's connected-review and check readings do reach the repository's code
 host while that card is enabled: GitHub uses the available Threading, `gh`, or Git credential
