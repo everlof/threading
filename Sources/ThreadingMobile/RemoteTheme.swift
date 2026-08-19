@@ -34,6 +34,24 @@ enum MobileDesign {
         static let toggleTrackHeight: CGFloat = 32
         static let toggleThumb: CGFloat = 26
         static let navigationStatusIndicator: CGFloat = 6
+        /// How wide a chat's navigation title asks to be, whatever it says.
+        ///
+        /// The name morphs character by character, and a morph is built against the geometry it
+        /// starts in: the label resolves every character's final slot up front, then animates
+        /// each one there. A title sized to its own text cannot hold still through a rename,
+        /// because the new name is what changed the size — the morph is laid out in the old
+        /// width, SwiftUI commits the new one a pass later, and the re-layout snaps every glyph
+        /// to its final slot. On screen the animation stops half way through. Claude renaming a
+        /// chat to `✳ <name>` moved this bar's title 27 points and did exactly that.
+        ///
+        /// A *request*, not a guarantee: a bar hands its title what its button groups leave,
+        /// which on a 320-point phone is 176. Stating this as both the ideal and the maximum
+        /// takes the name out of the answer while leaving the bar's own width in it, so the
+        /// title still holds still — the width it settles on depends on the device, never on
+        /// what the chat is called. The UIKit conversation title has stated its width since it
+        /// was written, for the same reason; this is that decision, named and shared.
+        static let navigationTitleWidth: CGFloat = 280
+        static let navigationTitleHeight: CGFloat = minimumTapTarget
         /// The working orb standing in the status dot's place in a chat's navigation title. It
         /// takes the line the dot leaves rather than a place of its own, so the title stays
         /// centred and one mark speaks at a time; sized to the caption line it sits on rather
@@ -150,6 +168,14 @@ struct MobileConnectionNavigationTitle: View {
             .font(.caption2)
             .foregroundStyle(theme.secondaryLabel)
         }
+        // Asked for, not measured. The ideal is what a principal toolbar item is sized by, so
+        // stating one takes the name out of the answer; the same value as the maximum keeps the
+        // title inside whatever the bar's button groups actually left, which on a 320-point
+        // phone is well under it. See `MobileDesign.Size.navigationTitleWidth`.
+        .frame(
+            idealWidth: MobileDesign.Size.navigationTitleWidth,
+            maxWidth: MobileDesign.Size.navigationTitleWidth
+        )
         .accessibilityElement(children: .combine)
     }
 }

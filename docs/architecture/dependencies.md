@@ -335,6 +335,36 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
       device pixel, so sweeping a glyph across one pixel yields exactly three distinct
       rasters. Three phases reproduce AppKit exactly; four looks entirely reasonable and
       lands a third of the glyphs in the wrong bucket.
+  - **A colour glyph never enters that pipeline.** Every step above assumes the glyph is an
+    outline the engine inks in one colour, and the inversion reads a single channel back. Apple
+    Color Emoji is artwork the engine composites as authored, so one channel of it is a
+    silhouette: 🚀 came out a grey ghost, and ✳ — whose colour form is a green asterisk on a
+    shaded plate — came out a white asterisk with a dark cap over its top spoke, which is what
+    shipped in the phone's navigation title. `GlyphRaster.isColorGlyph` asks the *resolved run*
+    rather than the character, because the fallback cascade is what decides and it differs by
+    platform: macOS satisfies U+2733 from Zapf Dingbats and iOS from `.AppleColorEmojiUI`, from
+    the same string. Colour tiles are drawn transparent, unsmoothed, untinted, and cached
+    without the ink. `GlyphMorphEffect` cross-fades them, because a bitmap glyph has no outline
+    for a shape stand-in and concealing the incoming layer would blink the character out.
+    Which presentation a *mark* should ask for is the host's call, not the package's — see
+    `MobileGlyphPresentation`, which asks for VS15 on emoji-capable symbols whose own default
+    presentation is text, so an agent's mark is the same glyph on both screens.
+  - **A morph is built against the geometry it starts in, so the host owes it stable bounds.**
+    `morph(to:)` resolves the label's final layout up front — `invalidateIntrinsicContentSize`
+    then `layoutIfNeeded` — and animates every character to a slot computed there. A host whose
+    layout settles *later* defeats that, and SwiftUI is such a host: a `UIViewRepresentable`'s
+    frame is decided in SwiftUI's own pass, not by `layoutIfNeeded`. The morph is then laid out
+    in the old width, the real width lands a frame or two later, and `relayoutCurrent()` snaps
+    every glyph to its final slot — on screen, an animation that stops half way. This shipped in
+    the phone's terminal navigation title, whose principal toolbar item was sized to what it
+    said: Claude renaming a chat to `✳ <name>` moved it 27 points mid-morph. `MobileMorphingTitle`
+    now fills the width it is offered rather than reporting the width its text wants, and the
+    navigation title states an ideal *and* a maximum (`MobileDesign.Size.navigationTitleWidth`)
+    rather than measuring one — a stated width alone sat on both buttons of a 320-point bar,
+    which hands its title the 176 points its button groups leave. So the settled width depends on
+    the device and never on the name. A host that genuinely cannot hold its width still —
+    rotation, Dynamic Type — will still see the snap; the package does not yet re-target an
+    in-flight morph.
   - **A glyph layer's frame is a raster tile, not the glyph's metrics.** It is padded for
     ink that overhangs the advance and snapped to the pixel grid, so it always overruns the
     text it draws. `CharacterSlot.inkFrame` (exposed as `MorphingLabel.glyphInkFrames`) is

@@ -2,6 +2,58 @@ import LabelMorph
 import SwiftUI
 import UIKit
 
+// MARK: - Mobile Glyph Presentation
+
+/// Chooses how a title's marks are drawn, without changing the title itself.
+///
+/// An agent names its own chat through the terminal's title, and Claude's is `✳ <name>`.
+/// U+2733 is emoji-*capable* but its default presentation is text, and which face satisfies it
+/// is a platform decision rather than a property of the string: macOS falls back to Zapf
+/// Dingbats and draws the mark the sidebar and the terminal already draw, while iOS resolves the
+/// same scalar to Apple Color Emoji — a green asterisk on a shaded plate, at nearly twice the
+/// advance. VS15 asks the fallback cascade for the text presentation both platforms agree on.
+///
+/// Only symbols that are *already* text by default are rewritten, and only when the author has
+/// not asked for emoji with VS16. A chat named "🚀 Ship it" keeps its rocket: that scalar's own
+/// default presentation is emoji, and the phone renders it as one.
+///
+/// The line is Unicode's own default rather than "does it look nice in colour", and that is a
+/// decision, not an accident. Several text-default scalars do have handsome colour forms on this
+/// platform — ❤ ☀ ℹ ✔ ‼ ⏸ all resolve to Apple Color Emoji bare, where macOS draws every one of
+/// them as an outline with or without the selector. Following the character's own default is what
+/// makes one chat name look like one chat name on both screens; drawing the pretty ones in colour
+/// would mean a per-scalar list to keep, and a heart that changes colour when you pick up your
+/// phone.
+enum MobileGlyphPresentation {
+    private static let textVariationSelector = UnicodeScalar(0xFE0E)!
+
+    static func presented(_ title: String) -> String {
+        guard title.unicodeScalars.contains(where: isTextDefaultEmoji) else { return title }
+        return String(title.map(presented))
+    }
+
+    private static func presented(_ character: Character) -> Character {
+        let scalars = character.unicodeScalars
+        guard let base = scalars.first, isTextDefaultEmoji(base) else { return character }
+        switch scalars.count {
+        case 1:
+            return Character(String(base) + String(textVariationSelector))
+        case 2 where scalars.last == textVariationSelector:
+            return character
+        default:
+            // A keycap, a modifier, or an explicit VS16: the author or the sender said more
+            // about this cluster than "here is a mark", and that is theirs to say.
+            return character
+        }
+    }
+
+    private static func isTextDefaultEmoji(_ scalar: UnicodeScalar) -> Bool {
+        scalar.value > 0x7F
+            && scalar.properties.isEmoji
+            && !scalar.properties.isEmojiPresentation
+    }
+}
+
 /// The phone's design boundary around LabelMorph.
 ///
 /// LabelMorph owns character layout and animation. This view owns Dynamic Type, tail
@@ -85,10 +137,13 @@ final class MobileMorphingTitleLabel: UIView {
             && title != presentedTitle
             && !reducesMotion
             && window != nil
+        // The label is given the presentation; everything this view answers with — the title it
+        // reports, what VoiceOver reads, what counts as a rename — stays the title it was told.
+        let presented = MobileGlyphPresentation.presented(title)
         if animates {
-            applyEffect(morphingTo: title)
+            applyEffect(morphingTo: presented)
         }
-        label.setText(title, animated: animates)
+        label.setText(presented, animated: animates)
         presentedTitle = title
         accessibilityLabel = title
         invalidateIntrinsicContentSize()
@@ -144,6 +199,26 @@ struct MobileMorphingTitle: UIViewRepresentable {
 
     func makeUIView(context: Context) -> MobileMorphingTitleLabel {
         MobileMorphingTitleLabel()
+    }
+
+    /// Takes the width it is offered rather than the width its text happens to want.
+    ///
+    /// A morph is built against the geometry it starts in: the label resolves every character's
+    /// final slot up front and animates each one there. A label sized to its own text cannot
+    /// hold still through a rename, because the new name is what changed the size — the morph is
+    /// laid out in the old width, SwiftUI commits the new one a pass later, and the re-layout
+    /// snaps every glyph to its final slot. On screen the animation stops half way. Claude
+    /// renaming a chat to `✳ <name>` moved the terminal's navigation title 27 points and did
+    /// exactly that. Filling the offer instead makes the container decide — the bar's title
+    /// area, the row's remaining width — and a rename changes only the glyphs inside it.
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: MobileMorphingTitleLabel,
+        context: Context
+    ) -> CGSize? {
+        let intrinsic = uiView.intrinsicContentSize
+        guard let width = proposal.width, width.isFinite else { return intrinsic }
+        return CGSize(width: width, height: intrinsic.height)
     }
 
     func updateUIView(_ view: MobileMorphingTitleLabel, context: Context) {

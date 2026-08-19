@@ -1399,8 +1399,13 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         accessibilityTraits = .header
     }
 
+    /// Stated rather than measured, so a rename cannot move the label its own name morphs in.
+    /// See `MobileDesign.Size.navigationTitleWidth`.
     override var intrinsicContentSize: CGSize {
-        CGSize(width: 280, height: 44)
+        CGSize(
+            width: MobileDesign.Size.navigationTitleWidth,
+            height: MobileDesign.Size.navigationTitleHeight
+        )
     }
 
     @available(*, unavailable)

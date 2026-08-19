@@ -32,6 +32,7 @@
 		A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61900010000000000000002 /* RemoteTerminalScrollTests.swift */; };
 		A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */; };
 		A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63600010000000000000002 /* RemoteTerminalTapTests.swift */; };
+		A63700010000000000000001 /* MobileNavigationTitleMorphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */; };
 		A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62100010000000000000002 /* MobileWorkingOrbTests.swift */; };
 		A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */; };
 		A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62300010000000000000002 /* MobileAgentIdentityTests.swift */; };
@@ -161,6 +162,7 @@
 		A61900010000000000000002 /* RemoteTerminalScrollTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalScrollTests.swift; sourceTree = "<group>"; };
 		A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardDismissalTests.swift; sourceTree = "<group>"; };
 		A63600010000000000000002 /* RemoteTerminalTapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalTapTests.swift; sourceTree = "<group>"; };
+		A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileNavigationTitleMorphTests.swift; sourceTree = "<group>"; };
 		A62100010000000000000002 /* MobileWorkingOrbTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileWorkingOrbTests.swift; sourceTree = "<group>"; };
 		A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionNavigationTransitionTests.swift; sourceTree = "<group>"; };
 		A62300010000000000000002 /* MobileAgentIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAgentIdentityTests.swift; sourceTree = "<group>"; };
@@ -372,6 +374,7 @@
 				A61900010000000000000002 /* RemoteTerminalScrollTests.swift */,
 				A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */,
 				A63600010000000000000002 /* RemoteTerminalTapTests.swift */,
+				A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */,
 				A62100010000000000000002 /* MobileWorkingOrbTests.swift */,
 				A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */,
 				A62300010000000000000002 /* MobileAgentIdentityTests.swift */,
@@ -955,6 +958,7 @@
 				A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */,
 				A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */,
 				A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */,
+				A63700010000000000000001 /* MobileNavigationTitleMorphTests.swift in Sources */,
 				A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */,
 				A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */,
 				A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */,
