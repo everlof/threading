@@ -361,6 +361,26 @@ enum RemoteListenerFailure: String, Equatable, Sendable {
     /// The loopback listener could not be constructed or reported a failure that is not a
     /// collision.
     case loopbackUnavailable
+
+    /// What a person reads. The raw value stays the token a diagnostic groups by, and the two
+    /// must not be the same string: "portRangeInUse" was reaching the settings page verbatim,
+    /// inside a sentence about a listener, with nothing in it a person could act on.
+    var statement: String {
+        switch self {
+        case .portRangeInUse:
+            return L10n.format(
+                "Ports %1$@ to %2$@ are all in use on this Mac. Quit whatever is holding them, "
+                    + "then turn Remote Access on again.",
+                String(RemoteAccessDefaults.listenerPortFallbackRange.lowerBound),
+                String(RemoteAccessDefaults.listenerPortFallbackRange.upperBound)
+            )
+        case .loopbackUnavailable:
+            return L10n.string(
+                "Threading could not open its listener on this Mac. Turn Remote Access on again, "
+                    + "and report it if it keeps failing."
+            )
+        }
+    }
 }
 
 enum RemoteListenerStartOutcome: Equatable, Sendable {

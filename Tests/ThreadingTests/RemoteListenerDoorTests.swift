@@ -498,12 +498,17 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         )
     }
 
-    func testTheDoorSettingIsEmptyByDefaultAndDropsWhatItDoesNotKnow() {
+    func testTheDoorSettingIsTheNetworkDoorByDefaultAndDropsWhatItDoesNotKnow() {
         XCTAssertEqual(
             appSettings.remoteAccessDoors,
-            [],
-            "the shipped exposure is loopback only until the listener presents an identity"
+            [.lan],
+            "the network door ships on now that the listener presents a pinned identity"
         )
+
+        // Switching the only door off has to stay off. An empty array used to be stored as an
+        // absent key, which handed the read straight back to the registered default.
+        appSettings.remoteAccessDoors = []
+        XCTAssertEqual(appSettings.remoteAccessDoors, [])
 
         appSettings.remoteAccessDoors = [.lan]
         XCTAssertEqual(appSettings.remoteAccessDoors, [.lan])

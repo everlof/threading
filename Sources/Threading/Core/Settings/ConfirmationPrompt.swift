@@ -60,6 +60,12 @@ enum ConfirmationPrompt: String, CaseIterable {
     case revokeChatAccess
     case revokePairedDevice
     case deleteHostedServiceAccount
+    // Both change what a paired phone trusts. A reset unpairs every device that did not hear
+    // the announcement; activating a rotation unpairs only the devices that have not connected
+    // since one was announced. Neither can be undone by pressing anything here — the way back
+    // is on the other device, with a camera.
+    case resetRemoteAccessIdentity
+    case activateRemoteAccessIdentityRotation
     case deleteSession
     case deleteArchivedSession
     case deleteAppTheme
@@ -214,6 +220,8 @@ enum ConfirmationPrompt: String, CaseIterable {
              // revocation like the corresponding guest action: Return belongs on Cancel.
              .revokePairedDevice,
              .deleteHostedServiceAccount,
+             .resetRemoteAccessIdentity,
+             .activateRemoteAccessIdentityRotation,
              .deleteSession,
              .deleteArchivedSession,
              .deleteAppTheme,

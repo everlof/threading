@@ -2,26 +2,73 @@
 
 Remote access mirrors Threading sessions to a browser or to the native `ThreadingMobile` iOS app.
 It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac,
-choose a connection, and turn on **Remote Access**:
+turn on **Remote Access**, and switch on the ways in you want. There is no connection *mode* any
+more: a mode forced one choice between overlapping things, and a way in is one switch per network,
+each stating who can reach it, who can see the traffic, what survives a restart, and whether it
+works away from home.
 
+- **This network** (`remoteAccessDoors`, `lan` by default) binds this Mac's own addresses on the
+  networks it is attached to, one listener per address, each presenting this Mac's pinned
+  certificate. The port is sticky, so a paired phone reconnects tomorrow without scanning again.
+- **Through a VPN** is the same listener reached from a tunnel into that network, including UniFi
+  Teleport and WireGuard. It follows **This network** and has no switch: a tunnel usually hands the
+  phone an address inside the home network, which the LAN listener already answers.
+- **Tailscale** (`remoteAccessTailscaleEnabled`, off by default) publishes Threading only inside the
+  owner's tailnet. It is one switch over `RemoteTailscaleDoorImplementation`: today that is
+  `tailscale serve --https=8443` proxying to the loopback listener, and §8 of the transport plan
+  replaces it with a listener bound to this Mac's tailnet address presenting the same pinned
+  identity. Nothing above the coordinator knows which of the two is carrying it.
 - **Hosted Direct** becomes the native owner-device default after Sign in with Apple. It uses the
   Threading service only for identity, ICE signaling and TURN fallback; ordinary traffic goes
   directly between iPhone and Mac whenever ICE succeeds.
-- **Relay** keeps the existing Cloudflare path and supports ordinary public share links.
-- **Tailscale** publishes Threading only inside the owner's tailnet. It is the private option for
-  owner devices and can also share a chat with somebody already in that tailnet.
-- **Private + Sharing** uses Tailscale for owner pairing and starts the public relay only when a
-  one-chat link is created. **Owner Relay Fallback** and **Keep Sharing Relay Ready** are separate,
-  off-by-default controls for people who prefer availability over the fail-closed private path.
+- **Relay** is **no longer an owner pairing route.** Its Cloudflare Quick Tunnel address changes
+  every launch, which is fatal to "pair once, reconnect tomorrow", so no setting on the page starts
+  it and `/api/me` no longer advertises it. It is still started on demand when a one-chat guest link
+  is created, because a guest has no Threading app, no pairing code and no tailnet.
+
+Because every way in is bound separately, "tailnet only" and "this network only" are both
+expressible, which is the guarantee behind *publishes Threading only inside the owner's tailnet*: a
+person who chose the tailnet for its privacy is not also listening on hotel Wi-Fi.
 
 All transports terminate at the same loopback server, protocol and authorization checks. A transport
 changes who can route packets to Threading; it never expands what a bearer may do.
 
+**The wire policy is now always `privateOnly`.** `RemoteHostConnectionPolicy` stays on the wire
+because an old phone decodes it and maps anything it does not understand to `privateOnly` as well;
+`relayOnly` and `preferPrivate` are never sent again.
+
+**The settings screen's copy rules.** A way in is never presented without its four lines; a way in
+whose four lines are embarrassing is one to fix or remove, not to describe vaguely. A status line
+states a fact, an address and a port or the specific reason there is none, and never a mood. A
+reason and its remedy live in the panel that shows the failure, not in a row somewhere else on the
+page. Nothing claims to be reachable on the strength of a firewall reading: the Mac cannot observe
+whether an incoming connection was allowed, because a probe from this Mac to its own LAN address is
+local traffic the Application Firewall does not filter, so a bound address behind a suspect
+firewall reads *May not be reachable* with the address and the fix in the same line.
+
+**Certificate management is on the page.** `RemoteIdentityCardPresentation` prints the
+26-character pairing code of the certificate the routable ways in present, offers **Prepare
+Rotation** and **Activate Rotation** as two steps, and puts **Reset Identity…** behind a
+confirmation that says plainly that every paired device has to scan again. Rotation is announced
+over the pinned channel, so a device that has connected since the announcement follows the switch
+with nothing to do; a reset is the answer for a lost or unreadable key, not the ordinary way to
+change certificates.
+
+**One migration, and then the mode is gone.** `remoteAccessConnectionMode`,
+`remoteAccessAllowsOwnerRelayFallback` and `remoteAccessKeepsRelayReady` remain in the settings
+registry only so `AppSettings.migrateRemoteAccessConnectionMode()` can carry a stored `tailscale`
+or `tailscaleAndRelay` over to the tailnet switch exactly once; `relay` carries nothing and lands
+on the shipped default, `This network`. `remoteAccessTailscaleServeEnabled` is registered and not
+yet operative: it becomes the browser convenience, "open Threading in a browser on your tailnet
+without a certificate warning", when the tailnet way in stops being Serve, and it carries no
+settings row until then.
+
 ## Pair an iPhone
 
 1. Keep Threading running on the Mac.
-2. For zero-install access, sign in with Apple under **Hosted Direct**. Relay and Tailscale remain
-   optional compatibility/private choices; their readiness cards identify setup problems.
+2. **This network** is on by default, so a phone on the same Wi-Fi needs nothing else. For
+   zero-install access, sign in with Apple under **Hosted Direct**; **Tailscale** is the way in
+   for reaching this Mac from anywhere, and its readiness card identifies setup problems.
 3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
 **A reason never lives only in a readiness row.** `TailscaleReadinessIssue` carries the row's
@@ -84,10 +131,10 @@ TUI; only structured Native questions/permissions and explicit human requests ca
 corresponding notifications.
 
 An owner pairing is stored as one logical Mac identity, not as one hostname. iOS attempts its
-durable hosted ICE/TURN credential first, then only the Relay/Tailscale endpoints allowed by the
-owner's selected fallback policy. Owner responses
-advertise the currently usable Tailscale and/or relay endpoints plus an explicit `privateOnly`,
-`relayOnly`, or `preferPrivate` policy. The iPhone orders only HTTPS endpoints allowed by that
+durable hosted ICE/TURN credential first, then the private endpoints the Mac advertises. Owner
+responses carry the addresses each way in is currently answering on, tailnet included, plus an
+explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still
+decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed by that
 policy, prefers Tailscale when requested, records the successful route, and can move to another
 advertised route without creating a duplicate device. Unknown future policies fail closed to
 private-only. Guest shares never receive the Mac's private endpoint list.
@@ -341,7 +388,7 @@ Pairing and sharing are deliberately different actions:
 - An unused invitation expires after 24 hours. Accepting it consumes that URL and creates a new
   device-bound membership without a 24-hour timer. Unused invitations and accepted memberships
   are stored in the Mac login Keychain, so turning Remote Access off, restarting Threading, or
-  changing between Tailscale and Relay suspends the route without silently removing the share.
+  switching a way in suspends the route without silently removing the share.
   The member keeps access until **Stop Sharing** or their named membership is revoked. Create
   another invitation for another person; forwarding an already accepted invite does not clone
   the membership. A credential that cannot be restored exactly fails closed rather than creating
@@ -743,11 +790,17 @@ feature lock.
   best-effort hint about the macOS Application Firewall; it is only ever a hint, because a probe
   from this Mac to its own address is local traffic the firewall does not filter. Only a phone
   that connected proves reachability.
-- In **Relay**, or while **Private + Sharing** needs a public share/fallback, `cloudflared` opens
-  an outbound tunnel to that one listener. No router
-  port or inbound firewall rule is opened. Traffic passes through Cloudflare, where TLS is
-  terminated, so use that transport only for work you are comfortable sending through it.
-- In **Tailscale** or **Private + Sharing**, Tailscale Serve exposes the same listener as HTTPS/WSS on dedicated
+- **This network** and **Through a VPN** bind routable addresses, which is a change of exposure:
+  Threading becomes an app that accepts incoming connections, and the promise that "no router port
+  or inbound firewall rule is opened" now holds only for the relay below. Nothing is bound that a
+  way in did not ask for, every routable listener presents this Mac's pinned certificate, and
+  loopback stays cleartext because the Hosted Direct bridge and Tailscale Serve talk plain HTTP to
+  it.
+- While a **one-chat guest link** exists, `cloudflared` opens an outbound tunnel to that one
+  listener. No router port or inbound firewall rule is opened for it. Traffic passes through
+  Cloudflare, where TLS is terminated, so share only work you are comfortable sending through it.
+  No setting starts this: creating a share does, and it stops when the last share is gone.
+- While **Tailscale** is on, Tailscale Serve exposes the same listener as HTTPS/WSS on dedicated
   port 8443, reachable only according to the tailnet's identity and ACL policy. Threading removes
   only that exact Serve handler when it stops and never runs `tailscale serve reset`, which could
   erase unrelated services. Before starting, it reads `tailscale serve status --json` and refuses
@@ -948,8 +1001,9 @@ stable tailnet origin, so an owner paired through Tailscale reconnects after a M
 without rescanning as long as Tailscale is available on both devices.
 
 On iPhone, Tailscale must be connected before its `*.ts.net` origin is reachable. iOS permits only
-one active packet-tunnel VPN at a time, so another VPN may prevent that connection; use Relay in
-that situation.
+one active packet-tunnel VPN at a time, so another VPN may prevent that connection; in that
+situation reach this Mac over the VPN you do have connected, which the network way in already
+answers.
 
 An operated release can add account-backed rendezvous and invitations. Without recipient
 accounts Threading cannot

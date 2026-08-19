@@ -204,6 +204,18 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "remoteAccessKeepsRelayReady",
                 valueType: .boolean
             ),
+            .remoteAccessDoorMigration: .init(
+                key: "didMigrateRemoteAccessDoors",
+                valueType: .boolean
+            ),
+            .remoteAccessTailscaleEnabled: .init(
+                key: "remoteAccessTailscaleEnabled",
+                valueType: .boolean
+            ),
+            .remoteAccessTailscaleServeEnabled: .init(
+                key: "remoteAccessTailscaleServeEnabled",
+                valueType: .boolean
+            ),
             .remoteAccessListenerPort: .init(
                 key: "remoteAccessListenerPort",
                 valueType: .integer
@@ -343,6 +355,17 @@ final class AppSettingDefinitionTests: XCTestCase {
         let defaults = AppSettingDefinitions.registeredDefaults
         XCTAssertEqual(defaults["restoresLastSession"] as? Bool, true)
         XCTAssertEqual(defaults["remoteAccessKeepsRelayReady"] as? Bool, false)
+        XCTAssertEqual(defaults["remoteAccessTailscaleEnabled"] as? Bool, false)
+        XCTAssertEqual(defaults["remoteAccessTailscaleServeEnabled"] as? Bool, false)
+        // The LAN door is the shipped exposure now that the listener presents a pinned
+        // identity, and the seed is what makes an existing install pick it up.
+        XCTAssertEqual(
+            defaults["remoteAccessDoors"] as? [String],
+            [RemoteAccessDoor.lan.rawValue]
+        )
+        // The migration marker is deliberately unseeded: `containsValue` answers for a
+        // registered default too, so seeding it would mark every install already migrated.
+        XCTAssertNil(defaults["didMigrateRemoteAccessDoors"])
         XCTAssertEqual(defaults["preventsIdleSystemSleepWhileAgentsWork"] as? Bool, false)
         XCTAssertEqual(defaults["appTextSize"] as? String, AppTextSize.standard.rawValue)
 
@@ -355,7 +378,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 75)
+        XCTAssertEqual(authoredRows.count, 74)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -412,9 +435,12 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Open a window before I start", "I start at", "I stop at", "Days",
             "If the window has not reset", "When a session hits its usage limit"
         ])
+        // The mode and its two relay switches are gone; the ways in are rows of their own. The
+        // sign-in row is last because it is the one row on this page that is not a stored
+        // setting, so it is surfaced rather than persisted and cannot be interleaved.
         XCTAssertEqual(actual["remote-access"], [
-            "Remote Access", "Connection", "Hosted Direct", "Owner Relay Fallback",
-            "Keep Sharing Relay Ready", "New shared chats", "Reports from your phone"
+            "Remote Access", "This network", "Tailscale", "New shared chats",
+            "Reports from your phone", "Hosted Direct"
         ])
         XCTAssertEqual(actual["github"], ["Client ID", "gh CLI", "Git credential helper"])
         XCTAssertEqual(actual["privacy"], [

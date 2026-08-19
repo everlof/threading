@@ -143,6 +143,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private let tailscale: any RemoteTailnetTransport
     private let hostedService: RemoteHostedServiceController
     private let appSettings: AppSettings
+    /// What the `tailscale` door is made of in this build. One seam, so §8 of the transport plan
+    /// swaps a Serve handler for a bound tailnet address without the settings page noticing.
+    private let tailscaleDoor: RemoteTailscaleDoorImplementation
     private let authority = RemoteAuthorityStore()
     private let ownerDevices: RemoteOwnerDeviceRegistry
     private let guestShareStore: RemoteGuestSharePersisting
@@ -171,9 +174,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         serverServices: RemoteAccessServerServices? = nil,
         relayTransport: (any RemoteRelayTransport)? = nil,
         tailnetTransport: (any RemoteTailnetTransport)? = nil,
-        identityStore: RemoteAccessIdentityStore? = nil
+        identityStore: RemoteAccessIdentityStore? = nil,
+        tailscaleDoor: RemoteTailscaleDoorImplementation = .current
     ) {
         self.appSettings = appSettings
+        self.tailscaleDoor = tailscaleDoor
         tunnel = relayTransport ?? Self.defaultRelayTransport()
         tailscale = tailnetTransport ?? Self.defaultTailnetTransport()
         let services = serverServices ?? Self.makeServerServices(appSettings: appSettings)
@@ -368,6 +373,29 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     var tailscaleReadiness: TailscaleReadiness { tailscale.readiness }
     var hostedServiceState: RemoteHostedServiceState { hostedService.state }
 
+    /// Whether any way in an owner device could take is switched on.
+    ///
+    /// With none of them on, Remote Access binds loopback and nothing else, which is a state the
+    /// page has to be able to say out loud rather than a spinner waiting for something that is
+    /// never going to start.
+    var hasEnabledWayIn: Bool {
+        !appSettings.remoteAccessDoors.isEmpty || appSettings.remoteAccessTailscaleEnabled
+    }
+
+    var isThisNetworkDoorEnabled: Bool { appSettings.remoteAccessDoors.contains(.lan) }
+
+    var isTailscaleDoorEnabled: Bool { appSettings.remoteAccessTailscaleEnabled }
+
+    /// The `lan` door, with its addresses in the order the pairing code picks between them.
+    var thisNetworkDoorState: RemoteAccessDoorState {
+        let state = listenerStatus.state(of: .lan)
+        guard case .bound(let bindings) = state else { return state }
+        return .bound(Self.orderedBindings(
+            bindings,
+            primaryInterfaceName: Self.primaryInterfaceName()
+        ))
+    }
+
     /// Installed by the application composition root before the listener is allowed to start.
     var sessionCommands: (any RemoteSessionCommands)? {
         get { server.sessionCommands }
@@ -419,48 +447,36 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     /// The stable host plus the routes an owner is allowed to consider. Guest payloads omit the
     /// list so a public one-chat invitation never reveals the owner's private tailnet hostname.
+    ///
+    /// **The relay is not in here any more.** Its address changes every launch, which is fatal
+    /// to "pair once, reconnect tomorrow", so it stopped being an owner route; a phone that
+    /// remembered one has a dead endpoint and learns the live ones from this list the next time
+    /// it connects over any of them. It is still minted on demand for a one-chat guest share,
+    /// which is a different credential on a different path.
+    ///
+    /// The policy is therefore always `privateOnly`. `RemoteHostConnectionPolicy` stays on the
+    /// wire because an old phone decodes it and maps anything it does not know to `privateOnly`
+    /// as well; `relayOnly` and `preferPrivate` are never sent again.
     func hostIdentity(for authorization: RemoteAuthorization) -> RemoteHostDTO {
         let identity = RemoteHostIdentity.current
         guard authorization.canManageHost else { return identity }
 
-        let mode = appSettings.remoteAccessConnectionMode
         var endpoints: [RemoteHostEndpointDTO] = Self.doorEndpoints(
             listenerStatus,
             advertisedHostname: appSettings.remoteAccessAdvertisedHostname
         )
-        if mode.usesTailscale, case .connected(let origin) = tailscaleStatus {
+        if appSettings.remoteAccessTailscaleEnabled,
+           case .connected(let origin) = tailscaleStatus {
             endpoints.append(RemoteHostEndpointDTO(
                 kind: RemoteTransportKind.tailscale.rawValue,
                 baseURL: origin,
                 isStable: true
             ))
         }
-        let allowsRelay = mode == .relay
-            || (mode == .tailscaleAndRelay
-                && appSettings.remoteAccessAllowsOwnerRelayFallback)
-        if allowsRelay, case .connected(let origin) = relayStatus {
-            endpoints.append(RemoteHostEndpointDTO(
-                kind: RemoteTransportKind.relay.rawValue,
-                baseURL: origin,
-                isStable: !Self.isQuickRelay(origin)
-            ))
-        }
-
-        let policy: RemoteHostConnectionPolicy
-        switch mode {
-        case .relay:
-            policy = .relayOnly
-        case .tailscale:
-            policy = .privateOnly
-        case .tailscaleAndRelay:
-            policy = appSettings.remoteAccessAllowsOwnerRelayFallback
-                ? .preferPrivate
-                : .privateOnly
-        }
         return Self.ownerHost(
             identity,
             endpoints: endpoints,
-            policy: policy,
+            policy: .privateOnly,
             identity: identityStore.snapshot
         )
     }
@@ -776,6 +792,22 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
     }
 
+    /// The LAN addresses in the order the pairing code picks between them.
+    ///
+    /// The settings page prints the first one as the door's status and the rest as its second
+    /// line, so the address a person reads first is the address on the code they are about to
+    /// photograph.
+    nonisolated static func orderedBindings(
+        _ bindings: [RemoteListenerBinding],
+        primaryInterfaceName: String?
+    ) -> [RemoteListenerBinding] {
+        guard let preferred = preferredPairingBinding(
+            bindings,
+            primaryInterfaceName: primaryInterfaceName
+        ) else { return [] }
+        return [preferred] + bindings.filter { $0 != preferred }.sorted { $0.address < $1.address }
+    }
+
     /// The interface carrying the default IPv4 route, from the system configuration store.
     ///
     /// The store answers from memory, which is what makes this safe to ask on the main actor;
@@ -788,24 +820,20 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         return global[kSCDynamicStorePropNetPrimaryInterface as String] as? String
     }
 
+    /// Where a pairing code points when no LAN door is bound: the tailnet, when that door is on
+    /// and up. Never the relay, which stopped being an owner pairing route.
     private var pairingOrigin: URL? {
-        switch appSettings.remoteAccessConnectionMode {
-        case .relay:
-            if case .connected(let origin) = relayStatus { return origin }
-        case .tailscale, .tailscaleAndRelay:
-            if case .connected(let origin) = tailscaleStatus { return origin }
-        }
-        return nil
+        guard appSettings.remoteAccessTailscaleEnabled,
+              case .connected(let origin) = tailscaleStatus else { return nil }
+        return origin
     }
 
+    /// Where a one-chat guest link points. Unchanged: a guest is somebody with no Threading app,
+    /// no pairing code and no tailnet, so the public relay is the only origin that reaches them,
+    /// and it is started on demand when a share is created rather than by any setting.
     private var invitationOrigin: URL? {
-        switch appSettings.remoteAccessConnectionMode {
-        case .relay, .tailscaleAndRelay:
-            if case .connected(let origin) = relayStatus { return origin }
-        case .tailscale:
-            if case .connected(let origin) = tailscaleStatus { return origin }
-        }
-        return nil
+        guard case .connected(let origin) = relayStatus else { return nil }
+        return origin
     }
 
     /// Mints a short-lived, single-use invitation for exactly one chat.
@@ -1420,28 +1448,37 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         if enabled { start() } else { stop() }
     }
 
-    func setConnectionMode(_ mode: RemoteAccessConnectionMode) {
-        guard appSettings.remoteAccessConnectionMode != mode else { return }
-        failPendingShares(.remoteAccessUnavailable)
-        appSettings.remoteAccessConnectionMode = mode
+    /// Selects the `tailscale` door, and starts or stops whatever that door is made of.
+    ///
+    /// Today that is the Serve transport; when `RemoteTailscaleDoorImplementation` becomes
+    /// `.listenerDoor` this rebuilds a listener instead, and neither the setting nor the page
+    /// changes.
+    func setTailscaleDoorEnabled(_ enabled: Bool) {
+        guard appSettings.remoteAccessTailscaleEnabled != enabled else { return }
+        appSettings.remoteAccessTailscaleEnabled = enabled
         guard case .listening(let port) = status else {
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
             return
         }
-        startTransports(port: port)
-    }
-
-    func setAllowsOwnerRelayFallback(_ enabled: Bool) {
-        guard appSettings.remoteAccessAllowsOwnerRelayFallback != enabled else { return }
-        appSettings.remoteAccessAllowsOwnerRelayFallback = enabled
-        reconcileRelayIfNeeded()
+        switch tailscaleDoor {
+        case .serveTransport:
+            if enabled {
+                startTailscale(port: port, generation: transportGeneration)
+            } else {
+                tailscale.stop()
+                tailscaleStatus = .stopped
+            }
+        case .listenerDoor:
+            server.updateDoors(listenerConfiguration().doors)
+        }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
-    func setKeepsRelayReady(_ enabled: Bool) {
-        guard appSettings.remoteAccessKeepsRelayReady != enabled else { return }
-        appSettings.remoteAccessKeepsRelayReady = enabled
-        reconcileRelayIfNeeded()
+    /// The browser convenience on the tailnet. Stored now, acted on when the `tailscale` door
+    /// stops being Serve; see `RemoteTailscaleDoorImplementation`.
+    func setTailscaleServeEnabled(_ enabled: Bool) {
+        guard appSettings.remoteAccessTailscaleServeEnabled != enabled else { return }
+        appSettings.remoteAccessTailscaleServeEnabled = enabled
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
@@ -1537,7 +1574,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 self.pairingBootstrapToken = nil
                 self.pairingRedemptions.removeAll()
                 self.listenerStatus = .idle
-                self.status = .failed(reason: failure.rawValue)
+                self.status = .failed(reason: failure.statement)
                 EventLog.shared.record(
                     .remote,
                     "Remote access failed to start",
@@ -1554,10 +1591,17 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     /// What the listener is asked to bind: the sticky port, and the routable doors the user
     /// selected. Loopback is not in the set because it is not a choice.
+    ///
+    /// The `tailscale` door joins the set only once it is a bind rather than a Serve handler;
+    /// until then the switch runs a transport and the listener knows nothing about it.
     private func listenerConfiguration() -> RemoteListenerConfiguration {
-        RemoteListenerConfiguration(
+        var doors = appSettings.remoteAccessDoors
+        if tailscaleDoor == .listenerDoor, appSettings.remoteAccessTailscaleEnabled {
+            doors.insert(.tailscale)
+        }
+        return RemoteListenerConfiguration(
             preferredPort: appSettings.remoteAccessListenerPort,
-            doors: appSettings.remoteAccessDoors,
+            doors: doors,
             isDiscoveryEnabled: appSettings.remoteAccessDiscoveryEnabled
         )
     }
@@ -1606,7 +1650,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         let selected = doors.intersection(RemoteAccessDoor.selectable)
         guard appSettings.remoteAccessDoors != selected else { return }
         appSettings.remoteAccessDoors = selected
-        server.updateDoors(selected)
+        server.updateDoors(listenerConfiguration().doors)
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
@@ -1617,6 +1661,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     // MARK: - Transports
 
+    /// Starts what the selected ways in are made of.
+    ///
+    /// The LAN door is the listener's own business — `start` already handed it the door set — so
+    /// the only transport an owner route can need is the tailnet's, and only while that door is
+    /// still Serve. **Nothing here starts the relay.** It exists for guest shares and is started
+    /// by creating one.
     private func startTransports(port: UInt16) {
         transportGeneration += 1
         let generation = transportGeneration
@@ -1626,8 +1676,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         relayStatus = .stopped
         tailscaleStatus = .stopped
 
-        let mode = appSettings.remoteAccessConnectionMode
-        if mode.usesTailscale {
+        if appSettings.remoteAccessTailscaleEnabled, tailscaleDoor == .serveTransport {
             startTailscale(port: port, generation: generation)
         }
         if shouldRunRelay {
@@ -1637,29 +1686,22 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     private var shouldRunRelay: Bool {
         Self.relayRequired(
-            mode: appSettings.remoteAccessConnectionMode,
-            allowsOwnerFallback: appSettings.remoteAccessAllowsOwnerRelayFallback,
-            keepsRelayReady: appSettings.remoteAccessKeepsRelayReady,
             hasActiveShares: !sessionShares.isEmpty,
             hasPendingShares: !pendingPublicShares.isEmpty
         )
     }
 
+    /// The relay runs when, and only when, a guest link needs a public origin.
+    ///
+    /// It used to run because of a *mode* — and, in one branch, because a switch on the settings
+    /// page asked it to stay warm. Both are gone: the Quick Tunnel's address changes every
+    /// launch, so it cannot be an owner route, and a public HTTP origin nobody is using is
+    /// exposure nobody asked for.
     nonisolated static func relayRequired(
-        mode: RemoteAccessConnectionMode,
-        allowsOwnerFallback: Bool,
-        keepsRelayReady: Bool,
         hasActiveShares: Bool,
         hasPendingShares: Bool
     ) -> Bool {
-        switch mode {
-        case .relay:
-            return true
-        case .tailscale:
-            return false
-        case .tailscaleAndRelay:
-            return allowsOwnerFallback || keepsRelayReady || hasActiveShares || hasPendingShares
-        }
+        hasActiveShares || hasPendingShares
     }
 
     private func startRelay(port: UInt16, generation: Int) {
@@ -1691,30 +1733,22 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
     }
 
+    /// Brings up the public origin a guest link needs, on demand.
+    ///
+    /// One transport rather than a fork on the old mode: a guest has no Threading app, no
+    /// pairing code and no tailnet, so a tailnet origin was never a route they could take.
     private func startInvitationTransportIfNeeded() {
         guard case .listening(let port) = status else {
             failPendingShares(.remoteAccessUnavailable)
             return
         }
-        switch appSettings.remoteAccessConnectionMode {
-        case .relay, .tailscaleAndRelay:
-            switch relayStatus {
-            case .connected:
-                drainPendingSharesIfPossible()
-            case .starting:
-                break
-            case .stopped, .unavailable:
-                startRelay(port: port, generation: transportGeneration)
-            }
-        case .tailscale:
-            switch tailscaleStatus {
-            case .connected:
-                drainPendingSharesIfPossible()
-            case .starting:
-                break
-            case .stopped, .unavailable:
-                startTailscale(port: port, generation: transportGeneration)
-            }
+        switch relayStatus {
+        case .connected:
+            drainPendingSharesIfPossible()
+        case .starting:
+            break
+        case .stopped, .unavailable:
+            startRelay(port: port, generation: transportGeneration)
         }
     }
 
@@ -1891,11 +1925,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 "transport": kind.rawValue,
                 "reason": Self.diagnosticReason(reason),
             ])
-            let mode = appSettings.remoteAccessConnectionMode
-            let isInvitationTransport = kind == .relay
-                ? mode != .tailscale
-                : mode == .tailscale
-            if isInvitationTransport {
+            // The relay is the one transport a pending guest link is waiting on. A tailnet door
+            // that cannot come up is the owner's route and says so on the settings page; it
+            // never fails a share.
+            if kind == .relay {
                 failPendingShares(.relayUnavailable(reason))
             }
         case .stopped, .starting:
