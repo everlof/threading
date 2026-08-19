@@ -118,7 +118,7 @@ then the kernel may have given that number to an unrelated file. `ChildOutputStr
 read source over a non-blocking descriptor it owns: GCD's cancel handler runs after the event
 handler has finished and never twice, so the close happens exactly once with nobody reading, and
 `ChildOutputReader.read` returns an outcome rather than raising. Every teardown path cancels
-explicitly rather than relying on `deinit`. `RemoteRelayReadinessTests` covers the burst, end of
+explicitly rather than relying on `deinit`. `RemoteDoorReadinessTests` covers the burst, end of
 file, a broken descriptor, and a spurious wake-up; the first fails by timeout if the primitive
 changes back.
 
@@ -127,16 +127,16 @@ evidence anywhere — the diagnostics journal records `relayConnected` and `rela
 transport stuck in `.starting` reaches neither, so the one failure a support report most needed to
 explain was the one it could not see. Any transport that can sit between "started" and "answered"
 carries a timeout that converts silence into a stated reason, and a typed code beside the sentence
-a person reads (`RemoteRelayFailure`, as `TailscaleReadinessIssue` already did) so a report groups
-by cause rather than by localised prose. UI follows the same rule: a spinner is for work that is
+a person reads (`TailscaleReadinessIssue`) so a report groups by cause rather than by localised
+prose. UI follows the same rule: a spinner is for work that is
 still arriving, and a surface that is up but unusable gets its own copy and a retry, never the
 progress branch — see `RemotePairingCardState`.
 
-Declaring a transport failed also ends its child. A relay this app has stopped tracking must not be
-left publishing the loopback listener, since an address serving real traffic that nothing in the
-app knows about is the shape of the original bug, not a convenient fallback. Recovery is the user's
-explicit retry, and the test asks the kernel whether the process is gone rather than asking the
-transport what it believes.
+Declaring a transport failed also ends its child. A transport this app has stopped tracking must
+not be left publishing the loopback listener, since an address serving real traffic that nothing in
+the app knows about is the shape of the original bug, not a convenient fallback. Recovery is the
+user's explicit retry, and a test of one asks the kernel whether the process is gone rather than
+asking the transport what it believes.
 
 A feature is not stable merely because its happy path works. Before calling one stable, it has:
 

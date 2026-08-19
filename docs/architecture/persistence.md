@@ -651,8 +651,8 @@ file follows `RecoverableFileStore` quarantine rather than being replaced silent
 The companion clients use the same contract with a wider key. iOS stores a versioned archive in
 its own `UserDefaults`; the dependency-free browser stores one in same-origin `localStorage`.
 Both length-prefix the paired host identity before the session id so ids cannot collide, persist
-the last host/session route, and keep Native and terminal drafts distinct. A Tailscale/relay URL
-is deliberately absent from that key: both are routes to one paired host. Records containing an
+the last host/session route, and keep Native and terminal drafts distinct. The route's own URL is
+deliberately absent from that key: every advertised address is a route to one paired host. Records containing an
 unsent draft are never pruned automatically; position-only records are bounded to the 250 most
 recent. The iOS archive is also capped at 1 MiB and validates state count, identity, viewport and
 aggregate draft bytes before decode is accepted and before encode is attempted. Every mutation is

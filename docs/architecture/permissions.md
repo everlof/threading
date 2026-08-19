@@ -81,11 +81,11 @@ The obvious reading of Remote Access — a listener, a phone on the same Wi-Fi �
 needs `NSLocalNetworkUsageDescription`. It does not, and adding the string would have documented
 a permission the app never requests.
 
-All three of Threading's listeners set `requiredLocalEndpoint` to `127.0.0.1`:
-`RemoteAccessServer`, `MCPServer`, and `ExtensionHostService`. Loopback is exempt from the
-local-network gate, and the phone arrives over an **outbound** relay connection rather than
-across the LAN. The `0.0.0.0` handling in `ListeningPort.swift` is about detecting what a
-*user's* dev server binds to — a feature, not one of our own binds.
+`MCPServer` and `ExtensionHostService` set `requiredLocalEndpoint` to `127.0.0.1` and bind
+nothing else. `RemoteAccessServer` binds loopback the same way, and additionally binds one
+listener per routable address for each way in the owner switched on; each of those is pinned to
+one address and none of them binds `0.0.0.0`. The `0.0.0.0` handling in `ListeningPort.swift` is
+about detecting what a *user's* dev server binds to — a feature, not one of our own binds.
 
 **That claim is about Threading's own binds, and only those.** A Local Network prompt naming
 Threading has been seen in the wild, and the attribution rule is why: an agent that curls a LAN
