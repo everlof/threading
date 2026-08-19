@@ -473,11 +473,11 @@ final class RemoteListenerSet: @unchecked Sendable {
                 self.publish()
             case .waiting(let error):
                 entry.isReady = false
-                entry.failure = Self.reason(for: error)
+                entry.failure = Self.reason(for: error, door: door)
                 self.publish()
             case .failed(let error):
                 entry.isReady = false
-                entry.failure = Self.reason(for: error)
+                entry.failure = Self.reason(for: error, door: door)
                 // A failed listener stays in the set holding its reason until the next rebuild,
                 // which replaces it (see `isStale`); leaving it out would report the door as
                 // merely "no interface" when something is actually sitting on its port.
@@ -701,7 +701,7 @@ final class RemoteListenerSet: @unchecked Sendable {
         }
 
         let entries = (listeners[door] ?? [:]).values
-        guard !entries.isEmpty else { return .notReachable(.noInterface) }
+        guard !entries.isEmpty else { return .notReachable(door.absentInterfaceReason) }
         let ready = entries.filter(\.isReady).map(\.binding).sorted { $0.address < $1.address }
         if !ready.isEmpty { return .bound(ready) }
         // Something holding the port is the more actionable answer, so it wins over an address
@@ -814,15 +814,20 @@ final class RemoteListenerSet: @unchecked Sendable {
         return code == .EADDRINUSE
     }
 
-    private static func reason(for error: NWError) -> RemoteDoorUnreachableReason {
-        guard case .posix(let code) = error else { return .noInterface }
+    private static func reason(
+        for error: NWError,
+        door: RemoteAccessDoor
+    ) -> RemoteDoorUnreachableReason {
+        guard case .posix(let code) = error else { return door.absentInterfaceReason }
         switch code {
         case .EADDRINUSE:
             return .portInUse
         default:
             // `EADDRNOTAVAIL` is what an address that has gone away reports, and it is by far
-            // the common case here: the interface list moved between enumeration and bind.
-            return .noInterface
+            // the common case here: the interface list moved between enumeration and bind. The
+            // door decides how that reads, because a tailnet address vanishing is `tailscaled`
+            // going away rather than a network cable.
+            return door.absentInterfaceReason
         }
     }
 }

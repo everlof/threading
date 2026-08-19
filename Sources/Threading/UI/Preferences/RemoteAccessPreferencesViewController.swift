@@ -14,9 +14,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let thisNetworkToggle = ThemedToggle()
     private let tailscaleToggle = ThemedToggle()
     private let tailscaleServeToggle = ThemedToggle()
-    /// The Serve sub-option's whole row, held so it can stay off the page until Serve stops
-    /// being the tailnet door itself. See `configureControls`.
-    private var tailscaleServeRow: NSView?
+    /// The Serve sub-option's own status line, and the admin-console page that fixes it.
+    private var tailscaleServeStatusViews: WayInStatusViews?
+    private let tailscaleServeRemedyButton = ThemedButton()
+    /// The page `tailscaleServeRemedyButton` opens, held here because a target-action carries no
+    /// payload. Cleared on every update so a stale page cannot outlive the failure that offered it.
+    private var tailscaleServeRemedyURL: URL?
     private var wayInStatusViews: [RemoteAccessWayIn: WayInStatusViews] = [:]
     private var threadingDirectSection: NSView?
     private let identityCode = NSTextField(labelWithString: "")
@@ -47,21 +50,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let pairingDetail = NSTextField(wrappingLabelWithString: "")
     private let pairingCode = NSImageView()
     private let pairingNote = NSTextField(wrappingLabelWithString: "")
-    private let pairingRemedyButton = ThemedButton()
-    /// The page the pairing panel's remedy button opens, held here for the same reason
-    /// `tailscaleActionURL` is: a target-action carries no payload. Cleared on every update so a
-    /// stale page can never outlive the failure that offered it.
-    private var pairingRemedyURL: URL?
     private let hostedSpinner = ThemedSpinner()
     private var tailscaleStepGlyphs: [NSTextField] = []
     private var tailscaleStepSpinners: [ThemedSpinner] = []
+    private var tailscaleStepTitles: [NSTextField] = []
     private var tailscaleStepDetails: [NSTextField] = []
-    private var tailscaleStepActions: [ThemedButton] = []
     private var tailscaleReadinessSection: NSView?
-    /// The tailnet approval page behind the readiness card's action button, held here because
-    /// the button's target-action carries no payload. Cleared on every readiness update so a
-    /// stale URL can never outlive the issue that offered it.
-    private var tailscaleActionURL: URL?
 
     private var copiedReset: DispatchWorkItem?
     private var pairedDeviceIDs: [String] = []
@@ -81,6 +75,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     override func viewWillAppear() {
         super.viewWillAppear()
+        // One `tailscale status` while somebody is looking at the page, and only while the
+        // tailnet way in is on. The door itself needs no probe — it is bound or it is not — so
+        // this is what sharpens "not connected" into "not installed" and supplies the MagicDNS
+        // name. Not a timer, and nothing waits for it: the page redraws when it answers.
+        RemoteAccessCoordinator.shared.refreshTailscaleHostFacts()
         refresh()
     }
 
@@ -107,8 +106,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
         tailscaleServeToggle.target = self
         tailscaleServeToggle.action = #selector(tailscaleServeChanged)
-        tailscaleServeToggle.setAccessibilityIdentifier("settings.remote-access.tailscale-serve")
+        tailscaleServeToggle.setAccessibilityIdentifier(Identifier.serveToggle)
         tailscaleServeToggle.setAccessibilityLabel(L10n.string("Open in a browser on your tailnet"))
+
+        tailscaleServeRemedyButton.target = self
+        tailscaleServeRemedyButton.action = #selector(openServeRemedy)
+        tailscaleServeRemedyButton.isHidden = true
+        tailscaleServeRemedyButton.setContentHuggingPriority(.required, for: .horizontal)
+        tailscaleServeRemedyButton.setContentCompressionResistancePriority(
+            .required,
+            for: .horizontal
+        )
+        tailscaleServeRemedyButton.setAccessibilityIdentifier(Identifier.serveRemedy)
 
         identityCode.applyFont(.code())
         identityCode.textColor = Design.Text.label
@@ -202,11 +211,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         pairingActionButton.target = self
         pairingActionButton.action = #selector(pairingAction)
         pairingActionButton.setAccessibilityIdentifier("settings.remote-access.pair")
-
-        pairingRemedyButton.target = self
-        pairingRemedyButton.action = #selector(openPairingRemedy)
-        pairingRemedyButton.isHidden = true
-        pairingRemedyButton.setAccessibilityIdentifier("settings.remote-access.pairing-remedy")
 
         statusGlyph.applyFont(.body)
         statusGlyph.setContentHuggingPriority(.required, for: .horizontal)
@@ -367,14 +371,14 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         return rows
     }
 
-    /// The Serve sub-option, built and **not shown**.
+    /// The Serve sub-option, under the tailnet way in.
     ///
-    /// Today the tailnet door *is* `tailscale serve` (`RemoteTailscaleDoorImplementation`), so a
-    /// switch offering to turn Serve off would take the phone's only tailnet route with it, and
-    /// a switch shown disabled would be a promise with no date on it. It appears when the door
-    /// becomes a bind to this Mac's own tailnet address and Serve becomes what §8 of the
-    /// transport plan describes: a way for a *browser* on the tailnet to skip the certificate
-    /// warning. The row is assembled here so that change is one line rather than a rewrite.
+    /// It is a sub-option and not a way in: the phone reaches this Mac at the tailnet address the
+    /// listener binds, with the certificate it pinned, so nothing here is a route. What Serve buys
+    /// is the one thing a pinned self-signed identity cannot give a *browser* — a publicly trusted
+    /// certificate for the `*.ts.net` name — and what it costs is a public certificate-transparency
+    /// entry naming this Mac and the tailnet, which is why the cost is on the page beside the
+    /// switch rather than in a document.
     private func tailscaleServeRows() -> [NSView] {
         let row = SettingsUI.row(
             title: "Open in a browser on your tailnet",
@@ -386,11 +390,49 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             "Turning it on publishes this Mac’s name and your tailnet name in public "
                 + "certificate logs."
         ))
-        let noteRow = SettingsUI.fullRow(note)
-        row.isHidden = true
-        noteRow.isHidden = true
-        tailscaleServeRow = row
-        return [row, noteRow]
+        return [row, SettingsUI.fullRow(serveStatusRow()), SettingsUI.fullRow(note)]
+    }
+
+    /// Serve's own status line, with the admin-console page that fixes it beside the sentence.
+    private func serveStatusRow() -> NSView {
+        let glyph = NSTextField(labelWithString: DoorMark.idle)
+        glyph.applyFont(.body)
+        glyph.setContentHuggingPriority(.required, for: .horizontal)
+        glyph.setAccessibilityIdentifier(Identifier.serveStatusMark)
+        let spinner = ThemedSpinner()
+
+        let text = NSTextField(wrappingLabelWithString: "")
+        text.applyFont(.body)
+        text.textColor = Design.Text.label
+        text.setAccessibilityIdentifier(Identifier.serveStatus)
+        let hint = NSTextField(wrappingLabelWithString: "")
+        hint.applyFont(.subheading)
+        hint.textColor = Design.Text.secondary
+        hint.setAccessibilityIdentifier(Identifier.serveStatusHint)
+
+        let labels = NSStackView(views: [text, hint])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = Design.Spacing.hairline
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [
+            markSlot(glyph: glyph, spinner: spinner),
+            labels,
+            tailscaleServeRemedyButton
+        ])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.distribution = .fill
+        row.spacing = Design.Spacing.medium
+
+        tailscaleServeStatusViews = WayInStatusViews(
+            glyph: glyph,
+            spinner: spinner,
+            text: text,
+            hint: hint
+        )
+        return row
     }
 
     private func noteLabel(_ text: String) -> NSTextField {
@@ -542,45 +584,38 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         ])
     }
 
+    /// The tailnet way in's readiness: two facts the `tailscale` CLI owns, then what the listener
+    /// bound.
+    ///
+    /// The rows carry no action button any more. The only failures that had a page to open were
+    /// Serve's, and Serve is a sub-option now: its admin-console link belongs beside the switch
+    /// that asked for it, not on a card about the door.
     private func tailscaleReadinessCard() -> SettingsCard {
-        let titles = [
-            L10n.string("Tailscale installed"),
-            L10n.string("Signed in and running"),
-            L10n.string("Private HTTPS endpoint"),
-        ]
         var rows: [NSView] = []
-        for title in titles {
-            let glyph = NSTextField(labelWithString: "–")
+        for step in TailscaleReadinessStep.allCases {
+            let glyph = NSTextField(labelWithString: DoorMark.idle)
             glyph.applyFont(.body)
             glyph.setContentHuggingPriority(.required, for: .horizontal)
+            glyph.setAccessibilityIdentifier(Identifier.readinessMark(step))
             let spinner = ThemedSpinner()
 
-            let titleLabel = NSTextField(labelWithString: title)
+            let titleLabel = NSTextField(labelWithString: "")
             titleLabel.applyFont(.body)
             titleLabel.textColor = Design.Text.label
+            titleLabel.setAccessibilityIdentifier(Identifier.readinessTitle(step))
             let detail = NSTextField(wrappingLabelWithString: "")
             detail.applyFont(.subheading)
             detail.textColor = Design.Text.secondary
+            detail.setAccessibilityIdentifier(Identifier.readinessDetail(step))
 
             let labels = NSStackView(views: [titleLabel, detail])
             labels.orientation = .vertical
             labels.alignment = .leading
             labels.spacing = Design.Spacing.hairline
-            let action = ThemedButton(
-                title: "",
-                target: self,
-                action: #selector(openTailscaleAction)
-            )
-            action.isHidden = true
-            action.setContentHuggingPriority(.required, for: .horizontal)
-            action.setContentCompressionResistancePriority(.required, for: .horizontal)
-            let row = NSStackView(views: [markSlot(glyph: glyph, spinner: spinner), labels, action])
+            let row = NSStackView(views: [markSlot(glyph: glyph, spinner: spinner), labels])
             row.orientation = .horizontal
             row.alignment = .centerY
             row.spacing = Design.Spacing.medium
-            // `.fill` plus the low-hugging label column pushes the action button to the
-            // trailing edge; without it the gravity-area default parks the button beside
-            // whichever detail sentence is shortest.
             row.distribution = .fill
             labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
             row.edgeInsets = NSEdgeInsets(
@@ -592,8 +627,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             rows.append(row)
             tailscaleStepGlyphs.append(glyph)
             tailscaleStepSpinners.append(spinner)
+            tailscaleStepTitles.append(titleLabel)
             tailscaleStepDetails.append(detail)
-            tailscaleStepActions.append(action)
         }
         return SettingsCard(rows: rows)
     }
@@ -654,7 +689,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         heading.alignment = .centerY
         heading.spacing = Design.Spacing.small
 
-        let actions = NSStackView(views: [pairingRemedyButton, pairingActionButton])
+        let actions = NSStackView(views: [pairingActionButton])
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = Design.Spacing.small
@@ -757,7 +792,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             at: PhoneReportWorkspacePolicy.allCases
                 .firstIndex(of: AppSettings.shared.phoneReportWorkspace) ?? 0
         )
-        updateTailscaleReadiness(coordinator.tailscaleReadiness)
         openLocallyButton.isHidden = coordinator.localURL == nil
         openLocallyButton.isEnabled = coordinator.localURL != nil
         rebuildPairedDevices(coordinator.pairedOwnerDevices, error: coordinator.ownerDevicePersistenceError)
@@ -807,8 +841,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 card: RemotePairingCardState.resolve(
                     ownerDevicePersistenceError: coordinator.ownerDevicePersistenceError,
                     pairingCodePayload: coordinator.pairingCodePayload,
-                    transport: coordinator.tailscaleStatus,
-                    tailscaleReadiness: coordinator.tailscaleReadiness,
+                    wayIn: RemotePairingCardState.mostAdvanced(of: doors.offeredStatuses),
                     hasWayIn: coordinator.hasEnabledWayIn
                 )
             )
@@ -842,7 +875,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         _ coordinator: RemoteAccessCoordinator
     ) -> RemoteAccessDoorsPresentation {
         let isOn = AppSettings.shared.remoteAccessEnabled
+        let doorState = coordinator.tailscaleDoorState
+        let facts = coordinator.tailscaleHostFacts
         var statuses: [RemoteAccessWayIn: RemoteDoorStatus] = [:]
+        var serve: RemoteDoorStatus?
         if isOn {
             statuses[.thisNetwork] = .thisNetwork(
                 isEnabled: coordinator.isThisNetworkDoorEnabled,
@@ -852,21 +888,37 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             )
             statuses[.tailscale] = .tailscale(
                 isEnabled: coordinator.isTailscaleDoorEnabled,
-                transport: coordinator.tailscaleStatus,
-                readiness: coordinator.tailscaleReadiness
+                state: doorState,
+                facts: facts,
+                magicDNSName: facts.magicDNSName
             )
             statuses[.threadingDirect] = .threadingDirect(coordinator.hostedServiceState)
+            serve = .tailscaleServe(
+                isEnabled: coordinator.isTailscaleServeEnabled,
+                transport: coordinator.tailscaleServeStatus,
+                readiness: coordinator.tailscaleServeReadiness
+            )
         } else {
             for wayIn in RemoteAccessWayIn.allCases where wayIn != .throughAVPN {
                 statuses[wayIn] = .remoteAccessOff()
             }
+            serve = .remoteAccessOff()
         }
         return RemoteAccessDoorsPresentation(
             isRemoteAccessOn: isOn,
             thisNetworkIsOn: coordinator.isThisNetworkDoorEnabled,
             tailscaleIsOn: coordinator.isTailscaleDoorEnabled,
+            tailscaleServeIsOn: coordinator.isTailscaleServeEnabled,
             showsThreadingDirect: coordinator.canIssueHostedDeviceCredentials,
             statuses: statuses,
+            serveStatus: serve,
+            serveRemedy: RemoteDoorStatus.serveRemedy(coordinator.tailscaleServeReadiness),
+            tailnetReadiness: .resolve(
+                isEnabled: isOn && coordinator.isTailscaleDoorEnabled,
+                facts: facts,
+                doorState: doorState,
+                doorStatus: statuses[.tailscale] ?? .remoteAccessOff()
+            ),
             identity: .resolve(coordinator.identitySnapshot)
         )
     }
@@ -878,13 +930,22 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         remoteAccessToggle.state = doors.isRemoteAccessOn ? .on : .off
         thisNetworkToggle.state = doors.thisNetworkIsOn ? .on : .off
         tailscaleToggle.state = doors.tailscaleIsOn ? .on : .off
-        tailscaleServeToggle.state =
-            AppSettings.shared.remoteAccessTailscaleServeEnabled ? .on : .off
+        tailscaleServeToggle.state = doors.tailscaleServeIsOn ? .on : .off
         threadingDirectSection?.isHidden = !doors.showsThreadingDirect
         tailscaleReadinessSection?.isHidden = !doors.tailscaleIsOn
         for (wayIn, views) in wayInStatusViews {
             apply(doors.status(of: wayIn), to: views)
         }
+        if let views = tailscaleServeStatusViews {
+            apply(doors.serveStatus, to: views)
+        }
+        tailscaleServeRemedyURL = doors.serveRemedy?.url
+        tailscaleServeRemedyButton.isHidden = doors.serveRemedy == nil
+        if let remedy = doors.serveRemedy {
+            tailscaleServeRemedyButton.title = remedy.title
+            tailscaleServeRemedyButton.setAccessibilityLabel(remedy.title)
+        }
+        applyTailnetReadiness(doors.tailnetReadiness)
         apply(doors.identity)
     }
 
@@ -1133,16 +1194,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 prominent: false
             )
 
-        case .connectionUnavailable(let reason, let remedy):
-            // The reason is the panel's own, not a pointer at the readiness row above it.
+        case .connectionUnavailable(let reason):
+            // The reason is the panel's own, not a pointer at a row above it: the way in's
+            // status line states the fact and its remedy, and this is that sentence.
             updatePairing(
                 title: L10n.string("Private connection unavailable"),
                 detail: reason,
                 action: L10n.string("Retry Connection"),
                 actionEnabled: true,
-                // The fix is the button to press when there is one; Retry stands beside it.
-                prominent: remedy == nil,
-                remedy: remedy
+                prominent: true
             )
 
         case .preparing(let detail):
@@ -1185,101 +1245,47 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         statusSpinner.isAnimating = busy
     }
 
-    /// The readiness card, drawn from the same values the unavailable panel reads.
+    /// The readiness card, drawn from one resolved value.
     ///
     /// Every issue used to restate all three rows here, which is how a new one could land with
     /// no mark at all and how the row's copy drifted from the sentence the transport reported.
-    /// The issue names its step and its own line; the rows above it are met and the rows below
-    /// it are waiting, by construction.
-    func updateTailscaleReadiness(_ readiness: TailscaleReadiness) {
-        guard tailscaleStepGlyphs.count == TailscaleReadinessStep.allCases.count,
-              tailscaleStepSpinners.count == TailscaleReadinessStep.allCases.count,
-              tailscaleStepDetails.count == TailscaleReadinessStep.allCases.count,
-              tailscaleStepActions.count == TailscaleReadinessStep.allCases.count else { return }
+    /// The rows are resolved outside the view now (`RemoteTailnetReadinessPresentation`), so what
+    /// this does is paint three marks and six labels, and every state in it can be photographed
+    /// without a tailnet.
+    func applyTailnetReadiness(_ readiness: RemoteTailnetReadinessPresentation) {
+        let steps = TailscaleReadinessStep.allCases
+        guard tailscaleStepGlyphs.count == steps.count,
+              tailscaleStepSpinners.count == steps.count,
+              tailscaleStepTitles.count == steps.count,
+              tailscaleStepDetails.count == steps.count else { return }
 
-        tailscaleActionURL = nil
-        tailscaleStepActions.forEach { $0.isHidden = true }
+        for step in steps {
+            guard let row = readiness.row(step) else { continue }
+            let index = step.rawValue
+            tailscaleStepTitles[index].stringValue = row.title
+            tailscaleStepDetails[index].stringValue = row.detail
+            let isWorking = row.mark == .working
+            tailscaleStepSpinners[index].setAccessibilityLabel(row.detail)
+            tailscaleStepSpinners[index].isAnimating = isWorking
+            tailscaleStepGlyphs[index].isHidden = isWorking
+            tailscaleStepGlyphs[index].stringValue = Self.mark(for: row.mark)
+            tailscaleStepGlyphs[index].textColor = Self.ink(for: row.mark)
+        }
+    }
 
-        func setStep(_ step: TailscaleReadinessStep, glyph: String, color: NSColor, detail: String) {
-            let index = step.rawValue
-            tailscaleStepGlyphs[index].stringValue = glyph
-            tailscaleStepGlyphs[index].textColor = color
-            tailscaleStepGlyphs[index].isHidden = false
-            tailscaleStepSpinners[index].isAnimating = false
-            tailscaleStepDetails[index].stringValue = detail
+    private static func mark(for mark: RemoteTailnetReadinessPresentation.Row.Mark) -> String {
+        switch mark {
+        case .met: return DoorMark.ready
+        case .attention: return DoorMark.attention
+        case .pending, .working: return DoorMark.idle
         }
-        func offerAction(_ step: TailscaleReadinessStep, title: String, url: URL) {
-            let index = step.rawValue
-            tailscaleActionURL = url
-            tailscaleStepActions[index].title = title
-            tailscaleStepActions[index].setAccessibilityLabel(title)
-            tailscaleStepActions[index].isHidden = false
-        }
-        func pending(_ step: TailscaleReadinessStep, _ detail: String) {
-            setStep(step, glyph: "–", color: Design.Text.tertiary, detail: detail)
-        }
-        func working(_ step: TailscaleReadinessStep, _ detail: String) {
-            let index = step.rawValue
-            tailscaleStepGlyphs[index].isHidden = true
-            tailscaleStepSpinners[index].setAccessibilityLabel(detail)
-            tailscaleStepSpinners[index].isAnimating = true
-            tailscaleStepDetails[index].stringValue = detail
-        }
-        func ready(_ step: TailscaleReadinessStep, _ detail: String) {
-            setStep(step, glyph: "✓", color: Design.Status.positive, detail: detail)
-        }
-        func attention(_ step: TailscaleReadinessStep, _ detail: String) {
-            setStep(step, glyph: "!", color: Design.Status.warning, detail: detail)
-        }
-        func met(upTo step: TailscaleReadinessStep) {
-            if step.rawValue > TailscaleReadinessStep.installed.rawValue {
-                ready(.installed, L10n.string("Tailscale is installed."))
-            }
-            if step.rawValue > TailscaleReadinessStep.signedIn.rawValue {
-                ready(.signedIn, L10n.string("This Mac is connected to your tailnet."))
-            }
-        }
-        func waiting(after step: TailscaleReadinessStep) {
-            for later in TailscaleReadinessStep.allCases where later.rawValue > step.rawValue {
-                pending(later, L10n.string("Waiting for Tailscale."))
-            }
-        }
+    }
 
-        switch readiness {
-        case .notChecked:
-            pending(.installed, L10n.string("Checked when Remote Access turns on."))
-            pending(.signedIn, L10n.string("Waiting for the installation check."))
-            pending(.privateEndpoint, L10n.string("Waiting for Tailscale."))
-        case .checking:
-            // One `tailscale status` answers both installation and the tailnet, so the two
-            // steps are genuinely in flight together.
-            working(.installed, L10n.string("Looking for Tailscale…"))
-            working(.signedIn, L10n.string("Checking your tailnet status…"))
-            pending(.privateEndpoint, L10n.string("Waiting for Tailscale."))
-        case .publishing:
-            met(upTo: .privateEndpoint)
-            // The same sentence the status row and the pairing panel are showing: this step is
-            // where the wait actually is, and it was the one saying least about it.
-            working(
-                .privateEndpoint,
-                readiness.startupStatement?.detail
-                    ?? L10n.string("Publishing Threading privately…")
-            )
-        case .ready(let origin):
-            met(upTo: .privateEndpoint)
-            setStep(
-                .privateEndpoint,
-                glyph: "✓",
-                color: Design.Status.positive,
-                detail: L10n.format("Ready at %@.", origin.host ?? origin.absoluteString)
-            )
-        case .actionRequired(let issue, let actionURL):
-            met(upTo: issue.step)
-            attention(issue.step, issue.rowDetail)
-            waiting(after: issue.step)
-            if let actionURL, let title = issue.remedyActionTitle {
-                offerAction(issue.step, title: title, url: actionURL)
-            }
+    private static func ink(for mark: RemoteTailnetReadinessPresentation.Row.Mark) -> NSColor {
+        switch mark {
+        case .met: return Design.Status.positive
+        case .attention: return Design.Status.warning
+        case .pending, .working: return Design.Text.tertiary
         }
     }
 
@@ -1363,7 +1369,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         actionEnabled: Bool,
         prominent: Bool,
         busy: Bool = false,
-        remedy: RemotePairingRemedy? = nil,
         pairingPayload: String? = nil
     ) {
         pairingTitle.stringValue = title
@@ -1373,14 +1378,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         pairingActionButton.title = action
         pairingActionButton.isEnabled = actionEnabled
         pairingActionButton.isProminent = prominent
-
-        pairingRemedyURL = remedy?.url
-        pairingRemedyButton.isHidden = remedy == nil
-        pairingRemedyButton.isProminent = remedy != nil
-        if let remedy {
-            pairingRemedyButton.title = remedy.title
-            pairingRemedyButton.setAccessibilityLabel(remedy.title)
-        }
 
         // Drawn at the side the card gives it: an `NSImage` scaled into an image view is
         // resampled, and a resampled module edge is the one thing this artwork cannot spare.
@@ -1504,14 +1501,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         NSWorkspace.shared.open(url)
     }
 
-    @objc private func openTailscaleAction() {
-        guard let tailscaleActionURL else { return }
-        NSWorkspace.shared.open(tailscaleActionURL)
-    }
-
-    @objc private func openPairingRemedy() {
-        guard let pairingRemedyURL else { return }
-        NSWorkspace.shared.open(pairingRemedyURL)
+    /// Opens the admin-console page a Serve failure named. Only that page is ever offered, so
+    /// arbitrary text in command output cannot steer the browser anywhere else.
+    @objc private func openServeRemedy() {
+        guard let tailscaleServeRemedyURL else { return }
+        NSWorkspace.shared.open(tailscaleServeRemedyURL)
     }
 
     @objc private func pairingAction() {
@@ -1610,6 +1604,25 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
         static func disclosure(_ wayIn: RemoteAccessWayIn) -> String {
             "settings.remote-access.disclosure.\(wayIn.identifierComponent)"
+        }
+
+        /// The Serve sub-option. Not a way in, so it is named rather than derived from one.
+        static let serveToggle = "settings.remote-access.tailscale-serve"
+        static let serveStatus = "settings.remote-access.status.tailscale-serve"
+        static let serveStatusMark = "settings.remote-access.status-mark.tailscale-serve"
+        static let serveStatusHint = "settings.remote-access.status-hint.tailscale-serve"
+        static let serveRemedy = "settings.remote-access.tailscale-serve-remedy"
+
+        static func readinessTitle(_ step: TailscaleReadinessStep) -> String {
+            "settings.remote-access.readiness.\(step.identifierComponent)"
+        }
+
+        static func readinessDetail(_ step: TailscaleReadinessStep) -> String {
+            "settings.remote-access.readiness-detail.\(step.identifierComponent)"
+        }
+
+        static func readinessMark(_ step: TailscaleReadinessStep) -> String {
+            "settings.remote-access.readiness-mark.\(step.identifierComponent)"
         }
     }
 

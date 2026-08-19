@@ -1,13 +1,26 @@
 import Foundation
 
-/// Publishes the remote-access loopback listener inside the user's tailnet with Tailscale Serve.
+/// The `tailscale` CLI, as Remote Access uses it: what this Mac's tailnet membership is, and the
+/// browser convenience that publishes Threading at the `*.ts.net` name.
+///
+/// **This is no longer how a phone reaches this Mac.** The `tailscale` door is a listener bound to
+/// this Mac's own tailnet address, presenting the same pinned certificate as every other routable
+/// door, so the iOS app takes one code path everywhere (§8 of the transport plan). What Serve
+/// still provides is the one thing a raw bind cannot: a publicly trusted certificate for the
+/// tailnet DNS name, which is what stops a *browser* on the tailnet meeting a full-page
+/// certificate interstitial. That is a convenience, off by default, and nothing depends on it.
 ///
 /// Serve keeps the backend on `127.0.0.1`, preserves the separation from MCP and extension
 /// listeners, and supplies HTTPS/WSS at a stable tailnet DNS name. The front-end port is owned by
-/// Threading so stopping this transport can remove exactly its handler; `tailscale serve reset`
-/// is intentionally never used because it would erase unrelated services the user configured.
+/// Threading so stopping it can remove exactly its handler; `tailscale serve reset` is
+/// intentionally never used because it would erase unrelated services the user configured.
+///
+/// The status probe is the second half. `tailscale status --json` is the only way to tell "not
+/// installed" from "signed out" from "stopped", and it is also where this Mac's MagicDNS name
+/// comes from, which the tailnet door advertises beside its numeric address. It runs when the
+/// door is switched on, whether or not Serve is.
 @MainActor
-final class TailscaleRemoteTransport: RemoteTailnetTransport {
+final class TailscaleServeTransport: RemoteTailnetTransport {
 
     private(set) var state: RemoteTransportState = .stopped
 
@@ -18,6 +31,14 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
     private(set) var readiness: TailscaleReadiness = .notChecked {
         didSet {
             guard readiness != oldValue else { return }
+            onReadinessChange?()
+        }
+    }
+
+    /// What the last `tailscale status` said about this Mac. `.unknown` until one has run.
+    private(set) var hostFacts: TailscaleHostFacts = .unknown {
+        didSet {
+            guard hostFacts != oldValue else { return }
             onReadinessChange?()
         }
     }
@@ -44,8 +65,43 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
         onStateChange: @MainActor @Sendable (RemoteTransportState) -> Void
     )?
 
-    init(locateExecutable: @escaping () -> URL? = { TailscaleRemoteTransport.executableURL() }) {
+    init(locateExecutable: @escaping () -> URL? = { TailscaleServeTransport.executableURL() }) {
         self.locateExecutable = locateExecutable
+    }
+
+    // MARK: - The facts behind the door
+
+    /// Reads `tailscale status` once and publishes what it said, without publishing anything on
+    /// the tailnet.
+    ///
+    /// The tailnet door binds an address whether or not this runs; what this adds is the
+    /// difference between "Tailscale is not connected" and "Tailscale is not installed", plus
+    /// the MagicDNS name the door advertises beside its numeric address. One short-lived child
+    /// process with a deadline, off the main actor, called when the door is switched on and when
+    /// the page that renders it appears — never on a timer.
+    func refreshHostFacts() {
+        // A publish is already running its own status stage, and both would want the one command
+        // slot. Its completion updates the same value, so skipping here loses nothing.
+        guard command == nil else { return }
+        guard let executable = locateExecutable() else {
+            hostFacts = TailscaleHostFacts(state: .notInstalled, magicDNSName: nil)
+            return
+        }
+        let launchID = UUID()
+        self.launchID = launchID
+        run(
+            executable: executable,
+            arguments: Self.statusArguments,
+            stage: "facts",
+            launchID: launchID,
+            // A probe that could not be launched says the facts are unknown. It must not report
+            // Serve unavailable: Serve may not even be switched on.
+            onLaunchFailure: { [weak self] in self?.hostFacts = .unknown }
+        ) { [weak self] status, data in
+            guard let self, self.launchID == launchID else { return }
+            self.launchID = nil
+            self.hostFacts = Self.hostFacts(exitStatus: status, output: data)
+        }
     }
 
     func start(
@@ -89,6 +145,9 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
             launchID: launchID
         ) { [weak self] status, data in
             guard let self, self.launchID == launchID else { return }
+            // Serve's first command is the probe's command, so the facts behind the door are
+            // learned here too rather than needing a second child process.
+            self.hostFacts = Self.hostFacts(exitStatus: status, output: data)
             guard status == 0 else {
                 self.finishUnavailable(Self.statusFailureIssue(from: data))
                 return
@@ -147,6 +206,8 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
         onStateChange = nil
         state = .stopped
         readiness = .notChecked
+        // `hostFacts` deliberately survives: it is what `tailscale status` said about this Mac,
+        // and the tailnet door still renders it after the browser convenience is switched off.
 
         guard let executable else { return }
         let cleanup: SpawnedChildProcess
@@ -204,14 +265,20 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
 
     // MARK: - Commands
 
+    /// `onLaunchFailure` is what a command that never started reports. It defaults to Serve's
+    /// answer because Serve is what most of these commands are for; the status probe passes its
+    /// own, because a probe that could not run says nothing about whether Serve is publishing.
     private func run(
         executable: URL,
         arguments: [String],
         stage: String,
         launchID: UUID,
         timeout: TimeInterval = RemoteTailscaleDefaults.commandTimeoutSeconds,
+        onLaunchFailure: (@MainActor () -> Void)? = nil,
         completion: @escaping @MainActor @Sendable (Int32, Data) -> Void
     ) {
+        let failed: @MainActor () -> Void = onLaunchFailure
+            ?? { [weak self] in self?.finishUnavailable(.statusUnavailable) }
         let pipe: ChildPipe
         do {
             pipe = try ChildPipe()
@@ -219,7 +286,7 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
             ThreadingLogger.remote.error(
                 "Tailscale command pipe creation failed stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            finishUnavailable(.statusUnavailable)
+            failed()
             return
         }
         let collector = CommandOutputCollector()
@@ -242,7 +309,7 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
             ThreadingLogger.remote.error(
                 "Tailscale command launch failed stage=\(stage, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            finishUnavailable(.statusUnavailable)
+            failed()
             return
         }
 
@@ -406,20 +473,68 @@ final class TailscaleRemoteTransport: RemoteTailnetTransport {
         }
     }
 
+    /// Serve's own origin: the `*.ts.net` name on Serve's dedicated HTTPS port.
+    ///
+    /// **Never advertised to a phone.** Serve presents a publicly trusted certificate, so a phone
+    /// told to pin it would fail at the next renewal, and a phone told to stock-trust it would be
+    /// the one endpoint in the list that no fingerprint covers. The tailnet door advertises this
+    /// Mac's own tailnet address and MagicDNS name on the sticky port instead, with the pin.
     nonisolated static func origin(fromStatusJSON data: Data) -> URL? {
         guard let status = try? JSONDecoder().decode(TailscaleStatus.self, from: data),
               status.backendState.lowercased() == "running",
-              let rawName = status.local?.dnsName.trimmingCharacters(in: .whitespacesAndNewlines),
-              !rawName.isEmpty else {
+              let name = magicDNSName(status.local?.dnsName) else {
             return nil
         }
-        let name = rawName.hasSuffix(".") ? String(rawName.dropLast()) : rawName
         var components = URLComponents()
         components.scheme = "https"
         components.host = name
         components.port = RemoteTailscaleDefaults.httpsPort
         components.path = "/"
         return components.url
+    }
+
+    /// What one `tailscale status` run says about this Mac, whatever it exited with.
+    ///
+    /// Pure, because this is the one place two different questions are answered from the same
+    /// bytes: whether the tailnet door can ever come up, and what this Mac is called on the
+    /// tailnet. A failed command still carries an answer often enough to be worth reading — the
+    /// CLI prints "logged out" and exits non-zero — and anything it does not recognise stays
+    /// `.unknown` rather than becoming a claim.
+    nonisolated static func hostFacts(exitStatus: Int32, output: Data) -> TailscaleHostFacts {
+        guard exitStatus == 0 else {
+            switch statusFailureIssue(from: output) {
+            case .signedOut: return TailscaleHostFacts(state: .signedOut, magicDNSName: nil)
+            case .stopped: return TailscaleHostFacts(state: .stopped, magicDNSName: nil)
+            default: return .unknown
+            }
+        }
+        guard let status = try? JSONDecoder().decode(TailscaleStatus.self, from: output) else {
+            return .unknown
+        }
+        switch status.backendState.lowercased() {
+        case "running":
+            return TailscaleHostFacts(
+                state: .running,
+                magicDNSName: magicDNSName(status.local?.dnsName)
+            )
+        case "needslogin", "needsmachineauth", "loggedout":
+            return TailscaleHostFacts(state: .signedOut, magicDNSName: nil)
+        case "stopped", "starting", "nomap":
+            return TailscaleHostFacts(state: .stopped, magicDNSName: nil)
+        default:
+            return .unknown
+        }
+    }
+
+    /// The MagicDNS name without its trailing root label, or nil when the status carried none.
+    ///
+    /// `Self.DNSName` arrives fully qualified (`mac.tail1234.ts.net.`), and a trailing dot is a
+    /// valid host in a URL that no certificate, ACL or person writes that way.
+    nonisolated static func magicDNSName(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        let name = trimmed.hasSuffix(".") ? String(trimmed.dropLast()) : trimmed
+        return name.isEmpty ? nil : name
     }
 
     nonisolated static func readinessIssue(

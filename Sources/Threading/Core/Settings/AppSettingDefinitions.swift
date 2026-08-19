@@ -1030,17 +1030,18 @@ enum AppSettingDefinitions {
     )
     /// The browser convenience on the tailnet, and nothing else.
     ///
-    /// **Not operative yet, and deliberately not on the page yet.** Today the `tailscale` door
-    /// *is* Tailscale Serve (`RemoteTailscaleDoorImplementation.serveTransport`), so a switch
-    /// offering to turn Serve off would take the phone's only tailnet route with it. When the
-    /// raw tailnet bind lands, Serve becomes what §8 of the transport plan describes — "Open
-    /// Threading in a browser on your tailnet without a certificate warning" — and this is the
-    /// switch for it. It has no catalogue row until then, because a search result must lead to a
-    /// row that is on the page.
+    /// Off by default and not a way in: the phone reaches this Mac at the tailnet address the
+    /// listener binds, with the certificate it pinned, so nothing here is a route. What Serve
+    /// adds is a publicly trusted certificate for the `*.ts.net` name, which is the only way a
+    /// *browser* on the tailnet opens Threading without a full-page certificate warning. What it
+    /// costs is a public certificate-transparency entry naming this Mac and the tailnet, which is
+    /// why it is a switch a person makes rather than something the tailnet door turns on.
     static let remoteAccessTailscaleServeEnabled = AppSettingDescriptor<Bool>(
         identity: .remoteAccessTailscaleServeEnabled,
         persistenceKey: "remoteAccessTailscaleServeEnabled",
-        absence: .registered(false)
+        absence: .registered(false),
+        presentations: [row("remote-access", 3, "Ways In", "Open in a browser on your tailnet",
+                            ["browser", "Serve", "certificate", "tailnet", "HTTPS"])]
     )
     /// The port the listener tries first.
     ///
@@ -1119,7 +1120,7 @@ enum AppSettingDefinitions {
         persistenceKey: "phoneReportWorkspace",
         absence: .registered(PhoneReportWorkspacePolicy.sameCheckout.rawValue),
         validation: .allowedStrings(Set(PhoneReportWorkspacePolicy.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 4, "Sharing & Security", "Reports from your phone",
+        presentations: [row("remote-access", 5, "Sharing & Security", "Reports from your phone",
                             ["shake", "report", "worktree", "workspace", "isolated"])]
     )
     static let remoteInputControlDefault = AppSettingDescriptor<String>(
@@ -1127,7 +1128,7 @@ enum AppSettingDefinitions {
         persistenceKey: "remoteInputControlDefault",
         absence: .registered(RemoteInputControlDefault.collaborative.rawValue),
         validation: .allowedStrings(Set(RemoteInputControlDefault.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 3, "Sharing & Security", "New shared chats",
+        presentations: [row("remote-access", 4, "Sharing & Security", "New shared chats",
                             ["security", "collaborative", "focused", "share"])],
         remotePolicy: .ownerMutable
     )
