@@ -314,11 +314,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// embarrassing is one to fix or remove, and one whose lines are fine has nothing to hide
     /// behind a triangle either — so they are on the page, under the status they qualify.
     private func wayInCard(_ wayIn: RemoteAccessWayIn) -> SettingsCard {
+        // The copy arrives already localized from `RemoteAccessWayIn`, so the row must not look
+        // it up a second time: under a translated build that lookup takes the Swedish sentence
+        // as a key and finds nothing.
         var rows: [NSView] = [
             SettingsUI.row(
                 title: wayIn.title,
                 subtitle: wayIn.promise,
-                control: toggle(for: wayIn)
+                control: toggle(for: wayIn),
+                localizes: false
             )
         ]
         if wayIn.hasSwitch || wayIn == .threadingDirect {
@@ -330,9 +334,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         }
         if wayIn == .tailscale {
             rows.append(contentsOf: tailscaleServeRows())
-            // "Through a VPN" is the same door reached from a tunnel, so it belongs to the
-            // network card rather than to a switch of its own.
         }
+        // "Through a VPN" is the same way in reached from a tunnel, so it belongs to the network
+        // card rather than to a switch of its own.
         if wayIn == .thisNetwork {
             rows.append(contentsOf: throughAVPNRows())
         }
@@ -742,6 +746,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         copiedReset = nil
 
         let coordinator = RemoteAccessCoordinator.shared
+        let doors = doorsPresentation(coordinator)
         inputControlDefault.selectedIndex = RemoteInputControlDefault.allCases.firstIndex(
             of: AppSettings.shared.remoteInputControlDefault
         ) ?? 0
@@ -754,7 +759,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         openLocallyButton.isEnabled = coordinator.localURL != nil
         rebuildPairedDevices(coordinator.pairedOwnerDevices, error: coordinator.ownerDevicePersistenceError)
         updateHostedAccount(coordinator)
-        apply(doorsPresentation(coordinator))
+        apply(doors)
 
         switch coordinator.status {
         case .disabled:
@@ -793,7 +798,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         case .listening(let port):
             applyListeningState(
                 connection: RemoteConnectionStatusPresentation.resolve(
-                    statuses: doorsPresentation(coordinator).offeredStatuses,
+                    statuses: doors.offeredStatuses,
                     localPort: port
                 ),
                 card: RemotePairingCardState.resolve(
@@ -806,9 +811,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             )
 
         case .failed(let reason):
+            // The reason is already a sentence with a remedy in it; a page that wrapped it in
+            // "The private listener failed (portRangeInUse)" was printing a diagnostic token.
             updateConnection(
                 title: L10n.string("Couldn’t start"),
-                detail: L10n.format("The private listener failed (%@).", reason),
+                detail: reason,
                 color: Design.Status.negative
             )
             updatePairing(

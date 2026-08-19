@@ -1574,7 +1574,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 self.pairingBootstrapToken = nil
                 self.pairingRedemptions.removeAll()
                 self.listenerStatus = .idle
-                self.status = .failed(reason: failure.rawValue)
+                self.status = .failed(reason: failure.statement)
                 EventLog.shared.record(
                     .remote,
                     "Remote access failed to start",
