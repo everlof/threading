@@ -455,9 +455,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         let column = NSLayoutGuide()
         container.addLayoutGuide(column)
 
+        // The guide is pinned on all four sides so its frame is determined; only its width is
+        // the question the labels answer.
         var constraints: [NSLayoutConstraint] = [
             column.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            column.topAnchor.constraint(equalTo: container.topAnchor)
+            column.topAnchor.constraint(equalTo: container.topAnchor),
+            column.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ]
         let narrow = column.widthAnchor.constraint(equalToConstant: 0)
         narrow.priority = .defaultLow
