@@ -445,14 +445,18 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
 
         // Half of a split control draws no surface of its own: the plate underneath is one
         // shape, and a second one raised inside it is the seam `SplitIconButtonView` removes.
-        // The ring still needs a silhouette to follow, so it takes the one that was not drawn.
+        // The ring has no silhouette of its own to follow either, so it follows the plate's and
+        // stops at the weld — `drawKeyboardFocus(weldedInto:)`.
+        //
+        // A host that named its ground filled the plate to draw it (`SplitButtonView` says so
+        // for a primary press), and a ring landing on a fill reads as the plate being smaller
+        // rather than as a ring around it — so it keeps its own width of that fill clear, which
+        // is the rule the titled half beside it follows for the same reason.
         guard drawsSurface else {
             drawKeyboardFocus(
-                around: ThemedSurface.Shape(
-                    rect: bounds,
-                    radius: Design.Radius.control(fitting: bounds.size)
-                ),
-                color: ink.label
+                weldedInto: superview,
+                color: ink.label,
+                keepingEdge: hostGround == nil ? 0 : Design.Accessibility.focusRingWidth
             )
             applyGlyphTint()
             return

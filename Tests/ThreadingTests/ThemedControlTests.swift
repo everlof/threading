@@ -6538,6 +6538,188 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
     }
 
+    // MARK: - Keyboard Focus on a Welded Half
+
+    /// A half of a plate is not a rounded rect, and the geometry saying so is what both split
+    /// controls' focus rings stand on: the plate's own corners survive the cut, and the edge the
+    /// cut produced does not become one.
+    func testAWeldedHalfOfASilhouetteKeepsThePlatesCornersAndSquaresTheCut() {
+        let plate = ThemedSurface.Shape(
+            rect: NSRect(x: 0, y: 0, width: 120, height: 28),
+            radius: 8
+        )
+
+        let trailing = plate.portion(in: NSRect(x: 96, y: 0, width: 24, height: 28))
+        XCTAssertTrue(
+            trailing.contains(NSPoint(x: 97, y: 1)),
+            "the corner at the weld was rounded — a half drawn as a rounded rect of its own is "
+                + "the second control inside the control that the plate exists to remove"
+        )
+        XCTAssertFalse(
+            trailing.contains(NSPoint(x: 119, y: 1)),
+            "the plate's own corner was squared off, so the half reaches outside the plate"
+        )
+
+        let whole = plate.portion(in: plate.rect.insetBy(dx: -10, dy: -10))
+        XCTAssertFalse(
+            whole.contains(NSPoint(x: 1, y: 1)),
+            "a silhouette cut by nothing has to come back as the silhouette it already was"
+        )
+    }
+
+    /// The ring a focused half draws follows the **plate**: turned where the plate turns its own
+    /// corners, squared at the weld, inside the plate's silhouette, and never over the other
+    /// half.
+    ///
+    /// Drawn around the half's own bounds instead, it was reported as the control looking broken
+    /// the moment the chevron could take focus — a small rounded rectangle floating inside the
+    /// right end of an accent plate, with its corners standing outside the plate's own curve.
+    func testAFocusedHalfOfATitledPlateIsRingedAlongItAndSquaredAtTheWeld() throws {
+        AppThemePalette.set(.system)
+
+        let halves: [(name: String, half: (SplitButtonView) -> NSView, weldIsTrailing: Bool)] = [
+            ("press", { $0.action }, true),
+            ("chevron", { $0.chevron }, false)
+        ]
+        for (name, half, weldIsTrailing) in halves {
+            let control = titledSplitControl(emphasis: .primary)
+            _ = try XCTUnwrap(control.window, "a fixture with no window can hold no focus")
+            try assertRingFollowsThePlate(
+                of: control,
+                focusing: half(control),
+                weldIsTrailing: weldIsTrailing,
+                named: name
+            )
+        }
+    }
+
+    /// The same contract on the header's icon pair, whose halves are both `ThemedIconButton` and
+    /// whose plate is drawn on the window's backdrop rather than on a pane.
+    func testAFocusedHalfOfTheIconPlateIsRingedAlongItToo() throws {
+        AppThemePalette.set(.system)
+
+        let control = splitControl()
+        _ = try XCTUnwrap(control.window, "a fixture with no window can hold no focus")
+        try assertRingFollowsThePlate(
+            of: control,
+            focusing: control.chevron,
+            weldIsTrailing: false,
+            named: "chevron"
+        )
+    }
+
+    /// - Parameter weldIsTrailing: whether the shared edge is this half's *trailing* one, which
+    ///   is what tells the plate's end apart from the seam without naming either measurement.
+    private func assertRingFollowsThePlate(
+        of control: NSView,
+        focusing half: NSView,
+        weldIsTrailing: Bool,
+        named name: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let ink = try focusRingInk(of: control, focusing: half)
+        XCTAssertFalse(ink.isEmpty, "focusing the \(name) half drew no ring at all",
+                       file: file, line: line)
+
+        let columns = ink.map(\.x)
+        XCTAssertGreaterThanOrEqual(
+            try XCTUnwrap(columns.min()), half.frame.minX - Ring.fringe,
+            "the \(name) half's ring reached over the weld into the other half",
+            file: file, line: line
+        )
+        XCTAssertLessThanOrEqual(
+            try XCTUnwrap(columns.max()), half.frame.maxX + Ring.fringe,
+            "the \(name) half's ring reached over the weld into the other half",
+            file: file, line: line
+        )
+
+        // The plate's silhouette, given the fringe an anti-aliased stroke leaves at its own edge.
+        let silhouette = ThemedSurface.Shape(
+            rect: control.bounds,
+            radius: Design.Radius.control(fitting: control.bounds.size)
+        ).outset(by: Ring.overhang).path
+        XCTAssertTrue(
+            ink.allSatisfy { silhouette.contains(NSPoint(x: $0.x, y: control.bounds.height - $0.y)) },
+            "the \(name) half's ring stood outside the plate — its corners are not the plate's",
+            file: file, line: line
+        )
+
+        let middle = try topOfRing(ink, inColumn: half.frame.midX)
+        let atWeld = try XCTUnwrap(weldIsTrailing ? columns.max() : columns.min())
+        let atPlateEnd = try XCTUnwrap(weldIsTrailing ? columns.min() : columns.max())
+
+        XCTAssertEqual(
+            try topOfRing(ink, inColumn: atWeld), middle, accuracy: Ring.tolerance,
+            "the \(name) half's ring curled away from the weld — the seam is a straight edge, "
+                + "and rounding it draws a control inside the control",
+            file: file, line: line
+        )
+        XCTAssertGreaterThan(
+            try topOfRing(ink, inColumn: atPlateEnd), middle + Ring.tolerance,
+            "the \(name) half's ring turned no corner where the plate turns its own — it is a "
+                + "box on the plate rather than the end of it",
+            file: file, line: line
+        )
+    }
+
+    private enum Ring {
+        /// How far an anti-aliased stroke may spill past the geometry it was asked for.
+        static let fringe: CGFloat = 0.5
+
+        /// How far past the plate a ring's ink may still sit and be the plate's own edge.
+        ///
+        /// A ring on a *bordered* plate is drawn flush with it — it stands in for the hairline
+        /// (`drawKeyboardFocus(around:keepingEdge:)`) — so its outer half lands exactly on the
+        /// silhouette, and an offscreen window backs at 1×, where a pixel straddling a curve has
+        /// its centre up to half a pixel diagonal outside it. Anything further out is a ring
+        /// drawn to a shape the plate is not.
+        static let overhang: CGFloat = 1
+        /// A corner is `Design.Radius.control` deep, so points are the unit that tells a square
+        /// corner from a turned one without pinning which theme is drawing.
+        static let tolerance: CGFloat = 1
+    }
+
+    /// The pixels focusing `half` changed, in the plate's own points, measured down from its top.
+    ///
+    /// The ring is the only thing that differs between the two renders, so this finds it without
+    /// naming a tone — which matters because the two halves of one plate deliberately ring in
+    /// the tones their own grounds ask for.
+    private func focusRingInk(of control: NSView, focusing half: NSView) throws -> [NSPoint] {
+        let resting = try XCTUnwrap(control.bitmapImageRepForCachingDisplay(in: control.bounds))
+        control.cacheDisplay(in: control.bounds, to: resting)
+
+        let window = try XCTUnwrap(control.window)
+        XCTAssertTrue(window.makeFirstResponder(half), "the half refused the keyboard")
+
+        let focused = try XCTUnwrap(control.bitmapImageRepForCachingDisplay(in: control.bounds))
+        control.cacheDisplay(in: control.bounds, to: focused)
+
+        let scale = CGFloat(resting.pixelsWide) / control.bounds.width
+        var ink: [NSPoint] = []
+        for y in 0..<resting.pixelsHigh {
+            for x in 0..<resting.pixelsWide {
+                let before = resting.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+                let after = focused.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+                guard before != after else { continue }
+                // The pixel's **centre**: an offscreen window backs at 1×, where taking the
+                // index instead puts a corner sample a whole point outside the curve it is
+                // being asked about and fails a ring that is drawn correctly.
+                ink.append(NSPoint(
+                    x: (CGFloat(x) + 0.5) / scale,
+                    y: (CGFloat(y) + 0.5) / scale
+                ))
+            }
+        }
+        return ink
+    }
+
+    /// Where the ring's ink starts in one column, measured down from the plate's top edge.
+    private func topOfRing(_ ink: [NSPoint], inColumn column: CGFloat) throws -> CGFloat {
+        let rows = ink.filter { abs($0.x - column) <= Ring.fringe }.map(\.y)
+        return try XCTUnwrap(rows.min(), "the ring has no ink at x = \(column)")
+    }
+
     /// A titled plate laid out the way the attachments footer lays it out, in a window that is
     /// never shown.
     private func titledSplitControl(

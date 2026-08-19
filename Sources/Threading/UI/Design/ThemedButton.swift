@@ -665,17 +665,20 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         // The press half of a split control draws no surface of its own: the plate underneath
         // is one shape, and a second one raised inside it is the seam `SplitButtonView` removes.
         // The glow is *cleared* rather than skipped — the half may have drawn one before it was
-        // welded — and the ring still needs a silhouette to follow, so it takes the one that
-        // was not drawn. The face stays put too: no visual offset, because a half that travelled
-        // alone would tear the plate it shares.
+        // welded. The face stays put too: no visual offset, because a half that travelled alone
+        // would tear the plate it shares.
         guard drawsSurface else {
             applyThemeControlGlow(nil, radius: corner)
+            // The ring has no silhouette of its own to follow either, so it follows the plate's
+            // and stops at the weld — `drawKeyboardFocus(weldedInto:)`, which is where the box
+            // this used to draw around its own bounds is written up.
+            //
             // In the tone the title is already cut from, for the reason the unwelded primary
             // states below: on a plate the host filled with the accent, an accent ring is a ring
             // painted on itself. The band outside it is the plate's fill rather than this half's,
             // which is the one difference, and it does not change what the ring has to read on.
             drawKeyboardFocus(
-                around: ThemedSurface.Shape(rect: bounds, radius: corner),
+                weldedInto: superview,
                 color: isProminent ? foreground : Design.Surface.accent,
                 keepingEdge: isProminent ? Design.Accessibility.focusRingWidth : 0
             )

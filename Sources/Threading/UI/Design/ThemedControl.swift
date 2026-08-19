@@ -214,8 +214,44 @@ class ThemedControl: NSControl, ThemedComponent {
         strokeFocusRing(shape.outset(by: gap + Design.Accessibility.focusRingWidth / 2), color)
     }
 
+    /// Strokes the ring around this control's **share of the plate it was welded onto**.
+    ///
+    /// A welded half draws no surface of its own (`SplitControlHalf.drawsSurface`), so it has no
+    /// silhouette for a ring to follow, and taking its own bounds as one was reported as the
+    /// control looking broken the moment it took focus: the report sheet's chevron came out
+    /// wearing a small rounded rectangle floating inside the right end of an accent plate — a
+    /// second control inside the control, which is the exact seam the plate exists to remove.
+    ///
+    /// So the ring follows the **plate**: the outer corners are the plate's own, and the edge at
+    /// the weld is the straight seam a raised half already fills to (`Shape.portion(in:)`). It is
+    /// held half a ring-width inside that seam for the reason every ring here is inset — drawing
+    /// is clipped at this view's bounds, so a stroke centred on the edge comes back at half
+    /// weight, which reads as the two halves being ringed differently.
+    ///
+    /// - Parameter plate: the host drawing the surface — a welded half's superview. Nil is
+    ///   answered with this control's own silhouette, which is all an unwelded half has.
+    func drawKeyboardFocus(
+        weldedInto plate: NSView?,
+        color: NSColor = Design.Surface.accent,
+        keepingEdge edge: CGFloat = 0
+    ) {
+        guard hasKeyboardFocus else { return }
+        let width = Design.Accessibility.focusRingWidth
+        let silhouette = ThemedSurface.Shape(
+            rect: plate.map { convert($0.bounds, from: $0) } ?? bounds,
+            radius: Design.Radius.control(fitting: plate?.bounds.size ?? bounds.size)
+        ).inset(by: edge + width / 2)
+        strokeFocusRing(
+            silhouette.portion(in: bounds.insetBy(dx: width / 2, dy: 0)),
+            color
+        )
+    }
+
     private func strokeFocusRing(_ shape: ThemedSurface.Shape, _ color: NSColor) {
-        let path = shape.path
+        strokeFocusRing(shape.path, color)
+    }
+
+    private func strokeFocusRing(_ path: NSBezierPath, _ color: NSColor) {
         color.setStroke()
         path.lineWidth = Design.Accessibility.focusRingWidth
         path.stroke()
@@ -347,6 +383,61 @@ enum ThemedSurface {
                 rect: rect.insetBy(dx: -amount, dy: -amount),
                 radius: radius > 0 ? radius + amount : 0
             )
+        }
+
+        /// The part of this silhouette that lies inside `rect` — **one half of a shared plate**.
+        ///
+        /// A welded half is not a rounded rect and drawing it as one is a visible bug: the outer
+        /// corners belong to the plate, and the cut edge is the straight seam the other half
+        /// meets. So a corner is turned only where it is the plate's own corner, and every edge
+        /// the cut produced stays square. That is the same sentence `SplitIconButtonView` writes
+        /// as a clip when it fills a raised half, said as a path so a *ring* can follow it too.
+        ///
+        /// A rect that contains the whole silhouette gets the whole silhouette back, so a caller
+        /// that turns out not to be welded into anything draws exactly what `path` would.
+        func portion(in region: NSRect) -> NSBezierPath {
+            let clipped = region.intersection(rect)
+            guard !clipped.isNull, clipped.width > 0, clipped.height > 0 else {
+                return NSBezierPath()
+            }
+
+            let limit = min(clipped.width, clipped.height) / 2
+            // A corner survives the cut only if both of its edges are still the silhouette's.
+            func turn(atX x: CGFloat, y: CGFloat) -> CGFloat {
+                let onSide = abs(x - rect.minX) < Corner.tolerance
+                    || abs(x - rect.maxX) < Corner.tolerance
+                let onCap = abs(y - rect.minY) < Corner.tolerance
+                    || abs(y - rect.maxY) < Corner.tolerance
+                return onSide && onCap ? min(radius, limit) : 0
+            }
+
+            let corners = [
+                NSPoint(x: clipped.maxX, y: clipped.minY),
+                NSPoint(x: clipped.maxX, y: clipped.maxY),
+                NSPoint(x: clipped.minX, y: clipped.maxY),
+                NSPoint(x: clipped.minX, y: clipped.minY)
+            ]
+            let path = NSBezierPath()
+            // Started mid-edge rather than at a corner, because a tangent arc needs a current
+            // point to turn away from: beginning *on* a corner would round it against itself.
+            path.move(to: NSPoint(x: clipped.midX, y: clipped.minY))
+            for (index, corner) in corners.enumerated() {
+                let turn = turn(atX: corner.x, y: corner.y)
+                if turn > 0 {
+                    let next = corners[(index + 1) % corners.count]
+                    path.appendArc(from: corner, to: next, radius: turn)
+                } else {
+                    path.line(to: corner)
+                }
+            }
+            path.close()
+            return path
+        }
+
+        private enum Corner {
+            /// Points, not ulps: these coordinates have been through a view-to-view conversion
+            /// and an inset, so exact equality is not a question worth asking of them.
+            static let tolerance: CGFloat = 0.01
         }
     }
 

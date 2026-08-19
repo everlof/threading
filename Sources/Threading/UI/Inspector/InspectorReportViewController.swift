@@ -136,7 +136,14 @@ final class InspectorReportViewController: NSViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         // The description is what the sheet is asking for, so the caret starts in it.
-        view.window?.makeFirstResponder(noteField)
+        //
+        // Through the component's own `focus()`, because `PromptView` is a plain `NSView`
+        // wrapping the text view that actually edits. `makeFirstResponder` on the box itself
+        // *succeeds* — AppKit consults `acceptsFirstResponder` for the key-view loop and for a
+        // click, not for an explicit request — so the container took the caret, had nothing to
+        // do with a keystroke, and the sheet opened with a description that could not be typed
+        // into while looking focused.
+        noteField.focus()
     }
 
     // MARK: - Setup

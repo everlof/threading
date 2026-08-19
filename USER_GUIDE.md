@@ -961,7 +961,8 @@ after it is an ordinary one.
 
 Two ways in. **Help ▸ Report a Problem…** is a form. **View ▸ Inspect…** captures the window and
 opens the same sheet on the picture, where clicking the image marks a place and the marks are
-written into the report as prose and as coordinates.
+written into the report as prose and as coordinates. The sheet opens with the caret already in
+the description, so you can start typing what went wrong without clicking into it first.
 
 **A screenshot you took yourself opens the sheet too.** Drop an image file on Threading's icon in
 the Dock, or on the strip beside the traffic lights at the top of the window, and the report sheet
