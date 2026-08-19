@@ -76,6 +76,25 @@ enum RemoteAccessDefaults {
     static let firewallProbeTimeout: TimeInterval = 3
     static let firewallProbeOutputBytes = 4 * 1024
 
+    // MARK: - Wake on Demand
+
+    /// The service a Bonjour Sleep Proxy advertises itself under. Apple's, not ours: an Apple TV,
+    /// a HomePod or a capable router publishes it, and its presence is half of what decides
+    /// whether a connection can wake this Mac.
+    static let sleepProxyServiceType = "_sleep-proxy._udp"
+
+    /// How long the sleep-proxy browse runs before answering "none".
+    ///
+    /// A proxy on the network answers a query in well under a second; measured on the development
+    /// network, the local proxy appeared immediately. Three seconds is generous for a fact that
+    /// is only ever rendered as a status line, and it is a ceiling rather than a wait: the browse
+    /// finishes the moment a proxy answers.
+    static let sleepProxyBrowseTimeout: TimeInterval = 3
+
+    /// How long `pmset -g` may take before "wake for network access" stays unknown.
+    static let wakeSettingProbeTimeout: TimeInterval = 3
+    static let wakeSettingProbeOutputBytes = 8 * 1024
+
     /// The serial queue that owns the listener, every connection's I/O, WebSocket framing and
     /// the broadcast fan-out. Stores and AppKit are main-only, so anything touching them hops.
     static let queueLabel = "codes.threading.remote"

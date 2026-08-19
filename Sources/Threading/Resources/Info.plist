@@ -97,6 +97,29 @@
 	<string>Threading needs access so the agent you run in a project on this volume can read and edit its files.</string>
 	<key>NSNetworkVolumesUsageDescription</key>
 	<string>Threading needs access so the agent you run in a project on this network volume can read and edit its files.</string>
+	<!--
+		macOS 15 brought iOS's local network privacy to the Mac, and TN3179's table is explicit:
+		*every* Bonjour operation needs the privilege, registering a service included. So the
+		first time Threading announces its LAN door, macOS asks — and without this string the
+		alert has no sentence of ours in it. Measured on macOS 26.5: the same binary registered
+		in about 0.7s when run from Terminal, which TN3179 exempts along with daemons and root,
+		and registered nothing at all in 3.5s when launched as a launchd agent with an app
+		identity, which is the path a person's copy of Threading actually takes.
+
+		Listening for and accepting incoming TCP does *not* need the privilege, which is why
+		remote access worked on the LAN before discovery existed and why a denial costs the
+		announcement rather than the door.
+	-->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Threading announces this Mac on your network so your paired iPhone can find it when its address changes.</string>
+	<!--
+		The service type Threading registers. TN3179 asks for it beside the usage description
+		whenever an app registers or browses for a specific Bonjour service.
+	-->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_threading._tcp</string>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

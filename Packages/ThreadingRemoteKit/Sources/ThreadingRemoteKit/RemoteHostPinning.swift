@@ -198,7 +198,17 @@ public struct RemoteHostPinSet: Equatable, Hashable, Sendable {
     }
 
     public func matches(certificateDER: Data) -> Bool {
-        let digest = Data(SHA256.hash(data: certificateDER))
+        matches(digest: Data(SHA256.hash(data: certificateDER)))
+    }
+
+    /// Whether a digest somebody else computed is one of the two this client accepts.
+    ///
+    /// The certificate is not always in hand. A Bonjour advertisement carries the fingerprint and
+    /// no certificate, and matching it against a held pin is how a phone decides whether a Mac on
+    /// this network is one it has already paired with. Deciding that from a digest is not weaker:
+    /// the digest is what the pin is compared against either way, and a service claiming a
+    /// fingerprint it cannot present still fails the TLS check on the connection that follows.
+    public func matches(digest: Data) -> Bool {
         if current.matches(digest: digest) { return true }
         guard let next else { return false }
         return next.matches(digest: digest)

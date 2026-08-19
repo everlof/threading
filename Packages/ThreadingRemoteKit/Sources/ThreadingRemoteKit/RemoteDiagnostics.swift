@@ -28,6 +28,21 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     case hostIdentityReset
     /// A prepared successor identity became the one the listeners present.
     case hostIdentityRotated
+    /// This Mac started advertising its listener on the local network. `origin` carries a hash of
+    /// the addresses behind the advertisement, never the addresses and never the instance name.
+    case hostDiscoveryRegistered
+    /// This Mac stopped advertising, because discovery was turned off, the LAN door closed, or
+    /// the identity behind the advertisement changed and a new registration replaced it.
+    case hostDiscoveryWithdrawn
+    /// A client saw a Threading service on the local network. `peer` is a pseudonym of the
+    /// advertised host id; the instance name and the address are never recorded.
+    case hostDiscoveryFound
+    /// A discovered service's fingerprint matched a Mac this client is already paired with, and
+    /// its address became a candidate for that Mac.
+    case hostDiscoveryMatched
+    /// A discovered service was not a Mac this client is paired with, so nothing was learned
+    /// from it. Discovery finds a known Mac's current address; it never acquires a new Mac.
+    case hostDiscoveryIgnored
     case relayConnected
     case relayFailed
     case authenticationRefused

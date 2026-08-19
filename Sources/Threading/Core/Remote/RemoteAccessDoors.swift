@@ -47,6 +47,15 @@ enum RemoteAccessDoor: String, CaseIterable, Sendable {
     /// binds nothing rather than falling back to cleartext.
     var requiresTLS: Bool { self != .loopback }
 
+    /// Whether this door's addresses are advertised over Bonjour.
+    ///
+    /// Only the LAN door. Loopback reaches this Mac alone, so advertising it would broadcast a
+    /// route nobody can take; a tailnet or VPN address is reached over a tunnel that multicast
+    /// does not cross, so an advertisement there would be a broadcast to nobody while still being
+    /// a broadcast. Same-network discovery is a convenience for the one door it can work on, and
+    /// the advertised endpoint list is what makes the others work.
+    var isAdvertisedOverBonjour: Bool { self == .lan }
+
     /// The wire vocabulary an address on this door is advertised under.
     var endpointKind: String {
         switch self {
@@ -374,15 +383,25 @@ struct RemoteListenerConfiguration: Equatable, Sendable {
     /// rather than a constant read inside the listener, because a client has to walk the same
     /// list and a test has to be able to state a range nothing else on the machine is using.
     var fallbackRange: ClosedRange<UInt16>
+    /// Whether the LAN door is advertised over Bonjour so a paired phone can find this Mac
+    /// without being told an address.
+    ///
+    /// On by default and separately switchable, because an advertisement is a broadcast: it is
+    /// visible to everyone on the network, and some people will want the door open without the
+    /// announcement. Turning it off costs nothing but the convenience — the advertised endpoint
+    /// list still carries every address, which is the same path a VPN or tailnet already uses.
+    var isDiscoveryEnabled: Bool
 
     init(
         preferredPort: UInt16 = RemoteAccessDefaults.defaultListenerPort,
         doors: Set<RemoteAccessDoor> = [],
-        fallbackRange: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange
+        fallbackRange: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange,
+        isDiscoveryEnabled: Bool = true
     ) {
         self.preferredPort = preferredPort
         self.doors = doors
         self.fallbackRange = fallbackRange
+        self.isDiscoveryEnabled = isDiscoveryEnabled
     }
 
     /// The ports the listener tries, in order.

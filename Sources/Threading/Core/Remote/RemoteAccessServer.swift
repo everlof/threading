@@ -218,13 +218,17 @@ final class RemoteAccessServer: @unchecked Sendable {
     init(
         services: RemoteAccessServerServices,
         addressSource: @escaping RemoteNetworkAddressSource = RemoteNetworkInterfaces.current,
-        identityProvider: any RemoteAccessIdentityProviding
+        identityProvider: any RemoteAccessIdentityProviding,
+        advertiser: any RemoteServiceAdvertising = RemoteServiceAdvertisers.standard(),
+        hostIDSource: @escaping @Sendable () -> String = { RemoteHostIdentity.current.id }
     ) {
         self.services = services
         self.listeners = RemoteListenerSet(
             queue: queue,
             addressSource: addressSource,
-            identityProvider: identityProvider
+            identityProvider: identityProvider,
+            advertiser: advertiser,
+            hostIDSource: hostIDSource
         )
         listeners.onConnection = { [weak self] connection in self?.accept(connection) }
     }
@@ -256,6 +260,15 @@ final class RemoteAccessServer: @unchecked Sendable {
     func refreshListenerAddresses() {
         listeners.refreshAddresses()
     }
+
+    /// Starts or stops advertising the LAN door over Bonjour. No listener is disturbed either
+    /// way: the door is whether this Mac answers, and this is whether it says so out loud.
+    func updateDiscovery(isEnabled: Bool) {
+        listeners.update(isDiscoveryEnabled: isEnabled)
+    }
+
+    /// What this Mac is broadcasting over Bonjour right now, if anything.
+    var advertisedService: RemoteServiceRegistration? { listeners.advertisedService }
 
     /// Rebuilds the routable listeners so they present the identity store's current certificate.
     /// The port does not move, and loopback is not disturbed.

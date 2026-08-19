@@ -1103,6 +1103,20 @@ final class AppSettings {
         }
     }
 
+    /// Whether this Mac announces its LAN door on the network so a paired phone finds it without
+    /// being told an address.
+    ///
+    /// On by default. It is a separate switch from the door itself because an advertisement is a
+    /// broadcast: everyone on the network can see the service, its instance name and its TXT
+    /// record. Those carry this Mac's id, the protocol version and the certificate fingerprint,
+    /// and nothing about the person using it.
+    var remoteAccessDiscoveryEnabled: Bool {
+        get { AppSettingDefinitions.remoteAccessDiscoveryEnabled.read(from: defaults) ?? true }
+        set {
+            AppSettingDefinitions.remoteAccessDiscoveryEnabled.write(newValue, to: defaults)
+        }
+    }
+
     /// How a newly shared session starts. The choice is only a default: the owner can switch
     /// the live session between collaborative and focused control at any time.
     var remoteInputControlDefault: RemoteInputControlDefault {

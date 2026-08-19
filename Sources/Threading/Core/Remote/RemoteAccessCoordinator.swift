@@ -1557,8 +1557,47 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private func listenerConfiguration() -> RemoteListenerConfiguration {
         RemoteListenerConfiguration(
             preferredPort: appSettings.remoteAccessListenerPort,
-            doors: appSettings.remoteAccessDoors
+            doors: appSettings.remoteAccessDoors,
+            isDiscoveryEnabled: appSettings.remoteAccessDiscoveryEnabled
         )
+    }
+
+    // MARK: - Discovery
+
+    /// Whether this Mac announces its LAN door with Bonjour.
+    var isDiscoveryEnabled: Bool { appSettings.remoteAccessDiscoveryEnabled }
+
+    /// Starts or stops the announcement. No listener is disturbed either way, so a phone already
+    /// connected over the LAN door stays connected.
+    func setDiscoveryEnabled(_ enabled: Bool) {
+        guard appSettings.remoteAccessDiscoveryEnabled != enabled else { return }
+        appSettings.remoteAccessDiscoveryEnabled = enabled
+        server.updateDiscovery(isEnabled: enabled)
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+    }
+
+    /// What this Mac is broadcasting over Bonjour right now, if anything.
+    ///
+    /// The registration rather than a Bool: the instance name and the TXT record are what a
+    /// person is entitled to see before deciding whether they want the broadcast at all.
+    var advertisedService: RemoteServiceRegistration? { server.advertisedService }
+
+    /// Whether a connection to the advertised service can wake this Mac, and the two facts
+    /// behind it. `.unknown` until `refreshWakeOnDemandFacts()` has read them.
+    private(set) var wakeOnDemand: RemoteWakeOnDemandFacts = .unknown {
+        didSet {
+            guard wakeOnDemand != oldValue else { return }
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+        }
+    }
+
+    /// Reads "Wake for network access" and browses briefly for a Sleep Proxy.
+    ///
+    /// Both are network-and-process work, so this is asynchronous and bounded; the answer is
+    /// allowed to stay unknown. Call it when the Remote Access page appears and after a network
+    /// change, never on a timer: a proxy is a property of the network this Mac is on.
+    func refreshWakeOnDemandFacts() async {
+        wakeOnDemand = await RemoteWakeOnDemandProbe.read()
     }
 
     /// Selects the routable doors and rebuilds only their listeners. Loopback and the doors that
