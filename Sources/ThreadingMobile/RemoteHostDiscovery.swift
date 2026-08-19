@@ -165,12 +165,20 @@ final class RemoteHostDiscovery {
     // MARK: - Lifecycle
 
     /// Starts browsing if there is a paired Mac to browse for.
+    ///
+    /// Idempotent, and also the way the match list is re-stated: calling it again with a changed
+    /// list keeps the browser and re-evaluates what is already on the network, because a Mac
+    /// paired *after* its announcement was seen would otherwise wait for the next one.
     func start(hosts: [PairedRemoteHost]) {
+        let previousKeys = Self.matchKeys(of: self.hosts)
         self.hosts = hosts
         guard hosts.contains(where: { $0.isOwnerDevice && $0.pinSet != nil }) else {
             stop()
             return
         }
+        // Only when what a match *depends on* changed. A reconnect rewrites a record's
+        // last-connected date, and re-resolving every service for that would be churn.
+        if Self.matchKeys(of: hosts) != previousKeys { forgetTracking() }
         guard browser == nil else { return }
 
         let browser = NWBrowser(
@@ -222,6 +230,16 @@ final class RemoteHostDiscovery {
             }
             return DiscoveredRemoteService(endpoint: result.endpoint, advertisement: advertisement)
         }
+    }
+
+    /// What a match depends on: which owner records exist and which certificates they accept.
+    static func matchKeys(of hosts: [PairedRemoteHost]) -> Set<String> {
+        Set(hosts.compactMap { host -> String? in
+            guard host.isOwnerDevice, let pins = host.pinSet else { return nil }
+            let next = pins.next.map { $0.bytes.map { String(format: "%02x", $0) }.joined() } ?? ""
+            let current = pins.current.bytes.map { String(format: "%02x", $0) }.joined()
+            return "\(host.id)|\(current)|\(next)"
+        })
     }
 
     /// The instance names a change set says have gone away.

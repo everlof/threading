@@ -384,6 +384,42 @@ final class RemoteHostDiscoveryTests: XCTestCase {
         )
     }
 
+    /// Pairing a Mac whose announcement is already on the network must not wait for the next
+    /// one. Re-stating the match list re-evaluates what is tracked; a reconnect that only moves a
+    /// record's last-connected date does not, because that would be churn.
+    func testAChangedMatchListReEvaluatesWhatIsAlreadyTracked() throws {
+        let discovery = RemoteHostDiscovery()
+        self.discovery = discovery
+        let host = try pairedHost()
+        let service = DiscoveredRemoteService(
+            endpoint: .service(
+                name: "OPAQUE",
+                type: RemoteDiscoveryDefaults.serviceType,
+                domain: RemoteDiscoveryDefaults.serviceDomain,
+                interface: nil
+            ),
+            advertisement: advertisement(hostID: "mac-1", fingerprint: fingerprint)
+        )
+
+        discovery.start(hosts: [host])
+        discovery.apply([service])
+        XCTAssertEqual(discovery.trackedServiceCount, 1)
+
+        var reconnected = host
+        reconnected.lastConnectedAt = Date().addingTimeInterval(60)
+        discovery.start(hosts: [reconnected])
+        XCTAssertEqual(
+            discovery.trackedServiceCount,
+            1,
+            "a record whose pins did not change is not a reason to resolve anything again"
+        )
+
+        var rotated = host
+        rotated.pinnedFingerprint = nextFingerprint.hex
+        discovery.start(hosts: [rotated])
+        XCTAssertEqual(discovery.trackedServiceCount, 0)
+    }
+
     // MARK: - Starting and stopping
 
     /// Nothing is browsed for until there is a Mac a discovery could mean, which is also what
