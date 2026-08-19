@@ -458,21 +458,21 @@ struct RemoteListenerConfiguration: Equatable, Sendable {
 
 /// The order the listener tries ports in.
 ///
-/// Deterministic, and short enough that a client can walk the same list. The configured port
-/// comes first, then the shipped range, so a person who moved the port off the default still
-/// lands somewhere both ends can predict rather than on an ephemeral port nobody can guess.
+/// Deterministic, and short enough that a client can walk the same list. The order itself is
+/// `RemoteListenerPorts.candidates` in the shared kit, because the phone walks it too and a
+/// second implementation of "the configured port first, then the shipped range" is a re-pair
+/// waiting for the day the two disagree.
+///
+/// What stays here is the one rule that is the Mac's alone: this process is not root, so a
+/// privileged port is not a port it may try. The kit describes ports both ends talk about; this
+/// describes the ports this build is allowed to open. Filtering after the shared order is the
+/// same answer as filtering inside it, because that order is already de-duplicated.
 enum RemoteListenerPortPlan {
     static func candidates(
         preferred: UInt16,
         range: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange
     ) -> [UInt16] {
-        var seen: Set<UInt16> = []
-        var candidates: [UInt16] = []
-        for port in [preferred] + Array(range) {
-            guard port >= RemoteAccessDefaults.minimumListenerPort else { continue }
-            guard seen.insert(port).inserted else { continue }
-            candidates.append(port)
-        }
-        return candidates
+        RemoteListenerPorts.candidates(preferred: preferred, range: range)
+            .filter { $0 >= RemoteAccessDefaults.minimumListenerPort }
     }
 }

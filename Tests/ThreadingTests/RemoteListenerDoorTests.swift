@@ -236,6 +236,39 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         )
     }
 
+    /// The Mac and the phone walk one list, and this is the assertion that keeps it one.
+    ///
+    /// `RemoteAccessDefaults` used to hold its own copy of the port and the range. They agreed
+    /// with the kit's by hand, which is exactly the arrangement that stops agreeing on the day
+    /// somebody moves one of them: the listener would answer on a port the phone never tries,
+    /// and the symptom would be a re-pair rather than a failing build.
+    func testTheMacPortPlanAgreesWithTheSharedKitForTheShippedDefaults() {
+        XCTAssertEqual(RemoteAccessDefaults.defaultListenerPort, RemoteListenerPorts.defaultPort)
+        XCTAssertEqual(
+            RemoteAccessDefaults.listenerPortFallbackRange,
+            RemoteListenerPorts.fallbackRange
+        )
+        XCTAssertEqual(
+            RemoteListenerPortPlan.candidates(
+                preferred: RemoteAccessDefaults.defaultListenerPort
+            ),
+            RemoteListenerPorts.candidates(preferred: RemoteListenerPorts.defaultPort),
+            "the Mac tries a different order from the one the phone walks"
+        )
+        // A moved port is the interesting case: it is the one a person can change, and it is
+        // the one where a divergent range would strand a paired phone.
+        let moved = RemoteAccessDefaults.listenerPortFallbackRange.upperBound + 1
+        XCTAssertEqual(
+            RemoteListenerPortPlan.candidates(preferred: moved),
+            RemoteListenerPorts.candidates(preferred: moved)
+        )
+        // And the one rule that is the Mac's alone survives pointing at the shared list.
+        XCTAssertFalse(
+            RemoteListenerPortPlan.candidates(preferred: 80).contains(80),
+            "a privileged port became a candidate when the order moved to the kit"
+        )
+    }
+
     // MARK: - Doors
 
     func testLoopbackIsBoundCleartextAndIsNotAdvertised() throws {
@@ -645,6 +678,99 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         XCTAssertFalse(
             (doors[.lan] ?? []).contains { ["awdl0", "llw0", "vmenet0"].contains($0.interfaceName) },
             "Apple's peer-to-peer radios carry nothing a phone can route to"
+        )
+    }
+
+    /// Phase 4 is almost entirely honesty about addresses: a VPN puts the phone on a network
+    /// this Mac already listens on, so what has to be right is which door a tunnel belongs to.
+    ///
+    /// Every VPN and the tailnet arrive on a `utun`, and the only thing telling them apart is
+    /// whether the tunnel carries an address out of `100.64.0.0/10`. UniFi Teleport is
+    /// WireGuard, which hands out an address inside the home network, so it is the case that
+    /// looks most like the LAN and is still not the tailnet.
+    func testATunnelIsTheTailnetOnlyWhileItCarriesACarrierGradeNATAddress() {
+        func door(_ address: String) -> RemoteAccessDoor? {
+            RemoteDoorClassification.door(
+                forInterface: "utun3",
+                addresses: [RemoteNetworkAddress(interfaceName: "utun3", address: address)]
+            )
+        }
+
+        XCTAssertEqual(door("192.168.1.55"), .vpn, "Teleport hands out an address in this network")
+        XCTAssertEqual(door("10.8.0.2"), .vpn, "an ordinary WireGuard tunnel is somebody's VPN")
+        XCTAssertEqual(door("172.16.4.9"), .vpn)
+        XCTAssertEqual(door("100.101.102.103"), .tailscale)
+        // The range's own edges, because "starts with 100." is the rule this is not.
+        XCTAssertEqual(door("100.64.0.1"), .tailscale)
+        XCTAssertEqual(door("100.127.255.254"), .tailscale)
+        XCTAssertEqual(door("100.63.255.254"), .vpn, "100.63 is below the CGNAT range")
+        XCTAssertEqual(door("100.128.0.1"), .vpn, "100.128 is above it")
+
+        // A tunnel holding both is the tailnet, and the same address on Ethernet is the LAN.
+        XCTAssertEqual(
+            RemoteDoorClassification.door(forInterface: "utun3", addresses: [
+                RemoteNetworkAddress(interfaceName: "utun3", address: "10.8.0.2"),
+                RemoteNetworkAddress(interfaceName: "utun3", address: "100.101.102.103")
+            ]),
+            .tailscale
+        )
+        XCTAssertEqual(
+            RemoteDoorClassification.door(
+                forInterface: "en0",
+                addresses: [RemoteNetworkAddress(interfaceName: "en0", address: "192.168.1.55")]
+            ),
+            .lan
+        )
+    }
+
+    /// And the kind a phone reads is the door's, not a guess from the address.
+    ///
+    /// A private address is what a tunnel into this network hands out, so a rule that read the
+    /// address alone would call Teleport's endpoint `lan` and a phone would try it while off the
+    /// Wi-Fi. Built from values rather than from a bind: the `vpn` door is classified today and
+    /// bound later, and this assertion is about the advertisement either way.
+    func testATunnelAddressIsAdvertisedAsVPNAndAnEthernetOneAsLAN() {
+        let port: UInt16 = 8760
+        let status = RemoteListenerStatus(
+            port: port,
+            doors: [
+                .lan: .bound([RemoteListenerBinding(
+                    door: .lan,
+                    address: RemoteNetworkAddress(interfaceName: "en0", address: "192.168.1.42"),
+                    port: port
+                )]),
+                .vpn: .bound([RemoteListenerBinding(
+                    door: .vpn,
+                    address: RemoteNetworkAddress(interfaceName: "utun3", address: "192.168.1.55"),
+                    port: port
+                )])
+            ],
+            firewall: .unknown
+        )
+
+        let endpoints = RemoteAccessCoordinator.doorEndpoints(
+            status,
+            advertisedHostname: "",
+            localHostname: nil
+        )
+        XCTAssertEqual(
+            endpoints.map(\.baseURL.absoluteString),
+            ["https://192.168.1.42:\(port)/", "https://192.168.1.55:\(port)/"]
+        )
+        XCTAssertEqual(
+            endpoints.map(\.kind),
+            [RemoteHostEndpointKind.lan, RemoteHostEndpointKind.vpn],
+            "two private addresses, and the door each arrived on is what names it"
+        )
+        XCTAssertTrue(
+            endpoints.allSatisfy(\.expectsPinnedIdentity),
+            "the same certificate answers on every routable door, which is what lets a VPN "
+                + "address work with the pin scanned on the Wi-Fi"
+        )
+        XCTAssertEqual(
+            endpoints.map(\.baseURL.port),
+            [Int(port), Int(port)],
+            "the port is the same one over the tunnel, which is what makes no re-pair possible"
         )
     }
 

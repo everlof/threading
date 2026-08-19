@@ -385,6 +385,237 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         )
     }
 
+    // MARK: - The announcement, and what it buys
+
+    /// The switch belongs to the `lan` door and to no other, so it lives in that door's card.
+    ///
+    /// Asserted through the card the two views actually land in rather than through the order
+    /// they were appended in: a row moved one section down still reads as "This network" in the
+    /// source and reads as Tailscale on the screen.
+    func testTheAnnouncementSwitchIsInsideTheThisNetworkCard() throws {
+        let page = self.page(state: .lanBound)
+        let toggle = try XCTUnwrap(
+            view(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.discoveryToggle)
+        )
+        let door = try XCTUnwrap(view(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.status(.thisNetwork)
+        ))
+        XCTAssertIdentical(
+            card(containing: toggle),
+            card(containing: door),
+            "the announcement moved out of the card whose door carries it"
+        )
+        let wake = try XCTUnwrap(
+            label(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand)
+        )
+        XCTAssertIdentical(card(containing: wake), card(containing: door))
+    }
+
+    /// A broadcast is visible to everyone on the network, so the row says what leaves this Mac
+    /// rather than that something does.
+    func testTheAnnouncementRowStatesWhatIsBroadcast() throws {
+        let page = self.page(state: .lanBound)
+        let labels = allLabels(in: page.view).map(\.stringValue)
+        let subtitle = try XCTUnwrap(
+            labels.first { $0.hasPrefix("Broadcasts an opaque name") },
+            "the announcement does not say what it broadcasts"
+        )
+        for named in ["opaque name", "id", "protocol version", "certificate fingerprint"] {
+            XCTAssertTrue(subtitle.contains(named), "the payload does not name the \(named)")
+        }
+        XCTAssertTrue(
+            subtitle.contains("Never the computer name and never your name"),
+            "the row does not say what is never broadcast, which is the reason to read it"
+        )
+        XCTAssertTrue(
+            subtitle.contains("pairing still needs the code"),
+            "the row leaves a reader thinking a broadcast is a way in"
+        )
+        XCTAssertFalse(subtitle.contains("\u{2014}"), "an em dash reached the copy")
+    }
+
+    /// The instance name is the one part of the payload that is safe to print, and printing it
+    /// is what lets a person confirm that the broadcast carries no name of theirs.
+    func testTheAnnouncedLineNamesTheOpaqueInstanceAndOnlyWhenOneIsRegistered() throws {
+        let announced = self.page(
+            state: .lanBound,
+            discovery: DiscoveryState.announcedAndCanWake.presentation
+        )
+        let line = try XCTUnwrap(label(
+            in: announced.view,
+            id: RemoteAccessPreferencesViewController.Identifier.announcedName
+        ))
+        XCTAssertEqual(line.stringValue, "Announced as \(Self.instanceName)")
+        XCTAssertFalse(line.isHidden)
+        XCTAssertEqual(
+            Self.instanceName.count,
+            RemoteBase32.encode(Data(repeating: 0, count: RemoteDiscoveryDefaults.instanceNameByteCount)).count,
+            "the fixture is not the shape of name the Mac actually publishes"
+        )
+
+        let off = self.page(state: .lanBound, discovery: DiscoveryState.off.presentation)
+        let offLine = try XCTUnwrap(label(
+            in: off.view,
+            id: RemoteAccessPreferencesViewController.Identifier.announcedName
+        ))
+        XCTAssertTrue(
+            isEffectivelyHidden(offLine),
+            "a line about an announcement was shown while nothing was registered"
+        )
+        // The whole row leaves, not only its text: hiding a label keeps the mark column's own
+        // height constraint, and the card printed a blank line where the fact had been. Measured
+        // by where the line below it lands, because a hidden label keeps its own frame either
+        // way, which is exactly why the first version of this passed on the bug.
+        let announcedWake = try XCTUnwrap(label(
+            in: announced.view,
+            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
+        ))
+        let offWake = try XCTUnwrap(label(
+            in: off.view,
+            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
+        ))
+        XCTAssertGreaterThan(
+            ink(of: offWake, in: off.host).minY,
+            ink(of: announcedWake, in: announced.host).minY,
+            "the announced line left a gap behind it"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(view(
+                in: off.view,
+                id: RemoteAccessPreferencesViewController.Identifier.discoveryToggle
+            ) as? ThemedToggle).state,
+            .off
+        )
+    }
+
+    /// "Can wake this Mac" is a promise the network has to keep, so it is printed only when both
+    /// facts hold, and each of the other three states names the exact thing that is missing.
+    func testWakingIsClaimedOnlyWithBothFactsAndOtherwiseNamesTheReason() throws {
+        let expected: [(DiscoveryState, String, String, NSColor)] = [
+            (.announcedAndCanWake, "Can wake this Mac from sleep", "\u{2713}", Design.Status.positive),
+            (
+                .wakeSettingOff,
+                "Wake for network access is off in System Settings \u{25B8} Energy",
+                "\u{2013}",
+                Design.Text.tertiary
+            ),
+            (
+                .noSleepProxy,
+                "No sleep proxy on this network; an Apple TV or HomePod provides one",
+                "\u{2013}",
+                Design.Text.tertiary
+            ),
+            (.notChecked, "Not checked yet", "\u{2013}", Design.Text.tertiary)
+        ]
+        for (state, text, mark, ink) in expected {
+            let page = self.page(state: .lanBound, discovery: state.presentation)
+            let line = try XCTUnwrap(label(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
+            ))
+            XCTAssertEqual(line.stringValue, text, "\(state)")
+            let glyph = try XCTUnwrap(label(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemandMark
+            ))
+            // The mark as well as the ink: this is the page's only signal under Differentiate
+            // Without Colour, and a green tick beside three of these would be the exact promise
+            // the network cannot keep.
+            XCTAssertEqual(glyph.stringValue, mark, "\(state)")
+            XCTAssertEqual(glyph.textColor?.hexString, ink.hexString, "\(state)")
+        }
+    }
+
+    /// A Sleep Proxy answers for an advertised service, so with nothing advertised there is
+    /// nothing to wake this Mac however the two facts read.
+    ///
+    /// The switch being off is the reachable case: `pmset` still says the setting is on and a
+    /// proxy is still on the network, so both facts hold and the page would have printed a green
+    /// "can wake this Mac" for a service it had just withdrawn.
+    func testWakingIsNotClaimedWhileNothingIsAnnounced() throws {
+        let page = self.page(state: .lanBound, discovery: DiscoveryState.off.presentation)
+        XCTAssertTrue(
+            DiscoveryState.off.presentation.wakeFacts.canWakeThisMac,
+            "the fixture no longer holds both facts, so it proves nothing"
+        )
+        let line = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
+        ))
+        XCTAssertEqual(line.stringValue, "Waking needs an announcement on this network")
+        let glyph = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemandMark
+        ))
+        XCTAssertEqual(glyph.stringValue, "\u{2013}")
+        XCTAssertEqual(glyph.textColor?.hexString, Design.Text.tertiary.hexString)
+    }
+
+    /// Unknown is never yes, on the page as well as in the facts.
+    func testNoWakeClaimSurvivesEitherFactBeingMissing() throws {
+        let partial: [RemoteWakeOnDemandFacts] = [
+            Self.wakeFacts(true, nil),
+            Self.wakeFacts(nil, true),
+            Self.wakeFacts(nil, nil),
+            .unknown
+        ]
+        for facts in partial {
+            let page = self.page(
+                state: .lanBound,
+                discovery: RemoteDiscoveryPresentation(
+                    isEnabled: true,
+                    announcedName: Self.instanceName,
+                    wakeFacts: facts
+                )
+            )
+            let line = try XCTUnwrap(label(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
+            ))
+            XCTAssertEqual(
+                line.stringValue,
+                "Not checked yet",
+                "a half-read answer was rendered as a reason it had looked at"
+            )
+            XCTAssertFalse(
+                line.stringValue.contains("Can wake"),
+                "the page promised waking without both facts"
+            )
+        }
+    }
+
+    /// The two fact lines start on one column, under the status line they qualify.
+    ///
+    /// A render found it: the wake line carries a mark and the announced line did not, so the
+    /// two sentences began four points apart in a card where everything else is aligned by ink.
+    func testTheTwoFactLinesShareTheirColumn() throws {
+        let page = self.page(
+            state: .lanBound,
+            discovery: DiscoveryState.announcedAndCanWake.presentation
+        )
+        let announced = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.announcedName
+        ))
+        let wake = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
+        ))
+        XCTAssertEqual(
+            ink(of: announced, in: page.host).minX,
+            ink(of: wake, in: page.host).minX,
+            accuracy: 0.5,
+            "the two facts under one switch begin on two columns"
+        )
+        // The host is unflipped, so the line higher on the page has the larger y.
+        XCTAssertGreaterThan(
+            ink(of: announced, in: page.host).minY,
+            ink(of: wake, in: page.host).minY,
+            "the wake line reads before the announcement it depends on"
+        )
+    }
+
     // MARK: - The browser sub-option carries its own reason and fix
 
     /// The panel used to say "Private connection unavailable" while the only explanation sat in
@@ -715,11 +946,17 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         }
 
         var written: [String] = []
-        // The squeezed pane as well, for the one state that has two columns to fit into it.
-        let fixtures: [(state: PageState, width: CGFloat, suffix: String)] =
-            PageState.allCases.map { ($0, Render.width, "") }
-                + [(.lanBound, Render.narrowWidth, "-narrow")]
-        for (state, width, suffix) in fixtures {
+        // The squeezed pane as well, for the one state that has two columns to fit into it, and
+        // the announcement's five states on the page they actually appear on.
+        let fixtures: [
+            (state: PageState, width: CGFloat, discovery: RemoteDiscoveryPresentation?, suffix: String)
+        ] =
+            PageState.allCases.map { ($0, Render.width, nil, "") }
+                + [(.lanBound, Render.narrowWidth, nil, "-narrow")]
+                + DiscoveryState.allCases.map {
+                    (.lanBound, Render.width, $0.presentation, "-discovery-\($0.fileName)")
+                }
+        for (state, width, discovery, suffix) in fixtures {
             for (name, appearanceName) in [
                 ("light", NSAppearance.Name.aqua),
                 ("dark", .darkAqua)
@@ -731,7 +968,12 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 // built outside it every label that sits on the ground rather than on a card
                 // came out dark on dark.
                 appearance.performAsCurrentDrawingAppearance {
-                    let page = self.page(state: state, width: width, appearance: appearance)
+                    let page = self.page(
+                        state: state,
+                        width: width,
+                        appearance: appearance,
+                        discovery: discovery
+                    )
                     png = self.pngData(of: page.host)
                 }
                 let data = try XCTUnwrap(png, "\(state) rendered nothing in \(name)")
@@ -917,10 +1159,108 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 : RemoteAccessSettingsRenderTests.identity
         }
 
+        /// What the announcement is doing in this page state, when a test does not say.
+        ///
+        /// Announced exactly when the `lan` door has an address under it: the registration rides
+        /// on that door's listeners and nowhere else, so a page with the tailnet door up and the
+        /// LAN door off has the switch on and nothing on the network.
+        var discovery: RemoteDiscoveryPresentation {
+            hasBoundAddress && thisNetworkIsOn
+                ? DiscoveryState.announcedAndCanWake.presentation
+                : RemoteDiscoveryPresentation(
+                    isEnabled: true,
+                    announcedName: nil,
+                    wakeFacts: .unknown
+                )
+        }
+
         private var approvalURL: URL { RemoteAccessSettingsRenderTests.approvalURL }
         private var serveOrigin: URL {
             URL(string: "https://\(RemoteAccessSettingsRenderTests.magicDNSName):8443/")!
         }
+    }
+
+    /// The announcement and the wake facts, as the five states a person can be looking at.
+    ///
+    /// A separate axis from `PageState` rather than more cases in it: neither value changes any
+    /// door's status line, and multiplying nine page states by five would photograph forty-five
+    /// pages to show five differences.
+    enum DiscoveryState: CaseIterable {
+        /// Announced, and the network can wake this Mac. Both facts hold.
+        case announcedAndCanWake
+        /// The switch is off, so nothing is registered.
+        case off
+        /// Announced, and "Wake for network access" is off in System Settings.
+        case wakeSettingOff
+        /// Announced, the setting is on, and no proxy answered on this network.
+        case noSleepProxy
+        /// Announced, and the probe has not produced an answer yet.
+        case notChecked
+
+        var fileName: String {
+            switch self {
+            case .announcedAndCanWake: return "announced-can-wake"
+            case .off: return "off"
+            case .wakeSettingOff: return "wake-setting-off"
+            case .noSleepProxy: return "no-sleep-proxy"
+            case .notChecked: return "not-checked"
+            }
+        }
+
+        var presentation: RemoteDiscoveryPresentation {
+            switch self {
+            case .announcedAndCanWake:
+                return RemoteDiscoveryPresentation(
+                    isEnabled: true,
+                    announcedName: RemoteAccessSettingsRenderTests.instanceName,
+                    wakeFacts: RemoteAccessSettingsRenderTests.wakeFacts(true, true)
+                )
+            case .off:
+                // Both wake facts hold and nothing is registered, which is the combination that
+                // would have printed a green "can wake" through a service that does not exist.
+                return RemoteDiscoveryPresentation(
+                    isEnabled: false,
+                    announcedName: nil,
+                    wakeFacts: RemoteAccessSettingsRenderTests.wakeFacts(true, true)
+                )
+            case .wakeSettingOff:
+                return RemoteDiscoveryPresentation(
+                    isEnabled: true,
+                    announcedName: RemoteAccessSettingsRenderTests.instanceName,
+                    wakeFacts: RemoteAccessSettingsRenderTests.wakeFacts(false, true)
+                )
+            case .noSleepProxy:
+                return RemoteDiscoveryPresentation(
+                    isEnabled: true,
+                    announcedName: RemoteAccessSettingsRenderTests.instanceName,
+                    wakeFacts: RemoteAccessSettingsRenderTests.wakeFacts(true, false)
+                )
+            case .notChecked:
+                return RemoteDiscoveryPresentation(
+                    isEnabled: true,
+                    announcedName: RemoteAccessSettingsRenderTests.instanceName,
+                    wakeFacts: .unknown
+                )
+            }
+        }
+    }
+
+    /// The opaque instance name a Mac broadcasts, as `RemoteDiscoveryDefaults` derives one.
+    /// Derived rather than typed so the fixture cannot photograph a shape the Mac never
+    /// publishes.
+    nonisolated private static let instanceName = RemoteDiscoveryDefaults.instanceName(
+        hostID: "6B0C6A4E-1C6E-4A5B-9F4E-9C2A2E9E5A11"
+    )
+
+    nonisolated private static func wakeFacts(
+        _ womp: Bool?,
+        _ proxy: Bool?
+    ) -> RemoteWakeOnDemandFacts {
+        RemoteWakeOnDemandFacts(
+            wakeForNetworkAccess: womp,
+            sleepProxyPresent: proxy,
+            readAt: Date(timeIntervalSince1970: 1_760_000_000)
+        )
     }
 
     private struct Page {
@@ -937,7 +1277,8 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         state: PageState,
         width: CGFloat = Render.width,
         appearance: NSAppearance? = nil,
-        identity: RemoteIdentityCardPresentation? = nil
+        identity: RemoteIdentityCardPresentation? = nil,
+        discovery: RemoteDiscoveryPresentation? = nil
     ) -> Page {
         let controller = RemoteAccessPreferencesViewController()
         let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: Render.height))
@@ -991,6 +1332,7 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             identity: identity ?? state.identity
         )
         controller.apply(doors)
+        controller.apply(discovery ?? state.discovery)
         controller.applyListeningState(
             connection: RemoteConnectionStatusPresentation.resolve(
                 statuses: doors.offeredStatuses,

@@ -2275,23 +2275,35 @@ access to reach this Mac on Wi-Fi. Turn it on in Settings.** when iOS is blockin
 Tapping the title takes you to the pairing screen or to Settings rather than repeating the
 attempt.
 
-On the same Wi-Fi, the iPhone finds the Mac by itself. Threading announces the connection on the
-network under an opaque name, and the announcement carries three things: this Mac's id, the
-protocol version, and its certificate fingerprint. It never carries your name, the computer's
-name, or anything about your chats. The iPhone pays attention to an announcement only when the
-fingerprint is one it already trusts for a Mac you have already paired with, so a stranger's Mac
-on the same network is ignored and pairing is still only ever the QR code. What it buys you is
-the case that used to need a re-scan: when your router gives the Mac a different address, the
-phone finds the new one and reconnects with nothing to do. It works on Wi-Fi and Ethernet only,
-not through a VPN or Tailscale, where the Mac's advertised address list is what carries the
-connection instead. Turn the announcement off under **Settings > Remote Access** if you would
-rather the Mac stayed quiet; the connection keeps working. The first time Threading announces
-itself, macOS asks for permission to use the local network.
+On the same Wi-Fi, the iPhone finds the Mac by itself. **Announce on this network**, in the
+**This network** card, is the switch for it, and it is on to begin with. The announcement carries
+an opaque name plus three things: this Mac's id, the protocol version, and its certificate
+fingerprint. It never carries your name, the computer's name, or anything about your chats, and
+it is not a way in: pairing is still only ever the QR code. The iPhone pays attention to an
+announcement only when the fingerprint is one it already trusts for a Mac you have paired with,
+so a stranger's Mac on the same network is ignored. What it buys you is the case that used to
+need a re-scan: when your router gives the Mac a different address, the phone finds the new one
+and reconnects with nothing to do. It works on Wi-Fi and Ethernet only, not through a VPN or
+Tailscale, where the Mac's advertised address list is what carries the connection instead. Turn
+it off if you would rather the Mac stayed quiet; the connection keeps working, and the phone goes
+back to remembering addresses. The first time Threading announces itself, macOS asks for
+permission to use the local network.
+
+Under the switch the page prints what is actually on the network, **Announced as** and the opaque
+name, so you can see for yourself that no name of yours is in it. Beside it is what the
+announcement buys while the Mac is asleep. macOS can hand an announced connection to a sleep
+proxy on your network, which is what an Apple TV, a HomePod or a capable router provides, and the
+proxy wakes the Mac when your phone connects. Threading says **Can wake this Mac from sleep**
+only when both halves are true, and otherwise says which one is missing: that **Wake for network
+access** is off in System Settings, that there is no sleep proxy on this network, that it has not
+checked yet, or that nothing is being announced for a proxy to answer for. It never promises
+waking on a network that cannot do it.
 
 When the code you scan carries this Mac's identity, the pairing screen says so: the iPhone will
 then trust exactly that Mac's certificate and nothing else, with no certificate authority in the
-path. Choose Mac shows the 26-character identity code beside each paired Mac, and it is the same
-code the Mac's own Remote Access settings print, so the two can be compared by eye. A certificate
+path. The phone's **Settings** shows the 26-character identity code under the Mac it is paired
+with, and it is the same code the Mac's own Remote Access settings print, so the two can be
+compared by eye. A certificate
 that does not match is reported by name, **This Mac’s identity does not match the one you paired
 with**, and never as a network error or a changed address. If Remote Access was reset on the Mac,
 scan its code again; a Mac that replaces its certificate the ordinary way announces the
