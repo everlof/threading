@@ -3781,12 +3781,6 @@
     "Owner": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ägare" } } }
     },
-    "Paired devices can connect through Relay. Tailscale pairing: %@": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Parkopplade enheter kan ansluta via reläet. Tailscale-parkoppling: %@" } } }
-    },
-    "Relay fallback ready": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Reläreserven är redo" } } }
-    },
     "Allow Threading to publish this private service, then retry.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillåt Threading att publicera den här privata tjänsten och försök sedan igen." } } }
     },
@@ -3868,9 +3862,6 @@
     "HoverPopoverScheduler": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "HoverPopoverScheduler" } } }
     },
-    "In Private + Sharing, let your paired devices use Relay when Tailscale cannot be reached. Off fails closed on the private path.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "I Privat + delning kan parkopplade enheter använda reläet när Tailscale inte kan nås. Av innebär att den privata vägen stängs vid fel." } } }
-    },
     "Install Tailscale on this Mac to use private access.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Installera Tailscale på denna Mac för att använda privat åtkomst." } } }
     },
@@ -3880,32 +3871,17 @@
     "Instant (usage pill)": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Omedelbar (användningspillret)" } } }
     },
-    "Keep Sharing Relay Ready": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Håll delningsreläet redo" } } }
-    },
     "Looking for Tailscale…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Letar efter Tailscale…" } } }
     },
-    "Owner Relay Fallback": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Reläreserv för ägare" } } }
-    },
-    "Private + Sharing": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Privat + delning" } } }
-    },
     "Private HTTPS endpoint": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Privat HTTPS-slutpunkt" } } }
-    },
-    "Private pairing is ready. The public relay starts when you share.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Privat parkoppling är klar. Det offentliga reläet startar när du delar." } } }
     },
     "Publishing Threading privately…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Publicerar Threading privat…" } } }
     },
     "Ready at %@.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Redo på %@." } } }
-    },
-    "Relay supports ordinary share links. Tailscale keeps access inside your private tailnet. Private + Sharing uses Tailscale for pairing and starts the public relay only when it is needed.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Relä stöder vanliga delningslänkar. Tailscale håller åtkomsten inom ditt privata tailnet. Privat + delning använder Tailscale för parkoppling och startar det offentliga reläet endast när det behövs." } } }
     },
     "Remote Access is not ready.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fjärråtkomst är inte redo." } } }
@@ -3915,9 +3891,6 @@
     },
     "Signed in and running": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inloggad och igång" } } }
-    },
-    "Start the public relay immediately instead of waiting until you create a public share link.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Starta det offentliga reläet direkt i stället för att vänta tills du skapar en offentlig delningslänk." } } }
     },
     "Tailscale Readiness": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale-status" } } }
@@ -3986,11 +3959,6 @@
         "sv": { "stringUnit": { "state": "translated", "value": "Lyssnaren binds till 127.0.0.1 och det valda HTTPS-reläet eller Tailscale Serve publicerar bara den lyssnaren. Threading öppnar ingen LAN-lyssnare, så macOS frågar aldrig efter åtkomst till lokalt nätverk." } }
       }
     },
-    "Available privately through %@.": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Tillgänglig privat via %@." } }
-      }
-    },
     "Both": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Båda" } }
@@ -4041,34 +4009,14 @@
         "sv": { "stringUnit": { "state": "translated", "value": "Parkoppling inte tillgänglig" } }
       }
     },
-    "Private Tailscale pairing and public share links are both ready.": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Privat Tailscale-parkoppling och offentliga delningslänkar är båda redo." } }
-      }
-    },
     "Private connection unavailable": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Privat anslutning inte tillgänglig" } }
       }
     },
-    "Private pairing is ready. Sharing relay: %@": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Privat parkoppling är redo. Delningsrelä: %@" } }
-      }
-    },
-    "Private pairing is ready; the sharing relay is connecting…": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Privat parkoppling är redo; delningsreläet ansluter…" } }
-      }
-    },
     "Relay supports ordinary share links. Tailscale keeps access inside your private tailnet. Both uses Tailscale for pairing and the relay for sharing.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Relä stöder vanliga delningslänkar. Tailscale håller åtkomsten inom ditt privata tailnet. Båda använder Tailscale för parkoppling och reläet för delning." } }
-      }
-    },
-    "Relay": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Relä" } }
       }
     },
     "Retry Connection": {
@@ -4086,11 +4034,6 @@
         "sv": { "stringUnit": { "state": "translated", "value": "Återkalla %@?" } }
       }
     },
-    "Tailscale pairing and share links are ready.": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Tailscale-parkoppling och delningslänkar är redo." } }
-      }
-    },
     "Tailscale": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Tailscale" } }
@@ -4099,11 +4042,6 @@
     "The QR code appears here as soon as the selected connection is ready.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "QR-koden visas här så snart den valda anslutningen är redo." } }
-      }
-    },
-    "The local mirror is ready on 127.0.0.1:%@. Waiting for %@…": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Den lokala speglingen är redo på 127.0.0.1:%1$@. Väntar på %2$@…" } }
       }
     },
     "The local mirror is ready on 127.0.0.1:%lld. Waiting for %@…": {
@@ -4121,34 +4059,9 @@
         "sv": { "stringUnit": { "state": "translated", "value": "Threading kunde inte läsa nyckelringsposten för parkopplade enheter. Posten skrivs inte över och en autentiseringsuppgift som inte kan bevaras utfärdas inte." } }
       }
     },
-    "Turn on Remote Access. Threading will start a local mirror and connect it to %@.": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Slå på Fjärråtkomst. Threading startar en lokal spegling och ansluter den till %@." } }
-      }
-    },
     "Turning it off closes every connection and shared-chat link. Your explicitly paired devices remain paired for the next time.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "När du stänger av funktionen stängs alla anslutningar och delade chattlänkar. Dina uttryckligen parkopplade enheter förblir parkopplade till nästa gång." } }
-      }
-    },
-    "the HTTPS relay": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "HTTPS-reläet" } }
-      }
-    },
-    "the relay": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "reläet" } }
-      }
-    },
-    "your Tailscale tailnet": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "ditt Tailscale-tailnet" } }
-      }
-    },
-    "your tailnet": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "ditt tailnet" } }
       }
     },
     "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.": {
@@ -8660,28 +8573,6 @@
         }
       }
     },
-    "Connected through %@.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ansluten via %@."
-          }
-        }
-      }
-    },
-    "Connecting securely": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ansluter säkert"
-          }
-        }
-      }
-    },
     "Connecting…": {
       "extractionState": "stale",
       "localizations": {
@@ -12931,17 +12822,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Laddar konversation"
-          }
-        }
-      }
-    },
-    "Local access only": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Endast lokal åtkomst"
           }
         }
       }
@@ -24825,17 +24705,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "repo-roten"
-          }
-        }
-      }
-    },
-    "the secure relay": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "det säkra reläet"
           }
         }
       }
