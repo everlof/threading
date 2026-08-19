@@ -795,8 +795,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     var isRunning: Bool { stream.isRunning }
 
-    /// Whether this session is the one on screen, tracked so it only raises the sidebar's
-    /// attention dot when a request is waiting *off* screen — on screen, the card is the cue.
+    /// Whether this session is the one on screen. Visibility still feeds activity refreshes and
+    /// read receipts, but it does not erase an operational state such as a pending permission:
+    /// the sidebar must keep saying that the turn is blocked until the request is answered.
     var isVisible = false {
         didSet {
             guard isVisible != oldValue else { return }
@@ -807,8 +808,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// What the sidebar shows for this session.
     ///
     /// A request pending inside a turn is the blocked state, not the unread one: the turn has
-    /// stopped until it is answered. Off screen only, as before — on screen the permission card
-    /// is the cue, and a second mark in the sidebar would only repeat it.
+    /// stopped until it is answered. This remains true while the conversation is visible. The
+    /// inline card explains what needs an answer; the sidebar mark answers whether the session
+    /// is working or waiting, and showing a spinner there would state the opposite.
     ///
     /// Work left running outranks `idle` for the same reason it does in `SessionActivityTracker`:
     /// a turn that ends on top of a backgrounded shell is not the session finishing, and saying
@@ -820,7 +822,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// is dimmed, resuming is the offer, and the refusal is still the newest thing in the
     /// transcript when it comes back.
     var activity: SessionActivity {
-        if hasPendingPermission, !isVisible {
+        if hasPendingPermission {
             return isTurnInFlight ? .awaitingUser : .needsAttention
         }
         if isTurnInFlight { return .working }

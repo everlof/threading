@@ -483,12 +483,13 @@ Each queued request is re-evaluated when it reaches the front. Parallel calls ma
 classified before the first card's **Allow for Session** choice changed policy; presenting the
 later cards from that stale classification contradicted both the choice and the **Auto** chip.
 
-A pending Claude request in an **off-screen** session raises the sidebar's attention dot: a
-native session reports `activity` through `AgentRuntime` alongside terminal sessions, returning
-`.needsAttention` when anything is waiting and the session is not visible (`isVisible`, set by
-`setVisibleSession`). On screen the card is the cue, so no dot. `terminate()` denies the active
-card and every queued request, so a session that goes away does not leave the CLI blocked on the
-hook's timeout.
+A pending native request raises the sidebar's attention mark whether or not its conversation is
+visible: a native session reports `activity` through `AgentRuntime` alongside terminal sessions,
+returning `.awaitingUser` when the request blocks an open turn and `.needsAttention` when anything
+is waiting after the turn has closed. The inline card explains what needs an answer; the row mark
+states that the session is waiting rather than working, so suppressing it on the selected row
+would leave the spinner saying the opposite. `terminate()` denies the active card and every queued
+request, so a session that goes away does not leave its transport blocked on a timeout.
 
 `PermissionPolicy` decides which tools are worth interrupting for, in Swift rather than in the
 hook's matcher or app-server request handler. The read-only set is a short **allowlist**, so a

@@ -1344,6 +1344,35 @@ final class ConversationRenderTests: XCTestCase {
         })
     }
 
+    /// A selected native conversation still owns a sidebar row. Its inline card explains the
+    /// question, while the row must say that the turn is blocked rather than still working.
+    func testVisiblePendingPermissionReportsAwaitingUserUntilAnswered() {
+        let session = AgentSession(kind: .codex, title: "Visible permission", usesNativeUI: true)
+        let controller = requireConversationViewController(
+            agentSession: session,
+            project: Project(
+                name: "Visible permission",
+                folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+            ),
+            customizationLookup: { _ in .empty }
+        )
+        _ = controller.view
+        controller.isVisible = true
+        controller.isTurnInFlight = true
+
+        controller.presentPermission(PermissionRequest(
+            sessionID: session.id,
+            toolName: "Bash",
+            input: ["command": "scripts/ui-evidence-ios.sh --only session-dashboard"]
+        )) { _ in }
+
+        XCTAssertEqual(controller.activity, .awaitingUser)
+
+        controller.activePermissionCard?.resolve(.allow(reason: "Approved for this test."))
+
+        XCTAssertEqual(controller.activity, .working)
+    }
+
     func testReplayFinishAttachesAnUnfinishedTail() {
         let session = AgentSession(kind: .codex, title: "Replay tail", usesNativeUI: true)
         let controller = requireConversationViewController(

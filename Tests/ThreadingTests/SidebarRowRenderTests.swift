@@ -164,7 +164,17 @@ final class SidebarRowRenderTests: XCTestCase {
         // shipping outline uses, rather than rendering the spinner by itself.
         written += try writeBusyTerminal(story: "17-terminal-working-and-selected")
 
-        XCTAssertEqual(written, 34, "Every story should render in both appearances")
+        // A pending permission in the selected conversation is the state where a working spinner
+        // used to survive even though the inline card had stopped the turn. The row must instead
+        // carry the filled warning mark, resolved against the selected ground.
+        written += try write(
+            story: "18-blocked-and-selected",
+            activity: .awaitingUser,
+            hovered: false,
+            selected: true
+        )
+
+        XCTAssertEqual(written, 36, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
