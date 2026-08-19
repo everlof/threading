@@ -1027,18 +1027,6 @@ enum AppSettingDefinitions {
         absence: .falseValue,
         notification: .none
     )
-    /// Whether this Mac is reachable on its tailnet.
-    ///
-    /// One door, one switch. Off by default, and turning it on does not put Threading on any
-    /// other network: every door is bound separately, which is the guarantee
-    /// `docs/REMOTE_ACCESS.md` makes about publishing "only inside the owner's tailnet".
-    static let remoteAccessTailscaleEnabled = AppSettingDescriptor<Bool>(
-        identity: .remoteAccessTailscaleEnabled,
-        persistenceKey: "remoteAccessTailscaleEnabled",
-        absence: .registered(false),
-        presentations: [row("remote-access", 3, "Ways In", "Tailscale",
-                            ["tailnet", "Tailscale", "VPN", "away from home"])]
-    )
     /// The browser convenience on the tailnet, and nothing else.
     ///
     /// **Not operative yet, and deliberately not on the page yet.** Today the `tailscale` door
@@ -1082,8 +1070,20 @@ enum AppSettingDefinitions {
         identity: .remoteAccessDoors,
         persistenceKey: "remoteAccessDoors",
         absence: .registered([RemoteAccessDoor.lan.rawValue]),
-        presentations: [row("remote-access", 2, "Ways In", "This network",
+        presentations: [row("remote-access", 1, "Ways In", "This network",
                             ["Wi-Fi", "LAN", "local network", "VPN", "Teleport"])]
+    )
+    /// Whether this Mac is reachable on its tailnet.
+    ///
+    /// One door, one switch. Off by default, and turning it on does not put Threading on any
+    /// other network: every door is bound separately, which is the guarantee
+    /// `docs/REMOTE_ACCESS.md` makes about publishing "only inside the owner's tailnet".
+    static let remoteAccessTailscaleEnabled = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessTailscaleEnabled,
+        persistenceKey: "remoteAccessTailscaleEnabled",
+        absence: .registered(false),
+        presentations: [row("remote-access", 2, "Ways In", "Tailscale",
+                            ["tailnet", "Tailscale", "VPN", "away from home"])]
     )
     /// An address to advertise beside the ones enumerated from the interfaces.
     ///
@@ -1102,7 +1102,7 @@ enum AppSettingDefinitions {
         persistenceKey: "phoneReportWorkspace",
         absence: .registered(PhoneReportWorkspacePolicy.sameCheckout.rawValue),
         validation: .allowedStrings(Set(PhoneReportWorkspacePolicy.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 5, "Sharing & Security", "Reports from your phone",
+        presentations: [row("remote-access", 4, "Sharing & Security", "Reports from your phone",
                             ["shake", "report", "worktree", "workspace", "isolated"])]
     )
     static let remoteInputControlDefault = AppSettingDescriptor<String>(
@@ -1110,7 +1110,7 @@ enum AppSettingDefinitions {
         persistenceKey: "remoteInputControlDefault",
         absence: .registered(RemoteInputControlDefault.collaborative.rawValue),
         validation: .allowedStrings(Set(RemoteInputControlDefault.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 4, "Sharing & Security", "New shared chats",
+        presentations: [row("remote-access", 3, "Sharing & Security", "New shared chats",
                             ["security", "collaborative", "focused", "share"])],
         remotePolicy: .ownerMutable
     )
@@ -1202,9 +1202,10 @@ enum AppSettingDefinitions {
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
         .init(remoteAccessConnectionMode), .init(remoteAccessAllowsOwnerRelayFallback),
         .init(remoteAccessKeepsRelayReady), .init(remoteAccessDoorMigration),
-        .init(remoteAccessTailscaleEnabled), .init(remoteAccessTailscaleServeEnabled),
+        .init(remoteAccessTailscaleServeEnabled),
         .init(remoteAccessListenerPort),
-        .init(remoteAccessDoors), .init(remoteAccessAdvertisedHostname),
+        .init(remoteAccessDoors), .init(remoteAccessTailscaleEnabled),
+        .init(remoteAccessAdvertisedHostname),
         .init(remoteInputControlDefault),
         .init(phoneReportWorkspace),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
@@ -1247,7 +1248,7 @@ enum AppSettingDefinitions {
         // Sign-in rather than a stored setting, so it is surfaced instead of persisted. It used
         // to borrow the connection mode's second presentation, and that descriptor is now a
         // migration record with no row of its own.
-        surfaced("remoteAccess.hostedDirect", pageID: "remote-access", order: 1,
+        surfaced("remoteAccess.hostedDirect", pageID: "remote-access", order: 5,
                   section: "Connection", title: "Hosted Direct",
                   "direct", "introduce", "sign in", "Threading Direct"),
         surfaced("github.ghCLI", pageID: "github", order: 1,

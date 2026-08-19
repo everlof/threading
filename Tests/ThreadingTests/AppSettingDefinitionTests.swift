@@ -431,9 +431,12 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Open a window before I start", "I start at", "I stop at", "Days",
             "If the window has not reset", "When a session hits its usage limit"
         ])
+        // The mode and its two relay switches are gone; the ways in are rows of their own. The
+        // sign-in row is last because it is the one row on this page that is not a stored
+        // setting, so it is surfaced rather than persisted and cannot be interleaved.
         XCTAssertEqual(actual["remote-access"], [
-            "Remote Access", "Connection", "Hosted Direct", "Owner Relay Fallback",
-            "Keep Sharing Relay Ready", "New shared chats", "Reports from your phone"
+            "Remote Access", "This network", "Tailscale", "New shared chats",
+            "Reports from your phone", "Hosted Direct"
         ])
         XCTAssertEqual(actual["github"], ["Client ID", "gh CLI", "Git credential helper"])
         XCTAssertEqual(actual["privacy"], [

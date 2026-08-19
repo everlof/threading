@@ -157,3 +157,133 @@ final class MacAdvertisedOriginDiagnosticsTests: XCTestCase {
         )
     }
 }
+
+/// What a switch on the Remote Access page is allowed to start.
+///
+/// The page used to offer a *mode*, and two of its rows existed only to start the public relay:
+/// one let owner devices fall back to it, the other kept it warm for a share nobody had created.
+/// Neither survives, because a Quick Tunnel address changes every launch and cannot be an owner
+/// route. The relay now has exactly one trigger left, and it is not on this page: creating a
+/// one-chat guest link.
+///
+/// Driven through the injected transports rather than through `relayRequired` alone, because the
+/// question is not whether the policy says no. It is whether anything in the lifecycle reaches
+/// `cloudflared` anyway.
+@MainActor
+final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
+
+    private var suiteNames: [String] = []
+    private var coordinators: [RemoteAccessCoordinator] = []
+
+    override func tearDown() async throws {
+        await MainActor.run {
+            for coordinator in coordinators { coordinator.stop() }
+            coordinators.removeAll()
+            for name in suiteNames {
+                UserDefaults().removePersistentDomain(forName: name)
+            }
+            suiteNames.removeAll()
+        }
+        try await super.tearDown()
+    }
+
+    func testNoSwitchOnThePageStartsTheRelay() throws {
+        let relay = RecordingRelayTransport()
+        let tailnet = RecordingTailnetTransport()
+        let settings = isolatedAppSettings()
+        // A port nothing else on this machine is holding, so the test never fights the app the
+        // developer is running on the shipped default.
+        settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
+        settings.remoteAccessDoors = []
+        settings.remoteAccessTailscaleEnabled = false
+        let coordinator = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: settings,
+            guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
+            relayTransport: relay,
+            tailnetTransport: tailnet
+        )
+        coordinators.append(coordinator)
+
+        coordinator.setEnabled(true)
+        waitForListening(coordinator)
+        XCTAssertEqual(relay.startedPorts, [], "the master switch started the relay")
+        XCTAssertEqual(tailnet.startedPorts, [], "a way in that is off started its transport")
+
+        // The tailnet switch starts what that way in is made of, and nothing else.
+        coordinator.setTailscaleDoorEnabled(true)
+        XCTAssertEqual(tailnet.startedPorts.count, 1)
+        XCTAssertEqual(relay.startedPorts, [], "the tailnet switch started the relay")
+
+        // The reserved browser convenience is stored and starts nothing at all.
+        coordinator.setTailscaleServeEnabled(true)
+        XCTAssertTrue(settings.remoteAccessTailscaleServeEnabled)
+        XCTAssertEqual(relay.startedPorts, [], "the Serve sub-option started the relay")
+
+        // And the network way in is the listener's own business.
+        coordinator.setDoors([.lan])
+        XCTAssertEqual(relay.startedPorts, [], "This network started the relay")
+
+        coordinator.setTailscaleDoorEnabled(false)
+        XCTAssertGreaterThan(tailnet.stopCount, 0, "switching the tailnet off left it running")
+        XCTAssertEqual(relay.startedPorts, [], "switching a way in off started the relay")
+    }
+
+    /// The seam under the tailnet switch. Swapping the implementation is what §8 of the transport
+    /// plan does, and it must not need the settings page to change.
+    func testTheTailnetSwitchRunsWhicheverImplementationTheBuildCarries() throws {
+        let relay = RecordingRelayTransport()
+        let tailnet = RecordingTailnetTransport()
+        let settings = isolatedAppSettings()
+        settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
+        settings.remoteAccessDoors = []
+        settings.remoteAccessTailscaleEnabled = true
+        let coordinator = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: settings,
+            guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
+            relayTransport: relay,
+            tailnetTransport: tailnet,
+            tailscaleDoor: .listenerDoor
+        )
+        coordinators.append(coordinator)
+
+        coordinator.setEnabled(true)
+        waitForListening(coordinator)
+
+        // With the raw bind carrying the door, Serve is not started at all: the listener set is
+        // what answers on the tailnet.
+        XCTAssertEqual(
+            tailnet.startedPorts, [],
+            "the Serve transport ran for a build whose tailnet door is a listener"
+        )
+        XCTAssertEqual(relay.startedPorts, [])
+        XCTAssertEqual(
+            RemoteTailscaleDoorImplementation.current,
+            .serveTransport,
+            "the shipped implementation changed without the page being reviewed again"
+        )
+    }
+
+    /// Spins the run loop until the listener has answered. `start` completes on main, so a plain
+    /// `await` would never let it in.
+    private func waitForListening(
+        _ coordinator: RemoteAccessCoordinator,
+        timeout: TimeInterval = 5
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if case .listening = coordinator.status { return }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTFail("the listener never reported itself listening: \(coordinator.status)")
+    }
+
+    private func isolatedAppSettings() -> AppSettings {
+        let name = "RemoteAccessDoorTransportTests.\(UUID().uuidString)"
+        suiteNames.append(name)
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.register(defaults: AppSettingDefinitions.registeredDefaults)
+        return AppSettings(defaults: defaults)
+    }
+}
