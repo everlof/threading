@@ -2237,6 +2237,19 @@ access to reach this Mac on Wi-Fi. Turn it on in Settings.** when iOS is blockin
 Tapping the title takes you to the pairing screen or to Settings rather than repeating the
 attempt.
 
+On the same Wi-Fi, the iPhone finds the Mac by itself. Threading announces the connection on the
+network under an opaque name, and the announcement carries three things: this Mac's id, the
+protocol version, and its certificate fingerprint. It never carries your name, the computer's
+name, or anything about your chats. The iPhone pays attention to an announcement only when the
+fingerprint is one it already trusts for a Mac you have already paired with, so a stranger's Mac
+on the same network is ignored and pairing is still only ever the QR code. What it buys you is
+the case that used to need a re-scan: when your router gives the Mac a different address, the
+phone finds the new one and reconnects with nothing to do. It works on Wi-Fi and Ethernet only,
+not through a VPN or Tailscale, where the Mac's advertised address list is what carries the
+connection instead. Turn the announcement off under **Settings > Remote Access** if you would
+rather the Mac stayed quiet; the connection keeps working. The first time Threading announces
+itself, macOS asks for permission to use the local network.
+
 When the code you scan carries this Mac's identity, the pairing screen says so: the iPhone will
 then trust exactly that Mac's certificate and nothing else, with no certificate authority in the
 path. Choose Mac shows the 26-character identity code beside each paired Mac, and it is the same
@@ -4072,9 +4085,11 @@ than by scrubbing. Threading never uploads it; sending it is your decision.
 
 **What is never asked for.** Threading has no analytics and no identifier for your install. It
 requests no camera, microphone, contacts, calendar, location or Full Disk Access.
-Remote Access does not need the Local Network permission either: the listener binds to
-`127.0.0.1`, and the selected HTTPS relay or Tailscale Serve publishes only that loopback
-listener. Threading never opens a listener on the physical LAN.
+Remote Access asks for the Local Network permission only if you turn on the connection for this
+network and let Threading announce itself on it, which is what lets your phone find the Mac after
+its address changes. Until then the listener binds to `127.0.0.1` and the selected HTTPS relay or
+Tailscale Serve publishes only that loopback listener. Answering "Don't Allow" stops the
+announcement and nothing else.
 
 The session status card's connected-review and check readings do reach the repository's code
 host while that card is enabled: GitHub uses the available Threading, `gh`, or Git credential

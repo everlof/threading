@@ -815,6 +815,69 @@ feature lock.
 Treat the owner QR code and every copied share URL like passwords. The owner code is intentionally
 much stronger than a guest URL; only show it to devices you control.
 
+### Discovery on the same network
+
+The `lan` door works without discovery: the Mac advertises its addresses through `/api/me` and
+the phone remembers them. Discovery answers the question that list cannot, which is where the Mac
+is *now* after DHCP moved it. Without it a new lease costs a re-pair; with it the phone
+re-resolves and carries on.
+
+- **What is broadcast.** While Remote Access is on, the `lan` door is bound and
+  `remoteAccessDiscoveryEnabled` is on, the Mac registers `_threading._tcp` on that door's
+  listeners and nowhere else. The instance name is an opaque 16-character token derived from this
+  Mac's id, never the computer name: `NWListener.Service(name: nil, …)` advertises under the
+  computer name, which usually contains the user's own. The TXT record carries three values and
+  the parser on both ends refuses a fourth: the host id, the protocol version, and the full
+  64-character certificate fingerprint. No user name, no project names, no chat titles. macOS
+  broadcasts this Mac's `.local` hostname regardless of Threading; that one is not ours to hide.
+- **One registration, not one per address.** Several LAN interfaces mean several listeners under
+  the one door, but Bonjour advertises a host: the SRV record names the `.local` hostname and the
+  address records behind it already cover every interface. A second registration of the same name
+  and port would only earn a platform rename.
+- **The announcement follows what is bound.** A door with no address on it announces nothing, and
+  the record names the certificate the door presents, so rotating the identity re-registers with
+  the new fingerprint on the same port. Turning discovery off withdraws the registration and
+  leaves the door open; the addresses are still advertised through `/api/me`.
+- **Match, do not trust. Pairing stays QR-only.** A discovered service is interesting to the phone
+  only when its TXT fingerprint is one that phone already accepts for a Mac it has already
+  paired with, current or announced successor. Everything else is ignored, including an unpaired
+  Mac advertising the same service type and a service claiming a paired Mac's host id with a
+  different fingerprint. A match puts the record's *existing* pins in force for the newly learned
+  address and changes nothing else: no pairing is created, no pin is learned or widened, and the
+  connection that follows still has to be answered by the certificate behind that fingerprint.
+  A guest capability never matches at all.
+- **The phone browses only in the foreground, and only when it has a Mac to look for.** The
+  tracked services and the remembered addresses both have ceilings, one service is resolved at a
+  time with a deadline, and the browser is stopped in the background. A discovered address is
+  held in memory rather than written into the pairing: it is a fact about the network the phone is
+  on right now.
+- **Denial degrades.** If iOS Local Network access is refused, browsing finds nothing and the
+  advertised endpoint list is the fallback, exactly as it is for a VPN or tailnet address.
+- **It does not cross a tunnel.** Multicast rarely crosses WireGuard, so UniFi Teleport, an
+  ordinary VPN and the tailnet carry no discovery. They do not need it: those addresses come from
+  the advertised list, and `remoteAccessAdvertisedHostname` is the escape hatch for an address the
+  Mac cannot enumerate.
+- **Local network privacy applies to the Mac too.** macOS 15 brought it over from iOS, and Apple's
+  TN3179 is explicit that *every* Bonjour operation needs the privilege, registering a service
+  included. So Threading's own `Info.plist` carries `NSLocalNetworkUsageDescription` and
+  `NSBonjourServices`, and the first announcement is what asks. Listening for and accepting
+  incoming TCP needs no privilege, which is why the door itself works whatever the answer is.
+  Measured on macOS 26.5: the same registration completed in about 0.7 seconds from a
+  Terminal-run binary, which TN3179 exempts along with daemons and root, and completed not at all
+  under an app identity whose privilege was undetermined. A hosted test is in the second group, so
+  the real round trip is a manual `dns-sd` check written down in `RemoteServiceDiscoveryTests`
+  rather than a test that would fail on every machine.
+
+**Wake on Demand comes with the advertisement, under two conditions.** macOS hands a
+Bonjour-advertised listener to a Sleep Proxy on the network, which is an Apple TV, a HomePod or a
+capable router, and the proxy answers for the sleeping Mac and wakes it when somebody connects.
+`RemoteWakeOnDemandFacts` holds the two inputs: whether "Wake for network access" is on, read from
+`pmset`, and whether a sleep proxy answered a short `_sleep-proxy._udp` browse. `canWakeThisMac`
+is true only when **both** hold, and unknown is never yes. With the setting off macOS never hands
+the registration over; with no proxy present there is nothing to answer for a sleeping Mac and it
+sleeps through every attempt exactly as before. Nothing may render "can wake this Mac" from
+anything but that value.
+
 ### iPhone trust evaluation
 
 <!-- Owned by the iOS client. Self-contained on purpose: nothing above or below depends on it. -->
@@ -893,8 +956,11 @@ accounts Threading cannot
 push to a friend *before* they accept a share link; their messaging app carries the invitation,
 then Threading registers that accepted capability and can notify the device from then on.
 
-Remote access cannot wake a sleeping or offline Mac. A remotely resumed session starts in the
-background and does not activate or bring Threading's Mac window to the front.
+Remote access cannot wake a Mac that is offline, and cannot wake a sleeping one except on the
+same network, where the sleep proxy path above can: both "Wake for network access" and a proxy on
+the network are required, and Threading claims it only when it has observed both. A remotely
+resumed session starts in the background and does not activate or bring Threading's Mac window to
+the front.
 
 Remote session creation intentionally exposes only checkouts the Mac already knows. Git Review,
 the read-only repository browser, detected image/PDF previews, and browser follow snapshots have
@@ -941,8 +1007,9 @@ with no AppKit window graph or ambient project/runtime lookup.
   LAN or the tailnet meets a certificate interstitial against a pinned self-signed identity;
   Tailscale Serve stays as the opt-in way around that on a tailnet, and the iOS app is unaffected
   because it pins.
-- `ThreadingRemoteKit`: versioned wire DTOs, pairing-link parsing, and the fingerprint codec and
-  pinning policy (`RemoteHostPinning`) shared by macOS and iOS.
+- `ThreadingRemoteKit`: versioned wire DTOs, pairing-link parsing, the fingerprint codec and
+  pinning policy (`RemoteHostPinning`), and the discovery vocabulary both ends have to agree on
+  (`RemoteServiceDiscovery`: the service type, the TXT keys, and the opaque instance name).
 - `Sources/ThreadingMobile`: SwiftUI iOS shell, UIKit Native-conversation timeline and SwiftTerm
   terminal surface.
 - `docs/NOTIFICATION_E2E.md`: opt-in real APNs and Claude → MCP → APNs verification.
