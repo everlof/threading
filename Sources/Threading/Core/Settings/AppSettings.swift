@@ -1346,6 +1346,13 @@ final class AppSettings {
     /// because the marker is already there. Writes suppress notification because this runs while
     /// the settings object is still being built.
     private func migrateRemoteAccessConnectionMode() {
+        // A hosted test bundle runs inside the shipping app and sees the developer's real
+        // defaults domain, so this would be a write on their behalf — the rule
+        // `legacyPreferencesForSharedProcess` already states for the other one-time import. A
+        // store a test hands over explicitly still migrates, which is how it is asserted.
+        guard defaults != .standard || Self.importsLegacyPreferencesForSharedProcess else {
+            return
+        }
         let marker = AppSettingDefinitions.remoteAccessDoorMigration
         guard !marker.containsValue(in: defaults) else { return }
         let mode = AppSettingDefinitions.remoteAccessConnectionMode.read(from: defaults)
