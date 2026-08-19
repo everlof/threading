@@ -342,7 +342,6 @@ final class RemoteServiceDiscoveryTests: HostedStoreTestCase {
         let port = try quietPort()
         XCTAssertEqual(start(configuration(port: port, doors: [.lan])), .listening(port: port))
         waitUntil("the service is registered") { self.server.advertisedService != nil }
-        let firstListener = server.listenerIdentities[Self.lanAddress]
         XCTAssertEqual(advertiser.registrations.count, 1)
 
         // The address goes away and comes back, which is what a Wi-Fi change looks like.
@@ -357,15 +356,19 @@ final class RemoteServiceDiscoveryTests: HostedStoreTestCase {
         server.refreshListenerAddresses()
         waitUntil("the service is registered again") { self.server.advertisedService != nil }
 
-        XCTAssertNotEqual(
-            server.listenerIdentities[Self.lanAddress],
-            firstListener,
-            "the fixture only proves anything if the listener really was replaced"
-        )
+        // Deliberately not an `ObjectIdentifier` comparison against the old listener: the
+        // replacement is allocated after the original is released, and the allocator hands back
+        // the same address often enough that such a test fails only in a full run. The
+        // withdrawal and the second registration are the behaviour anyway.
         XCTAssertEqual(
             advertiser.registrations.count,
             2,
             "the registration follows the socket that carries it"
+        )
+        XCTAssertGreaterThanOrEqual(
+            advertiser.withdrawals,
+            1,
+            "and the door going away withdrew it rather than leaving it on a dead listener"
         )
         XCTAssertEqual(advertiser.applied.last??.port, port)
     }
