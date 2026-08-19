@@ -11,8 +11,8 @@ credential, or device/account name into this vocabulary.
 | Failure seam | Share-safe evidence in a report | Deliberately local evidence |
 | --- | --- | --- |
 | App launch and crash recovery | `appLaunched`, `uncleanExitDetected`, `recoveryModeEntered`; launch verdict, last checkpoint, bounded MetricKit crash tokens | `.ips` files, call trees, addresses, raw EventLog and unified log |
-| Manual and inspector reporting | `issueReportOpened`, submission started/succeeded/deferred/failed; surface and trigger tokens | Inspector PNG path, full-resolution capture, clipboard contents |
-| Report delivery | Idempotent report ID in the receipt plus delivered/queued/failed result token | HTTP body logging, caller address, authorization headers |
+| Manual, inspector and connection-recovery reporting | `issueReportOpened`, submission started/succeeded/deferred/failed; surface and trigger tokens | Inspector PNG path, full-resolution capture, clipboard contents |
+| Report delivery | Idempotent report ID in the receipt plus delivered/queued/failed result token; protected iOS outbox retries at launch, foreground entry and foreground connectivity return | HTTP body logging, caller address, authorization headers |
 | Pairing and host credentials | pairing/refresh success or failure, transport/result/code tokens | invitation URLs, bearer material, host/device names |
 | Remote listener and transports | listener/door/socket lifecycle, protocol versions, pseudonymous peer/session tokens; `relayFailed` keeps its legacy name and carries a `TailscaleReadinessIssue` code beside its reason | SDP, ICE addresses, terminal data and connection credentials |
 | Permission decisions | sent/received and capability/result tokens | command text, tool input, provider evidence |

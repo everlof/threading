@@ -16,9 +16,9 @@ struct AgentLaunchFlag: Equatable {
 /// How much a session may do before it has to ask.
 ///
 /// One vocabulary for the supported CLIs — **Claude's**, because it is the richer one and,
-/// together with Grok, names a single mode rather than a pair of axes. Raw values are Claude's own external
-/// flag values, so `rawValue` is what `--permission-mode` takes and a case rename would be a
-/// silent reset wherever this is persisted.
+/// together with Grok, names a single mode rather than a multi-axis configuration. Raw values
+/// are Claude's own external flag values, so `rawValue` is what `--permission-mode` takes and a
+/// case rename would be a silent reset wherever this is persisted.
 ///
 /// The six and what they *mean* are read from the CLI itself (2.1.220) rather than assumed —
 /// its fallback-decision table is one function, and it is not the table you would guess:
@@ -35,10 +35,11 @@ struct AgentLaunchFlag: Equatable {
 /// waving it through. Grouping it with `bypassPermissions` as "the dangerous two" is the
 /// obvious mistake; they are opposites that happen to share a symbol in Claude's own UI.
 ///
-/// Codex has no single mode. The same idea is two axes there — when to ask
-/// (`--ask-for-approval`) and what may happen without asking (`--sandbox`) — so each case
-/// carries the pair it translates to. The six land on six *distinct* Codex configurations,
-/// which is what makes one shared vocabulary honest rather than a menu with duplicate items.
+/// Codex has no single mode. The same idea is three axes there — when to ask
+/// (`--ask-for-approval`), what may happen without asking (`--sandbox`) and who reviews a
+/// boundary crossing (`approvals_reviewer`) — so each case carries the configuration it
+/// translates to. The six land on six *distinct* Codex configurations, which is what makes one
+/// shared vocabulary honest rather than a menu with duplicate items.
 enum AgentPermissionMode: String, Codable, CaseIterable, Sendable {
     /// Ask before anything. Claude's internal name for this one is `default`; `manual` is the
     /// external name its own `--help` documents, and the raw value has to be the external one.
@@ -65,6 +66,18 @@ enum AgentPermissionMode: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// The runtime-specific title where its own vocabulary adds meaning to the shared one.
+    ///
+    /// Codex calls automatic approval review **Approve for me**. Keeping `Auto` first preserves
+    /// the shared six-mode ordering while the qualifier says that Codex routes the approvals it
+    /// does raise through a reviewer agent rather than back to the user.
+    func displayName(for kind: AgentKind) -> String {
+        switch (self, kind) {
+        case (.auto, .codex): L10n.string("Auto (Approve for me)")
+        default: displayName
+        }
+    }
+
     /// One line describing what the mode does, for the menu item's help text.
     var menuDescription: String {
         switch self {
@@ -80,6 +93,16 @@ enum AgentPermissionMode: String, Codable, CaseIterable, Sendable {
             L10n.string("Never interrupts — refuses anything that would need approval.")
         case .bypassPermissions:
             L10n.string("No permission checks at all.")
+        }
+    }
+
+    /// Runtime-specific help for a shared mode whose enforcement differs materially.
+    func menuDescription(for kind: AgentKind) -> String {
+        switch (self, kind) {
+        case (.auto, .codex):
+            L10n.string("A reviewer agent handles requests that cross the sandbox.")
+        default:
+            menuDescription
         }
     }
 
@@ -130,9 +153,9 @@ enum AgentPermissionMode: String, Codable, CaseIterable, Sendable {
             ]
 
         case .codex:
-            // Both axes, always together: Codex defaults them independently, so stating one
-            // and leaving the other produces a posture that is neither the mode asked for nor
-            // the CLI's own.
+            // All three axes, always together: Codex defaults them independently, so stating
+            // only the sandbox and approval policy can leave a human-review preset labelled as
+            // Approve for me, or a Manual preset routed through the automatic reviewer.
             return [
                 AgentLaunchFlag(
                     name: AgentDefaults.codexApprovalFlag,
@@ -141,6 +164,10 @@ enum AgentPermissionMode: String, Codable, CaseIterable, Sendable {
                 AgentLaunchFlag(
                     name: AgentDefaults.codexSandboxFlag,
                     value: codexSandboxMode
+                ),
+                AgentLaunchFlag(
+                    name: AgentDefaults.codexConfigFlag,
+                    value: codexApprovalsReviewerOverride
                 )
             ]
 
@@ -183,9 +210,10 @@ enum AgentPermissionMode: String, Codable, CaseIterable, Sendable {
     /// *back* — see `AgentDefaults.agentInternalManualMode` — so a reader that took only the
     /// external one would report "unknown" for the most common posture there is.
     ///
-    /// Codex answers nil by construction rather than by omission: its posture is two axes, so
+    /// Codex answers nil by construction rather than by omission: its posture is three axes, so
     /// no single value it emits can name one of these, and a reader would have to be given the
-    /// pair — which is `init?(codexApprovalPolicy:sandboxMode:)` below. OpenCode has no shared
+    /// configuration — which is
+    /// `init?(codexApprovalPolicy:sandboxMode:approvalsReviewer:)` below. OpenCode has no shared
     /// vocabulary to read at all.
     ///
     /// Unrecognised is nil rather than a fallback. A newer CLI writing a seventh mode, or a
@@ -236,22 +264,44 @@ enum AgentPermissionMode: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// The mode a Codex configuration's two axes name together, or nil when they name none of
-    /// the six.
+    /// Who reviews a Codex request that crosses the sandbox boundary.
     ///
-    /// The inverse of the pair above, and exact rather than nearest: the six land on six
-    /// *distinct* configurations, so a pair either is one of them or is a posture this
-    /// vocabulary cannot state — `on-request` with `read-only`, say, which is neither Auto nor
-    /// Plan. Naming the closest one would be the guess this whole file avoids.
+    /// Auto is Codex's **Approve for me** posture. Every other explicit mode states `user` too,
+    /// so a persistent auto-review setting cannot silently turn Manual into an automatic mode.
+    var codexApprovalsReviewer: String {
+        self == .auto
+            ? AgentDefaults.codexApprovalsReviewerAutoReview
+            : AgentDefaults.codexApprovalsReviewerUser
+    }
+
+    /// A TOML string override passed as the value following Codex's `--config` flag.
+    var codexApprovalsReviewerOverride: String {
+        "\(AgentDefaults.codexApprovalsReviewerKey)=\"\(codexApprovalsReviewer)\""
+    }
+
+    /// The mode a Codex configuration's three axes name together, or nil when they name none of
+    /// the six. An omitted reviewer uses Codex's documented `user` default.
     ///
-    /// Both axes are required. Codex defaults them independently and this app does not read that
-    /// pair of defaults out of the CLI, so a config that states one and leaves the other is a
-    /// posture Threading does not know rather than one it may complete.
-    init?(codexApprovalPolicy: String?, sandboxMode: String?) {
+    /// The inverse of the configuration above, and exact rather than nearest: the six land on
+    /// six *distinct* configurations, so a configuration either is one of them or is a posture
+    /// this vocabulary cannot state — `on-request` with `read-only`, say, which is neither Auto
+    /// nor Plan. Naming the closest one would be the guess this whole file avoids.
+    ///
+    /// Approval policy and sandbox are required. Codex defaults them independently and this app
+    /// does not infer either one. The reviewer has a documented `user` default, so only that axis
+    /// may be omitted and completed without guessing.
+    init?(
+        codexApprovalPolicy: String?,
+        sandboxMode: String?,
+        approvalsReviewer: String?
+    ) {
         guard let codexApprovalPolicy, let sandboxMode else { return nil }
+        let approvalsReviewer = approvalsReviewer ?? AgentDefaults.codexApprovalsReviewerUser
 
         guard let mode = AgentPermissionMode.allCases.first(where: {
-            $0.codexApprovalPolicy == codexApprovalPolicy && $0.codexSandboxMode == sandboxMode
+            $0.codexApprovalPolicy == codexApprovalPolicy
+                && $0.codexSandboxMode == sandboxMode
+                && $0.codexApprovalsReviewer == approvalsReviewer
         }) else { return nil }
 
         self = mode

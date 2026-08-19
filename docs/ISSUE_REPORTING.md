@@ -24,7 +24,8 @@ The iOS consent screen has three explicit destinations:
 
 1. **Send report** writes a bounded report to the protected iOS outbox and posts it to the private
    intake. Failed network, rate-limit, and 5xx deliveries remain in the outbox and retry when the
-   app launches or becomes active.
+   app launches, becomes active, or observes connectivity return while it remains in the
+   foreground.
 2. **Send to my Threading** appears only for a paired owner whose Mac exposes the Threading
    checkout. It creates a real local agent task over the existing authenticated host route. It
    does not pass through the public service.
@@ -42,6 +43,12 @@ the local route for a user who wants to inspect or share Apple's original artifa
 HTTP is used because reporting is a durable, idempotent mutation. A WebSocket may later deliver a
 status notification, but cannot be the only submission record: either app can be suspended after
 the server commits but before it receives the response.
+
+The iOS connection-recovery card opens the same reviewed consent screen with trigger
+`connectionRecovery`. It does not capture a screenshot automatically and it does not depend on
+the paired Mac being reachable. **Send report** therefore remains useful for the exact failure the
+card describes: the protected outbox records the reviewed package first and delivers it when an
+Internet route is available.
 
 ## Public wire contract
 

@@ -45,6 +45,13 @@ describe("private issue-report intake", () => {
     expect(publicRead.status).toBe(404);
   });
 
+  it("accepts a reviewed connection-recovery report from iOS", async () => {
+    const report = makeReport();
+    report.trigger = "connectionRecovery";
+
+    expect((await submit(report)).status).toBe(201);
+  });
+
   it("makes an exact retry idempotent and refuses reuse with different evidence", async () => {
     const report = makeReport();
     const before = await todayCount();

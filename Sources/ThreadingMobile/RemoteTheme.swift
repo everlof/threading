@@ -105,6 +105,11 @@ enum MobileDesign {
 
     enum Motion {
         static let controlResponse: Double = 0.18
+        /// LabelMorph's showcase timing brought to the pace of application chrome.
+        static let nameMorphTempo: Double = 0.65
+        /// The whole character cascade is bounded so sentence-length chat names do not settle
+        /// more slowly than short ones.
+        static let nameMorphCascade: TimeInterval = 0.3
     }
 }
 
@@ -122,10 +127,15 @@ struct MobileConnectionNavigationTitle: View {
 
     var body: some View {
         VStack(spacing: MobileDesign.Spacing.hairline) {
-            Text(title)
-                .font(.headline)
-                .lineLimit(1)
-                .foregroundStyle(theme.label)
+            MobileMorphingTitle(
+                title: title,
+                textStyle: .headline,
+                weight: .semibold,
+                textColor: theme.uiLabel,
+                groundColor: theme.uiSurface,
+                alignment: .center
+            )
+            .frame(maxWidth: .infinity)
 
             HStack(spacing: MobileDesign.Spacing.tight) {
                 Circle()
@@ -140,36 +150,6 @@ struct MobileConnectionNavigationTitle: View {
             .font(.caption2)
             .foregroundStyle(theme.secondaryLabel)
         }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// A single-line connection title for owner flows whose controls begin immediately below the
-/// navigation bar. The full two-line title remains appropriate above a reading surface; using it
-/// here made a standard navigation bar grow merely to repeat the host on its own line.
-struct MobileCompactConnectionNavigationTitle: View {
-    let title: String
-    let status: String
-    let statusColor: Color
-    @Environment(\.remoteTheme) private var theme
-
-    var body: some View {
-        HStack(spacing: MobileDesign.Spacing.tight) {
-            Text(title)
-                .font(.headline)
-                .lineLimit(1)
-            Circle()
-                .fill(statusColor)
-                .frame(
-                    width: MobileDesign.Size.navigationStatusIndicator,
-                    height: MobileDesign.Size.navigationStatusIndicator
-                )
-            Text(status)
-                .font(.caption2)
-                .lineLimit(1)
-                .foregroundStyle(theme.secondaryLabel)
-        }
-        .foregroundStyle(theme.label)
         .accessibilityElement(children: .combine)
     }
 }
@@ -296,6 +276,41 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+/// A full-width action whose foreground remains legible against an arbitrary authored accent.
+///
+/// SwiftUI's prominent button chooses its own foreground colour, which can disappear when a Mac
+/// theme supplies a pale accent. Application-owned mobile actions use the resolved accent contrast
+/// instead, while secondary actions stay on the theme's control surface.
+struct MobileThemedActionButtonStyle: ButtonStyle {
+    enum Kind {
+        case primary
+        case secondary
+    }
+
+    let kind: Kind
+    let theme: RemoteThemePalette
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: MobileDesign.Size.dialogActionHeight)
+            .foregroundStyle(kind == .primary ? theme.accentForeground : theme.label)
+            .background(
+                kind == .primary ? theme.accent : theme.controlResting,
+                in: RoundedRectangle(cornerRadius: theme.controlRadius)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.controlRadius)
+                    .stroke(
+                        kind == .primary ? Color.clear : theme.border,
+                        lineWidth: theme.borderWidth
+                    )
+            }
+            .opacity(isEnabled ? (configuration.isPressed ? 0.78 : 1) : 0.42)
     }
 }
 

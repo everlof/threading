@@ -26,7 +26,7 @@ struct ResolvedPermissionMode: Equatable {
         /// launch line and therefore outranks anything the runtime would have chosen.
         case appDefault
         /// The runtime's own configuration: Claude's `permissions.defaultMode` across its
-        /// settings layers, or Codex's `approval_policy` and `sandbox_mode` pair.
+        /// settings layers, or Codex's approval, sandbox and reviewer configuration.
         case agentConfiguration
         /// What this conversation's own transcript records it being in. A report, not a setting.
         case observedInThisConversation
@@ -181,6 +181,10 @@ struct ResolvedPermissionMode: Equatable {
                 ),
                 sandboxMode: AgentModels.configuredCodexValue(
                     AgentDefaults.codexSandboxModeKey,
+                    account: account
+                ),
+                approvalsReviewer: AgentModels.configuredCodexValue(
+                    AgentDefaults.codexApprovalsReviewerKey,
                     account: account
                 )
             )

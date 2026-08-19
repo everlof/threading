@@ -73,16 +73,36 @@ final class LimitRecoveryTests: XCTestCase {
 
     // MARK: - What clears it
 
-    /// A turn beginning is the limit lifting, whoever typed — the scheduled continuation
-    /// landing is exactly this edge.
-    func testTheParkClearsWhenATurnStarts() {
+    /// A loop and a scheduled continuation both submit locally before the provider decides.
+    /// Their turn-start hook may not turn a standing 429 into a working row.
+    func testATurnStartDoesNotClearTheParkWithoutTranscriptEvidence() {
         let tracker = SessionActivityTracker()
         tracker.markRunning()
         tracker.noteLimitParked(recoveryArmed: true)
 
         tracker.noteTurnStarted()
 
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .idle)
+
+        tracker.noteLimitCleared()
+
+        XCTAssertEqual(
+            tracker.activity,
+            .working,
+            "Once the transcript moves, the already-started turn becomes visible"
+        )
+    }
+
+    /// The loud park obeys the same authority boundary as an armed one. A local retry that is
+    /// immediately refused must stay visibly limited rather than flash Loading.
+    func testATurnStartDoesNotClearAFlaggedPark() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.noteLimitParked(recoveryArmed: false)
+
+        tracker.noteTurnStarted()
+
+        XCTAssertEqual(tracker.activity, .limitReached)
     }
 
     /// The transcript is what lowers the park: `ObservedUsageLimit` answers nil the moment the
@@ -218,6 +238,72 @@ final class LimitRecoveryTests: XCTestCase {
     func testASessionWithNothingScheduledOwesNoContinuation() {
         XCTAssertFalse(
             LimitRecoveryCoordinator.hasOwedContinuation(for: SessionID())
+        )
+    }
+
+    /// A reset preset the user authored is not an automatic recovery, and a recovery for one
+    /// refusal cannot suppress a later refusal just because the provider repeated its words.
+    func testOnlyTheSameRefusalsAutomaticContinuationCountsAsAlreadyArmed() {
+        let sessionID = SessionID()
+        let userPreset = ScheduledMessage(
+            dueAt: Date().addingTimeInterval(3_600),
+            target: .session(sessionID),
+            text: "Do the next task",
+            anchor: .usageWindowReset(windowID: "7d")
+        )
+        let recovery = ScheduledMessage(
+            dueAt: Date().addingTimeInterval(3_600),
+            target: .session(sessionID),
+            text: "continue",
+            anchor: .usageWindowReset(windowID: "7d"),
+            purpose: .limitRecovery,
+            limitRecoveryRecordID: "refusal-one"
+        )
+
+        XCTAssertFalse(
+            LimitRecoveryCoordinator.recoveryContinuationAlreadyArmed(
+                in: [userPreset],
+                forRefusalRecordID: "refusal-one"
+            )
+        )
+        XCTAssertTrue(
+            LimitRecoveryCoordinator.recoveryContinuationAlreadyArmed(
+                in: [userPreset, recovery],
+                forRefusalRecordID: "refusal-one"
+            )
+        )
+        XCTAssertFalse(
+            LimitRecoveryCoordinator.recoveryContinuationAlreadyArmed(
+                in: [userPreset, recovery],
+                forRefusalRecordID: "refusal-two"
+            )
+        )
+    }
+
+    /// The usage service keeps a last-good value for the dashboard after a fetch failure. That is
+    /// good display state and unsafe scheduling state: recovery must not turn it into another
+    /// overnight continuation against the wrong window.
+    func testRecoveryRefusesAStaleUsageReading() {
+        let usage = AccountUsage(
+            windows: [],
+            planLabel: nil,
+            observedAt: Date(),
+            source: .api
+        )
+
+        XCTAssertEqual(
+            LimitRecoveryCoordinator.settledUsageForRecovery(from: .current(usage)),
+            usage
+        )
+        XCTAssertNil(
+            LimitRecoveryCoordinator.settledUsageForRecovery(
+                from: .stale(usage, error: .network("offline"))
+            )
+        )
+        XCTAssertNil(
+            LimitRecoveryCoordinator.settledUsageForRecovery(
+                from: .failed(.network("offline"))
+            )
         )
     }
 

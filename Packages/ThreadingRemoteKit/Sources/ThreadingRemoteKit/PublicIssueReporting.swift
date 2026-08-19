@@ -111,7 +111,9 @@ public enum PublicIssueReportPolicy {
     public static let maximumScreenshotPreviewBytes = 12 * 1_024
 
     public static func accepts(_ submission: PublicIssueReportSubmissionDTO) -> Bool {
-        let allowedTriggers = Set(["shake", "diagnostics", "manual", "postCrash"])
+        let allowedTriggers = Set([
+            "shake", "diagnostics", "connectionRecovery", "manual", "postCrash",
+        ])
         guard submission.schemaVersion == PublicIssueReportSubmissionDTO.currentSchemaVersion,
               UUID(uuidString: submission.id) != nil,
               submission.id == submission.id.lowercased(),

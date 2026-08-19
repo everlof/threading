@@ -55,6 +55,12 @@ final class SessionInfoViewController: NSViewController {
         label.applyFont(.compactCode)
         label.textColor = Design.Text.label
         label.lineBreakMode = .byTruncatingMiddle
+        // A session path is unbounded input inside an edge pane. `fittingSize` resolves at
+        // `.fittingSizeCompression`, so the ordinary label resistance still lends the split
+        // item the whole path width. AppKit then grows the *window* when the pane is revealed,
+        // moving the trailing toggle away from the pointer that revealed it. The line already
+        // truncates in the middle; put that promise below the fitting-size pass as well.
+        label.setContentCompressionResistancePriority(Self.truncatingPriority, for: .horizontal)
         return label
     }()
     private lazy var metaLabel: NSTextField = {
@@ -62,6 +68,7 @@ final class SessionInfoViewController: NSViewController {
         label.applyFont(.caption)
         label.textColor = Design.Text.tertiary
         label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(Self.truncatingPriority, for: .horizontal)
         return label
     }()
     private lazy var revealButton: ThemedButton = {
@@ -83,6 +90,9 @@ final class SessionInfoViewController: NSViewController {
         return button
     }()
     private let list = PanelListView(rowSpacing: Design.Spacing.hairline)
+    private static let truncatingPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1
+    )
 
     // MARK: - Initialization
 

@@ -81,6 +81,60 @@ enum MobileDashboardChrome {
     }
 }
 
+/// The bounded, user-facing explanation for an owner dashboard that could not reach its Mac.
+///
+/// The transport keeps the structural cause and this value turns it into the few facts useful at
+/// recovery time: what happened, the human names of the doors that were tried, and the identity
+/// the phone is already paired to. Addresses, ports and Foundation error prose stay in diagnostics.
+struct MobileConnectionRecoveryPresentation: Equatable {
+    let title: String
+    let message: String
+    let lastConnection: String?
+    let routesTried: [String]
+    let identityCode: String?
+    let primaryRecovery: RemoteConnectionFailure.Recovery
+    let offersPairAgain: Bool
+
+    static func resolve(
+        failure: RemoteConnectionFailure,
+        host: PairedRemoteHost?
+    ) -> MobileConnectionRecoveryPresentation {
+        let title: String
+        switch failure.cause {
+        case .addressChanged:
+            title = MobileL10n.string("Pair this Mac again")
+        case .pinnedIdentityMismatch:
+            title = MobileL10n.string("Check this Mac’s identity")
+        case .localNetworkDenied:
+            title = MobileL10n.string("Allow Local Network access")
+        case .upgradeRequired:
+            title = MobileL10n.string("Update Threading")
+        case .helloTimeout:
+            title = MobileL10n.string("This Mac didn’t answer")
+        case .remoteAction:
+            title = MobileL10n.string("The Mac refused the request")
+        case .transport:
+            title = MobileL10n.string("Can’t reach this Mac")
+        }
+
+        let message = failure.cause == .transport
+            ? MobileL10n.string(
+                "Threading tried every saved way to reach this Mac. Make sure the Mac app is open, then try again. If it still fails, scan its current QR code."
+            )
+            : failure.message
+
+        return MobileConnectionRecoveryPresentation(
+            title: title,
+            message: message,
+            lastConnection: host?.connectionLabel,
+            routesTried: host?.connectionOptionLabels ?? [],
+            identityCode: host?.pinnedFingerprintCode,
+            primaryRecovery: failure.recovery,
+            offersPairAgain: failure.cause == .transport || failure.cause == .helloTimeout
+        )
+    }
+}
+
 private struct DashboardProjectSection {
     let projectName: String
     let title: String
@@ -116,6 +170,7 @@ struct SessionDashboard: View {
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var theme
+    @Environment(\.openURL) private var openURL
     @AppStorage("sessionDashboardOrganization") private var organizationRaw =
         SessionOrganization.project.rawValue
     @State private var searchText = ""
@@ -140,14 +195,31 @@ struct SessionDashboard: View {
     @State private var showsUsage = false
     private let projectName: String?
     let openSettings: () -> Void
+    let reportConnectionIssue: () -> Void
 
-    init(projectName: String? = nil, openSettings: @escaping () -> Void) {
+    init(
+        projectName: String? = nil,
+        openSettings: @escaping () -> Void,
+        reportConnectionIssue: @escaping () -> Void
+    ) {
         self.projectName = projectName
         self.openSettings = openSettings
+        self.reportConnectionIssue = reportConnectionIssue
     }
 
     private var organization: SessionOrganization {
         SessionOrganization(rawValue: organizationRaw) ?? .project
+    }
+
+    private var showsDemoBanner: Bool {
+#if DEBUG
+        // This evidence fixture borrows demo data plumbing, but represents a real failed owner
+        // connection. Suppressing the demo disclaimer keeps the captured state truthful.
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "sessions-offline" {
+            return false
+        }
+#endif
+        return model.isDemo
     }
 
     private var sessions: [RemoteSessionSummaryDTO] {
@@ -192,12 +264,18 @@ struct SessionDashboard: View {
     private var dashboardContent: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
-                if projectName == nil, model.isDemo {
+                if projectName == nil, showsDemoBanner {
                     demoBanner
                 }
 
+                if let failure = model.phase.failure {
+                    connectionRecoveryCard(failure)
+                }
+
                 if model.me == nil {
-                    loadingCard
+                    if model.phase.failure == nil {
+                        loadingCard
+                    }
                 } else if sessions.isEmpty {
                     emptyCard
                 } else if projectName != nil {
@@ -234,9 +312,10 @@ struct SessionDashboard: View {
                     NotificationOnboardingCard()
                 }
             }
-            // A project starts with the row plate itself. Keep its halo inside the scroll
-            // viewport instead of settling it flush against—and clipping it at—the top edge.
-            .padding(.top, projectName == nil ? 0 : MobileDesign.Spacing.large)
+            // The first plate belongs to the scrolling page, not to the navigation bar. The
+            // breathing room also keeps a material glow inside the viewport instead of clipping
+            // it against the bar's edge.
+            .padding(.top, MobileDesign.Spacing.large)
             .padding(.horizontal, MobileDesign.Spacing.large)
             .padding(.bottom, 36)
         }
@@ -748,6 +827,198 @@ struct SessionDashboard: View {
         .remoteThemeGlow(theme)
     }
 
+    private func connectionRecoveryCard(_ failure: RemoteConnectionFailure) -> some View {
+        let presentation = MobileConnectionRecoveryPresentation.resolve(
+            failure: failure,
+            host: model.activeHost
+        )
+        return ThemedRowGroup {
+            HStack(alignment: .top, spacing: MobileDesign.Spacing.medium) {
+                Image(systemName: recoveryCardSymbol(for: failure.cause))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(theme.warning)
+                    .frame(width: MobileDesign.Size.minimumTapTarget)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                    Text(presentation.title)
+                        .font(.headline)
+                        .foregroundStyle(theme.label)
+                    Text(presentation.message)
+                        .font(.subheadline)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(MobileDesign.Spacing.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if presentation.lastConnection != nil || !presentation.routesTried.isEmpty {
+                ThemedRowDivider()
+                VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                    if let lastConnection = presentation.lastConnection {
+                        connectionFact(
+                            MobileL10n.string("Last connected"),
+                            value: lastConnection
+                        )
+                    }
+                    if !presentation.routesTried.isEmpty {
+                        connectionFact(
+                            MobileL10n.string("Tried now"),
+                            value: presentation.routesTried.joined(separator: " · ")
+                        )
+                    }
+                }
+                .padding(MobileDesign.Spacing.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let identityCode = presentation.identityCode {
+                ThemedRowDivider()
+                VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                    Text(MobileL10n.string("Saved identity"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.secondaryLabel)
+                    Text(identityCode)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(theme.label)
+                        .textSelection(.enabled)
+                        .accessibilityLabel(
+                            MobileL10n.string("Identity code %@", identityCode)
+                        )
+                    Text(MobileL10n.string(
+                        "Compare this code with Identity Code in Threading → Settings → Remote Access on the Mac before scanning again."
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(MobileDesign.Spacing.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            ThemedRowDivider()
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    recoveryButton(
+                        title: failure.recoveryTitle,
+                        systemImage: recoveryButtonSymbol(for: presentation.primaryRecovery),
+                        isPrimary: true
+                    ) {
+                        recover(from: presentation.primaryRecovery)
+                    }
+                    if presentation.offersPairAgain {
+                        recoveryButton(
+                            title: MobileL10n.string("Scan the QR code again"),
+                            systemImage: "qrcode.viewfinder",
+                            isPrimary: false
+                        ) {
+                            model.isPairing = true
+                        }
+                    }
+                }
+                VStack(spacing: MobileDesign.Spacing.small) {
+                    recoveryButton(
+                        title: failure.recoveryTitle,
+                        systemImage: recoveryButtonSymbol(for: presentation.primaryRecovery),
+                        isPrimary: true
+                    ) {
+                        recover(from: presentation.primaryRecovery)
+                    }
+                    if presentation.offersPairAgain {
+                        recoveryButton(
+                            title: MobileL10n.string("Scan the QR code again"),
+                            systemImage: "qrcode.viewfinder",
+                            isPrimary: false
+                        ) {
+                            model.isPairing = true
+                        }
+                    }
+                }
+            }
+            .padding(MobileDesign.Spacing.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ThemedRowDivider()
+            Button(action: reportConnectionIssue) {
+                Label(MobileL10n.string("Report a problem"), systemImage: "exclamationmark.bubble")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: MobileDesign.Size.minimumTapTarget
+                    )
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.accent)
+            .padding(.horizontal, MobileDesign.Spacing.inset)
+            .padding(.vertical, MobileDesign.Spacing.tight)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(MobileL10n.string("Connection recovery"))
+    }
+
+    private func connectionFact(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(theme.tertiaryLabel)
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(theme.label)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func recoveryButton(
+        title: String,
+        systemImage: String,
+        isPrimary: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(MobileThemedActionButtonStyle(
+            kind: isPrimary ? .primary : .secondary,
+            theme: theme
+        ))
+    }
+
+    private func recover(from recovery: RemoteConnectionFailure.Recovery) {
+        switch recovery {
+        case .reconnect:
+            Task { await model.refresh() }
+        case .pairAgain:
+            model.isPairing = true
+        case .openLocalNetworkSettings:
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            openURL(url)
+        case .openUpdatePage(let url):
+            openURL(url)
+        }
+    }
+
+    private func recoveryCardSymbol(for cause: RemoteConnectionFailure.Cause) -> String {
+        switch cause {
+        case .pinnedIdentityMismatch: return "exclamationmark.shield"
+        case .localNetworkDenied: return "network.slash"
+        case .upgradeRequired: return "arrow.down.circle"
+        case .addressChanged: return "qrcode.viewfinder"
+        case .helloTimeout, .remoteAction, .transport: return "wifi.exclamationmark"
+        }
+    }
+
+    private func recoveryButtonSymbol(
+        for recovery: RemoteConnectionFailure.Recovery
+    ) -> String {
+        switch recovery {
+        case .reconnect: return "arrow.clockwise"
+        case .pairAgain: return "qrcode.viewfinder"
+        case .openLocalNetworkSettings: return "gearshape"
+        case .openUpdatePage: return "arrow.down.circle"
+        }
+    }
+
     private var emptyCard: some View {
         ContentUnavailableView(
             MobileL10n.string(showsArchived ? "No archived sessions" : "No sessions yet"),
@@ -1202,11 +1473,15 @@ private struct SessionRow: View {
             }
 
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
-                Text(session.title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(theme.label)
+                MobileMorphingTitle(
+                    title: session.title,
+                    textStyle: .subheadline,
+                    weight: .medium,
+                    textColor: theme.uiLabel,
+                    groundColor: theme.uiPanel,
+                    alignment: .left
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: MobileDesign.Spacing.tight) {
                     // Green means connected and the slash means not; the glyph is the state now,
                     // so it speaks the whole state for VoiceOver rather than hiding.
@@ -1462,7 +1737,7 @@ struct NewRemoteSessionView: View {
                         .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .principal) {
-                    MobileCompactConnectionNavigationTitle(
+                    MobileConnectionNavigationTitle(
                         title: MobileL10n.string("New session"),
                         status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
                         statusColor: hostStatusColor

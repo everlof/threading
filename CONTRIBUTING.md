@@ -31,7 +31,9 @@ under Apple's terms, which the GPL does not permit. That build is only lawful be
 copyright holder licenses their own code both ways. For your contribution to be includable in
 it, we need the same latitude from you: [`CLA.md`](CLA.md) grants the maintainer a
 non-exclusive license to distribute your contribution under other terms too. You keep the
-copyright to your work, and it remains in the repository under GPLv3 like everything else.
+copyright to your work, and it remains in the repository under GPLv3 like everything else —
+except `Service/ThreadingControlPlane/`, which is under the Functional Source License (its own
+`LICENSE`, and the carve-out list in [`README.md`](README.md)).
 
 This is the same arrangement projects like Blink Shell use, for the same reason. Agreement is
 collected when you open your first pull request; a PR whose author has not agreed cannot be

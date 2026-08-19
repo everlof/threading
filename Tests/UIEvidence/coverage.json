@@ -55,8 +55,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Session composer",
-      "description": "The opening composer at full and constrained heights, including its scheduled automatic-start receipt, empty-project refusal state, and deliberately dissimilar themes.",
-      "states": ["Tall", "Short", "Scheduled automatic start", "No project selected"],
+      "description": "The opening composer at full and constrained heights, including its scheduled automatic-start receipt, empty-project refusal state, Codex Auto-review posture, and deliberately dissimilar themes.",
+      "states": ["Tall", "Short", "Scheduled automatic start", "No project selected", "Codex Auto-review"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist", "Hard-retro family"],
         "appearances": ["Light", "Dark"],

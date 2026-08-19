@@ -65,7 +65,7 @@ describe("issue-report triage notifications", () => {
         receivedAt,
         schemaVersion: "1",
         source: "iOSClient",
-        trigger: "manual",
+        trigger: "connectionRecovery",
         kind: "report",
       },
     });

@@ -8,6 +8,27 @@ import XCTest
 @MainActor
 final class SessionInfoRowTests: XCTestCase {
 
+    func testDirectoryPathLendsThePanelNoWidthOfItsOwn() {
+        func makePanel(path: String) -> SessionInfoViewController {
+            let controller = SessionInfoViewController(sessionID: SessionID(), folderPath: path)
+            controller.readSource = { completion in completion(.empty) }
+            controller.usageSource = { nil }
+            controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+            controller.view.layoutSubtreeIfNeeded()
+            return controller
+        }
+
+        let short = makePanel(path: "/tmp/project")
+        let long = makePanel(path: "/tmp/" + String(repeating: "very-long-project-name/", count: 20))
+
+        XCTAssertEqual(
+            short.view.fittingSize.width,
+            long.view.fittingSize.width,
+            accuracy: 0.5,
+            "an unbounded session path asked the panel, and therefore the window, to grow"
+        )
+    }
+
     // MARK: - Fixtures
 
     private func makeProcessRow(

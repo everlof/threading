@@ -7,6 +7,12 @@ decide *before* opening any source, given the working assumption that source ava
 is a trust requirement in this category — so revenue has to come from somewhere other than
 the code.
 
+**What landed since:** the repository went public under GPLv3 on 2026-08-08 rather than
+the FSL-everywhere of §7, and on 2026-08-19 the control plane alone was carved out to
+FSL-1.1-ALv2 on the §6.1 reasoning.
+[`docs/architecture/releasing.md`](architecture/releasing.md) holds the current record; this
+file stays as the dated analysis.
+
 ---
 
 ## 1. The market's price for the app layer is $0

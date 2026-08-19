@@ -68,9 +68,24 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     )
 
     private let currentSessionProjection: CurrentSessionProjection
+    private let readReceipts: SessionReadReceiptStore
+    private let remotelyViewingParticipantIDs: @MainActor (SessionID) -> Set<String>
+    private let ownerAlertWasAcknowledged: @MainActor (SessionID) -> Void
 
-    init(currentSessionProjection: CurrentSessionProjection) {
+    init(
+        currentSessionProjection: CurrentSessionProjection,
+        readReceipts: SessionReadReceiptStore = .shared,
+        remotelyViewingParticipantIDs: @escaping @MainActor (SessionID) -> Set<String> = {
+            RemoteSessionMirrorRegistry.shared.viewingParticipantIDs(for: $0)
+        },
+        ownerAlertWasAcknowledged: @escaping @MainActor (SessionID) -> Void = {
+            AttentionAlertCenter.shared.sessionWasViewed($0)
+        }
+    ) {
         self.currentSessionProjection = currentSessionProjection
+        self.readReceipts = readReceipts
+        self.remotelyViewingParticipantIDs = remotelyViewingParticipantIDs
+        self.ownerAlertWasAcknowledged = ownerAlertWasAcknowledged
     }
 
     // MARK: - Properties
@@ -147,6 +162,9 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         for sessionID: SessionID
     ) -> Bool {
         guard controllers[sessionID] == nil else { return false }
+        surface.activityTracker.onAttention = { [weak self] in
+            self?.noteSessionAttention(sessionID)
+        }
         controllers[sessionID] = surface
         return true
     }
@@ -228,7 +246,52 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     /// What the session is currently doing. Sessions with no terminal are dormant.
     func activity(sessionID: SessionID) -> SessionActivity {
+        activity(
+            sessionID: sessionID,
+            participantID: SessionReadReceiptStore.ownerParticipantID
+        )
+    }
+
+    /// Reader-specific activity for remote catalogues. Operational states are shared; only the
+    /// finished-result mark is projected through the stable participant's durable receipt.
+    func activity(sessionID: SessionID, participantID: String) -> SessionActivity {
+        readReceipts.project(
+            sharedActivity(sessionID: sessionID),
+            sessionID: sessionID,
+            participantID: participantID
+        )
+    }
+
+    private func sharedActivity(sessionID: SessionID) -> SessionActivity {
         controllers[sessionID]?.activity ?? conversations[sessionID]?.activity ?? .dormant
+    }
+
+    /// Opens one unread generation and spends it immediately for participants who already have
+    /// this conversation on screen. Socket presence is reduced to stable person identities here.
+    func noteSessionAttention(_ sessionID: SessionID) {
+        var viewers = remotelyViewingParticipantIDs(sessionID)
+        if visibleSessionID == sessionID {
+            viewers.insert(SessionReadReceiptStore.ownerParticipantID)
+        }
+        _ = readReceipts.recordAttention(for: sessionID, seenBy: viewers)
+        NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
+    }
+
+    /// Marks the current generation read for one person across all of their devices.
+    ///
+    /// The owner's acknowledgement also withdraws the macOS alert unconditionally. The system
+    /// may still hold a notification posted by an earlier app process, while this process has no
+    /// in-memory activity edge or receipt mutation with which to discover it. Removing by the
+    /// session's stable request identifier is idempotent and closes that relaunch path.
+    func acknowledgeAttention(sessionID: SessionID, participantID: String) {
+        if participantID == SessionReadReceiptStore.ownerParticipantID {
+            ownerAlertWasAcknowledged(sessionID)
+        }
+        guard readReceipts.acknowledge(
+            sessionID: sessionID,
+            participantID: participantID
+        ) else { return }
+        NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
     }
 
     /// Applies a lifecycle report from an agent's own hooks to the session that raised it.
@@ -470,8 +533,11 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         // Coming on screen answers the session's notification the same way it lowers its
         // sidebar flag — the no-op before `start()` keeps notification machinery out of tests.
         if let sessionID {
+            acknowledgeAttention(
+                sessionID: sessionID,
+                participantID: SessionReadReceiptStore.ownerParticipantID
+            )
             SessionSnoozeCenter.shared.acknowledge(sessionID)
-            AttentionAlertCenter.shared.sessionWasViewed(sessionID)
         }
     }
 
@@ -647,6 +713,9 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             subagentState: subagentState(for: agentSession.id),
             launchPlanProvider: fixtureLaunchPlanProvider
         ) else { return nil }
+        conversation.onAttention = { [weak self] in
+            self?.noteSessionAttention(agentSession.id)
+        }
         conversations[agentSession.id] = conversation
         return conversation
     }

@@ -225,25 +225,7 @@ final class GeneralPreferencesViewController: NSViewController {
                 ThemedMenuItem(title: value.settingsTitle, representedValue: value)
             )
         }
-        // The first item inherits — no flag, the agent's own configuration decides — and the
-        // six follow. Its represented value is deliberately nil, which is how the handler
-        // tells "leave it alone" from a mode.
-        permissionModePopUp.addItem(
-            ThemedMenuItem(title: L10n.string("Agent's Setting"), representedValue: nil)
-        )
-        for mode in AgentPermissionMode.allCases {
-            permissionModePopUp.addItem(
-                ThemedMenuItem(
-                    title: mode.displayName,
-                    subtitle: mode.menuDescription,
-                    representedValue: mode
-                )
-            )
-        }
-        permissionModePopUp.selectItem(
-            at: AppSettings.shared.defaultPermissionMode
-                .flatMap { AgentPermissionMode.allCases.firstIndex(of: $0).map { $0 + 1 } } ?? 0
-        )
+        rebuildPermissionModePopUp(for: AppSettings.shared.defaultAgentKind)
         permissionModePopUp.target = self
         permissionModePopUp.action = #selector(permissionModeChanged)
         permissionModePopUp.translatesAutoresizingMaskIntoConstraints = false
@@ -596,8 +578,8 @@ final class GeneralPreferencesViewController: NSViewController {
     /// How much a new session may do before it has to ask.
     ///
     /// Both agents, in one vocabulary: Claude states a mode directly, and Codex reaches the same
-    /// postures through its approval policy and sandbox. The default defers rather than deciding
-    /// — picking a mode here for everyone would override a `permissions.defaultMode` or
+    /// postures through its approval policy, sandbox, and reviewer. The default defers rather
+    /// than deciding — picking a mode here for everyone would override a `permissions.defaultMode` or
     /// `config.toml` the user set themselves, on the one axis where being wrong either nags
     /// them all day or stops asking when it should have.
     private func permissionModeCard() -> SettingsCard {
@@ -1160,9 +1142,34 @@ final class GeneralPreferencesViewController: NSViewController {
 
     // MARK: - Actions
 
+    /// Rebuilds the shared default in the vocabulary of the agent new chats use. The persisted
+    /// value stays the same when that agent changes; only Codex needs to qualify Auto with the
+    /// automatic reviewer behavior the launch will select.
+    private func rebuildPermissionModePopUp(for kind: AgentKind) {
+        permissionModePopUp.removeAllItems()
+        // The first item inherits — no flag, the agent's own configuration decides — and the
+        // six follow. Its represented value is deliberately nil, which is how the handler
+        // tells "leave it alone" from a mode.
+        permissionModePopUp.addItem(
+            ThemedMenuItem(title: L10n.string("Agent's Setting"), representedValue: nil)
+        )
+        for mode in AgentPermissionMode.allCases {
+            permissionModePopUp.addItem(ThemedMenuItem(
+                title: mode.displayName(for: kind),
+                subtitle: mode.menuDescription(for: kind),
+                representedValue: mode
+            ))
+        }
+        permissionModePopUp.selectItem(
+            at: AppSettings.shared.defaultPermissionMode
+                .flatMap { AgentPermissionMode.allCases.firstIndex(of: $0).map { $0 + 1 } } ?? 0
+        )
+    }
+
     @objc private func defaultAgentChanged() {
         guard let kind = defaultAgentPopUp.selectedItem?.representedValue as? AgentKind else { return }
         AppSettings.shared.defaultAgentKind = kind
+        rebuildPermissionModePopUp(for: kind)
     }
 
     @objc private func startupSpeedChanged(_ sender: ThemedPopUp) {

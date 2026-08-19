@@ -153,6 +153,8 @@ final class ProjectDatabase {
                 try database.execute(ProjectDatabaseSchema.version4)
             case 5:
                 try database.execute(ProjectDatabaseSchema.version5)
+            case 6:
+                try database.execute(ProjectDatabaseSchema.version6)
             default:
                 // Unreachable while `version` and the cases here are edited together, which is
                 // the point of failing loudly rather than silently skipping a step.
@@ -686,6 +688,82 @@ final class ProjectDatabase {
         }
     }
 
+    // MARK: - Public Methods — Session Read Receipts
+
+    /// Loads the complete auxiliary receipt ledger in one pass. This is lazy at the feature
+    /// boundary (`SessionReadReceiptStore`), so launch does not pay for it unless activity is
+    /// projected, and subsequent list rows are dictionary lookups rather than one query each.
+    func sessionReadReceiptStates() throws -> [SessionID: SessionReadReceiptState] {
+        let statement = try database.prepare(
+            """
+            SELECT attention.session_id, attention.generation,
+                   receipt.participant_id, receipt.generation
+            FROM \(ProjectDatabaseSchema.sessionAttentionTable) AS attention
+            LEFT JOIN \(ProjectDatabaseSchema.sessionReadReceiptTable) AS receipt
+              ON receipt.session_id = attention.session_id
+            ORDER BY attention.session_id
+            """
+        )
+        defer { statement.finalize() }
+
+        var result: [SessionID: SessionReadReceiptState] = [:]
+        while try statement.step() {
+            guard let rawSessionID = statement.text(0),
+                  let sessionID = SessionID(uuidString: rawSessionID) else {
+                // Presentation metadata is not authoritative project data. A malformed row may
+                // lose a dot; it may not quarantine the conversations it sits beside.
+                continue
+            }
+            let completionGeneration = statement.int(1)
+            guard completionGeneration >= 0 else { continue }
+            var state = result[sessionID] ?? SessionReadReceiptState(
+                sessionID: sessionID,
+                completionGeneration: completionGeneration
+            )
+            if let participantID = statement.text(2), !participantID.isEmpty {
+                let seenGeneration = statement.int(3)
+                if seenGeneration >= 0, seenGeneration <= completionGeneration {
+                    state.seenGenerationByParticipant[participantID] = seenGeneration
+                }
+            }
+            result[sessionID] = state
+        }
+        return result
+    }
+
+    /// Persists the completion and every receipt advancement in one transaction. Upserts are
+    /// monotonic at the store owner; retaining untouched receipt rows preserves collaborators
+    /// whose devices are offline while another participant reads the result.
+    ///
+    /// A transient runtime (for example a component-gallery fixture) has no durable session row.
+    /// Its live in-memory projection still works, but it cannot own a durable receipt. Checking
+    /// inside the write transaction distinguishes that valid case from an actual storage failure
+    /// without weakening the foreign key that cleans receipts up with their conversation.
+    @discardableResult
+    func saveSessionReadReceiptState(_ state: SessionReadReceiptState) throws -> Bool {
+        try database.transaction {
+            let session = try database.prepare(
+                "SELECT 1 FROM session WHERE id = ? LIMIT 1"
+            )
+            defer { session.finalize() }
+            session.bind(1, state.sessionID.uuidString)
+            guard try session.step() else { return false }
+
+            try database.prepare(ProjectDatabaseSchema.upsertSessionAttention)
+                .bind(1, state.sessionID.uuidString)
+                .bind(2, state.completionGeneration)
+                .run()
+            for (participantID, generation) in state.seenGenerationByParticipant {
+                try database.prepare(ProjectDatabaseSchema.upsertSessionReadReceipt)
+                    .bind(1, state.sessionID.uuidString)
+                    .bind(2, participantID)
+                    .bind(3, generation)
+                    .run()
+            }
+            return true
+        }
+    }
+
     // MARK: - Private Methods — Rows
 
     private func upsert(_ project: Project, position: Int) throws {
@@ -1023,7 +1101,7 @@ final class ProjectDatabase {
 
 enum ProjectDatabaseSchema {
 
-    static let version = 5
+    static let version = 6
 
     static let selectedSessionKey = "selectedSessionID"
 
@@ -1045,6 +1123,8 @@ enum ProjectDatabaseSchema {
     static let controlGrantTable = "control_grant"
     static let supervisionTable = "supervision"
     static let supervisionEventTable = "supervision_event"
+    static let sessionAttentionTable = "session_attention"
+    static let sessionReadReceiptTable = "session_read_receipt"
 
     /// Columns exist to be ordered by, filtered on, or joined; everything else is in `data`.
     /// `kind` and `last_active_at` are duplicated out of the payload on purpose — they are what
@@ -1200,6 +1280,34 @@ enum ProjectDatabaseSchema {
         CREATE UNIQUE INDEX supervision_active_child ON supervision (child_session_id)
             WHERE state = '\(SupervisionState.active.rawValue)';
         CREATE INDEX supervision_event_order ON supervision_event (supervision_id, at);
+        """
+
+    /// Unread is participant state, not process state. The conversation owns a monotonic result
+    /// generation; each stable participant identity owns how far through it they have read.
+    /// Both tables cascade with the session so a deleted chat leaves no identity metadata behind.
+    static let version6 = """
+        CREATE TABLE session_attention (
+            session_id TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+            generation INTEGER NOT NULL CHECK(generation >= 0)
+        );
+
+        CREATE TABLE session_read_receipt (
+            session_id     TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+            participant_id TEXT NOT NULL,
+            generation     INTEGER NOT NULL CHECK(generation >= 0),
+            PRIMARY KEY(session_id, participant_id)
+        );
+        """
+
+    static let upsertSessionAttention = """
+        INSERT INTO session_attention (session_id, generation) VALUES (?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET generation = excluded.generation
+        """
+
+    static let upsertSessionReadReceipt = """
+        INSERT INTO session_read_receipt (session_id, participant_id, generation)
+        VALUES (?, ?, ?)
+        ON CONFLICT(session_id, participant_id) DO UPDATE SET generation = excluded.generation
         """
 
     static let upsertControlGrant = """

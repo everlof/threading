@@ -1,3 +1,4 @@
+import ThreadingRemoteKit
 import XCTest
 @testable import ThreadingMobile
 
@@ -98,10 +99,93 @@ final class SessionDashboardTests: XCTestCase {
     func testOfflineNavigationStatusDoesNotPutATransportErrorInTheTitleBar() {
         XCTAssertEqual(
             MobileDashboardChrome.connectionStatus(
-                phase: .offline("The operation timed out after 60 seconds"),
+                phase: .offline(.transport("The operation timed out after 60 seconds")),
                 connectionLabel: "Relay"
             ),
             MobileL10n.string("Not connected")
+        )
+    }
+
+    /// A route failure must replace the indeterminate loading card with an actionable state. The
+    /// useful network facts are semantic route names; the address, port and raw timeout stay in
+    /// diagnostics where they cannot turn the dashboard into a network inspector.
+    func testOfflineRecoveryNamesRoutesAndIdentityWithoutAnAddressOrPort() throws {
+        let host = try pairedHost()
+        let presentation = MobileConnectionRecoveryPresentation.resolve(
+            failure: .transport(
+                URLError(.timedOut),
+                host: "david-mac.tailnet.example"
+            ),
+            host: host
+        )
+
+        XCTAssertEqual(presentation.title, MobileL10n.string("Can’t reach this Mac"))
+        XCTAssertEqual(presentation.primaryRecovery, .reconnect)
+        XCTAssertTrue(presentation.offersPairAgain)
+        XCTAssertEqual(presentation.lastConnection, MobileL10n.string("Tailscale"))
+        XCTAssertEqual(
+            Set(presentation.routesTried),
+            Set([MobileL10n.string("Tailscale"), MobileL10n.string("This network")])
+        )
+        XCTAssertEqual(
+            presentation.identityCode?.count,
+            RemoteHostPinningDefaults.pairingCodeCharacterCount
+        )
+        let visibleNetworkText = ([presentation.lastConnection].compactMap { $0 }
+            + presentation.routesTried).joined(separator: " ")
+        XCTAssertFalse(visibleNetworkText.contains("8760"))
+        XCTAssertFalse(visibleNetworkText.contains("192.168"))
+        XCTAssertFalse(
+            presentation.message.contains("timed out"),
+            "Foundation's transport prose leaked into the recovery card"
+        )
+    }
+
+    /// An identity refusal never becomes a one-tap trust override. The action opens the scanner,
+    /// where the code is learned from the Mac's screen again, and the saved code remains visible
+    /// for the comparison that should happen first.
+    func testIdentityMismatchKeepsTheScanAsTheOnlyTrustRecovery() throws {
+        let host = try pairedHost()
+        let presentation = MobileConnectionRecoveryPresentation.resolve(
+            failure: .pinnedIdentityMismatch(),
+            host: host
+        )
+
+        XCTAssertEqual(
+            presentation.title,
+            MobileL10n.string("Check this Mac’s identity")
+        )
+        XCTAssertEqual(presentation.primaryRecovery, .pairAgain)
+        XCTAssertFalse(presentation.offersPairAgain)
+        XCTAssertEqual(presentation.identityCode, host.pinnedFingerprintCode)
+    }
+
+    private func pairedHost() throws -> PairedRemoteHost {
+        let fingerprint = RemoteHostFingerprint(
+            certificateDER: Data("dashboard recovery certificate".utf8)
+        )
+        let tailnet = try XCTUnwrap(URL(string: "https://david-mac.tailnet.example:8760/"))
+        let local = try XCTUnwrap(URL(string: "https://192.168.1.42:8760/"))
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: tailnet,
+            token: String(repeating: "a", count: 43),
+            pinnedFingerprintCode: fingerprint.pairingCode
+        ))
+        return PairedRemoteHost(
+            id: "mac-1",
+            hostID: "mac-1",
+            shareID: "my-devices",
+            scope: "all",
+            name: "David’s MacBook Pro",
+            link: link,
+            lastConnectedAt: Date(),
+            endpoints: [
+                RemoteHostEndpointDTO(kind: "tailscale", baseURL: tailnet, isStable: true),
+                RemoteHostEndpointDTO(kind: "lan", baseURL: local, isStable: true),
+            ],
+            connectionPolicy: .privateOnly,
+            activeEndpointKind: "tailscale",
+            pinnedFingerprint: fingerprint.hex
         )
     }
 }

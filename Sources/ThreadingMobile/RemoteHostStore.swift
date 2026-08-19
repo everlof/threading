@@ -191,7 +191,29 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
     /// kind, and a pairing made against one is not re-labelled by this phone updating. No current
     /// host sends it.
     var connectionLabel: String {
-        switch activeEndpointKind ?? Self.endpointKind(for: link.baseURL) {
+        Self.connectionLabel(forEndpointKind: activeEndpointKind ?? Self.endpointKind(for: link.baseURL))
+    }
+
+    /// The user-facing names of the saved doors a refresh walks, once per door rather than once
+    /// per fallback port. These are deliberately labels, never addresses or port numbers: the
+    /// dashboard needs to say what it tried without turning recovery into a network inspector.
+    var connectionOptionLabels: [String] {
+        var result: [String] = []
+        var seen: Set<String> = []
+        if hostedCredential != nil {
+            let label = Self.connectionLabel(forEndpointKind: RemoteHostEndpointKind.hosted)
+            result.append(label)
+            seen.insert(label)
+        }
+        for candidate in candidates where !candidate.isPortWalk {
+            let label = Self.connectionLabel(forEndpointKind: candidate.kind)
+            if seen.insert(label).inserted { result.append(label) }
+        }
+        return result
+    }
+
+    static func connectionLabel(forEndpointKind kind: String) -> String {
+        switch kind {
         case RemoteHostEndpointKind.tailscale: return MobileL10n.string("Tailscale")
         case RemoteHostEndpointKind.relay: return MobileL10n.string("Relay")
         case RemoteHostEndpointKind.lan: return MobileL10n.string("This network")
@@ -315,6 +337,9 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
 /// One address the phone will try, and the door it belongs to.
 struct RemoteHostConnectionCandidate: Equatable {
     let link: RemoteConnectionLink
+    /// The Mac's semantic name for this door. It follows every fallback attempt so presentation
+    /// can collapse a sticky-port walk back to one human route such as "This network".
+    let kind: String
     /// Attempts sharing this identifier are the same advertised door at another port of the
     /// sticky range. An answer from one of them ends the walk over the rest.
     let doorID: String
@@ -338,7 +363,12 @@ struct RemoteHostConnectionCandidate: Equatable {
         var result: [RemoteHostConnectionCandidate] = []
         if let link = RemoteConnectionLink(baseURL: baseURL, token: token) {
             result.append(
-                RemoteHostConnectionCandidate(link: link, doorID: doorID, isPortWalk: false)
+                RemoteHostConnectionCandidate(
+                    link: link,
+                    kind: kind,
+                    doorID: doorID,
+                    isPortWalk: false
+                )
             )
         }
         guard kind == RemoteHostEndpointKind.lan,
@@ -352,7 +382,12 @@ struct RemoteHostConnectionCandidate: Equatable {
             guard let url = components?.url,
                   let link = RemoteConnectionLink(baseURL: url, token: token) else { continue }
             result.append(
-                RemoteHostConnectionCandidate(link: link, doorID: doorID, isPortWalk: true)
+                RemoteHostConnectionCandidate(
+                    link: link,
+                    kind: kind,
+                    doorID: doorID,
+                    isPortWalk: true
+                )
             )
         }
         return result

@@ -1355,9 +1355,11 @@ final class MobileThemeOutlineView: UIView {
 }
 
 private final class RemoteConversationNavigationTitleView: UIControl {
-    private let titleLabel = UILabel()
+    private let titleLabel = MobileMorphingTitleLabel()
     private let statusLabel = UILabel()
     private let dot = UIView()
+    private var titleColor = UIColor.label
+    private var titleGroundColor = UIColor.systemBackground
     /// In the status dot's place, not beside the title. Beside the title it took a column of
     /// its own and pushed the name off the bar's centre every time a turn started, and it left
     /// two marks on one line saying two different things at once. Standing where the dot stands
@@ -1388,10 +1390,7 @@ private final class RemoteConversationNavigationTitleView: UIControl {
             dot.heightAnchor.constraint(equalTo: dot.widthAnchor),
         ])
         dot.layer.cornerRadius = MobileDesign.Size.navigationStatusIndicator / 2
-        titleLabel.font = .preferredFont(forTextStyle: .headline)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.textAlignment = .center
+        titleLabel.isAccessibilityElement = false
         statusLabel.font = .preferredFont(forTextStyle: .caption2)
         statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.lineBreakMode = .byTruncatingTail
@@ -1418,7 +1417,15 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         isWorking: Bool,
         recovery: (title: String, action: () -> Void)?
     ) {
-        titleLabel.text = title
+        titleLabel.configure(
+            title: title,
+            textStyle: .headline,
+            weight: .semibold,
+            textColor: titleColor,
+            groundColor: titleGroundColor,
+            alignment: .center,
+            reducesMotion: UIAccessibility.isReduceMotionEnabled
+        )
         statusLabel.text = status
         dot.backgroundColor = statusColor
         // One variant per working period, chosen on the hidden→visible edge, so a turn keeps
@@ -1441,7 +1448,17 @@ private final class RemoteConversationNavigationTitleView: UIControl {
     }
 
     func applyTheme(_ theme: RemoteThemePalette) {
-        titleLabel.textColor = theme.uiLabel
+        titleColor = theme.uiLabel
+        titleGroundColor = theme.uiSurface
+        titleLabel.configure(
+            title: titleLabel.stringValue,
+            textStyle: .headline,
+            weight: .semibold,
+            textColor: titleColor,
+            groundColor: titleGroundColor,
+            alignment: .center,
+            reducesMotion: UIAccessibility.isReduceMotionEnabled
+        )
         statusLabel.textColor = theme.uiSecondaryLabel
         orb.applyTheme(theme)
     }

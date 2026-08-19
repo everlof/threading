@@ -72,12 +72,28 @@ final class UsageLimitStopTests: XCTestCase {
 
     /// The whole record, exactly as CLI 2.1.223 wrote it.
     func testTheRefusalRecordIsReadWithItsSentence() throws {
-        let url = try transcript([refusal()])
+        let url = try transcript([refusal(uuid: "refusal-one")])
 
         let stop = ClaudeTranscriptUsageLimit.newestStop(at: url)
 
         XCTAssertEqual(stop?.message, "You've hit your session limit · resets 1:20pm (Europe/Rome)")
         XCTAssertEqual(stop?.resetHint, "1:20pm (Europe/Rome)")
+        XCTAssertEqual(stop?.recordID, "refusal-one")
+    }
+
+    /// A loop retries while the account is still spent, and the provider repeats the same
+    /// sentence. Changed-only observation must see the new refusal record rather than mistaking
+    /// equal prose for the old stop still standing.
+    func testTwoIdenticallyWordedRefusalsAreDistinctStops() throws {
+        let first = try transcript([refusal(uuid: "refusal-one")])
+        let second = try transcript([refusal(uuid: "refusal-two")])
+
+        let firstStop = ClaudeTranscriptUsageLimit.newestStop(at: first)
+        let secondStop = ClaudeTranscriptUsageLimit.newestStop(at: second)
+
+        XCTAssertEqual(firstStop?.message, secondStop?.message)
+        XCTAssertNotEqual(firstStop, secondStop)
+        XCTAssertEqual(secondStop?.recordID, "refusal-two")
     }
 
     /// The CLI appends bookkeeping *after* the refusal — `turn_duration`, then a queue operation
@@ -93,14 +109,14 @@ final class UsageLimitStopTests: XCTestCase {
         XCTAssertNotNil(ClaudeTranscriptUsageLimit.newestStop(at: url))
     }
 
-    /// What *does* clear it: the conversation saying anything at all, in either direction. That
-    /// is why nothing has to remember when the refusal was.
-    func testANewerMessageClearsTheStop() throws {
+    /// A newer provider outcome clears the stop. A newer user record does not: it proves only
+    /// that a retry was submitted locally, and `/loop` can be refused again immediately.
+    func testOnlyANewerAssistantOutcomeClearsTheStop() throws {
         let assistant = try transcript([refusal(), assistantText("Carrying on")])
         let user = try transcript([refusal(), userText("continue")])
 
         XCTAssertNil(ClaudeTranscriptUsageLimit.newestStop(at: assistant))
-        XCTAssertNil(ClaudeTranscriptUsageLimit.newestStop(at: user))
+        XCTAssertNotNil(ClaudeTranscriptUsageLimit.newestStop(at: user))
     }
 
     /// A subagent that runs out of allowance is reported to its parent as a failed task, and the
@@ -163,6 +179,36 @@ final class UsageLimitStopTests: XCTestCase {
         wait(for: [landed], timeout: 5)
 
         XCTAssertNotNil(ClaudeTranscriptUsageLimit.known(at: url))
+    }
+
+    /// This is the changed-only cache boundary exercised as a sequence, not just value equality:
+    /// a retry can receive the exact same sentence, and its new provider record must still wake
+    /// recovery for the new refusal.
+    @MainActor
+    func testARepeatedIdenticalRefusalMovesTheChangedOnlyReader() throws {
+        let url = try transcript([refusal(uuid: "refusal-one")])
+        ClaudeTranscriptUsageLimit.forgetAll()
+        defer { ClaudeTranscriptUsageLimit.forgetAll() }
+
+        let firstRead = expectation(description: "first refusal read")
+        ClaudeTranscriptUsageLimit.revalidate(at: url) { stop in
+            XCTAssertEqual(stop?.recordID, "refusal-one")
+            firstRead.fulfill()
+        }
+        wait(for: [firstRead], timeout: 5)
+
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((refusal(uuid: "refusal-two") + "\n").utf8))
+        try handle.close()
+
+        let secondRead = expectation(description: "repeated refusal read")
+        ClaudeTranscriptUsageLimit.revalidate(at: url) { stop in
+            XCTAssertEqual(stop?.message, "You've hit your session limit · resets 1:20pm (Europe/Rome)")
+            XCTAssertEqual(stop?.recordID, "refusal-two")
+            secondRead.fulfill()
+        }
+        wait(for: [secondRead], timeout: 5)
     }
 
     /// The regression from session 4ce20d8d: moving the refused transcript to Daniel copied the
@@ -240,11 +286,13 @@ final class UsageLimitStopTests: XCTestCase {
     /// The specimen record, field for field.
     private func refusal(
         text: String = "You've hit your session limit · resets 1:20pm (Europe/Rome)",
-        isSidechain: Bool = false
+        isSidechain: Bool = false,
+        uuid: String? = nil
     ) -> String {
-        #"""
+        let identity = uuid.map { ",\"uuid\":\"\($0)\"" } ?? ""
+        return #"""
         {"type":"assistant","isSidechain":\#(isSidechain),"isApiErrorMessage":true,\#
-        "error":"rate_limit","apiErrorStatus":429,"message":{"model":"<synthetic>",\#
+        "error":"rate_limit","apiErrorStatus":429\#(identity),"message":{"model":"<synthetic>",\#
         "role":"assistant","content":[{"type":"text","text":"\#(text)"}]}}
         """#
     }

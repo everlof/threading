@@ -31,7 +31,15 @@ final class RemoteAppModel: ObservableObject {
         case idle
         case connecting
         case online
-        case offline(String)
+        case offline(RemoteConnectionFailure)
+
+        /// The named failure survives all the way to the dashboard. Keeping only its sentence
+        /// made the root screen unable to choose a recovery action, and it fell back to an
+        /// indeterminate loading card after the request had already failed.
+        var failure: RemoteConnectionFailure? {
+            guard case .offline(let failure) = self else { return nil }
+            return failure
+        }
     }
 
     @Published private(set) var hosts: [PairedRemoteHost] {
@@ -107,12 +115,12 @@ final class RemoteAppModel: ObservableObject {
     init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
         self.continuity = continuity
 #if DEBUG
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] != nil,
+        if let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"],
            let link = RemoteConnectionLink(
             string: "https://david-mac.tailnet-demo.ts.net:8443/#preview"
            ) {
             isDemo = true
-            let host = PairedRemoteHost(
+            var host = PairedRemoteHost(
                 id: "demo-mac",
                 hostID: "demo-mac",
                 shareID: "my-devices",
@@ -135,6 +143,14 @@ final class RemoteAppModel: ObservableObject {
                 connectionPolicy: .privateOnly,
                 activeEndpointKind: "tailscale"
             )
+            if demoMode == "sessions-offline" {
+                // A public, deterministic certificate fingerprint gives the recovery fixture the
+                // same 26-character comparison code a real paired record carries. No credential
+                // or machine state enters UI evidence.
+                host.pinnedFingerprint = RemoteHostFingerprint(
+                    certificateDER: Data("offline recovery evidence".utf8)
+                ).hex
+            }
             let studioLink = RemoteConnectionLink(
                 string: "https://studio-mac.tailnet-demo.ts.net:8443/#preview"
             )!
@@ -157,8 +173,13 @@ final class RemoteAppModel: ObservableObject {
             hosts = [host, studio]
             activeHostID = host.id
             continuity.setActiveHostID(host.id)
-            me = Self.demoResponse
-            phase = .online
+            if demoMode == "sessions-offline" {
+                me = nil
+                phase = .offline(.transport(URLError(.timedOut), host: link.baseURL.host))
+            } else {
+                me = Self.demoResponse
+                phase = .online
+            }
             return
         }
 #endif
@@ -363,7 +384,7 @@ final class RemoteAppModel: ObservableObject {
         } catch {
             hosts = previousHosts
             storageIssue = error.localizedDescription
-            phase = .offline(error.localizedDescription)
+            phase = .offline(.transport(error.localizedDescription))
             throw error
         }
         invalidateRefreshes()
@@ -547,7 +568,7 @@ final class RemoteAppModel: ObservableObject {
             guard activeHostID == hostID, refreshGeneration == generation else { return }
             forgetDiscovered(hostID: hostID)
             let failure = connectionFailure(for: host, error: error)
-            phase = .offline(failure.message)
+            phase = .offline(failure)
             scheduleThemeEventsRecovery(for: hostID)
             if !wasOffline {
                 var fields: [RemoteDiagnosticField: String] = [
@@ -1884,8 +1905,8 @@ final class RemoteAppModel: ObservableObject {
                             ),
                             .init(
                                 id: "auto",
-                                name: "Auto",
-                                detail: "Decides for itself when to ask."
+                                name: "Auto (Approve for me)",
+                                detail: "A reviewer agent handles requests that cross the sandbox."
                             ),
                         ]
                     ),

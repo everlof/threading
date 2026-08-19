@@ -5231,6 +5231,17 @@
         }
       }
     },
+    "A reviewer agent handles requests that cross the sandbox.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En granskningsagent hanterar begäranden som passerar sandlådans gräns."
+          }
+        }
+      }
+    },
     "A safe extension is sandboxed and Foundation-only. A companion executable must declare each capability it wants, and Threading requests only the grants that its reviewed capabilities cover.": {
       "extractionState": "stale",
       "localizations": {
@@ -6520,6 +6531,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatiskt"
+          }
+        }
+      }
+    },
+    "Auto (Approve for me)": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatiskt (godkänn åt mig)"
           }
         }
       }
@@ -28525,6 +28547,7 @@
     "Move to %@ and carry on": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Byt till %@ och fortsätt"}}}},
     "Threading stops the agent, moves the conversation to a login with room, and queues “continue” there. A login whose fresh reading has no room is refused rather than used.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading stoppar agenten, flyttar konversationen till en inloggning med utrymme och köar ”fortsätt” där. En inloggning vars färska mätning saknar utrymme nekas i stället för att användas."}}}},
     "This conversation has already moved between logins several times just now.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här konversationen har redan flyttats mellan inloggningar flera gånger nyss."}}}},
+    "This conversation has conflicting automatic recovery schedules.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här konversationen har motstridiga automatiska återställningsscheman."}}}},
     "The login this chat was set to continue on is not available.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inloggningen som chatten skulle fortsätta på är inte tillgänglig."}}}},
     "No other login has room right now.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen annan inloggning har utrymme just nu."}}}},
     "There is no other login to move this conversation to.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det finns ingen annan inloggning att flytta konversationen till."}}}},

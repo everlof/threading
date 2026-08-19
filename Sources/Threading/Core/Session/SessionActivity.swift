@@ -178,6 +178,10 @@ final class SessionActivityTracker {
     /// Called whenever the activity changes.
     var onChange: ((SessionActivity) -> Void)?
 
+    /// Called once for each new attention episode, independently of who is looking.
+    /// Read state belongs to participant identities rather than this process-local tracker.
+    var onAttention: (() -> Void)?
+
     /// Which session this is, for the log. Optional because the tracker is constructed before
     /// its owner knows — and because a fixture has no session at all.
     var sessionID: SessionID?
@@ -287,6 +291,10 @@ final class SessionActivityTracker {
     /// speaks again with nobody having typed. Reported by `Stop`, and only ever true for a
     /// session that reports its own turns.
     private var pausedOnOwnWork = false
+
+    /// Claude commonly reports `Stop` and a later idle-prompt `Notification` for one result.
+    /// They are one unread episode; new work opens the next one.
+    private var attentionEpisodeOpen = false
 
     /// Tells work this turn started from work parked in an earlier one — see
     /// `BackgroundWorkLedger`, which is where that judgement and its reasoning live.
@@ -398,6 +406,7 @@ final class SessionActivityTracker {
             return
         }
 
+        if !turnInFlight { attentionEpisodeOpen = false }
         turnInFlight = true
         awaitsUser = false
         settle(.output)
@@ -446,6 +455,7 @@ final class SessionActivityTracker {
     func noteTurnStarted(turnID: String? = nil) {
         launchedUnattended = false
         adoptOwnReports()
+        attentionEpisodeOpen = false
         turnInFlight = true
         turnGeneration += 1
         reportedTurnID = turnID
@@ -453,9 +463,10 @@ final class SessionActivityTracker {
         // A new prompt is proof the user is past whatever the last turn was asking, so an ask
         // whose close never arrived ends here rather than outliving the turn it belonged to.
         openAsks.removeAll()
-        // A turn beginning is the limit lifting, whoever typed it — the scheduled continuation
-        // landing is exactly this edge.
-        limitPark = .none
+        // Do not lower `limitPark` here. `UserPromptSubmit` proves that the CLI accepted a local
+        // prompt, not that the provider accepted the request: `/loop` and a scheduled recovery
+        // both raise this hook before an account that is still spent writes another refusal.
+        // The transcript that raised the park is the authority that lowers it.
         settle(.turnStarted)
     }
 
@@ -532,6 +543,7 @@ final class SessionActivityTracker {
         // not take the unread mark either.
         awaitsUser = !isVisible && !pausedOnOwnWork
         settle(cause)
+        if !pausedOnOwnWork { raiseAttention() }
     }
 
     /// The agent reported that it is waiting on the user.
@@ -553,6 +565,7 @@ final class SessionActivityTracker {
         guard !launchedUnattended else { return }
         awaitsUser = true
         settle(.awaitingUserReported)
+        if !turnInFlight { raiseAttention() }
     }
 
     /// The agent called a tool whose result is the user's answer — see `TurnBlockingTools`.
@@ -594,8 +607,9 @@ final class SessionActivityTracker {
     ///
     /// `recoveryArmed` says whether something is handling it: armed reads `idle` (nothing owed,
     /// nothing running), unarmed flags the loud mark (a turn stopped dead on the CLI's
-    /// chooser). The park clears on the next turn start, on the process ending or relaunching,
-    /// or — unarmed only — on the user looking at it, the same guess `awaitsUser` makes.
+    /// chooser). The park clears when the transcript no longer ends on the refusal, or when the
+    /// process ends or relaunches. A local turn start is not provider acceptance: a loop can
+    /// submit and be refused again while the account is still spent.
     func noteLimitParked(recoveryArmed: Bool) {
         quietTimer?.invalidate()
         quietTimer = nil
@@ -611,10 +625,11 @@ final class SessionActivityTracker {
     /// The session's own record no longer ends on a refusal: the conversation has spoken since,
     /// so whatever the limit was, it is not what this session is doing now.
     ///
-    /// The only thing that lowers a park besides a turn starting and the process lifecycle, and
-    /// it is not a guess: `ObservedUsageLimit` answers nil the moment a newer message record
-    /// exists, which is the same evidence the park was raised on. Hooks cannot serve here —
-    /// nothing fires for a refusal, and nothing fires for its lifting either.
+    /// The only thing that lowers a park besides the process lifecycle, and it is not a guess:
+    /// `ObservedUsageLimit` answers nil the moment a newer assistant outcome exists, which is
+    /// the same provider-side evidence the park was raised on. Hooks cannot serve here —
+    /// `UserPromptSubmit` fires before the provider decides, while nothing fires for either a
+    /// refusal or its lifting.
     func noteLimitCleared() {
         guard limitPark != .none else { return }
         limitPark = .none
@@ -686,6 +701,7 @@ final class SessionActivityTracker {
             otherProgramHoldsPTY: otherProgramHoldsPTY
         )
         settle(.bell)
+        if !launchedUnattended { raiseAttention() }
         return cause
     }
 
@@ -717,6 +733,7 @@ final class SessionActivityTracker {
         awaitsUser = false
         openAsks.removeAll()
         pausedOnOwnWork = false
+        attentionEpisodeOpen = false
         limitPark = .none
         backgroundWork.forget()
         settle(.dormant)
@@ -741,6 +758,7 @@ final class SessionActivityTracker {
         bytesSinceQuiet = 0
         reportsOwnActivity = false
         hasHeardFromProcess = false
+        attentionEpisodeOpen = false
         isDormant = false
         turnInFlight = false
         reportedTurnID = nil
@@ -881,6 +899,13 @@ final class SessionActivityTracker {
         // Finishing while the session is on screen needs no flag; the user saw it happen.
         awaitsUser = !isVisible
         settle(.quiet)
+        raiseAttention()
+    }
+
+    private func raiseAttention() {
+        guard !attentionEpisodeOpen else { return }
+        attentionEpisodeOpen = true
+        onAttention?()
     }
 }
 

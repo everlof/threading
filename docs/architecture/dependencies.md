@@ -138,6 +138,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     the same trap as a test writing to `UserDefaults.standard`. `TerminalCopyOnSelectTests` pins
     all of it, including that a one-event drag selects nothing: the selection anchors at the
     first *drag* event, not at the press.
+    A settled macOS selection also survives ordinary PTY output and a line feed that does not
+    move its buffer rows. Codex repaints progress after the pointer is released, and clearing on
+    every feed chunk made a valid range disappear on its next frame. Coordinates are discarded
+    only when their meaning changes: a buffer switch, resize, alternate-buffer scroll, normal
+    scrollback trim, keyboard input, or a new pointer choice. Normal scrollback growth appends
+    beneath the selected rows and leaves them stable.
   - **The Option-word keys are ours.** `TerminalSession` sets `optionAsMetaKey = false` so
     Option still composes `~ | \ @` on non-US layouts. Upstream's meta branch is also the only
     place that turned Option-arrow into word motion, so that one switch silently dropped the
@@ -247,9 +253,17 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   character when it changes, used for every session, project and checkout name the app shows.
   - Location: `./Packages/Vendor/LabelMorph/` (git submodule), a local Swift package like the other two.
   - Upstream: https://github.com/everlof/LabelMorph — **our fork**, mod it directly.
-  - `MorphingTitleLabel` (in `UI/Design/`) is the theme boundary: the package owns glyph
+  - `MorphingTitleLabel` (in `UI/Design/`) is the Mac theme boundary: the package owns glyph
     layout and animation, the wrapper owns the semantic ink, Reduce Motion, clipping,
-    accessibility and the user's chosen preset.
+    accessibility and the user's chosen preset. `MobileMorphingTitleLabel` and its SwiftUI
+    bridge `MobileMorphingTitle` are the phone counterpart. The same retained UIKit wrapper is
+    used by SwiftUI list/navigation chrome and the native conversation controller, so a chat
+    rename cannot animate in one surface and snap in another.
+  - **The engine is AppKit and UIKit.** The fork's platform aliases keep its public font, colour
+    and view API native on each side. Core Text outlines are y-up while UIKit layers are y-down;
+    `GlyphPath` reflects iOS outlines across the glyph baseline. Omitting that conversion leaves
+    settled bitmap glyphs correct but turns the in-flight Shape Morph upside down, which a static
+    screenshot cannot expose.
   - **Tempo is ours.** `MorphPreset.recommendedTiming` is tuned to show an effect off — one
     large title, watched — and the wrapper brings it to the app's own pace before every morph:
     the per-character duration scaled by `Design.Motion.nameMorphTempo`, and the stagger held
@@ -274,6 +288,10 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `alignment` all guard on equality). Each rebuilds or repaints every glyph layer, and a
     sidebar row restates all three on every configure — which happens continuously while an
     agent works.
+  - **The phone list stays proportional to what is visible.** Session rows remain in their
+    `LazyVStack`; each visible row retains one wrapper, and an unchanged SwiftUI update is stopped
+    by the package's equality guards. The duration and total cascade are bounded independently of
+    title length, so neither a long name nor an unbounded session history adds background work.
   - **Glyph rasterisation is ours** (`GlyphRaster`, `GlyphLayer`). The stock label draws each
     character with a `CATextLayer`, which is invisible at 2x and measurably worse at 1x —
     an external monitor at its native resolution, where one point is one pixel. Against

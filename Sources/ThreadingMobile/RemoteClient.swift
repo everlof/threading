@@ -346,7 +346,11 @@ struct RemoteClient {
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.timeoutIntervalForRequest = RemoteClientDefaults.requestTimeoutSeconds
         configuration.timeoutIntervalForResource = RemoteClientDefaults.resourceTimeoutSeconds
-        configuration.waitsForConnectivity = true
+        // A refresh walks several independently usable doors to the same Mac. Waiting here keeps
+        // an unreachable first door suspended inside URLSession, so its per-door timeout never
+        // becomes the failure that advances the walk to the next candidate. Every REST attempt
+        // must terminalize promptly; the route loop, not URLSession, owns waiting and failover.
+        configuration.waitsForConnectivity = false
         return URLSession(
             configuration: configuration,
             delegate: pinningDelegate,
@@ -763,6 +767,11 @@ struct RemoteClient {
     /// inheriting the request session's `waitsForConnectivity`.
     static var socketWaitsForConnectivity: Bool {
         socketSession.configuration.waitsForConnectivity
+    }
+
+    /// True when a REST request can suspend instead of returning control to the route walk.
+    static var requestWaitsForConnectivity: Bool {
+        session.configuration.waitsForConnectivity
     }
 
     /// The delegate each session actually installed, so a test can prove they are the same

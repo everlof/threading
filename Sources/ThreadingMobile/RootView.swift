@@ -297,6 +297,19 @@ struct RootView: View {
         )
     }
 
+    private func openConnectionRecoveryReport() {
+        let trigger = MobileIssueReportTrigger.connectionRecovery
+        MobileDiagnostics.record(.issueReportOpened, fields: [
+            .reason: trigger.rawValue,
+            .surface: "none",
+        ])
+        issueReportRequest = MobileIssueReportRequest(
+            trigger: trigger,
+            screenshot: nil,
+            screenshotWasRequested: false
+        )
+    }
+
 #if DEBUG
     private static let terminalDemoModes: Set<String> = [
         "terminal-collaboration",
@@ -444,7 +457,10 @@ struct RootView: View {
                 if model.hosts.isEmpty {
                     WelcomeView(openSettings: { showsSettings = true })
                 } else {
-                    SessionDashboard(openSettings: { showsSettings = true })
+                    SessionDashboard(
+                        openSettings: { showsSettings = true },
+                        reportConnectionIssue: openConnectionRecoveryReport
+                    )
                 }
             }
             .navigationDestination(for: MobileNavigationRoute.self) { route in
@@ -452,7 +468,8 @@ struct RootView: View {
                 case .project(let projectName):
                     SessionDashboard(
                         projectName: projectName,
-                        openSettings: { showsSettings = true }
+                        openSettings: { showsSettings = true },
+                        reportConnectionIssue: openConnectionRecoveryReport
                     )
                 case .session(let sessionID):
                     if let session = model.me?.sessions.first(where: { $0.id == sessionID }) {

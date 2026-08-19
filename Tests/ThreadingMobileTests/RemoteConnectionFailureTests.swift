@@ -202,6 +202,13 @@ final class RemoteConnectionFailureTests: XCTestCase {
         )
     }
 
+    func testTheRequestSessionDoesNotWaitForConnectivity() {
+        XCTAssertFalse(
+            RemoteClient.requestWaitsForConnectivity,
+            "A waiting REST candidate prevents the route walk from trying the next door."
+        )
+    }
+
     // MARK: - A dead address must say so
 
     func testABadServerResponseOnTheSocketAsksForAFreshPairingCode() {

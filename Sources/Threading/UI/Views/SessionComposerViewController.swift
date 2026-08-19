@@ -1198,12 +1198,14 @@ final class SessionComposerViewController: NSViewController {
         modeChip.configure(
             symbolName: PermissionModePresentation.symbol,
             title: PermissionModePresentation.chipTitle(
+                for: selectedAgent,
                 selected: selectedPermissionMode,
                 inherited: inheritedMode
             )
         )
         // `configure` puts the title on the tooltip, so whose value it is has to be said after.
         if let tooltip = PermissionModePresentation.chipTooltip(
+            for: selectedAgent,
             selected: selectedPermissionMode,
             inherited: inheritedMode
         ) {

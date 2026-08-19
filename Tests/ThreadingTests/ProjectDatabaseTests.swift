@@ -189,6 +189,36 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertFalse(try database.isEmpty())
     }
 
+    func testSessionReadReceiptsRoundTripAndCascadeWithTheirSession() throws {
+        let database = try makeDatabase()
+        let session = AgentSession(kind: .claude, title: "Unread")
+        let project = makeProject("alpha", sessions: [session])
+        try database.save(ProjectsState(projects: [project]))
+
+        let receipt = SessionReadReceiptState(
+            sessionID: session.id,
+            completionGeneration: 4,
+            seenGenerationByParticipant: ["owner": 4, "anna": 2]
+        )
+        try database.saveSessionReadReceiptState(receipt)
+        XCTAssertEqual(try database.sessionReadReceiptStates()[session.id], receipt)
+
+        try database.save(ProjectsState(projects: [makeProject("alpha")]))
+        XCTAssertTrue(try database.sessionReadReceiptStates().isEmpty)
+    }
+
+    func testTransientSessionReceiptIsAnInMemoryOnlyNoOp() throws {
+        let database = try makeDatabase()
+        let receipt = SessionReadReceiptState(
+            sessionID: SessionID(),
+            completionGeneration: 1,
+            seenGenerationByParticipant: [SessionReadReceiptStore.ownerParticipantID: 1]
+        )
+
+        XCTAssertFalse(try database.saveSessionReadReceiptState(receipt))
+        XCTAssertTrue(try database.sessionReadReceiptStates().isEmpty)
+    }
+
     func testAuthorityAndSupervisionRoundTripAndCascadeWithSessions() throws {
         let database = try makeDatabase()
         let manager = AgentSession(kind: .claude, title: "Manager")

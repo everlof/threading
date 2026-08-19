@@ -1535,7 +1535,13 @@ extension TerminalView {
     func feedPrepare()
     {
         search.invalidate()
+        // AppKit selections are buffer ranges, so ordinary process output can leave them intact.
+        // The macOS front end clears only when an operation invalidates those coordinates
+        // (buffer switch, resize, fixed-buffer scroll, or scrollback trim). UIKit's selection
+        // handles keep their existing output-cancels-selection contract.
+        #if os(iOS) || os(visionOS)
         selection.active = false
+        #endif
         startDisplayUpdates()
     }
     

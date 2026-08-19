@@ -537,6 +537,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         pausedOnOwnWork = isTurnInFlight
             ? false
             : backgroundWork.turnEnded(leaving: backgroundWorkInFlight)
+        if !isReplaying, !isTurnInFlight, !pausedOnOwnWork {
+            onAttention?()
+        }
         // A turn beginning is the limit lifting, whoever asked for it. Cleared on the opening
         // edge only: the closing edge is where a refusal is *recorded*, and clearing there
         // would wipe the state one event after setting it.
@@ -792,6 +795,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     weak var delegate: ConversationViewControllerDelegate?
+
+    /// The runtime owns participant receipts; the renderer reports only that a new result exists.
+    var onAttention: (() -> Void)?
 
     var isRunning: Bool { stream.isRunning }
 
@@ -2992,12 +2998,14 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         modeChip.configure(
             symbolName: PermissionModePresentation.symbol,
             title: PermissionModePresentation.chipTitle(
+                for: session.kind,
                 selected: session.permissionMode,
                 inherited: inheritedMode
             )
         )
         // `configure` puts the title on the tooltip, so whose value it is has to be said after.
         if let tooltip = PermissionModePresentation.chipTooltip(
+            for: session.kind,
             selected: session.permissionMode,
             inherited: inheritedMode
         ) {

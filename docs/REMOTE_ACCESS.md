@@ -1076,6 +1076,21 @@ a second certificate for the same address.
   with", offers re-pairing, and never presents it as a generic network error or as a changed
   address. A support report carries the verdict as a token; the fingerprint itself is not a fact
   a report contains.
+- **The dashboard stops loading when the attempt has stopped.** An offline phase retains the
+  structured failure rather than only its sentence, so an owner with no cached catalogue gets a
+  recovery card instead of an indeterminate “Loading sessions…” card. It names only the saved
+  doors in product language (This network, Tailscale, VPN or Direct), never an address or port,
+  offers the cause-specific next step, and keeps re-scanning available after an ordinary route
+  failure. The complete 26-character identity already pinned by the phone is shown for comparison
+  with **Settings ▸ Remote Access** on the Mac; a mismatch has no “trust this answer” shortcut.
+  **Report a problem** opens the app-owned private-report consent sheet without capturing the
+  screen. Its reviewed package is written to the protected iOS outbox before delivery, so neither
+  the Mac route nor immediate Internet connectivity is required; the same idempotent package
+  retries when connectivity returns in the foreground. Reporting and outbox policy remain
+  host-owned alongside connection truth and recovery actions.
+  This recovery surface is deliberately host-only under the customization-surface gate: Threading
+  retains connection truth, certificate comparison and every recovery action even where other
+  presentation is customizable.
 - **Persisted with the pairing.** Both fingerprints live on the paired-host Keychain record, so
   the pin is in force on the first request after a relaunch rather than only after the request
   that would have learned it. The 26-character code is shown beside the Mac in Choose Mac for

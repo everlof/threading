@@ -278,6 +278,99 @@ final class AgentTerminalRuntimeCapabilityTests: XCTestCase {
         XCTAssertNil(runtime.terminalRootProcessIdentifier(for: missingID))
     }
 
+    func testRuntimeProjectsUnreadPerStableIdentityAcrossAttentionEpisodes() {
+        var persisted: [SessionID: SessionReadReceiptState] = [:]
+        let receipts = SessionReadReceiptStore(
+            load: { persisted },
+            save: {
+                persisted[$0.sessionID] = $0
+                return true
+            }
+        )
+        let sessionID = SessionID()
+        var remoteViewers: Set<String> = ["member-anna"]
+        let runtime = AgentRuntime(
+            currentSessionProjection: CurrentSessionProjection { _ in nil },
+            readReceipts: receipts,
+            remotelyViewingParticipantIDs: { requestedID in
+                requestedID == sessionID ? remoteViewers : []
+            }
+        )
+        let surface = RecordingRuntimeSurface(isRunning: true)
+        XCTAssertTrue(runtime.registerTerminalRuntimeSurface(surface, for: sessionID))
+        defer { runtime.discard(sessionID: sessionID) }
+
+        // The owner is looking locally and Anna is looking remotely when this result lands.
+        runtime.setVisibleSession(sessionID)
+        surface.activityTracker.isVisible = true
+        surface.activityTracker.noteTurnStarted()
+        surface.activityTracker.noteTurnFinished()
+
+        XCTAssertEqual(runtime.activity(sessionID: sessionID), .idle)
+        XCTAssertEqual(
+            runtime.activity(sessionID: sessionID, participantID: "member-anna"),
+            .idle
+        )
+        XCTAssertEqual(
+            runtime.activity(sessionID: sessionID, participantID: "member-priya"),
+            .needsAttention
+        )
+
+        // A later result is a new generation. Nobody is looking, and reading it as the owner
+        // cannot spend either collaborator's independent receipt.
+        runtime.setVisibleSession(nil)
+        surface.activityTracker.isVisible = false
+        remoteViewers = []
+        surface.activityTracker.noteTurnStarted()
+        surface.activityTracker.noteTurnFinished()
+
+        XCTAssertEqual(runtime.activity(sessionID: sessionID), .needsAttention)
+        XCTAssertEqual(
+            runtime.activity(sessionID: sessionID, participantID: "member-anna"),
+            .needsAttention
+        )
+        runtime.acknowledgeAttention(
+            sessionID: sessionID,
+            participantID: SessionReadReceiptStore.ownerParticipantID
+        )
+        XCTAssertEqual(runtime.activity(sessionID: sessionID), .idle)
+        XCTAssertEqual(
+            runtime.activity(sessionID: sessionID, participantID: "member-anna"),
+            .needsAttention
+        )
+    }
+
+    func testOwnerAcknowledgementWithdrawsAStaleSystemAlertWithoutAReceiptEdge() {
+        let receipts = SessionReadReceiptStore(load: { [:] }, save: { _ in true })
+        let sessionID = SessionID()
+        var withdrawn: [SessionID] = []
+        let runtime = AgentRuntime(
+            currentSessionProjection: CurrentSessionProjection { _ in nil },
+            readReceipts: receipts,
+            remotelyViewingParticipantIDs: { _ in [] },
+            ownerAlertWasAcknowledged: { withdrawn.append($0) }
+        )
+
+        // A delivered notification can predate this process, so there may be no loaded unread
+        // generation to advance. The stable system request still has to be removed when any
+        // owner device opens the conversation.
+        runtime.acknowledgeAttention(
+            sessionID: sessionID,
+            participantID: SessionReadReceiptStore.ownerParticipantID
+        )
+        XCTAssertEqual(withdrawn, [sessionID])
+
+        runtime.acknowledgeAttention(
+            sessionID: sessionID,
+            participantID: "member-anna"
+        )
+        XCTAssertEqual(
+            withdrawn,
+            [sessionID],
+            "a collaborator reading must not withdraw the owner's Mac notification"
+        )
+    }
+
     private final class RecordingRuntimeSurface: AgentTerminalRuntimeSurface {
         var isRunning: Bool
         var activity: SessionActivity { activityTracker.activity }

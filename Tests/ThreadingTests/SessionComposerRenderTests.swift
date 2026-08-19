@@ -27,10 +27,12 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
     /// `UserDefaults.standard`. A test that picks an agent to assert what its chips offer has to
     /// put the old one back, or the app they run next opens on a runtime they never chose.
     private var savedAgentKind: AgentKind?
+    private var savedPermissionMode: AgentPermissionMode?
 
     override func setUp() {
         super.setUp()
         savedAgentKind = AppSettings.shared.defaultAgentKind
+        savedPermissionMode = AppSettings.shared.defaultPermissionMode
     }
 
     override func tearDown() {
@@ -38,7 +40,9 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         if let savedAgentKind {
             AppSettings.shared.defaultAgentKind = savedAgentKind
         }
+        AppSettings.shared.defaultPermissionMode = savedPermissionMode
         savedAgentKind = nil
+        savedPermissionMode = nil
         super.tearDown()
     }
 
@@ -188,7 +192,7 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             let effort = try XCTUnwrap(
                 chip(named: "composer.session-start.effort", in: composer.view)
             )
-            mode.configure(icon: nil, title: PermissionModePresentation.agentSettingTitle)
+            mode.configure(icon: nil, title: AgentPermissionMode.auto.displayName(for: .codex))
             effort.configure(icon: nil, title: "Extra High")
             mode.isHidden = false
             effort.isHidden = false
@@ -1477,6 +1481,32 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
                 }
             }
         }
+
+        // One canonical provider-specific state: Codex's longer Auto title is the visible
+        // promise that the third launch axis selects automatic review. It gets one focused
+        // render rather than multiplying every theme/state combination above.
+        AppSettings.shared.defaultAgentKind = .codex
+        AppSettings.shared.defaultPermissionMode = .auto
+        AppThemePalette.set(.system)
+        let autoReviewAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        var autoReviewData: Data?
+        autoReviewAppearance.performAsCurrentDrawingAppearance {
+            autoReviewData = image(
+                size: Render.short,
+                appearance: autoReviewAppearance,
+                theme: .system,
+                projectID: project.id,
+                promptText: "Review the approval path.",
+                scheduled: false
+            )
+        }
+        try XCTUnwrap(autoReviewData, "Failed to render Codex Auto-review")
+            .write(to: directory.appendingPathComponent(
+                "composer-system-light-codex-auto-review.png"
+            ))
+        written += 1
+        expected += 1
+
         print("Rendered \(written) composers to \(directory.path)")
         XCTAssertEqual(written, expected)
     }

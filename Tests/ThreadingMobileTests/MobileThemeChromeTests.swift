@@ -77,3 +77,114 @@ final class MobileKeyboardAppearanceTests: XCTestCase {
         )
     }
 }
+
+@MainActor
+final class MobileMorphingTitleTests: XCTestCase {
+    func testAMountedTitleMorphsWhenItsChatNameChanges() {
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+
+        configure(title, text: "First chat", reducesMotion: false)
+        window.layoutIfNeeded()
+        XCTAssertFalse(title.isAnimatingTitleForTesting)
+
+        configure(title, text: "Renamed chat", reducesMotion: false)
+
+        XCTAssertEqual(title.stringValue, "Renamed chat")
+        XCTAssertEqual(title.accessibilityLabel, "Renamed chat")
+        XCTAssertTrue(title.isAnimatingTitleForTesting)
+    }
+
+    func testReduceMotionLandsAChangedChatNameWithoutAnimation() {
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+
+        configure(title, text: "First chat", reducesMotion: false)
+        window.layoutIfNeeded()
+        configure(title, text: "Renamed chat", reducesMotion: true)
+
+        XCTAssertEqual(title.stringValue, "Renamed chat")
+        XCTAssertFalse(title.isAnimatingTitleForTesting)
+    }
+
+    func testNavigationStackCompressesALongChatNameWithoutCollapsingIt() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
+        let title = MobileMorphingTitleLabel()
+        configure(title, text: "Review the new remote access feature", reducesMotion: false)
+        let status = UILabel()
+        status.text = "Connected"
+        let stack = UIStackView(arrangedSubviews: [title, status])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.frame = host.bounds
+        host.addSubview(stack)
+
+        host.layoutIfNeeded()
+
+        XCTAssertEqual(title.frame.width, host.bounds.width, accuracy: 0.5)
+        XCTAssertGreaterThan(title.frame.height, 0)
+    }
+
+    func testShapeMorphGlyphsUseUIKitCoordinateDirection() throws {
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+
+        configure(title, text: "I", reducesMotion: false)
+        window.layoutIfNeeded()
+        configure(title, text: "P", reducesMotion: false)
+
+        let path = try XCTUnwrap(shapeLayers(in: title.layer).compactMap(\.path).first)
+        let box = path.boundingBoxOfPath
+        var upperInk = 0
+        var lowerInk = 0
+        for row in 0..<40 {
+            for column in 0..<40 {
+                let point = CGPoint(
+                    x: box.minX + (CGFloat(column) + 0.5) * box.width / 40,
+                    y: box.minY + (CGFloat(row) + 0.5) * box.height / 40
+                )
+                guard path.contains(point, using: .evenOdd) else { continue }
+                if point.y < box.midY {
+                    upperInk += 1
+                } else {
+                    lowerInk += 1
+                }
+            }
+        }
+
+        XCTAssertGreaterThan(upperInk, lowerInk, "P's bowl belongs above its stem on UIKit")
+    }
+
+    private func mountedTitle() -> (UIWindow, MobileMorphingTitleLabel) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        let title = MobileMorphingTitleLabel(frame: CGRect(x: 55, y: 80, width: 280, height: 24))
+        controller.view.addSubview(title)
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        return (window, title)
+    }
+
+    private func configure(
+        _ title: MobileMorphingTitleLabel,
+        text: String,
+        reducesMotion: Bool
+    ) {
+        title.configure(
+            title: text,
+            textStyle: .headline,
+            weight: .semibold,
+            textColor: .label,
+            groundColor: .systemBackground,
+            alignment: .center,
+            reducesMotion: reducesMotion
+        )
+    }
+
+    private func shapeLayers(in layer: CALayer) -> [CAShapeLayer] {
+        (layer.sublayers ?? []).flatMap { child in
+            (child as? CAShapeLayer).map { [$0] } ?? shapeLayers(in: child)
+        }
+    }
+}

@@ -166,6 +166,20 @@ resolve_simulator() {
   printf '%s\n' "${simulator}"
 }
 
+boot_simulator_if_needed() {
+  local udid="$1"
+  local state
+  state="$(
+    xcrun simctl list devices available -j \
+      | jq -r --arg udid "${udid}" \
+        '[.devices[][] | select(.udid == $udid)][0].state // empty'
+  )"
+  if [[ "${state}" != "Booted" ]]; then
+    xcrun simctl boot "${udid}"
+  fi
+  xcrun simctl bootstatus "${udid}" -b >/dev/null
+}
+
 template_simulator_udid="$(resolve_simulator "${requested_simulator}")"
 device_name="$(
   xcrun simctl list devices available -j \
@@ -197,8 +211,7 @@ if [[ "${requested_simulator}" == "booted" ]]; then
   )"
   simulator_udid="${temporary_simulator_udid}"
   if [[ -n "${template_simulator_to_reboot}" ]]; then
-    xcrun simctl boot "${template_simulator_to_reboot}"
-    xcrun simctl bootstatus "${template_simulator_to_reboot}" -b >/dev/null
+    boot_simulator_if_needed "${template_simulator_to_reboot}"
     template_simulator_to_reboot=""
   fi
 
@@ -216,8 +229,7 @@ if [[ "${requested_simulator}" == "booted" ]]; then
     -bool NO "${simulator_preferences_work}"
   defaults import com.apple.iphonesimulator "${simulator_preferences_work}" >/dev/null
 
-  xcrun simctl boot "${simulator_udid}"
-  xcrun simctl bootstatus "${simulator_udid}" -b >/dev/null
+  boot_simulator_if_needed "${simulator_udid}"
 else
   simulator_udid="${template_simulator_udid}"
 fi

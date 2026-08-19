@@ -3,8 +3,8 @@ import AppKit
 import SwiftTerm
 @testable import Threading
 
-/// Copy-on-select: what a pointer gesture in the terminal puts on the clipboard, and — the half
-/// that costs a user something when it is wrong — what it leaves alone.
+/// Terminal selection: what a pointer gesture puts on the clipboard, what it leaves alone, and
+/// how long the selected buffer range survives while the process keeps repainting.
 ///
 /// macOS has one pasteboard, so every one of these gestures is spending the user's clipboard.
 /// The setting being off has to mean *nothing is written*, a selection covering no characters has
@@ -186,6 +186,58 @@ final class TerminalCopyOnSelectTests: XCTestCase {
 
         XCTAssertNil(view.selectedText, "the click should have cleared the selection")
         XCTAssertEqual(copied, Self.priorClipboard, "clearing a selection is not a copy")
+    }
+
+    // MARK: - Selection Lifetime
+
+    /// Codex repaints progress in small output chunks after a drag has settled. Output outside
+    /// the selected range must not dismiss the range merely because another PTY read arrived.
+    func testSelectionSurvivesUnrelatedProcessOutput() {
+        AppSettings.shared.copiesTerminalSelection = false
+        drag(row: Row.text)
+        let selected = view.selectedText
+
+        view.feed(text: "\u{1b}[3;1Hworking")
+
+        XCTAssertEqual(view.selectedText, selected)
+    }
+
+    /// Codex's TUI also uses line feeds while repainting. A line feed away from the bottom does
+    /// not move or replace existing buffer rows, so it must not cancel their selection.
+    func testSelectionSurvivesALineFeedThatDoesNotScroll() {
+        AppSettings.shared.copiesTerminalSelection = false
+        drag(row: Row.text)
+        let selected = view.selectedText
+
+        view.feed(text: "\u{1b}[3;1Hprogress\r\n")
+
+        XCTAssertEqual(view.selectedText, selected)
+    }
+
+    /// Normal and alternate buffers reuse coordinates for unrelated content. Keeping the range
+    /// across a switch would highlight text the user never selected.
+    func testSwitchingBuffersClearsTheSelection() {
+        drag(row: Row.text)
+        XCTAssertNotNil(view.selectedText)
+
+        view.feed(text: "\u{1b}[?1049h")
+
+        XCTAssertNil(view.selectedText)
+    }
+
+    /// An alternate buffer has no scrollback: scrolling replaces every row in place rather than
+    /// appending stable history. That operation still invalidates a local selection.
+    func testScrollingTheAlternateBufferClearsTheSelection() {
+        // 1049 restores whichever cursor position the alternate buffer last held. Home it so
+        // the pointer fixture selects the row we just wrote rather than assuming that position.
+        view.feed(text: "\u{1b}[?1049h\u{1b}[Hstable row")
+        drag(row: Row.text)
+        XCTAssertNotNil(view.selectedText)
+
+        let bottomRow = view.getTerminal().getDims().rows
+        view.feed(text: "\u{1b}[\(bottomRow);1H\r\n")
+
+        XCTAssertNil(view.selectedText)
     }
 
     // MARK: - Copy With Nothing Selected

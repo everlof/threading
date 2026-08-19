@@ -427,6 +427,34 @@ final class StateManager {
         }
     }
 
+    // MARK: - Session Read Receipt Persistence
+
+    func sessionReadReceiptStates() -> [SessionID: SessionReadReceiptState]? {
+        do {
+            return try database().sessionReadReceiptStates()
+        } catch {
+            ThreadingLogger.session.error(
+                "Could not load session read receipts: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func saveSessionReadReceiptState(_ state: SessionReadReceiptState) -> Bool {
+        guard writesAreAllowed(for: "session read receipt") else { return false }
+        do {
+            return try database().saveSessionReadReceiptState(state)
+        } catch {
+            ThreadingLogger.session.error(
+                "Could not persist session read receipt: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
     /// Restores the store, importing a legacy `projects.json` the first time.
     ///
     /// Three outcomes, and the contract is the one the JSON document had: a missing store starts

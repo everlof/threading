@@ -187,6 +187,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     public var terminal: Terminal!
 
     var selection: SelectionService!
+    /// The scrollback origin when the current selection was last changed. Buffer coordinates
+    /// remain stable while normal scrollback grows, but recycling its oldest line shifts every
+    /// coordinate and invalidates the range.
+    private var selectionLinesTop = 0
     private var scroller: NSScroller!
     
     // Attribute dictionary, maps a console attribute (color, flags) to the corresponding dictionary
@@ -533,6 +537,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     open func bufferActivated(source: Terminal) {
+        // A selection belongs to one buffer. The normal and alternate buffers reuse the same
+        // coordinates for unrelated contents, so carrying a range between them highlights text
+        // the user never selected.
+        selection.selectNone()
         updateScroller ()
     }
     
@@ -554,13 +562,21 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     open func scrolled(source terminal: Terminal, yDisp: Int) {
+        // Normal-buffer growth appends beneath existing ranges, so selection remains valid.
+        // A fixed alternate buffer scrolls its rows in place, while a full normal scrollback
+        // recycles from the top; both replace the cells the saved coordinates identified.
+        if selection.active,
+           !terminal.buffer.hasScrollback || terminal.buffer.linesTop != selectionLinesTop {
+            selection.selectNone()
+        }
         //selectionView.notifyScrolled(source: terminal)
         updateScroller()
         terminalDelegate?.scrolled(source: self, position: scrollPosition)
     }
     
     open func linefeed(source: Terminal) {
-        selection.selectNone()
+        // A line feed that does not scroll or trim the buffer leaves an existing range valid.
+        // `scrolled(source:yDisp:)` owns the two cases that do invalidate its coordinates.
     }
     
     /// This vaiable controls whether mouse events are sent to the application running under the
@@ -1087,6 +1103,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     open func selectionChanged(source: Terminal) {
+        if selection.active {
+            selectionLinesTop = source.buffer.linesTop
+        }
         needsDisplay = true
     }
     

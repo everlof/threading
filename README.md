@@ -69,6 +69,10 @@ under `Targets/`.
 The repository is licensed under the **GNU GPLv3** (see [`LICENSE`](LICENSE)), with these
 carve-outs, each under its own terms:
 
+- `Service/ThreadingControlPlane/` — the hosted rendezvous service, under the
+  [Functional Source License](https://fsl.software) (FSL-1.1-ALv2, its own `LICENSE`). Read it,
+  modify it, run it for your own Macs; you may not offer it as a competing service. Each version
+  becomes Apache-2.0 two years after it is made available.
 - `Packages/Vendor/SwiftTerm/` — a vendored fork of [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm),
   MIT (its `LICENSE` file governs that tree).
 - `Packages/Vendor/ThinkingOrbs/`, `Packages/Vendor/LabelMorph/`, and
@@ -80,6 +84,11 @@ carve-outs, each under its own terms:
 The App Store build of the iOS companion is distributed by the copyright holder under the App
 Store's terms rather than the GPL — which is why contributions require the lightweight
 agreement described in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+The control plane is the one component with a running cost and an operator, so it is the one
+component under a license that prevents a competing hosted instance. It stays readable on
+purpose: the claim that no transcript, prompt, or terminal byte reaches the server is only worth
+something if you can check it.
 
 ## Contributing
 

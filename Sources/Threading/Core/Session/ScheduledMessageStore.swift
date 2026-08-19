@@ -234,6 +234,26 @@ final class ScheduledMessageStore {
         return true
     }
 
+    /// Cancels wait-for-reset promises whose refusal has already cleared.
+    ///
+    /// One commit, not a loop of removals: several records would be an invariant failure, but a
+    /// recovery from that state must not persist a half-cancelled queue. Purpose keeps this from
+    /// touching an ordinary message the user happened to schedule for the same usage reset.
+    @discardableResult
+    func cancelLimitRecoveryContinuations(for sessionID: SessionID) -> Bool {
+        let cancelled = messages.filter {
+            $0.target.sessionID == sessionID && $0.isOwedLimitRecoveryContinuation
+        }
+        guard !cancelled.isEmpty else { return true }
+
+        let cancelledIDs = Set(cancelled.map(\.id))
+        let retained = messages.filter { !cancelledIDs.contains($0.id) }
+        guard commit(retained) else { return false }
+        claimed.subtract(cancelledIDs)
+        for id in cancelledIDs { attachments.release(id) }
+        return true
+    }
+
     /// Rewrites a waiting send in place, keeping its identity.
     @discardableResult
     func replace(_ id: ScheduledMessageID, with message: ScheduledMessage) -> Bool {

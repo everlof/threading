@@ -89,6 +89,58 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertTrue(store.hasClockWorkPending)
     }
 
+    /// Automatic recovery shares the durable queue with user-authored schedules, so its purpose
+    /// and originating refusal must survive both persistence and a reset re-arm.
+    func testLimitRecoveryProvenanceSurvivesPersistenceAndRescheduling() throws {
+        let store = makeStore()
+        let recovery = ScheduledMessage(
+            dueAt: now.addingTimeInterval(3_600),
+            target: .session(SessionID()),
+            text: "continue",
+            anchor: .usageWindowReset(windowID: "5h"),
+            purpose: .limitRecovery,
+            limitRecoveryRecordID: "refusal-two"
+        )
+        try store.add(recovery, now: now).get()
+
+        let reopened = makeStore()
+        let persisted = try XCTUnwrap(reopened[recovery.id])
+        XCTAssertEqual(persisted.purpose, .limitRecovery)
+        XCTAssertEqual(persisted.limitRecoveryRecordID, "refusal-two")
+        XCTAssertTrue(persisted.isOwedLimitRecoveryContinuation)
+
+        let rearmed = persisted.rescheduled(to: now.addingTimeInterval(7_200))
+        XCTAssertEqual(rearmed.purpose, .limitRecovery)
+        XCTAssertEqual(rearmed.limitRecoveryRecordID, "refusal-two")
+    }
+
+    /// Once the provider produces a newer outcome, the recovery promise is fulfilled. Cancelling
+    /// it must not touch a user's own message aimed at the same reset.
+    func testClearingARefusalCancelsOnlyAutomaticRecoveryContinuations() throws {
+        let store = makeStore()
+        let sessionID = SessionID()
+        let userPreset = message(
+            to: sessionID,
+            text: "Review the result",
+            anchor: .usageWindowReset(windowID: "5h")
+        )
+        let recovery = ScheduledMessage(
+            dueAt: now.addingTimeInterval(3_600),
+            target: .session(sessionID),
+            text: "continue",
+            anchor: .usageWindowReset(windowID: "5h"),
+            purpose: .limitRecovery,
+            limitRecoveryRecordID: "refusal-one"
+        )
+        try store.add(userPreset, now: now).get()
+        try store.add(recovery, now: now).get()
+
+        XCTAssertTrue(store.cancelLimitRecoveryContinuations(for: sessionID))
+
+        XCTAssertEqual(store.messages(for: sessionID).map(\.id), [userPreset.id])
+        XCTAssertEqual(makeStore().messages(for: sessionID).map(\.id), [userPreset.id])
+    }
+
     func testAReservedSessionStartIsAddressableByItsConversationID() throws {
         let store = makeStore()
         let projectID = ProjectID()
@@ -473,6 +525,11 @@ final class ScheduledMessageStoreTests: XCTestCase {
         let reopened = makeStore()
 
         XCTAssertEqual(reopened.all.first?.text, "Written by the previous release")
+        XCTAssertEqual(
+            reopened.all.first?.purpose,
+            .userAuthored,
+            "An old record cannot be guessed to be automation merely because it targets a reset"
+        )
         guard case .time = reopened.all.first?.trigger else {
             return XCTFail("The pre-trigger clock fields should migrate into a time trigger")
         }

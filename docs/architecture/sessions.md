@@ -1090,7 +1090,7 @@ session's `⋯` menu, defaulted in Settings ▸ General. `AgentPermissionMode` o
 translation; `AgentLauncher.permissionMode(for:)` resolves session → app default → nil.
 
 **The whole translation, including which flags each runtime takes.** `launchFlags(for:)` returns
-the `AgentLaunchFlag` pairs for one mode on one runtime; the launcher appends whatever it gets
+the `AgentLaunchFlag` values for one mode on one runtime; the launcher appends whatever it gets
 back and knows nothing else about the mapping. That dispatch used to be a `switch session.kind`
 in the launcher choosing among the per-runtime value properties here, which meant two files had
 to agree and nothing said so — a runtime could be given its value property and no launcher
@@ -1124,19 +1124,23 @@ dangerous two" is the obvious mistake; they are opposites that share a symbol in
 Note also that Claude's internal name for Manual is `default`, while the value its `--help`
 documents and the flag accepts is `manual`.
 
-| Mode | Claude `--permission-mode` | Codex `--ask-for-approval` / `--sandbox` |
+| Mode | Claude `--permission-mode` | Codex approval / sandbox / reviewer |
 |---|---|---|
-| Manual | `manual` | `untrusted` / `read-only` — must ask to change anything |
-| Plan | `plan` | `never` / `read-only` — reads, writes nothing, never interrupts |
-| Accept Edits | `acceptEdits` | `untrusted` / `workspace-write` — edits in place, commands still gated |
-| Auto | `auto` | `on-request` / `workspace-write` — the model decides when to ask |
-| Don't Ask | `dontAsk` | `never` / `workspace-write` |
-| Bypass Permissions | `bypassPermissions` | `never` / `danger-full-access` |
+| Manual | `manual` | `untrusted` / `read-only` / `user` — must ask to change anything |
+| Plan | `plan` | `never` / `read-only` / `user` — reads, writes nothing, never interrupts |
+| Accept Edits | `acceptEdits` | `untrusted` / `workspace-write` / `user` — edits in place, commands still gated |
+| Auto | `auto` | `on-request` / `workspace-write` / `auto_review` — **Auto (Approve for me)**; a reviewer agent answers eligible boundary crossings |
+| Don't Ask | `dontAsk` | `never` / `workspace-write` / `user` |
+| Bypass Permissions | `bypassPermissions` | `never` / `danger-full-access` / `user` |
 
 Six modes onto six *distinct* Codex configurations, which is what makes one shared vocabulary
-honest rather than a menu with duplicate rows. The sandbox carries most of the meaning: Manual
-and Accept Edits share an approval policy and differ only there. Codex has no plan concept, so
-Plan is only the enforceable half — the menu says so rather than implying parity.
+honest rather than a menu with duplicate rows. Codex has a third independent axis beyond the
+approval policy and sandbox: `approvals_reviewer`. Threading states it for every explicit mode so
+a persistent Auto-review setting cannot silently turn Manual into automatic review. Auto is the
+one provider-specific title — **Auto (Approve for me)** — because it deliberately selects the
+reviewer agent. The sandbox still carries most of the remaining meaning: Manual and Accept Edits
+share an approval policy and differ only there. Codex has no plan concept, so Plan is only the
+enforceable half — the menu says so rather than implying parity.
 
 **Nil is a third state, not "off".** It emits no flag, leaving Claude's `permissions.defaultMode`
 and Codex's `config.toml` deciding — the same reasoning as `remoteControl` above, and the same
@@ -1172,10 +1176,12 @@ authority:
 2. The runtime's own configuration. `ClaudeSettings.permissionMode` reads `permissions.defaultMode`
    across the CLI's four layers (managed → `settings.local.json` → project `settings.json` → the
    account's), first-match-wins, sharing one layer list with `ClaudeStatusLineSettings`. Codex
-   states the same posture as a *pair*, so `AgentPermissionMode(codexApprovalPolicy:sandboxMode:)`
-   inverts the table above — exactly, never to the nearest mode, and only when both axes are
-   present. Grok's `config.toml` states none of the six and OpenCode's policy is per-tool, so both
-   answer nothing.
+   states the same posture through approval, sandbox and reviewer values, so
+   `AgentPermissionMode(codexApprovalPolicy:sandboxMode:approvalsReviewer:)` inverts the table
+   above — exactly, never to the nearest mode. Approval and sandbox must be present; an omitted
+   reviewer means Codex's documented `user` default. Consequently the ordinary
+   `on-request`/`workspace-write` Auto preset is not misreported as **Approve for me**. Grok's
+   `config.toml` states none of the six and OpenCode's policy is per-tool, so both answer nothing.
 3. `ObservedPermissionMode` for this conversation, from memory only — `refreshConversationControls`
    runs per streamed event, so the background re-read stays with the surfaces that own one. Passed
    **only while the agent is running**, because that is the whole of what this source claims: the

@@ -93,9 +93,11 @@ enum PermissionModePresentation {
     /// The title of the row that carries `mode`, marked where it is the inherited answer.
     static func rowTitle(
         _ mode: AgentPermissionMode,
+        for kind: AgentKind,
         inherited: ResolvedPermissionMode
     ) -> String {
-        mode == inherited.mode ? "\(mode.displayName)\(suffix(for: inherited.source))" : mode.displayName
+        let title = mode.displayName(for: kind)
+        return mode == inherited.mode ? "\(title)\(suffix(for: inherited.source))" : title
     }
 
     /// Names the mode that will actually apply, not only the one chosen on this surface.
@@ -110,29 +112,32 @@ enum PermissionModePresentation {
     /// failure this control cannot have. Where that is all there is, the honest answer is that
     /// the agent decides — and the tooltip still names the mode it last decided on.
     static func chipTitle(
+        for kind: AgentKind,
         selected: AgentPermissionMode?,
         inherited: ResolvedPermissionMode
     ) -> String {
-        (selected ?? inherited.nameableMode)?.displayName ?? agentSettingTitle
+        (selected ?? inherited.nameableMode)?.displayName(for: kind) ?? agentSettingTitle
     }
 
     /// What a chip's tooltip adds: the value is in the chip, and this says whose value it is.
     /// Nil where the chip carries the user's own choice, which needs no explaining.
     static func chipTooltip(
+        for kind: AgentKind,
         selected: AgentPermissionMode?,
         inherited: ResolvedPermissionMode
     ) -> String? {
         guard selected == nil, let mode = inherited.mode else { return nil }
+        let title = mode.displayName(for: kind)
 
         switch inherited.source {
         case .appDefault:
-            return L10n.format("%@ — the default for new chats in Settings.", mode.displayName)
+            return L10n.format("%@ — the default for new chats in Settings.", title)
         case .agentConfiguration:
-            return L10n.format("%@ — this agent's own setting.", mode.displayName)
+            return L10n.format("%@ — this agent's own setting.", title)
         case .observedInThisConversation, .rememberedFromEarlierRun:
             return L10n.format(
                 "%@ — what this agent last ran in. It decides again each launch.",
-                mode.displayName
+                title
             )
         }
     }
@@ -231,8 +236,8 @@ enum PermissionModePresentation {
             // The description rides as the subtitle rather than a hover tooltip, so what a
             // mode actually permits is read in the same glance that chooses it.
             rows.append(.item(ThemedMenuItem(
-                title: rowTitle(mode, inherited: inherited),
-                subtitle: [mode.menuDescription, mode.caveat(for: kind)]
+                title: rowTitle(mode, for: kind, inherited: inherited),
+                subtitle: [mode.menuDescription(for: kind), mode.caveat(for: kind)]
                     .compactMap { $0 }
                     .joined(separator: " "),
                 representedValue: isDefault ? nil : mode,

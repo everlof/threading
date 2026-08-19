@@ -27,11 +27,20 @@ struct UsageLimitStop: Equatable, Sendable {
     /// (Europe/Rome)`, `Tuesday at 9am`. Nil when it refused without saying.
     let resetHint: String?
 
+    /// The provider record that stated this refusal, when the runtime has one.
+    ///
+    /// The reader's callback is changed-only, and a provider commonly refuses several retries
+    /// with exactly the same sentence. The record identity is therefore part of the fact: the
+    /// second refusal is a new stop even when its words and reset hint are byte-for-byte equal.
+    /// Structured runtimes that deliver one refusal event at a time may leave this nil.
+    let recordID: String?
+
     // MARK: - Initialization
 
-    init(message: String, resetHint: String? = nil) {
+    init(message: String, resetHint: String? = nil, recordID: String? = nil) {
         self.message = message
         self.resetHint = resetHint
+        self.recordID = recordID
     }
 
     // MARK: - Public Methods

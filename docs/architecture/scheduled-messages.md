@@ -50,6 +50,12 @@ The trigger is encoded as part of the durable record. The decoder also accepts t
 top-level `dueAt` / time-zone / wall-clock shape and turns it into `.time`, so installing this
 version does not strand existing scheduled drafts.
 
+**Purpose is durable too.** Most records are `.userAuthored`; automatic limit continuations are
+`.limitRecovery` and carry the refusal record that created them. The distinction is semantic, not
+presentation: a user's own reset preset must not suppress recovery merely because both name the
+same window, while a recovery for the same refusal must not be filed twice. Older records decode
+as user-authored because provenance cannot be reconstructed safely from their text or trigger.
+
 ## The store is a file, and it is written on the mutation
 
 `ScheduledMessageStore` is a `RecoverableFileStore` at `scheduled-messages.json`, criticality

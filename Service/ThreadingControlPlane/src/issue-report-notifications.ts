@@ -3,7 +3,9 @@ import type { Env } from "./environment";
 const reportKeyPattern = /^reports\/v1\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$/u;
 const safeTokenPattern = /^[A-Za-z0-9._:-]+$/u;
 const acceptedKinds = new Set(["report", "crash", "diagnostics"]);
-const acceptedTriggers = new Set(["shake", "diagnostics", "manual", "postCrash"]);
+const acceptedTriggers = new Set([
+  "shake", "diagnostics", "connectionRecovery", "manual", "postCrash",
+]);
 const acceptedSources = new Set(["iOSClient", "macOSHost"]);
 
 interface R2EventNotification {

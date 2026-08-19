@@ -42,8 +42,31 @@ Five guards keep it honest:
   look, or at the first reported turn — the remote mirror can type into an unattended
   terminal, and from that turn on the session flags like any other.
 
-`needsAttention` is only raised when work finishes in a session that is *not* on screen;
-`AgentRuntime.setVisibleSession` tracks which that is. A terminal bell raises it directly.
+The tracker reports an **attention episode** whenever work finishes or a terminal bell raises an
+unread result, independently of who is looking. `AgentRuntime` gives that episode a monotonic
+conversation generation in `SessionReadReceiptStore`, then projects `idle` / `needsAttention`
+for the person reading the row. Operational states — `working`, `awaitingUser`, `limitReached`
+and `dormant` — remain shared facts and are never changed by a receipt.
+
+Read identity has one deliberate asymmetry:
+
+- Every owner credential maps to `RemoteCollaborationParticipantDTO.ownerID`. Reading on the Mac,
+  an iPhone or a browser therefore clears the result on every owner device.
+- An accepted collaborator maps to their stable member id (with the share id as the legacy
+  fallback). Their receipt is independent of the owner and every other collaborator. Random
+  socket-scoped presence ids never enter durable state.
+
+`session_attention` and `session_read_receipt` persist those generations in SQLite and cascade
+with their session. The ledger loads once, lazily, and row projection is then O(1); opening a
+local session or successfully attaching a remote live surface advances that identity's receipt.
+Participants already viewing the conversation are recorded as having seen a result when it lands,
+so the dot does not flash on another one of their devices. `RemoteSessionMirrorRegistry` observes
+`SessionActivityDidChange` directly and sends an authorization-specific row delta; activity no
+longer waits for an unrelated project-title or branch mutation to refresh the remote chat list.
+An owner acknowledgement also removes the Mac's stable session notification unconditionally,
+even when no receipt changed: after relaunch, macOS can still hold the prior process's request
+while the new process has no in-memory alert edge to clear. Collaborator receipts never remove
+the owner's notification.
 
 **`limitReached` is the one state nothing here can infer.** A provider that refuses a turn over a
 rate limit raises no hook — no turn began, none ended — and the CLI answers by printing a sentence
@@ -143,8 +166,9 @@ is the single place that turns them into a `SessionActivity`. Three rules fall o
 - **`awaitingUser` and a bell raise the flag without touching the turn.** Where nothing reports,
   the bell still ends the inferred turn — it is the only boundary a shell has, and leaving the
   turn open would strand it `working` with no quiet timer left to stop it.
-- **Being looked at lowers the flag and returns to the turn**, so a session asked-and-answered
-  mid-turn goes back to `working`, while one that genuinely finished off screen still goes `idle`.
+- **Being looked at lowers the tracker's process-local waiting flag and returns to the turn**, so
+  a session asked-and-answered mid-turn goes back to `working`, while one that genuinely finished
+  goes `idle` before its participant-specific unread receipt is projected onto the row.
 - **Output may lower the flag, and may do nothing else.** Answering in place raises no hook at
   all, so a fresh burst inside a flagged turn is the only evidence the agent resumed. It is
   admitted on screen only — off screen the flag is the one thing saying the session is waiting,

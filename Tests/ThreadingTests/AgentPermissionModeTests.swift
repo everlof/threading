@@ -11,16 +11,19 @@ import XCTest
 final class AgentPermissionModeTests: HostedStoreTestCase {
 
     private var defaultMode: AgentPermissionMode?
+    private var defaultKind = AgentKind.claude
 
     override func setUp() {
         super.setUp()
         // The app-wide default is one of the inputs under test, and it is real user state.
         defaultMode = AppSettings.shared.defaultPermissionMode
+        defaultKind = AppSettings.shared.defaultAgentKind
         AppSettings.shared.defaultPermissionMode = nil
     }
 
     override func tearDown() {
         AppSettings.shared.defaultPermissionMode = defaultMode
+        AppSettings.shared.defaultAgentKind = defaultKind
         super.tearDown()
     }
 
@@ -88,7 +91,7 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
                 ).arguments.last)
             )
 
-            // Codex spends the mode on two axes and names neither `--permission-mode`; the
+            // Codex spends the mode on three axes and names neither `--permission-mode`; the
             // shared claim is that *something* on the line carries it.
             let stated = AgentPermissionMode.plan.launchFlags(for: kind)
             XCTAssertFalse(stated.isEmpty, "\(kind) claims the vocabulary but produces no flags")
@@ -105,10 +108,10 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
 
     // MARK: - Codex
 
-    /// Codex has no mode flag, so each mode becomes an approval policy *and* a sandbox — and the
-    /// six land on six distinct pairs. That distinctness is the claim worth testing: a mapping
-    /// where two modes collapse would give the menu two items that do the same thing.
-    func testEachModeReachesCodexAsADistinctApprovalAndSandboxPair() throws {
+    /// Codex has no mode flag, so each mode becomes an approval policy, sandbox and reviewer —
+    /// and the six land on six distinct configurations. That distinctness is the claim worth
+    /// testing: a mapping where two modes collapse would give the menu duplicate behavior.
+    func testEachModeReachesCodexAsADistinctPermissionConfiguration() throws {
         var seen: Set<String> = []
 
         for mode in AgentPermissionMode.allCases {
@@ -116,6 +119,7 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
 
             let approval = try XCTUnwrap(Self.value(after: "--ask-for-approval", in: words))
             let sandbox = try XCTUnwrap(Self.value(after: "--sandbox", in: words))
+            let reviewer = try XCTUnwrap(Self.value(after: "--config", in: words))
 
             XCTAssertTrue(
                 ["untrusted", "on-request", "never"].contains(approval),
@@ -126,10 +130,35 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
                 "\(mode) asked Codex for a sandbox it does not have: \(sandbox)"
             )
             XCTAssertTrue(
-                seen.insert("\(approval)/\(sandbox)").inserted,
-                "\(mode) produces the same Codex launch as another mode: \(approval)/\(sandbox)"
+                [
+                    "approvals_reviewer=\"user\"",
+                    "approvals_reviewer=\"auto_review\""
+                ].contains(reviewer),
+                "\(mode) asked Codex for an unknown approval reviewer: \(reviewer)"
+            )
+            XCTAssertTrue(
+                seen.insert("\(approval)/\(sandbox)/\(reviewer)").inserted,
+                "\(mode) produces the same Codex launch as another mode: "
+                    + "\(approval)/\(sandbox)/\(reviewer)"
             )
         }
+    }
+
+    /// Codex's Auto is its Approve-for-me posture: prompts still arise at the workspace
+    /// boundary, but a separate reviewer agent answers eligible requests instead of the user.
+    func testCodexAutoRoutesApprovalsToTheReviewerAgent() throws {
+        let auto = try Self.launchWords(kind: .codex, mode: .auto)
+        let manual = try Self.launchWords(kind: .codex, mode: .manual)
+
+        XCTAssertEqual(
+            Self.value(after: AgentDefaults.codexConfigFlag, in: auto),
+            "approvals_reviewer=\"auto_review\""
+        )
+        XCTAssertEqual(
+            Self.value(after: AgentDefaults.codexConfigFlag, in: manual),
+            "approvals_reviewer=\"user\"",
+            "a persistent reviewer setting must not silently turn Manual into Auto-review"
+        )
     }
 
     /// Manual and Accept edits share an approval policy and differ only in the sandbox, which is
@@ -237,6 +266,7 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
     func testTheChipNamesTheModeThatWillActuallyApply() {
         XCTAssertEqual(
             PermissionModePresentation.chipTitle(
+                for: .claude,
                 selected: .plan,
                 inherited: ResolvedPermissionMode(mode: .dontAsk, source: .appDefault)
             ),
@@ -244,6 +274,7 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
         )
         XCTAssertEqual(
             PermissionModePresentation.chipTitle(
+                for: .claude,
                 selected: nil,
                 inherited: ResolvedPermissionMode(mode: .dontAsk, source: .appDefault)
             ),
@@ -251,10 +282,86 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
         )
         XCTAssertEqual(
             PermissionModePresentation.chipTitle(
+                for: .claude,
                 selected: nil,
                 inherited: ResolvedPermissionMode(mode: nil, source: .agentConfiguration)
             ),
             PermissionModePresentation.agentSettingTitle
+        )
+    }
+
+    /// The shared mode keeps Claude and Grok's native `Auto` name, while Codex qualifies the
+    /// same row with the reviewer behavior its own product calls **Approve for me**.
+    func testCodexAutoNamesApproveForMeOnTheChipAndMenu() throws {
+        let inherited = ResolvedPermissionMode(mode: .auto, source: .appDefault)
+
+        XCTAssertEqual(
+            PermissionModePresentation.chipTitle(
+                for: .codex,
+                selected: .auto,
+                inherited: inherited
+            ),
+            "Auto (Approve for me)"
+        )
+        XCTAssertEqual(
+            PermissionModePresentation.chipTitle(
+                for: .claude,
+                selected: .auto,
+                inherited: inherited
+            ),
+            "Auto"
+        )
+
+        let autoRow = try XCTUnwrap(
+            PermissionModePresentation.rows(
+                for: .codex,
+                selected: .auto,
+                inherited: inherited,
+                timing: .whenTheSessionStarts
+            ).compactMap(\.item).first { $0.title.hasPrefix("Auto") }
+        )
+        XCTAssertEqual(autoRow.title, "Auto (Approve for me)  (default)")
+        XCTAssertEqual(
+            autoRow.subtitle,
+            "A reviewer agent handles requests that cross the sandbox."
+        )
+    }
+
+    /// General's default is shown in the vocabulary of the agent new chats use. Otherwise the
+    /// saved Codex Auto launch would select the reviewer while Settings continued to promise
+    /// only the older, human-reviewed preset.
+    func testGeneralSettingsNamesAutoReviewForTheDefaultCodexAgent() throws {
+        AppSettings.shared.defaultAgentKind = .codex
+        AppSettings.shared.defaultPermissionMode = .auto
+
+        let controller = GeneralPreferencesViewController()
+        _ = controller.view
+        let permissionPopUp = try XCTUnwrap(
+            Self.descendants(of: controller.view)
+                .compactMap { $0 as? ThemedPopUp }
+                .first { popUp in
+                    AgentPermissionMode.allCases.allSatisfy { mode in
+                        popUp.entries.contains { entry in
+                            guard case .item(let item) = entry else { return false }
+                            return item.representedValue as? AgentPermissionMode == mode
+                        }
+                    }
+                }
+        )
+        let auto = try XCTUnwrap(permissionPopUp.entries.compactMap { entry -> ThemedMenuItem? in
+            guard case .item(let item) = entry,
+                  item.representedValue as? AgentPermissionMode == .auto else { return nil }
+            return item
+        }.first)
+
+        XCTAssertEqual(auto.title, "Auto (Approve for me)")
+        XCTAssertEqual(
+            auto.subtitle,
+            "A reviewer agent handles requests that cross the sandbox."
+        )
+        XCTAssertEqual(
+            permissionPopUp.selectedItem?.representedValue as? AgentPermissionMode,
+            .auto
         )
     }
 
@@ -268,6 +375,7 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
     func testTheThreeSurfacesOfferTheSamePermissionModeRows() throws {
         AppSettings.shared.defaultPermissionMode = .dontAsk
         let chipTitle = PermissionModePresentation.chipTitle(
+            for: .claude,
             selected: nil,
             inherited: ResolvedPermissionMode(
                 mode: PermissionModePresentation.appDefault,
@@ -443,6 +551,7 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
         XCTAssertNil(
             Self.chip(
                 titled: PermissionModePresentation.chipTitle(
+                    for: .openCode,
                     selected: nil,
                     inherited: ResolvedPermissionMode(mode: nil, source: .agentConfiguration)
                 ),
@@ -672,6 +781,10 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
     private static func value(after flag: String, in words: [String]) -> String? {
         guard let index = words.firstIndex(of: flag), index + 1 < words.count else { return nil }
         return words[index + 1]
+    }
+
+    private static func descendants(of root: NSView) -> [NSView] {
+        root.subviews + root.subviews.flatMap { descendants(of: $0) }
     }
 
     /// Splits a launch line into the words a shell would pass on, without running it. The same

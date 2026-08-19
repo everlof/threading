@@ -40,6 +40,11 @@ final class RemoteSessionMirrorRegistry {
             self?.closeUnavailableSessions()
             self?.broadcastSessionsChanged(change)
         }
+        // Activity is live row state, not a project mutation. Depending on a coincident title or
+        // branch write left a completed chat's phone badge stale indefinitely.
+        appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
+            self?.broadcastSessionRow(event.sessionID)
+        }
         // The System theme can change without an AppTheme event when macOS itself crosses
         // light/dark mode. Its resolved AppKit colours and reported mode must move remotely too.
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance) {
@@ -112,7 +117,13 @@ final class RemoteSessionMirrorRegistry {
                         RemoteSessionAccess.isVisible($0)
                             && authorization.scope.covers($0.id)
                     }
-                    .map { summary(for: $0, projectName: project.name) }
+                    .map {
+                        summary(
+                            for: $0,
+                            projectName: project.name,
+                            authorization: authorization
+                        )
+                    }
             }
             .sorted(by: summaryOrder)
 
@@ -125,7 +136,13 @@ final class RemoteSessionMirrorRegistry {
         let ownsSessionLifecycle = canManageSessions(authorization)
         let archived = ownsSessionLifecycle
             ? ProjectStore.shared.archivedSessions()
-                .map { summary(for: $0.session, projectName: $0.project.name) }
+                .map {
+                    summary(
+                        for: $0.session,
+                        projectName: $0.project.name,
+                        authorization: authorization
+                    )
+                }
                 .sorted(by: summaryOrder)
             : nil
 
@@ -164,14 +181,21 @@ final class RemoteSessionMirrorRegistry {
         return features.isEmpty ? nil : features
     }
 
-    private func summary(for session: AgentSession, projectName: String) -> RemoteSessionSummaryDTO {
+    private func summary(
+        for session: AgentSession,
+        projectName: String,
+        authorization: RemoteAuthorization
+    ) -> RemoteSessionSummaryDTO {
         let available = AgentRuntime.shared.isRunning(sessionID: session.id)
         return RemoteSessionSummaryDTO(
             id: session.id.uuidString,
             title: session.displayTitle,
             agentKind: session.kind.rawValue,
             surface: session.usesNativeUI ? .conversation : .terminal,
-            state: String(describing: AgentRuntime.shared.activity(sessionID: session.id)),
+            state: String(describing: AgentRuntime.shared.activity(
+                sessionID: session.id,
+                participantID: authorization.collaborationParticipantID
+            )),
             projectName: projectName,
             isAvailable: available,
             lastActiveAt: session.lastActiveAt.timeIntervalSince1970,
@@ -280,8 +304,8 @@ final class RemoteSessionMirrorRegistry {
                     ? AgentPermissionMode.allCases.map { mode in
                         RemotePermissionModeChoiceDTO(
                             id: mode.rawValue,
-                            name: mode.displayName,
-                            detail: [mode.menuDescription, mode.caveat(for: kind)]
+                            name: mode.displayName(for: kind),
+                            detail: [mode.menuDescription(for: kind), mode.caveat(for: kind)]
                                 .compactMap { $0 }
                                 .joined(separator: " ")
                         )
@@ -394,6 +418,10 @@ final class RemoteSessionMirrorRegistry {
             )
         }
         guard attached else { return false }
+        AgentRuntime.shared.acknowledgeAttention(
+            sessionID: sessionID,
+            participantID: authorization.collaborationParticipantID
+        )
         // Attaching the live surface is a visit, regardless of which window or paired device
         // supplied it. All clients therefore acknowledge the same durable wake receipt.
         SessionSnoozeCenter.shared.acknowledge(sessionID)
@@ -638,6 +666,14 @@ final class RemoteSessionMirrorRegistry {
         }
         broadcastInputControl(sessionID)
         followersChanged(sessionID)
+    }
+
+    /// Stable people currently viewing one live surface. Multiple sockets and owner devices
+    /// collapse here; their socket-scoped presence ids remain separate everywhere else.
+    func viewingParticipantIDs(for sessionID: SessionID) -> Set<String> {
+        Set(mirrors[sessionID]?.subscribers.values.compactMap {
+            $0.authenticatedPeer?.authorization.collaborationParticipantID
+        } ?? [])
     }
 
     /// Begins keeping the bounded terminal history as soon as a live surface exists, not only
@@ -1555,13 +1591,33 @@ final class RemoteSessionMirrorRegistry {
                     guard RemoteSessionAccess.isVisible(candidate),
                           authorization.scope.covers(candidate.id),
                           let project else { return nil }
-                    return summary(for: candidate, projectName: project.name)
+                    return summary(
+                        for: candidate,
+                        projectName: project.name,
+                        authorization: authorization
+                    )
                 }
                 connection.sendText(encode(RemoteSessionsChangedDTO(
                     session: visible,
                     removedSessionID: visible == nil ? sessionID.uuidString : nil
                 )))
             }
+        }
+    }
+
+    /// Pushes one identity-specific catalogue row for an activity or read-receipt edge.
+    private func broadcastSessionRow(_ sessionID: SessionID) {
+        guard let session = ProjectStore.shared.session(withID: sessionID),
+              let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
+        for connection in themeEventSubscribers.values {
+            guard let authorization = connection.authenticatedPeer?.authorization,
+                  RemoteSessionAccess.isVisible(session),
+                  authorization.scope.covers(sessionID) else { continue }
+            connection.sendText(encode(RemoteSessionsChangedDTO(session: summary(
+                for: session,
+                projectName: project.name,
+                authorization: authorization
+            ))))
         }
     }
 

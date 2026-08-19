@@ -659,8 +659,9 @@ enum AgentModels {
     /// One top-level scalar out of the account's `config.toml`.
     ///
     /// Shared beyond this type because Codex states its permission posture in the same file:
-    /// `ResolvedPermissionMode` reads `approval_policy` and `sandbox_mode` through it rather
-    /// than opening the same file with a second parser that could disagree about quoting.
+    /// `ResolvedPermissionMode` reads `approval_policy`, `sandbox_mode` and
+    /// `approvals_reviewer` through it rather than opening the same file with a second parser
+    /// that could disagree about quoting.
     static func configuredCodexValue(
         _ key: String,
         account: AgentAccount?

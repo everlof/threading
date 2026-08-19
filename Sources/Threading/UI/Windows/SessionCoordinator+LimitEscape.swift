@@ -216,7 +216,8 @@ extension SessionCoordinator {
         let message = ScheduledMessage(
             dueAt: Date().addingTimeInterval(LimitEscapeDefaults.continuationDelay),
             target: .session(sessionID),
-            text: LimitRecoveryDefaults.continuationText
+            text: LimitRecoveryDefaults.continuationText,
+            purpose: .limitRecovery
         )
 
         switch ScheduledMessageStore.shared.add(message) {

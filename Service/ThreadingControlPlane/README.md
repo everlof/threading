@@ -17,6 +17,19 @@ exact-read routes require a separate Worker secret that is never shipped in an a
 containing only the UTC day and an accepted count caps distributed intake at 2,000 new objects per
 day; exact retries do not consume another slot.
 
+## Licensing
+
+Unlike the rest of the repository, this directory is **not** GPLv3. It is under the
+[Functional Source License](https://fsl.software) (FSL-1.1-ALv2 — see [`LICENSE`](LICENSE)):
+read it, modify it, and run it for your own use, including the local `npm run dev` path below
+and a self-hosted instance for your own Macs. What it does not permit is offering it as a
+service that competes with the hosted one. Each version converts to Apache-2.0 two years after
+it is made available.
+
+It is source-available rather than closed because the guarantee above — no terminal output,
+transcripts, prompts, attachments, paths, or provider credentials — is only credible if it can
+be audited.
+
 ## Local verification
 
 From the repository root, `./dev` is the normal one-command path: it starts this service, builds

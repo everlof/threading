@@ -1,5 +1,6 @@
 import Darwin
 import CoreMotion
+import Network
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
@@ -8,6 +9,7 @@ import UserNotifications
 enum MobileIssueReportTrigger: String {
     case shake
     case diagnostics
+    case connectionRecovery
 }
 
 struct MobileIssueReportRequest: Identifiable {
@@ -629,6 +631,10 @@ actor MobileIssueReportOutbox {
     private let directory: URL
     private let endpoint: URL
     private var activeReportIDs: Set<String> = []
+    private var connectivityMonitor: NWPathMonitor?
+    private let connectivityQueue = DispatchQueue(
+        label: "codes.threading.mobile.issue-report-connectivity"
+    )
 
     init(
         directory: URL = FileManager.default
@@ -729,6 +735,32 @@ actor MobileIssueReportOutbox {
                 return
             }
         }
+    }
+
+    /// Keeps queued reports moving when connectivity returns without a scene transition.
+    ///
+    /// Launch and foreground retries remain useful checkpoints, but a phone can stay active while
+    /// Wi-Fi or VPN recovers. The monitor exists only for the foreground lifetime and merely asks
+    /// the same idempotent disk outbox to flush; it never creates or uploads an unreviewed report.
+    func setConnectivityRetryActive(_ active: Bool) {
+        guard active else {
+            connectivityMonitor?.cancel()
+            connectivityMonitor = nil
+            return
+        }
+        guard connectivityMonitor == nil else { return }
+
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { await self?.flush() }
+        }
+        connectivityMonitor = monitor
+        monitor.start(queue: connectivityQueue)
+    }
+
+    var connectivityRetryIsActive: Bool {
+        connectivityMonitor != nil
     }
 
     /// Actor methods are re-entrant while URLSession is suspended. Track ids across that await so

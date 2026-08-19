@@ -21,6 +21,7 @@ struct ThreadingMobileHostedRoot: View {
                 // `onChange(of: scenePhase)` does not fire for the phase the app launches into,
                 // so the first foreground is this one.
                 model.startDiscovery()
+                await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
                 await notifications.prepare()
                 await notifications.sync(hosts: model.hosts)
                 await MobileIssueReportOutbox.shared.flush()
@@ -33,6 +34,7 @@ struct ThreadingMobileHostedRoot: View {
                     // address it finds is only useful while somebody is looking at the app.
                     model.startDiscovery()
                     Task {
+                        await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
                         await model.refresh()
                         await notifications.refreshAuthorization()
                         await notifications.sync(hosts: model.hosts)
@@ -41,6 +43,9 @@ struct ThreadingMobileHostedRoot: View {
                 } else if phase == .background {
                     model.stopDiscovery()
                     model.suspendHostedConnections()
+                    Task {
+                        await MobileIssueReportOutbox.shared.setConnectivityRetryActive(false)
+                    }
                 }
             }
             .onChange(of: notifications.deviceToken) { _, _ in

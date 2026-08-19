@@ -65,6 +65,7 @@ final class ResolvedPermissionModeTests: XCTestCase {
         )
         XCTAssertEqual(
             PermissionModePresentation.chipTitle(
+                for: .claude,
                 selected: nil,
                 inherited: ResolvedPermissionMode.resolve(appDefault: nil, configured: nil)
             ),
@@ -72,44 +73,59 @@ final class ResolvedPermissionModeTests: XCTestCase {
         )
     }
 
-    // MARK: - Codex states its posture as a pair
+    // MARK: - Codex states its posture as a configuration
 
-    /// Codex has no single mode: the six postures are six distinct
-    /// `approval_policy`/`sandbox_mode` combinations, so reading one back is reading the pair.
+    /// Codex has no single mode: the six postures are six distinct approval, sandbox and
+    /// reviewer combinations, so reading one back means reading the complete configuration.
     /// Round-tripping every case is what holds the two directions to each other — a mapping that
     /// changed in one direction only is exactly the bug their adjacency exists to prevent.
-    func testEveryModeRoundTripsThroughCodexsTwoAxes() {
+    func testEveryModeRoundTripsThroughCodexsThreeAxes() {
         for mode in AgentPermissionMode.allCases {
             XCTAssertEqual(
                 AgentPermissionMode(
                     codexApprovalPolicy: mode.codexApprovalPolicy,
-                    sandboxMode: mode.codexSandboxMode
+                    sandboxMode: mode.codexSandboxMode,
+                    approvalsReviewer: mode.codexApprovalsReviewer
                 ),
                 mode,
-                "\(mode) does not survive a round trip through Codex's two axes"
+                "\(mode) does not survive a round trip through Codex's three axes"
             )
         }
     }
 
-    /// A pair that names none of the six is a posture this vocabulary cannot state, and a pair
-    /// missing an axis is a configuration this app has not been given. Both read as nothing
-    /// rather than as the nearest mode.
-    func testAPairThatNamesNoneOfTheSixReadsAsNothing() {
+    /// A configuration that names none of the six is a posture this vocabulary cannot state,
+    /// and one missing an axis is a configuration this app has not been given. Both read as
+    /// nothing rather than as the nearest mode.
+    func testAConfigurationThatNamesNoneOfTheSixReadsAsNothing() {
         XCTAssertNil(
             AgentPermissionMode(
                 codexApprovalPolicy: AgentDefaults.codexApprovalOnRequest,
-                sandboxMode: AgentDefaults.codexSandboxReadOnly
+                sandboxMode: AgentDefaults.codexSandboxReadOnly,
+                approvalsReviewer: AgentDefaults.codexApprovalsReviewerAutoReview
             ),
             "on-request with read-only is neither Auto nor Plan"
         )
         XCTAssertNil(
             AgentPermissionMode(
                 codexApprovalPolicy: AgentDefaults.codexApprovalNever,
-                sandboxMode: nil
+                sandboxMode: nil,
+                approvalsReviewer: AgentDefaults.codexApprovalsReviewerUser
             ),
             "one axis cannot name a posture Codex defaults the other half of"
         )
-        XCTAssertNil(AgentPermissionMode(codexApprovalPolicy: nil, sandboxMode: nil))
+        XCTAssertNil(AgentPermissionMode(
+            codexApprovalPolicy: nil,
+            sandboxMode: nil,
+            approvalsReviewer: nil
+        ))
+        XCTAssertNil(
+            AgentPermissionMode(
+                codexApprovalPolicy: AgentDefaults.codexApprovalOnRequest,
+                sandboxMode: AgentDefaults.codexSandboxWorkspaceWrite,
+                approvalsReviewer: nil
+            ),
+            "Codex's default human reviewer is plain Auto, not Auto (Approve for me)"
+        )
     }
 
     /// And the whole way through, from a `config.toml` on disk to a mode: this is what lets a
@@ -143,6 +159,51 @@ final class ResolvedPermissionModeTests: XCTestCase {
         )
     }
 
+    /// `on-request` plus `workspace-write` is Codex's ordinary Auto preset until the reviewer
+    /// axis opts into Auto-review. The chip must not promise Approve for me from only the pair.
+    func testCodexConfigurationNamesAutoOnlyWithTheAutomaticReviewer() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-auto-review-config-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let config = directory.appendingPathComponent(AgentDefaults.codexConfigFile)
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .named("codex"),
+            configPath: directory.path
+        )
+        try Data(
+            """
+            approval_policy = "on-request"
+            sandbox_mode = "workspace-write"
+            """.utf8
+        ).write(to: config)
+        XCTAssertNil(
+            ResolvedPermissionMode.configured(
+                for: .codex,
+                account: account,
+                projectDirectory: nil
+            )
+        )
+
+        try Data(
+            """
+            approval_policy = "on-request"
+            sandbox_mode = "workspace-write"
+            approvals_reviewer = "auto_review"
+            """.utf8
+        ).write(to: config)
+        XCTAssertEqual(
+            ResolvedPermissionMode.configured(
+                for: .codex,
+                account: account,
+                projectDirectory: nil
+            ),
+            .auto
+        )
+    }
+
     /// Grok and OpenCode state none of the six anywhere this app reads, and say so by answering
     /// nothing rather than by having been forgotten in a branch.
     func testARuntimeThatConfiguresNoModeAnswersNothing() {
@@ -170,6 +231,7 @@ final class ResolvedPermissionModeTests: XCTestCase {
         XCTAssertEqual(
             PermissionModePresentation.rowTitle(
                 .auto,
+                for: .claude,
                 inherited: ResolvedPermissionMode(mode: .auto, source: .agentConfiguration)
             ),
             "\(AgentPermissionMode.auto.displayName)\(PermissionModePresentation.defaultSuffix)"
@@ -177,6 +239,7 @@ final class ResolvedPermissionModeTests: XCTestCase {
         XCTAssertEqual(
             PermissionModePresentation.rowTitle(
                 .auto,
+                for: .claude,
                 inherited: ResolvedPermissionMode(mode: .auto, source: .rememberedFromEarlierRun)
             ),
             "\(AgentPermissionMode.auto.displayName)\(PermissionModePresentation.lastUsedSuffix)"
@@ -184,6 +247,7 @@ final class ResolvedPermissionModeTests: XCTestCase {
         XCTAssertEqual(
             PermissionModePresentation.rowTitle(
                 .plan,
+                for: .claude,
                 inherited: ResolvedPermissionMode(mode: .auto, source: .agentConfiguration)
             ),
             AgentPermissionMode.plan.displayName,
@@ -311,6 +375,7 @@ final class ResolvedPermissionModeTests: XCTestCase {
     func testTheChipDoesNotNameAModeNothingWillApply() {
         XCTAssertEqual(
             PermissionModePresentation.chipTitle(
+                for: .claude,
                 selected: nil,
                 inherited: ResolvedPermissionMode(mode: .auto, source: .rememberedFromEarlierRun)
             ),
@@ -323,6 +388,7 @@ final class ResolvedPermissionModeTests: XCTestCase {
         ] {
             XCTAssertEqual(
                 PermissionModePresentation.chipTitle(
+                    for: .claude,
                     selected: nil,
                     inherited: ResolvedPermissionMode(mode: .auto, source: source)
                 ),
@@ -332,6 +398,7 @@ final class ResolvedPermissionModeTests: XCTestCase {
         }
         XCTAssertEqual(
             PermissionModePresentation.chipTitle(
+                for: .claude,
                 selected: .plan,
                 inherited: ResolvedPermissionMode(mode: .auto, source: .rememberedFromEarlierRun)
             ),
@@ -345,12 +412,14 @@ final class ResolvedPermissionModeTests: XCTestCase {
     func testTheChipsTooltipNamesTheSourceAndOnlyWhenInheriting() throws {
         XCTAssertNil(
             PermissionModePresentation.chipTooltip(
+                for: .claude,
                 selected: .plan,
                 inherited: ResolvedPermissionMode(mode: .auto, source: .agentConfiguration)
             )
         )
         XCTAssertNil(
             PermissionModePresentation.chipTooltip(
+                for: .claude,
                 selected: nil,
                 inherited: ResolvedPermissionMode(mode: nil, source: .agentConfiguration)
             )
@@ -364,6 +433,7 @@ final class ResolvedPermissionModeTests: XCTestCase {
         ] {
             let tooltip = try XCTUnwrap(
                 PermissionModePresentation.chipTooltip(
+                    for: .claude,
                     selected: nil,
                     inherited: ResolvedPermissionMode(mode: .auto, source: source)
                 )

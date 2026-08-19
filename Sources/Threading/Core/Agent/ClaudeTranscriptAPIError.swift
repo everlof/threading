@@ -70,20 +70,45 @@ struct ClaudeTranscriptAPIError: Equatable, Sendable {
     /// **It is the newest *message*, not the newest line.** The CLI appends bookkeeping after a
     /// failure — `turn_duration`, queue operations, file-history snapshots — so the walk steps
     /// over anything that is not a message and lets the first `assistant`/`user` record it meets
-    /// decide. That is also what clears both facts read out of this: the next thing the
-    /// conversation says, in either direction, is proof it is talking again, so neither reader
-    /// has to remember when the failure was.
+    /// decide. General turn-refusal reading uses that boundary because either side speaking ends
+    /// the failed turn. Usage-limit reading deliberately asks `newestAssistantMessage` instead:
+    /// a locally recorded retry is not proof that the provider accepted it.
     ///
     /// **A sidechain's failure is not the session's.** A subagent that runs out of limit is
     /// reported to its parent as a failed task and the parent goes on working — as this app's own
     /// `f3ad7546` session did, for five minutes, before the main thread was refused too. Sidechain
     /// records are stepped over rather than allowed to decide.
     static func newestMessage(at url: URL, limit: Int) -> [String: Any]? {
+        newestMessage(
+            at: url,
+            limit: limit,
+            admitting: ClaudeAPIErrorDefaults.messageTypes
+        )
+    }
+
+    /// The newest provider outcome, ignoring a newer user prompt that has not been answered yet.
+    ///
+    /// Limit recovery uses this stricter boundary because writing a retry into the transcript is
+    /// not evidence that the provider accepted it. The standing refusal remains authoritative
+    /// until a newer assistant record either repeats it or proves the conversation spoke again.
+    static func newestAssistantMessage(at url: URL, limit: Int) -> [String: Any]? {
+        newestMessage(
+            at: url,
+            limit: limit,
+            admitting: ClaudeAPIErrorDefaults.assistantMessageTypes
+        )
+    }
+
+    private static func newestMessage(
+        at url: URL,
+        limit: Int,
+        admitting messageTypes: Set<String>
+    ) -> [String: Any]? {
         var newest: [String: Any]?
 
         JSONLReader.forEachRecordFromEnd(at: url, limit: limit) { record in
             guard let type = record[ClaudeAPIErrorDefaults.typeKey] as? String,
-                  ClaudeAPIErrorDefaults.messageTypes.contains(type),
+                  messageTypes.contains(type),
                   record[ClaudeAPIErrorDefaults.sidechainKey] as? Bool != true
             else { return true }
 
@@ -150,6 +175,7 @@ enum ClaudeAPIErrorDefaults {
     /// appends — `system`, `queue-operation`, `summary`, `file-history-snapshot` — is
     /// bookkeeping written *around* a message and says nothing about whether one failed.
     static let messageTypes: Set<String> = ["assistant", "user"]
+    static let assistantMessageTypes: Set<String> = ["assistant"]
 
     static let rateLimitReason = "rate_limit"
     static let rateLimitStatus = 429

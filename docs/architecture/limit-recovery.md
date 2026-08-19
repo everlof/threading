@@ -55,10 +55,11 @@ meeting at one seam:
 - **Detection** is `ObservedUsageLimit` → `ClaudeTranscriptUsageLimit` → `UsageLimitStop`: the
   capability-gated seam (`AgentCapabilities.transcriptUsageLimitRecord`, the
   `ObservedPermissionMode` shape), the `TranscriptFactReader`-backed reader, and the fact type.
-  The newest *message* record decides — a refusal stands until the conversation says anything
-  in either direction, which is also what clears it, so nothing has to remember when the
-  refusal was. Sidechain refusals are excluded: a subagent running out of limit is a failed
-  task to its parent, not the session stopping.
+  The newest *assistant* message record decides — a refusal stands until the provider produces a
+  newer outcome. A newer user record is only proof that a retry was submitted locally; `/loop`
+  can write it immediately before the provider repeats the same refusal. Sidechain refusals are
+  excluded: a subagent running out of limit is a failed task to its parent, not the session
+  stopping.
 - **Recovery** is `LimitRecoveryCoordinator` + `LimitRecoveryPolicy` + `LimitChooserReading`:
   a poll at `UsageLimitDefaults.pollInterval` over the live sessions (`stat`-cheap — the
   reader's size gate skips any transcript that has not grown, and its changed-only callback
@@ -104,8 +105,10 @@ separate facts" — [`session-activity.md`](session-activity.md)). The two shape
   deliberately — work the 429'd turn left running cannot wake a limited agent, and `working`
   would be a lie the sidebar holds for hours.
 
-The park clears on the next turn start, on `noteLimitCleared()`, and `markRunning`/`markDormant`
-reset it with the rest of the process-scoped facts. Detection ends the stranded turn itself
+The park clears on `noteLimitCleared()`, and `markRunning`/`markDormant` reset it with the rest of
+the process-scoped facts. A turn start deliberately does **not** clear it: `UserPromptSubmit`
+means the CLI accepted a local prompt, and both `/loop` and a scheduled continuation can raise it
+before a still-spent account writes another refusal. Detection ends the stranded turn itself
 (`turnInFlight = false`) — the transcript's `turn_duration` is the boundary the missing `Stop`
 never delivered.
 
@@ -116,7 +119,9 @@ of the CLI's chooser options leave the account exactly as spent as it was, and t
 around the chooser whatever is picked, so either guess would draw an ordinary idle row for a
 session that still cannot run. The park is lowered by evidence instead: `noteLimitCleared()`,
 raised by `LimitRecoveryCoordinator` when the reader answers nil, which happens exactly when the
-transcript records a newer message.
+transcript records a newer assistant outcome. Repeated refusals carry their transcript record identity, so
+a loop that receives the same provider sentence again is a new stop rather than an unchanged
+cached value.
 
 ## The mark
 
@@ -479,6 +484,15 @@ about resets does not pass on one word.
 The `waitForReset` continuation is a `ScheduledMessage` — "continue", targeted at the session,
 due at the binding window's `resetsAt` plus the same one-minute margin
 [`scheduled-messages.md`](scheduled-messages.md) already applies, for the same racing reason.
+The refusal first force-refreshes its account and waits for that refresh's settlement before
+selecting the binding window; starting an asynchronous refresh and immediately consulting the old
+cache can aim a five-hour refusal at a fuller seven-day window. The record's `.limitRecovery`
+purpose and refusal identity make deduplication exact: the same refusal reuses its continuation,
+while a newer refusal replaces the obsolete recovery plan. A user-authored reset preset never
+counts as either one. When the provider produces a newer successful outcome before the due time,
+the refusal has cleared and the promise is already fulfilled, so the store cancels that app-owned
+continuation in one commit; leaving it armed would type an unsolicited `continue` later and could
+also suppress the next real recovery.
 Everything hard about the moment is already solved there and is reused, not rebuilt: delivery
 types into a live terminal between turns in its own write; a send arriving to find the window
 still spent follows `ScheduledResetPolicy` (wait-once by default, bounded by

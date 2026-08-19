@@ -38,7 +38,9 @@ const diagnosticsKeys = [
   "records",
 ];
 const recordKeys = ["timestamp", "source", "level", "event", "fields"];
-const triggers = new Set(["shake", "diagnostics", "manual", "postCrash"]);
+const triggers = new Set([
+  "shake", "diagnostics", "connectionRecovery", "manual", "postCrash",
+]);
 const reportSources = new Set(["iOSClient", "macOSHost"]);
 const recordSources = new Set(["iOSClient", "macOSHost", "browserClient"]);
 const levels = new Set(["info", "warning", "error"]);

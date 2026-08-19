@@ -1396,6 +1396,16 @@ The vocabulary these encode, which new work should follow:
   distribution, lowest hugging), so the × keeps the trailing inset instead of the slack landing
   after it. `PageTitleView` carries the same pair of properties for the same reason.
 
+  iPhone mutable chat titles cross the same boundary through `MobileMorphingTitleLabel` and
+  `MobileMorphingTitle`; a feature row must not substitute `Text` or `UILabel`. This includes the
+  dashboard chat list, both SwiftUI and UIKit conversation navigation titles, and their live
+  rename updates. The navigation title keeps the chat name above the connection state. A
+  morphing label in a centred `UIStackView` uses `.defaultLow` horizontal compression resistance:
+  priority 1 lets the stack solve an over-width sentence by collapsing the title to zero instead
+  of truncating it to the bar. This presentation is deliberately host-owned: providers and
+  extensions supply the title value, while Threading retains truncation, motion, accessibility,
+  theme ink and the two-row status relationship.
+
 - **A paragraph cannot morph; lines can.** LabelMorph diffs one Core Text line, so a wrapped
   block has no single line to be diffed against. `MorphingMultilineTitleLabel` keeps a value as
   lines instead — one `MorphingTitleLabel` per line, split on newlines and never wrapped — which

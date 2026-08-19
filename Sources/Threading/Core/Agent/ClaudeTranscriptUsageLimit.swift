@@ -24,11 +24,11 @@ import Foundation
 /// itself still stops the session — `UsageLimitStop.recognised(in:)` is asked for the reset hint
 /// and not for permission.
 ///
-/// The record's shape, the newest-message walk and the rule that a sidechain's refusal is not the
-/// session's are `ClaudeTranscriptAPIError`'s, shared with `ClaudeTranscriptTurnRefusal` — which
-/// reads the *other* half of the same record: the failures that are not the allowance. This
-/// reader answers only for `isRateLimit`, and that one predicate is the whole boundary between
-/// them.
+/// The record's shape, the newest-provider-outcome walk and the rule that a sidechain's refusal
+/// is not the session's are `ClaudeTranscriptAPIError`'s, shared with
+/// `ClaudeTranscriptTurnRefusal` — which reads the *other* half of the same record: the failures
+/// that are not the allowance. This reader answers only for `isRateLimit`, and that one predicate
+/// is the whole boundary between them.
 ///
 /// The caching, the size gate and the background hop are `TranscriptFactReader`'s, shared with
 /// `ClaudeTranscriptModel` and `ClaudeTranscriptPermissionMode`. Callers in the app should ask
@@ -79,7 +79,7 @@ enum ClaudeTranscriptUsageLimit {
     /// the same split the two readers beside it keep. Callers in the app should ask
     /// `known`/`revalidate` instead; this touches the disk.
     nonisolated static func newestStop(at url: URL) -> UsageLimitStop? {
-        guard let record = ClaudeTranscriptAPIError.newestMessage(
+        guard let record = ClaudeTranscriptAPIError.newestAssistantMessage(
             at: url,
             limit: UsageLimitDefaults.scanBytes
         ),
@@ -87,10 +87,14 @@ enum ClaudeTranscriptUsageLimit {
             failure.isRateLimit
         else { return nil }
 
-        return UsageLimitStop.recognised(in: failure.text)
-            ?? UsageLimitStop(
-                message: failure.text ?? TranscriptUsageLimitDefaults.unstatedRefusal
-            )
+        let recognised = UsageLimitStop.recognised(in: failure.text)
+        return UsageLimitStop(
+            message: recognised?.message
+                ?? failure.text
+                ?? TranscriptUsageLimitDefaults.unstatedRefusal,
+            resetHint: recognised?.resetHint,
+            recordID: ClaudeTranscriptAPIError.identity(of: record)
+        )
     }
 }
 

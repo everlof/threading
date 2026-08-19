@@ -1334,6 +1334,9 @@ inheritance for restart and prints a muted notice instead of claiming a live cha
 `PermissionModePresentation` is the one place the rows, the inherit wording and the `hand.raised`
 symbol are written down; the session row's menu, the opening composer's chip and this chip all
 build from it, so three entrances to one setting cannot name the app-wide default three ways.
+It also owns the one provider-specific title: Codex renders Auto as **Auto (Approve for me)**,
+because that choice states `approvals_reviewer = "auto_review"` and must not look like Codex's
+ordinary human-reviewed Auto preset.
 Each surface passes only its own `Timing`, which is the one thing they genuinely differ about:
 
 - **Claude switches live.** `set_permission_mode` rides the same control channel `set_model`
@@ -1365,8 +1368,9 @@ Each surface passes only its own `Timing`, which is the one thing they genuinely
   the wire. (The `system`/`status` line above is a standing offer this does not yet take up: the
   CLI volunteers its current `permissionMode`, which would make the chip authoritative rather
   than merely consistent with the record.)
-- **Codex records for the next launch.** Its posture is stated in the `--ask-for-approval` and
-  `--sandbox` flags of the `codex app-server` process, and `turn/start` carries only
+- **Codex records for the next launch.** Its posture is stated in the `--ask-for-approval`,
+  `--sandbox`, and one-run `approvals_reviewer` configuration of the `codex app-server` process,
+  and `turn/start` carries only
   `model`, `effort` and `serviceTier` — reasoning effort is read into the next turn, the
   permission mode is not. (The app-server binary does list a `turn/start.permissions` key, but
   among the `experimentalFeature/list` names, so it is a gate rather than a contract to build

@@ -489,17 +489,39 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
   Sparkle replaces the bundle, so the SQLite store and settings survive, but the extension
   helpers' quarantine state is worth checking against a real upgrade — that is the one piece of
   this app's state that lives outside the usual containers.
-- ~~Whether Threading is distributed publicly at all.~~ Decided (2026-08-08): **public**,
-  GPLv3 (root `LICENSE`; the vendored SwiftTerm and the submodule forks stay MIT under their
-  own files). The model is Blink Shell's: the Mac app is free through the Sparkle feed, the
-  iOS companion is a paid App Store build that anyone may also build from source — the store
-  price buys the signed, updating convenience. The App Store build ships under the copyright
-  holder's own terms, which the GPL cannot grant, so outside contributions require the grant
-  in `CLA.md` (`CONTRIBUTING.md` says why; wire the CLA-Assistant GitHub app when the first
-  real PR arrives). Public was also structurally forced: release assets on a private GitHub
-  repo are not anonymously downloadable, so a private repo could never have served
-  `SUFeedURL`. The Homebrew cask is now unblocked as a future step — claudex's
-  `publish-homebrew-cask.sh` is the template.
+- ~~Whether Threading is distributed publicly at all.~~ Decided (2026-08-08): **public**, GPLv3
+  (root `LICENSE`; the vendored SwiftTerm and the submodule forks stay MIT under their own
+  files; `Service/ThreadingControlPlane/` is FSL-1.1-ALv2 — see the next entry). The model is
+  Blink Shell's: the Mac app is free through the Sparkle feed, the iOS companion is a paid App
+  Store build that anyone may also build from source — the store price buys the signed,
+  updating convenience. The App Store build ships under the copyright holder's own terms, which
+  the GPL cannot grant, so outside contributions require the grant in `CLA.md`
+  (`CONTRIBUTING.md` says why; wire the CLA-Assistant GitHub app when the first real PR
+  arrives). Public was also structurally forced: release assets on a private GitHub repo are
+  not anonymously downloadable, so a private repo could never have served `SUFeedURL`. The
+  Homebrew cask is now unblocked as a future step — claudex's `publish-homebrew-cask.sh` is the
+  template.
+- ~~Which license the hosted control plane ships under.~~ Decided (2026-08-19):
+  **FSL-1.1-ALv2**, carved out of the repository's GPLv3
+  (`Service/ThreadingControlPlane/LICENSE`, taken verbatim from the canonical template with
+  only the notice filled in). Two reasons, and the first is the load-bearing one: **GPLv3 has
+  no network clause**, so on a Cloudflare Worker it grants nothing. Copyleft triggers on
+  distribution, and nobody distributes a Worker — they deploy it. A fork could strip any
+  metering from `auth.ts`, host it, and publish nothing while staying fully compliant. Second,
+  `docs/OPEN_SOURCE.md` §4 already named the APNs/rendezvous seam as the intended paid surface,
+  and §6.1 of that same analysis says the money seam must be licensed before the paywall exists
+  rather than after. Doing it now relicenses 3,800 lines of plumbing nobody is attached to;
+  doing it once device tiers land in `auth.ts` and `enrollment.ts` would mean relicensing the
+  paywall itself, in public, with a GPL copy of it in the history. FSL rather than AGPL because
+  AGPL binds only a *modified* fork to publish — it does not stop someone hosting an unmodified
+  competing instance, which is the actual exposure. FSL rather than closed because the "no
+  transcripts, prompts, or terminal bytes reach the server" claim is the product's
+  differentiator, and an unauditable version of that claim is worth much less; FSL permits
+  reading, local `npm run dev`, and self-hosting for your own Macs, and converts each version
+  to Apache-2.0 after two years. No combined-work question with the GPL app: the Worker is
+  TypeScript, `src/protocol.ts` hand-mirrors the contract, nothing links `ThreadingRemoteKit`,
+  and the two talk over HTTP. Note the limit — commits of that directory already published
+  under GPLv3 stay GPLv3 forever, so this binds new versions only.
 - The repository now has its public-distribution `origin`. The release and nightly workflows
   remain dormant until the five GitHub Actions secrets named in `release.yml` are installed;
   the nightly schedule is deliberately disabled until then.

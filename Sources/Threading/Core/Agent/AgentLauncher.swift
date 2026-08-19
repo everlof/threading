@@ -342,9 +342,9 @@ enum AgentLauncher {
 
     /// Adds the flags that state the mode, in each CLI's own vocabulary.
     ///
-    /// Codex takes two flags because it has two axes, and both must be stated together: its
-    /// approval policy and its sandbox are independently defaulted, so setting one and leaving
-    /// the other would produce a posture that is neither the mode asked for nor the CLI's own.
+    /// Codex takes three flags because its approval policy, sandbox and reviewer are
+    /// independently defaulted. Stating them together keeps the selected mode independent of a
+    /// persistent `config.toml` reviewer setting.
     private static func appendPermissionMode(
         for session: AgentSession,
         to command: inout ShellCommand
@@ -795,7 +795,7 @@ enum AgentLauncher {
         tomlValue: String,
         to command: inout ShellCommand
     ) {
-        command.append(flag: "--config", value: "\(key)=\(tomlValue)")
+        command.append(flag: AgentDefaults.codexConfigFlag, value: "\(key)=\(tomlValue)")
     }
 
     /// A TOML basic-string literal for values supplied through Codex's `--config` flag.

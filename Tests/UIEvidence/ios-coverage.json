@@ -28,6 +28,7 @@
     {"id": "session-dashboard-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom"},
     {"id": "session-dashboard-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light"},
     {"id": "session-dashboard-project-custom-dark", "entryID": "ios-session-dashboard", "demo": "project-sessions", "appearance": "dark", "theme": "custom"},
+    {"id": "session-dashboard-offline-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-offline", "appearance": "dark", "theme": "custom"},
     {"id": "conversation-custom-dark", "entryID": "ios-native-conversation", "demo": "conversation", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "conversation-custom-light", "entryID": "ios-native-conversation", "demo": "conversation", "appearance": "light", "theme": "custom-light"},
     {"id": "conversation-collaboration-custom-dark", "entryID": "ios-native-conversation", "demo": "conversation-collaboration", "appearance": "dark", "theme": "custom"},
@@ -143,8 +144,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Session dashboard",
-      "description": "The paired owner dashboard and project-scoped chat list, with host switching in navigation chrome and project-aware session creation.",
-      "states": ["Paired owner", "Mixed session activity", "Project grouping", "Project-scoped chat list"],
+      "description": "The paired owner dashboard and project-scoped chat list, with host switching in navigation chrome, project-aware session creation and actionable connection recovery.",
+      "states": ["Paired owner", "Mixed session activity", "Project grouping", "Project-scoped chat list", "Offline recovery with saved routes and identity"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/session-dashboard-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}

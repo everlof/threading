@@ -9,8 +9,8 @@ import Foundation
 /// The poll is a `stat` per live session unless a transcript grew (`TranscriptFactReader`'s
 /// gate), at `UsageLimitDefaults.pollInterval` — the interval that reader's own defaults
 /// document for exactly this consumer. The reader calls back only when the answer *moves*, so
-/// one refusal is handled once: the standing stop stays constant until the conversation speaks
-/// again, and the next refusal is a new value.
+/// one refusal is handled once: the standing stop stays constant until the provider produces a
+/// newer outcome, and the next refusal is a new value even when its sentence is unchanged.
 ///
 /// Everything it does is journaled to `EventLog.Category.limitRecovery`, because a recovery is
 /// invisible by construction — it acts precisely when nobody is watching — and "it did
@@ -25,9 +25,12 @@ final class LimitRecoveryCoordinator {
 
     private var timer: Timer?
 
-    /// Sessions whose refusal is mid-recovery, so a poll landing during the chooser dance
-    /// cannot start a second one.
-    private var recovering: Set<SessionID> = []
+    /// The recovery attempt that owns each session's refusal.
+    ///
+    /// Identity matters because usage refreshes and chooser reads are asynchronous. Clearing a
+    /// refusal and then seeing a newer one must make every callback from the older attempt a
+    /// no-op rather than letting stale state schedule or type into the new turn.
+    private var recovering: [SessionID: UUID] = [:]
 
     /// The refusal currently standing over each flagged session, held only until the policy has
     /// decided what to do with it — the durable half is `LimitEscapeSuggestionStore`, which both
@@ -42,6 +45,22 @@ final class LimitRecoveryCoordinator {
     // MARK: - Initialization
 
     private init() {}
+
+    private func beginRecovery(for sessionID: SessionID) -> UUID? {
+        guard recovering[sessionID] == nil else { return nil }
+        let attemptID = UUID()
+        recovering[sessionID] = attemptID
+        return attemptID
+    }
+
+    private func ownsRecovery(_ attemptID: UUID, for sessionID: SessionID) -> Bool {
+        recovering[sessionID] == attemptID
+    }
+
+    private func finishRecovery(_ attemptID: UUID, for sessionID: SessionID) {
+        guard ownsRecovery(attemptID, for: sessionID) else { return }
+        recovering.removeValue(forKey: sessionID)
+    }
 
     // MARK: - Public Methods
 
@@ -80,12 +99,25 @@ final class LimitRecoveryCoordinator {
 
     private func limitReadingMoved(_ sessionID: SessionID, stop: UsageLimitStop?) {
         guard let stop else {
-            // The conversation spoke again — the continuation landed, or the user did. Told to
-            // the tracker rather than left to the turn-start hook: a session whose hooks never
-            // arrived has no other way back, and the mark is the one thing on the row that
+            // The provider produced a newer outcome — the continuation landed, or the user's
+            // retry was accepted. Tell that to the tracker rather than leaving it to the
+            // turn-start hook: a session whose hooks never arrived has no other way back, and
+            // the mark is the one thing on the row that
             // would otherwise outlive what it describes.
-            recovering.remove(sessionID)
+            recovering.removeValue(forKey: sessionID)
             parked.removeValue(forKey: sessionID)
+            let obsolete = ScheduledMessageStore.shared.messages(for: sessionID)
+                .filter { $0.isOwedLimitRecoveryContinuation }
+            if !obsolete.isEmpty {
+                let cancelled = ScheduledMessageStore.shared
+                    .cancelLimitRecoveryContinuations(for: sessionID)
+                EventLog.shared.record(.limitRecovery, cancelled
+                    ? "Cleared refusal cancelled its obsolete continuation"
+                    : "Cleared refusal could not cancel its obsolete continuation", [
+                    "session": sessionID.uuidString,
+                    "count": String(obsolete.count)
+                ])
+            }
             LimitEscapeSuggestionStore.shared.refusalCleared(for: sessionID)
             AgentRuntime.shared.limitRecoverySurface(for: sessionID)?
                 .noteLimitCleared()
@@ -94,8 +126,17 @@ final class LimitRecoveryCoordinator {
             )
             return
         }
-        guard !recovering.contains(sessionID) else { return }
-        recovering.insert(sessionID)
+        if recovering[sessionID] != nil {
+            guard parked[sessionID] != stop else { return }
+            // A new refusal supersedes the asynchronous recovery of the old one. Its callbacks
+            // carry the old attempt id and will refuse themselves below.
+            recovering.removeValue(forKey: sessionID)
+            EventLog.shared.record(.limitRecovery, "New refusal superseded an in-flight recovery", [
+                "session": sessionID.uuidString,
+                "record": stop.recordID ?? ""
+            ])
+        }
+        guard let attemptID = beginRecovery(for: sessionID) else { return }
         parked[sessionID] = stop
 
         EventLog.shared.record(.limitRecovery, "Usage-limit refusal read from a transcript", [
@@ -111,7 +152,7 @@ final class LimitRecoveryCoordinator {
                 "session": sessionID.uuidString
             ])
             parked.removeValue(forKey: sessionID)
-            recovering.remove(sessionID)
+            finishRecovery(attemptID, for: sessionID)
             return
         }
 
@@ -128,14 +169,19 @@ final class LimitRecoveryCoordinator {
                 "scope": String(describing: answer.scope)
             ])
             offerEscape(for: sessionID)
-            recovering.remove(sessionID)
+            finishRecovery(attemptID, for: sessionID)
 
         case .waitForReset:
             EventLog.shared.record(.limitRecovery, "Recovery armed by policy", [
                 "session": sessionID.uuidString,
                 "scope": String(describing: answer.scope)
             ])
-            armWaitForReset(sessionID, terminal: terminal, trigger: .policy)
+            armWaitForReset(
+                sessionID,
+                terminal: terminal,
+                trigger: .policy,
+                attemptID: attemptID
+            )
 
         case .resumeOnBestAccount, .resumeVia:
             EventLog.shared.record(.limitRecovery, "Account recovery armed by policy", [
@@ -146,7 +192,8 @@ final class LimitRecoveryCoordinator {
             armAccountResume(
                 sessionID,
                 terminal: terminal,
-                policy: answer.policy
+                policy: answer.policy,
+                attemptID: attemptID
             )
         }
     }
@@ -171,8 +218,7 @@ final class LimitRecoveryCoordinator {
             return
         }
         // A recovery already in flight owns this refusal; a second arm would type twice.
-        guard !recovering.contains(sessionID) else { return }
-        recovering.insert(sessionID)
+        guard let attemptID = beginRecovery(for: sessionID) else { return }
 
         LimitEscapeSuggestionStore.shared.setBusy(.waitForReset, for: sessionID)
         EventLog.shared.record(.limitRecovery, "Wait-for-reset pressed", [
@@ -186,7 +232,12 @@ final class LimitRecoveryCoordinator {
             ? nil
             : AgentRuntime.shared.runningLimitRecoverySurface(for: sessionID)
 
-        armWaitForReset(sessionID, terminal: terminal, trigger: .press)
+        armWaitForReset(
+            sessionID,
+            terminal: terminal,
+            trigger: .press,
+            attemptID: attemptID
+        )
     }
 
     // MARK: - Private Methods — Wait For Reset
@@ -219,43 +270,89 @@ final class LimitRecoveryCoordinator {
     private func armWaitForReset(
         _ sessionID: SessionID,
         terminal: (any AgentTerminalLimitRecoverySurface)?,
-        trigger: RecoveryTrigger
+        trigger: RecoveryTrigger,
+        attemptID: UUID
     ) {
-        guard let plan = continuationPlan(for: sessionID) else {
-            standDown(
-                sessionID,
-                terminal: terminal,
-                trigger: trigger,
-                because: "no usage reading to schedule against",
-                sentence: LimitRecoveryStrings.noReadingProblem
-            )
+        guard ownsRecovery(attemptID, for: sessionID) else { return }
+        // The transcript has already ended the refused turn. Keep the row truthful while the
+        // fresh usage read and chooser verification are in flight; a failure below converts
+        // this quiet recovering park into the visible flagged one.
+        terminal?.noteLimitParked(recoveryArmed: true)
+        let refusalRecordID = parked[sessionID]?.recordID
+
+        // Seeing the same standing refusal again after a relaunch must not answer its chooser or
+        // file a second send. Identity makes this precise: a newer refusal with the same words is
+        // not covered by the old continuation and proceeds to a fresh plan below.
+        let existing = ScheduledMessageStore.shared.messages(for: sessionID)
+        if Self.recoveryContinuationAlreadyArmed(
+            in: existing,
+            forRefusalRecordID: refusalRecordID
+        ) {
+            terminal?.noteLimitParked(recoveryArmed: true)
+            EventLog.shared.record(.limitRecovery, "Continuation for this refusal already scheduled", [
+                "session": sessionID.uuidString,
+                "record": refusalRecordID ?? ""
+            ])
+            if trigger == .press { LimitEscapeSuggestionStore.shared.clear(sessionID) }
+            finishRecovery(attemptID, for: sessionID)
             return
         }
 
-        // A continuation already waiting for this session means a previous arm is still in
-        // flight — a re-armed reset, an undelivered send. A second one would type twice.
-        guard !Self.hasOwedContinuation(for: sessionID) else {
-            terminal?.noteLimitParked(recoveryArmed: true)
-            EventLog.shared.record(.limitRecovery, "Continuation already scheduled, re-armed the park", [
-                "session": sessionID.uuidString
-            ])
-            // The press is answered by the offer going away: the send it asked for is already
-            // filed, and the scheduled-message strip is the surface that names it.
-            if trigger == .press { LimitEscapeSuggestionStore.shared.clear(sessionID) }
-            recovering.remove(sessionID)
-            return
+        // The refusal is newer than any usage poll. Do not read the cache on the line after
+        // starting an asynchronous refresh: wait for the freshest reading pacing permits, then
+        // choose the window from that settled snapshot.
+        continuationPlan(for: sessionID) { [weak self] plan in
+            guard let self, self.ownsRecovery(attemptID, for: sessionID) else { return }
+            guard let plan else {
+                self.standDown(
+                    sessionID,
+                    terminal: terminal,
+                    trigger: trigger,
+                    attemptID: attemptID,
+                    because: "no current usage reading to schedule against",
+                    sentence: LimitRecoveryStrings.noReadingProblem
+                )
+                return
+            }
+
+            self.continueArmingWaitForReset(
+                sessionID,
+                terminal: terminal,
+                trigger: trigger,
+                attemptID: attemptID,
+                refusalRecordID: refusalRecordID,
+                plan: plan
+            )
         }
+    }
+
+    private func continueArmingWaitForReset(
+        _ sessionID: SessionID,
+        terminal: (any AgentTerminalLimitRecoverySurface)?,
+        trigger: RecoveryTrigger,
+        attemptID: UUID,
+        refusalRecordID: String?,
+        plan: ContinuationPlan
+    ) {
+        guard ownsRecovery(attemptID, for: sessionID) else { return }
 
         guard let terminal else {
             EventLog.shared.record(.limitRecovery, "No terminal to answer, scheduling the continuation", [
                 "session": sessionID.uuidString
             ])
-            scheduleContinuation(plan, sessionID: sessionID, terminal: nil, trigger: trigger)
+            scheduleContinuation(
+                plan,
+                sessionID: sessionID,
+                terminal: nil,
+                trigger: trigger,
+                attemptID: attemptID,
+                refusalRecordID: refusalRecordID
+            )
             return
         }
 
         answerChooser(terminal, sessionID: sessionID, attempt: 0) { [weak self] result in
-            guard let self else { return }
+            guard let self, self.ownsRecovery(attemptID, for: sessionID) else { return }
 
             switch result {
             case .answered(let keystrokes):
@@ -264,7 +361,12 @@ final class LimitRecoveryCoordinator {
                     "keystrokes": keystrokes
                 ])
                 self.scheduleContinuation(
-                    plan, sessionID: sessionID, terminal: terminal, trigger: trigger
+                    plan,
+                    sessionID: sessionID,
+                    terminal: terminal,
+                    trigger: trigger,
+                    attemptID: attemptID,
+                    refusalRecordID: refusalRecordID
                 )
 
             case .noticeOnly:
@@ -275,7 +377,12 @@ final class LimitRecoveryCoordinator {
                     "session": sessionID.uuidString
                 ])
                 self.scheduleContinuation(
-                    plan, sessionID: sessionID, terminal: terminal, trigger: trigger
+                    plan,
+                    sessionID: sessionID,
+                    terminal: terminal,
+                    trigger: trigger,
+                    attemptID: attemptID,
+                    refusalRecordID: refusalRecordID
                 )
 
             case .unreadable(let reason, let screen):
@@ -283,6 +390,7 @@ final class LimitRecoveryCoordinator {
                     sessionID,
                     terminal: terminal,
                     trigger: trigger,
+                    attemptID: attemptID,
                     because: reason,
                     sentence: LimitRecoveryStrings.unreadableScreenProblem,
                     screen: screen
@@ -291,14 +399,30 @@ final class LimitRecoveryCoordinator {
         }
     }
 
-    /// Whether a window-anchored continuation is already owed for this session.
+    /// Whether a limit-recovery continuation is already owed for this session.
     ///
     /// One predicate, two readers: the arm refuses to file a second send, and the strip stops
     /// offering what is already filed. They were separate once and that is exactly how a button
     /// comes to offer something the code behind it declines to do.
     static func hasOwedContinuation(for sessionID: SessionID) -> Bool {
         ScheduledMessageStore.shared.messages(for: sessionID)
-            .contains { $0.state.isOwed && $0.anchor?.usageWindowID != nil }
+            .contains { $0.isOwedLimitRecoveryContinuation }
+    }
+
+    /// Whether one refusal already owns a durable continuation.
+    ///
+    /// Kept pure so the identity contract is testable without touching the developer's shared
+    /// scheduled-message store. A runtime without record identities may have only one standing
+    /// refusal, so its existing recovery is the conservative match.
+    static func recoveryContinuationAlreadyArmed(
+        in messages: [ScheduledMessage],
+        forRefusalRecordID recordID: String?
+    ) -> Bool {
+        messages.contains { message in
+            guard message.isOwedLimitRecoveryContinuation else { return false }
+            guard let recordID else { return message.limitRecoveryRecordID == nil }
+            return message.limitRecoveryRecordID == recordID
+        }
     }
 
     /// Which window stops this session and when it lifts — the same window the toolbar pill
@@ -309,49 +433,103 @@ final class LimitRecoveryCoordinator {
         let dueAt: Date
     }
 
-    private func continuationPlan(for sessionID: SessionID) -> ContinuationPlan? {
+    private func continuationPlan(
+        for sessionID: SessionID,
+        completion: @escaping @MainActor (ContinuationPlan?) -> Void
+    ) {
         guard let session = ProjectStore.shared.session(withID: sessionID),
               let account = AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle)
-        else { return nil }
+        else { return completion(nil) }
 
         let model = session.model ?? AgentModels.defaultModel(for: session.kind, account: account)
-        // The reading may be stale — the refusal is fresher than any poll — so ask for a
-        // refresh regardless of the answer; a plan made now is checked again at delivery by
-        // the scheduled send's own stand-aside rule.
-        AccountUsageService.shared.refresh(account)
+        AccountUsageService.shared.refresh(account, force: true) {
+            let now = Date()
+            guard let usage = Self.settledUsageForRecovery(
+                from: AccountUsageService.shared.reading(for: account)
+            ),
+                  let window = usage.bindingWindow(at: now, metering: model),
+                  let resetsAt = window.resetsAt, resetsAt > now
+            else { return completion(nil) }
 
-        guard let usage = AccountUsageService.shared.usage(for: account),
-              let window = usage.bindingWindow(metering: model),
-              let resetsAt = window.resetsAt, resetsAt > Date()
-        else { return nil }
+            EventLog.shared.record(.limitRecovery, "Fresh usage reading selected the recovery window", [
+                "session": sessionID.uuidString,
+                "window": window.compactName,
+                "observedAt": ISO8601DateFormatter().string(from: usage.observedAt),
+                "fraction": window.fraction.map { String($0) } ?? ""
+            ])
+            completion(ContinuationPlan(
+                windowID: window.id,
+                windowName: window.compactName,
+                dueAt: resetsAt.addingTimeInterval(PresetDefaults.resetPadding)
+            ))
+        }
+    }
 
-        return ContinuationPlan(
-            windowID: window.id,
-            windowName: window.compactName,
-            dueAt: resetsAt.addingTimeInterval(PresetDefaults.resetPadding)
-        )
+    /// A failed refresh deliberately leaves the last good value available for display, but that
+    /// stale value is not safe to schedule from. Recovery either receives the current reading or
+    /// stands down; it never converts a fetch failure into a confidently wrong reset window.
+    static func settledUsageForRecovery(from reading: AccountUsageReading) -> AccountUsage? {
+        guard case .current(let usage) = reading else { return nil }
+        return usage
     }
 
     private func scheduleContinuation(
         _ plan: ContinuationPlan,
         sessionID: SessionID,
         terminal: (any AgentTerminalLimitRecoverySurface)?,
-        trigger: RecoveryTrigger
+        trigger: RecoveryTrigger,
+        attemptID: UUID,
+        refusalRecordID: String?
     ) {
+        guard ownsRecovery(attemptID, for: sessionID) else { return }
+
+        let owed = ScheduledMessageStore.shared.messages(for: sessionID)
+            .filter { $0.isOwedLimitRecoveryContinuation }
+        guard owed.count <= 1 else {
+            standDown(
+                sessionID,
+                terminal: terminal,
+                trigger: trigger,
+                attemptID: attemptID,
+                because: "multiple automatic continuations were owed for one session",
+                sentence: LimitRecoveryStrings.conflictingSchedulesProblem
+            )
+            return
+        }
+
+        let previous = owed.first
         let message = ScheduledMessage(
+            id: previous?.id ?? ScheduledMessageID(),
+            createdAt: previous?.createdAt ?? Date(),
             dueAt: plan.dueAt,
             target: .session(sessionID),
             text: LimitRecoveryDefaults.continuationText,
-            anchor: .usageWindowReset(windowID: plan.windowID)
+            anchor: .usageWindowReset(windowID: plan.windowID),
+            purpose: .limitRecovery,
+            limitRecoveryRecordID: refusalRecordID
         )
 
-        switch ScheduledMessageStore.shared.add(message) {
+        let result: Result<ScheduledMessage, ScheduledMessageStore.Refusal>
+        if let previous {
+            result = ScheduledMessageStore.shared.replace(previous.id, with: message)
+                ? .success(message)
+                : .failure(.writesBlocked)
+        } else {
+            result = ScheduledMessageStore.shared.add(message)
+        }
+
+        switch result {
         case .success:
             terminal?.noteLimitParked(recoveryArmed: true)
-            EventLog.shared.record(.limitRecovery, "Continuation scheduled for the window reset", [
+            EventLog.shared.record(.limitRecovery, previous == nil
+                ? "Continuation scheduled for the window reset"
+                : "Obsolete recovery continuation replaced", [
                 "session": sessionID.uuidString,
                 "window": plan.windowName,
-                "dueAt": ISO8601DateFormatter().string(from: plan.dueAt)
+                "dueAt": ISO8601DateFormatter().string(from: plan.dueAt),
+                "previousWindow": previous?.anchor?.usageWindowID ?? "",
+                "previousRecord": previous?.limitRecoveryRecordID ?? "",
+                "record": refusalRecordID ?? ""
             ])
             ThreadingLogger.agent.info(
                 """
@@ -363,13 +541,14 @@ final class LimitRecoveryCoordinator {
             // is the fact, and the composer's scheduled-message strip is what names it. Two
             // strips saying the same thing is the duplication this subsystem avoids by design.
             LimitEscapeSuggestionStore.shared.clear(sessionID)
-            recovering.remove(sessionID)
+            finishRecovery(attemptID, for: sessionID)
 
         case .failure(let refusal):
             standDown(
                 sessionID,
                 terminal: terminal,
                 trigger: trigger,
+                attemptID: attemptID,
                 because: "the schedule was refused: \(refusal)",
                 sentence: ScheduledRefusalText.sentence(for: refusal)
             )
@@ -394,8 +573,10 @@ final class LimitRecoveryCoordinator {
     private func armAccountResume(
         _ sessionID: SessionID,
         terminal: any AgentTerminalLimitRecoverySurface,
-        policy: LimitRecoveryPolicy
+        policy: LimitRecoveryPolicy,
+        attemptID: UUID
     ) {
+        guard ownsRecovery(attemptID, for: sessionID) else { return }
         offerEscape(for: sessionID)
 
         guard budget.admitMigration(for: sessionID) else {
@@ -403,6 +584,7 @@ final class LimitRecoveryCoordinator {
                 sessionID,
                 terminal: terminal,
                 trigger: .policyAccountResume,
+                attemptID: attemptID,
                 because: "the unattended migration budget for this session is spent",
                 sentence: LimitRecoveryStrings.budgetSpentProblem
             )
@@ -416,7 +598,7 @@ final class LimitRecoveryCoordinator {
         terminal.noteLimitParked(recoveryArmed: true)
 
         resolveResumeTarget(for: sessionID, policy: policy) { [weak self] result in
-            guard let self else { return }
+            guard let self, self.ownsRecovery(attemptID, for: sessionID) else { return }
 
             switch result {
             case .success(let account):
@@ -433,13 +615,14 @@ final class LimitRecoveryCoordinator {
                     accountID: account.id
                 ))
                 self.parked.removeValue(forKey: sessionID)
-                self.recovering.remove(sessionID)
+                self.finishRecovery(attemptID, for: sessionID)
 
             case .failure(let refusal):
                 self.standDown(
                     sessionID,
                     terminal: terminal,
                     trigger: .policyAccountResume,
+                    attemptID: attemptID,
                     because: refusal.reason,
                     sentence: refusal.sentence
                 )
@@ -711,6 +894,7 @@ final class LimitRecoveryCoordinator {
         _ sessionID: SessionID,
         terminal: (any AgentTerminalLimitRecoverySurface)?,
         trigger: RecoveryTrigger,
+        attemptID: UUID,
         because reason: String,
         sentence: String,
         screen: String? = nil
@@ -741,7 +925,7 @@ final class LimitRecoveryCoordinator {
             // being written. The offer is already on screen; it is told why instead.
             LimitEscapeSuggestionStore.shared.note(problem: sentence, for: sessionID)
         }
-        recovering.remove(sessionID)
+        finishRecovery(attemptID, for: sessionID)
     }
 
     // MARK: - Private Methods — The Interactive Escape
@@ -818,6 +1002,12 @@ enum LimitRecoveryStrings {
     /// the screen is in the journal, and a sentence quoting a half-drawn TUI helps nobody.
     static var unreadableScreenProblem: String {
         L10n.string("The session is not showing the limit prompt.")
+    }
+
+    /// More than one app-owned continuation means the durable invariant was already broken. Do
+    /// not guess which record owns the session; name the repair the user must make.
+    static var conflictingSchedulesProblem: String {
+        L10n.string("This conversation has conflicting automatic recovery schedules.")
     }
 
     /// The unattended migrations ran out. Phrased as what happened rather than as a limit the user

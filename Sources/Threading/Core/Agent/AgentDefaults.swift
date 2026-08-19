@@ -47,11 +47,12 @@ enum AgentDefaults {
     static let codexBypassHookTrustFlag = "--dangerously-bypass-hook-trust"
 
     /// How a launch states its permission posture. Claude and Grok name one mode; Codex splits
-    /// the same idea across when-to-ask and what-may-happen-without-asking, so it takes two
-    /// flags. `AgentPermissionMode` owns which values pair with which.
+    /// the same idea across when-to-ask, what-may-happen-without-asking and who reviews a
+    /// boundary crossing. `AgentPermissionMode` owns which values travel together.
     static let claudePermissionModeFlag = "--permission-mode"
     static let codexApprovalFlag = "--ask-for-approval"
     static let codexSandboxFlag = "--sandbox"
+    static let codexConfigFlag = "--config"
     static let grokPermissionModeFlag = "--permission-mode"
 
     /// What Claude and Grok call Manual in their own vocabulary. It is Claude's *internal* name
@@ -61,11 +62,12 @@ enum AgentDefaults {
     /// records carry it too. So it is written out, not accepted.
     static let agentInternalManualMode = "default"
 
-    /// The same two axes as the flags above, spelled the way `config.toml` states them. A
+    /// The same three axes as the flags above, spelled the way `config.toml` states them. A
     /// session Threading launches without a mode inherits whatever these say, which is what
     /// lets its chip name a posture instead of naming where the answer lives.
     static let codexApprovalPolicyKey = "approval_policy"
     static let codexSandboxModeKey = "sandbox_mode"
+    static let codexApprovalsReviewerKey = "approvals_reviewer"
 
     static let codexApprovalUntrusted = "untrusted"
     static let codexApprovalOnRequest = "on-request"
@@ -74,6 +76,9 @@ enum AgentDefaults {
     static let codexSandboxReadOnly = "read-only"
     static let codexSandboxWorkspaceWrite = "workspace-write"
     static let codexSandboxFullAccess = "danger-full-access"
+
+    static let codexApprovalsReviewerUser = "user"
+    static let codexApprovalsReviewerAutoReview = "auto_review"
 
     /// Model choices offered for Claude: the aliases its `--help` documents, which track the
     /// latest of each family rather than pinning a dated name.

@@ -1249,7 +1249,7 @@ How much a chat may do before it stops to ask. Claude Code and Codex support it,
 | **Manual** | Asks before making any change. |
 | **Plan** | Reads and proposes. Changes nothing. |
 | **Accept Edits** | Edits files without asking. Commands still ask. |
-| **Auto** | Decides for itself when to ask. |
+| **Auto** | Claude and Grok decide when to ask. For Codex this appears as **Auto (Approve for me)**: eligible requests that cross the sandbox go to a reviewer agent instead of interrupting you. |
 | **Don't Ask** | Never interrupts — *refuses* anything that would need approval. |
 | **Bypass Permissions** | No permission checks at all. |
 
@@ -1270,8 +1270,10 @@ Set it in three places:
   default and changes nothing — Claude's own `permissions.defaultMode` and Codex's `config.toml`
   still decide. Threading reads both, so the chip and the menu can still name the mode you will
   get: Claude's four settings layers (a managed policy, the project's `.claude/settings.local.json`
-  and `settings.json`, then your account's), and Codex's `approval_policy` and `sandbox_mode`
-  pair. A repository cannot grant *Auto* to itself — Claude ignores that one value outside your
+  and `settings.json`, then your account's), and Codex's `approval_policy`, `sandbox_mode`, and
+  `approvals_reviewer` values. Codex's ordinary human-reviewed Auto preset is not labelled
+  **Approve for me**; that name appears only when the reviewer is `auto_review`. A repository
+  cannot grant *Auto* to itself — Claude ignores that one value outside your
   own settings, so Threading does not report it either.
 
 Codex has no plan mode of its own, so Plan there stops it writing but does not ask it to plan;
@@ -2320,11 +2322,13 @@ own mark, and a login other than the CLI's default one adds its chip on the mark
 name beside the chat's state — the same two facts the Mac sidebar carries. A small glyph after the
 connection icon says which surface you will land in: a terminal for the agent's own UI, a speech
 bubble for a Native conversation. Rows are two lines tall, so a long chat title is shortened here
-and shown in full once the chat is open.
+and shown in full once the chat is open. When an agent renames a chat, its title morphs to the new
+name in both this list and the open chat's navigation bar.
 
 Starting a chat from the phone opens it. The **+** button's sheet closes onto the new chat's own
 screen rather than back onto the list, and stays there while the Mac starts the agent — a new
-session shows "Resuming on your Mac…" for as long as that takes.
+session shows "Resuming on your Mac…" for as long as that takes. The New Session navigation bar
+keeps its title above the connected Mac and state, matching the two-row chat navigation title.
 
 While the agent is working on a turn, the dotted thinking orb takes the place of the connection dot
 under the chat's title, tinted with the app theme's accent, exactly as it appears beside the

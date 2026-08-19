@@ -134,6 +134,18 @@ struct ScheduledAttachment: Codable, Sendable, Equatable {
 /// was scheduled, so the record no longer depends on anything outside it surviving the wait.
 struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
 
+    // MARK: - Purpose
+
+    /// Why the record exists.
+    ///
+    /// Most schedules are user-authored. Limit recovery also rides this store, but it has
+    /// different deduplication semantics: an ordinary reset preset must never suppress an
+    /// automatic recovery, and a recovery for an older refusal must not suppress a newer one.
+    enum Purpose: String, Codable, Sendable, Equatable {
+        case userAuthored
+        case limitRecovery
+    }
+
     // MARK: - Target
 
     enum Target: Codable, Sendable, Equatable {
@@ -262,6 +274,12 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
     let id: ScheduledMessageID
     let createdAt: Date
 
+    let purpose: Purpose
+
+    /// The refusal record this recovery answers. Nil for user-authored schedules and for a
+    /// structured runtime that has no transcript record identity.
+    let limitRecoveryRecordID: String?
+
     var target: Target
     var text: String
     var context: [ConversationContextAttachment]
@@ -294,13 +312,17 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         attachments: [ScheduledAttachment] = [],
         anchor: Anchor = .wallClock,
         state: State = .armed,
-        resetRearmCount: Int = 0
+        resetRearmCount: Int = 0,
+        purpose: Purpose = .userAuthored,
+        limitRecoveryRecordID: String? = nil
     ) {
         var wallClockCalendar = calendar
         wallClockCalendar.timeZone = timeZone
 
         self.id = id
         self.createdAt = createdAt
+        self.purpose = purpose
+        self.limitRecoveryRecordID = limitRecoveryRecordID
         self.attachments = attachments
         self.trigger = .time(TimeTrigger(
             dueAt: dueAt,
@@ -327,10 +349,14 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         text: String,
         context: [ConversationContextAttachment] = [],
         attachments: [ScheduledAttachment] = [],
-        state: State = .armed
+        state: State = .armed,
+        purpose: Purpose = .userAuthored,
+        limitRecoveryRecordID: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
+        self.purpose = purpose
+        self.limitRecoveryRecordID = limitRecoveryRecordID
         self.target = target
         self.text = text
         self.context = context
@@ -354,6 +380,8 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         case trigger
         case state
         case resetRearmCount
+        case purpose
+        case limitRecoveryRecordID
         case dueAt
         case intendedTimeZoneIdentifier
         case intendedWallClock
@@ -365,6 +393,11 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
 
         id = try container.decode(ScheduledMessageID.self, forKey: .id)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
+        purpose = try container.decodeIfPresent(Purpose.self, forKey: .purpose) ?? .userAuthored
+        limitRecoveryRecordID = try container.decodeIfPresent(
+            String.self,
+            forKey: .limitRecoveryRecordID
+        )
         target = try container.decode(Target.self, forKey: .target)
         text = try container.decode(String.self, forKey: .text)
         context = try container.decodeIfPresent(
@@ -402,6 +435,8 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(purpose, forKey: .purpose)
+        try container.encodeIfPresent(limitRecoveryRecordID, forKey: .limitRecoveryRecordID)
         try container.encode(target, forKey: .target)
         try container.encode(text, forKey: .text)
         try container.encode(context, forKey: .context)
@@ -412,6 +447,14 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
     }
 
     // MARK: - Reading
+
+    /// Whether this is the durable wait-for-reset promise owned by limit recovery.
+    ///
+    /// Purpose is part of the predicate: a user can schedule an ordinary message for a usage
+    /// reset, and that message is not permission for recovery to stand down.
+    var isOwedLimitRecoveryContinuation: Bool {
+        purpose == .limitRecovery && state.isOwed && anchor?.usageWindowID != nil
+    }
 
     /// What a row shows. Empty prose with staged context still reads as something, for the same
     /// reason `ConversationOutbox.Item.summary` does.
@@ -474,7 +517,9 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
             attachments: attachments,
             anchor: current.anchor,
             state: .armed,
-            resetRearmCount: countingRearm ? resetRearmCount + 1 : resetRearmCount
+            resetRearmCount: countingRearm ? resetRearmCount + 1 : resetRearmCount,
+            purpose: purpose,
+            limitRecoveryRecordID: limitRecoveryRecordID
         )
     }
 }

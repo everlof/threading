@@ -47,6 +47,13 @@ final class PublicIssueReportingTests: XCTestCase {
         }
     }
 
+    func testSubmissionAcceptsConnectionRecoveryTriggerFromIOS() {
+        XCTAssertTrue(PublicIssueReportPolicy.accepts(makeSubmission(
+            trigger: "connectionRecovery",
+            source: .iOSClient
+        )))
+    }
+
     func testBoundingDropsContentInMachineFieldsAndPolicyRejectsACraftedBypass() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "public-report-\(UUID().uuidString)",

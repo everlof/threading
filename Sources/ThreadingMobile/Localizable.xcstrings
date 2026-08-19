@@ -1,6 +1,21 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Allow Local Network access": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillåt åtkomst till lokalt nätverk" } } }
+    },
+    "Can’t reach this Mac": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kan inte nå den här Mac-datorn" } } }
+    },
+    "Check this Mac’s identity": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollera Mac-datorns identitet" } } }
+    },
+    "Compare this code with Identity Code in Threading → Settings → Remote Access on the Mac before scanning again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Jämför den här koden med Identitetskod i Threading → Inställningar → Fjärråtkomst på Mac-datorn innan du skannar igen." } } }
+    },
+    "Connection recovery": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anslutningshjälp" } } }
+    },
     "Find the bug hiding in plain sight…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hitta buggen som gömmer sig helt öppet…" } } }
     },
@@ -17,6 +32,9 @@
         }
       }
     },
+    "Last connected": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Senast ansluten" } } }
+    },
     "Make the impossible state impossible…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gör det omöjliga tillståndet omöjligt…" } } }
     },
@@ -30,11 +48,32 @@
         }
       }
     },
+    "Pair this Mac again": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Parkoppla den här Mac-datorn igen" } } }
+    },
     "Polish the rough edges…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Putsa de grova kanterna…" } } }
     },
+    "Saved identity": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparad identitet" } } }
+    },
     "Teach this screen a new trick…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lär den här skärmen ett nytt trick…" } } }
+    },
+    "The Mac refused the request": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade begäran" } } }
+    },
+    "This Mac didn’t answer": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn svarade inte" } } }
+    },
+    "Threading tried every saved way to reach this Mac. Make sure the Mac app is open, then try again. If it still fails, scan its current QR code.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading försökte alla sparade sätt att nå den här Mac-datorn. Kontrollera att Mac-appen är öppen och försök igen. Om det fortfarande inte fungerar skannar du dess aktuella QR-kod." } } }
+    },
+    "Tried now": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Försökte nu" } } }
+    },
+    "Update Threading": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppdatera Threading" } } }
     },
     "30d": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "30 d" } } }
