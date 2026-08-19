@@ -2216,15 +2216,16 @@ alone. With no way in switched on, the page says that too rather than waiting fo
 that is never coming.
 
 The Tailscale readiness card appears when that way in is on, and tells you whether installation,
-sign-in/running, or private HTTPS Serve needs attention. If your tailnet has not approved Tailscale Serve (or HTTPS certificates) yet,
+sign-in/running, or private HTTPS Serve needs attention. If your tailnet has not approved
+Tailscale Serve (or HTTPS certificates) yet,
 the card's endpoint row offers an **Enable Tailscale Serve…** / **Enable HTTPS…** button that
 opens the tailnet's approval page; approve there, then **Retry Connection**. The pairing panel
 below states the same reason and the same fix itself, with that button beside **Retry
 Connection**, so you never have to match a failure to a row elsewhere on the page. While the
 tailnet is coming up, the status line and the panel say what is being waited for: the first
 HTTPS certificate a tailnet issues can take up to a minute, and both say so until it answers.
-**Open in Browser** tests the
-client on the Mac, and the page shows an owner-device QR code for the native app.
+**Open in Browser** tests the client on the Mac, and the page shows an owner-device QR code for
+the native app.
 
 **This Mac's Identity** prints the 26-character pairing code of the certificate every routable way
 in presents. Your phone pins that certificate when it scans the QR code and compares this code with
@@ -2235,9 +2236,9 @@ with nothing to do. **Reset Identity…** throws the certificate away and mints 
 every paired device has to scan again; it asks first, and it is the answer for a lost or unreadable
 key rather than the ordinary way to change certificates.
 
-Pairing is for your own
-trusted devices: a paired owner can see your unarchived chats, manage them, and approve bounded
-Native permission requests. To involve somebody else, use a session's **… > Share Chat…** and
+Pairing is for your own trusted devices: a paired owner can see your unarchived chats, manage
+them, and approve bounded Native permission requests. To involve somebody else, use a session's
+**… > Share Chat…** and
 choose an invitation for that chat alone. The sheet names each grant and what it withholds:
 **View only** follows the chat but cannot type, prompt, or answer a permission request;
 **Collaborator** adds typing and prompts while permission requests still come to you; and
