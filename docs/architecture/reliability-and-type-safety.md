@@ -99,11 +99,12 @@ log text.
 That count reads like a ceiling and is a *length to fill*: Foundation stays inside `read(2)` until
 that many bytes arrive or the writer closes the pipe. A child that prints a burst and keeps running
 therefore delivers nothing at all, and nothing reports it, because a blocked read is not a failure
-anybody counts. This shipped: the HTTPS relay asked for 16 KB, `cloudflared` printed roughly 3 KB
-of banner — the published address inside it — and then went quiet, so the very first readability
-callback blocked for the life of the app. The tunnel was live and serving real traffic over
-`trycloudflare.com` the whole time; the settings page said "Preparing your pairing code /
-Connecting…" and iPhone pairing was unreachable in Relay mode. `BoundedChildProcess.captureSuffix`
+anybody counts. This shipped: the since-retired HTTPS relay asked for 16 KB, its child printed
+roughly 3 KB of banner with the published address inside it and then went quiet, so the very first
+readability callback blocked for the life of the app. The tunnel was live and serving real traffic
+the whole time; the settings page said "Preparing your pairing code / Connecting…" and iPhone
+pairing was unreachable. `TailscaleServeTransport` reads the same way, which is why the type
+outlived the transport it was written for. `BoundedChildProcess.captureSuffix`
 is the deliberate exception: it drains a finite helper to EOF behind a `ChildProcessDeadline`, so
 filling is what it wants.
 

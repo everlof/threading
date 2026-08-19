@@ -31,10 +31,12 @@ works away from home.
 - **Hosted Direct** becomes the native owner-device default after Sign in with Apple. It uses the
   Threading service only for identity, ICE signaling and TURN fallback; ordinary traffic goes
   directly between iPhone and Mac whenever ICE succeeds.
-- **Relay** is **no longer an owner pairing route.** Its Cloudflare Quick Tunnel address changes
-  every launch, which is fatal to "pair once, reconnect tomorrow", so no setting on the page starts
-  it and `/api/me` no longer advertises it. It is still started on demand when a one-chat guest link
-  is created, because a guest has no Threading app, no pairing code and no tailnet.
+- **Relay is gone.** The Cloudflare Quick Tunnel's address changed every launch, which is fatal to
+  "pair once, reconnect tomorrow", and a third party terminated its TLS. Nothing starts it, nothing
+  advertises it, and `cloudflared` is no longer a dependency of anything. It was the only public
+  origin Threading had, so public guest links went with it; see
+  [Pair an iPhone](#pair-an-iphone). `RemoteHostEndpointKind.relay` stays on the wire as
+  decodable vocabulary, because an installed phone holds records that carry it.
 
 Because every way in is bound separately, "tailnet only" and "this network only" are both
 expressible, which is the guarantee behind *publishes Threading only inside the owner's tailnet*: a
@@ -65,10 +67,12 @@ with nothing to do; a reset is the answer for a lost or unreadable key, not the 
 change certificates.
 
 **One migration, and then the mode is gone.** `remoteAccessConnectionMode`,
-`remoteAccessAllowsOwnerRelayFallback` and `remoteAccessKeepsRelayReady` remain in the settings
-registry only so `AppSettings.migrateRemoteAccessConnectionMode()` can carry a stored `tailscale`
-or `tailscaleAndRelay` over to the tailnet switch exactly once; `relay` carries nothing and lands
-on the shipped default, `This network`.
+`remoteAccessAllowsOwnerRelayFallback` and `remoteAccessKeepsRelayReady` are no longer settings:
+`AppSettings.migrateRemoteAccessConnectionMode()` reads the three raw defaults keys once, carries a
+stored `tailscale` or `tailscaleAndRelay` over to the tailnet switch, and then deletes them. `relay`
+carries nothing and lands on the shipped default, `This network`. The marker
+(`didMigrateRemoteAccessDoors`) is written last, so an interrupted migration re-runs and a second
+run finds nothing to carry.
 
 **Retiring Serve as a route is what breaks an old phone.** An old client under `privateOnly`
 filters to `kind == "tailscale"`, and that endpoint is now `https://100.x:<port>` with a
@@ -118,8 +122,8 @@ The hosted QR carries two independent scopes in its URL fragment: a temporary re
 credential that can form an encrypted ICE/TURN route to this Mac, and the existing one-time owner
 bootstrap that must still be redeemed by the loopback remote server. The Mac exchanges the
 bootstrap for a unique 256-bit, device-bound owner credential, rotates the code, issues the
-phone's durable hosted credential, and revokes the temporary pairing route. Relay/Tailscale QR
-codes redeem the same owner bootstrap over their selected route. The Mac stores the device record
+phone's durable hosted credential, and revokes the temporary pairing route. A QR code for a bound
+door redeems the same owner bootstrap over that door. The Mac stores the device record
 in the login Keychain and iOS stores the paired host and its credentials in its Keychain. Pairing therefore
 survives a Threading restart and also survives turning Remote Access off and back on. Settings
 lists each paired owner device with an explicit **Revoke** action; **Reset Everything** also
@@ -266,7 +270,7 @@ relayed ANSI stream locally rather than receiving a scaled screenshot. The Mac s
 returns when the remote view closes. Rotating the phone updates the lease, and disconnecting
 restores the newest natural Mac grid (or another phone that is still controlling the session).
 In Focused mode only the controlling person's devices participate in that resize lease, so a
-watcher's narrow window cannot reflow the controller's TUI. A Tailscale/relay route change does
+watcher's narrow window cannot reflow the controller's TUI. Moving between advertised routes does
 not change the person's control identity; reconnecting receives the Mac's authoritative current
 mode before input is accepted.
 
@@ -397,6 +401,12 @@ Pairing and sharing are deliberately different actions:
   chats, can manage sessions and themes, and may approve bounded Native permission requests. Its
   credential remains paired across Mac/app restarts until explicitly revoked.
 - **Share Chat…** in a session's `…` menu creates a single-use invitation for exactly that chat.
+  **The person on the other end needs the Threading app and a way onto one of your networks.**
+  The invitation points at a bound way in, LAN first and the tailnet otherwise, and carries the
+  same 26-character fingerprint the owner's pairing code carries, so their phone pins this Mac's
+  certificate from the code it was sent. `/api/me` never teaches a one-chat capability an identity,
+  which is why the code has to. With no way in bound there is no origin to mint against and the
+  sheet refuses with *Turn on a way in first*.
   Approval is a separate per-member, per-chat right: a trusted collaborator can review a complete
   Native permission request caused by their work without gaining settings, lifecycle, project, or
   other-chat access. The sheet names all three and says what each withholds, because the grant is
@@ -413,6 +423,13 @@ Pairing and sharing are deliberately different actions:
   View only waits for a running chat, and says so beside its dimmed button: a viewer cannot wake
   a dormant one, so there would be nothing to watch. The three live in `ShareLinkGrant`, which is
   what replaced a `switch` on the alert's button *index*.
+- **A guest cannot be somebody with only a browser any more.** That worked because the Cloudflare
+  Quick Tunnel gave Threading a public origin; removing the relay removes the origin, and this is a
+  real capability loss rather than a tidy-up. The browser client is unchanged and still speaks the
+  whole session protocol, so guest links return when it can be served over an ICE data channel;
+  the shim that needs is the same one Hosted Direct needs, and the two are planned together. A
+  proxy route through Threading's own infrastructure is deliberately not the answer: it would put
+  session bytes through a service that promises never to see them.
 - An unused invitation expires after 24 hours. Accepting it consumes that URL and creates a new
   device-bound membership without a 24-hour timer. Unused invitations and accepted memberships
   are stored in the Mac login Keychain, so turning Remote Access off, restarting Threading, or
@@ -726,7 +743,7 @@ THREADING_APNS_TOPIC=codes.threading.mobile
 The topic is optional and defaults to the iOS bundle identifier above. Without provider
 credentials the settings page says **Live only**: events still work while the authenticated
 connection is alive, but a suspended app cannot receive a remote push. A distributed build
-should move the provider key to a stable relay rather than ship it in either app.
+should move the provider key behind a service it operates rather than ship it in either app.
 
 The environment-selected `.p8` file must be a regular UTF-8 file no larger than 64 KiB. It is
 read through the opened-file streaming limit before CryptoKit parses it; a metadata preflight is
@@ -818,15 +835,16 @@ feature lock.
   from this Mac to its own address is local traffic the firewall does not filter. Only a phone
   that connected proves reachability.
 - **This network** and **Through a VPN** bind routable addresses, which is a change of exposure:
-  Threading becomes an app that accepts incoming connections, and the promise that "no router port
-  or inbound firewall rule is opened" now holds only for the relay below. Nothing is bound that a
-  way in did not ask for, every routable listener presents this Mac's pinned certificate, and
-  loopback stays cleartext because the Hosted Direct bridge and Tailscale Serve talk plain HTTP to
-  it.
-- While a **one-chat guest link** exists, `cloudflared` opens an outbound tunnel to that one
-  listener. No router port or inbound firewall rule is opened for it. Traffic passes through
-  Cloudflare, where TLS is terminated, so share only work you are comfortable sending through it.
-  No setting starts this: creating a share does, and it stops when the last share is gone.
+  Threading becomes an app that accepts incoming connections. Nothing is bound that a way in did
+  not ask for, every routable listener presents this Mac's pinned certificate, and loopback stays
+  cleartext because the Hosted Direct bridge and Tailscale Serve talk plain HTTP to it. No router
+  port is forwarded and no inbound firewall rule is opened on your router; what changes is that
+  this Mac answers on a network you are already on.
+- **A one-chat guest link opens nothing new.** It points at a way in that is already bound and is
+  reached the same way an owner device reaches it, with the same certificate and the same
+  authorization path. A guest holds a bearer for one chat, is never sent this Mac's endpoint list,
+  and never learns an identity from `/api/me`. Nothing starts on their behalf, and revoking the
+  link or the member ends it immediately.
 - While **Tailscale** is on, the listener binds the addresses this Mac holds on its tailnet, with
   the same pinned identity and the same sticky port as every other routable door. Tailscale filters
   packets between nodes whatever port they are on, so the tailnet's ACL policy still decides who
@@ -853,8 +871,9 @@ feature lock.
   photographed*. Its whole payload is a QR code, and QR's alphanumeric mode — 5.5 bits per
   character against byte mode's 8 — has no lower case, so a mixed-case token forces the densest
   possible symbol. Written as base32, alongside an upper-cased scheme and host
-  (`RemoteConnectionLink.scannablePayload`), a median relay host encodes in 37 modules instead of
-  41. It remains an unguessable online-only bootstrap held in memory, is accepted once (with a
+  (`RemoteConnectionLink.scannablePayload`), a LAN door with the fingerprint beside the token
+  encodes in 33 modules; the 52-character relay host it replaced needed 37 with the token alone,
+  and 41 before the token changed. It remains an unguessable online-only bootstrap held in memory, is accepted once (with a
   short same-device retry window for a lost response), and rotates immediately. Invitation and
   durable device bearers remain 256-bit base64url: they travel by copied link or protocol
   exchange, never by camera, so they buy nothing from the QR trade.
@@ -863,14 +882,13 @@ feature lock.
   checks and manufacture a value its non-optional endpoint accessors could not safely represent.
   The validated share URL is derived once at construction, while only the normalized origin and
   bearer are persisted.
-- **The 128-bit choice is forced by the host, not by the token, and should be revisited when the
-  relay moves to a short custom domain.** A 52-character `trycloudflare.com` hostname is most of
-  the payload, which is what leaves the token paying for the last version. Measured at level M
-  against a `k7m2qx.threading.app`-shaped origin: 33 modules with a *256-bit* base32 token — still
-  better than the 41 this shipped with — and 29 with the current 128-bit one. So once the host
-  shortens, full 256-bit entropy costs one version rather than four, and going back to it is the
-  cheaper side of the trade. Upper-casing the origin keeps earning either way (a bare
-  `threading.app` with the old base64url token is 37 lower-case against 33 upper-case).
+- **The 128-bit choice was forced by the host, and the host has since shortened.** A 52-character
+  `trycloudflare.com` hostname used to be most of the payload; a LAN door is `192.168.1.42:8760`
+  and the fingerprint is now the longest thing riding beside the token. At level M the shipping
+  payload measures 33 modules (`PairingCodeImageTests` holds the number). Full 256-bit entropy
+  would cost versions the code does not need to spend, so the bootstrap stays 128-bit: it is
+  online-only, held in memory, and rotated on first use. Upper-casing the origin keeps earning
+  either way.
 - API and WebSocket access require the accepted bearer and matching device id. Only a paired
   interactive all-sessions owner may
   create, rename, pin, archive or restore sessions, or select the shared app appearance and a
@@ -1079,16 +1097,16 @@ hostname, Cloudflare Realtime key, Sign in with Apple server key, rate-limit nam
 server-notification registration must be provisioned or confirmed before distributed builds can
 use it. A forced TURN-only run and the broader NAT/sleep/handoff matrix remain release gates.
 
-The automatic relay still uses a Cloudflare Quick Tunnel. Quick Tunnels are intended for
-development and testing, have no uptime guarantee, and receive a new public hostname whenever
-Threading starts. The durable device credential survives, but an iPhone paired to that old origin
-needs another reachable advertised route to discover the new Quick Tunnel. Hosted Direct supplies
-that route for signed-in owner devices; a legacy relay-only build must still scan again. The
-logical-host model now prefers an advertised stable relay URL, so a
-future named Cloudflare Tunnel can replace the quick endpoint without changing pairing or
-authorization. Provisioning and operating that named tunnel is not part of this phase. A tailnet
-address is stable, so an owner paired over the tailnet reconnects after a Mac or app restart
-without rescanning as long as Tailscale is running on both devices.
+Every advertised route is stable now, which is what lets a pairing survive a restart: a bound
+address and the sticky port are the same tomorrow, and a phone that finds neither learns the
+current list from the next route that does answer. A phone still paired to a retired Quick Tunnel
+address has a dead endpoint and no way to learn a live one, so those pairings have to be scanned
+once more. An owner paired over the tailnet reconnects after a Mac or app restart without
+rescanning as long as Tailscale is running on both devices.
+
+**Public guest links are gone with the relay.** A guest needs the Threading app and a way onto one
+of your networks; a browser-only guest comes back when the bundled client can be served over an ICE
+data channel.
 
 On iPhone, Tailscale must be connected before this Mac's tailnet address or MagicDNS name is
 reachable. iOS permits only one active packet-tunnel VPN at a time, so another VPN may prevent that
@@ -1114,12 +1132,6 @@ exposed. Composer attachment uploads are — narrowly, and only as described und
 [Sending a file from the phone](#sending-a-file-from-the-phone); the phone can put a file in the
 attachment store of one session it may already write to, and can do nothing else with the
 filesystem.
-
-If `cloudflared` is not installed, local browser mirroring still works. Install it with:
-
-```sh
-brew install cloudflared
-```
 
 For the tailnet way in, install and sign in to Tailscale on the Mac and iPhone, and make sure its
 ACLs allow the iPhone identity to reach the Mac **on the listener's port** (`8760` by default), not
@@ -1148,7 +1160,7 @@ with no AppKit window graph or ambient project/runtime lookup.
 - `Sources/Threading/Core/Remote`: the HTTP/WebSocket server and its per-door listener set
   (`RemoteListenerSet`, `RemoteAccessDoors`), the pinned identity the routable doors present
   (`RemoteAccessIdentity` and the `RemoteIdentity*` encoders behind it), durable owner-device
-  registry, authentication, pluggable Cloudflare/Tailscale transports, routing, the application
+  registry, authentication, the Tailscale Serve transport, routing, the application
   command capability, and live session mirrors.
 - `Sources/Threading/Resources/RemoteClient`: dependency-free browser client. A browser on the
   LAN or the tailnet meets a certificate interstitial against a pinned self-signed identity;

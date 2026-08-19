@@ -17,7 +17,7 @@ struct AgentChildRecord: Codable, Equatable, Sendable {
     /// inventing an id that looks like a row. Optional also makes older records
     /// forward-compatible with new child categories while preserving the original on-disk field.
     let sessionID: String?
-    /// The launched file's last path component — `claude`, `codex`, `grok`, `tailscale`.
+    /// The launched file's last path component: `claude`, `codex`, `grok`, `tailscale`.
     /// Enough to say what was killed without recording where it was installed.
     let executable: String
     let recordedAt: Date

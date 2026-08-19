@@ -123,11 +123,16 @@ case 2 only, which is precisely the case ICE/TURN is being designed for.
 
 ## 6. Recommendation
 
-**Reject.** Keep the Quick Tunnel exactly where it is: guest shares only, started by creating one,
-stopped when the last one is gone, with the TLS-termination sentence beside it. Owner routes stay
-on the Mac's own interfaces with a pinned certificate, and reaching a Mac from outside the network
-is ICE/TURN's problem, where the encryption is end to end and the third party carries bytes it
-cannot read.
+**Reject.** Owner routes stay on the Mac's own interfaces with a pinned certificate, and reaching a
+Mac from outside the network is ICE/TURN's problem, where the encryption is end to end and the
+third party carries bytes it cannot read.
+
+**Update, step 7 of the transport plan:** the Quick Tunnel this recommendation proposed keeping for
+guest shares is gone as well. A guest invitation is minted against a bound private door and carries
+the same pinned fingerprint an owner code carries, so the last reason to run `cloudflared` went
+with it. What that costs is a guest who has only a browser, which returns over ICE/TURN rather than
+over a tunnel; see [`REMOTE_ACCESS.md`](../REMOTE_ACCESS.md). The rejection above is unaffected: it
+was never the guest path that made a named tunnel attractive.
 
 ---
 

@@ -1,7 +1,7 @@
 import Foundation
 import ThreadingRemoteKit
 
-/// Tunables for remote access — the second HTTP/WebSocket server, bound on the doors the owner
+/// Tunables for remote access: the second HTTP/WebSocket server, bound on the doors the owner
 /// selected, so a session can be watched and driven from a browser or the iOS app.
 ///
 /// This server is deliberately separate from `MCPServer` and `ExtensionHostService`: those
