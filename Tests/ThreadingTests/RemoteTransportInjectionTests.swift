@@ -21,12 +21,15 @@ final class RecordingRelayTransport: RemoteRelayTransport {
     }
 }
 
-/// The tailnet half of the same seam.
+/// The `tailscale` CLI seam. `start` is Tailscale Serve, not the tailnet door: the door is a
+/// listener, so a test that turns it on must see nothing started here at all.
 @MainActor
 final class RecordingTailnetTransport: RemoteTailnetTransport {
     private(set) var startedPorts: [UInt16] = []
     private(set) var stopCount = 0
+    private(set) var factsRefreshes = 0
     var readiness: TailscaleReadiness = .notChecked
+    var hostFacts: TailscaleHostFacts = .unknown
     var onReadinessChange: (@MainActor () -> Void)?
 
     func start(
@@ -40,11 +43,15 @@ final class RecordingTailnetTransport: RemoteTailnetTransport {
     func stop() {
         stopCount += 1
     }
+
+    func refreshHostFacts() {
+        factsRefreshes += 1
+    }
 }
 
 /// The seam that keeps a test run from publishing the developer's Mac.
 ///
-/// `RemoteAccessCoordinator` used to build `RemoteTunnel()` and `TailscaleRemoteTransport()`
+/// `RemoteAccessCoordinator` used to build `RemoteTunnel()` and `TailscaleServeTransport()`
 /// itself, with the shipping executable locators, so any test that reached relay mode launched
 /// the real `cloudflared`. Two of those children were still alive on this machine when the
 /// transport plan was written, because nothing in the test run owned them.
@@ -210,27 +217,71 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
         XCTAssertEqual(relay.startedPorts, [], "the master switch started the relay")
         XCTAssertEqual(tailnet.startedPorts, [], "a way in that is off started its transport")
 
-        // The tailnet switch starts what that way in is made of, and nothing else.
+        // The tailnet switch is a bind. It starts no transport at all: it asks the listener for
+        // another door, and asks the CLI what it can say about why that door might not come up.
         coordinator.setTailscaleDoorEnabled(true)
-        XCTAssertEqual(tailnet.startedPorts.count, 1)
+        XCTAssertEqual(
+            tailnet.startedPorts, [],
+            "the tailnet way in started Tailscale Serve, which no phone uses"
+        )
+        XCTAssertGreaterThan(tailnet.factsRefreshes, 0, "the door was switched on unexplained")
         XCTAssertEqual(relay.startedPorts, [], "the tailnet switch started the relay")
 
-        // The reserved browser convenience is stored and starts nothing at all.
+        // The browser convenience is the one thing that does start Serve.
         coordinator.setTailscaleServeEnabled(true)
         XCTAssertTrue(settings.remoteAccessTailscaleServeEnabled)
+        XCTAssertEqual(tailnet.startedPorts.count, 1, "the Serve sub-option started nothing")
         XCTAssertEqual(relay.startedPorts, [], "the Serve sub-option started the relay")
 
         // And the network way in is the listener's own business.
         coordinator.setDoors([.lan])
         XCTAssertEqual(relay.startedPorts, [], "This network started the relay")
 
-        coordinator.setTailscaleDoorEnabled(false)
-        XCTAssertGreaterThan(tailnet.stopCount, 0, "switching the tailnet off left it running")
+        coordinator.setTailscaleServeEnabled(false)
+        XCTAssertGreaterThan(tailnet.stopCount, 0, "switching Serve off left it running")
         XCTAssertEqual(relay.startedPorts, [], "switching a way in off started the relay")
     }
 
+    /// The sub-option and the door are independent in both directions, which is the whole claim
+    /// behind "the Threading app does not need this": Serve is a browser convenience, so it
+    /// neither follows the door nor takes a route away when it stops.
+    func testServeRunsAndStopsWithoutTouchingTheTailnetDoor() throws {
+        let relay = RecordingRelayTransport()
+        let tailnet = RecordingTailnetTransport()
+        let settings = isolatedAppSettings()
+        settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
+        settings.remoteAccessDoors = []
+        settings.remoteAccessTailscaleEnabled = false
+        settings.remoteAccessTailscaleServeEnabled = true
+        let coordinator = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: settings,
+            guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
+            relayTransport: relay,
+            tailnetTransport: tailnet
+        )
+        coordinators.append(coordinator)
+
+        coordinator.setEnabled(true)
+        waitForListening(coordinator)
+
+        // Serve is on and the tailnet door is off: it publishes anyway, because a browser on the
+        // tailnet is a different audience from the phone.
+        XCTAssertEqual(tailnet.startedPorts.count, 1)
+        XCTAssertFalse(coordinator.isTailscaleDoorEnabled)
+
+        // Turning the door on does not start a second one, and turning Serve off does not take
+        // the door with it.
+        coordinator.setTailscaleDoorEnabled(true)
+        XCTAssertEqual(tailnet.startedPorts.count, 1)
+        let stopsBefore = tailnet.stopCount
+        coordinator.setTailscaleServeEnabled(false)
+        XCTAssertGreaterThan(tailnet.stopCount, stopsBefore)
+        XCTAssertTrue(coordinator.isTailscaleDoorEnabled, "stopping Serve closed the door")
+    }
+
     /// The seam under the tailnet switch. Swapping the implementation is what §8 of the transport
-    /// plan does, and it must not need the settings page to change.
+    /// plan did, and it did not need the settings page to change.
     func testTheTailnetSwitchRunsWhicheverImplementationTheBuildCarries() throws {
         let relay = RecordingRelayTransport()
         let tailnet = RecordingTailnetTransport()
@@ -260,8 +311,38 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
         XCTAssertEqual(relay.startedPorts, [])
         XCTAssertEqual(
             RemoteTailscaleDoorImplementation.current,
-            .serveTransport,
+            .listenerDoor,
             "the shipped implementation changed without the page being reviewed again"
+        )
+    }
+
+    /// The other side of the same seam: a build pinned to the old Serve handler still runs it,
+    /// and still keeps the tailnet out of the listener's door set.
+    func testABuildPinnedToServeStillRunsServeForItsDoor() throws {
+        let relay = RecordingRelayTransport()
+        let tailnet = RecordingTailnetTransport()
+        let settings = isolatedAppSettings()
+        settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
+        settings.remoteAccessDoors = []
+        settings.remoteAccessTailscaleEnabled = true
+        let coordinator = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: settings,
+            guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
+            relayTransport: relay,
+            tailnetTransport: tailnet,
+            tailscaleDoor: .serveTransport
+        )
+        coordinators.append(coordinator)
+
+        coordinator.setEnabled(true)
+        waitForListening(coordinator)
+
+        XCTAssertEqual(tailnet.startedPorts.count, 1)
+        XCTAssertEqual(
+            coordinator.listenerStatus.state(of: .tailscale),
+            .off,
+            "a Serve build bound the tailnet address as well, which is two doors for one switch"
         )
     }
 

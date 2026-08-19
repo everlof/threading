@@ -87,9 +87,20 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         address: "::1",
         isIPv6: true
     )
+    /// A tailnet as the classifier sees one: a `utun` carrying a `100.64.0.0/10` address, which
+    /// is what makes it Tailscale's rather than somebody's VPN. Not assignable on this machine,
+    /// which is the point of the address beside it.
     private static let tailscaleAddress = RemoteNetworkAddress(
         interfaceName: "utun9",
         address: "100.100.1.1"
+    )
+    /// The second address on the same tunnel. A real tailnet has one — Tailscale hands out an
+    /// IPv6 address beside the CGNAT one — and here it is the address that can actually be bound,
+    /// so the door can be exercised without a tailnet on the machine running the test.
+    private static let tailscaleBindableAddress = RemoteNetworkAddress(
+        interfaceName: "utun9",
+        address: "::1",
+        isIPv6: true
     )
     private static let vpnAddress = RemoteNetworkAddress(
         interfaceName: "utun8",
@@ -105,6 +116,12 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
     /// A copy shares the same allocation, so the closure the server holds reads whatever the
     /// test writes. This is how an interface arrives and goes away mid-test.
     private let addresses = OSAllocatedUnfairLock<[RemoteNetworkAddress]>(initialState: [])
+    /// Door transitions, as the support journal would have received them. Captured rather than
+    /// discarded so the events a report is read from can be asserted; a hosted test must never
+    /// append to the developer's own journal, which is why they are redirected at all.
+    private let journal = OSAllocatedUnfairLock<
+        [(event: RemoteDiagnosticEvent, fields: [RemoteDiagnosticField: String])]
+    >(initialState: [])
     private var occupied: [NWListener] = []
 
     override func setUp() {
@@ -124,7 +141,11 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         )
         // A hosted test runs inside the shipping app, so an unredirected journal call would
         // append door transitions to the developer's own support journal.
-        server.recordListenerDiagnostic = { _, _, _ in }
+        journal.withLock { $0 = [] }
+        let recorded = journal
+        server.recordListenerDiagnostic = { event, _, fields in
+            recorded.withLock { $0.append((event, fields)) }
+        }
     }
 
     override func tearDown() {
@@ -341,20 +362,131 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
 
     func testADoorThisBuildDoesNotBindSaysSoAndBindsNothing() throws {
         let port = try quietPort()
-        addresses.withLock { $0 = [Self.lanAddress, Self.tailscaleAddress] }
+        addresses.withLock { $0 = [Self.lanAddress, Self.vpnAddress] }
         XCTAssertEqual(
-            start(RemoteListenerConfiguration(preferredPort: port, doors: [.tailscale])),
+            start(RemoteListenerConfiguration(preferredPort: port, doors: [.vpn])),
             .listening(port: port)
         )
 
         XCTAssertEqual(
-            server.listenerStatus.state(of: .tailscale),
+            server.listenerStatus.state(of: .vpn),
             .notReachable(.notAvailableYet)
         )
         XCTAssertEqual(
             server.requestedBindings.map(\.address),
             [RemoteListenerSet.loopbackAddress]
         )
+    }
+
+    // MARK: - The tailnet door
+
+    /// The tailnet is a door like any other: one listener per address it holds, with TLS, on the
+    /// same sticky port. The `100.64.0.0/10` address cannot be assigned on a build machine, so
+    /// the door comes up on the address beside it and reports itself bound — which is also the
+    /// answer a real tailnet needs when one of its two addresses is slower to configure than the
+    /// other.
+    func testTheTailnetDoorBindsTheAddressesOnItsTunnel() throws {
+        let port = try quietPort()
+        addresses.withLock {
+            $0 = [Self.lanAddress, Self.tailscaleAddress, Self.tailscaleBindableAddress]
+        }
+        XCTAssertEqual(
+            start(RemoteListenerConfiguration(preferredPort: port, doors: [.tailscale])),
+            .listening(port: port)
+        )
+        waitUntil("the tailnet door binds") {
+            self.server.listenerStatus.state(of: .tailscale).bindings.count == 1
+        }
+
+        XCTAssertEqual(
+            server.listenerStatus.state(of: .tailscale).bindings.map(\.address),
+            [Self.tailscaleBindableAddress]
+        )
+        XCTAssertTrue(
+            RemoteAccessDoor.tailscale.isBindable,
+            "the door was classified and then not bound, which is the state §8 removes"
+        )
+        XCTAssertTrue(
+            RemoteAccessDoor.tailscale.requiresTLS,
+            "a tailnet address is a routable address, so it presents this Mac's certificate"
+        )
+        XCTAssertEqual(
+            server.requestedBindings.map(\.address).sorted(),
+            [Self.tailscaleAddress, Self.tailscaleBindableAddress, RemoteListenerSet.loopbackAddress]
+                .sorted(),
+            "the door asked for both of its tunnel's addresses and for nothing on the LAN"
+        )
+    }
+
+    /// The promise in `docs/REMOTE_ACCESS.md` that Tailscale "publishes Threading only inside the
+    /// owner's tailnet", asserted at bind time. Serve's loopback-only bind used to deliver it;
+    /// with the door bound directly, only a per-door bind can.
+    func testEnablingOnlyTheTailnetDoorBindsNothingOnTheLanAddress() throws {
+        let port = try quietPort()
+        addresses.withLock {
+            $0 = [Self.lanAddress, Self.vpnAddress, Self.tailscaleAddress,
+                  Self.tailscaleBindableAddress]
+        }
+        XCTAssertEqual(
+            start(RemoteListenerConfiguration(preferredPort: port, doors: [.tailscale])),
+            .listening(port: port)
+        )
+        waitUntil("the tailnet door binds") {
+            self.server.listenerStatus.state(of: .tailscale).bindings.count == 1
+        }
+
+        let bound = Set(server.requestedBindings.map(\.address))
+        XCTAssertFalse(
+            bound.contains(Self.lanAddress),
+            "somebody who chose the tailnet for its privacy is also listening on hotel Wi-Fi"
+        )
+        XCTAssertFalse(bound.contains(Self.vpnAddress))
+        XCTAssertFalse(
+            server.requestedBindings.contains { $0.address.address == "0.0.0.0" },
+            "a wildcard bind is the promise being broken quietly"
+        )
+        XCTAssertEqual(server.listenerStatus.state(of: .lan), .off)
+        XCTAssertEqual(
+            RemoteAccessCoordinator.doorEndpoints(
+                server.listenerStatus,
+                advertisedHostname: "",
+                localHostname: "studio.local"
+            ).map(\.kind),
+            [RemoteHostEndpointKind.tailscale],
+            "the LAN door's `.local` name was advertised for a Mac that is not answering on it"
+        )
+    }
+
+    /// The tailnet door's absence is its own reason. A `utun` with no `100.64.0.0/10` address is
+    /// `tailscaled` not running, which is fixed somewhere else than a Mac with no Wi-Fi.
+    func testATailnetWithNoAddressReportsThatRatherThanNoNetwork() throws {
+        let port = try quietPort()
+        // The LAN door stays out of this one: both fixtures answer at `::1`, and two doors on one
+        // address at one port is a collision rather than a tailnet.
+        addresses.withLock { $0 = [Self.lanAddress] }
+        XCTAssertEqual(
+            start(RemoteListenerConfiguration(preferredPort: port, doors: [.tailscale])),
+            .listening(port: port)
+        )
+        waitUntil("the tailnet door reports itself") {
+            self.server.listenerStatus.state(of: .tailscale)
+                == .notReachable(.tailscaleNotConnected)
+        }
+        XCTAssertEqual(
+            RemoteAccessDoor.lan.absentInterfaceReason,
+            .noInterface,
+            "a Mac off every network is not a Tailscale problem"
+        )
+
+        // And it comes back on its own when `tailscaled` does, without the door being toggled.
+        addresses.withLock {
+            $0 = [Self.tailscaleAddress, Self.tailscaleBindableAddress]
+        }
+        server.refreshListenerAddresses()
+        waitUntil("the tailnet door binds once its tunnel appears") {
+            self.server.listenerStatus.state(of: .tailscale).bindings.count == 1
+        }
+        XCTAssertEqual(server.port, port, "and the port did not move")
     }
 
     func testADoorWithNoInterfacesReportsItselfWithoutTakingLoopbackDown() throws {
@@ -385,6 +517,53 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
             self.server.listenerStatus.state(of: .lan) == .notReachable(.noInterface)
         }
         XCTAssertEqual(httpStatus(host: "127.0.0.1", port: port), 200)
+    }
+
+    /// A support report has to be able to say the tailnet door came up, or did not and why,
+    /// without the addresses. The events already existed for the LAN door; the tailnet door
+    /// reaches them because it is a door, not because anything was added for it.
+    func testTheTailnetDoorsTransitionsReachTheJournalWithoutItsAddresses() throws {
+        let port = try quietPort()
+        addresses.withLock { $0 = [] }
+        XCTAssertEqual(
+            start(RemoteListenerConfiguration(preferredPort: port, doors: [.tailscale])),
+            .listening(port: port)
+        )
+        waitUntil("the tailnet door reports itself unreachable") {
+            self.server.listenerStatus.state(of: .tailscale)
+                == .notReachable(.tailscaleNotConnected)
+        }
+
+        let unreachable = try XCTUnwrap(
+            journal.withLock { $0 }.last { $0.event == .hostDoorUnreachable },
+            "a door that cannot come up recorded nothing"
+        )
+        XCTAssertEqual(unreachable.fields[.transport], RemoteAccessDoor.tailscale.rawValue)
+        XCTAssertEqual(
+            unreachable.fields[.reason],
+            RemoteDoorUnreachableReason.tailscaleNotConnected.rawValue,
+            "the report cannot tell a tailnet that is down from a Mac with no Wi-Fi"
+        )
+
+        addresses.withLock {
+            $0 = [Self.tailscaleAddress, Self.tailscaleBindableAddress]
+        }
+        server.refreshListenerAddresses()
+        waitUntil("the tailnet door binds") {
+            self.server.listenerStatus.state(of: .tailscale).bindings.count == 1
+        }
+
+        let bound = try XCTUnwrap(
+            journal.withLock { $0 }.last { $0.event == .hostDoorBound },
+            "a door that came up recorded nothing"
+        )
+        XCTAssertEqual(bound.fields[.transport], RemoteAccessDoor.tailscale.rawValue)
+        let origin = try XCTUnwrap(bound.fields[.origin])
+        XCTAssertTrue(origin.hasPrefix("origin-"), "the origin is not a pseudonym: \(origin)")
+        XCTAssertFalse(
+            origin.contains("100.100") || origin.contains("utun"),
+            "the journal carries the address it is supposed to be hashing"
+        )
     }
 
     // MARK: - Advertised endpoints

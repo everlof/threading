@@ -276,9 +276,13 @@ struct RemoteDoorStatus: Equatable, Sendable {
     /// The line as one sentence, with its remedy after it. Both halves are already whole
     /// sentences; this only stops them running together.
     var sentence: String {
-        guard let hint else { return Self.terminated(text) }
-        return Self.terminated(text) + " " + hint
+        guard let hint else { return fact }
+        return fact + " " + hint
     }
+
+    /// The fact alone, terminated. What a row says when the sentence beside it already carries
+    /// the rest.
+    var fact: String { Self.terminated(text) }
 
     private static func terminated(_ text: String) -> String {
         guard let last = text.last, !".!?…:".contains(last) else { return text }
@@ -675,17 +679,28 @@ struct RemoteTailnetReadinessPresentation: Equatable, Sendable {
         let issue = isBound ? nil : facts.issue
 
         var rows: [Row] = []
-        rows.append(installedRow(isEnabled: isEnabled, isBound: isBound, issue: issue))
         rows.append(
-            signedInRow(isEnabled: isEnabled, isBound: isBound, facts: facts, issue: issue)
+            installedRow(isEnabled: isEnabled, isBound: isBound, facts: facts, issue: issue)
         )
-        rows.append(addressRow(isEnabled: isEnabled, state: doorState, status: doorStatus))
+        rows.append(
+            signedInRow(
+                isEnabled: isEnabled,
+                isBound: isBound,
+                facts: facts,
+                issue: issue,
+                status: doorStatus
+            )
+        )
+        rows.append(
+            addressRow(isEnabled: isEnabled, state: doorState, status: doorStatus, issue: issue)
+        )
         return RemoteTailnetReadinessPresentation(rows: rows)
     }
 
     private static func installedRow(
         isEnabled: Bool,
         isBound: Bool,
+        facts: TailscaleHostFacts,
         issue: TailscaleReadinessIssue?
     ) -> Row {
         let title = L10n.string("Tailscale installed")
@@ -707,7 +722,9 @@ struct RemoteTailnetReadinessPresentation: Equatable, Sendable {
                 mark: .attention
             )
         }
-        if isBound || issue != nil {
+        // Anything that is not "no binary at all" is proof there is one: a bound door, a status
+        // the CLI answered, or a state it named.
+        if isBound || facts.state == .running || issue != nil {
             return Row(
                 step: .installed,
                 title: title,
@@ -723,11 +740,15 @@ struct RemoteTailnetReadinessPresentation: Equatable, Sendable {
         )
     }
 
+    /// The remedy comes from the door's own status line rather than from a second spelling of
+    /// it. The line says "Turn on Tailscale on this Mac. The door comes back on its own", and a
+    /// row that said "then retry" beside it would be describing a button this page does not have.
     private static func signedInRow(
         isEnabled: Bool,
         isBound: Bool,
         facts: TailscaleHostFacts,
-        issue: TailscaleReadinessIssue?
+        issue: TailscaleReadinessIssue?,
+        status: RemoteDoorStatus
     ) -> Row {
         let title = L10n.string("Signed in and running")
         guard isEnabled else {
@@ -755,7 +776,12 @@ struct RemoteTailnetReadinessPresentation: Equatable, Sendable {
                 mark: .pending
             )
         case .some(let issue):
-            return Row(step: .signedIn, title: title, detail: issue.rowDetail, mark: .attention)
+            return Row(
+                step: .signedIn,
+                title: title,
+                detail: status.hint ?? issue.failureStatement,
+                mark: .attention
+            )
         case .none:
             return Row(
                 step: .signedIn,
@@ -766,10 +792,15 @@ struct RemoteTailnetReadinessPresentation: Equatable, Sendable {
         }
     }
 
+    /// `issue` is what the CLI already accounts for. A door with no address because Tailscale is
+    /// not installed is not a third failure to read: the row above it is the one to act on, and
+    /// this one is waiting for it, which is the same "everything below the failing row waits"
+    /// the card has always drawn.
     private static func addressRow(
         isEnabled: Bool,
         state: RemoteAccessDoorState,
-        status: RemoteDoorStatus
+        status: RemoteDoorStatus,
+        issue: TailscaleReadinessIssue?
     ) -> Row {
         let title = L10n.string("This Mac’s tailnet address")
         guard isEnabled else {
@@ -782,7 +813,8 @@ struct RemoteTailnetReadinessPresentation: Equatable, Sendable {
         }
         switch state {
         case .bound:
-            return Row(step: .tailnetAddress, title: title, detail: status.sentence, mark: .met)
+            // The fact alone: the way in's own line, two rows above, already carries the rest.
+            return Row(step: .tailnetAddress, title: title, detail: status.fact, mark: .met)
         case .binding:
             return Row(
                 step: .tailnetAddress,
@@ -791,6 +823,14 @@ struct RemoteTailnetReadinessPresentation: Equatable, Sendable {
                 mark: .working
             )
         case .notReachable:
+            guard issue == nil else {
+                return Row(
+                    step: .tailnetAddress,
+                    title: title,
+                    detail: L10n.string("Waiting for Tailscale."),
+                    mark: .pending
+                )
+            }
             // The door's own sentence, so the row and the status line cannot drift apart.
             return Row(
                 step: .tailnetAddress,

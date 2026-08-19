@@ -174,9 +174,9 @@ enum TailscaleReadinessIssue: String, Equatable, Sendable {
     case serveFailed
 
     /// The sentence the transport reports as `RemoteTransportState.unavailable`, which is what
-    /// a *remote* caller is told when a share cannot be prepared. The settings page reads
-    /// `rowDetail` and `explanation` instead: a row can be terse because it is titled, and the
-    /// panel needs both halves.
+    /// a *remote* caller is told. The settings page reads `failureStatement` and
+    /// `remedyStatement` instead, because a status line states the fact first and the remedy
+    /// after it, and a row can be terse because it is already titled.
     var message: String {
         switch self {
         case .notInstalled:
@@ -216,33 +216,6 @@ enum TailscaleReadinessIssue: String, Equatable, Sendable {
             return .signedIn
         case .serveNotEnabled, .httpsRequired, .permissionDenied, .portInUse, .serveFailed:
             return nil
-        }
-    }
-
-    /// What the readiness row says. The row is already titled with the step it belongs to, so
-    /// it only has to say what to do about it.
-    var rowDetail: String {
-        switch self {
-        case .notInstalled:
-            return L10n.string("Install Tailscale on this Mac, then retry.")
-        case .signedOut:
-            return L10n.string("Sign in to Tailscale on this Mac, then retry.")
-        case .stopped:
-            return L10n.string("Turn on Tailscale on this Mac, then retry.")
-        case .statusUnavailable:
-            return L10n.string("Threading could not read Tailscale’s status.")
-        case .serveNotEnabled:
-            return L10n.string("Enable Tailscale Serve for this tailnet, then retry.")
-        case .httpsRequired:
-            return L10n.string("Enable Tailscale HTTPS for this tailnet, then retry.")
-        case .permissionDenied:
-            return L10n.string("Allow Threading to publish this private service, then retry.")
-        case .portInUse:
-            return L10n.string(
-                "HTTPS port 8443 already has a Tailscale Serve handler. Remove it, then retry."
-            )
-        case .serveFailed:
-            return L10n.string("Tailscale Serve could not publish Threading. Retry the connection.")
         }
     }
 

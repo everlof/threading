@@ -60,6 +60,27 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         )
     ]
 
+    /// The tailnet, as the listener reports it: the `100.64.0.0/10` address the pairing code
+    /// would name first, and the IPv6 address beside it on the same `utun`.
+    private static let tailnetBindings = [
+        RemoteListenerBinding(
+            door: .tailscale,
+            address: RemoteNetworkAddress(interfaceName: "utun4", address: "100.65.47.126"),
+            port: listenerPort
+        ),
+        RemoteListenerBinding(
+            door: .tailscale,
+            address: RemoteNetworkAddress(
+                interfaceName: "utun4",
+                address: "fd7a:115c:a1e0::cd38:2f7e",
+                isIPv6: true
+            ),
+            port: listenerPort
+        )
+    ]
+
+    private static let magicDNSName = "mac-studio.tail1234.ts.net"
+
     private static let identity = RemoteIdentityCardPresentation(
         pairingCode: "MZXW6YTBOI7EU3TFOQQGE43FMN",
         nextPairingCode: nil,
@@ -110,13 +131,21 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 "\(wayIn) disagrees with itself about having a switch"
             )
         }
+        // The Serve sub-option is a switch too, and it is on the page rather than held back: the
+        // tailnet door is a listener now, so turning Serve off takes no route away from a phone.
         let serve = try XCTUnwrap(
-            view(in: page.view, id: "settings.remote-access.tailscale-serve"),
-            "the Serve sub-option was removed rather than held back"
+            view(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.serveToggle),
+            "the Serve sub-option is not on the page"
         )
-        // Built and not shown: Serve *is* the tailnet door today, so a switch turning it off
-        // would take the phone's only tailnet route with it.
-        XCTAssertTrue(isEffectivelyHidden(serve), "the Serve sub-option is on the page already")
+        XCTAssertFalse(isEffectivelyHidden(serve), "the Serve sub-option is still hidden")
+        XCTAssertEqual(
+            allLabels(in: page.view).filter {
+                $0.stringValue.contains("publishes this Mac’s name and your tailnet name in "
+                    + "public certificate logs")
+            }.count,
+            1,
+            "the certificate-transparency cost is not stated beside the switch that pays it"
+        )
     }
 
     // MARK: - The status line states a fact
@@ -356,73 +385,163 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         )
     }
 
-    // MARK: - The unavailable panel
+    // MARK: - The browser sub-option carries its own reason and fix
 
-    /// The panel carries the reason and the fix, rather than naming neither and leaving both in
-    /// a readiness row further up the page.
-    func testTheUnavailablePanelShowsTheReasonAndTheFixBesideRetry() throws {
-        let page = self.page(state: .tailscaleServeNotEnabled)
+    /// The panel used to say "Private connection unavailable" while the only explanation sat in
+    /// a readiness row three rows above it. Serve is a sub-option now, so the sentence and the
+    /// button that fixes it are on its own row — and the tailnet way in beside it keeps saying
+    /// what it is doing, because Serve failing is not the door failing.
+    func testAServeFailureStatesItsReasonAndOffersItsFixOnItsOwnRow() throws {
+        let page = self.page(state: .serveNeedsHTTPS)
+
+        let status = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.serveStatus
+        ))
+        XCTAssertEqual(status.stringValue, TailscaleReadinessIssue.httpsRequired.failureStatement)
+        let hint = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.serveStatusHint
+        ))
+        XCTAssertEqual(hint.stringValue, TailscaleReadinessIssue.httpsRequired.remedyStatement)
+
+        let remedy = try XCTUnwrap(
+            button(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.serveRemedy)
+        )
+        XCTAssertFalse(remedy.isHidden, "the admin-console page is not offered beside the reason")
+        XCTAssertEqual(remedy.title, "Enable HTTPS…")
+
+        // The door is bound the whole time. A browser convenience that cannot publish must not
+        // read as the tailnet way in being down.
+        let door = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
+        ))
+        XCTAssertEqual(door.stringValue, "Reachable at 100.65.47.126:8760")
+        XCTAssertEqual(
+            try XCTUnwrap(label(in: page.view, id: "settings.remote-access.status")).stringValue,
+            "Ready",
+            "a Serve failure took the whole Mac's status down with it"
+        )
+    }
+
+    /// Serving states where, and the address a browser is meant to open.
+    func testServeStatesTheAddressItIsServingAt() throws {
+        let page = self.page(state: .serveServing)
+        let status = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.serveStatus
+        ))
+        XCTAssertEqual(status.stringValue, "Serving at https://mac-studio.tail1234.ts.net:8443")
+        XCTAssertTrue(
+            try XCTUnwrap(
+                button(
+                    in: page.view,
+                    id: RemoteAccessPreferencesViewController.Identifier.serveRemedy
+                )
+            ).isHidden,
+            "a button was offered beside a row with nothing wrong with it"
+        )
+    }
+
+    /// A way in that failed with no page to open shows Retry alone. Nothing in the pairing panel
+    /// opens an admin console any more: the only thing that had one was Serve.
+    func testAWayInFailureShowsRetryAlone() throws {
+        let page = self.page(state: .tailnetNotInstalled)
+        let retry = try XCTUnwrap(button(in: page.view, id: "settings.remote-access.pair"))
+        XCTAssertEqual(retry.title, "Retry Connection")
+        XCTAssertTrue(retry.isProminent, "Retry is the only action, so it is the one offered")
 
         let detail = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-detail"))
         XCTAssertEqual(
             detail.stringValue,
-            "Tailscale Serve is not enabled for this tailnet. Enable HTTPS certificates in the "
-                + "Tailscale admin console, then retry.",
-            "the panel does not say which readiness item failed or what fixes it"
+            "Not currently reachable: Tailscale is not installed on this Mac. Install Tailscale "
+                + "and sign in on this Mac. The door comes back on its own.",
+            "the panel does not say which way in failed or what fixes it"
         )
+    }
 
-        let remedy = try XCTUnwrap(
-            button(in: page.view, id: "settings.remote-access.pairing-remedy")
-        )
-        let retry = try XCTUnwrap(button(in: page.view, id: "settings.remote-access.pair"))
-        XCTAssertFalse(remedy.isHidden, "the fix's action is not offered beside Retry")
-        XCTAssertEqual(remedy.title, "Enable Tailscale Serve…")
-        XCTAssertEqual(retry.title, "Retry Connection")
-        XCTAssertTrue(remedy.isProminent, "the fix is not the button being offered")
-        XCTAssertFalse(retry.isProminent, "two prominent buttons ask the same question twice")
-        XCTAssertLessThan(
-            remedy.frame.minX, retry.frame.minX,
-            "the fix reads after the retry it replaces"
-        )
+    // MARK: - The tailnet door
 
-        // The readiness row keeps saying it too; the panel is an addition, not a move.
-        let rowDetail = TailscaleReadinessIssue.serveNotEnabled.rowDetail
-        XCTAssertTrue(
-            allLabels(in: page.view).contains { $0.stringValue == rowDetail },
-            "the readiness row lost its own line"
-        )
-
-        // And the door's own status line carries the same failure, split into fact and fix.
+    func testABoundTailnetDoorNamesItsAddressAndItsName() throws {
+        let page = self.page(state: .tailnetBound)
         let status = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
         ))
+        XCTAssertEqual(status.stringValue, "Reachable at 100.65.47.126:8760")
+
+        let hint = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.statusHint(.tailscale)
+        ))
+        XCTAssertTrue(
+            hint.stringValue.contains("mac-studio.tail1234.ts.net:8760"),
+            "the MagicDNS name is missing: “\(hint.stringValue)”"
+        )
+        XCTAssertFalse(
+            hint.stringValue.contains("8443"),
+            "Serve's port was named as a way the phone could reach this Mac"
+        )
+
+        // The readiness card reads the listener, not a transport.
         XCTAssertEqual(
-            status.stringValue,
-            TailscaleReadinessIssue.serveNotEnabled.failureStatement
+            try XCTUnwrap(label(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.readinessTitle(
+                    .tailnetAddress
+                )
+            )).stringValue,
+            "This Mac’s tailnet address"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(label(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.readinessMark(.installed)
+            )).stringValue,
+            "✓",
+            "a bound tailnet address is proof Tailscale is installed, whatever the probe said"
         )
     }
 
-    /// A failure with no page to open shows Retry alone.
-    func testAFailureWithNoPageToOpenShowsRetryAlone() throws {
-        let page = self.page(state: .tailscaleStatusUnavailable)
-        let remedy = try XCTUnwrap(
-            button(in: page.view, id: "settings.remote-access.pairing-remedy")
+    /// The three reasons a tailnet door has no address, told apart. "Not connected" and "not
+    /// installed" are fixed in different places, and only the CLI can tell them apart.
+    func testAnAbsentTailnetSaysWhichOfItsThreeCausesItIs() throws {
+        let notConnected = try XCTUnwrap(label(
+            in: self.page(state: .tailnetNotConnected).view,
+            id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
+        ))
+        XCTAssertEqual(
+            notConnected.stringValue,
+            "Not currently reachable: Tailscale is not connected."
         )
-        let retry = try XCTUnwrap(button(in: page.view, id: "settings.remote-access.pair"))
-        XCTAssertTrue(remedy.isHidden, "a button was offered with nowhere to go")
-        XCTAssertTrue(retry.isProminent, "Retry is the only action, so it is the one offered")
+
+        let notInstalled = self.page(state: .tailnetNotInstalled)
+        XCTAssertEqual(
+            try XCTUnwrap(label(
+                in: notInstalled.view,
+                id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
+            )).stringValue,
+            "Not currently reachable: Tailscale is not installed on this Mac."
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(label(
+                in: notInstalled.view,
+                id: RemoteAccessPreferencesViewController.Identifier.readinessMark(.installed)
+            )).stringValue,
+            "!",
+            "the readiness card does not mark the row that failed"
+        )
     }
 
     // MARK: - Starting
 
-    /// The minute of silence. The page says what it is waiting for in all three places a person
-    /// is looking: the status row, the tailnet door's own line, and the pairing panel.
-    func testAPublishingTailnetSaysWhatItIsWaitingForEverywhereItIsShown() throws {
-        let page = self.page(state: .tailscaleStarting)
+    /// Coming up is a state with a fact in it, in every place a person is looking: the status
+    /// row, the way in's own line, the readiness card, and the pairing panel.
+    func testATailnetDoorComingUpSaysSoEverywhereItIsShown() throws {
+        let page = self.page(state: .tailnetBinding)
 
-        let waiting = "Waiting for the tailnet HTTPS endpoint to answer. The first time can take "
-            + "up to a minute."
+        let waiting = "Binding to this Mac’s tailnet address…"
 
         let status = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.status"))
         XCTAssertEqual(status.stringValue, "Starting")
@@ -444,7 +563,7 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         let panel = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-detail"))
         XCTAssertEqual(panel.stringValue, waiting, "the panel is still silent about the wait")
 
-        // The status row, the door's line, the readiness row and the panel.
+        // The status row, the way in's line, the readiness row and the panel.
         XCTAssertEqual(
             allLabels(in: page.view).filter { $0.stringValue.contains(waiting) }.count,
             4,
@@ -641,14 +760,18 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         case lanFirewalled
         /// No certificate, so nothing routable may be bound at all.
         case identityUnavailable
-        /// The tailnet door, up.
-        case tailscaleReady
-        /// The tailnet door, a minute into its first certificate.
-        case tailscaleStarting
-        /// The failure that shipped with its explanation three rows away.
-        case tailscaleServeNotEnabled
-        /// A failure with no admin page to open.
-        case tailscaleStatusUnavailable
+        /// The tailnet door, bound at this Mac's own tailnet address.
+        case tailnetBound
+        /// The tailnet door, still binding.
+        case tailnetBinding
+        /// `tailscaled` is not running, so no `utun` carries a tailnet address.
+        case tailnetNotConnected
+        /// There is no `tailscale` binary on this Mac at all.
+        case tailnetNotInstalled
+        /// The browser convenience, publishing at the `*.ts.net` name.
+        case serveServing
+        /// The browser convenience, refused until the tailnet enables HTTPS certificates.
+        case serveNeedsHTTPS
         /// Remote Access on and no way in switched on.
         case nothingOn
 
@@ -658,19 +781,21 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             case .lanNoInterface: return "lan-no-interface"
             case .lanFirewalled: return "lan-firewall"
             case .identityUnavailable: return "identity-unavailable"
-            case .tailscaleReady: return "tailscale-ready"
-            case .tailscaleStarting: return "tailscale-starting"
-            case .tailscaleServeNotEnabled: return "tailscale-serve-not-enabled"
-            case .tailscaleStatusUnavailable: return "tailscale-status-unavailable"
+            case .tailnetBound: return "tailnet-bound"
+            case .tailnetBinding: return "tailnet-binding"
+            case .tailnetNotConnected: return "tailnet-not-connected"
+            case .tailnetNotInstalled: return "tailnet-not-installed"
+            case .serveServing: return "serve-serving"
+            case .serveNeedsHTTPS: return "serve-needs-https"
             case .nothingOn: return "nothing-on"
             }
         }
 
         var hasBoundAddress: Bool {
             switch self {
-            case .lanBound, .tailscaleReady: return true
-            case .lanNoInterface, .lanFirewalled, .identityUnavailable, .tailscaleStarting,
-                 .tailscaleServeNotEnabled, .tailscaleStatusUnavailable, .nothingOn:
+            case .lanBound, .tailnetBound, .serveServing, .serveNeedsHTTPS: return true
+            case .lanNoInterface, .lanFirewalled, .identityUnavailable, .tailnetBinding,
+                 .tailnetNotConnected, .tailnetNotInstalled, .nothingOn:
                 return false
             }
         }
@@ -679,10 +804,14 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
 
         var tailscaleIsOn: Bool { isTailnetState }
 
+        /// The sub-option is only ever on beside a door that is up: it is a browser convenience,
+        /// and a person who has not turned the tailnet way in on is not looking at it.
+        var serveIsOn: Bool { self == .serveServing || self == .serveNeedsHTTPS }
+
         private var isTailnetState: Bool {
             switch self {
-            case .tailscaleReady, .tailscaleStarting, .tailscaleServeNotEnabled,
-                 .tailscaleStatusUnavailable:
+            case .tailnetBound, .tailnetBinding, .tailnetNotConnected, .tailnetNotInstalled,
+                 .serveServing, .serveNeedsHTTPS:
                 return true
             case .lanBound, .lanNoInterface, .lanFirewalled, .identityUnavailable, .nothingOn:
                 return false
@@ -697,9 +826,42 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 return .notReachable(.noInterface)
             case .identityUnavailable:
                 return .notReachable(.identityUnavailable)
-            case .tailscaleReady, .tailscaleStarting, .tailscaleServeNotEnabled,
-                 .tailscaleStatusUnavailable, .nothingOn:
+            case .tailnetBound, .tailnetBinding, .tailnetNotConnected, .tailnetNotInstalled,
+                 .serveServing, .serveNeedsHTTPS, .nothingOn:
                 return .off
+            }
+        }
+
+        /// What the listener bound on the tailnet, which is the whole of what the door is.
+        var tailnetDoorState: RemoteAccessDoorState {
+            switch self {
+            case .tailnetBound, .serveServing, .serveNeedsHTTPS:
+                return .bound(RemoteAccessSettingsRenderTests.tailnetBindings)
+            case .tailnetBinding:
+                return .binding
+            case .tailnetNotConnected, .tailnetNotInstalled:
+                return .notReachable(.tailscaleNotConnected)
+            case .lanBound, .lanNoInterface, .lanFirewalled, .identityUnavailable, .nothingOn:
+                return .off
+            }
+        }
+
+        /// What `tailscale status` said, which only sharpens the sentence beside a door that is
+        /// down. A bound door never consults it.
+        var facts: TailscaleHostFacts {
+            switch self {
+            case .tailnetBound, .serveServing, .serveNeedsHTTPS:
+                return TailscaleHostFacts(
+                    state: .running,
+                    magicDNSName: RemoteAccessSettingsRenderTests.magicDNSName
+                )
+            case .tailnetNotInstalled:
+                return TailscaleHostFacts(state: .notInstalled, magicDNSName: nil)
+            case .tailnetNotConnected:
+                return TailscaleHostFacts(state: .stopped, magicDNSName: nil)
+            case .tailnetBinding, .lanBound, .lanNoInterface, .lanFirewalled,
+                 .identityUnavailable, .nothingOn:
+                return .unknown
             }
         }
 
@@ -709,32 +871,27 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 : .unknown
         }
 
+        /// Serve's readiness, which is about the browser convenience and nothing else.
         var readiness: TailscaleReadiness {
             switch self {
-            case .tailscaleServeNotEnabled:
-                return .actionRequired(.serveNotEnabled, actionURL: approvalURL)
-            case .tailscaleStatusUnavailable:
-                return .actionRequired(.statusUnavailable, actionURL: nil)
-            case .tailscaleStarting:
-                return .publishing
-            case .tailscaleReady:
-                return .ready(tailnetOrigin)
-            case .lanBound, .lanNoInterface, .lanFirewalled, .identityUnavailable, .nothingOn:
+            case .serveNeedsHTTPS:
+                return .actionRequired(.httpsRequired, actionURL: approvalURL)
+            case .serveServing:
+                return .ready(serveOrigin)
+            case .lanBound, .lanNoInterface, .lanFirewalled, .identityUnavailable, .tailnetBound,
+                 .tailnetBinding, .tailnetNotConnected, .tailnetNotInstalled, .nothingOn:
                 return .notChecked
             }
         }
 
         var transport: RemoteTransportState {
             switch self {
-            case .tailscaleServeNotEnabled:
-                return .unavailable(TailscaleReadinessIssue.serveNotEnabled.message)
-            case .tailscaleStatusUnavailable:
-                return .unavailable(TailscaleReadinessIssue.statusUnavailable.message)
-            case .tailscaleStarting:
-                return .starting
-            case .tailscaleReady:
-                return .connected(tailnetOrigin)
-            case .lanBound, .lanNoInterface, .lanFirewalled, .identityUnavailable, .nothingOn:
+            case .serveNeedsHTTPS:
+                return .unavailable(TailscaleReadinessIssue.httpsRequired.message)
+            case .serveServing:
+                return .connected(serveOrigin)
+            case .lanBound, .lanNoInterface, .lanFirewalled, .identityUnavailable, .tailnetBound,
+                 .tailnetBinding, .tailnetNotConnected, .tailnetNotInstalled, .nothingOn:
                 return .stopped
             }
         }
@@ -761,8 +918,8 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         }
 
         private var approvalURL: URL { RemoteAccessSettingsRenderTests.approvalURL }
-        private var tailnetOrigin: URL {
-            URL(string: "https://mac-studio.tail1234.ts.net:8443/")!
+        private var serveOrigin: URL {
+            URL(string: "https://\(RemoteAccessSettingsRenderTests.magicDNSName):8443/")!
         }
     }
 
@@ -808,8 +965,9 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             ),
             .tailscale: .tailscale(
                 isEnabled: state.tailscaleIsOn,
-                transport: state.transport,
-                readiness: state.readiness
+                state: state.tailnetDoorState,
+                facts: state.facts,
+                magicDNSName: state.facts.magicDNSName
             ),
             .threadingDirect: .threadingDirect(.stopped)
         ]
@@ -817,12 +975,24 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             isRemoteAccessOn: true,
             thisNetworkIsOn: state.thisNetworkIsOn,
             tailscaleIsOn: state.tailscaleIsOn,
+            tailscaleServeIsOn: state.serveIsOn,
             showsThreadingDirect: false,
             statuses: statuses,
+            serveStatus: .tailscaleServe(
+                isEnabled: state.serveIsOn,
+                transport: state.transport,
+                readiness: state.readiness
+            ),
+            serveRemedy: RemoteDoorStatus.serveRemedy(state.readiness),
+            tailnetReadiness: .resolve(
+                isEnabled: state.tailscaleIsOn,
+                facts: state.facts,
+                doorState: state.tailnetDoorState,
+                doorStatus: statuses[.tailscale] ?? .remoteAccessOff()
+            ),
             identity: identity ?? state.identity
         )
         controller.apply(doors)
-        controller.updateTailscaleReadiness(state.readiness)
         controller.applyListeningState(
             connection: RemoteConnectionStatusPresentation.resolve(
                 statuses: doors.offeredStatuses,
@@ -831,8 +1001,7 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             card: RemotePairingCardState.resolve(
                 ownerDevicePersistenceError: nil,
                 pairingCodePayload: state.payload,
-                transport: state.transport,
-                tailscaleReadiness: state.readiness,
+                wayIn: RemotePairingCardState.mostAdvanced(of: doors.offeredStatuses),
                 hasWayIn: state.thisNetworkIsOn || state.tailscaleIsOn
             )
         )

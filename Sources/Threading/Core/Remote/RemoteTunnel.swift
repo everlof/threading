@@ -28,7 +28,7 @@ final class RemoteTunnel: RemoteRelayTransport {
     private var shutdownEscalations: [pid_t: ChildProcessEscalation] = [:]
     private var onStateChange: (@MainActor @Sendable (State) -> Void)?
 
-    /// Both injectable for the same reason `TailscaleRemoteTransport` injects its locator: a test
+    /// Both injectable for the same reason `TailscaleServeTransport` injects its locator: a test
     /// must not depend on whether the machine running it has `cloudflared`, and the startup
     /// deadline cannot be asserted at its shipping length.
     private let locateExecutable: () -> URL?

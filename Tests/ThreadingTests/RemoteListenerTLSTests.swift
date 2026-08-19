@@ -24,6 +24,17 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
         isIPv6: true
     )
 
+    /// A tailnet as the classifier sees one: a `utun` carrying a `100.64.0.0/10` address, which
+    /// is what makes it Tailscale's rather than somebody's VPN, plus the address beside it on the
+    /// same interface. The CGNAT address is not assignable on a build machine, so it is the `::1`
+    /// that binds — which is the shape a real tailnet has anyway, an IPv4 and an IPv6 address on
+    /// one interface, and it proves the door reports itself bound while one of its addresses
+    /// cannot be taken.
+    private static let tailnetAddresses = [
+        RemoteNetworkAddress(interfaceName: "utun9", address: "100.100.1.1"),
+        RemoteNetworkAddress(interfaceName: "utun9", address: "::1", isIPv6: true)
+    ]
+
     private var server: RemoteAccessServer!
     private var identityStore: RemoteAccessIdentityStore!
     private var identityDirectory: URL!
@@ -171,14 +182,17 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
         XCTAssertTrue(endpoints.allSatisfy(\.expectsPinnedIdentity))
         XCTAssertEqual(endpoints.first?.baseURL.absoluteString, "https://[::1]:\(port)/")
 
-        // A Serve endpoint is advertised under the same kind and must not be pinned: it holds a
-        // real certificate for that name, and a phone told to pin it would fail on renewal.
-        let serve = RemoteHostEndpointDTO(
+        // An endpoint somebody else terminates is advertised without the flag, and must stay
+        // that way: a Serve origin holds a real certificate for its `*.ts.net` name, and a phone
+        // told to pin it would fail on renewal. **Nothing in this build advertises one** — the
+        // tailnet door is a listener with this Mac's own identity — so it is constructed here to
+        // prove the wire still distinguishes the two.
+        let publiclyTrusted = RemoteHostEndpointDTO(
             kind: RemoteHostEndpointKind.tailscale,
             baseURL: try XCTUnwrap(URL(string: "https://mac.example.ts.net:8443/")),
             isStable: true
         )
-        endpoints.append(serve)
+        endpoints.append(publiclyTrusted)
         let host = RemoteAccessCoordinator.ownerHost(
             RemoteHostDTO(id: "mac-1", name: "Studio"),
             endpoints: endpoints,
@@ -194,6 +208,80 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
             "all three are private-network candidates now, cleartext being the thing that was "
                 + "keeping the LAN ones out"
         )
+    }
+
+    /// The tailnet door advertises the address this Mac holds on its tailnet, its MagicDNS name
+    /// on the same sticky port, and nothing at all about Serve.
+    func testTheTailnetDoorAdvertisesItsOwnAddressAndNameWithThePin() throws {
+        let port = try quietPort()
+        addresses.withLock { $0 = Self.tailnetAddresses + [Self.lanAddress] }
+        XCTAssertEqual(
+            start(RemoteListenerConfiguration(preferredPort: port, doors: [.tailscale])),
+            .listening(port: port)
+        )
+        waitUntil("the tailnet door binds") {
+            self.server.listenerStatus.state(of: .tailscale).bindings.count == 1
+        }
+
+        let endpoints = RemoteAccessCoordinator.doorEndpoints(
+            server.listenerStatus,
+            advertisedHostname: "",
+            localHostname: "studio.local",
+            tailnetHostname: "mac-studio.tail1234.ts.net"
+        )
+        XCTAssertEqual(
+            endpoints.map(\.baseURL.absoluteString),
+            [
+                "https://[::1]:\(port)/",
+                "https://mac-studio.tail1234.ts.net:\(port)/"
+            ],
+            "the tailnet door advertises the address it bound and the name that resolves to it"
+        )
+        XCTAssertTrue(
+            endpoints.allSatisfy { $0.kind == RemoteHostEndpointKind.tailscale },
+            "a tailnet address is not a LAN address, and the phone picks by kind"
+        )
+        XCTAssertTrue(
+            endpoints.allSatisfy(\.expectsPinnedIdentity),
+            "the tailnet door presents this Mac's own certificate, exactly like the LAN door"
+        )
+        XCTAssertFalse(
+            endpoints.contains { $0.baseURL.port == 8443 },
+            "Serve's origin was advertised: it is a public certificate no fingerprint covers"
+        )
+        XCTAssertEqual(
+            RemoteHostEndpointSelection.ordered(endpoints, policy: .privateOnly).count,
+            endpoints.count,
+            "a phone under the fail-closed policy has both of these to try"
+        )
+        XCTAssertTrue(
+            RemoteAccessCoordinator.doorEndpoints(
+                server.listenerStatus,
+                advertisedHostname: "",
+                localHostname: "studio.local"
+            ).allSatisfy { $0.baseURL.host != "mac-studio.tail1234.ts.net" },
+            "a name nobody has read from the CLI is not advertised"
+        )
+    }
+
+    /// A pinned client reaches the tailnet door over TLS, with the same certificate the LAN door
+    /// presents. One identity, one code path, whatever address the phone is standing on.
+    func testAPinnedClientReachesTheTailnetDoorWithTheSameCertificate() throws {
+        let port = try quietPort()
+        addresses.withLock { $0 = Self.tailnetAddresses }
+        XCTAssertEqual(
+            start(RemoteListenerConfiguration(preferredPort: port, doors: [.tailscale])),
+            .listening(port: port)
+        )
+        waitUntil("the tailnet door binds") {
+            self.server.listenerStatus.state(of: .tailscale).bindings.count == 1
+        }
+
+        let fingerprint = try XCTUnwrap(identityStore.snapshot.fingerprint)
+        let client = pinnedClient(fingerprint: fingerprint)
+        XCTAssertEqual(client.status(url: url(port: port, path: "/")), 200)
+        XCTAssertEqual(client.delegate.verdict(forHost: Self.lanAddress.address), .accepted)
+        XCTAssertTrue(RemoteAccessDoor.tailscale.requiresTLS)
     }
 
     func testAPairingCodeNamesOneLanAddressAndPrefersTheDefaultRoute() throws {
@@ -235,7 +323,7 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
         XCTAssertNil(RemoteAccessCoordinator.preferredPairingBinding([], primaryInterfaceName: "en0"))
     }
 
-    func testTheScannedCodeCarriesTheFingerprintWhenTheLanDoorIsTheDestination() throws {
+    func testTheScannedCodeCarriesTheFingerprintAndPrefersTheLanDoor() throws {
         let made = RemoteIdentityTestStore.make(label: "pairing")
         defer { RemoteIdentityTestStore.erase(made.directory) }
         let fingerprint = try made.store.currentIdentity().get().fingerprint
@@ -244,18 +332,22 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
             address: RemoteNetworkAddress(interfaceName: "en0", address: "192.168.1.42"),
             port: 8760
         )
-        let serve = try XCTUnwrap(URL(string: "https://mac.example.ts.net:8443/"))
+        let tailnet = RemoteListenerBinding(
+            door: .tailscale,
+            address: RemoteNetworkAddress(interfaceName: "utun4", address: "100.65.47.126"),
+            port: 8760
+        )
 
         let destination = try XCTUnwrap(RemoteAccessCoordinator.pairingDestination(
             lanBindings: [lan],
+            tailnetBindings: [tailnet],
             primaryInterfaceName: "en0",
-            pinnedFingerprint: fingerprint,
-            fallbackOrigin: serve
+            pinnedFingerprint: fingerprint
         ))
         XCTAssertEqual(
             destination.origin.absoluteString,
             "https://192.168.1.42:8760/",
-            "a bound LAN door wins over a transport somebody else terminates"
+            "a bound LAN door wins: it is the network the phone in the room is already on"
         )
         let link = try XCTUnwrap(RemoteConnectionLink(
             baseURL: destination.origin,
@@ -267,24 +359,31 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
             "HTTPS://192.168.1.42:8760/#MFRGGZDFMZTWQ2LK.\(fingerprint.pairingCode)"
         )
 
+        // With no LAN door, the tailnet is the destination — and it carries the fingerprint too,
+        // because the listener there presents this Mac's own certificate. It used to fall back to
+        // a Serve origin with no fingerprint at all, which is the second trust story §8 removes.
         let withoutLAN = try XCTUnwrap(RemoteAccessCoordinator.pairingDestination(
             lanBindings: [],
+            tailnetBindings: [tailnet],
             primaryInterfaceName: "en0",
-            pinnedFingerprint: fingerprint,
-            fallbackOrigin: serve
+            pinnedFingerprint: fingerprint
         ))
-        XCTAssertEqual(withoutLAN.origin, serve)
-        XCTAssertNil(
-            withoutLAN.pinnedFingerprintCode,
-            "a Serve or relay origin presents a certificate that is not ours to pin"
-        )
+        XCTAssertEqual(withoutLAN.origin.absoluteString, "https://100.65.47.126:8760/")
+        XCTAssertEqual(withoutLAN.pinnedFingerprintCode, fingerprint.pairingCode)
 
         XCTAssertNil(RemoteAccessCoordinator.pairingDestination(
             lanBindings: [lan],
+            tailnetBindings: [tailnet],
             primaryInterfaceName: "en0",
-            pinnedFingerprint: nil,
-            fallbackOrigin: nil
-        ), "and with no identity there is nothing to pair to at all")
+            pinnedFingerprint: nil
+        ), "with no identity there is nothing to pair to at all")
+
+        XCTAssertNil(RemoteAccessCoordinator.pairingDestination(
+            lanBindings: [],
+            tailnetBindings: [],
+            primaryInterfaceName: "en0",
+            pinnedFingerprint: fingerprint
+        ), "and with nothing bound there is nowhere to send a phone")
     }
 
     // MARK: - Rotation
