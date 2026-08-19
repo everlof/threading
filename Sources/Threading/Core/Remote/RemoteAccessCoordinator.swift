@@ -66,19 +66,23 @@ struct RemoteCreatedShare {
     let canApprovePermissions: Bool
 }
 
-enum RemoteSharePreparationError: LocalizedError {
+/// Why an invitation could not be minted, in the words the person asking gets back.
+///
+/// Both cases are a fact about this Mac rather than about the network: an invitation points at a
+/// private door, so there is either one bound or there is not, and the answer is known the moment
+/// it is asked. Nothing waits for a transport to come up.
+enum RemoteSharePreparationError: LocalizedError, Equatable {
     case remoteAccessUnavailable
-    case relayUnavailable(String)
-    case tooManyRequests
+    /// Remote Access is on, but no routable door is bound, so there is no origin a guest's phone
+    /// could reach and nothing to pin when it got there.
+    case noPrivateDoor
 
     var errorDescription: String? {
         switch self {
         case .remoteAccessUnavailable:
             return L10n.string("Remote Access is not ready.")
-        case .relayUnavailable(let reason):
-            return reason
-        case .tooManyRequests:
-            return L10n.string("Too many share links are being prepared. Try again shortly.")
+        case .noPrivateDoor:
+            return L10n.string("Turn on a way in first.")
         }
     }
 }
@@ -122,13 +126,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
     }
 
-    private(set) var relayStatus: RemoteTransportState = .stopped {
-        didSet {
-            guard relayStatus != oldValue else { return }
-            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-        }
-    }
-
     /// What Tailscale Serve is doing. **Not the tailnet door**, which is a listener: this is the
     /// opt-in browser convenience, and no phone route depends on it.
     private(set) var tailscaleServeStatus: RemoteTransportState = .stopped {
@@ -141,7 +138,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private let server: RemoteAccessServer
     private let identityStore: RemoteAccessIdentityStore
     private let mirrors: RemoteSessionMirrorRegistry
-    private let tunnel: any RemoteRelayTransport
     /// The `tailscale` CLI: the facts behind the tailnet door, and the Serve sub-option.
     private let tailscale: any RemoteTailnetTransport
     private let hostedService: RemoteHostedServiceController
@@ -160,13 +156,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private var hostedPairingTask: Task<Void, Never>?
     private var pairingRedemptions: [String: PairingRedemption] = [:]
     private var sessionShares: [SessionID: [SessionShare]] = [:]
-    private var pendingPublicShares: [UUID: PendingPublicShare] = [:]
     /// Invalidates a listener completion that was already enqueued on main when the user
     /// switched the feature off. Without it, a fast off-after-on could put the UI back into
     /// `listening` after `stop()` had already closed the listener and revoked its token.
     private var lifecycleGeneration = 0
-    /// Transport callbacks have their own generation because changing Relay/Tailscale mode keeps
-    /// the listener and all current authorizations alive.
+    /// Transport callbacks have their own generation because starting or stopping the browser
+    /// convenience keeps the listener and all current authorizations alive.
     private var transportGeneration = 0
 
     init(
@@ -175,14 +170,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         guestShareStore: RemoteGuestSharePersisting? = nil,
         hostedService: RemoteHostedServiceController? = nil,
         serverServices: RemoteAccessServerServices? = nil,
-        relayTransport: (any RemoteRelayTransport)? = nil,
         tailnetTransport: (any RemoteTailnetTransport)? = nil,
         identityStore: RemoteAccessIdentityStore? = nil,
         tailscaleDoor: RemoteTailscaleDoorImplementation = .current
     ) {
         self.appSettings = appSettings
         self.tailscaleDoor = tailscaleDoor
-        tunnel = relayTransport ?? Self.defaultRelayTransport()
         tailscale = tailnetTransport ?? Self.defaultTailnetTransport()
         let services = serverServices ?? Self.makeServerServices(appSettings: appSettings)
         mirrors = services.mirrors
@@ -243,17 +236,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         mirrors.installTerminalApplication(terminalApplication)
     }
 
-    /// The transports the app ships with, unless a caller injected substitutes.
+    /// The transport the app ships with, unless a caller injected a substitute.
     ///
     /// A hosted test process gets `RefusedRemoteTransport` instead: the test bundle lives inside
-    /// this app, so a test that reaches `shared` would otherwise spawn the developer's own
-    /// `cloudflared` and `tailscale` and publish their Mac, leaving children behind after the run.
-    /// A test that wants to observe transport behaviour injects its own double rather than
-    /// relying on this.
-    static func defaultRelayTransport() -> any RemoteRelayTransport {
-        isHostedTestProcess ? RefusedRemoteTransport() : RemoteTunnel()
-    }
-
+    /// this app, so a test that reaches `shared` would otherwise run the developer's own
+    /// `tailscale` and publish their Mac, leaving a child behind after the run. A test that wants
+    /// to observe transport behaviour injects its own double rather than relying on this.
     static func defaultTailnetTransport() -> any RemoteTailnetTransport {
         isHostedTestProcess ? RefusedRemoteTransport() : TailscaleServeTransport()
     }
@@ -365,15 +353,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         var members: [String: MemberRecord]
     }
 
-    private struct PendingPublicShare {
-        let sessionID: SessionID
-        let capability: RemoteCapability
-        let canApprovePermissions: Bool
-        let completion: @MainActor (
-            Result<RemoteCreatedShare, RemoteSharePreparationError>
-        ) -> Void
-    }
-
     /// Serve's readiness. The tailnet *door* reads `tailscaleHostFacts` and the listener.
     var tailscaleServeReadiness: TailscaleReadiness { tailscale.readiness }
     /// What `tailscale status` last said about this Mac.
@@ -476,13 +455,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     /// The stable host plus the routes an owner is allowed to consider. Guest payloads omit the
-    /// list so a public one-chat invitation never reveals the owner's private tailnet hostname.
+    /// list so a one-chat invitation never reveals the owner's other addresses; a guest reaches
+    /// the one door its link names and learns nothing further about this Mac.
     ///
-    /// **The relay is not in here any more.** Its address changes every launch, which is fatal
-    /// to "pair once, reconnect tomorrow", so it stopped being an owner route; a phone that
-    /// remembered one has a dead endpoint and learns the live ones from this list the next time
-    /// it connects over any of them. It is still minted on demand for a one-chat guest share,
-    /// which is a different credential on a different path.
+    /// Every route in here is a door of this Mac's own, and every one of them is stable, which is
+    /// what "pair once, reconnect tomorrow" rests on. A phone paired to an address this Mac no
+    /// longer holds learns the live ones from this list the next time it connects over any of
+    /// them.
     ///
     /// The policy is therefore always `privateOnly`. `RemoteHostConnectionPolicy` stays on the
     /// wire because an old phone decodes it and maps anything it does not know to `privateOnly`
@@ -775,8 +754,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// and it is the network the phone in the room is almost certainly already on. When no LAN
     /// door is bound, the tailnet door is the answer, and it carries the fingerprint too — the
     /// listener there presents the same certificate as every other routable door. Nothing falls
-    /// back to Serve or to the relay: both hand the phone a certificate that is not ours to pin,
-    /// which is exactly the second trust story §8 exists to remove.
+    /// back to Serve, which hands the phone a certificate that is not ours to pin: that is
+    /// exactly the second trust story §8 exists to remove.
     private var pairingDestination: (origin: URL, pinnedFingerprintCode: String?)? {
         Self.pairingDestination(
             lanBindings: listenerStatus.state(of: .lan).bindings,
@@ -857,12 +836,20 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         return global[kSCDynamicStorePropNetPrimaryInterface as String] as? String
     }
 
-    /// Where a one-chat guest link points. Unchanged: a guest is somebody with no Threading app,
-    /// no pairing code and no tailnet, so the public relay is the only origin that reaches them,
-    /// and it is started on demand when a share is created rather than by any setting.
-    private var invitationOrigin: URL? {
-        guard case .connected(let origin) = relayStatus else { return nil }
-        return origin
+    /// Where a one-chat guest link points, and what the guest's phone should pin when it
+    /// arrives there.
+    ///
+    /// The same destination the owner's pairing code names: the LAN door when one is bound, the
+    /// tailnet door otherwise. A guest is somebody on your Wi-Fi or on your tailnet running the
+    /// Threading app, so the origin is a private door of this Mac and the link carries the
+    /// certificate's pairing code exactly as the owner code does. There is no public origin left
+    /// to offer: the Quick Tunnel that used to supply one is gone, and browser guests come back
+    /// over ICE/TURN rather than through a third party that terminates TLS.
+    ///
+    /// Nil means no routable door is bound, which is the whole of the refusal below. It is a fact
+    /// this Mac already knows, so minting answers immediately rather than waiting on anything.
+    private var invitationDestination: (origin: URL, pinnedFingerprintCode: String?)? {
+        pairingDestination
     }
 
     /// Mints a short-lived, single-use invitation for exactly one chat.
@@ -871,58 +858,49 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// Accepting it exchanges the invitation bearer for a device-bound membership bearer that
     /// remains valid until sharing is stopped. Copying the invite can therefore never leak the
     /// dashboard or another session.
+    ///
+    /// Synchronous, because every input is already known: a door is bound or it is not. It used
+    /// to queue the request behind a relay process starting up, which is what the pending-share
+    /// machinery and its timeout existed for.
     func createSessionShare(
         for sessionID: SessionID,
         capability: RemoteCapability,
-        canApprovePermissions requestedPermissionApproval: Bool = false,
-        completion: @escaping @MainActor (
-            Result<RemoteCreatedShare, RemoteSharePreparationError>
-        ) -> Void
-    ) {
-        guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-              case .listening = status else {
-            completion(.failure(.remoteAccessUnavailable))
-            return
+        canApprovePermissions requestedPermissionApproval: Bool = false
+    ) -> Result<RemoteCreatedShare, RemoteSharePreparationError> {
+        let isListening: Bool
+        if case .listening = status { isListening = true } else { isListening = false }
+        if let refusal = Self.shareRefusal(
+            isSessionShareable: RemoteSessionAccess.isVisible(
+                ProjectStore.shared.session(withID: sessionID)
+            ),
+            isListening: isListening,
+            hasPrivateDoor: invitationDestination != nil
+        ) {
+            return .failure(refusal)
         }
-
-        if invitationOrigin != nil {
-            guard let created = createSessionShareNow(
-                for: sessionID,
-                capability: capability,
-                canApprovePermissions: requestedPermissionApproval
-            ) else {
-                completion(.failure(.remoteAccessUnavailable))
-                return
-            }
-            completion(.success(created))
-            return
-        }
-
-        guard pendingPublicShares.count < RemoteAccessDefaults.maximumPendingSharePreparations
-        else {
-            completion(.failure(.tooManyRequests))
-            return
-        }
-
-        let requestID = UUID()
-        pendingPublicShares[requestID] = PendingPublicShare(
-            sessionID: sessionID,
+        guard let created = createSessionShareNow(
+            for: sessionID,
             capability: capability,
-            canApprovePermissions: requestedPermissionApproval,
-            completion: completion
-        )
-        startInvitationTransportIfNeeded()
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + RemoteAccessDefaults.sharePreparationTimeout
-        ) { [weak self] in
-            guard let self, let pending = self.pendingPublicShares.removeValue(
-                forKey: requestID
-            ) else { return }
-            self.reconcileRelayIfNeeded()
-            pending.completion(.failure(.relayUnavailable(
-                L10n.string("The sharing connection timed out. Try again.")
-            )))
+            canApprovePermissions: requestedPermissionApproval
+        ) else {
+            return .failure(.remoteAccessUnavailable)
         }
+        return .success(created)
+    }
+
+    /// Why an invitation cannot be minted, or nil when one can.
+    ///
+    /// Separated from the minting so the order of the two refusals is a value rather than a run
+    /// of guards: "Remote Access is not ready" and "turn on a way in" send a person to two
+    /// different switches, and answering the wrong one is worse than answering neither.
+    nonisolated static func shareRefusal(
+        isSessionShareable: Bool,
+        isListening: Bool,
+        hasPrivateDoor: Bool
+    ) -> RemoteSharePreparationError? {
+        guard isSessionShareable, isListening else { return .remoteAccessUnavailable }
+        guard hasPrivateDoor else { return .noPrivateDoor }
+        return nil
     }
 
     private func createSessionShareNow(
@@ -930,8 +908,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         capability: RemoteCapability,
         canApprovePermissions requestedPermissionApproval: Bool
     ) -> RemoteCreatedShare? {
-        guard invitationOrigin != nil else { return nil }
-
         guard let invitationToken = Self.randomToken() else {
             ThreadingLogger.remote.error(
                 "Remote credential generation failed stage=guest_invitation"
@@ -1328,7 +1304,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private func sharingChanged() {
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         mirrors.sessionSharingChanged()
-        reconcileRelayIfNeeded()
     }
 
     private func restoreGuestShares() {
@@ -1431,12 +1406,31 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
     }
 
+    /// The invitation, written the way the owner's pairing link is written.
+    ///
+    /// `RemoteConnectionLink` owns the fragment, including the `.<fingerprint>` half, so a guest
+    /// scanning or opening this pins the door it names before its first request. That is the same
+    /// out-of-band step the owner code performs, and it is what makes a private door usable by
+    /// somebody who has never spoken to this Mac.
     private func invitationURL(token: String) -> URL? {
-        guard let origin = invitationOrigin else { return nil }
-        var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)
-        components?.path = "/"
-        components?.fragment = token
-        return components?.url
+        guard let destination = invitationDestination else { return nil }
+        return Self.invitationURL(
+            token: token,
+            origin: destination.origin,
+            pinnedFingerprintCode: destination.pinnedFingerprintCode
+        )
+    }
+
+    nonisolated static func invitationURL(
+        token: String,
+        origin: URL,
+        pinnedFingerprintCode: String?
+    ) -> URL? {
+        RemoteConnectionLink(
+            baseURL: origin,
+            token: token,
+            pinnedFingerprintCode: pinnedFingerprintCode
+        )?.shareURL
     }
 
     private func expireInvitation(token: String, sessionID: SessionID) {
@@ -1461,7 +1455,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         mirrors.sessionSharingChanged()
-        reconcileRelayIfNeeded()
     }
 
     // MARK: - Master switch
@@ -1536,7 +1529,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// accepted one-chat records remain in Keychain and are rehydrated on the next start.
     func stop() {
         lifecycleGeneration += 1
-        failPendingShares(.remoteAccessUnavailable)
         stopTransports()
         server.stop()
         listenerStatus = .idle
@@ -1714,24 +1706,17 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// route. What is left is the browser convenience, which follows its own switch and no
     /// phone's, and the CLI facts the tailnet door's status line reads.
     ///
-    /// **Nothing here starts the relay.** It exists for guest shares and is started by creating
-    /// one.
     private func startTransports(port: UInt16) {
         transportGeneration += 1
         let generation = transportGeneration
-        tunnel.stop()
         tailscale.stop()
         hostedService.start(targetPort: port)
-        relayStatus = .stopped
         tailscaleServeStatus = .stopped
 
         if shouldRunTailscaleServe {
             startTailscale(port: port, generation: generation)
         } else if appSettings.remoteAccessTailscaleEnabled {
             tailscale.refreshHostFacts()
-        }
-        if shouldRunRelay {
-            startRelay(port: port, generation: generation)
         }
     }
 
@@ -1741,95 +1726,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         return tailscaleDoor == .serveTransport && appSettings.remoteAccessTailscaleEnabled
     }
 
-    private var shouldRunRelay: Bool {
-        Self.relayRequired(
-            hasActiveShares: !sessionShares.isEmpty,
-            hasPendingShares: !pendingPublicShares.isEmpty
-        )
-    }
-
-    /// The relay runs when, and only when, a guest link needs a public origin.
-    ///
-    /// It used to run because of a *mode* — and, in one branch, because a switch on the settings
-    /// page asked it to stay warm. Both are gone: the Quick Tunnel's address changes every
-    /// launch, so it cannot be an owner route, and a public HTTP origin nobody is using is
-    /// exposure nobody asked for.
-    nonisolated static func relayRequired(
-        hasActiveShares: Bool,
-        hasPendingShares: Bool
-    ) -> Bool {
-        hasActiveShares || hasPendingShares
-    }
-
-    private func startRelay(port: UInt16, generation: Int) {
-        relayStatus = .starting
-        tunnel.start(port: port) { [weak self] state in
-            self?.transportChanged(.relay, state: state, generation: generation)
-        }
-    }
-
     private func startTailscale(port: UInt16, generation: Int) {
         tailscaleServeStatus = .starting
         tailscale.start(port: port) { [weak self] state in
-            self?.transportChanged(.tailscale, state: state, generation: generation)
+            self?.serveTransportChanged(state, generation: generation)
         }
-    }
-
-    private func reconcileRelayIfNeeded() {
-        guard case .listening(let port) = status else { return }
-        if shouldRunRelay {
-            switch relayStatus {
-            case .connected, .starting:
-                return
-            case .stopped, .unavailable:
-                startRelay(port: port, generation: transportGeneration)
-            }
-        } else if relayStatus != .stopped {
-            tunnel.stop()
-            relayStatus = .stopped
-        }
-    }
-
-    /// Brings up the public origin a guest link needs, on demand.
-    ///
-    /// One transport rather than a fork on the old mode: a guest has no Threading app, no
-    /// pairing code and no tailnet, so a tailnet origin was never a route they could take.
-    private func startInvitationTransportIfNeeded() {
-        guard case .listening(let port) = status else {
-            failPendingShares(.remoteAccessUnavailable)
-            return
-        }
-        switch relayStatus {
-        case .connected:
-            drainPendingSharesIfPossible()
-        case .starting:
-            break
-        case .stopped, .unavailable:
-            startRelay(port: port, generation: transportGeneration)
-        }
-    }
-
-    private func drainPendingSharesIfPossible() {
-        guard invitationOrigin != nil, !pendingPublicShares.isEmpty else { return }
-        let pending = Array(pendingPublicShares.values)
-        pendingPublicShares.removeAll()
-        for request in pending {
-            guard let created = createSessionShareNow(
-                for: request.sessionID,
-                capability: request.capability,
-                canApprovePermissions: request.canApprovePermissions
-            ) else {
-                request.completion(.failure(.remoteAccessUnavailable))
-                continue
-            }
-            request.completion(.success(created))
-        }
-    }
-
-    private func failPendingShares(_ error: RemoteSharePreparationError) {
-        let pending = Array(pendingPublicShares.values)
-        pendingPublicShares.removeAll()
-        for request in pending { request.completion(.failure(error)) }
     }
 
     private func stopTransports() {
@@ -1838,14 +1739,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         hostedPairingTask = nil
         hostedService.revokeDevice(deviceID: Self.hostedPairingDeviceID)
         hostedPairingLink = nil
-        tunnel.stop()
         tailscale.stop()
         hostedService.stop()
-        relayStatus = .stopped
         tailscaleServeStatus = .stopped
     }
 
-    /// Produces the first-install QR route without requiring cloudflared or Tailscale. The
+    /// Produces the first-install QR route without requiring Tailscale or a bound door. The
     /// rendezvous bearer only reaches this Mac's loopback listener; the existing one-time owner
     /// bootstrap still has to be redeemed before any remote API is authorized.
     private func refreshHostedPairingLink() {
@@ -1929,49 +1828,42 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
-    private func transportChanged(
-        _ kind: RemoteTransportKind,
-        state: RemoteTransportState,
+    /// What Tailscale Serve is doing, journalled.
+    ///
+    /// Serve is the only transport left with states of its own: every way in an owner device can
+    /// take is a listener, and the listener reports through `RemoteListenerStatus`. The two
+    /// diagnostic events keep their names so a report can be grouped against older bundles; what
+    /// they carry now is the browser convenience and nothing else.
+    private func serveTransportChanged(
+        _ state: RemoteTransportState,
         generation: Int
     ) {
         guard transportGeneration == generation,
               appSettings.remoteAccessEnabled,
               case .listening = status else { return }
-        switch kind {
-        case .relay: relayStatus = state
-        case .tailscale: tailscaleServeStatus = state
-        }
+        tailscaleServeStatus = state
 
         switch state {
         case .connected(let origin):
-            // The advertised origin, hashed. Without it a report says a transport connected and
-            // cannot say to what, which is exactly the question a phone failing against a dead
+            // The published origin, hashed. Without it a report says a transport connected and
+            // cannot say to what, which is exactly the question a browser failing against a dead
             // address needs answered.
             let digest = MacRemoteDiagnostics.originDigest(origin)
             MacRemoteDiagnostics.record(.relayConnected, fields: [
-                .transport: kind.rawValue,
+                .transport: Self.serveTransportName,
                 .origin: digest,
             ])
             EventLog.shared.record(.remote, "Remote transport connected", [
-                "transport": kind.rawValue,
+                "transport": Self.serveTransportName,
                 "origin": digest,
             ])
-            drainPendingSharesIfPossible()
         case .unavailable(let reason):
             var fields: [RemoteDiagnosticField: String] = [
-                .transport: kind.rawValue,
+                .transport: Self.serveTransportName,
                 .reason: Self.diagnosticReason(reason),
             ]
-            if kind == .tailscale,
-               case .actionRequired(let issue, _) = tailscale.readiness {
+            if case .actionRequired(let issue, _) = tailscale.readiness {
                 fields[.code] = issue.rawValue
-            }
-            // The relay's own code, rather than a guess made from its localised sentence. Until
-            // it existed a relay that launched and never published an address recorded nothing
-            // at all, because that case had no timeout and so never reached this branch.
-            if kind == .relay, let failure = tunnel.lastFailure {
-                fields[.reason] = failure.diagnosticReason
-                fields[.code] = failure.rawValue
             }
             MacRemoteDiagnostics.record(
                 .relayFailed,
@@ -1979,19 +1871,17 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 fields: fields
             )
             EventLog.shared.record(.remote, "Remote transport unavailable", [
-                "transport": kind.rawValue,
+                "transport": Self.serveTransportName,
                 "reason": Self.diagnosticReason(reason),
             ])
-            // The relay is the one transport a pending guest link is waiting on. A tailnet door
-            // that cannot come up is the owner's route and says so on the settings page; it
-            // never fails a share.
-            if kind == .relay {
-                failPendingShares(.relayUnavailable(reason))
-            }
         case .stopped, .starting:
             break
         }
     }
+
+    /// The token a diagnostic report groups Serve's own events by. Unchanged from when the
+    /// tailnet had two implementations, so a bundle from either build reads the same.
+    private static let serveTransportName = RemoteAccessDoor.tailscale.rawValue
 
     private static func diagnosticReason(_ reason: String) -> String {
         let lowered = reason.lowercased()
@@ -1999,10 +1889,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         if lowered.contains("network") { return "network" }
         if lowered.contains("exited") { return "process-exited" }
         return "unavailable"
-    }
-
-    private static func isQuickRelay(_ origin: URL) -> Bool {
-        origin.host?.lowercased().hasSuffix(".trycloudflare.com") == true
     }
 
     // MARK: - Tokens
@@ -2024,19 +1910,16 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     ///
     /// Base32 rather than base64url, and 16 bytes rather than 32, because this token is the
     /// tail of a QR payload: base64url is mixed case, so it forces a byte-mode segment worth
-    /// 8 bits a character where base32's uppercase alphabet encodes at 5.5. Against a median
-    /// `trycloudflare.com` host that is 41 modules before and 37 after — and a symbol with
-    /// fewer, larger modules is one a camera finds faster, which is the whole job here.
+    /// 8 bits a character where base32's uppercase alphabet encodes at 5.5. A symbol with fewer,
+    /// larger modules is one a camera finds faster, which is the whole job here.
     ///
     /// 128 bits, not 256. It is an unguessable online-only bootstrap, held in memory, rotated
     /// immediately after a successful exchange, and revoked when Remote Access stops.
-    /// Shortening it further would reach 33 modules, and that is where this stops: the trade
-    /// turns from "spend entropy nobody can use" into "spend entropy", and a code that is 10%
-    /// chunkier is not worth arguing about the second one.
     ///
-    /// **Revisit this when the relay moves off `trycloudflare.com`.** The 52-character host is
-    /// what makes the token pay for the last version; against a short custom domain a 256-bit
-    /// base32 token still measures 33 modules. See `docs/REMOTE_ACCESS.md` for the table.
+    /// The origin it rides on is now a private door, `HTTPS://192.168.1.42:8760/`, and the
+    /// fragment carries the 26-character fingerprint beside the token. Both halves are base32
+    /// upper case in the same alphanumeric segment, so the fingerprint costs characters and no
+    /// mode switch. `PairingCodeImageTests` holds the measured module count.
     ///
     /// `randomToken` stays as it was for invitations and device bearers. Those travel by
     /// copied link and never by camera, so they have nothing to buy with the change.

@@ -11,11 +11,12 @@ import Foundation
 /// then keeps running therefore delivers *nothing* — the reader blocks on its very first callback
 /// and never returns.
 ///
-/// That is not hypothetical. It is how the HTTPS relay came up, published its address, served real
-/// traffic, and left the iPhone pairing card spinning on "Preparing your pairing code" for the life
-/// of the app: `cloudflared` prints roughly 3 KB of banner, including the URL, and then goes quiet,
-/// so a 16 KB request never came back and the address was never parsed. Nothing timed out, because
-/// a blocked read is not a failure.
+/// That is not hypothetical. It is how the retired HTTPS relay came up, published its address,
+/// served real traffic, and left the iPhone pairing card spinning on "Preparing your pairing code"
+/// for the life of the app: it printed roughly 3 KB of banner, including the URL, and then went
+/// quiet, so a 16 KB request never came back and the address was never parsed. Nothing timed out,
+/// because a blocked read is not a failure. `tailscale serve` reads the same way, which is why
+/// this outlived the transport it was written for.
 ///
 /// `FileHandle.availableData` has the right blocking semantics and the wrong failure semantics: it
 /// reports errors by raising an Objective-C exception Swift cannot catch. So does `fileDescriptor`

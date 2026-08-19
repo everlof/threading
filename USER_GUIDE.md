@@ -2248,7 +2248,12 @@ key rather than the ordinary way to change certificates.
 Pairing is for your own trusted devices: a paired owner can see your unarchived chats, manage
 them, and approve bounded Native permission requests. To involve somebody else, use a session's
 **… > Share Chat…** and
-choose an invitation for that chat alone. The sheet names each grant and what it withholds:
+choose an invitation for that chat alone. **The person you send it to needs the Threading app and
+a way onto one of your networks**, the same Wi-Fi or your tailnet: the invitation points at a way
+in you have switched on, and carries the certificate their phone has to pin. With no way in on,
+the sheet says **Turn on a way in first** rather than producing a link nobody can open. Sending a
+chat to somebody who only has a browser is not possible at present; that used to travel over a
+public relay, which Threading no longer runs. The sheet names each grant and what it withholds:
 **View only** follows the chat but cannot type, prompt, or answer a permission request;
 **Collaborator** adds typing and prompts while permission requests still come to you; and
 **Collaborator + approval** adds answering those requests, which lets the agent run commands and
@@ -2264,14 +2269,15 @@ You can pair several phones and tablets with the same Mac. Each receives a separ
 credential and can control sessions concurrently; Settings lists and revokes them independently.
 The iPhone still shows that Mac once even when it knows several of its addresses. It
 follows the connection policy chosen on the Mac, shows the active route beside its connection
-status, and can fail over or adopt an advertised stable relay address without being paired again.
+status, and can fail over or adopt another advertised address without being paired again.
 
 A connection that cannot be made says so rather than spinning. A Mac that accepts the connection
 and never answers is reported after a short wait, and the chat title stays tappable to retry. Two
 failures are named because retrying them changes nothing: **This Mac’s address has changed. Scan
 its QR code again.** when something other than that Mac answers on the remembered address, which
-happens when a relay address was reused after a restart, and **Threading needs Local Network
-access to reach this Mac on Wi-Fi. Turn it on in Settings.** when iOS is blocking the connection.
+happens when another machine took the address your Mac used to hold, and **Threading needs Local
+Network access to reach this Mac on Wi-Fi. Turn it on in Settings.** when iOS is blocking the
+connection.
 Tapping the title takes you to the pairing screen or to Settings rather than repeating the
 attempt.
 
@@ -2359,7 +2365,7 @@ This can be changed while the session is running; it is not decided permanently 
 Set the starting choice for newly shared chats under **Settings > Remote Access > New shared
 chats**. Control belongs to a person across their connected devices, not to the most recent tab.
 If a guest controller drops offline, a 30-second grace period preserves the turn across a normal
-Tailscale/relay reconnect before it returns to the owner. Revoking the controller returns it
+reconnect before it returns to the owner. Revoking the controller returns it
 immediately. A watcher can use **Request control**, which reaches the current controller through
 the existing human-only **@** attention path. It never sends anything to Claude/Codex, and push
 delivery follows that recipient's separate **Requests for my input** notification setting.
@@ -2410,7 +2416,7 @@ view back to the bottom while you are reading above it; typing returns you to th
 Focused control is enforced on the Mac, not merely by disabling a button. A watcher may edit a
 draft, select and scroll terminal output, and follow the session, but raw keys, paste/drop, mouse
 reporting, atomic terminal sends and Native prompt sends are refused. Only the controller's
-devices influence the shared terminal grid. Switching between Tailscale and relay does not
+devices influence the shared terminal grid. Moving between advertised routes does not
 change who holds control; a reconnect receives the current host-authoritative state.
 
 Use the separate **@** button beside a Native composer—or above an agent-UI terminal—to ask a

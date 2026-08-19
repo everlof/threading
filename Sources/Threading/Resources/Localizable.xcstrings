@@ -3907,20 +3907,29 @@
     "Tailscale is installed.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale är installerat." } } }
     },
-    "The sharing connection timed out. Try again.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Delningsanslutningen tog för lång tid. Försök igen." } } }
-    },
     "This Mac is connected to your tailnet.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Denna Mac är ansluten till ditt tailnet." } } }
     },
     "Threading could not read Tailscale’s status.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading kunde inte läsa Tailscales status." } } }
     },
-    "Too many share links are being prepared. Try again shortly.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "För många delningslänkar förbereds. Försök igen om en stund." } } }
-    },
     "Turn on Tailscale on this Mac, then retry.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Slå på Tailscale på denna Mac och försök sedan igen." } } }
+    },
+    "Turn on a way in first.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Slå på ett sätt in först." } } }
+    },
+    "This chat cannot be shared yet": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här konversationen kan inte delas än" } } }
+    },
+    "Share with someone on your Wi-Fi or tailnet who has the Threading app. A single-use invitation to this one chat. It expires in 24 hours if nobody accepts it; once accepted, that person keeps access until you choose Stop Sharing Chat. No link reaches your other chats, projects, or settings.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dela med någon på ditt Wi-Fi eller tailnet som har Threading-appen. En inbjudan för engångsbruk till just den här konversationen. Den upphör efter 24 timmar om ingen tar emot den. När någon har tagit emot den behåller personen åtkomsten tills du väljer Stoppa delning av konversation. Ingen länk når dina andra konversationer, projekt eller inställningar." } } }
+    },
+    "Remote Access binds only the ways in you turn on": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fjärråtkomst binder bara de sätt in du slår på" } } }
+    },
+    "The listener always binds 127.0.0.1, and binds a network address only for a way in you switched on. Each of those presents this Mac’s own certificate, which your paired phone pins; nothing else terminates the traffic.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lyssnaren binder alltid 127.0.0.1 och binder en nätverksadress bara för ett sätt in som du slagit på. Var och en av dem visar denna Macs eget certifikat, som din parkopplade telefon nålar fast. Ingen annan avslutar trafiken." } } }
     },
     "Visible exactly while the pointer is on the anchor.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Synlig exakt så länge pekaren är på ankaret." } } }
@@ -3944,16 +3953,6 @@
     "Threading will restart as if newly installed: no projects, no sessions, no conversations. Files are moved into a dated folder beside your data so they can be recovered by hand. Paired-owner credentials are revoked and cannot be recovered from that folder.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Threading startar om som nyinstallerat: inga projekt, inga sessioner, inga konversationer. Filer flyttas till en daterad mapp bredvid dina data så att de kan återställas manuellt. Autentiseringsuppgifter för parkopplade ägarenheter återkallas och kan inte återställas från den mappen." } }
-      }
-    },
-    "Remote Access starts at a loopback listener": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Fjärråtkomst börjar med en loopback-lyssnare" } }
-      }
-    },
-    "The listener binds to 127.0.0.1 and the selected HTTPS relay or Tailscale Serve publishes only that listener. Threading opens no LAN listener, so macOS never asks for Local Network access.": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "Lyssnaren binds till 127.0.0.1 och det valda HTTPS-reläet eller Tailscale Serve publicerar bara den lyssnaren. Threading öppnar ingen LAN-lyssnare, så macOS frågar aldrig efter åtkomst till lokalt nätverk." } }
       }
     },
     "Both": {
@@ -5271,16 +5270,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "En konversation som inte körs uppdaterar sin gren när dess utcheckning byter gren, oavsett om det sker från en annan konversation eller utanför Threading. När detta är av behåller den grenen den senast kördes på."
-          }
-        }
-      }
-    },
-    "A single-use invitation to this one chat. It expires in 24 hours if nobody accepts it; once accepted, that person keeps access until you choose Stop Sharing Chat. No link reaches your other chats, projects, or settings.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "En engångsinbjudan till just den här konversationen. Den upphör efter 24 timmar om ingen accepterar den; när den har accepterats behåller personen åtkomsten tills du väljer Stoppa delning av konversation. Ingen länk når dina andra konversationer, projekt eller inställningar."
           }
         }
       }
@@ -17590,28 +17579,6 @@
         }
       }
     },
-    "Secure relay isn’t ready": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Säker relä är inte redo"
-          }
-        }
-      }
-    },
-    "Secure relay unavailable": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Säker relä tillgänglig"
-          }
-        }
-      }
-    },
     "See what is open in the panel and which tab is active.": {
       "extractionState": "stale",
       "localizations": {
@@ -19423,17 +19390,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "PDF-filen kunde inte dekodas."
-          }
-        }
-      }
-    },
-    "The QR code appears here as soon as the secure relay is ready.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "QR-koden visas här så snart det säkra reläet är redo."
           }
         }
       }
@@ -21873,16 +21829,8 @@
         }
       }
     },
-    "Use Share Chat… from that chat’s ⋯ menu. It grants only the selected chat, with view, collaboration and approval rights chosen separately.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Välj Dela konversation… i konversationens ⋯-meny. Det ger bara åtkomst till den valda konversationen, med separata val för visning, samarbete och godkännanden."
-          }
-        }
-      }
+    "Use Share Chat… from that chat’s ⋯ menu. It grants only the selected chat, with view, collaboration and approval rights chosen separately. The invitation points at a way in above, so the person needs the Threading app and a way onto that network.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd Dela konversation… i konversationens ⋯-meny. Den ger åtkomst endast till den valda konversationen, med visning, samarbete och godkännande valda var för sig. Inbjudan pekar på ett sätt in ovan, så personen behöver Threading-appen och en väg in på det nätverket." } } }
     },
     "Use Website Favicon": {
       "extractionState": "stale",
@@ -22546,17 +22494,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Du tillåter Threading i Systeminställningar och läser sedan om tillägget."
-          }
-        }
-      }
-    },
-    "You can still test the browser on this Mac, or retry the secure relay.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Du kan fortfarande testa webbläsaren på denna Mac, eller försöka igen med den säkra reläet."
           }
         }
       }

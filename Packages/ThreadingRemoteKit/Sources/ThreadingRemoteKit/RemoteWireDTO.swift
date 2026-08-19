@@ -598,6 +598,12 @@ public enum RemoteHostEndpointKind {
     /// A rendezvous route through the hosted service. No address of the Mac's own.
     public static let hosted = "hosted"
     /// A public tunnel origin operated by a third party.
+    ///
+    /// **Legacy vocabulary. No host advertises this any more**, because the Cloudflare Quick
+    /// Tunnel behind it is gone: its address changed every launch, so it could not be a route a
+    /// phone remembers, and a third party terminated its TLS. The name stays because an installed
+    /// phone has records that carry it and decodes this field against `known`; removing it would
+    /// change what those records mean rather than what any host sends.
     public static let relay = "relay"
 
     /// Every kind this build understands. A client uses it to notice an unknown kind rather
@@ -661,13 +667,14 @@ public struct RemoteHostEndpointDTO: Codable, Equatable, Hashable, Sendable {
 /// Unknown values are interpreted by clients as private-only. Adding a policy in a later host
 /// must never make an older phone silently route private work through a public endpoint.
 ///
-/// **This enum outlives the setting that produced it.** The Mac's connection modes are being
-/// replaced by one switch per door, and there is no relay left to prefer, so a current host
-/// always sends `privateOnly`. The other two cases stay on the wire because an installed phone
-/// decodes this field and maps anything it does not recognise to `privateOnly`; removing a case
-/// would change nothing there and deleting the enum would change what those phones read. On a
-/// current client all three therefore mean the same fail-closed thing, and only the ordering
-/// differs. Do not delete this without an installed base that no longer sends it.
+/// **This enum outlives the setting that produced it.** The Mac's connection modes were replaced
+/// by one switch per door, and the relay the other two cases named is gone, so a current host
+/// always sends `privateOnly`. `relayOnly` and `preferPrivate` are legacy vocabulary: they stay on
+/// the wire because an installed phone decodes this field and maps anything it does not recognise
+/// to `privateOnly`; removing a case would change nothing there and deleting the enum would change
+/// what those phones read. On a current client all three therefore mean the same fail-closed
+/// thing, and only the ordering differs. Do not delete this without an installed base that no
+/// longer sends it.
 public enum RemoteHostConnectionPolicy: String, Codable, Equatable, Hashable, Sendable {
     case privateOnly
     case relayOnly
@@ -722,8 +729,8 @@ public enum RemoteHostEndpointSelection {
             func rank(_ endpoint: RemoteHostEndpointDTO) -> Int {
                 switch policy {
                 case .privateOnly, .relayOnly:
-                    // A newly advertised stable endpoint replaces a remembered quick-tunnel
-                    // address without asking the user to pair the same Mac again.
+                    // A newly advertised stable endpoint replaces a remembered unstable one
+                    // without asking the user to pair the same Mac again.
                     return endpoint.isStable ? 0 : (endpoint.baseURL == currentBaseURL ? 1 : 2)
                 case .preferPrivate:
                     if RemoteHostEndpointKind.privateNetwork.contains(endpoint.kind) { return 0 }

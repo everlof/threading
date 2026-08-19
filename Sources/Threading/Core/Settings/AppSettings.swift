@@ -1012,32 +1012,11 @@ final class AppSettings {
         }
     }
 
-    /// **Superseded by the door switches, and kept as the value they migrate from.**
-    ///
-    /// Nothing reads this to decide what to start any more: owner routes come from
-    /// `remoteAccessDoors` and `remoteAccessTailscaleEnabled`.
-    /// `migrateRemoteAccessConnectionMode()` reads it exactly once. An absent or unknown value
-    /// still answers `.relay`, because that is what a mode this build cannot understand meant on
-    /// the way in, and it is the mode that migrates to nothing.
-    var remoteAccessConnectionMode: RemoteAccessConnectionMode {
-        get {
-            guard let raw = AppSettingDefinitions.remoteAccessConnectionMode.read(from: defaults)
-            else {
-                return .relay
-            }
-            return RemoteAccessConnectionMode(rawValue: raw) ?? .relay
-        }
-        set {
-            AppSettingDefinitions.remoteAccessConnectionMode.write(newValue.rawValue, to: defaults)
-        }
-    }
-
     /// Whether this Mac answers on its tailnet.
     ///
-    /// The `tailscale` door's switch. What that door *is* today is
-    /// `RemoteTailscaleDoorImplementation.serveTransport`; the setting says nothing about the
-    /// implementation, which is what lets the raw tailnet bind replace it without the settings
-    /// page changing.
+    /// The `tailscale` door's switch. The setting says nothing about what the door is made of,
+    /// which is what let a listener on this Mac's own tailnet address replace the Serve handler
+    /// without the settings page changing.
     var remoteAccessTailscaleEnabled: Bool {
         get { AppSettingDefinitions.remoteAccessTailscaleEnabled.read(from: defaults) ?? false }
         set {
@@ -1056,25 +1035,6 @@ final class AppSettings {
         }
         set {
             AppSettingDefinitions.remoteAccessTailscaleServeEnabled.write(newValue, to: defaults)
-        }
-    }
-
-    /// **Superseded by the door switches**, and read only by the migration that retires them.
-    var remoteAccessAllowsOwnerRelayFallback: Bool {
-        get { AppSettingDefinitions.remoteAccessAllowsOwnerRelayFallback.read(from: defaults) ?? false }
-        set {
-            AppSettingDefinitions.remoteAccessAllowsOwnerRelayFallback.write(newValue, to: defaults)
-        }
-    }
-
-    /// **Superseded by the door switches**, and read only by the migration that retires them.
-    ///
-    /// The relay is no longer started for owner pairing at all, and a guest share still starts
-    /// it on demand, so there is nothing left for this to keep warm.
-    var remoteAccessKeepsRelayReady: Bool {
-        get { AppSettingDefinitions.remoteAccessKeepsRelayReady.read(from: defaults) ?? false }
-        set {
-            AppSettingDefinitions.remoteAccessKeepsRelayReady.write(newValue, to: defaults)
         }
     }
 
@@ -1341,24 +1301,28 @@ final class AppSettings {
     }
 
     /// `remoteAccessConnectionMode` was one choice between overlapping things; a door is a
-    /// switch per network.
+    /// switch per network. This is what is left of it.
     ///
     /// The carry is deliberately narrow. `tailscale` and `tailscaleAndRelay` both mean "this Mac
     /// answers on my tailnet", so both turn the `tailscale` door on. `relay` carries **nothing**:
-    /// the Cloudflare Quick Tunnel stopped being an owner pairing route, because its address
-    /// changes every launch and pairing cannot survive that. Somebody who was on Relay therefore
-    /// lands on the shipped default, `This network`, which is the route that replaced it. The
-    /// relay is still started on demand for a one-chat guest share, and no setting on the
-    /// Remote Access page starts it.
+    /// the Cloudflare Quick Tunnel it named is gone, because its address changed every launch and
+    /// pairing cannot survive that. Somebody who was on Relay therefore lands on the shipped
+    /// default, `This network`, which is the route that replaced it.
+    ///
+    /// The three keys are read as raw strings and booleans rather than through descriptors,
+    /// because they are no longer settings: nothing writes them, nothing else reads them, and a
+    /// descriptor for a value the app does not have is a settings row waiting to be reintroduced
+    /// by mistake. Having read them, this removes them, so the only trace left of the mode is the
+    /// marker below.
     ///
     /// `remoteAccessDoors` is not touched here. Its registered default moved to `lan` in the
     /// same release, so an install that never wrote the key gets the LAN door by reading it, and
     /// an install that did write one already stated a decision this migration must not overrule.
     ///
     /// The marker is written last and never seeded, so an interrupted migration re-runs; the
-    /// carry is idempotent, and a person who later switches Tailscale off keeps that answer
-    /// because the marker is already there. Writes suppress notification because this runs while
-    /// the settings object is still being built.
+    /// second run finds the keys gone and carries nothing, so a person who later switches
+    /// Tailscale off keeps that answer. Writes suppress notification because this runs while the
+    /// settings object is still being built.
     private func migrateRemoteAccessConnectionMode() {
         // A hosted test bundle runs inside the shipping app and sees the developer's real
         // defaults domain, so this would be a write on their behalf — the rule
@@ -1369,16 +1333,33 @@ final class AppSettings {
         }
         let marker = AppSettingDefinitions.remoteAccessDoorMigration
         guard !marker.containsValue(in: defaults) else { return }
-        let mode = AppSettingDefinitions.remoteAccessConnectionMode.read(from: defaults)
-            .flatMap(RemoteAccessConnectionMode.init(rawValue:))
-        if let mode, mode.usesTailscale {
+        let mode = defaults.string(forKey: RetiredRemoteAccessKeys.connectionMode)
+        if mode == RetiredRemoteAccessKeys.tailscaleMode
+            || mode == RetiredRemoteAccessKeys.tailscaleAndRelayMode {
             AppSettingDefinitions.remoteAccessTailscaleEnabled.write(
                 true,
                 to: defaults,
                 notifying: false
             )
         }
+        for key in RetiredRemoteAccessKeys.all { defaults.removeObject(forKey: key) }
         marker.write(true, to: defaults, notifying: false)
+    }
+
+    /// The stored values the retired connection mode left behind, named once so the migration
+    /// that reads them is also the thing that deletes them.
+    ///
+    /// Raw keys rather than `AppSettingDescriptor`s: these are not settings any more. The two
+    /// mode values named here are the only ones that ever meant "this Mac answers on my tailnet";
+    /// `relay` and anything unrecognised carry nothing.
+    private enum RetiredRemoteAccessKeys {
+        static let connectionMode = "remoteAccessConnectionMode"
+        static let ownerRelayFallback = "remoteAccessAllowsOwnerRelayFallback"
+        static let keepsRelayReady = "remoteAccessKeepsRelayReady"
+        static let tailscaleMode = "tailscale"
+        static let tailscaleAndRelayMode = "tailscaleAndRelay"
+
+        static let all = [connectionMode, ownerRelayFallback, keepsRelayReady]
     }
 
     /// The seeded values, and the one place they are registered on the standard defaults.

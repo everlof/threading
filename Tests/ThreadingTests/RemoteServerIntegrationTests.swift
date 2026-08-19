@@ -2125,19 +2125,6 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertNil(server.port)
     }
 
-    func testQuickTunnelURLCanBeRecoveredAcrossLogChunks() throws {
-        let log = """
-            INF Requesting new quick Tunnel on trycloudflare.com...
-            INF +-----------------------------------------------------------+
-            INF |  https://quiet-river-42.trycloudflare.com                 |
-            """
-        XCTAssertEqual(
-            RemoteTunnel.publicURL(in: log)?.absoluteString,
-            "https://quiet-river-42.trycloudflare.com"
-        )
-        XCTAssertNil(RemoteTunnel.publicURL(in: "INF tunnel is still starting"))
-    }
-
     func testResumeRouteAcceptsOnlyOneSessionIdentifier() {
         XCTAssertEqual(
             RemoteRouter.resumeSessionID(forPath: "/api/session/abc/resume"),
@@ -3514,27 +3501,6 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
                        .statusUnavailable)
     }
 
-    /// The relay runs for a guest link and for nothing else.
-    ///
-    /// It used to run because of a *mode*, and in one branch because a switch on the settings
-    /// page asked it to stay warm. Both are gone: a Quick Tunnel address changes every launch,
-    /// so it cannot be an owner route, and a public origin nobody is using is exposure nobody
-    /// asked for.
-    func testTheRelayRunsOnlyForAGuestLink() {
-        XCTAssertFalse(RemoteAccessCoordinator.relayRequired(
-            hasActiveShares: false,
-            hasPendingShares: false
-        ))
-        XCTAssertTrue(RemoteAccessCoordinator.relayRequired(
-            hasActiveShares: true,
-            hasPendingShares: false
-        ))
-        XCTAssertTrue(RemoteAccessCoordinator.relayRequired(
-            hasActiveShares: false,
-            hasPendingShares: true
-        ))
-    }
-
     func testTailscaleOwnsOnlyItsDedicatedServePort() {
         XCTAssertEqual(TailscaleServeTransport.statusArguments, [
             "status", "--json", "--peers=false",
@@ -3647,6 +3613,11 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         defer { freshDefaults.removePersistentDomain(forName: freshSuite) }
         XCTAssertFalse(fresh.remoteAccessTailscaleEnabled)
 
+        // An unreadable mode carries nothing rather than being guessed at.
+        let (unknown, unknownDefaults, unknownSuite) = try settings(mode: "moon")
+        defer { unknownDefaults.removePersistentDomain(forName: unknownSuite) }
+        XCTAssertFalse(unknown.remoteAccessTailscaleEnabled)
+
         // And it runs once: switching the door off again survives the next launch.
         let (once, onceDefaults, onceSuite) = try settings(mode: "tailscale")
         defer { onceDefaults.removePersistentDomain(forName: onceSuite) }
@@ -3654,6 +3625,28 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         XCTAssertTrue(onceDefaults.bool(forKey: "didMigrateRemoteAccessDoors"))
         once.remoteAccessTailscaleEnabled = false
         XCTAssertFalse(AppSettings(defaults: onceDefaults).remoteAccessTailscaleEnabled)
+    }
+
+    /// Having read the retired keys, the migration takes them away. They are not settings any
+    /// more, so leaving them on disk would leave three values nothing in the app can explain.
+    func testTheMigrationDeletesTheRetiredModeKeysItRead() throws {
+        let suite = "RemoteDoorMigrationCleanup.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.register(defaults: AppSettingDefinitions.registeredDefaults)
+        defaults.set("tailscaleAndRelay", forKey: "remoteAccessConnectionMode")
+        defaults.set(true, forKey: "remoteAccessAllowsOwnerRelayFallback")
+        defaults.set(true, forKey: "remoteAccessKeepsRelayReady")
+
+        XCTAssertTrue(AppSettings(defaults: defaults).remoteAccessTailscaleEnabled)
+
+        for key in [
+            "remoteAccessConnectionMode",
+            "remoteAccessAllowsOwnerRelayFallback",
+            "remoteAccessKeepsRelayReady",
+        ] {
+            XCTAssertNil(defaults.object(forKey: key), "\(key) survived the migration")
+        }
     }
 }
 
@@ -3769,21 +3762,18 @@ final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
         return AppSettings(defaults: defaults)
     }
 
-    /// Never the shipping transports. A coordinator built with the defaults owns a `RemoteTunnel`
-    /// pointed at the real `cloudflared`, and the test bundle is hosted inside the app, so a
-    /// coordinator that ever reached relay mode here would publish this developer's Mac.
+    /// Never the shipping transport. A coordinator built with the defaults owns a
+    /// `TailscaleServeTransport` pointed at the real CLI, and the test bundle is hosted inside
+    /// the app, so a coordinator that started it here would publish this developer's Mac.
     private func makeCoordinator(
         guestShareStore: RemoteGuestSharePersisting
     ) -> RemoteAccessCoordinator {
-        let relay = RecordingRelayTransport()
         let tailnet = RecordingTailnetTransport()
-        transportDoubles.append(relay)
         transportDoubles.append(tailnet)
         return RemoteAccessCoordinator(
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
             appSettings: isolatedRemoteAppSettings(),
             guestShareStore: guestShareStore,
-            relayTransport: relay,
             tailnetTransport: tailnet
         )
     }

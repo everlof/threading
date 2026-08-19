@@ -100,6 +100,46 @@ final class RemoteHostTrustTests: XCTestCase {
         XCTAssertNil(delegate.pins(forHost: "192.168.1.42"))
     }
 
+    /// A guest link is minted against one of the Mac's own doors now, so it carries the
+    /// certificate's pairing code exactly as the owner code does. The guest's phone therefore
+    /// pins the host it scanned, and pins nothing else: `/api/me` still teaches a one-chat
+    /// capability no identity, and a guest record advertises no endpoint list to spread a pin
+    /// across. Both halves are the point. Without the first the phone would meet a self-signed
+    /// certificate under stock evaluation and refuse the only address it has; with the second
+    /// relaxed, a one-chat token would be deciding what this phone trusts about a Mac.
+    func testAGuestPinsTheHostItsOwnCodeNamesAndLearnsNothingFromApiMe() throws {
+        let delegate = RemoteCertificatePinningDelegate()
+        var guest = ownerHost(endpoints: nil)
+        guest.shareID = "one-chat"
+        guest.scope = "session"
+        guest.link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: try XCTUnwrap(URL(string: "https://192.168.1.42:8760/")),
+            token: Self.bearer,
+            pinnedFingerprintCode: fingerprint.pairingCode
+        ))
+
+        // The Mac answering a guest's `/api/me` names an identity anyway: the record refuses it.
+        let outcome = guest.merge(
+            identity: identity(current: fingerprint),
+            successfulLink: guest.link
+        )
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertNil(guest.pinnedFingerprint, "a one-chat token taught this phone a pin")
+
+        RemoteHostTrust.register([guest], with: delegate)
+
+        let registered = try XCTUnwrap(
+            delegate.pins(forHost: "192.168.1.42"),
+            "the guest's own scanned code did not reach the delegate"
+        )
+        XCTAssertTrue(registered.matches(certificateDER: Self.certificate))
+        XCTAssertFalse(registered.matches(certificateDER: Self.successor))
+        XCTAssertEqual(
+            Array(guest.pinnedHosts.keys), ["192.168.1.42"],
+            "a guest pinned a host other than the one its link names"
+        )
+    }
+
     // MARK: - Rotation
 
     func testTheSuccessorIsAcceptedBesideTheCurrentCertificate() throws {
@@ -472,7 +512,7 @@ final class RemoteHostTrustTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private func ownerHost(endpoints: [RemoteHostEndpointDTO]) -> PairedRemoteHost {
+    private func ownerHost(endpoints: [RemoteHostEndpointDTO]?) -> PairedRemoteHost {
         let link = RemoteConnectionLink(
             baseURL: URL(string: "https://192.168.1.42:8760/")!,
             token: Self.bearer

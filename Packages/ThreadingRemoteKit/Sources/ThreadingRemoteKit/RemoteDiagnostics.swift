@@ -43,6 +43,11 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     /// A discovered service was not a Mac this client is paired with, so nothing was learned
     /// from it. Discovery finds a known Mac's current address; it never acquires a new Mac.
     case hostDiscoveryIgnored
+    /// A transport of the host's published the origin it is serving at, or could not.
+    ///
+    /// **Legacy names.** They were written for the Cloudflare relay, which is gone; the one
+    /// transport left behind them is the Tailscale Serve browser convenience. The cases keep
+    /// their spelling so a report groups against bundles collected before that change.
     case relayConnected
     case relayFailed
     case authenticationRefused

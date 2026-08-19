@@ -1138,7 +1138,7 @@ final class RemoteNotificationManager: ObservableObject {
                         .code: MobileDiagnostics.errorCode(error),
                     ]
                 )
-                // The ordinary refresh will retry once the Mac/relay is reachable again.
+                // The ordinary refresh will retry once the Mac is reachable again.
             }
         }
     }

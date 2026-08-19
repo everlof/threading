@@ -1,49 +1,10 @@
 import Foundation
 
-/// The externally reachable doors that may publish Threading's dedicated loopback server.
-///
-/// Both transports terminate at the same authenticated HTTP/WebSocket surface. Choosing a
-/// transport never changes what a remote principal may do; it changes only who can route packets
-/// to the listener.
-enum RemoteTransportKind: String, CaseIterable, Sendable {
-    case relay
-    case tailscale
-}
-
 enum RemoteTransportState: Equatable, Sendable {
     case stopped
     case starting
     case connected(URL)
     case unavailable(String)
-}
-
-/// Why the relay is not carrying traffic, as a content-free code.
-///
-/// `RemoteTransportState.unavailable` carries the sentence a person reads, which is localised and
-/// occasionally parameterised; it cannot also be the token a diagnostic report groups by. This
-/// enum is the same split `TailscaleReadinessIssue` already makes, and it exists because the one
-/// failure that produced no evidence at all was the relay launching and then never publishing an
-/// address: the journal recorded `relayFailed reason=unavailable` for every cause alike, so
-/// "cloudflared is not installed" and "cloudflared started and went quiet" read identically.
-enum RemoteRelayFailure: String, Equatable, Sendable {
-    case notInstalled
-    case launchFailed
-    case startupTimedOut
-    case exitedDuringStartup
-    case exitedAfterConnecting
-
-    /// The `reason` token the diagnostics journal groups by, matching the vocabulary
-    /// `RemoteAccessCoordinator` already infers for transports that report no code.
-    var diagnosticReason: String {
-        switch self {
-        case .notInstalled, .launchFailed:
-            return "unavailable"
-        case .startupTimedOut:
-            return "timeout"
-        case .exitedDuringStartup, .exitedAfterConnecting:
-            return "process-exited"
-        }
-    }
 }
 
 /// What `tailscale status` says about this Mac's own tailnet membership.
@@ -298,16 +259,6 @@ protocol RemoteAccessTransport: AnyObject {
     func stop()
 }
 
-/// The public relay door, as the coordinator uses it.
-///
-/// `lastFailure` is on the protocol rather than only on `RemoteTunnel` because the coordinator
-/// reads it when a transport reports itself unavailable, and a substitute that could not answer
-/// would silently downgrade that diagnostic to a guess made from a localized sentence.
-@MainActor
-protocol RemoteRelayTransport: RemoteAccessTransport {
-    var lastFailure: RemoteRelayFailure? { get }
-}
-
 /// The `tailscale` CLI, as the coordinator uses it.
 ///
 /// **`start` and `stop` are Tailscale Serve, not the tailnet door.** The door is a listener on
@@ -334,13 +285,12 @@ protocol RemoteTailnetTransport: RemoteAccessTransport {
 ///
 /// The unit test bundle is hosted inside the app, so anything that reaches
 /// `RemoteAccessCoordinator.shared` gets the real composition root. Left alone, a test that
-/// enabled remote access would launch this developer's `cloudflared` and `tailscale`, publish
-/// their Mac, and leave the children behind: two such orphans were alive on this machine when
-/// the transport plan was written. Refusing at the factory is narrower than refusing at every
-/// call site, and it reports a terminal state rather than sitting in `.starting` forever.
+/// enabled remote access would run this developer's `tailscale` and publish their Mac, leaving
+/// the child behind: orphans of exactly that shape were alive on this machine when the transport
+/// plan was written. Refusing at the factory is narrower than refusing at every call site, and it
+/// reports a terminal state rather than sitting in `.starting` forever.
 @MainActor
-final class RefusedRemoteTransport: RemoteRelayTransport, RemoteTailnetTransport {
-    let lastFailure: RemoteRelayFailure? = nil
+final class RefusedRemoteTransport: RemoteTailnetTransport {
     let readiness: TailscaleReadiness = .notChecked
     /// A refused process reads nothing, so the facts stay unknown rather than becoming a claim
     /// about the developer's own machine.
@@ -381,21 +331,4 @@ enum RemoteTailscaleDoorImplementation: Equatable, Sendable {
 
     /// What this build does.
     static let current: RemoteTailscaleDoorImplementation = .listenerDoor
-}
-
-/// **Superseded by the per-door switches.** Read only by the one migration that carries a stored
-/// mode over to them (`AppSettings.migrateRemoteAccessConnectionMode()`).
-///
-/// A mode forced a single choice between overlapping things, which is what made the settings
-/// screen dishonest: "Tailscale" said nothing about who could see the traffic, and "Relay" said
-/// nothing about the address dying on restart. Doors are one switch per network, each with its
-/// own four lines.
-enum RemoteAccessConnectionMode: String, CaseIterable, Sendable {
-    case relay
-    case tailscale
-    case tailscaleAndRelay
-
-    /// The half of the old mode the migration carries: both tailnet modes mean "this Mac
-    /// answers on my tailnet".
-    var usesTailscale: Bool { self != .relay }
 }

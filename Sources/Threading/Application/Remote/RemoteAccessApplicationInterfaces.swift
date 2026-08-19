@@ -73,11 +73,8 @@ protocol RemoteHostCommanding: AnyObject, Sendable {
     func createSessionShare(
         for sessionID: SessionID,
         capability: RemoteCapability,
-        canApprovePermissions: Bool,
-        completion: @escaping @MainActor (
-            Result<RemoteCreatedShare, RemoteSharePreparationError>
-        ) -> Void
-    )
+        canApprovePermissions: Bool
+    ) -> Result<RemoteCreatedShare, RemoteSharePreparationError>
     func revokeSessionShares(_ sessionID: SessionID)
 }
 

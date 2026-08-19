@@ -13,11 +13,11 @@ struct AgentChildRecord: Codable, Equatable, Sendable {
     let pid: Int32
     let startTime: ProcessStartTime
     /// The Threading session the child belongs to, when it is a conversation. Long-lived
-    /// infrastructure children such as the remote relay have no session rather than inventing
-    /// an id that looks like a row. Optional also makes older records forward-compatible with
-    /// new child categories while preserving the original on-disk field.
+    /// infrastructure children such as the Tailscale Serve handler have no session rather than
+    /// inventing an id that looks like a row. Optional also makes older records
+    /// forward-compatible with new child categories while preserving the original on-disk field.
     let sessionID: String?
-    /// The launched file's last path component — `claude`, `codex`, `grok`, `cloudflared`.
+    /// The launched file's last path component: `claude`, `codex`, `grok`, `tailscale`.
     /// Enough to say what was killed without recording where it was installed.
     let executable: String
     let recordedAt: Date

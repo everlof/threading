@@ -306,10 +306,11 @@ final class PrivacyPreferencesViewController: NSViewController {
             ),
             SettingsUI.detailRow(
                 symbol: "network",
-                title: "Remote Access starts at a loopback listener",
-                detail: "The listener binds to 127.0.0.1 and the selected HTTPS relay or "
-                    + "Tailscale Serve publishes only that listener. Threading opens no LAN "
-                    + "listener, so macOS never asks for Local Network access."
+                title: "Remote Access binds only the ways in you turn on",
+                detail: "The listener always binds 127.0.0.1, and binds a network address only "
+                    + "for a way in you switched on. Each of those presents this Mac’s own "
+                    + "certificate, which your paired phone pins; nothing else terminates the "
+                    + "traffic."
             )
         ])
     }

@@ -86,6 +86,20 @@ final class ShareChatSheetTests: XCTestCase {
         )
     }
 
+    /// Who the invitation is for, in the first sentence.
+    ///
+    /// A share used to reach anybody with a browser, because a public relay carried it. It does
+    /// not any more: the link points at a door of this Mac's own, so the person on the other end
+    /// has to be on that network and running the app. Leaving that out is how somebody sends a
+    /// link to a colleague in another country and waits.
+    func testTheMessageSaysWhoCanUseTheInvitation() {
+        let message = ShareChatSheet.request(chatTitle: "Fix the parser", isRunning: true).message
+
+        XCTAssertTrue(message.contains("Wi-Fi or tailnet"))
+        XCTAssertTrue(message.contains("Threading app"))
+        XCTAssertFalse(message.lowercased().contains("relay"))
+    }
+
     func testTheMessageKeepsTheInvitationMechanicsAndNotTheGrants() {
         let message = ShareChatSheet.request(chatTitle: "Fix the parser", isRunning: true).message
 

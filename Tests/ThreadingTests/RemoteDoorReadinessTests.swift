@@ -1,11 +1,13 @@
 import XCTest
 @testable import Threading
 
-/// The relay's half of "my iPhone never got a pairing code".
+/// "My iPhone never got a pairing code", and everything the app could not say about it.
 ///
 /// Every case here stands for a way the settings page sat on "Preparing your pairing code /
-/// Connecting…" with no reason and no way out, while the relay itself was fine.
-final class RemoteRelayReadinessTests: XCTestCase {
+/// Connecting…" with no reason and no way out, while the way in itself was fine. The reading half
+/// is here too: a child that prints a short burst and keeps running is what the pairing card was
+/// waiting on, and it is now `tailscale serve` rather than the relay that produced it.
+final class RemoteDoorReadinessTests: XCTestCase {
 
     // MARK: - Reading a running child's output
 
@@ -27,7 +29,7 @@ final class RemoteRelayReadinessTests: XCTestCase {
         defer { stream.cancel() }
 
         // Far less than any plausible read chunk, and nothing follows it: exactly the shape of a
-        // quick Tunnel announcing its address and then going quiet.
+        // CLI announcing its address and then going quiet.
         let burst = Data("a short banner line\n".utf8)
         burst.withUnsafeBytes { raw in
             XCTAssertEqual(write(descriptors[1], raw.baseAddress, raw.count), raw.count)
@@ -113,101 +115,6 @@ final class RemoteRelayReadinessTests: XCTestCase {
         // Idempotent, and never a second close of a number the kernel has since handed out.
         stream.cancel()
         stream.cancel()
-    }
-
-    // MARK: - Parsing the published address
-
-    func testFindsTheAddressInAQuickTunnelBanner() {
-        // The real shape of the output: box drawing around it, and log level prefixes.
-        let banner = """
-        2026-08-16T15:04:51Z INF Requesting new quick Tunnel on trycloudflare.com...
-        2026-08-16T15:04:58Z INF +------------------------------------------------------+
-        2026-08-16T15:04:58Z INF |  Your quick Tunnel has been created! Visit it at:     |
-        2026-08-16T15:04:58Z INF |  https://followed-joke-prizes-newton.trycloudflare.com |
-        2026-08-16T15:04:58Z INF +------------------------------------------------------+
-        """
-        XCTAssertEqual(
-            RemoteTunnel.publicURL(in: banner),
-            URL(string: "https://followed-joke-prizes-newton.trycloudflare.com")
-        )
-    }
-
-    func testFindsNoAddressBeforeOneIsPublished() {
-        let preamble = """
-        2026-08-16T15:04:51Z ERR Configuration file /dev/null was empty
-        2026-08-16T15:04:51Z INF Requesting new quick Tunnel on trycloudflare.com...
-        """
-        XCTAssertNil(RemoteTunnel.publicURL(in: preamble))
-    }
-
-    // MARK: - A relay that starts and never answers
-
-    /// The state the app actually shipped in: a child alive and quiet, and a transport with no
-    /// way out of `.starting`. It now ends as a reported failure with a code.
-    @MainActor
-    func testARelayThatNeverPublishesAnAddressTimesOut() async throws {
-        let quiet = try QuietExecutable()
-        defer { try? FileManager.default.removeItem(at: quiet.directory) }
-        let tunnel = RemoteTunnel(
-            childLedger: AgentChildLedger(url: quiet.directory.appendingPathComponent("ledger")),
-            locateExecutable: { quiet.url },
-            startupTimeout: .milliseconds(400)
-        )
-        defer { tunnel.stop() }
-
-        let states = ObservedStates()
-        tunnel.start(port: 65000) { states.append($0) }
-        XCTAssertEqual(tunnel.state, .starting)
-
-        // The child has to be up before its death can mean anything.
-        try await waitUntil(within: .seconds(10)) { quiet.launchedProcessID != nil }
-        let child = try XCTUnwrap(quiet.launchedProcessID)
-        XCTAssertTrue(quiet.isRunning(child), "the stand-in relay should be alive to be killed")
-
-        try await waitUntil(within: .seconds(10)) {
-            if case .unavailable = tunnel.state { return true }
-            return false
-        }
-        XCTAssertEqual(tunnel.lastFailure, .startupTimedOut)
-        XCTAssertTrue(
-            states.all.contains { if case .unavailable = $0 { return true } else { return false } },
-            "the failure has to reach the coordinator, not only the transport"
-        )
-
-        // Fail closed: a relay we have stopped tracking must not be left publishing this Mac.
-        try await waitUntil(within: .seconds(10)) { !quiet.isRunning(child) }
-    }
-
-    /// No child, no spawn, and still a code — the branch a machine without `cloudflared` takes.
-    @MainActor
-    func testAMissingRelayBinaryReportsItsOwnCode() {
-        let tunnel = RemoteTunnel(locateExecutable: { nil })
-        defer { tunnel.stop() }
-
-        var reported: RemoteTransportState?
-        tunnel.start(port: 65000) { reported = $0 }
-
-        XCTAssertEqual(tunnel.lastFailure, .notInstalled)
-        guard case .unavailable = reported else {
-            return XCTFail("the missing binary has to be reported, not merely stored")
-        }
-    }
-
-    // MARK: - Saying which way it failed
-
-    /// The journal recorded `reason=unavailable` for every relay failure alike, because the
-    /// reason was inferred from a localised sentence. These codes are what a report groups by.
-    func testRelayFailuresCarryTheirOwnDiagnosticReason() {
-        XCTAssertEqual(RemoteRelayFailure.notInstalled.diagnosticReason, "unavailable")
-        XCTAssertEqual(RemoteRelayFailure.launchFailed.diagnosticReason, "unavailable")
-        XCTAssertEqual(RemoteRelayFailure.startupTimedOut.diagnosticReason, "timeout")
-        XCTAssertEqual(RemoteRelayFailure.exitedDuringStartup.diagnosticReason, "process-exited")
-        XCTAssertEqual(RemoteRelayFailure.exitedAfterConnecting.diagnosticReason, "process-exited")
-    }
-
-    func testRelayFailureCodesAreStableTokens() {
-        XCTAssertEqual(RemoteRelayFailure.startupTimedOut.rawValue, "startupTimedOut")
-        XCTAssertEqual(RemoteRelayFailure.notInstalled.rawValue, "notInstalled")
     }
 
     // MARK: - What the pairing card says
@@ -556,88 +463,6 @@ final class RemoteRelayReadinessTests: XCTestCase {
         address: RemoteNetworkAddress(interfaceName: "en0", address: "192.168.1.42"),
         port: 8760
     )
-}
-
-private extension XCTestCase {
-    /// Polls rather than sleeping a fixed amount, so a slow machine does not turn a passing
-    /// deadline into a flake.
-    func waitUntil(
-        within limit: Duration,
-        _ condition: @MainActor () -> Bool
-    ) async throws {
-        let deadline = ContinuousClock.now.advanced(by: limit)
-        while ContinuousClock.now < deadline {
-            if await condition() { return }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        let met = await condition()
-        XCTAssertTrue(met, "condition was still false after \(limit)")
-    }
-}
-
-/// A stand-in for a relay binary that launches, ignores its arguments, says nothing, and stays
-/// alive — the exact shape that produced no output and no failure.
-///
-/// It reports its own pid before `exec`ing, because matching a command line does not survive the
-/// `exec`: an earlier version of this fixture looked for the script's path in `ps` and so passed
-/// whether or not the child was still running.
-private struct QuietExecutable {
-    let directory: URL
-    let url: URL
-    private let pidURL: URL
-
-    init() throws {
-        directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("quiet-relay-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        url = directory.appendingPathComponent("quiet-relay")
-        pidURL = directory.appendingPathComponent("pid")
-        try """
-        #!/bin/sh
-        printf '%s' "$$" > "\(pidURL.path)"
-        exec sleep 120
-        """.write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755],
-            ofItemAtPath: url.path
-        )
-    }
-
-    /// The pid the child reported, once it has. `exec` keeps it, so this identifies the process
-    /// that is actually holding the relay open.
-    var launchedProcessID: pid_t? {
-        guard let text = try? String(contentsOf: pidURL, encoding: .utf8),
-              let value = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            return nil
-        }
-        return value
-    }
-
-    /// Asked of the kernel rather than of the transport, so the assertion is about the machine
-    /// and not about what the app believes. A reaped child answers ESRCH; an unreaped zombie
-    /// still answers a signal check, so the process state decides.
-    func isRunning(_ pid: pid_t) -> Bool {
-        guard kill(pid, 0) == 0 else { return false }
-        let listing = Process()
-        listing.executableURL = URL(fileURLWithPath: "/bin/ps")
-        listing.arguments = ["-p", String(pid), "-o", "state="]
-        let pipe = Pipe()
-        listing.standardOutput = pipe
-        listing.standardError = FileHandle.nullDevice
-        guard (try? listing.run()) != nil else { return true }
-        let output = pipe.fileHandleForReading.readDataToEndOfFile()
-        listing.waitUntilExit()
-        let state = String(decoding: output, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return !state.isEmpty && !state.hasPrefix("Z")
-    }
-}
-
-/// The transport reports on the main actor; the assertions read the sequence afterwards.
-@MainActor
-private final class ObservedStates {
-    private(set) var all: [RemoteTransportState] = []
-    func append(_ state: RemoteTransportState) { all.append(state) }
 }
 
 /// Output arrives on Foundation's monitoring queue, not on the test's thread.

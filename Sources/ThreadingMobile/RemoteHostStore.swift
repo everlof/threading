@@ -152,9 +152,10 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
     /// an authentication refusal, a certificate that is not the pinned one) ends that door.
     /// Continuing to knock on nine more ports after the Mac has spoken finds nothing.
     var candidates: [RemoteHostConnectionCandidate] {
-        // `nil` is a legacy record from before hosts advertised routes. An explicitly empty
-        // list is different: the Mac currently authorizes no endpoint under its policy, so
-        // falling back to a remembered relay here would violate private-only.
+        // `nil` is a legacy record from before hosts advertised routes, and it is also what a
+        // guest capability holds: a one-chat share is told the door it was minted against and no
+        // others. An explicitly empty list is different: the Mac currently authorizes no endpoint
+        // under its policy, so falling back to a remembered address here would violate it.
         guard let endpoints else {
             return RemoteHostConnectionCandidate.attempts(
                 baseURL: link.baseURL,
@@ -184,6 +185,11 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         return result
     }
 
+    /// What this connection is called on screen.
+    ///
+    /// `relay` is still here because a record can still carry it: an older Mac advertises the
+    /// kind, and a pairing made against one is not re-labelled by this phone updating. No current
+    /// host sends it.
     var connectionLabel: String {
         switch activeEndpointKind ?? Self.endpointKind(for: link.baseURL) {
         case RemoteHostEndpointKind.tailscale: return MobileL10n.string("Tailscale")
@@ -294,6 +300,10 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
 
     /// A guess at which door an address belongs to, for a record that has no advertised list to
     /// consult. Used for labels and diagnostics only; nothing is authorized by it.
+    ///
+    /// A public host answers `relay` because that is what an address outside every private range
+    /// used to be. No current Mac has one, so in practice this reaches the last case only for a
+    /// record written by an older pairing.
     static func endpointKind(for baseURL: URL) -> String {
         guard let host = baseURL.host?.lowercased() else { return "direct" }
         if host.hasSuffix(".ts.net") { return RemoteHostEndpointKind.tailscale }
@@ -318,7 +328,7 @@ struct RemoteHostConnectionCandidate: Equatable {
     /// own order, because the Mac walks the same list when its configured port is taken and a
     /// collision must not cost a re-pair. Bounded by the range and deterministic: ten addresses
     /// tried one after another, never in parallel. Every other kind contributes itself alone,
-    /// because a tailnet name, a relay hostname and a VPN address are not ports somebody guessed.
+    /// because a tailnet name and a VPN address are not ports somebody guessed.
     static func attempts(
         baseURL: URL,
         kind: String,

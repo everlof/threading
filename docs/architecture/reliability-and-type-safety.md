@@ -99,11 +99,12 @@ log text.
 That count reads like a ceiling and is a *length to fill*: Foundation stays inside `read(2)` until
 that many bytes arrive or the writer closes the pipe. A child that prints a burst and keeps running
 therefore delivers nothing at all, and nothing reports it, because a blocked read is not a failure
-anybody counts. This shipped: the HTTPS relay asked for 16 KB, `cloudflared` printed roughly 3 KB
-of banner — the published address inside it — and then went quiet, so the very first readability
-callback blocked for the life of the app. The tunnel was live and serving real traffic over
-`trycloudflare.com` the whole time; the settings page said "Preparing your pairing code /
-Connecting…" and iPhone pairing was unreachable in Relay mode. `BoundedChildProcess.captureSuffix`
+anybody counts. This shipped: the since-retired HTTPS relay asked for 16 KB, its child printed
+roughly 3 KB of banner with the published address inside it and then went quiet, so the very first
+readability callback blocked for the life of the app. The tunnel was live and serving real traffic
+the whole time; the settings page said "Preparing your pairing code / Connecting…" and iPhone
+pairing was unreachable. `TailscaleServeTransport` reads the same way, which is why the type
+outlived the transport it was written for. `BoundedChildProcess.captureSuffix`
 is the deliberate exception: it drains a finite helper to EOF behind a `ChildProcessDeadline`, so
 filling is what it wants.
 
@@ -117,7 +118,7 @@ then the kernel may have given that number to an unrelated file. `ChildOutputStr
 read source over a non-blocking descriptor it owns: GCD's cancel handler runs after the event
 handler has finished and never twice, so the close happens exactly once with nobody reading, and
 `ChildOutputReader.read` returns an outcome rather than raising. Every teardown path cancels
-explicitly rather than relying on `deinit`. `RemoteRelayReadinessTests` covers the burst, end of
+explicitly rather than relying on `deinit`. `RemoteDoorReadinessTests` covers the burst, end of
 file, a broken descriptor, and a spurious wake-up; the first fails by timeout if the primitive
 changes back.
 
@@ -126,16 +127,16 @@ evidence anywhere — the diagnostics journal records `relayConnected` and `rela
 transport stuck in `.starting` reaches neither, so the one failure a support report most needed to
 explain was the one it could not see. Any transport that can sit between "started" and "answered"
 carries a timeout that converts silence into a stated reason, and a typed code beside the sentence
-a person reads (`RemoteRelayFailure`, as `TailscaleReadinessIssue` already did) so a report groups
-by cause rather than by localised prose. UI follows the same rule: a spinner is for work that is
+a person reads (`TailscaleReadinessIssue`) so a report groups by cause rather than by localised
+prose. UI follows the same rule: a spinner is for work that is
 still arriving, and a surface that is up but unusable gets its own copy and a retry, never the
 progress branch — see `RemotePairingCardState`.
 
-Declaring a transport failed also ends its child. A relay this app has stopped tracking must not be
-left publishing the loopback listener, since an address serving real traffic that nothing in the
-app knows about is the shape of the original bug, not a convenient fallback. Recovery is the user's
-explicit retry, and the test asks the kernel whether the process is gone rather than asking the
-transport what it believes.
+Declaring a transport failed also ends its child. A transport this app has stopped tracking must
+not be left publishing the loopback listener, since an address serving real traffic that nothing in
+the app knows about is the shape of the original bug, not a convenient fallback. Recovery is the
+user's explicit retry, and a test of one asks the kernel whether the process is gone rather than
+asking the transport what it believes.
 
 A feature is not stable merely because its happy path works. Before calling one stable, it has:
 
