@@ -43,7 +43,8 @@
         "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()",
         "ThemedPresentationTests\/testAlertDismissEndsTheSheetWithoutAButtonAnswer()",
         "ThemedPresentationTests\/testAlertEscapeEndsTheSheetAndReturnsFocus()",
-        "ThemedPresentationTests\/testPopoverEscapeClosesOnceAndReturnsFocus()"
+        "ThemedPresentationTests\/testPopoverEscapeClosesOnceAndReturnsFocus()",
+        "ThemedPresentationTests\/testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack()"
       ],
       "target" : {
         "containerPath" : "container:Threading.xcodeproj",

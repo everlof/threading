@@ -478,13 +478,14 @@ the following cases genuinely need to be visible, and they are skipped by name i
   `testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()` — both assert on first
   responder, which requires a key window.
 - `ThemedPresentationTests/testPopoverEscapeClosesOnceAndReturnsFocus()`,
-  `testAlertEscapeEndsTheSheetAndReturnsFocus()` and
-  `testAlertDismissEndsTheSheetWithoutAButtonAnswer()` — the three that share `testWindow()`, a
-  titled 420×260 fixture at (120,120) with `makeKeyAndOrderFront`. They present a real popover
-  panel and real sheets and assert who holds the keyboard afterwards, which is AppKit's
-  presentation machinery rather than ours. They were flashing a window three times per `fast`
-  run, which is the lane an agent re-runs all day; they still run in `all`, so the push gate is
-  unchanged.
+  `testAlertEscapeEndsTheSheetAndReturnsFocus()`,
+  `testAlertDismissEndsTheSheetWithoutAButtonAnswer()` and
+  `testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack()` — the four that share
+  `testWindow()`, a titled 420×260 fixture at (120,120) with `makeKeyAndOrderFront`. They
+  present a real popover panel and real sheets and assert who holds the keyboard afterwards,
+  which is AppKit's presentation machinery rather than ours. They were flashing a window three
+  times per `fast` run, which is the lane an agent re-runs all day; they still run in `all`, so
+  the push gate is unchanged.
 
 **Adding a test that needs a real window?** Add it to `skippedTests` in
 `TestPlans/Threading-Fast.xctestplan` and say why here. Anything that can be asserted against an
@@ -500,6 +501,27 @@ where you would notice it. Overriding `constrainFrameRect(_:to:)` to return the 
 keeps a titled window parked. So a fixture that needs a real window does not automatically need a
 *visible* one: check whether it can be borderless or unconstrained first, and skip it from `fast`
 only when it genuinely has to be somewhere a person could see.
+
+**Parking answers "is this drawn", not "where do the keystrokes go" — and neither does ordering
+front.** The trick above buys a real window for rendering and for WebKit; it does not buy key
+status, because the window server does not hand the keyboard to a window sitting on no display.
+`ThemedPresentationTests/testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack()` was
+tried on exactly that fixture — titled, `constrainFrameRect(_:to:)` overridden, parked at
+(-10,000, -10,000), `makeKeyAndOrderFront` — and came up with `isKeyWindow` false.
+
+Moving it to the visible `testWindow()` did not fix it either, and the reason is one level up:
+**`NSApp.keyWindow` is `nil` for the whole of an inactive application.** A suite started by
+`scripts/test.sh` runs with the terminal frontmost, and since macOS 14 `activate(ignoringOtherApps:)`
+cannot take the front from an app that has not yielded it — so no window in the host holds key,
+`makeKeyAndOrderFront` merely records the intent, and every key-status assertion fails while the
+code under test is working. Diagnosing this by adding assertions for `NSApp.isActive` and
+`NSApp.keyWindow` beside the failing one took a minute and saved changing the popover.
+
+So a test that asserts `isKeyWindow` belongs in the skip list above **and** has to ask for the
+front itself. `activateHost()` in that file does it, and `XCTSkipUnless`es when the front does not
+come, so a run that structurally cannot observe focus says so instead of blaming the component.
+Expect that test to report as skipped in an ordinary command-line `all` run; it verifies for real
+when the host is frontmost.
 
 **A fast fixture window is built, never shown, and has bounded ownership.** An unshown window still
 lays out, draws through `cacheDisplay`, and takes a first responder, which is everything these

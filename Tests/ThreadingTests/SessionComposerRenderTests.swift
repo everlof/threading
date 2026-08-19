@@ -1049,6 +1049,7 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         defer { try? FileManager.default.removeItem(at: imageURL) }
         prompt.stringValue = "Crop the empty space out of this"
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
         composer.refreshScheduleChip()
         XCTAssertTrue(composer.scheduleButton.isEnabled)
         XCTAssertNil(try refusal(), "an attached image was refused rather than carried")
@@ -1122,6 +1123,7 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         defer { try? FileManager.default.removeItem(at: imageURL) }
         prompt.stringValue = "Crop the empty space out of this"
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         composer.scheduleStart(at: Date().addingTimeInterval(60 * 60), anchor: .wallClock)
 
@@ -1199,6 +1201,7 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         let prompt = try XCTUnwrap(promptView(in: composer.view))
         prompt.stringValue = "Crop the empty space out of this"
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         // The session in between, then the same project selected again.
         composer.show(projectID: project.id)
@@ -1236,6 +1239,7 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         let send = try startButton(in: composer.view)
         prompt.stringValue = "Read this screenshot"
         prompt.attachFiles(at: [imageURL.path])
+        waitForAttachmentPreparation(prompt)
 
         delegate.starts = false
         send.performClick()
@@ -1805,6 +1809,28 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap { descendants(of: $0) }
+    }
+
+    /// Lets a just-attached file finish becoming a preview.
+    ///
+    /// The composer prepares attachments serially and decodes them off the main actor, so a
+    /// path handed over on this line is *pending* on the next one: no thumbnail yet, and no
+    /// submit, because a draft cannot be sent while a file it owns is still being classified.
+    /// A file that turns out to be undecodable resolves the same way — into literal text — so
+    /// waiting is what both outcomes have in common, and asserting either one before this
+    /// returns is asserting on a half-built composer.
+    private func waitForAttachmentPreparation(
+        _ prompt: PromptView,
+        timeout: TimeInterval = 5
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while prompt.isPreparingAttachments, Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+        }
+        XCTAssertFalse(
+            prompt.isPreparingAttachments,
+            "the composer never finished preparing its attachments"
+        )
     }
 }
 

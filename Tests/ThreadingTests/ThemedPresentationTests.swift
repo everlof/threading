@@ -324,7 +324,9 @@ final class ThemedPresentationTests: XCTestCase {
     /// editor, so a caret blinks in the popover while the keystrokes reach the window underneath.
     /// ⌘J's file search shipped that way. Only key status is evidence, so that is what is asserted.
     func testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack() throws {
-        let window = offscreenWindow()
+        try activateHost()
+        let window = testWindow()
+        defer { settle(window) }
         let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
         XCTAssertTrue(window.makeFirstResponder(anchor))
 
@@ -864,9 +866,44 @@ final class ThemedPresentationTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// A **key** window, for the two tests that assert where focus lands — which is the one
+    /// Brings the test host to the front, because key status does not exist until it is there.
+    ///
+    /// `NSApp.keyWindow` is `nil` for the whole of an inactive application, however many windows
+    /// it has ordered front: `makeKeyAndOrderFront` records the intent, and the window server
+    /// hands the keyboard over at activation. A suite launched from `scripts/test.sh` starts
+    /// inactive — the terminal that started it is frontmost — so a key-status assertion there is
+    /// reading the environment rather than the code, which is how this test came to fail on a
+    /// popover that was working. It is in `all` and not `fast` for exactly this reason: taking
+    /// the front is the interruption `fast` exists to avoid.
+    ///
+    /// Skipped rather than failed when activation does not come, so a session with no window
+    /// server reports the truth — the behaviour was not observable — instead of accusing the
+    /// popover.
+    private func activateHost() throws {
+        guard !NSApp.isActive else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let deadline = Date().addingTimeInterval(2)
+        while !NSApp.isActive, Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
+        }
+        try XCTSkipUnless(
+            NSApp.isActive,
+            "the test host could not come to the front, so no window can hold key status"
+        )
+    }
+
+    /// A **key** window, for the four tests that assert where focus lands — which is the one
     /// thing an unshown window cannot answer, and so the only reason to prefer this over
     /// `offscreenWindow()` below. Everything else in this file uses that one.
+    ///
+    /// **It has to be on a display, and that is why its tests are skipped from the fast plan.**
+    /// A borderless or unconstrained window parked at (-10,000, -10,000) is the usual way to
+    /// need a real window without showing one, and it is enough for rendering and for WebKit —
+    /// but not for this. The window server does not hand the keyboard to a window that is on no
+    /// screen: a titled fixture whose `constrainFrameRect(_:to:)` was overridden to keep it
+    /// parked came up with `isKeyWindow` false, and every focus assertion under it failed while
+    /// the popover was working correctly. Parking answers "is this drawn"; only a window
+    /// somebody could look at answers "where do the keystrokes go".
     private func testWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 120, y: 120, width: 420, height: 260),

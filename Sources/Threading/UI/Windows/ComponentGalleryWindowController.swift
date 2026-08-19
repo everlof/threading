@@ -197,8 +197,12 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedMultilineTitleLabel",
         "AnnotatedImageView",
         "ImageAnnotationRailView",
+        "ImageAnnotationPaneView",
+        "ImageAnnotationReceiptView",
+        "ImageAnnotationCountView",
         "ToastPresenter",
         "ToastView",
+        "ControlButtonGroupView",
         "ToolbarButtonGroupView",
         "UsageDashboardView",
         "UsageReadingLabel",
@@ -890,6 +894,14 @@ final class ComponentGalleryViewController: NSViewController {
                     "ToolbarButtonGroupView",
                     "Related toolbar actions spaced as a set, the way the window's own trailing controls are.",
                     groupedActions
+                ),
+                story(
+                    "ControlButtonGroupView",
+                    "The same run inside a content control row rather than a toolbar. The space "
+                        + "within a related run is tighter than the space between separate "
+                        + "decisions, and the whole run takes the theme's row height in one "
+                        + "step — switch the style above and every icon in it follows.",
+                    makeControlButtonGroupStory()
                 ),
                 story(
                     "ControlRowView",
@@ -2951,6 +2963,27 @@ final class ComponentGalleryViewController: NSViewController {
                     makeImageAnnotationSample()
                 ),
                 story(
+                    "ImageAnnotationPaneView",
+                    "The whole sidecar the inspector hangs beside a picture: the list, how many "
+                        + "of the twenty are used, what the chat has already been given, and the "
+                        + "one press that gives it the rest. The inspector supplies the pixels "
+                        + "and the mutations; the pane owns the layout.",
+                    makeImageAnnotationPaneStory()
+                ),
+                story(
+                    "ImageAnnotationReceiptView",
+                    "What is left where the picture lives once the inspector is closed: how many "
+                        + "marks were saved, whether the chat has this revision, and the way back "
+                        + "in. Shown beside the source image rather than inside the inspector.",
+                    makeImageAnnotationReceiptStory()
+                ),
+                story(
+                    "ImageAnnotationCountView",
+                    "The same fact at row size, for the attachments chronology — a pin and a "
+                        + "number, read as one glance down a column.",
+                    makeImageAnnotationCountStory()
+                ),
+                story(
                     "ThemedFileIconView",
                     "Native Finder artwork under System; semantic, theme-owned file kinds under authored themes.",
                     makeFileIconSample()
@@ -3557,6 +3590,98 @@ final class ComponentGalleryViewController: NSViewController {
 
     /// The picture and its rail, wired to each other exactly as the report sheet wires them —
     /// this story is the one place the two halves can be exercised without filing a report.
+    /// Three related icon actions as one run, plus the same run again with a single member, so
+    /// the spacing *inside* a run can be compared against the spacing between the two groups.
+    private func makeControlButtonGroupStory() -> NSView {
+        let run = ControlButtonGroupView(buttons: [
+            galleryToolbarButton(symbol: "arrow.uturn.backward", label: "Step back"),
+            galleryToolbarButton(symbol: "arrow.uturn.forward", label: "Step forward"),
+            galleryToolbarButton(symbol: "arrow.clockwise", label: "Reload")
+        ])
+        let single = ControlButtonGroupView(buttons: [
+            galleryToolbarButton(symbol: "square.and.arrow.up", label: "Share")
+        ])
+        return row([run, single])
+    }
+
+    /// The pane at the size the inspector gives it, holding a list that is neither empty nor at
+    /// its cap, and a chat that has an older revision — the state the footer has most to say about.
+    private func makeImageAnnotationPaneStory() -> NSView {
+        let pane = ImageAnnotationPaneView()
+        pane.setAnnotations(
+            galleryAnnotationFixture(),
+            sharingState: .changedInChat,
+            showsChatActions: true,
+            canShare: true
+        )
+        pane.onShare = { [weak self] in
+            self?.showReceipt(L10n.string("Added the current revision to the chat."))
+        }
+        pane.onRemoveFromChat = { [weak self] in
+            self?.showReceipt(L10n.string("Took the revision back out of the chat."))
+        }
+        NSLayoutConstraint.activate([
+            pane.widthAnchor.constraint(equalToConstant: 260),
+            pane.heightAnchor.constraint(equalToConstant: 240)
+        ])
+        return pane
+    }
+
+    /// Two receipts side by side, because the sentence under the count is the whole component:
+    /// one chat holds this exact revision, the other holds an older one.
+    private func makeImageAnnotationReceiptStory() -> NSView {
+        let current = ImageAnnotationReceiptView()
+        current.configure(count: 3, state: .currentInChat, canShare: false)
+        current.onEdit = { [weak self] in
+            self?.showReceipt(L10n.string("Reopened the picture for editing."))
+        }
+        current.onPrimaryAction = { [weak self] in
+            self?.showReceipt(L10n.string("Took the receipt's action."))
+        }
+
+        let stale = ImageAnnotationReceiptView()
+        stale.configure(count: 1, state: .changedSinceShared, canShare: true)
+        stale.onEdit = { [weak self] in
+            self?.showReceipt(L10n.string("Reopened the picture for editing."))
+        }
+        stale.onPrimaryAction = { [weak self] in
+            self?.showReceipt(L10n.string("Took the receipt's action."))
+        }
+
+        let column = NSStackView(views: [current, stale])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.medium
+        column.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([column.widthAnchor.constraint(equalToConstant: 380)])
+        return column
+    }
+
+    /// One, a handful, and the cap — the three widths the column has to stay legible at.
+    private func makeImageAnnotationCountStory() -> NSView {
+        row([
+            ImageAnnotationCountView(count: 1),
+            ImageAnnotationCountView(count: 7),
+            ImageAnnotationCountView(count: ImageAnnotationDefaults.maximumCount)
+        ])
+    }
+
+    /// Notes rather than placeholder text: an empty note and a written one lay out differently,
+    /// and the pane is the component that has to hold both.
+    private func galleryAnnotationFixture() -> [ImageAnnotation] {
+        [
+            ImageAnnotation(
+                point: CGPoint(x: 0.28, y: 0.34),
+                note: L10n.string("The row loses its highlight before the capture is taken.")
+            ),
+            ImageAnnotation(
+                point: CGPoint(x: 0.66, y: 0.58),
+                note: L10n.string("This label wraps one word early at this width.")
+            ),
+            ImageAnnotation(point: CGPoint(x: 0.44, y: 0.80))
+        ]
+    }
+
     private func makeImageAnnotationSample() -> NSView {
         let size = NSSize(width: 900, height: 500)
         let plate = NSImage(size: size)
