@@ -69,6 +69,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let permissionModePopUp = ThemedPopUp()
     private let shellField = ThemedTextField()
     private let newChatOpeningMessageField = ThemedTextField()
+    private var openingMessageWriteTimer: Timer?
 
     /// The scratchpad's folder, **shown rather than typed.** A path with a typo in it is a
     /// scratchpad nobody can find and an agent launching into nothing; the picker cannot
@@ -87,6 +88,11 @@ final class GeneralPreferencesViewController: NSViewController {
         view = NSView()
         setupControls()
         setupLayout()
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        flushOpeningMessageWrite()
     }
 
     override func viewWillAppear() {
@@ -733,6 +739,26 @@ final class GeneralPreferencesViewController: NSViewController {
         )
 
         return [master] + kinds + [choice, events]
+    }
+
+    // MARK: - Opening Message
+
+    private func scheduleOpeningMessageWrite() {
+        openingMessageWriteTimer?.invalidate()
+        openingMessageWriteTimer = Timer.scheduledTimer(
+            withTimeInterval: GeneralPreferencesDefaults.textSettingCoalescingInterval,
+            repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.flushOpeningMessageWrite() }
+        }
+    }
+
+    private func flushOpeningMessageWrite() {
+        openingMessageWriteTimer?.invalidate()
+        openingMessageWriteTimer = nil
+        let typed = newChatOpeningMessageField.stringValue
+        guard AppSettings.shared.newChatOpeningMessage != typed else { return }
+        AppSettings.shared.newChatOpeningMessage = typed
     }
 
     // MARK: - Alert Sound
@@ -1483,9 +1509,25 @@ final class GeneralPreferencesViewController: NSViewController {
 }
 
 extension GeneralPreferencesViewController: NSTextFieldDelegate {
+    /// Coalesced, because writing this setting is not free: every write posts
+    /// `AppSettingsDidChange`, and its observers re-read each project's git control files,
+    /// re-scan the three sound directories twice, and diff a snapshot of every session. That is
+    /// several milliseconds of filesystem work per *character* — measured at ~2 ms of git reads
+    /// alone across ten projects — for a value nothing reads until the next chat is created.
+    ///
+    /// Coalescing here rather than in the descriptor: a toggle or a pop-up is a settled choice
+    /// the moment it is made and must still broadcast at once. Only free text arrives one
+    /// keystroke at a time, and it means nothing until it stops.
     func controlTextDidChange(_ notification: Notification) {
         guard notification.object as? NSTextField === newChatOpeningMessageField else { return }
-        AppSettings.shared.newChatOpeningMessage = newChatOpeningMessageField.stringValue
+        scheduleOpeningMessageWrite()
+    }
+
+    /// A field that is left settles the setting immediately; so does leaving the page. Between
+    /// them, no path out of this row can lose what was typed into it.
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard notification.object as? NSTextField === newChatOpeningMessageField else { return }
+        flushOpeningMessageWrite()
     }
 }
 
@@ -1493,4 +1535,7 @@ extension GeneralPreferencesViewController: NSTextFieldDelegate {
 
 enum GeneralPreferencesDefaults {
     static let shellBrowseDirectory = "/bin"
+    /// Long enough that an ordinary sentence is one write, short enough that a page closed by
+    /// ⌘W a moment after the last character has already settled without needing the flush.
+    static let textSettingCoalescingInterval: TimeInterval = 0.4
 }

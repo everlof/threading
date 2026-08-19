@@ -642,7 +642,19 @@ Its `session-continuity.json` entry is keyed by `SessionID` and writes an unsent
 immediately; viewport progress is cheaper and is coalesced. Transcript content remains in the
 provider-owned session, so this file stores only the private local draft, normalized reading
 position, follow-bottom choice, and update time. Clearing a submitted draft preserves the
-viewport. Editable image annotation documents live here too: normalized marks, stable asset
+viewport.
+
+**Position-only records are bounded to the 250 most recent, on the host as well as the clients.**
+The rule was written for the companion archives and not applied here, and the omission is a typing
+latency bug rather than a disk one: every mutation rewrites, re-reads and re-verifies the whole
+file, and a draft and an annotation note are both written per keystroke. Nothing else in the app
+ever deletes a reading position, so one is kept for every session that has ever been scrolled —
+on a real machine the file reached 7,163 records and 2.2 MB, of which 7,159 were positions for
+sessions that no longer existed, and one keystroke in a composer or an annotation note cost 47 ms.
+Bounded, the same keystroke costs about 2 ms. A record holding an unsent draft, staged context or
+an annotation document is never pruned; `SessionContinuityState.hasUserContent` is the line, and
+the prune runs on load as well as on commit so a file that grew before the bound existed becomes
+small at the next mutation rather than paying for one whole-file write at every launch. Editable image annotation documents live here too: normalized marks, stable asset
 aliases, source custody, revision number, the stable composer-context id, and the last flattened
 revision shared. They are written on every edit because the inspector window is only one view of
 that work; closing it is not a persistence boundary and never implies publication. An unreadable

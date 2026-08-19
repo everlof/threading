@@ -186,17 +186,47 @@ final class SessionContinuityStore {
                 throw SessionContinuityStoreError.invalidSessionIdentifier(invalidID)
             }
         }
-        states = outcome.value.states.reduce(into: [:]) { result, entry in
-            guard let id = SessionID(uuidString: entry.key) else { return }
-            result[id] = entry.value
+        // Pruned on the way in, not written back: a file that grew before the bound existed
+        // becomes small at the next mutation rather than costing a write at every launch.
+        states = pruningPositions(
+            outcome.value.states.reduce(into: [:]) { result, entry in
+                guard let id = SessionID(uuidString: entry.key) else { return }
+                result[id] = entry.value
+            }
+        )
+    }
+
+    /// Position-only records are disposable history; records holding unsent words or marks are
+    /// not — the same rule `MobileSessionContinuityStore` applies to the same data.
+    ///
+    /// It belongs here rather than at the callers because the growth is not any one caller's:
+    /// a reading position is written for every session that is ever scrolled, and nothing else
+    /// in the app ever deletes one. Left unbounded on this machine it reached 7,163 records and
+    /// 2.2 MB, and since every mutation rewrites, re-reads and re-verifies the whole file, one
+    /// keystroke in a composer or an annotation note cost 47 ms. Bounded, the same keystroke
+    /// costs about 2 ms. See [`performance.md`](../../../docs/architecture/performance.md).
+    private func pruningPositions(
+        _ candidate: [SessionID: SessionContinuityState]
+    ) -> [SessionID: SessionContinuityState] {
+        let positionOnly = candidate
+            .filter { !$0.value.hasUserContent }
+            .sorted { $0.value.updatedAt > $1.value.updatedAt }
+        guard positionOnly.count > SessionContinuityDefaults.retainedPositionCount else {
+            return candidate
         }
+        var pruned = candidate
+        for entry in positionOnly.dropFirst(SessionContinuityDefaults.retainedPositionCount) {
+            pruned.removeValue(forKey: entry.key)
+        }
+        return pruned
     }
 
     /// This store carries unsent user text, so the verified file is the commit point. Keeping
     /// the prior in-memory value after failure also lets the standing composer continue to show
     /// what the next launch can actually recover.
     @discardableResult
-    private func commit(_ candidate: [SessionID: SessionContinuityState]) -> Bool {
+    private func commit(_ unbounded: [SessionID: SessionContinuityState]) -> Bool {
+        let candidate = pruningPositions(unbounded)
         let file = SessionContinuityFile(states: candidate.reduce(into: [:]) {
             $0[$1.key.uuidString] = $1.value
         })
@@ -215,11 +245,16 @@ struct SessionContinuityState: Codable, Equatable {
     var updatedAt = Date()
 
     var isEmpty: Bool {
-        conversationDraft.isEmpty
-            && conversationContext.isEmpty
+        !hasUserContent
             && conversationViewportProgress == nil
             && conversationFollowsBottom
-            && imageAnnotationDocuments.isEmpty
+    }
+
+    /// Words or marks the user authored and has not sent, which no prune may take.
+    var hasUserContent: Bool {
+        !conversationDraft.isEmpty
+            || !conversationContext.isEmpty
+            || !imageAnnotationDocuments.isEmpty
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -274,4 +309,7 @@ private enum SessionContinuityStoreError: LocalizedError {
 enum SessionContinuityDefaults {
     static let fileName = "session-continuity.json"
     static let viewportSaveDelay: TimeInterval = 0.25
+    /// How many position-only records survive, newest first. The companion clients keep the
+    /// same number of the same thing; see `MobileSessionContinuityStore`.
+    static let retainedPositionCount = 250
 }

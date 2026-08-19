@@ -3063,3 +3063,66 @@ Three changes, each measured:
 The lesson worth keeping is the middle one: "fewer passes" is not automatically faster than
 "several cheap passes", and the version that read best was 20× slower than the version it replaced.
 Measure each step.
+
+## Typing latency in a themed field
+
+Two fields were reported as unusably slow to type in — an image-annotation note in the media
+inspector, and the opening-message field in General settings. `ThemedTextField` itself was
+measured first and cleared: drawing one costs **0.086 ms**, an order of magnitude *less* than a
+stock `NSTextField` at 0.826 ms, and a full keystroke through the field editor including redraw is
+0.317 ms. The component was never the cost. Both fields were slow for the same structural reason
+in two different stores — **what the delegate does with each character**.
+
+### The annotation note: an unbounded file rewritten per keystroke
+
+Each character ran `SessionContinuityStore.setImageAnnotations`, and every mutation of that store
+encodes the whole file, writes it atomically, reads it back and compares it byte for byte. That is
+correct — it is the commit point for unsent user text — and it is affordable only if the file is
+bounded. It was not: nothing ever deleted a reading position, so the file held one for every
+session that had ever been scrolled. On this machine it had reached **7,163 records and 2.2 MB**,
+7,159 of them positions for sessions that no longer existed.
+
+Measured against a seeded copy of that file, Debug:
+
+| | before | after |
+|---|---|---|
+| `setImageAnnotations`, median | **47.06 ms** | **2.06 ms** |
+| `setConversationDraft`, median | 46.41 ms | 1.94 ms |
+| file on disk | 2,234,922 bytes | 79,177 bytes |
+
+The fix is the bound the companion clients already applied to the same data: position-only records
+are kept to the 250 most recent, and a record holding an unsent draft, staged context or an
+annotation document is never pruned. See [`persistence.md`](persistence.md).
+
+Note what this also means for the **composer**: it writes a draft through the same store on every
+keystroke, so it was paying the same 47 ms and is fixed by the same bound.
+
+The residual ~2 ms is the bounded whole-file encode, write and read-back verify. It is left in
+place deliberately rather than coalesced: the store's contract is that a draft is durable the
+moment it is typed, and 2 ms is frame-cheap.
+
+`SessionContinuityPruningTests` holds the boundary, including a keystroke-latency case seeded from
+a written file rather than from 7,163 writes — the shape the bug actually had is an app launching
+onto a file that grew over months.
+
+### The settings field: a global broadcast per character
+
+The opening-message field wrote `AppSettings.shared.newChatOpeningMessage` on every
+`controlTextDidChange`, and every write posts `AppSettingsDidChange`. Its observers then re-read
+each project's git control files (**1.95 ms** across ten projects, measured), rebuild both sound
+pop-ups — **0.41 ms** each, three directory scans and ~30 items apiece — and diff an extension
+snapshot of every project and session. Several milliseconds of filesystem work per character, for
+a value nothing reads until the next chat is created.
+
+The write is now coalesced (0.4 s) and flushed when the field is left or the page disappears, so a
+sentence is one write and one broadcast instead of one per character. Coalescing lives at this
+field rather than in the setting descriptor on purpose: a toggle or a pop-up is a settled choice
+the moment it is made and must still broadcast at once. Only free text arrives one keystroke at a
+time. `OpeningMessageCoalescingTests` asserts both halves — silence while typing, and one write on
+the way out.
+
+**Still open, and deliberately not changed here:** `ExtensionHostService.refreshSnapshotJournal()`
+does synchronous git control-file reads for every project on *any* settings change, and
+`GeneralPreferencesViewController` rebuilds both sound menus — six directory scans — on any
+settings change including its own. Coalescing the field hides that from typing; it does not make
+either operation bounded, and both are still per-event filesystem work on the main actor.
