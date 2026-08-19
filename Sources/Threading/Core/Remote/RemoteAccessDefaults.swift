@@ -1,11 +1,11 @@
 import Foundation
 import ThreadingRemoteKit
 
-/// Tunables for remote access — the second loopback HTTP/WebSocket server that the selected HTTPS
-/// transports expose so a session can be watched and driven from a browser or the iOS app.
+/// Tunables for remote access — the second HTTP/WebSocket server, bound on the doors the owner
+/// selected, so a session can be watched and driven from a browser or the iOS app.
 ///
 /// This server is deliberately separate from `MCPServer` and `ExtensionHostService`: those
-/// endpoints broker tool permissions and host extensions, and the tunnel must never reach
+/// endpoints broker tool permissions and host extensions, and a remote client must never reach
 /// them. A value here is a decision about the one surface a remote client can touch.
 enum RemoteAccessDefaults {
 
@@ -52,7 +52,7 @@ enum RemoteAccessDefaults {
     ///
     /// A wait with no deadline is not a state. Without this the settings page would sit in
     /// Starting for the life of the process when a listener never leaves `waiting`, which is the
-    /// failure shape the relay already produced once.
+    /// failure shape a transport with no startup deadline already produced once.
     static let listenerStartTimeout: TimeInterval = 10
 
     /// How long `stop()` waits for the kernel to release the listener's port. Cancellation is
@@ -105,8 +105,9 @@ enum RemoteAccessDefaults {
     /// the broadcast fan-out. Stores and AppKit are main-only, so anything touching them hops.
     static let queueLabel = "codes.threading.remote"
 
-    /// Ceiling on concurrent connections. A tunnel is a public URL; a flood of half-open
-    /// sockets should cost a bounded amount of memory, not an unbounded one.
+    /// Ceiling on concurrent connections. A routable door is reachable by everything else on
+    /// that network; a flood of half-open sockets should cost a bounded amount of memory, not an
+    /// unbounded one.
     static let maximumConnections = 32
 
     // MARK: - HTTP phase
@@ -115,7 +116,7 @@ enum RemoteAccessDefaults {
     static let maximumRequestBytes = 1 * 1024 * 1024
 
     /// How long a connection may sit in the HTTP phase (no upgrade, no complete request) before
-    /// it is closed. A tunnel attracts probes that open a socket and say nothing.
+    /// it is closed. An open port attracts probes that open a socket and say nothing.
     static let httpIdleSeconds: TimeInterval = 60
 
     // MARK: - WebSocket
@@ -202,16 +203,15 @@ enum RemoteAccessDefaults {
 
     // MARK: - Shares
 
-    /// A minted share expires after this unless the caller chose otherwise. A share is a public
-    /// door, so it closes on its own rather than staying open until someone remembers to revoke.
+    /// A minted share expires after this unless the caller chose otherwise. An unused invitation
+    /// is a bearer lying around in somebody's messages, so it closes on its own rather than
+    /// staying open until someone remembers to revoke it.
     static let defaultShareExpiry: TimeInterval = 24 * 60 * 60
 
     /// A consumed owner bootstrap is cached just long enough for the same device to retry a lost
     /// acceptance response. The QR rotates immediately, so a photographed old code cannot pair a
     /// second device during this window.
     static let pairingRetrySeconds: TimeInterval = 60
-    static let maximumPendingSharePreparations = 32
-    static let sharePreparationTimeout: TimeInterval = 20
 
     // MARK: - Mutation replay
 

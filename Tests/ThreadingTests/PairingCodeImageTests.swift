@@ -18,15 +18,16 @@ import XCTest
 @MainActor
 final class PairingCodeImageTests: XCTestCase {
 
-    /// A real pairing payload: a median four-word Cloudflare quick-tunnel host written the way
-    /// `RemoteConnectionLink.scannablePayload` writes it, and a base32 owner token. 37 modules
-    /// at correction level M.
+    /// A real pairing payload: a LAN door written the way `RemoteConnectionLink.scannablePayload`
+    /// writes it, a base32 owner token, and the 26-character fingerprint the phone pins.
     private static let payload =
-        "HTTPS://MEAT-IMPLIES-TRACKING-NEWFOUNDLAND.TRYCLOUDFLARE.COM"
-            + "/#MZXW6YTBOI7EU3TFOQQGE43FMN"
+        "HTTPS://192.168.1.42:8760/#MZXW6YTBOI7EU3TFOQQGE43FMN.CEJBGFAVCYLRQGI2DMOB2HQ7EA"
 
     private enum Render {
-        static let modules = 37
+        /// Measured: a LAN origin with the fingerprint beside the token reaches version 4. The
+        /// payload it replaced, a 52-character `trycloudflare.com` host with the token alone,
+        /// needed 37, so the door that replaced the relay pays for the fingerprint and change.
+        static let modules = 33
         static let quietModules = 4
 
         /// Small enough to be a hard test and still above anything the UI does: the card gives
@@ -223,13 +224,16 @@ final class PairingCodeImageTests: XCTestCase {
     /// mixed-case — so a test that pinned only one of them would pass while the win was gone.
     /// This compares the real thing against the shape it replaced.
     func testTheScannablePayloadEncodesSmallerThanThePlainURL() throws {
-        // A median `trycloudflare.com` host: four dictionary words and the TLD.
-        let host = "meat-implies-tracking-newfoundland.trycloudflare.com"
+        // The door a pairing code names: this Mac's address on the Wi-Fi, on the sticky port.
+        let host = "192.168.1.42:8760"
         let origin = try XCTUnwrap(URL(string: "https://\(host)/"))
         let pairingToken = try XCTUnwrap(RemoteAccessCoordinator.pairingToken())
-        let link = try XCTUnwrap(
-            RemoteConnectionLink(baseURL: origin, token: pairingToken)
-        )
+        let fingerprintCode = "CEJBGFAVCYLRQGI2DMOB2HQ7EA"
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: origin,
+            token: pairingToken,
+            pinnedFingerprintCode: fingerprintCode
+        ))
 
         let scanned = try XCTUnwrap(
             PairingCodeMatrix.make(link.scannablePayload, correctionLevel: "M")
@@ -237,7 +241,7 @@ final class PairingCodeImageTests: XCTestCase {
         // The shape this replaced: lower-case origin, 32-byte base64url token.
         let previousToken = try XCTUnwrap(RemoteAccessCoordinator.randomToken())
         let previous = try XCTUnwrap(PairingCodeMatrix.make(
-            "https://\(host)/#\(previousToken)",
+            "https://\(host)/#\(previousToken).\(fingerprintCode)",
             correctionLevel: "M"
         ))
 
@@ -246,8 +250,8 @@ final class PairingCodeImageTests: XCTestCase {
             "the pairing payload no longer encodes more tightly than a plain URL"
         )
         XCTAssertLessThanOrEqual(
-            scanned.size, 37,
-            "a median host should reach version 5; it needs \(scanned.size) modules"
+            scanned.size, 33,
+            "a LAN door should stay inside version 4; it needs \(scanned.size) modules"
         )
 
         // Smaller has to still mean scannable, and the same credential.

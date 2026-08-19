@@ -1,26 +1,6 @@
 import XCTest
 @testable import Threading
 
-/// A relay door that records what the coordinator asked of it and launches nothing.
-@MainActor
-final class RecordingRelayTransport: RemoteRelayTransport {
-    private(set) var startedPorts: [UInt16] = []
-    private(set) var stopCount = 0
-    var lastFailure: RemoteRelayFailure?
-
-    func start(
-        port: UInt16,
-        onStateChange: @escaping @MainActor @Sendable (RemoteTransportState) -> Void
-    ) {
-        startedPorts.append(port)
-        onStateChange(.starting)
-    }
-
-    func stop() {
-        stopCount += 1
-    }
-}
-
 /// The `tailscale` CLI seam. `start` is Tailscale Serve, not the tailnet door: the door is a
 /// listener, so a test that turns it on must see nothing started here at all.
 @MainActor
@@ -51,10 +31,10 @@ final class RecordingTailnetTransport: RemoteTailnetTransport {
 
 /// The seam that keeps a test run from publishing the developer's Mac.
 ///
-/// `RemoteAccessCoordinator` used to build `RemoteTunnel()` and `TailscaleServeTransport()`
-/// itself, with the shipping executable locators, so any test that reached relay mode launched
-/// the real `cloudflared`. Two of those children were still alive on this machine when the
-/// transport plan was written, because nothing in the test run owned them.
+/// `RemoteAccessCoordinator` used to build its transports itself, with the shipping executable
+/// locators, so any test that reached one launched a real child. Orphans of exactly that shape
+/// were still alive on this machine when the transport plan was written, because nothing in the
+/// test run owned them.
 @MainActor
 final class RemoteTransportInjectionTests: XCTestCase {
 
@@ -69,10 +49,6 @@ final class RemoteTransportInjectionTests: XCTestCase {
     }
 
     func testHostedTestProcessGetsRefusedTransportsRatherThanRealChildProcesses() {
-        XCTAssertTrue(
-            RemoteAccessCoordinator.defaultRelayTransport() is RefusedRemoteTransport,
-            "A hosted test process must never construct the real cloudflared transport."
-        )
         XCTAssertTrue(
             RemoteAccessCoordinator.defaultTailnetTransport() is RefusedRemoteTransport,
             "A hosted test process must never construct the real tailscale transport."
@@ -89,27 +65,22 @@ final class RemoteTransportInjectionTests: XCTestCase {
         transport.stop()
 
         XCTAssertEqual(states, [.stopped])
-        XCTAssertNil(transport.lastFailure)
         XCTAssertEqual(transport.readiness, .notChecked)
     }
 
-    func testCoordinatorDrivesTheInjectedTransportsAndNotItsOwn() {
-        let relay = RecordingRelayTransport()
+    func testCoordinatorDrivesTheInjectedTransportAndNotItsOwn() {
         let tailnet = RecordingTailnetTransport()
         let coordinator = RemoteAccessCoordinator(
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
             appSettings: isolatedAppSettings(),
             guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
-            relayTransport: relay,
             tailnetTransport: tailnet
         )
 
-        XCTAssertEqual(relay.startedPorts, [])
         XCTAssertEqual(tailnet.startedPorts, [])
 
         coordinator.stop()
 
-        XCTAssertGreaterThan(relay.stopCount, 0)
         XCTAssertGreaterThan(tailnet.stopCount, 0)
     }
 
@@ -127,12 +98,12 @@ final class RemoteTransportInjectionTests: XCTestCase {
 final class MacAdvertisedOriginDiagnosticsTests: XCTestCase {
 
     func testTheAdvertisedOriginIsRecordedAsAHashRatherThanAnAddress() {
-        let origin = URL(string: "https://calm-forest-1234.trycloudflare.com")!
+        let origin = URL(string: "https://mac-studio.tail1234.ts.net:8443")!
         let digest = MacRemoteDiagnostics.originDigest(origin)
 
         XCTAssertTrue(digest.hasPrefix("origin-"))
-        XCTAssertFalse(digest.contains("trycloudflare"))
-        XCTAssertFalse(digest.contains("calm-forest"))
+        XCTAssertFalse(digest.contains("ts.net"))
+        XCTAssertFalse(digest.contains("mac-studio"))
         XCTAssertEqual(digest, MacRemoteDiagnostics.originDigest(origin))
     }
 
@@ -169,13 +140,12 @@ final class MacAdvertisedOriginDiagnosticsTests: XCTestCase {
 ///
 /// The page used to offer a *mode*, and two of its rows existed only to start the public relay:
 /// one let owner devices fall back to it, the other kept it warm for a share nobody had created.
-/// Neither survives, because a Quick Tunnel address changes every launch and cannot be an owner
-/// route. The relay now has exactly one trigger left, and it is not on this page: creating a
-/// one-chat guest link.
+/// The relay is gone and so are they. What is left that can start a child process is the browser
+/// convenience, and these are the switches that may and may not reach it.
 ///
-/// Driven through the injected transports rather than through `relayRequired` alone, because the
-/// question is not whether the policy says no. It is whether anything in the lifecycle reaches
-/// `cloudflared` anyway.
+/// Driven through the injected transport rather than through a policy function, because the
+/// question is not whether the policy says no. It is whether anything in the lifecycle starts a
+/// child anyway.
 @MainActor
 final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
 
@@ -194,8 +164,7 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
         try await super.tearDown()
     }
 
-    func testNoSwitchOnThePageStartsTheRelay() throws {
-        let relay = RecordingRelayTransport()
+    func testOnlyTheBrowserConvenienceStartsAChild() throws {
         let tailnet = RecordingTailnetTransport()
         let settings = isolatedAppSettings()
         // A port nothing else on this machine is holding, so the test never fights the app the
@@ -207,14 +176,12 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
             appSettings: settings,
             guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
-            relayTransport: relay,
             tailnetTransport: tailnet
         )
         coordinators.append(coordinator)
 
         coordinator.setEnabled(true)
         waitForListening(coordinator)
-        XCTAssertEqual(relay.startedPorts, [], "the master switch started the relay")
         XCTAssertEqual(tailnet.startedPorts, [], "a way in that is off started its transport")
 
         // The tailnet switch is a bind. It starts no transport at all: it asks the listener for
@@ -225,28 +192,28 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
             "the tailnet way in started Tailscale Serve, which no phone uses"
         )
         XCTAssertGreaterThan(tailnet.factsRefreshes, 0, "the door was switched on unexplained")
-        XCTAssertEqual(relay.startedPorts, [], "the tailnet switch started the relay")
 
         // The browser convenience is the one thing that does start Serve.
         coordinator.setTailscaleServeEnabled(true)
         XCTAssertTrue(settings.remoteAccessTailscaleServeEnabled)
         XCTAssertEqual(tailnet.startedPorts.count, 1, "the Serve sub-option started nothing")
-        XCTAssertEqual(relay.startedPorts, [], "the Serve sub-option started the relay")
 
-        // And the network way in is the listener's own business.
+        // And the network way in is the listener's own business: a door is a bind, so switching
+        // one on starts nothing that could outlive the app.
         coordinator.setDoors([.lan])
-        XCTAssertEqual(relay.startedPorts, [], "This network started the relay")
+        XCTAssertEqual(
+            tailnet.startedPorts.count, 1,
+            "This network started a second child of somebody else's transport"
+        )
 
         coordinator.setTailscaleServeEnabled(false)
         XCTAssertGreaterThan(tailnet.stopCount, 0, "switching Serve off left it running")
-        XCTAssertEqual(relay.startedPorts, [], "switching a way in off started the relay")
     }
 
     /// The sub-option and the door are independent in both directions, which is the whole claim
     /// behind "the Threading app does not need this": Serve is a browser convenience, so it
     /// neither follows the door nor takes a route away when it stops.
     func testServeRunsAndStopsWithoutTouchingTheTailnetDoor() throws {
-        let relay = RecordingRelayTransport()
         let tailnet = RecordingTailnetTransport()
         let settings = isolatedAppSettings()
         settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
@@ -257,7 +224,6 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
             appSettings: settings,
             guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
-            relayTransport: relay,
             tailnetTransport: tailnet
         )
         coordinators.append(coordinator)
@@ -283,7 +249,6 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
     /// The seam under the tailnet switch. Swapping the implementation is what §8 of the transport
     /// plan did, and it did not need the settings page to change.
     func testTheTailnetSwitchRunsWhicheverImplementationTheBuildCarries() throws {
-        let relay = RecordingRelayTransport()
         let tailnet = RecordingTailnetTransport()
         let settings = isolatedAppSettings()
         settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
@@ -293,7 +258,6 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
             appSettings: settings,
             guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
-            relayTransport: relay,
             tailnetTransport: tailnet,
             tailscaleDoor: .listenerDoor
         )
@@ -308,7 +272,6 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
             tailnet.startedPorts, [],
             "the Serve transport ran for a build whose tailnet door is a listener"
         )
-        XCTAssertEqual(relay.startedPorts, [])
         XCTAssertEqual(
             RemoteTailscaleDoorImplementation.current,
             .listenerDoor,
@@ -319,7 +282,6 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
     /// The other side of the same seam: a build pinned to the old Serve handler still runs it,
     /// and still keeps the tailnet out of the listener's door set.
     func testABuildPinnedToServeStillRunsServeForItsDoor() throws {
-        let relay = RecordingRelayTransport()
         let tailnet = RecordingTailnetTransport()
         let settings = isolatedAppSettings()
         settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
@@ -329,7 +291,6 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
             ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
             appSettings: settings,
             guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
-            relayTransport: relay,
             tailnetTransport: tailnet,
             tailscaleDoor: .serveTransport
         )

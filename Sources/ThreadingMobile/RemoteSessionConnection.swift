@@ -1023,9 +1023,9 @@ final class RemoteSessionConnection: ObservableObject {
            let verdict = RemoteClient.pinningDelegate.verdict(forHost: host) {
             fields[.detail] = RemoteHostTrust.token(for: verdict)
         }
-        // 530, 502 and 404 behind the same -1011 mean three different things: a relay whose
-        // origin is gone, a relay that could not reach it, and something else answering on that
-        // address entirely.
+        // 530, 502 and 404 behind the same -1011 mean three different things: an origin that is
+        // gone, something on the path that could not reach it, and something else answering on
+        // that address entirely.
         if let httpStatus { fields[.status] = String(httpStatus) }
         MobileDiagnostics.record(.socketFailed, level: .error, fields: fields)
     }

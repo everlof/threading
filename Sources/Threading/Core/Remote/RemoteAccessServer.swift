@@ -1610,26 +1610,27 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let hostCommands = self.hostCommands else {
-                respond(.respond(RemoteRouter.error(503, "Secure Relay Not Ready")))
+                respond(.respond(RemoteRouter.error(503, "Sharing Not Available")))
                 return
             }
-            hostCommands.createSessionShare(
+            switch hostCommands.createSessionShare(
                 for: sessionID,
                 capability: capability,
                 canApprovePermissions: choice.canApprovePermissions
-            ) { result in
-                switch result {
-                case .success(let created):
-                    respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
-                        url: created.url.absoluteString,
-                        capability: capability.rawValue,
-                        canApprovePermissions: created.canApprovePermissions,
-                        expiresAt: created.expiresAt.timeIntervalSince1970,
-                        me: self.services.mirrors.meResponse(for: authorization)
-                    ))))
-                case .failure:
-                    respond(.respond(RemoteRouter.error(503, "Secure Relay Not Ready")))
-                }
+            ) {
+            case .success(let created):
+                respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
+                    url: created.url.absoluteString,
+                    capability: capability.rawValue,
+                    canApprovePermissions: created.canApprovePermissions,
+                    expiresAt: created.expiresAt.timeIntervalSince1970,
+                    me: self.services.mirrors.meResponse(for: authorization)
+                ))))
+            case .failure:
+                // An invitation points at a door of this Mac's own, so the only way to fail is
+                // to have none bound. That is a state the owner fixes on the Mac, which is why
+                // it is reported rather than retried here.
+                respond(.respond(RemoteRouter.error(503, "Sharing Not Available")))
             }
         }
     }

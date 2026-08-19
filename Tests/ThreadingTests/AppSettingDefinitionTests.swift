@@ -192,18 +192,6 @@ final class AppSettingDefinitionTests: XCTestCase {
             .codexStartupSpeed: .init(key: "codexStartupSpeed", valueType: .string),
             .defaultPermissionMode: .init(key: "defaultPermissionMode", valueType: .string),
             .remoteAccessEnabled: .init(key: "remoteAccessEnabled", valueType: .boolean),
-            .remoteAccessConnectionMode: .init(
-                key: "remoteAccessConnectionMode",
-                valueType: .string
-            ),
-            .remoteAccessAllowsOwnerRelayFallback: .init(
-                key: "remoteAccessAllowsOwnerRelayFallback",
-                valueType: .boolean
-            ),
-            .remoteAccessKeepsRelayReady: .init(
-                key: "remoteAccessKeepsRelayReady",
-                valueType: .boolean
-            ),
             .remoteAccessDoorMigration: .init(
                 key: "didMigrateRemoteAccessDoors",
                 valueType: .boolean
@@ -354,8 +342,12 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testRegisteredDefaultsAreDerivedWithoutChangingAbsenceSemantics() {
         let defaults = AppSettingDefinitions.registeredDefaults
         XCTAssertEqual(defaults["restoresLastSession"] as? Bool, true)
-        XCTAssertEqual(defaults["remoteAccessKeepsRelayReady"] as? Bool, false)
         XCTAssertEqual(defaults["remoteAccessTailscaleEnabled"] as? Bool, false)
+        // The retired connection mode seeds nothing: its keys are read once by the migration
+        // and then deleted, so registering a default for one would re-create it every launch.
+        XCTAssertNil(defaults["remoteAccessConnectionMode"])
+        XCTAssertNil(defaults["remoteAccessAllowsOwnerRelayFallback"])
+        XCTAssertNil(defaults["remoteAccessKeepsRelayReady"])
         XCTAssertEqual(defaults["remoteAccessTailscaleServeEnabled"] as? Bool, false)
         // The LAN door is the shipped exposure now that the listener presents a pinned
         // identity, and the seed is what makes an existing install pick it up.

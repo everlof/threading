@@ -127,12 +127,12 @@ final class RemoteAppModel: ObservableObject {
                         isStable: true
                     ),
                     RemoteHostEndpointDTO(
-                        kind: "relay",
-                        baseURL: URL(string: "https://threading-demo.example.com/")!,
+                        kind: "lan",
+                        baseURL: URL(string: "https://192.168.1.42:8760/")!,
                         isStable: true
                     ),
                 ],
-                connectionPolicy: .preferPrivate,
+                connectionPolicy: .privateOnly,
                 activeEndpointKind: "tailscale"
             )
             let studioLink = RemoteConnectionLink(
@@ -324,7 +324,7 @@ final class RemoteAppModel: ObservableObject {
                     expectedHostID: hostID
                 )
             } catch {
-                // Pairing and the existing relay/Tailscale routes remain valid. The Mac will
+                // Pairing and the private routes this Mac advertised remain valid. The Mac will
                 // advertise the feature again so a later refresh can retry provisioning.
                 hostedProvisioningRetryAfter[id] = Date().addingTimeInterval(
                     Self.hostedProvisioningRetryDelay
@@ -627,7 +627,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     /// Changes the one app appearance shared by the Mac and paired clients. The local preview
-    /// is applied before the relay round trip, then replaced by the Mac's resolved response.
+    /// is applied before the round trip, then replaced by the Mac's resolved response.
     func selectAppTheme(_ themeID: String) async throws {
         guard canManageThemes, let host = activeHost, let current = me,
               let preview = current.themeCatalog?.appThemes.first(where: { $0.id == themeID })

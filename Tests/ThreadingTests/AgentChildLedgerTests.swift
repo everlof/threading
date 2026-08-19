@@ -44,7 +44,7 @@ final class AgentChildLedgerTests: XCTestCase {
             pid: 4322,
             startTime: ProcessStartTime(seconds: 1_700_000_000, microseconds: 123_456),
             sessionID: nil,
-            executable: "cloudflared",
+            executable: "tailscale",
             recordedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
         XCTAssertTrue(AgentChildLedger(url: url).record(record))

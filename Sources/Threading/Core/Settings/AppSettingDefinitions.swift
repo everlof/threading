@@ -54,9 +54,6 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case codexStartupSpeed
     case defaultPermissionMode
     case remoteAccessEnabled
-    case remoteAccessConnectionMode
-    case remoteAccessAllowsOwnerRelayFallback
-    case remoteAccessKeepsRelayReady
     case remoteAccessDoorMigration
     case remoteAccessTailscaleEnabled
     case remoteAccessTailscaleServeEnabled
@@ -992,36 +989,11 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 0, "Connection", "Remote Access",
                             ["iPhone", "remote", "sharing"])]
     )
-    /// **Kept for one migration and read nowhere else.**
+    /// Written once the retired connection mode has been carried over to the door switches.
     ///
-    /// A mode forced one choice between overlapping things: Relay, Tailscale, or both. Doors do
-    /// not, so the three settings below are gone from the page and from every decision the
-    /// coordinator makes. They stay in the registry only long enough for
-    /// `AppSettings.migrateRemoteAccessConnectionMode()` to carry a stored `tailscale` or
-    /// `tailscaleAndRelay` over to `remoteAccessTailscaleEnabled`; a stored `relay` carries
-    /// nothing, because the relay stopped being an owner pairing route. Removing the keys is a
-    /// later step of the transport plan, once the migration has shipped.
-    static let remoteAccessConnectionMode = AppSettingDescriptor<String>(
-        identity: .remoteAccessConnectionMode,
-        persistenceKey: "remoteAccessConnectionMode",
-        absence: .fallback("relay"),
-        validation: .allowedStrings(Set(RemoteAccessConnectionMode.allCases.map(\.rawValue)))
-    )
-    static let remoteAccessAllowsOwnerRelayFallback = AppSettingDescriptor<Bool>(
-        identity: .remoteAccessAllowsOwnerRelayFallback,
-        persistenceKey: "remoteAccessAllowsOwnerRelayFallback",
-        absence: .registered(false)
-    )
-    static let remoteAccessKeepsRelayReady = AppSettingDescriptor<Bool>(
-        identity: .remoteAccessKeepsRelayReady,
-        persistenceKey: "remoteAccessKeepsRelayReady",
-        absence: .registered(false)
-    )
-    /// Written once the mode has been carried over to the door switches.
-    ///
-    /// Never seeded, and written last, so an interrupted migration re-runs. Re-running is safe:
-    /// it reads a mode nothing writes any more and turns a door **on**, so a person who later
-    /// switched Tailscale off is not undone by the next launch — the marker is already there.
+    /// Never seeded, and written last, so an interrupted migration re-runs. Re-running is safe
+    /// and, after the first run, a no-op: the migration deletes the keys it read, so a person who
+    /// later switched Tailscale off is not undone by the next launch.
     static let remoteAccessDoorMigration = AppSettingDescriptor<Bool>(
         identity: .remoteAccessDoorMigration,
         persistenceKey: "didMigrateRemoteAccessDoors",
@@ -1218,8 +1190,7 @@ enum AppSettingDefinitions {
         .init(suppressesClaudeStatusLine), .init(bypassesCodexHookTrust),
         .init(claudeRemoteControl), .init(claudeStartupSpeed), .init(codexStartupSpeed),
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
-        .init(remoteAccessConnectionMode), .init(remoteAccessAllowsOwnerRelayFallback),
-        .init(remoteAccessKeepsRelayReady), .init(remoteAccessDoorMigration),
+        .init(remoteAccessDoorMigration),
         .init(remoteAccessListenerPort),
         // In catalogue order: the ways in, then the browser convenience under the tailnet one.
         // `SettingsPages` projects its rows from this list, and a search result that lands on a

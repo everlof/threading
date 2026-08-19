@@ -524,22 +524,20 @@ enum ShareChatSheet {
         guard let chosen, grants.indices.contains(chosen) else { return }
         let grant = grants[chosen]
 
-        RemoteAccessCoordinator.shared.createSessionShare(
+        switch RemoteAccessCoordinator.shared.createSessionShare(
             for: sessionID,
             capability: grant.capability,
             canApprovePermissions: grant.canApprovePermissions
-        ) { result in
-            switch result {
-            case .success(let created):
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(created.url.absoluteString, forType: .string)
-            case .failure(let error):
-                let unavailable = ThemedAlert()
-                unavailable.messageText = L10n.string("Secure relay isn’t ready")
-                unavailable.informativeText = error.localizedDescription
-                unavailable.alertStyle = .warning
-                unavailable.runModal()
-            }
+        ) {
+        case .success(let created):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(created.url.absoluteString, forType: .string)
+        case .failure(let error):
+            let unavailable = ThemedAlert()
+            unavailable.messageText = L10n.string("This chat cannot be shared yet")
+            unavailable.informativeText = error.localizedDescription
+            unavailable.alertStyle = .warning
+            unavailable.runModal()
         }
     }
 
@@ -551,7 +549,8 @@ enum ShareChatSheet {
             prompt: .shareChatLink,
             title: L10n.format("Share “%@”", chatTitle),
             message: L10n.string(
-                "A single-use invitation to this one chat. It expires in 24 hours if nobody "
+                "Share with someone on your Wi-Fi or tailnet who has the Threading app. A "
+                    + "single-use invitation to this one chat. It expires in 24 hours if nobody "
                     + "accepts it; once accepted, that person keeps access until you choose Stop "
                     + "Sharing Chat. No link reaches your other chats, projects, or settings."
             ),
