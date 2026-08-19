@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		This file exists for one key. Every other Info.plist value for this target still comes
+		from GENERATE_INFOPLIST_FILE and the INFOPLIST_KEY_ build settings, which Xcode merges
+		into this file at build time; NSBonjourServices is an array, and the INFOPLIST_KEY_
+		mechanism carries strings and booleans only. It sits beside the target's folder rather
+		than inside it because a synchronized root group copies its own files into the bundle,
+		and Xcode 26 cannot read a project whose exception set is attached to a target's own
+		synchronized root group; the Mac target's exception list, which already names every
+		ThreadingMobile file, is the one mechanism that works for both.
+
+		Without it, browsing for the service fails silently on iOS 14 and later: no results, no
+		error, no prompt. MobileLocalNetworkPermissionTests asserts the built app carries it,
+		because "silently finds nothing" is not a symptom anybody debugs quickly.
+	-->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_threading._tcp</string>
+	</array>
+</dict>
+</plist>

@@ -26,6 +26,9 @@ struct ThreadingMobileHostedRoot: View {
                 notifications.scenePhase = phase
                 if phase == .active {
                     MobileDiagnostics.record(.appBecameActive)
+                    // Browsing belongs to the foreground: it is a multicast listener, and the
+                    // address it finds is only useful while somebody is looking at the app.
+                    model.startDiscovery()
                     Task {
                         await model.refresh()
                         await notifications.refreshAuthorization()
@@ -33,6 +36,7 @@ struct ThreadingMobileHostedRoot: View {
                         await MobileIssueReportOutbox.shared.flush()
                     }
                 } else if phase == .background {
+                    model.stopDiscovery()
                     model.suspendHostedConnections()
                 }
             }

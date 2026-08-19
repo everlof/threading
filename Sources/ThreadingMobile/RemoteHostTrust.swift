@@ -63,6 +63,30 @@ enum RemoteHostTrust {
         return pins
     }
 
+    /// Puts a record's existing pins into force for an address that Mac was just discovered at.
+    ///
+    /// **This is not a third source of pins, and the distinction is the whole of why discovery is
+    /// safe.** Nothing is learned here: the pins registered are the ones the record already held,
+    /// and the only new fact is an address. A discovered service earns that address by
+    /// advertising a fingerprint this phone already accepts, and the connection that follows
+    /// still has to present the certificate behind it or the pinned check refuses it by name.
+    ///
+    /// It has to happen, because a pin is registered per host name. Without it the phone would
+    /// find the Mac's new address, connect to it unpinned, and have stock evaluation refuse the
+    /// self-signed certificate that is the entire point.
+    @discardableResult
+    static func register(
+        discoveredHost host: PairedRemoteHost,
+        at baseURL: URL,
+        with delegate: RemoteCertificatePinningDelegate = RemoteClient.pinningDelegate
+    ) -> RemoteHostPinSet? {
+        guard host.isOwnerDevice, let pins = host.pinSet, let name = baseURL.host else {
+            return nil
+        }
+        delegate.setPins(pins, forHost: name)
+        return pins
+    }
+
     /// Drops the pins a forgotten Mac held, then restates what the remaining records pin.
     ///
     /// The second half is not tidiness: one Mac can be present twice, once as an owner pairing
