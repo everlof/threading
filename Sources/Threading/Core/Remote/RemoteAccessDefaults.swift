@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingRemoteKit
 
 /// Tunables for remote access — the second loopback HTTP/WebSocket server that the selected HTTPS
 /// transports expose so a session can be watched and driven from a browser or the iOS app.
@@ -29,16 +30,18 @@ enum RemoteAccessDefaults {
     /// The port tried first, and the one a paired client remembers.
     ///
     /// The listener used to take an ephemeral port, so the Mac's address changed on every launch
-    /// and pairing could not survive a restart. `8760` carries no common assignment and nothing
-    /// on the development machine answered on it or on the nine ports above it.
-    static let defaultListenerPort: UInt16 = 8760
+    /// and pairing could not survive a restart. The value itself belongs to `RemoteListenerPorts`
+    /// in the shared kit, because the phone walks the same list before deciding this Mac has
+    /// moved: two copies of it would drift and cost a re-pair the first time they did.
+    static let defaultListenerPort = RemoteListenerPorts.defaultPort
 
     /// Where the port may land when the configured one is taken.
     ///
     /// Small, fixed and public: a client walks the same list before deciding the Mac has moved,
-    /// so one collision does not cost a re-pair. Exhausting it is a named failure — never a
-    /// silent ephemeral port, which is the behaviour this replaces.
-    static let listenerPortFallbackRange: ClosedRange<UInt16> = 8760...8769
+    /// so one collision does not cost a re-pair. Exhausting it is a named failure, never a
+    /// silent ephemeral port, which is the behaviour this replaces. Same shared source as
+    /// `defaultListenerPort`, for the same reason.
+    static let listenerPortFallbackRange = RemoteListenerPorts.fallbackRange
 
     /// Privileged ports are refused. Threading is not a root process and a person who types `80`
     /// into a port field is describing a listener this app must not try to open.

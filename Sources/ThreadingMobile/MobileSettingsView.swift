@@ -13,6 +13,26 @@ struct MobileSettingsView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
+                    let macs = PairedMacPresentation.rows(
+                        hosts: model.hosts,
+                        activeHostID: model.activeHostID
+                    )
+                    if !macs.isEmpty {
+                        settingsSection(
+                            "Macs",
+                            footer: MobileL10n.string(
+                                "The code under a Mac is the identity this iPhone pins. It is "
+                                    + "the same code that Mac prints under This Mac’s Identity, "
+                                    + "so the two can be compared by eye."
+                            )
+                        ) {
+                            ForEach(Array(macs.enumerated()), id: \.element.id) { index, mac in
+                                if index > 0 { ThemedRowDivider() }
+                                PairedMacRow(mac: mac)
+                            }
+                        }
+                    }
+
                     settingsSection("Appearance") {
                         SettingsNavigationRow(
                             symbol: "app.dashed",
@@ -107,8 +127,15 @@ struct MobileSettingsView: View {
         .presentationDetents([.large])
     }
 
+    /// A titled group of rows, with an optional line under it saying what they are.
+    ///
+    /// The footer is a `String` rather than a `LocalizedStringKey` because it is a sentence
+    /// rather than a label: it is too long for one source line, and a key assembled from two
+    /// literals is a key no catalogue has. It arrives already localized through `MobileL10n`,
+    /// which is also what makes the localization lint check that the sentence exists.
     private func settingsSection<Content: View>(
         _ title: LocalizedStringKey,
+        footer: String? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
@@ -117,6 +144,12 @@ struct MobileSettingsView: View {
                 .foregroundStyle(theme.label)
                 .padding(.horizontal, MobileDesign.Spacing.inset)
             ThemedRowGroup(content: content)
+            if let footer {
+                Text(footer)
+                    .font(.footnote)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .padding(.horizontal, MobileDesign.Spacing.inset)
+            }
         }
     }
 
@@ -131,6 +164,87 @@ struct MobileSettingsView: View {
         @unknown default:
             return "Unavailable"
         }
+    }
+}
+
+/// One paired Mac, as the Macs section prints it.
+///
+/// A value rather than a view reading the store, because what is worth asserting is which Macs
+/// appear, what each is called, and whether the identity code is the one this phone actually
+/// pins. `pinnedFingerprintCode` already prefers the fingerprint learned over the pinned channel
+/// to the one photographed off the screen, so a Mac that has rotated its certificate prints the
+/// code it is presenting now rather than the code somebody scanned last year.
+struct PairedMacPresentation: Equatable, Identifiable {
+
+    let id: String
+    /// The Mac's own spelling of its name, shared with the Mac chooser so a shared chat reads
+    /// the same in both places.
+    let title: String
+    /// The 26 characters a person compares against the Mac's settings page, or nil for a record
+    /// that has never been given a certificate to pin.
+    let identityCode: String?
+    /// Whether this is the Mac the phone is talking to. Marked rather than sorted to the top:
+    /// the list is short and a row that moves when you connect is a row you have to find again.
+    let isActive: Bool
+
+    static func rows(
+        hosts: [PairedRemoteHost],
+        activeHostID: String?
+    ) -> [PairedMacPresentation] {
+        hosts.map {
+            PairedMacPresentation(
+                id: $0.id,
+                title: $0.menuTitle,
+                identityCode: $0.pinnedFingerprintCode,
+                isActive: $0.id == activeHostID
+            )
+        }
+    }
+}
+
+/// A paired Mac and the identity code under it.
+///
+/// The code is monospaced because it is 26 characters being compared character by character
+/// against another screen, and it is not a secret: it is the public half of a certificate, and
+/// the whole point of it is being read across a room.
+private struct PairedMacRow: View {
+    @Environment(\.remoteTheme) private var theme
+    let mac: PairedMacPresentation
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.medium) {
+            Image(systemName: "laptopcomputer")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(theme.accent)
+                .frame(
+                    width: MobileDesign.Size.minimumTapTarget,
+                    height: MobileDesign.Size.minimumTapTarget
+                )
+                .background(
+                    theme.accentMuted,
+                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                )
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+                Text(mac.title)
+                    .foregroundStyle(theme.label)
+                if let code = mac.identityCode {
+                    Text(code)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(theme.tertiaryLabel)
+                        .accessibilityLabel(MobileL10n.string("Identity code %@", code))
+                }
+            }
+            Spacer(minLength: MobileDesign.Spacing.small)
+            if mac.isActive {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.accent)
+                    .accessibilityLabel(MobileL10n.string("Connected"))
+            }
+        }
+        .padding(.horizontal, MobileDesign.Spacing.inset)
+        .padding(.vertical, MobileDesign.Spacing.small)
+        .contentShape(Rectangle())
     }
 }
 

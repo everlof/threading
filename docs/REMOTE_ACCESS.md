@@ -910,6 +910,14 @@ re-resolves and carries on.
   ordinary VPN and the tailnet carry no discovery. They do not need it: those addresses come from
   the advertised list, and `remoteAccessAdvertisedHostname` is the escape hatch for an address the
   Mac cannot enumerate.
+- **Two rows on the Remote Access page, inside the "This network" card.** *Announce on this
+  network* is `remoteAccessDiscoveryEnabled` and states the payload rather than describing it:
+  an opaque name, this Mac's id, its protocol version and its certificate fingerprint, never the
+  computer name and never the user's, and pairing still needs the code. Under it, *Announced as
+  <name>* prints the instance name currently registered, which is the one part of the payload
+  that is safe to show and the only way a person can check by eye that no name of theirs is on
+  the network. Both come from `RemoteDiscoveryPresentation`, so the states are rendered from a
+  value rather than from a live registration a hosted test must not make.
 - **Local network privacy applies to the Mac too.** macOS 15 brought it over from iOS, and Apple's
   TN3179 is explicit that *every* Bonjour operation needs the privilege, registering a service
   included. So Threading's own `Info.plist` carries `NSLocalNetworkUsageDescription` and
@@ -930,6 +938,54 @@ is true only when **both** hold, and unknown is never yes. With the setting off 
 the registration over; with no proxy present there is nothing to answer for a sleeping Mac and it
 sleeps through every attempt exactly as before. Nothing may render "can wake this Mac" from
 anything but that value.
+
+The settings page states it as a fact line under the announcement, and there are five of them:
+*Can wake this Mac from sleep* when both facts hold, *Wake for network access is off in System
+Settings ▸ Energy*, *No sleep proxy on this network; an Apple TV or HomePod provides one*, *Not
+checked yet* while either fact is unknown, and *Waking needs an announcement on this network*
+when nothing is registered. The last one is not redundant: a Sleep Proxy answers for an
+*advertised service*, so both facts can hold on a Mac that is announcing nothing, and without it
+the page would promise waking through a service it had just withdrawn. The two facts are read
+when the page appears and when the `lan` door's state changes, never on a timer: reading them
+costs a child process and a multicast browse, and a sleep proxy is a property of the network this
+Mac is attached to rather than of the Mac.
+
+### Over a VPN, and over Teleport
+
+A VPN puts the phone on a network this Mac is already listening on, so almost nothing here is
+new: the `lan` door answers, the certificate is the same one, and the port is the same sticky
+port. What is new is honesty about which door an address arrived on. Every VPN and the tailnet
+appear as a `utun`, and the only thing telling them apart is whether the tunnel carries an
+address out of `100.64.0.0/10`; anything else on a `utun` is somebody's VPN and is advertised as
+kind `vpn`. UniFi Teleport is WireGuard underneath and hands the phone an address inside the home
+network, which is the case that looks most like the LAN and is still not it. A rule that read
+the address alone would advertise Teleport's endpoint as `lan`, and a phone would try it while
+off the Wi-Fi. `RemoteListenerDoorTests` asserts the classification, its range edges, and the kinds
+`doorEndpoints` publishes.
+
+**Discovery does not reach here.** Multicast rarely crosses WireGuard, so a tunnel carries no
+Bonjour: the advertised endpoint list is what makes a VPN work, and
+`remoteAccessAdvertisedHostname` is the escape hatch for an address this Mac cannot enumerate.
+Nothing about waking applies either, for the same reason: a Sleep Proxy is a link-local
+service.
+
+**Not yet run.** The plan's §7 acceptance is a live check with hardware this repository cannot
+stand in for, so it is written down rather than asserted:
+
+- [ ] With Teleport connected on **cellular** (Wi-Fi off on the phone, so nothing can be reached
+      the short way), the phone reaches the Mac and the chat list loads.
+- [ ] It uses the **same pinned certificate**: the 26-character identity code the phone shows for
+      that Mac matches the one on the Mac's Remote Access page, and no
+      "This Mac's identity does not match" state appears.
+- [ ] It uses the **same port**, the one the `lan` door reports on the Wi-Fi.
+- [ ] **No re-pairing and no settings change** on either device: the tunnel goes up, the phone
+      connects, and nothing is scanned.
+- [ ] The Mac's advertised address list refreshes when the tunnel goes up and down, rather than
+      keeping one address for the life of the process.
+- [ ] Bonjour is confirmed absent over the tunnel (`dns-sd -B _threading._tcp` from the phone's
+      side of it finds nothing), which is expected and is why the address list carries this.
+- [ ] Only one packet-tunnel VPN runs on iOS at a time, so Teleport and Tailscale are checked one
+      at a time rather than together.
 
 ### iPhone trust evaluation
 

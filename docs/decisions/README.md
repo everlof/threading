@@ -29,10 +29,12 @@ artefact.
 
 ## Records
 
-All five came out of the third [t3code mining trip](../archive/research/T3CODE_FINDINGS.md) and were deliberately
-kept apart. They are five independent product questions that happen to share a competitor, not one
-"advanced workflow" system, and three of them turn out to be mostly answered by machinery
-Threading already has.
+The first five came out of the third [t3code mining trip](../archive/research/T3CODE_FINDINGS.md)
+and were deliberately kept apart. They are five independent product questions that happen to share
+a competitor, not one "advanced workflow" system, and three of them turn out to be mostly answered
+by machinery Threading already has. The sixth is unrelated to them: it is decision 2 of the
+remote-access transport plan, written down because a rejected transport is exactly the kind of
+idea that comes back every six months.
 
 | Record | Recommendation |
 |---|---|
@@ -41,6 +43,7 @@ Threading already has.
 | [Editable file previews](editable-file-previews.md) — edit a file in Threading instead of leaving for an editor | **Reject** on the Mac; **wait for demand** on a narrow remote-only slice |
 | [Repository setup hooks](repository-setup-hooks.md) — a checked-in command that runs when Threading creates a worktree | **Reject** automatic execution; **prototype** an offer that still needs a press |
 | [DOM source attribution](dom-source-attribution.md) — click an element in the browser, get `Component` and `file:line` | **Reject** a bundled framework provider; **wait for demand** on reading what a page already publishes |
+| [A named Cloudflare Tunnel](named-cloudflare-tunnel.md) — a stable hostname for the owner's phone instead of a per-launch Quick Tunnel one | **Reject**: it buys address stability, which a sticky port already buys, by putting a third party that terminates TLS on the owner's daily route and asking every user for a domain |
 
 ## Measurements these records rest on
 
