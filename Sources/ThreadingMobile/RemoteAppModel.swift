@@ -545,6 +545,7 @@ final class RemoteAppModel: ObservableObject {
             return
         } catch {
             guard activeHostID == hostID, refreshGeneration == generation else { return }
+            forgetDiscovered(hostID: hostID)
             let failure = connectionFailure(for: host, error: error)
             phase = .offline(failure.message)
             scheduleThemeEventsRecovery(for: hostID)
@@ -931,6 +932,18 @@ final class RemoteAppModel: ObservableObject {
             .transport: RemoteHostEndpointKind.lan,
             .origin: MobileDiagnostics.originDigest(resolution.baseURL),
         ])
+    }
+
+    /// Forgets where a Mac was after a connection to it failed.
+    ///
+    /// The remembered address is this phone's working knowledge of a network, and a failed
+    /// connection is the evidence that it is out of date. Dropping it puts the advertised list
+    /// back in front, and clearing the browse tracking means the Mac's next announcement is
+    /// resolved again rather than recognised as something already known.
+    private func forgetDiscovered(hostID: String) {
+        guard discoveredAddresses[hostID] != nil else { return }
+        discoveredAddresses.forget(hostRecordID: hostID)
+        discovery.forgetTracking()
     }
 
     /// Keeps the browse and the remembered addresses aligned with what is actually paired.

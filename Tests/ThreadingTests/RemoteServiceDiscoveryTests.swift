@@ -335,6 +335,41 @@ final class RemoteServiceDiscoveryTests: HostedStoreTestCase {
         XCTAssertEqual(server.advertisedService?.port, port, "and the port does not move")
     }
 
+    /// A Wi-Fi change rebuilds the LAN listeners, and the registration lives on a socket. Left
+    /// alone it would die with the listener it was applied to while the published value still
+    /// claimed the Mac was announcing itself.
+    func testTheRegistrationIsReAppliedWhenItsListenerIsRebuilt() throws {
+        let port = try quietPort()
+        XCTAssertEqual(start(configuration(port: port, doors: [.lan])), .listening(port: port))
+        waitUntil("the service is registered") { self.server.advertisedService != nil }
+        let firstListener = server.listenerIdentities[Self.lanAddress]
+        XCTAssertEqual(advertiser.registrations.count, 1)
+
+        // The address goes away and comes back, which is what a Wi-Fi change looks like.
+        addresses.withLock { $0 = [Self.tailscaleAddress] }
+        server.refreshListenerAddresses()
+        waitUntil("the door reports no interface") {
+            self.server.listenerStatus.state(of: .lan) == .notReachable(.noInterface)
+        }
+        XCTAssertNil(server.advertisedService, "an absent door announces nothing")
+
+        addresses.withLock { $0 = [Self.lanAddress, Self.tailscaleAddress] }
+        server.refreshListenerAddresses()
+        waitUntil("the service is registered again") { self.server.advertisedService != nil }
+
+        XCTAssertNotEqual(
+            server.listenerIdentities[Self.lanAddress],
+            firstListener,
+            "the fixture only proves anything if the listener really was replaced"
+        )
+        XCTAssertEqual(
+            advertiser.registrations.count,
+            2,
+            "the registration follows the socket that carries it"
+        )
+        XCTAssertEqual(advertiser.applied.last??.port, port)
+    }
+
     // MARK: - The journal
 
     /// An advertisement is exactly the disclosure a support report must not repeat. The journal

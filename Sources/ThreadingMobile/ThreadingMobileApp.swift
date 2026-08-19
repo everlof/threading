@@ -18,6 +18,9 @@ struct ThreadingMobileHostedRoot: View {
             .environmentObject(keyboards)
             .environmentObject(notifications)
             .task {
+                // `onChange(of: scenePhase)` does not fire for the phase the app launches into,
+                // so the first foreground is this one.
+                model.startDiscovery()
                 await notifications.prepare()
                 await notifications.sync(hosts: model.hosts)
                 await MobileIssueReportOutbox.shared.flush()

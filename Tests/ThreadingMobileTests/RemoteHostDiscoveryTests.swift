@@ -351,6 +351,39 @@ final class RemoteHostDiscoveryTests: XCTestCase {
         ))
     }
 
+    /// A Mac that moves says goodbye and announces again. Forgetting the name on the goodbye is
+    /// what makes the re-announcement something to resolve rather than something already known
+    /// at an address that has stopped existing.
+    func testAServiceThatWentAwayIsResolvedAgainWhenItComesBack() {
+        let discovery = RemoteHostDiscovery()
+        self.discovery = discovery
+        let service = DiscoveredRemoteService(
+            endpoint: .service(
+                name: "OPAQUE",
+                type: RemoteDiscoveryDefaults.serviceType,
+                domain: RemoteDiscoveryDefaults.serviceDomain,
+                interface: nil
+            ),
+            advertisement: advertisement(hostID: "mac-1", fingerprint: fingerprint)
+        )
+
+        discovery.apply([service])
+        XCTAssertEqual(discovery.trackedServiceCount, 1)
+
+        discovery.forget(["OPAQUE"])
+        XCTAssertEqual(discovery.trackedServiceCount, 0)
+
+        discovery.apply([service])
+        XCTAssertEqual(discovery.trackedServiceCount, 1)
+
+        discovery.forgetTracking()
+        XCTAssertEqual(
+            discovery.trackedServiceCount,
+            0,
+            "a failed connection clears the tracking so the next announcement is resolved again"
+        )
+    }
+
     // MARK: - Starting and stopping
 
     /// Nothing is browsed for until there is a Mac a discovery could mean, which is also what

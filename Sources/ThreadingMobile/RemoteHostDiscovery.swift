@@ -180,9 +180,13 @@ final class RemoteHostDiscovery {
             ),
             using: .tcp
         )
-        browser.browseResultsChangedHandler = { [weak self] results, _ in
+        browser.browseResultsChangedHandler = { [weak self] results, changes in
             let seen = Self.services(in: results)
-            Task { @MainActor [weak self] in self?.apply(seen) }
+            let gone = Self.departedNames(in: changes)
+            Task { @MainActor [weak self] in
+                self?.forget(gone)
+                self?.apply(seen)
+            }
         }
         browser.stateUpdateHandler = { [weak self] state in
             switch state {
@@ -218,6 +222,38 @@ final class RemoteHostDiscovery {
             }
             return DiscoveredRemoteService(endpoint: result.endpoint, advertisement: advertisement)
         }
+    }
+
+    /// The instance names a change set says have gone away.
+    ///
+    /// A Mac that moves to another address goes through exactly this: mDNS says goodbye and
+    /// announces again. Forgetting the name is what makes the re-announcement a *new* service to
+    /// resolve rather than one already tracked at an address that has stopped existing, which is
+    /// the whole "move the Mac to a different subnet and do nothing on the phone" case.
+    nonisolated static func departedNames(in changes: Set<NWBrowser.Result.Change>) -> [String] {
+        changes.compactMap { change in
+            guard case .removed(let result) = change,
+                  case .service(let name, _, _, _) = result.endpoint else { return nil }
+            return name
+        }
+    }
+
+    /// Drops tracked services so a later announcement of the same name is resolved again.
+    func forget(_ names: [String]) {
+        for name in names {
+            tracked[name] = nil
+            trackedOrder.removeAll { $0 == name }
+            resolving.remove(name)
+        }
+    }
+
+    /// Forgets everything currently tracked, so the next announcement of any of it resolves
+    /// again. Used when a connection to a remembered address failed: whatever that address was,
+    /// it is not answering, and the network is the thing to ask again.
+    func forgetTracking() {
+        tracked.removeAll()
+        trackedOrder.removeAll()
+        resolving.removeAll()
     }
 
     /// Decides what each newly seen service is, and resolves the ones that are a paired Mac.

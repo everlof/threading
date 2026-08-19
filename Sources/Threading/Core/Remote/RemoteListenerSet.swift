@@ -152,6 +152,10 @@ final class RemoteListenerSet: @unchecked Sendable {
     /// The fingerprint the routable listeners are presenting, kept so the advertisement can be
     /// recomputed on a readiness change without asking the identity store again. Queue-owned.
     private var advertisedFingerprint: RemoteHostFingerprint?
+    /// Which listener currently carries the registration. Queue-owned, and part of what decides
+    /// whether the advertisement has to be re-applied: the registration lives on a socket, so a
+    /// rebuilt listener needs it again even when nothing about the value changed.
+    private var advertisedCarrier: ObjectIdentifier?
     private var startCompletion: (@Sendable (RemoteListenerStartOutcome) -> Void)?
     /// Which start a deadline belongs to. Without it, a stop-and-start inside the deadline
     /// window lets the old start's timer fail the new one.
@@ -600,14 +604,20 @@ final class RemoteListenerSet: @unchecked Sendable {
     private func updateAdvertisement() {
         let desired = desiredAdvertisement()
         let current = advertisementStorage.withLock { $0 }
-        guard desired != current else { return }
+        let carrier = desired == nil ? nil : advertisementCarrier()
+        let carrierID = carrier.map(ObjectIdentifier.init)
+        // The carrier is part of the state, not just the value. A Wi-Fi change rebuilds the LAN
+        // listeners, and a registration left on the cancelled one disappears with it: the value
+        // would still look current while nothing on the network could hear it.
+        guard desired != current || carrierID != advertisedCarrier else { return }
 
-        guard let desired else {
+        guard let desired, let carrier else {
             withdrawAdvertisement()
             return
         }
-        advertiser.apply(desired, to: advertisementCarrier())
+        advertiser.apply(desired, to: carrier)
         advertisementStorage.withLock { $0 = desired }
+        advertisedCarrier = carrierID
         journal(.hostDiscoveryRegistered, .info, [
             .transport: RemoteAccessDoor.lan.rawValue,
             .origin: advertisedOriginPseudonym(),
@@ -615,6 +625,7 @@ final class RemoteListenerSet: @unchecked Sendable {
     }
 
     private func withdrawAdvertisement() {
+        advertisedCarrier = nil
         guard advertisementStorage.withLock({ $0 }) != nil else { return }
         advertiser.apply(nil, to: nil)
         advertisementStorage.withLock { $0 = nil }
