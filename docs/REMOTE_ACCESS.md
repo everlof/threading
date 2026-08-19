@@ -66,8 +66,9 @@ settings row until then.
 ## Pair an iPhone
 
 1. Keep Threading running on the Mac.
-2. For zero-install access, sign in with Apple under **Hosted Direct**. Relay and Tailscale remain
-   optional compatibility/private choices; their readiness cards identify setup problems.
+2. **This network** is on by default, so a phone on the same Wi-Fi needs nothing else. For
+   zero-install access, sign in with Apple under **Hosted Direct**; **Tailscale** is the way in
+   for reaching this Mac from anywhere, and its readiness card identifies setup problems.
 3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
 **A reason never lives only in a readiness row.** `TailscaleReadinessIssue` carries the row's
@@ -130,10 +131,10 @@ TUI; only structured Native questions/permissions and explicit human requests ca
 corresponding notifications.
 
 An owner pairing is stored as one logical Mac identity, not as one hostname. iOS attempts its
-durable hosted ICE/TURN credential first, then only the Relay/Tailscale endpoints allowed by the
-owner's selected fallback policy. Owner responses
-advertise the currently usable Tailscale and/or relay endpoints plus an explicit `privateOnly`,
-`relayOnly`, or `preferPrivate` policy. The iPhone orders only HTTPS endpoints allowed by that
+durable hosted ICE/TURN credential first, then the private endpoints the Mac advertises. Owner
+responses carry the addresses each way in is currently answering on, tailnet included, plus an
+explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still
+decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed by that
 policy, prefers Tailscale when requested, records the successful route, and can move to another
 advertised route without creating a duplicate device. Unknown future policies fail closed to
 private-only. Guest shares never receive the Mac's private endpoint list.
@@ -387,7 +388,7 @@ Pairing and sharing are deliberately different actions:
 - An unused invitation expires after 24 hours. Accepting it consumes that URL and creates a new
   device-bound membership without a 24-hour timer. Unused invitations and accepted memberships
   are stored in the Mac login Keychain, so turning Remote Access off, restarting Threading, or
-  changing between Tailscale and Relay suspends the route without silently removing the share.
+  switching a way in suspends the route without silently removing the share.
   The member keeps access until **Stop Sharing** or their named membership is revoked. Create
   another invitation for another person; forwarding an already accepted invite does not clone
   the membership. A credential that cannot be restored exactly fails closed rather than creating
@@ -937,8 +938,9 @@ stable tailnet origin, so an owner paired through Tailscale reconnects after a M
 without rescanning as long as Tailscale is available on both devices.
 
 On iPhone, Tailscale must be connected before its `*.ts.net` origin is reachable. iOS permits only
-one active packet-tunnel VPN at a time, so another VPN may prevent that connection; use Relay in
-that situation.
+one active packet-tunnel VPN at a time, so another VPN may prevent that connection; in that
+situation reach this Mac over the VPN you do have connected, which the network way in already
+answers.
 
 An operated release can add account-backed rendezvous and invitations. Without recipient
 accounts Threading cannot
