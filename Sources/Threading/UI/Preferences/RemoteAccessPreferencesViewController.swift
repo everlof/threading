@@ -19,6 +19,28 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private var tailscaleServeRow: NSView?
     private var wayInStatusViews: [RemoteAccessWayIn: WayInStatusViews] = [:]
     private var threadingDirectSection: NSView?
+    private let discoveryToggle = ThemedToggle()
+    /// The announced fact's whole row, held so it can leave the card rather than leave a gap.
+    /// Hiding the label alone keeps the mark column's height constraint and prints a blank line.
+    private var announcedRow: NSView?
+    private let announcedGlyph = NSTextField(labelWithString: DoorMark.idle)
+    private let announcedLabel = NSTextField(wrappingLabelWithString: "")
+    /// The announcement is on or it is not, so this slot never spins. It is here because the
+    /// mark column's width is the spinner's, and a fact line indented differently from the
+    /// status line above it is a misalignment a reader sees before they read either.
+    private let announcedSpinner = ThemedSpinner()
+    private let wakeGlyph = NSTextField(labelWithString: DoorMark.idle)
+    private let wakeLabel = NSTextField(wrappingLabelWithString: "")
+    /// This one does spin: reading the two wake facts costs a child process and a browse, and
+    /// silence for the length of both is what "Not checked yet" would otherwise look like.
+    private let wakeSpinner = ThemedSpinner()
+    /// The door state the wake facts were last read against, and the read in flight.
+    ///
+    /// Both exist to keep this off a timer without asking for the same answer forever:
+    /// `wakeOnDemand` posts the page's own status notification when it lands, so refreshing on
+    /// every notification would re-probe for every answer it received.
+    private var wakeFactsDoorState: RemoteAccessDoorState?
+    private var wakeFactsTask: Task<Void, Never>?
     private let identityCode = NSTextField(labelWithString: "")
     private let identityDetail = NSTextField(wrappingLabelWithString: "")
     private let identitySuccessor = NSTextField(wrappingLabelWithString: "")
@@ -82,9 +104,14 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     override func viewWillAppear() {
         super.viewWillAppear()
         refresh()
+        // A sleep proxy is a property of the network this Mac is attached to, so the answer is
+        // read when somebody is looking at it and when the door under it moves. Never on a
+        // timer: it costs a child process and a multicast browse each time.
+        readWakeOnDemandFacts(force: true)
     }
 
     deinit {
+        wakeFactsTask?.cancel()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -104,6 +131,22 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         tailscaleToggle.action = #selector(tailscaleDoorChanged)
         tailscaleToggle.setAccessibilityIdentifier(Identifier.doorToggle(.tailscale))
         tailscaleToggle.setAccessibilityLabel(RemoteAccessWayIn.tailscale.title)
+
+        discoveryToggle.target = self
+        discoveryToggle.action = #selector(discoveryChanged)
+        discoveryToggle.setAccessibilityIdentifier(Identifier.discoveryToggle)
+        discoveryToggle.setAccessibilityLabel(L10n.string("Announce on this network"))
+        announcedGlyph.applyFont(.subheading)
+        announcedGlyph.setContentHuggingPriority(.required, for: .horizontal)
+        announcedLabel.applyFont(.subheading)
+        announcedLabel.textColor = Design.Text.secondary
+        announcedLabel.setAccessibilityIdentifier(Identifier.announcedName)
+        wakeGlyph.applyFont(.subheading)
+        wakeGlyph.setContentHuggingPriority(.required, for: .horizontal)
+        wakeGlyph.setAccessibilityIdentifier(Identifier.wakeOnDemandMark)
+        wakeLabel.applyFont(.subheading)
+        wakeLabel.textColor = Design.Text.secondary
+        wakeLabel.setAccessibilityIdentifier(Identifier.wakeOnDemand)
 
         tailscaleServeToggle.target = self
         tailscaleServeToggle.action = #selector(tailscaleServeChanged)
@@ -335,6 +378,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         if wayIn == .tailscale {
             rows.append(contentsOf: tailscaleServeRows())
         }
+        // The announcement and what it buys belong to this door and to no other: only the LAN
+        // listeners carry it, and only a Mac on the same network can be woken by one.
+        if wayIn == .thisNetwork {
+            rows.append(contentsOf: discoveryRows())
+        }
         // "Through a VPN" is the same way in reached from a tunnel, so it belongs to the network
         // card rather than to a switch of its own.
         if wayIn == .thisNetwork {
@@ -365,6 +413,54 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             rows.append(SettingsUI.fullRow(noteLabel(note)))
         }
         return rows
+    }
+
+    /// The announcement's switch and the two facts that follow from it.
+    ///
+    /// Inside the network card rather than in a section of its own, because it is not a way in:
+    /// the door works without it and closing it changes nothing about who can reach this Mac.
+    /// What it changes is whether a paired phone can still find the Mac after the router hands
+    /// it a new address, and whether a connection can wake it.
+    ///
+    /// The subtitle states the payload rather than describing it, because that is the decision
+    /// being taken: a broadcast is visible to everyone on the network, so the person switching
+    /// it on is entitled to read exactly what leaves this Mac before they do.
+    private func discoveryRows() -> [NSView] {
+        let row = SettingsUI.row(
+            title: "Announce on this network",
+            subtitle: "Broadcasts an opaque name, this Mac’s id, its protocol version and its "
+                + "certificate fingerprint, so a paired iPhone can find this Mac after its "
+                + "address changes. Never the computer name and never your name, and pairing "
+                + "still needs the code.",
+            control: discoveryToggle
+        )
+
+        let announced = NSStackView(views: [
+            markSlot(glyph: announcedGlyph, spinner: announcedSpinner),
+            announcedLabel
+        ])
+        announced.orientation = .horizontal
+        announced.alignment = .top
+        announced.distribution = .fill
+        announced.spacing = Design.Spacing.medium
+        announcedLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        announcedRow = announced
+
+        let wake = NSStackView(views: [
+            markSlot(glyph: wakeGlyph, spinner: wakeSpinner),
+            wakeLabel
+        ])
+        wake.orientation = .horizontal
+        wake.alignment = .top
+        wake.distribution = .fill
+        wake.spacing = Design.Spacing.medium
+        wakeLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let facts = NSStackView(views: [announced, wake])
+        facts.orientation = .vertical
+        facts.alignment = .leading
+        facts.spacing = Design.Spacing.small
+        return [row, SettingsUI.fullRow(facts)]
     }
 
     /// The Serve sub-option, built and **not shown**.
@@ -742,6 +838,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     @objc private func remoteAccessStatusDidChange(_ notification: Notification) {
         refresh()
+        readWakeOnDemandFacts()
     }
 
     private func refresh() {
@@ -763,6 +860,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         rebuildPairedDevices(coordinator.pairedOwnerDevices, error: coordinator.ownerDevicePersistenceError)
         updateHostedAccount(coordinator)
         apply(doors)
+        apply(discoveryPresentation(coordinator))
 
         switch coordinator.status {
         case .disabled:
@@ -871,6 +969,43 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         )
     }
 
+    /// What is being announced, and whether a connection could wake this Mac.
+    ///
+    /// Read from the coordinator in one place for the same reason `doorsPresentation` is: a
+    /// hosted test must not register a Bonjour service and cannot put a sleep proxy on the
+    /// developer's network, so the page renders a value the tests can hand it instead.
+    private func discoveryPresentation(
+        _ coordinator: RemoteAccessCoordinator
+    ) -> RemoteDiscoveryPresentation {
+        RemoteDiscoveryPresentation(
+            isEnabled: coordinator.isDiscoveryEnabled,
+            announcedName: coordinator.advertisedService?.name,
+            wakeFacts: coordinator.wakeOnDemand
+        )
+    }
+
+    /// Reads the two wake facts, when there is a reason to.
+    ///
+    /// Never on a timer, and not on every status change either: `wakeOnDemand` posts the same
+    /// notification when it lands, so an unconditional refresh from the observer would ask again
+    /// for every answer it received. The `lan` door's own state is the trigger, because a sleep
+    /// proxy is a property of the network this Mac is attached to. `force` is the page becoming
+    /// visible, which is a person looking at the answer rather than the network moving.
+    private func readWakeOnDemandFacts(force: Bool = false) {
+        let state = RemoteAccessCoordinator.shared.thisNetworkDoorState
+        guard force || state != wakeFactsDoorState else { return }
+        guard wakeFactsTask == nil else { return }
+        wakeFactsDoorState = state
+        wakeSpinner.isAnimating = true
+        wakeGlyph.isHidden = true
+        wakeFactsTask = Task { [weak self] in
+            await RemoteAccessCoordinator.shared.refreshWakeOnDemandFacts()
+            guard let self else { return }
+            self.wakeFactsTask = nil
+            self.refresh()
+        }
+    }
+
     /// Renders the ways in. The one entry point a test drives, for the same reason
     /// `applyListeningState` is: none of these states can be reached on a developer's machine
     /// on purpose.
@@ -886,6 +1021,36 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             apply(doors.status(of: wayIn), to: views)
         }
         apply(doors.identity)
+    }
+
+    /// Renders the announcement and the wake fact. The other entry point a test drives.
+    ///
+    /// The positive wake line is drawn from `RemoteDiscoveryPresentation.Wake` and from nothing
+    /// else, so "can wake this Mac" cannot be printed without both facts holding, which is the
+    /// promise §15 of the transport plan says settings must not make on a network that cannot
+    /// keep it.
+    func apply(_ discovery: RemoteDiscoveryPresentation) {
+        discoveryToggle.state = discovery.isEnabled ? .on : .off
+
+        announcedLabel.stringValue = discovery.announcement ?? ""
+        // Nothing registered is not a state with a line in it: the switch above already says
+        // whether the announcement is meant to be running, and a door with no address under it
+        // has its own status line three rows up.
+        let isAnnounced = discovery.announcement != nil
+        announcedRow?.isHidden = !isAnnounced
+        announcedLabel.isHidden = !isAnnounced
+        announcedGlyph.isHidden = !isAnnounced
+        announcedGlyph.stringValue = DoorMark.ready
+        announcedGlyph.textColor = Self.ink(for: .ready)
+        announcedSpinner.isAnimating = false
+
+        let wake = discovery.wake
+        wakeLabel.stringValue = wake.text
+        wakeGlyph.stringValue = Self.mark(for: wake.tone)
+        wakeGlyph.textColor = Self.ink(for: wake.tone)
+        wakeSpinner.isAnimating = wakeFactsTask != nil
+        wakeGlyph.isHidden = wakeFactsTask != nil
+        wakeSpinner.setAccessibilityLabel(wake.text)
     }
 
     private func apply(_ status: RemoteDoorStatus?, to views: WayInStatusViews) {
@@ -1420,6 +1585,13 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         refresh()
     }
 
+    /// Starts or stops the broadcast. Nothing else moves: the door stays open, the listener is
+    /// not disturbed, and a phone already connected over it stays connected.
+    @objc private func discoveryChanged() {
+        RemoteAccessCoordinator.shared.setDiscoveryEnabled(discoveryToggle.state == .on)
+        refresh()
+    }
+
     @objc private func tailscaleDoorChanged() {
         RemoteAccessCoordinator.shared.setTailscaleDoorEnabled(tailscaleToggle.state == .on)
         refresh()
@@ -1592,6 +1764,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     /// Accessibility identifiers, built once so a test and the page cannot spell them apart.
     enum Identifier {
+        static let discoveryToggle = "settings.remote-access.discovery"
+        static let announcedName = "settings.remote-access.announced-as"
+        static let wakeOnDemand = "settings.remote-access.wake-on-demand"
+        static let wakeOnDemandMark = "settings.remote-access.wake-on-demand-mark"
+
         static func doorToggle(_ wayIn: RemoteAccessWayIn) -> String {
             "settings.remote-access.door.\(wayIn.identifierComponent)"
         }

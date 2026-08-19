@@ -28738,7 +28738,15 @@
     "Reopened the picture for editing.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppnade bilden för redigering igen."}}}},
     "Took the receipt's action.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Utförde kvittots åtgärd."}}}},
     "The row loses its highlight before the capture is taken.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Raden tappar sin markering innan bilden tas."}}}},
-    "This label wraps one word early at this width.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här etiketten bryter raden ett ord för tidigt vid den här bredden."}}}}
+    "This label wraps one word early at this width.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här etiketten bryter raden ett ord för tidigt vid den här bredden."}}}},
+    "Announce on this network": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Annonsera i det här nätverket"}}}},
+    "Announced as %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Annonserad som %@"}}}},
+    "Broadcasts an opaque name, this Mac’s id, its protocol version and its certificate fingerprint, so a paired iPhone can find this Mac after its address changes. Never the computer name and never your name, and pairing still needs the code.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sänder ut ett ogenomskinligt namn, den här Mac-datorns id, dess protokollversion och dess certifikatavtryck, så att en parkopplad iPhone kan hitta Mac-datorn när adressen ändras. Aldrig datornamnet och aldrig ditt namn, och parkoppling kräver fortfarande koden."}}}},
+    "Can wake this Mac from sleep": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kan väcka den här Mac-datorn ur viloläge"}}}},
+    "No sleep proxy on this network; an Apple TV or HomePod provides one": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen viloproxy i det här nätverket; en Apple TV eller HomePod tillhandahåller en"}}}},
+    "Not checked yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inte kontrollerat än"}}}},
+    "Wake for network access is off in System Settings ▸ Energy": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning för nätverksåtkomst är avstängd i Systeminställningar ▸ Energi"}}}},
+    "Waking needs an announcement on this network": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning kräver en annonsering i det här nätverket"}}}}
   },
   "version": "1.0"
 }
