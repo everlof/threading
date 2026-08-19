@@ -223,8 +223,7 @@ final class RemoteRelayReadinessTests: XCTestCase {
                 wayIn: .thisNetwork(
                     isEnabled: true,
                     state: .bound([Self.lanBinding]),
-                    firewall: .unknown,
-                    preferredPort: 8760
+                    firewall: .unknown
                 )
             ),
             .codeUnavailable
@@ -289,8 +288,7 @@ final class RemoteRelayReadinessTests: XCTestCase {
                 wayIn: .thisNetwork(
                     isEnabled: true,
                     state: .bound([Self.lanBinding]),
-                    firewall: .unknown,
-                    preferredPort: 8760
+                    firewall: .unknown
                 )
             ),
             .keychainUnavailable
@@ -325,15 +323,13 @@ final class RemoteRelayReadinessTests: XCTestCase {
         let failing = RemoteDoorStatus.thisNetwork(
             isEnabled: true,
             state: .notReachable(.noInterface),
-            firewall: .unknown,
-            preferredPort: 8760
+            firewall: .unknown
         )
         let working = RemoteDoorStatus.tailscale(isEnabled: true, state: .binding, facts: .unknown)
         let ready = RemoteDoorStatus.thisNetwork(
             isEnabled: true,
             state: .bound([Self.lanBinding]),
-            firewall: .unknown,
-            preferredPort: 8760
+            firewall: .unknown
         )
 
         XCTAssertEqual(RemotePairingCardState.mostAdvanced(of: [off, failing]), failing)
@@ -539,8 +535,7 @@ final class RemoteRelayReadinessTests: XCTestCase {
         let status = RemoteDoorStatus.tailscale(
             isEnabled: true,
             state: state,
-            facts: TailscaleHostFacts(state: .running, magicDNSName: "mac.tail1234.ts.net"),
-            magicDNSName: "mac.tail1234.ts.net"
+            facts: TailscaleHostFacts(state: .running, magicDNSName: "mac.tail1234.ts.net")
         )
 
         XCTAssertEqual(status.text, "Reachable at 100.65.47.126:8760")

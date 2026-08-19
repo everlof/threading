@@ -960,14 +960,12 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             .thisNetwork: .thisNetwork(
                 isEnabled: state.thisNetworkIsOn,
                 state: state.doorState,
-                firewall: state.firewall,
-                preferredPort: Self.listenerPort
+                firewall: state.firewall
             ),
             .tailscale: .tailscale(
                 isEnabled: state.tailscaleIsOn,
                 state: state.tailnetDoorState,
-                facts: state.facts,
-                magicDNSName: state.facts.magicDNSName
+                facts: state.facts
             ),
             .threadingDirect: .threadingDirect(.stopped)
         ]

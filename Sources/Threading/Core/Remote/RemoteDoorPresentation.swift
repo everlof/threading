@@ -303,7 +303,6 @@ struct RemoteDoorStatus: Equatable, Sendable {
         isEnabled: Bool,
         state: RemoteAccessDoorState,
         firewall: RemoteFirewallHint,
-        preferredPort: UInt16,
         fallbackRange: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange
     ) -> RemoteDoorStatus {
         guard isEnabled else {
@@ -327,11 +326,7 @@ struct RemoteDoorStatus: Equatable, Sendable {
         case .bound(let bindings):
             return bound(bindings, firewall: firewall)
         case .notReachable(let reason):
-            return unreachable(
-                reason,
-                preferredPort: preferredPort,
-                fallbackRange: fallbackRange
-            )
+            return unreachable(reason, fallbackRange: fallbackRange)
         }
     }
 
@@ -372,7 +367,6 @@ struct RemoteDoorStatus: Equatable, Sendable {
 
     private static func unreachable(
         _ reason: RemoteDoorUnreachableReason,
-        preferredPort: UInt16,
         fallbackRange: ClosedRange<UInt16>
     ) -> RemoteDoorStatus {
         switch reason {
@@ -445,7 +439,6 @@ struct RemoteDoorStatus: Equatable, Sendable {
         isEnabled: Bool,
         state: RemoteAccessDoorState,
         facts: TailscaleHostFacts,
-        magicDNSName: String? = nil,
         fallbackRange: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange
     ) -> RemoteDoorStatus {
         guard isEnabled else { return tailscaleOff() }
@@ -459,18 +452,16 @@ struct RemoteDoorStatus: Equatable, Sendable {
                 isBusy: true
             )
         case .bound(let bindings):
-            let names = magicDNSName.flatMap { name in
+            // The MagicDNS name is a route the phone can take and a listener the Mac never bound
+            // separately: it resolves to the address beside it, on the same port.
+            let name = facts.magicDNSName.flatMap { name in
                 bindings.first.map { "\(name):\($0.port)" }
             }
-            return bound(bindings, firewall: .unknown, alsoReachableAt: names.map { [$0] } ?? [])
+            return bound(bindings, firewall: .unknown, alsoReachableAt: name.map { [$0] } ?? [])
         case .notReachable(.tailscaleNotConnected), .notReachable(.noInterface):
             return tailscaleNotConnected(facts)
         case .notReachable(let reason):
-            return unreachable(
-                reason,
-                preferredPort: RemoteAccessDefaults.defaultListenerPort,
-                fallbackRange: fallbackRange
-            )
+            return unreachable(reason, fallbackRange: fallbackRange)
         }
     }
 

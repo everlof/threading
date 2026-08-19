@@ -883,14 +883,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             statuses[.thisNetwork] = .thisNetwork(
                 isEnabled: coordinator.isThisNetworkDoorEnabled,
                 state: coordinator.thisNetworkDoorState,
-                firewall: coordinator.listenerStatus.firewall,
-                preferredPort: AppSettings.shared.remoteAccessListenerPort
+                firewall: coordinator.listenerStatus.firewall
             )
             statuses[.tailscale] = .tailscale(
                 isEnabled: coordinator.isTailscaleDoorEnabled,
                 state: doorState,
-                facts: facts,
-                magicDNSName: facts.magicDNSName
+                facts: facts
             )
             statuses[.threadingDirect] = .threadingDirect(coordinator.hostedServiceState)
             serve = .tailscaleServe(
