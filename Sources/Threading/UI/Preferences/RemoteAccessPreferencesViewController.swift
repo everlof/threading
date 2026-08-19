@@ -378,14 +378,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         if wayIn == .tailscale {
             rows.append(contentsOf: tailscaleServeRows())
         }
-        // The announcement and what it buys belong to this door and to no other: only the LAN
-        // listeners carry it, and only a Mac on the same network can be woken by one.
         if wayIn == .thisNetwork {
+            // The announcement and what it buys belong to this door and to no other: only the
+            // LAN listeners carry it, and only a Mac on the same network can be woken by one.
             rows.append(contentsOf: discoveryRows())
-        }
-        // "Through a VPN" is the same way in reached from a tunnel, so it belongs to the network
-        // card rather than to a switch of its own.
-        if wayIn == .thisNetwork {
+            // "Through a VPN" is the same way in reached from a tunnel, so it belongs to the
+            // network card rather than to a switch of its own.
             rows.append(contentsOf: throughAVPNRows())
         }
         return SettingsCard(rows: rows)
