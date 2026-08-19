@@ -126,6 +126,10 @@ struct RootView: View {
                                 .contains("files") == true ? .allFiles : .changed
                     )
                 }
+            } else if let openingFixture = MobileSessionOpeningFixture.current {
+                NavigationStack {
+                    SessionDetailView(session: openingFixture.session)
+                }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "browser-private" {
                 NavigationStack {

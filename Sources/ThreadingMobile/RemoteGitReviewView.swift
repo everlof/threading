@@ -301,15 +301,7 @@ struct RemoteGitReviewView: View {
     }
 
     private func loadingView(_ label: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            ProgressView()
-            Text(MobileL10n.string(label))
-                .font(.subheadline)
-                .foregroundStyle(theme.secondaryLabel)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        MobileLoadingPlaceholder(MobileL10n.string(label))
     }
 
     private func unavailableView(_ message: String) -> some View {

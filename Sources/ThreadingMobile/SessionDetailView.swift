@@ -2,6 +2,42 @@ import ThreadingRemoteKit
 import SwiftUI
 import UIKit
 
+#if DEBUG
+/// The session screen's opening states, held still for the iOS evidence catalogue.
+///
+/// Against a real Mac this screen passes through connecting, waking and failure in a moment,
+/// which is how a placeholder that painted the theme's ground as a plate the width of its own
+/// sentence reached a phone unnoticed. A fixture holds each one so it can be captured.
+enum MobileSessionOpeningFixture: String {
+    case connecting = "session-opening-connecting"
+    case resuming = "session-opening-resuming"
+    case failed = "session-opening-failed"
+
+    static var current: MobileSessionOpeningFixture? {
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            .flatMap(MobileSessionOpeningFixture.init(rawValue:))
+    }
+
+    var session: RemoteSessionSummaryDTO {
+        RemoteSessionSummaryDTO(
+            id: "session-opening-demo",
+            title: "Remote access review",
+            agentKind: "claude",
+            surface: .conversation,
+            state: self == .resuming ? "dormant" : "idle",
+            projectName: "Threading",
+            isAvailable: self != .resuming
+        )
+    }
+
+    /// The failure the screen reports is a real client error's own sentence, so the fixture
+    /// carries no copy of its own.
+    var launchError: String? {
+        self == .failed ? RemoteClientError.invalidResponse.localizedDescription : nil
+    }
+}
+#endif
+
 /// What the session screen's single trailing menu contains, and therefore whether it is shown.
 ///
 /// Workspace, the terminal palette and the session actions were three separate toolbar buttons.
@@ -87,13 +123,9 @@ struct SessionDetailView: View {
                     }
                 }
             } else {
-                VStack(spacing: 14) {
-                    ProgressView()
-                    Text(MobileL10n.string(
-                        session.isAvailable ? "Connecting…" : "Resuming on your Mac…"
-                    ))
-                        .foregroundStyle(theme.secondaryLabel)
-                }
+                MobileLoadingPlaceholder(MobileL10n.string(
+                    session.isAvailable ? "Connecting…" : "Resuming on your Mac…"
+                ))
             }
         }
         .navigationTitle(MobileSessionChrome.navigationTitle(
@@ -385,6 +417,13 @@ struct SessionDetailView: View {
     }
 
     private func open() async {
+#if DEBUG
+        // An evidence run asks for one opening state and stays in it; nothing connects.
+        if let fixture = MobileSessionOpeningFixture.current {
+            launchError = fixture.launchError
+            return
+        }
+#endif
         do {
             // A UI switch deliberately tears down the old process. Always ask readiness from
             // the newest catalogue row rather than the immutable navigation value, which may

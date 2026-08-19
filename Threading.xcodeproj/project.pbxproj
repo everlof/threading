@@ -200,6 +200,7 @@
 				ThreadingMobile/Localizable.xcstrings,
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileIssueReporting.swift,
+				ThreadingMobile/MobileLoadingPlaceholder.swift,
 				ThreadingMobile/MobileMorphingTitle.swift,
 				ThreadingMobile/MobileSessionContinuityStore.swift,
 				ThreadingMobile/MobileSettingsChrome.swift,

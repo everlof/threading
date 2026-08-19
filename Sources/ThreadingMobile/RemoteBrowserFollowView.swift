@@ -169,12 +169,7 @@ struct RemoteBrowserFollowView: View {
             }
             .scrollIndicators(.hidden)
         } else if isLoading {
-            VStack(spacing: MobileDesign.Spacing.medium) {
-                ProgressView()
-                Text("Updating browser preview…")
-                    .foregroundStyle(theme.secondaryLabel)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            MobileLoadingPlaceholder(MobileL10n.string("Updating browser preview…"))
         } else if let loadError {
             ContentUnavailableView {
                 Label("Preview Unavailable", systemImage: "rectangle.slash")

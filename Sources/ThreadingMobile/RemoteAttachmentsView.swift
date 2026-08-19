@@ -34,11 +34,7 @@ struct RemoteAttachmentsView: View {
     var body: some View {
         Group {
             if isLoading, attachments == nil {
-                VStack(spacing: 14) {
-                    ProgressView()
-                    Text("Finding attachments…")
-                        .foregroundStyle(theme.secondaryLabel)
-                }
+                MobileLoadingPlaceholder(MobileL10n.string("Finding attachments…"))
             } else if let errorMessage, attachments == nil {
                 ContentUnavailableView {
                     Label("Couldn’t load attachments", systemImage: "exclamationmark.triangle")
@@ -212,11 +208,7 @@ struct RemoteAttachmentTargetView: View {
                     }
                 }
             } else {
-                VStack(spacing: 14) {
-                    ProgressView()
-                    Text("Opening attachment…")
-                        .foregroundStyle(theme.secondaryLabel)
-                }
+                MobileLoadingPlaceholder(MobileL10n.string("Opening attachment…"))
             }
         }
         .background(theme.ground)
@@ -320,11 +312,7 @@ struct RemoteAttachmentPreview: View {
                     }
                 }
             } else {
-                VStack(spacing: 14) {
-                    ProgressView()
-                    Text("Loading preview…")
-                        .foregroundStyle(theme.secondaryLabel)
-                }
+                MobileLoadingPlaceholder(MobileL10n.string("Loading preview…"))
             }
         }
         .navigationTitle(attachment.name)

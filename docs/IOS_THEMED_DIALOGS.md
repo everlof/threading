@@ -102,6 +102,37 @@ editors, Notifications, Diagnostics, Mac appearance, Ask for input and the issue
   its rows are editable or reordered, the group when the form is a small fixed shape or the
   screen already builds its rows lazily.
 
+## Placeholder states
+
+`MobileLoadingPlaceholder` is the spinner-and-sentence a surface shows while it has nothing yet:
+connecting to a session, waking a Mac, finding attachments, opening an attachment or an
+extension panel, loading a review. Use it rather than assembling the three lines again.
+
+The reason it exists is that `background` paints the bounds of the content it is attached to.
+A screen that says `.background(theme.ground)` around a state sized to its own words gets the
+theme painted as a plate exactly as wide as the sentence, standing on the navigation container's
+own system background — a grey box in the middle of an unthemed black screen. That shipped on the
+session screen as "Resuming on your Mac…", and the same three lines had been copied to the
+attachments, attachment preview and extension-panel screens. The component fills the space it is
+offered, paints the ground itself, and tints the spinner with the theme's accent.
+
+`ContentUnavailableView` needs none of this and is still the right answer for a failure or empty
+state: it already expands to the space it is given, which is why the failure state beside each of
+those placeholders was themed the whole time.
+
+The three states of the session screen are in the iOS evidence catalogue, held still by a debug
+fixture because a real Mac passes through them in a moment:
+
+```bash
+THREADING_MOBILE_DEMO=session-opening-connecting
+THREADING_MOBILE_DEMO=session-opening-resuming
+THREADING_MOBILE_DEMO=session-opening-failed
+scripts/ui-evidence-ios.sh --only session-opening
+```
+
+The two spinner states are captured in `display` mode: a spinner never reaches the pixel-stable
+frame the app-owned capture waits for.
+
 ## Crossing a presentation boundary
 
 A sheet is its own hosting scene and inherits neither `remoteTheme` nor the presentation values

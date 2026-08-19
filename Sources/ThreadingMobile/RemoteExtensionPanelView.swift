@@ -60,11 +60,7 @@ struct RemoteExtensionPanelView: View {
                     Button("Try Again") { Task { await load() } }
                 }
             } else {
-                VStack(spacing: MobileDesign.Spacing.medium) {
-                    ProgressView()
-                    Text("Opening extension panel…")
-                        .foregroundStyle(theme.secondaryLabel)
-                }
+                MobileLoadingPlaceholder(MobileL10n.string("Opening extension panel…"))
             }
         }
         .background(theme.ground)
