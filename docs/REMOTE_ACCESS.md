@@ -274,6 +274,15 @@ watcher's narrow window cannot reflow the controller's TUI. Moving between adver
 not change the person's control identity; reconnecting receives the Mac's authoritative current
 mode before input is accepted.
 
+Pinching the iPhone terminal changes its monospaced font on a bounded 9–24 point, whole-point
+ladder and saves the result on that device. Whole-point crossings, rather than every gesture
+sample, are the only events that can recompute an interactive phone-owned grid and send
+SIGWINCH. A view-only phone keeps the Mac's authoritative grid and changes only its renderer's
+cell dimensions, so zoom never takes control or reflows the shared TUI. Hardware-keyboard and
+VoiceOver increase/decrease actions use the same setting. Font sizing remains host-owned rather
+than becoming an extension surface: it controls renderer/PTY geometry, while an extension may
+continue to customize only the content it owns.
+
 Entering a terminal-backed session commits the navigation destination without a width animation.
 A navigation push that reveals the destination through intermediate widths is not cosmetic for a
 terminal: every width becomes a SwiftTerm grid, a viewport message, a PTY resize/SIGWINCH and a
@@ -335,7 +344,10 @@ which is what the Fit-to-iPhone banner's own text change caused. Both sides now 
 `shouldApplyFrameSizeChange` — a fork seam ahead of the emulator, not behind it — so a managed
 grid is never left, even briefly. `EmojiFixedTerminalView` keeps `shouldApplyProcessSizeChange` as
 the second gate, on the PTY rather than the renderer. Re-applying an unchanged lease is not a
-resize either, for the same soft-reset reason.
+resize either, for the same soft-reset reason. Font assignment has to enter that same early seam:
+SwiftTerm's original `resetFont()` called `resize` directly and therefore bypassed the managed-grid
+answer. It now recomputes iOS cell dimensions through `processSizeChange`; a view-only renderer can
+refuse the grid change while still invalidating its glyph, accessibility and scroll geometry.
 
 Every applied grid is written to the event log as `Remote viewport applied` with the grid and the
 number of clients holding a lease. Diagnosing the argument above meant reading it out of
@@ -351,14 +363,36 @@ the drag. A drag over a mouse-tracking program was reported as a press and a dra
 selection gesture and moves nothing. Both are fixed in the fork — see
 [`dependencies.md`](architecture/dependencies.md) — and the touch mapping now reads: one finger
 scrolls the program when it is tracking the mouse and the mirror's own scrollback when it is not,
-two fingers always scroll the mirror.
+two fingers always scroll the mirror. Knowing *whether* it is tracking is the next paragraph:
+until the modes were stated at attach, a phone that joined a running agent believed nothing was.
 
-A joining client is seeded with a repaint of the *visible screen* (`RemoteScreenSeed`), which
-carries no DEC private modes, so a phone that connects to an already-running agent does not know
-the program is tracking the mouse until the program says so again. Until it does, one finger
-scrolls the phone's own mirror rather than the agent's transcript. Both scroll something, which is
-why this is a fidelity gap rather than a broken surface, and seeding the sticky modes beside the
-repaint is what closes it.
+**The sticky modes are stated at attach; the ring cannot be trusted to carry them.** A joining
+client is seeded with a repaint of the *visible screen* (`RemoteScreenSeed`), which carries no DEC
+private modes, and in front of that seed is a 512 KB window over raw output. A TUI arms its modes
+once, when it starts, so by the time a phone connects those sequences have long rolled out of the
+ring. Each of them decides how the *client* behaves, and each failed the same way: the phone's
+emulator sat at `mouseMode == .off`, so it swallowed every tap and gave one finger its own mirror
+rather than the agent's transcript; the key bar asked that same emulator whether an arrow should
+be SS3 or CSI (DECCKM) and got the wrong answer; a paste went out unbracketed, which runs a
+multi-line paste line by line.
+
+`RemoteTerminalModeSeed` states them instead. `RemoteTerminalState.modes` — mouse tracking and its
+encoding, application cursor keys, bracketed paste — is read off the Mac's live emulator, and
+`attachTerminal` sends the private-mode statement **after** the ring, because the ring is replayed
+history and history holds modes that stopped being true: an agent that has since exited to a shell
+would otherwise leave the phone reporting clicks into a prompt as pasted escape text. The
+statement is authoritative rather than additive — every tracking mode and every encoding is reset
+before the ones in force are set, and tracking is set last, because resetting an encoding also
+stops tracking on this emulator.
+
+**A tap also has to be the button a TUI listens for.** Two things in the fork stood between an
+armed phone and a click. iOS encoded every tap as xterm button 1, the *middle* button, where the
+Mac passes `NSEvent.buttonNumber` and sends 0 — so the phone was pressing something no program
+answers, and "click to go to bottom" ignored it. And the gesture as a whole was gated on the
+terminal holding the keyboard, so the first tap after the keyboard was put away was spent taking
+it back. A tap over a tracking program is now that program's left click, press and release
+together, and it leaves focus where the person put it; `TerminalKeyBar` carries the way back to
+the keyboard in both directions rather than only the way out.
 
 **The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
 a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the

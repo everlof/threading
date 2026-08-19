@@ -758,7 +758,8 @@ extension TerminalSession: RemoteTerminalSurface {
             title: title,
             remoteViewport: remoteViewport.map {
                 RemoteTerminalGrid(cols: $0.cols, rows: $0.rows)
-            }
+            },
+            modes: RemoteTerminalModes(terminal)
         )
     }
 
@@ -768,7 +769,8 @@ extension TerminalSession: RemoteTerminalSurface {
             grid: state.grid,
             title: state.title,
             screenSeed: RemoteScreenSeed.repaint(of: terminalView.getTerminal()),
-            remoteViewport: state.remoteViewport
+            remoteViewport: state.remoteViewport,
+            modes: state.modes
         )
     }
 

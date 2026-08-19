@@ -2408,7 +2408,13 @@ keyboard — tap twice to lock, tap again to release. Arrows, Home and End follo
 application-cursor mode, so full-screen programs receive the sequences they asked for. Layouts
 are stored only on the device that authored them; an iPhone and an iPad keep separate bars. This
 bar is the only one over the keyboard: the terminal emulator's own fixed accessory row is
-removed, and the bar carries the control that puts the keyboard away.
+removed, and the bar carries the control that puts the keyboard away and brings it back.
+
+**Tapping a mirrored terminal clicks it.** A full-screen TUI that draws something to click —
+Claude Code's "click to go to bottom", its option lists — receives a tap as a left click at that
+cell, whether or not the keyboard is up. Because the tap belongs to the program, it no longer
+doubles as the way to summon the keyboard: use the bar's keyboard control for that. A terminal
+with nothing tracking the mouse behaves as before, where a tap takes the keyboard back.
 
 Scrolling a mirrored terminal follows what the program in it wants. Full-screen agent TUIs such as
 Claude Code track the mouse and scroll their own transcript, so **one finger** moves the agent's
@@ -2416,6 +2422,11 @@ view the way a wheel does on the Mac. A program that is not tracking the mouse l
 the terminal's own scrollback instead. **Two fingers** always scroll the local scrollback, which is
 the phone's equivalent of holding Option while scrolling on the Mac. Output no longer pulls the
 view back to the bottom while you are reading above it; typing returns you to the live end.
+
+**Pinch with two fingers** to make the terminal text larger or smaller. The iPhone remembers that
+size across terminal sessions on this device. A hardware keyboard can use **Cmd++** and **Cmd+-**;
+VoiceOver exposes matching increase and decrease actions on the terminal. The gesture changes the
+TUI font, not Native conversation text.
 
 Focused control is enforced on the Mac, not merely by disabling a button. A watcher may edit a
 draft, select and scroll terminal output, and follow the session, but raw keys, paste/drop, mouse
@@ -3611,6 +3622,8 @@ collect in a stable end cell rather than rearranging the existing file layout.
   between headings, body copy, captions, code, and aligned numbers rather than assigning one
   point size to everything.
 - **Cmd++** / **Cmd+-** increases or decreases the active terminal's font size.
+- On iPhone, pinch the TUI terminal to change its font size. The chosen 9–24 point size is saved
+  on that iPhone; **Cmd++** / **Cmd+-** and VoiceOver actions reach the same setting.
 - **Settings ▸ Profiles ▸ Font** sets a profile's terminal family and size. Terminal text stays
   independent from app text so a dense shell and a comfortably readable interface can coexist.
 

@@ -88,9 +88,22 @@ extension TerminalView {
     {
         resetCaches()
         self.cellDimension = computeFontDimensions ()
+        #if os(iOS) || os(visionOS)
+        // Font changes are pixel-size changes too. Route them through the same managed-grid seam
+        // as layout so an iPhone rendering a Mac-owned grid can zoom without reflowing or
+        // soft-resetting the emulator to the phone's dimensions.
+        if !processSizeChange(newSize: frame.size) {
+            accessibility.invalidate()
+            search.invalidate()
+            updateScroller()
+        }
+        terminal.updateFullScreen()
+        setNeedsDisplay(bounds)
+        #else
         let newCols = Int(frame.width / cellDimension.width)
         let newRows = Int(frame.height / cellDimension.height)
         resize(cols: newCols, rows: newRows)
+        #endif
         updateCaretView()
     }
     
@@ -174,7 +187,9 @@ extension TerminalView {
             accessibility.invalidate ()
             search.invalidate ()
             
-            terminalDelegate?.sizeChanged (source: self, newCols: newCols, newRows: newRows)
+            if shouldReportSizeChange(newCols: newCols, newRows: newRows) {
+                terminalDelegate?.sizeChanged(source: self, newCols: newCols, newRows: newRows)
+            }
            
             updateScroller()
             return true

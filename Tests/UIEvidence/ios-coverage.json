@@ -63,6 +63,7 @@
     {"id": "terminal-ansi-custom-dark", "entryID": "ios-terminal", "demo": "terminal-ansi", "appearance": "dark", "theme": "custom"},
     {"id": "terminal-scrollback-custom-dark", "entryID": "ios-terminal", "demo": "terminal-scrollback", "appearance": "dark", "theme": "custom"},
     {"id": "terminal-codex-tui-custom-dark", "entryID": "ios-terminal", "demo": "terminal-codex-tui", "appearance": "dark", "theme": "custom"},
+    {"id": "terminal-codex-tui-large-font-custom-dark", "entryID": "ios-terminal", "demo": "terminal-codex-tui", "appearance": "dark", "theme": "custom"},
     {"id": "terminal-codex-tui-system-dark", "entryID": "ios-terminal", "demo": "terminal-codex-tui", "appearance": "dark", "theme": "fallback"},
     {"id": "terminal-codex-tui-threading-dark", "entryID": "ios-terminal", "demo": "terminal-codex-tui", "appearance": "dark", "theme": "threading"},
     {"id": "terminal-claude-tui-custom-dark", "entryID": "ios-terminal", "demo": "terminal-claude-tui", "appearance": "dark", "theme": "custom"},
@@ -205,7 +206,7 @@
       "priority": "critical",
       "title": "Remote terminal",
       "description": "The relayed SwiftTerm surface with mobile keyboard controls, viewport ownership and collaboration state.",
-      "states": ["Connected terminal", "Focused collaboration", "ANSI palette", "Unicode and wrapping", "Codex TUI", "Claude Code TUI", "Long test output", "Mobile key bar", "Keyboard open", "Keyboard dismissed and geometry restored"],
+      "states": ["Connected terminal", "Focused collaboration", "ANSI palette", "Unicode and wrapping", "Codex TUI", "Large terminal font", "Claude Code TUI", "Long test output", "Mobile key bar", "Keyboard open", "Keyboard dismissed and geometry restored"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/terminal-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied terminal"]}

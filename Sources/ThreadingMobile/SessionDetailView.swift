@@ -629,6 +629,8 @@ struct TerminalRemoteView: View {
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
     @StateObject private var keyBridge = TerminalKeyBridge()
+    @AppStorage(MobileTerminalFontSize.preferenceKey)
+    private var terminalFontSize = MobileTerminalFontSize.defaultValue
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
@@ -659,6 +661,8 @@ struct TerminalRemoteView: View {
                 theme: connection.terminalTheme,
                 allowsDirectInput: allowsDirectInput,
                 keyBridge: keyBridge,
+                fontSize: terminalFontSize,
+                onFontSizeChange: { terminalFontSize = $0 },
                 initialScrollProgress: terminalContinuity?.terminalViewportProgress,
                 onScrollProgress: saveTerminalViewport
             )

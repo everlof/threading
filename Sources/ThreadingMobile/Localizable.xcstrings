@@ -2677,6 +2677,36 @@
         }
       }
     },
+    "Increase terminal font size": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öka terminalens textstorlek"
+          }
+        }
+      }
+    },
+    "Decrease terminal font size": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minska terminalens textstorlek"
+          }
+        }
+      }
+    },
+    "Terminal font size %lld points": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminalens textstorlek är %lld punkter"
+          }
+        }
+      }
+    },
     "Rename": {
       "localizations": {
         "sv": {
@@ -4313,6 +4343,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Skift"
+          }
+        }
+      }
+    },
+    "Show keyboard": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa tangentbordet"
           }
         }
       }

@@ -46,6 +46,15 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     answers that by painting nothing at all, and a scrollbar that *does* draw has to hide
     itself. `ThemedScroller` carries that fade; see
     [`themes.md`](themes.md).
+  - **The mouse seam is ours.** A tap on iOS reported xterm button 1 — the *middle* button —
+    where the Mac passes `NSEvent.buttonNumber` and sends 0 for a left click, so a phone pressed
+    something no TUI answers. `singleTap` was also gated on the view holding the keyboard, which
+    spent the first tap after a dismissal on taking it back; a tap over a mouse-tracking program
+    now goes through the public `forwardTap(at:)` regardless of focus and leaves focus alone,
+    since taking the keyboard would cover the thing just clicked. `Terminal.mouseProtocol` is
+    public alongside `mouseMode` so a mirrored session can *state* both to a second renderer —
+    see [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md), where the ring cannot be relied on to carry
+    the arming sequence.
   - **The PTY seam is ours.** Local processes launch through `forkpty`; a `posix_spawn`-based
     wrapper cannot establish the child as the PTY's controlling terminal. The launch publishes
     the exact child PID synchronously, before its exit source is activated, and reaps that PID
@@ -61,7 +70,18 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     time it answers, `terminal.resize` has already reflowed the buffer, and putting the grid back
     runs SwiftTerm's resize path, which ends in `softReset()`. That cost a remote-controlled
     session its scrolling region on every layout pass — see [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
-    Keep both hooks when re-syncing: one gates the renderer, the other gates the PTY.
+    Font assignment belongs to this seam as well: iOS `resetFont()` must call
+    `processSizeChange` rather than `resize` directly, then refresh drawing and scroll geometry
+    even when a managed grid refuses the proposed row/column change. This lets a view-only phone
+    enlarge cells without reflowing the Mac-owned grid, while an interactive phone still updates
+    its PTY lease. Keep both hooks and the `resetFont` routing when re-syncing: one gates the
+    renderer, the other gates the PTY.
+  - **iOS terminal font sizing is bounded at the host.** `RemoteTerminalView` converts a pinch
+    into whole-point steps from 9 through 24 and persists only the final value on the device.
+    That bounds a continuous gesture to at most fifteen renderer/grid updates instead of one per
+    touch sample. Command-key and accessibility actions share the same path. The gesture,
+    limits, persistence and grid effects are deliberately host-owned because they govern the
+    terminal viewport; extensions do not customize them.
   - **Main-queue output is bounded.** PTY reads pause once pending terminal data reaches the
     4 MiB high-water mark and resume below 1 MiB. The kernel PTY buffer then supplies
     normal producer backpressure instead of an unbounded queue growing behind a busy AppKit

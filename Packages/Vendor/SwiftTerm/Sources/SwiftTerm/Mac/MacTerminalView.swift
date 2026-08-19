@@ -166,6 +166,15 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         true
     }
 
+    /**
+     * Gives a subclass a chance to keep a programmatic emulator resize local to the renderer.
+     * Internal scrolling and accessibility state are still updated; only the host delegate
+     * notification is suppressed. The default preserves SwiftTerm behaviour.
+     */
+    open func shouldReportSizeChange(newCols: Int, newRows: Int) -> Bool {
+        true
+    }
+
     /// If true, the caret view will show different shapes depending on the focus
     /// otherwise, it will behave like it is focused
     public var caretViewTracksFocus: Bool {
@@ -1666,7 +1675,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     public func sizeChanged(source: Terminal) {
-        terminalDelegate?.sizeChanged(source: self, newCols: source.cols, newRows: source.rows)
+        if shouldReportSizeChange(newCols: source.cols, newRows: source.rows) {
+            terminalDelegate?.sizeChanged(source: self, newCols: source.cols, newRows: source.rows)
+        }
         updateScroller ()
     }
     

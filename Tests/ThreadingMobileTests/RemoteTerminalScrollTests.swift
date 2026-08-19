@@ -34,6 +34,49 @@ final class RemoteTerminalScrollTests: XCTestCase {
 
     // MARK: - Tests
 
+    /// A terminal push crosses two grid authorities: the Mac's current PTY grid arrives in
+    /// `hello`, then an interactive phone takes ownership with the grid its final frame can
+    /// display. Both travel through SwiftTerm's size delegate, but only the latter is a viewport
+    /// lease. Reporting the authoritative resize echoed the Mac grid back between two identical
+    /// phone requests and made Codex repaint three times on every push.
+    @MainActor
+    func testOnlyTheLocallyOwnedGridIsReportedAsAViewportLease() {
+        let view = RemoteTerminalView(
+            frame: CGRect(x: 0, y: 0, width: 402, height: 874),
+            font: UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        )
+        let coordinator = TerminalViewRepresentable.Coordinator(
+            connection: .demoTerminal(),
+            allowsInput: true,
+            keyBridge: TerminalKeyBridge(),
+            initialScrollProgress: nil,
+            onScrollProgress: { _ in }
+        )
+        coordinator.attach(to: view)
+
+        XCTAssertFalse(
+            coordinator.reportsTerminalViewportChanges,
+            "A pre-authentication layout is not a lease yet."
+        )
+        XCTAssertFalse(view.shouldReportSizeChange(newCols: 48, newRows: 41))
+
+        view.setAuthoritativeGrid(cols: 109, rows: 84)
+
+        XCTAssertFalse(
+            coordinator.reportsTerminalViewportChanges,
+            "Installing the Mac grid must never echo it back as the phone's request."
+        )
+        XCTAssertFalse(view.shouldReportSizeChange(newCols: 109, newRows: 84))
+
+        view.setUsesLocalViewport(true)
+
+        XCTAssertTrue(
+            coordinator.reportsTerminalViewportChanges,
+            "The final interactive phone grid owns the remote viewport."
+        )
+        XCTAssertTrue(view.shouldReportSizeChange(newCols: 48, newRows: 41))
+    }
+
     func testAFreshViewSitsAtTheLiveTail() {
         let view = makeView(feeding: Fixture.lines)
 
@@ -184,7 +227,103 @@ final class RemoteTerminalScrollTests: XCTestCase {
         XCTAssertLessThanOrEqual(reports, Int(WheelReportBudget.burst) + 1)
     }
 
+    func testFontSizeIsRoundedAndBounded() {
+        XCTAssertEqual(MobileTerminalFontSize.normalized(8.4), 9)
+        XCTAssertEqual(MobileTerminalFontSize.normalized(13.49), 13)
+        XCTAssertEqual(MobileTerminalFontSize.normalized(13.5), 14)
+        XCTAssertEqual(MobileTerminalFontSize.normalized(99), 24)
+        XCTAssertEqual(MobileTerminalFontSize.normalized(.infinity), 13)
+    }
+
+    func testPinchScaleMapsFromTheGestureStartingSize() {
+        XCTAssertEqual(MobileTerminalFontSize.scaled(from: 13, by: 1.01), 13)
+        XCTAssertEqual(MobileTerminalFontSize.scaled(from: 13, by: 1.2), 16)
+        XCTAssertEqual(MobileTerminalFontSize.scaled(from: 20, by: 0.5), 10)
+        XCTAssertEqual(MobileTerminalFontSize.scaled(from: 13, by: 0), 13)
+    }
+
+    @MainActor
+    func testPinchPersistsOnlyItsFinalWholePointSize() {
+        let view = makeFontView(fontSize: 13)
+        var persisted: [Double] = []
+        view.configureFontSizing { persisted.append($0) }
+
+        view.beginFontPinch()
+        view.updateFontPinch(scale: 1.01)
+        view.updateFontPinch(scale: 1.2)
+
+        XCTAssertEqual(view.font.pointSize, 16)
+        XCTAssertTrue(persisted.isEmpty)
+
+        view.endFontPinch()
+
+        XCTAssertEqual(persisted, [16])
+    }
+
+    @MainActor
+    func testFontSizingInstallsOnePinchRecognizer() {
+        let view = makeFontView(fontSize: 13)
+
+        view.configureFontSizing { _ in }
+        view.configureFontSizing { _ in }
+
+        XCTAssertEqual(view.gestureRecognizers?.filter { $0 is UIPinchGestureRecognizer }.count, 1)
+    }
+
+    /// A viewer renders the Mac's grid rather than owning its PTY. Changing glyph dimensions
+    /// must therefore zoom that renderer without reflowing or soft-resetting the emulator.
+    @MainActor
+    func testFontChangePreservesAnAuthoritativeGrid() {
+        let view = makeFontView(fontSize: 13)
+        view.setAuthoritativeGrid(cols: 109, rows: 84)
+
+        view.applyPreferredFontSize(20)
+
+        let dimensions = view.getTerminal().getDims()
+        XCTAssertEqual(dimensions.cols, 109)
+        XCTAssertEqual(dimensions.rows, 84)
+        XCTAssertEqual(view.font.pointSize, 20)
+    }
+
+    /// An interactive phone owns the viewport, so a larger font intentionally advertises the
+    /// smaller grid that now fits the same pixels.
+    @MainActor
+    func testFontChangeRecomputesALocallyOwnedGrid() {
+        let view = makeFontView(fontSize: 13)
+        view.setAuthoritativeGrid(cols: 109, rows: 84)
+        view.setUsesLocalViewport(true)
+        let before = view.getTerminal().getDims()
+
+        view.applyPreferredFontSize(20)
+
+        let after = view.getTerminal().getDims()
+        XCTAssertLessThan(after.cols, before.cols)
+        XCTAssertLessThan(after.rows, before.rows)
+    }
+
+    @MainActor
+    func testFontSizeAccessibilityActionsDescribeBothDirections() {
+        let view = makeFontView(fontSize: 13)
+        view.configureFontSizing { _ in }
+
+        XCTAssertEqual(
+            Set(view.accessibilityCustomActions?.map(\.name) ?? []),
+            Set([
+                MobileL10n.string("Increase terminal font size"),
+                MobileL10n.string("Decrease terminal font size"),
+            ])
+        )
+    }
+
     // MARK: - Private Methods
+
+    @MainActor
+    private func makeFontView(fontSize: CGFloat) -> RemoteTerminalView {
+        RemoteTerminalView(
+            frame: CGRect(x: 0, y: 0, width: 402, height: 700),
+            font: UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        )
+    }
 
     private func makeView(feeding lines: Int) -> RemoteTerminalView {
         let view = RemoteTerminalView(

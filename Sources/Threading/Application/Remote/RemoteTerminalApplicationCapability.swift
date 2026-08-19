@@ -6,6 +6,58 @@ struct RemoteTerminalGrid: Equatable, Sendable {
     let rows: Int
 }
 
+/// The mouse-tracking contract the program running on the Mac's PTY asked for: which events it
+/// wants, and how a report has to be written for it to be understood.
+struct RemoteTerminalMouseReporting: Equatable, Sendable {
+
+    /// Which events the program asked to receive.
+    enum Tracking: String, Equatable, Sendable {
+        /// X10 compatibility: presses only.
+        case x10
+        /// Normal tracking: presses and releases.
+        case vt200
+        /// Presses, releases, and motion while a button is down.
+        case buttonEvent
+        /// Presses, releases, and motion regardless of button state.
+        case anyEvent
+    }
+
+    /// How a report is written on the wire. A client that guesses wrong mislocates the click.
+    enum Encoding: String, Equatable, Sendable {
+        case x10
+        case utf8
+        case sgr
+        case urxvt
+        case sgrPixel
+    }
+
+    let tracking: Tracking
+    let encoding: Encoding
+}
+
+/// The sticky modes a program set on the Mac's PTY that a second renderer cannot infer.
+///
+/// Each of these is armed once, by an escape sequence the program emits when it starts, and each
+/// decides how the *client* behaves from then on: whether a tap is a click, whether an arrow is
+/// SS3 or CSI, whether a paste is bracketed. A phone attaching later sees only what the ring
+/// still holds, and a TUI's opening sequences are long gone by then — so they are carried as
+/// state and restated to every joining client.
+struct RemoteTerminalModes: Equatable, Sendable {
+    /// `nil` when nothing on the PTY is tracking the mouse.
+    let mouseReporting: RemoteTerminalMouseReporting?
+    /// DECCKM. The phone's key bar reads this to choose between SS3 and CSI arrows.
+    let applicationCursorKeys: Bool
+    /// A paste the program wants delimited, so a multi-line one is not run line by line.
+    let bracketedPaste: Bool
+
+    /// What a terminal holds when no program has asked for anything.
+    static let plain = RemoteTerminalModes(
+        mouseReporting: nil,
+        applicationCursorKeys: false,
+        bracketedPaste: false
+    )
+}
+
 /// Cheap live state used for request admission and viewport reconciliation.
 ///
 /// Keeping this separate from `RemoteTerminalSnapshot` prevents high-frequency frontend input
@@ -14,6 +66,19 @@ struct RemoteTerminalState: Equatable, Sendable {
     let grid: RemoteTerminalGrid
     let title: String
     let remoteViewport: RemoteTerminalGrid?
+    let modes: RemoteTerminalModes
+
+    init(
+        grid: RemoteTerminalGrid,
+        title: String,
+        remoteViewport: RemoteTerminalGrid?,
+        modes: RemoteTerminalModes = .plain
+    ) {
+        self.grid = grid
+        self.title = title
+        self.remoteViewport = remoteViewport
+        self.modes = modes
+    }
 }
 
 /// The bounded state needed to attach a frontend to an already-running terminal.
@@ -28,17 +93,20 @@ struct RemoteTerminalSnapshot: Equatable, Sendable {
     var grid: RemoteTerminalGrid { state.grid }
     var title: String { state.title }
     var remoteViewport: RemoteTerminalGrid? { state.remoteViewport }
+    var modes: RemoteTerminalModes { state.modes }
 
     init(
         grid: RemoteTerminalGrid,
         title: String,
         screenSeed: Data,
-        remoteViewport: RemoteTerminalGrid?
+        remoteViewport: RemoteTerminalGrid?,
+        modes: RemoteTerminalModes = .plain
     ) {
         self.state = RemoteTerminalState(
             grid: grid,
             title: title,
-            remoteViewport: remoteViewport
+            remoteViewport: remoteViewport,
+            modes: modes
         )
         self.screenSeed = screenSeed
     }

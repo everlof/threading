@@ -521,6 +521,11 @@ final class RemoteSessionMirrorRegistry {
 
         let ringSnapshot = mirrors[sessionID]?.ring.snapshot() ?? Data()
         if !ringSnapshot.isEmpty { connection.sendBinary(ringSnapshot) }
+        // After the ring rather than before it. The ring is replayed history: it can arm mouse
+        // tracking the program has since dropped, and — far more often — it holds no arming
+        // sequence at all, because a TUI sends that once at startup and 512 KB of output rolled
+        // it away. The statement is what is true now, so it has to be the last word.
+        connection.sendBinary(RemoteTerminalModeSeed.bytes(for: snapshot.modes))
         return true
     }
 

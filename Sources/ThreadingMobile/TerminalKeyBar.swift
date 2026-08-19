@@ -64,6 +64,25 @@ final class TerminalKeyBridge: ObservableObject {
         keyWindow?.endEditing(true)
     }
 
+    /// Whether this terminal will take the keyboard at all.
+    ///
+    /// A view-only session refuses first responder, and a control that can do nothing should not
+    /// be offered — the dismiss half was never shown to a viewer either, because a viewer could
+    /// not have the keyboard up to begin with.
+    var canShowKeyboard: Bool {
+        terminalView?.canBecomeFirstResponder ?? false
+    }
+
+    /// Brings the system keyboard back.
+    ///
+    /// Tapping the terminal used to be the only way to ask for it. Over a program that tracks
+    /// the mouse a tap is that program's click now — the phone would otherwise have no way to
+    /// reach what a TUI draws — so the way back to the keyboard lives on this bar instead.
+    func showKeyboard() {
+        guard let terminalView, !terminalView.isFirstResponder else { return }
+        _ = terminalView.becomeFirstResponder()
+    }
+
     private var keyWindow: UIWindow? {
         terminalView?.window
             ?? UIApplication.shared.connectedScenes
@@ -136,11 +155,21 @@ struct TerminalKeyBar: View {
                 .fill(theme.divider)
                 .frame(width: theme.borderWidth, height: Metrics.keyHeight)
 
-            if isKeyboardVisible {
-                Button(action: bridge.dismissKeyboard) {
-                    trailingIcon("keyboard.chevron.compact.down")
+            // Both directions, because the terminal no longer answers a tap by taking the
+            // keyboard while a TUI is tracking the mouse: that tap is the TUI's click.
+            if isKeyboardVisible || bridge.canShowKeyboard {
+                Button(action: isKeyboardVisible ? bridge.dismissKeyboard : bridge.showKeyboard) {
+                    trailingIcon(
+                        isKeyboardVisible
+                            ? "keyboard.chevron.compact.down"
+                            : "keyboard.chevron.compact.up"
+                    )
                 }
-                .accessibilityLabel(MobileL10n.string("Hide keyboard"))
+                .accessibilityLabel(
+                    isKeyboardVisible
+                        ? MobileL10n.string("Hide keyboard")
+                        : MobileL10n.string("Show keyboard")
+                )
             }
 
             Button(action: customize) {

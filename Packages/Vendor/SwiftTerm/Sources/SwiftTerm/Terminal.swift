@@ -432,7 +432,7 @@ open class Terminal {
     // The mouse coordinates can be encoded in a number of ways, and obey to historical
     // upgrades to the protocol, but also attempts at fixing limitations of the different
     // encodings.
-    enum MouseProtocolEncoding {
+    public enum MouseProtocolEncoding {
         // The default x10 mode is limited to coordinates up to 223.
         // (255-32).   The other modes solve this limitaion
         case x10
@@ -452,8 +452,12 @@ open class Terminal {
         case sgrPixel
     }
     
-    // The protocol encoding for the terminal
-    private var mouseProtocol: MouseProtocolEncoding = .x10
+    /// The protocol encoding for the terminal.
+    ///
+    /// Readable from the outside because a mirrored terminal has to be able to state this
+    /// contract to a second renderer: a client left guessing x10 while the program asked for
+    /// SGR mislocates every click past column 95 and cannot report a release at all.
+    public private(set) var mouseProtocol: MouseProtocolEncoding = .x10
 
     // This is used to track if we are setting the colors, to prevent a
     // recursive invocation (nativeForegroundColor sets the terminal

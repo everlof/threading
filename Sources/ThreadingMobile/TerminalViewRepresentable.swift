@@ -10,6 +10,8 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     let theme: RemoteTerminalThemeDTO?
     let allowsDirectInput: Bool
     let keyBridge: TerminalKeyBridge
+    let fontSize: Double
+    let onFontSizeChange: @MainActor (Double) -> Void
     let initialScrollProgress: Double?
     let onScrollProgress: @MainActor (Double) -> Void
 
@@ -24,9 +26,10 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> RemoteTerminalView {
+        let resolvedFontSize = MobileTerminalFontSize.resolvedPreference(fontSize)
         let view = RemoteTerminalView(
             frame: UIScreen.main.bounds,
-            font: UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+            font: UIFont.monospacedSystemFont(ofSize: CGFloat(resolvedFontSize), weight: .regular)
         )
         view.terminalDelegate = context.coordinator
         view.dropBuiltInKeyboardAccessory()
@@ -35,6 +38,11 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         view.smartQuotesType = .no
         view.smartDashesType = .no
         view.setAllowsKeyboardInput(allowsDirectInput)
+        // Claim the mouse only when a report would actually reach the Mac. A view-only phone,
+        // or one whose keystrokes go to a draft, has its reports dropped on the way out — and a
+        // gesture claimed by the emulator and then dropped scrolls nothing at all.
+        view.allowMouseReporting = allowsDirectInput
+        view.configureFontSizing(onChange: onFontSizeChange)
         context.coordinator.attach(to: view)
         Self.apply(theme, to: view)
         view.accessibilityLabel = MobileL10n.string("Remote terminal")
@@ -72,6 +80,9 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         context.coordinator.initialScrollProgress = initialScrollProgress
         context.coordinator.onScrollProgress = onScrollProgress
         uiView.setAllowsKeyboardInput(allowsDirectInput)
+        uiView.allowMouseReporting = allowsDirectInput
+        uiView.configureFontSizing(onChange: onFontSizeChange)
+        uiView.applyPreferredFontSize(MobileTerminalFontSize.resolvedPreference(fontSize))
         let ownsViewport = connection.capability == .interact
         uiView.setUsesLocalViewport(ownsViewport)
         if !ownsViewport {
@@ -211,6 +222,14 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             onScrollProgress(progress)
         }
 
+        /// Only the phone-owned grid is a viewport request. During authentication the Mac's
+        /// authoritative grid is briefly installed so buffered ANSI can be interpreted, and
+        /// SwiftTerm reports that programmatic resize through this same delegate. Echoing it
+        /// back as a lease made every push resize the PTY phone → Mac → phone before settling.
+        var reportsTerminalViewportChanges: Bool {
+            terminalView?.usesLocalViewport == true
+        }
+
         nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
             let bytes = Array(data)
             Task { @MainActor [weak self] in
@@ -222,7 +241,8 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 
         nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
             Task { @MainActor [weak self] in
-                self?.connection.updateTerminalViewport(cols: newCols, rows: newRows)
+                guard let self, reportsTerminalViewportChanges else { return }
+                connection.updateTerminalViewport(cols: newCols, rows: newRows)
             }
         }
         nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
@@ -253,11 +273,16 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 /// SwiftTerm normally derives its grid from this device's pixel size. Remote output was produced
 /// for the Mac's PTY grid, though, so cursor addressing and wraps only remain correct when this
 /// view holds that authoritative size against its own layout.
-final class RemoteTerminalView: TerminalView {
+final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     private(set) var usesLocalViewport = false
+    private(set) var isAdjustingFontSize = false
     private var allowsKeyboardInput = true
     private var authoritativeColumns = 0
     private var authoritativeRows = 0
+    private var fontPinchRecognizer: UIPinchGestureRecognizer?
+    private var fontSizeAtPinchStart = MobileTerminalFontSize.defaultValue
+    private let fontSizeFeedbackGenerator = UISelectionFeedbackGenerator()
+    private var onFontSizeChange: (@MainActor (Double) -> Void)?
 
     override var canBecomeFirstResponder: Bool {
         allowsKeyboardInput && super.canBecomeFirstResponder
@@ -281,11 +306,172 @@ final class RemoteTerminalView: TerminalView {
         }
     }
 
+    func configureFontSizing(onChange: @escaping @MainActor (Double) -> Void) {
+        onFontSizeChange = onChange
+        if fontPinchRecognizer == nil {
+            let recognizer = UIPinchGestureRecognizer(
+                target: self,
+                action: #selector(handleFontPinch(_:))
+            )
+            recognizer.cancelsTouchesInView = false
+            recognizer.delegate = self
+            addGestureRecognizer(recognizer)
+            fontPinchRecognizer = recognizer
+        }
+        refreshFontSizeAccessibilityActions()
+    }
+
+    func applyPreferredFontSize(_ value: Double) {
+        guard !isAdjustingFontSize else { return }
+        applyFontSize(value)
+    }
+
+    func beginFontPinch() {
+        isAdjustingFontSize = true
+        fontSizeAtPinchStart = MobileTerminalFontSize.normalized(Double(font.pointSize))
+        fontSizeFeedbackGenerator.prepare()
+    }
+
+    func updateFontPinch(scale: CGFloat) {
+        guard isAdjustingFontSize else { return }
+        applyFontSize(
+            MobileTerminalFontSize.scaled(from: fontSizeAtPinchStart, by: scale),
+            feedback: true
+        )
+    }
+
+    func endFontPinch() {
+        guard isAdjustingFontSize else { return }
+        isAdjustingFontSize = false
+        persistCurrentFontSize()
+    }
+
+    @objc private func handleFontPinch(_ recognizer: UIPinchGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            beginFontPinch()
+        case .changed:
+            updateFontPinch(scale: recognizer.scale)
+        case .ended, .cancelled, .failed:
+            endFontPinch()
+        default:
+            break
+        }
+    }
+
+    private func applyFontSize(_ value: Double, feedback: Bool = false) {
+        let normalized = MobileTerminalFontSize.normalized(value)
+        guard font.pointSize != CGFloat(normalized) else {
+            refreshFontSizeAccessibilityActions()
+            return
+        }
+        font = font.withSize(CGFloat(normalized))
+        if feedback {
+            // This branch runs only after the whole-point guard above, so a continuous pinch
+            // produces one tactile tick per visible size step rather than one per touch sample.
+            fontSizeFeedbackGenerator.selectionChanged()
+            fontSizeFeedbackGenerator.prepare()
+        }
+        refreshFontSizeAccessibilityActions()
+    }
+
+    private func persistCurrentFontSize(announce: Bool = false) {
+        let normalized = MobileTerminalFontSize.normalized(Double(font.pointSize))
+        onFontSizeChange?(normalized)
+        if announce {
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: MobileL10n.string("Terminal font size %lld points", Int64(normalized))
+            )
+        }
+    }
+
+    @objc private func increaseTerminalFontSize() {
+        applyFontSize(
+            MobileTerminalFontSize.increased(from: Double(font.pointSize)),
+            feedback: true
+        )
+        persistCurrentFontSize(announce: true)
+    }
+
+    @objc private func decreaseTerminalFontSize() {
+        applyFontSize(
+            MobileTerminalFontSize.decreased(from: Double(font.pointSize)),
+            feedback: true
+        )
+        persistCurrentFontSize(announce: true)
+    }
+
+    @objc private func accessibilityIncreaseTerminalFontSize(
+        _ action: UIAccessibilityCustomAction
+    ) -> Bool {
+        increaseTerminalFontSize()
+        return true
+    }
+
+    @objc private func accessibilityDecreaseTerminalFontSize(
+        _ action: UIAccessibilityCustomAction
+    ) -> Bool {
+        decreaseTerminalFontSize()
+        return true
+    }
+
+    private func refreshFontSizeAccessibilityActions() {
+        let size = MobileTerminalFontSize.normalized(Double(font.pointSize))
+        var actions: [UIAccessibilityCustomAction] = []
+        if size < MobileTerminalFontSize.maximum {
+            actions.append(UIAccessibilityCustomAction(
+                name: MobileL10n.string("Increase terminal font size"),
+                target: self,
+                selector: #selector(accessibilityIncreaseTerminalFontSize(_:))
+            ))
+        }
+        if size > MobileTerminalFontSize.minimum {
+            actions.append(UIAccessibilityCustomAction(
+                name: MobileL10n.string("Decrease terminal font size"),
+                target: self,
+                selector: #selector(accessibilityDecreaseTerminalFontSize(_:))
+            ))
+        }
+        accessibilityCustomActions = actions
+    }
+
+    override var keyCommands: [UIKeyCommand]? {
+        (super.keyCommands ?? []) + [
+            UIKeyCommand(
+                title: MobileL10n.string("Increase terminal font size"),
+                action: #selector(increaseTerminalFontSize),
+                input: "+",
+                modifierFlags: .command
+            ),
+            UIKeyCommand(
+                title: MobileL10n.string("Decrease terminal font size"),
+                action: #selector(decreaseTerminalFontSize),
+                input: "-",
+                modifierFlags: .command
+            ),
+        ]
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === fontPinchRecognizer || otherGestureRecognizer === fontPinchRecognizer
+    }
+
     /// Answers before the emulator is touched, so a layout pass cannot reflow the Mac's grid to
     /// this phone's pixel size and back. The round trip also soft-reset the buffer, which threw
     /// away the scrolling region of whatever full-screen program the Mac is showing.
     override func shouldApplyFrameSizeChange(newCols: Int, newRows: Int) -> Bool {
         usesLocalViewport || authoritativeColumns <= 0 || authoritativeRows <= 0
+    }
+
+    /// Installing the Mac's authoritative grid is renderer state, not a request to resize the
+    /// process. SwiftTerm's programmatic `resize` reports through the same delegate as a frame
+    /// change, so suppress that report at the point where the resize still knows its owner.
+    override func shouldReportSizeChange(newCols: Int, newRows: Int) -> Bool {
+        usesLocalViewport
     }
 
     func setAuthoritativeGrid(cols: Int, rows: Int) {
