@@ -216,6 +216,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "remoteAccessAdvertisedHostname",
                 valueType: .string
             ),
+            .remoteAccessDiscoveryEnabled: .init(
+                key: "remoteAccessDiscoveryEnabled",
+                valueType: .boolean
+            ),
             .remoteInputControlDefault: .init(
                 key: "remoteInputControlDefault",
                 valueType: .string
