@@ -75,25 +75,32 @@ The consequence for the Info.plist: `NSDesktopFolderUsageDescription`,
 the user is told *why*, and they apply to unsandboxed apps too — the file dialog does not excuse
 them, because the process that trips the gate later is the agent, not the open panel.
 
-## The Local Network permission is not in play, and the check is the point
+## The Local Network permission is in play, for one reason: Bonjour
 
-The obvious reading of Remote Access — a listener, a phone on the same Wi-Fi — says the app
-needs `NSLocalNetworkUsageDescription`. It does not, and adding the string would have documented
-a permission the app never requests.
+Threading's own listeners never needed it. `MCPServer` and `ExtensionHostService` set
+`requiredLocalEndpoint` to `127.0.0.1` and bind nothing else; `RemoteAccessServer` binds loopback
+the same way and, for each way in the owner switched on, one listener per routable address, each
+pinned to one address and never `0.0.0.0`. Listening for and accepting incoming TCP does not
+require Local Network access (Apple's TN3179 table), which is why the LAN door worked before
+discovery existed. The `0.0.0.0` handling in `ListeningPort.swift` is about detecting what a
+*user's* dev server binds to, a feature and not one of our own binds.
 
-`MCPServer` and `ExtensionHostService` set `requiredLocalEndpoint` to `127.0.0.1` and bind
-nothing else. `RemoteAccessServer` binds loopback the same way, and additionally binds one
-listener per routable address for each way in the owner switched on; each of those is pinned to
-one address and none of them binds `0.0.0.0`. The `0.0.0.0` handling in `ListeningPort.swift` is
-about detecting what a *user's* dev server binds to — a feature, not one of our own binds.
+What does require it is **advertising**: registering the `_threading._tcp` service that lets a
+phone find a moved Mac is a Bonjour operation, and every Bonjour operation needs the privilege.
+Measured on macOS 26 (see `docs/REMOTE_ACCESS.md`, Discovery): the same binary registers when
+run from a terminal (exempt) and silently registers nothing as a launchd agent (not exempt), with
+no alert shown. So `Sources/Threading/Resources/Info.plist` carries `NSLocalNetworkUsageDescription`
+and `NSBonjourServices` for the Mac target, the mobile target carries the same pair (the array
+through its own `Info.plist` beside the folder), and the phone additionally needs the permission
+for unicast to a same-subnet private address, which iOS gates on the same prompt. Denial on the
+Mac means the announcement is withdrawn and the phone falls back to the advertised address list;
+denial on the phone is a named failure state with the Settings deep link.
 
-**That claim is about Threading's own binds, and only those.** A Local Network prompt naming
-Threading has been seen in the wild, and the attribution rule is why: an agent that curls a LAN
-address, resolves a `.local` name, or starts a dev server the network reaches trips the gate as
-a child of Threading, and macOS names the parent. So the usage string still does not belong in
-the Info.plist — Threading requests nothing — while the prompt remains something a user can
-meet. It is not forecast either: unlike `screencapture` there is no command that means it (any
-`curl` might), and macOS 13 and 14 have no Local Network list for a status row to point at.
+**The attribution rule still applies to children.** An agent that curls a LAN address, resolves a
+`.local` name, or starts a dev server the network reaches trips the gate as a child of Threading,
+and macOS names the parent. It is not forecast: unlike `screencapture` there is no command that
+means it (any `curl` might), and macOS 13 and 14 have no Local Network list for a status row to
+point at.
 
 ## Reporting a grant must not cost a prompt
 
