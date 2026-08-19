@@ -338,9 +338,19 @@ final class PromptView: NSView, ThemedComponent {
         appending(paths: attachmentPaths, to: textView.string)
     }
 
+    /// Whether a handed-over path is still on its way to becoming a preview.
+    ///
+    /// Preparation is serial and decodes off the main actor, so the two halves of an attachment
+    /// arrive at different times: `attachmentPaths` answers immediately, because the draft owns
+    /// the file the moment it is dropped, while the thumbnail — and the ability to send — arrive
+    /// a frame or more later. This names that gap for the surfaces that have to wait it out,
+    /// rather than each of them reaching for a private list or inferring it from a disabled
+    /// button that is also disabled for three other reasons.
+    var isPreparingAttachments: Bool { !pendingAttachmentPaths.isEmpty }
+
     /// The answer used by both an in-box submit and an owner-provided outside action.
     var isSubmissionAvailable: Bool {
-        hasSubmittableContent && pendingAttachmentPaths.isEmpty && isSubmissionEnabled
+        hasSubmittableContent && !isPreparingAttachments && isSubmissionEnabled
     }
 
     // MARK: - Initialization

@@ -457,7 +457,20 @@ final class ImageCompareTests: XCTestCase {
             canvas.showsKeyboardFocusRing, "opening the comparison outlined the whole surface"
         )
 
-        scrim.mouseDown(with: try Self.clickEvent())
+        // A press on the ground is a press where the surface is *not*. The wash also covers the
+        // header band the comparison deliberately opens below, and that band is the ground a
+        // person can actually reach; the scrim ignores a press that lands within the surface it
+        // is dimming for, so aiming at the window origin would be aiming at the comparison.
+        // Derived from the surface's own frame, so a layout change moves the click with it.
+        let ground = NSPoint(
+            x: inspector.frame.midX,
+            y: (inspector.frame.maxY + root.bounds.maxY) / 2
+        )
+        XCTAssertFalse(
+            inspector.frame.contains(ground),
+            "the comparison left no ground to press"
+        )
+        scrim.mouseDown(with: try Self.clickEvent(at: root.convert(ground, to: nil)))
 
         XCTAssertFalse(CompareInspectorPresenter.isPresenting(in: window))
         XCTAssertNil(Self.inspector(in: window), "closing left the surface in the window")
@@ -592,10 +605,10 @@ final class ImageCompareTests: XCTestCase {
     }
 
     @MainActor
-    private static func clickEvent() throws -> NSEvent {
+    private static func clickEvent(at location: NSPoint = .zero) throws -> NSEvent {
         try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseDown,
-            location: .zero,
+            location: location,
             modifierFlags: [],
             timestamp: 0,
             windowNumber: 0,

@@ -240,7 +240,13 @@ final class TerminalBoldTextTests: XCTestCase {
             JSONSerialization.jsonObject(with: Data(result.text.utf8)) as? [String: Any]
         )
         let variants = try XCTUnwrap(document["variants"] as? [String: Any])
-        let variant = try XCTUnwrap(variants.values.first as? [String: Any])
+        // Named rather than `values.first`: a theme publishes a light and a dark patch, and a
+        // dictionary hands them back in whichever order it likes. Asking for "the first one"
+        // therefore asserted against the dark palette's bold ink on some runs and the light
+        // palette's on others — the same test passing and failing on identical code.
+        let variant = try XCTUnwrap(
+            variants[AppTheme.VariantKind.dark.rawValue] as? [String: Any]
+        )
         let terminal = try XCTUnwrap(variant["terminal_colors"] as? [String: Any])
 
         XCTAssertEqual(terminal["bold_foreground"] as? String, "#FFFFFF")

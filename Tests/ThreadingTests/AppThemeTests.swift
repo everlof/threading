@@ -2323,7 +2323,7 @@ final class AppThemeTests: HostedStoreTestCase {
             for role in AppThemeRole.allCases {
                 let resolved = theme.resolved(role)
                 XCTAssertNotEqual(
-                    resolved.resolvedHex, role.systemColor.resolvedHex,
+                    resolved.resolvedComponents, role.systemColor.resolvedComponents,
                     "\(theme.name) leaves \(role.rawValue) on the system colour"
                 )
             }
@@ -2865,5 +2865,27 @@ private extension NSColor {
             hex = (usingColorSpace(.sRGB) ?? .black).hexString
         }
         return hex
+    }
+
+    /// The same resolution at full precision, for the questions a hex string cannot answer.
+    ///
+    /// `hexString` quantises to eight bits per channel, which is right for a colour on its way
+    /// to a raster or into a theme document and wrong for *is this the same colour*: white at
+    /// 90% alpha and Claymorphism's stated `#FFFFFFE6` are 229.5 and 230 of the same byte, so
+    /// they render identically and are not the same ink. Asking "did this role fall back?" of
+    /// the rendering therefore accused a theme that states the role.
+    var resolvedComponents: [CGFloat] {
+        let appearance = NSAppearance(named: .darkAqua) ?? NSAppearance.currentDrawing()
+        var components: [CGFloat] = []
+        appearance.performAsCurrentDrawingAppearance {
+            let color = usingColorSpace(.sRGB) ?? .black
+            components = [
+                color.redComponent,
+                color.greenComponent,
+                color.blueComponent,
+                color.alphaComponent
+            ]
+        }
+        return components
     }
 }
