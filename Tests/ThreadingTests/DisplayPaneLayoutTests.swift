@@ -1279,6 +1279,70 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         )
     }
 
+    /// Settings temporarily empties the display pane while its tab controllers stay cached. The
+    /// app-wide theme sweep cannot reach that detached tree, so remounting is where its frozen
+    /// layer colours have to catch up. This is the exact path that left the Attachments filter in
+    /// Threading navy after the user selected System.
+    func testAttachmentsFilterCatchesUpWithAThemeSwitchMissedWhileDetached() throws {
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        AppThemePalette.set(AppThemeStyles.threading)
+
+        let fixture = try projectSession()
+        defer { fixture.tearDown() }
+
+        let mine = try writePNG(in: fixture.folder, named: "mine.png", color: .systemGreen)
+        SessionAttachmentStore.shared.record(
+            declared: mine,
+            sessionID: fixture.sessionID,
+            projectRoot: fixture.folder,
+            origin: .user
+        )
+        let theirs = try writePNG(in: fixture.folder, named: "theirs.png", color: .systemRed)
+        SessionAttachmentStore.shared.record(
+            declared: theirs,
+            sessionID: fixture.sessionID,
+            projectRoot: fixture.folder,
+            origin: .agent
+        )
+
+        let attachments = try XCTUnwrap(
+            fixture.pane.activateAttachments(for: fixture.sessionID)
+        )
+        fixture.pane.view.layoutSubtreeIfNeeded()
+        let filter = try XCTUnwrap(
+            descendants(of: attachments.view).compactMap { $0 as? ThemedSegmentedControl }.first,
+            "the pane offered no filter for a list with both sides in it"
+        )
+        AppThemeRefresh.repaint(attachments.view)
+        let threadingTrack = try XCTUnwrap(filter.layer?.backgroundColor)
+
+        fixture.pane.showSession(nil)
+        XCTAssertNil(attachments.view.superview, "the cached Attachments tree stayed mounted")
+
+        AppThemePalette.set(.system)
+        AppThemeRefresh.repaintEverything()
+        XCTAssertEqual(
+            filter.layer?.backgroundColor,
+            threadingTrack,
+            "the detached fixture unexpectedly joined the window-only theme sweep"
+        )
+
+        fixture.pane.showSession(fixture.sessionID)
+        let systemTrack = try XCTUnwrap(filter.layer?.backgroundColor)
+        var expectedSystemTrack: String?
+        filter.effectiveAppearance.performAsCurrentDrawingAppearance {
+            expectedSystemTrack = Design.Surface.controlResting.usingColorSpace(.sRGB)?.hexString
+        }
+
+        XCTAssertNotEqual(systemTrack, threadingTrack, "the Attachments filter kept Threading navy")
+        XCTAssertEqual(
+            NSColor(cgColor: systemTrack)?.usingColorSpace(.sRGB)?.hexString,
+            expectedSystemTrack,
+            "the reattached filter did not resolve System's control surface"
+        )
+    }
+
     /// A session with no project has nowhere to keep a list — `makeAttachments` needs a folder to
     /// belong to — so the picture is shown the old way rather than not at all.
     func testASessionWithoutAProjectStillOpensAnImageTab() throws {

@@ -2292,6 +2292,12 @@ final class DisplayPaneController: NSViewController {
       controller.view.leadingAnchor.constraint(equalTo: hostedView.leadingAnchor),
       controller.view.trailingAnchor.constraint(equalTo: hostedView.trailingAnchor),
     ])
+
+    // Settings and session changes detach a tab controller without releasing it. A theme sweep
+    // only walks window content, so that cached tree can miss the switch and return with frozen
+    // layer colours from the theme it left under. The generation check keeps an ordinary tab
+    // switch O(1) while repairing only a tree that was actually away for a sweep.
+    AppThemeRefresh.repaintIfNeeded(controller.view)
     hostedView.isHidden = false
 
     // A restored browser carries its page URL but has not loaded it — the load is deferred to

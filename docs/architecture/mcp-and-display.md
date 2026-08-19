@@ -498,6 +498,14 @@ and the assignment happens *after* the outgoing view is unparented — releasing
 the original bug exactly. Reported from the running app as "the tabs overlap", and the scene path
 had been doing it since it shipped.
 
+**A cached controller returning to the pane must catch up with the theme before it is shown.**
+Opening Settings and changing sessions both detach the active tab without releasing it. The global
+theme sweep walks windows, so a retained Attachments, Overview, Review or extension-panel tree can
+miss the switch and return with layer colours frozen under the theme it left. `installHosted`
+therefore calls `AppThemeRefresh.repaintIfNeeded` after mounting the controller: the refresh
+generation makes an ordinary tab switch O(1), while a tree detached for a sweep is repaired once at
+the common host boundary.
+
 **Pane content states height as a preference.** A required height constraint inside the panel
 becomes the window's own minimum size, so a chart in the side pane stopped the window being made
 shorter until its tab was closed. The card's minimum is `.defaultHigh` and the chart's vertical
