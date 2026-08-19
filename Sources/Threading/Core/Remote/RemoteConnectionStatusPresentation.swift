@@ -11,13 +11,6 @@ import Foundation
 /// reach and were reviewed in none of them.
 struct RemoteConnectionStatusPresentation: Equatable {
 
-    /// Punctuation, not copy: the status lines below are whole facts already, and this is only
-    /// how two of them are set end to end.
-    private enum SentenceJoin {
-        static let separator = ". "
-        static let terminator = "."
-    }
-
     /// The mark beside the row. A colour is a `Design` role, which this layer does not read.
     enum Tone: Equatable {
         case ready
@@ -39,15 +32,26 @@ struct RemoteConnectionStatusPresentation: Equatable {
         statuses: [RemoteDoorStatus],
         localPort: UInt16
     ) -> RemoteConnectionStatusPresentation {
-        let bound = statuses.filter(\.namesABoundAddress)
-        if !bound.isEmpty {
+        let ready = statuses.filter(\.isReady)
+        if !ready.isEmpty {
             return RemoteConnectionStatusPresentation(
                 title: L10n.string("Ready"),
-                // Each bound line already names its own address; the row states them in the
+                // Each ready line already names its own address; the row states them in the
                 // order the ways in are listed rather than picking one to speak for the Mac.
-                detail: bound.map(\.text).joined(separator: SentenceJoin.separator)
-                    + SentenceJoin.terminator,
+                detail: ready.map(\.sentence).joined(separator: " "),
                 tone: .ready,
+                isBusy: false
+            )
+        }
+
+        // Bound, and something between the listener and the phone may be swallowing it. The
+        // address is real and the doubt is real, and neither may be dropped: a page that said
+        // "not reachable" would send somebody looking for a listener that is running.
+        if let doubtful = statuses.first(where: { $0.boundAddress != nil }) {
+            return RemoteConnectionStatusPresentation(
+                title: L10n.string("May not be reachable"),
+                detail: doubtful.sentence,
+                tone: .attention,
                 isBusy: false
             )
         }
@@ -70,7 +74,7 @@ struct RemoteConnectionStatusPresentation: Equatable {
                 title: L10n.string("Starting"),
                 detail: L10n.format(
                     "%1$@ The local mirror is ready on 127.0.0.1:%2$@.",
-                    working.text,
+                    working.sentence,
                     String(localPort)
                 ),
                 tone: .working,
@@ -81,9 +85,8 @@ struct RemoteConnectionStatusPresentation: Equatable {
         let attention = statuses.first { $0.tone == .attention }
         return RemoteConnectionStatusPresentation(
             title: L10n.string("Not reachable"),
-            detail: attention.map { status in
-                [status.text, status.hint].compactMap { $0 }.joined(separator: " ")
-            } ?? L10n.string("Nothing outside this Mac can reach it right now."),
+            detail: attention?.sentence
+                ?? L10n.string("Nothing outside this Mac can reach it right now."),
             tone: .attention,
             isBusy: false
         )

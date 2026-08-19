@@ -3511,35 +3511,23 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
                        .statusUnavailable)
     }
 
-    func testHybridRelayIsLazyButEveryOptInAndPublicShareStartsIt() {
+    /// The relay runs for a guest link and for nothing else.
+    ///
+    /// It used to run because of a *mode*, and in one branch because a switch on the settings
+    /// page asked it to stay warm. Both are gone: a Quick Tunnel address changes every launch,
+    /// so it cannot be an owner route, and a public origin nobody is using is exposure nobody
+    /// asked for.
+    func testTheRelayRunsOnlyForAGuestLink() {
         XCTAssertFalse(RemoteAccessCoordinator.relayRequired(
-            mode: .tailscaleAndRelay,
-            allowsOwnerFallback: false,
-            keepsRelayReady: false,
             hasActiveShares: false,
             hasPendingShares: false
         ))
-        for reason in 0..<4 {
-            XCTAssertTrue(RemoteAccessCoordinator.relayRequired(
-                mode: .tailscaleAndRelay,
-                allowsOwnerFallback: reason == 0,
-                keepsRelayReady: reason == 1,
-                hasActiveShares: reason == 2,
-                hasPendingShares: reason == 3
-            ))
-        }
         XCTAssertTrue(RemoteAccessCoordinator.relayRequired(
-            mode: .relay,
-            allowsOwnerFallback: false,
-            keepsRelayReady: false,
-            hasActiveShares: false,
+            hasActiveShares: true,
             hasPendingShares: false
         ))
-        XCTAssertFalse(RemoteAccessCoordinator.relayRequired(
-            mode: .tailscale,
-            allowsOwnerFallback: true,
-            keepsRelayReady: true,
-            hasActiveShares: true,
+        XCTAssertTrue(RemoteAccessCoordinator.relayRequired(
+            hasActiveShares: false,
             hasPendingShares: true
         ))
     }
@@ -3594,27 +3582,75 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         XCTAssertFalse(authorization.isBound(to: nil))
     }
 
-    func testConnectionModeDefaultsAndRoundTripsWithoutEnablingAnotherDoor() throws {
-        let suite = "RemoteConnectionMode.\(UUID().uuidString)"
+    /// The doors ship as one switch per network, and a settings screen that offered a *mode*
+    /// could not say what any of them cost. What survives of the mode is one migration.
+    func testDoorSwitchesDefaultAndRoundTripWithoutEnablingAnotherDoor() throws {
+        let suite = "RemoteDoorSwitches.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.register(defaults: AppSettingDefinitions.registeredDefaults)
         let settings = AppSettings(defaults: defaults)
 
-        XCTAssertEqual(settings.remoteAccessConnectionMode, .relay)
-        XCTAssertFalse(settings.remoteAccessAllowsOwnerRelayFallback)
-        XCTAssertFalse(settings.remoteAccessKeepsRelayReady)
+        XCTAssertEqual(settings.remoteAccessDoors, [.lan])
+        XCTAssertFalse(settings.remoteAccessTailscaleEnabled)
+        XCTAssertFalse(settings.remoteAccessTailscaleServeEnabled)
         XCTAssertEqual(settings.remoteInputControlDefault, .collaborative)
-        settings.remoteAccessConnectionMode = .tailscaleAndRelay
-        settings.remoteAccessAllowsOwnerRelayFallback = true
-        settings.remoteAccessKeepsRelayReady = true
+
+        settings.remoteAccessTailscaleEnabled = true
         settings.remoteInputControlDefault = .focusedOwner
-        XCTAssertEqual(AppSettings(defaults: defaults).remoteAccessConnectionMode, .tailscaleAndRelay)
-        XCTAssertTrue(AppSettings(defaults: defaults).remoteAccessAllowsOwnerRelayFallback)
-        XCTAssertTrue(AppSettings(defaults: defaults).remoteAccessKeepsRelayReady)
+        XCTAssertTrue(AppSettings(defaults: defaults).remoteAccessTailscaleEnabled)
         XCTAssertEqual(AppSettings(defaults: defaults).remoteInputControlDefault, .focusedOwner)
 
-        defaults.set("future-mode", forKey: "remoteAccessConnectionMode")
-        XCTAssertEqual(AppSettings(defaults: defaults).remoteAccessConnectionMode, .relay)
+        // Switching the only door off has to stay off. An empty array used to be written as an
+        // absent key, which handed the read back to the registered default.
+        settings.remoteAccessDoors = []
+        XCTAssertEqual(AppSettings(defaults: defaults).remoteAccessDoors, [])
+
+        // An unknown door fails closed rather than being guessed at.
+        defaults.set(["lan", "moon"], forKey: "remoteAccessDoors")
+        XCTAssertEqual(AppSettings(defaults: defaults).remoteAccessDoors, [.lan])
+    }
+
+    /// The one thing the retired mode still does.
+    func testAStoredConnectionModeMigratesToTheDoorSwitchesExactlyOnce() throws {
+        func settings(mode: String?) throws -> (AppSettings, UserDefaults, String) {
+            let suite = "RemoteDoorMigration.\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defaults.register(defaults: AppSettingDefinitions.registeredDefaults)
+            if let mode { defaults.set(mode, forKey: "remoteAccessConnectionMode") }
+            return (AppSettings(defaults: defaults), defaults, suite)
+        }
+
+        // Both tailnet modes meant "this Mac answers on my tailnet".
+        for mode in ["tailscale", "tailscaleAndRelay"] {
+            let (migrated, defaults, suite) = try settings(mode: mode)
+            defer { defaults.removePersistentDomain(forName: suite) }
+            XCTAssertTrue(
+                migrated.remoteAccessTailscaleEnabled,
+                "\(mode) did not carry over to the tailnet door"
+            )
+            XCTAssertEqual(migrated.remoteAccessDoors, [.lan])
+        }
+
+        // Relay carries nothing: it stopped being an owner pairing route, so somebody who was
+        // on it lands on the door that replaced it rather than on nothing at all.
+        let (relay, relayDefaults, relaySuite) = try settings(mode: "relay")
+        defer { relayDefaults.removePersistentDomain(forName: relaySuite) }
+        XCTAssertFalse(relay.remoteAccessTailscaleEnabled)
+        XCTAssertEqual(relay.remoteAccessDoors, [.lan])
+
+        // A fresh install has no mode to read and is not changed by the migration either.
+        let (fresh, freshDefaults, freshSuite) = try settings(mode: nil)
+        defer { freshDefaults.removePersistentDomain(forName: freshSuite) }
+        XCTAssertFalse(fresh.remoteAccessTailscaleEnabled)
+
+        // And it runs once: switching the door off again survives the next launch.
+        let (once, onceDefaults, onceSuite) = try settings(mode: "tailscale")
+        defer { onceDefaults.removePersistentDomain(forName: onceSuite) }
+        XCTAssertTrue(once.remoteAccessTailscaleEnabled)
+        XCTAssertTrue(onceDefaults.bool(forKey: "didMigrateRemoteAccessDoors"))
+        once.remoteAccessTailscaleEnabled = false
+        XCTAssertFalse(AppSettings(defaults: onceDefaults).remoteAccessTailscaleEnabled)
     }
 }
 

@@ -399,9 +399,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// One way in's live status: a mark, the fact, and the remedy when the fact alone does not
     /// say what to do about it.
     private func statusRow(for wayIn: RemoteAccessWayIn) -> NSView {
-        let glyph = NSTextField(labelWithString: "–")
+        let glyph = NSTextField(labelWithString: DoorMark.idle)
         glyph.applyFont(.body)
         glyph.setContentHuggingPriority(.required, for: .horizontal)
+        glyph.setAccessibilityIdentifier(Identifier.statusMark(wayIn))
         let spinner = ThemedSpinner()
 
         let text = NSTextField(wrappingLabelWithString: "")
@@ -434,53 +435,76 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         return row
     }
 
-    /// The four lines. The questions share one column, sized by the longest of them rather than
-    /// by a number typed in here, so a theme with a wider face moves the answers with it.
+    /// The four lines. The questions share one column, and that column is as wide as the
+    /// longest of them rather than as wide as a number typed in here, so a theme with a wider
+    /// face moves the answers with it.
+    ///
+    /// The column is a layout guide rather than four equal width constraints. Equalising them
+    /// against the first label pinned the column to *that* label's width — "Who can see the
+    /// traffic" rendered as "Who can see the", clipped mid-word with no ellipsis, which is the
+    /// failure `attributed-label-ignores-cell-linebreakmode` describes in a different disguise.
+    /// A guide every question may not exceed, pulled narrow at a priority the labels outrank,
+    /// settles on the longest one by construction.
     private func disclosureRows(for wayIn: RemoteAccessWayIn) -> NSView {
-        var questions: [NSTextField] = []
-        var lines: [NSView] = []
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        let column = NSLayoutGuide()
+        container.addLayoutGuide(column)
+
+        var constraints: [NSLayoutConstraint] = [
+            column.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            column.topAnchor.constraint(equalTo: container.topAnchor)
+        ]
+        let narrow = column.widthAnchor.constraint(equalToConstant: 0)
+        narrow.priority = .defaultLow
+        constraints.append(narrow)
+
+        var previous: NSView?
         for line in wayIn.disclosure.lines {
             let question = NSTextField(labelWithString: line.question)
             question.applyFont(.subheading)
             question.textColor = Design.Text.tertiary
-            question.setContentHuggingPriority(.required, for: .horizontal)
+            question.translatesAutoresizingMaskIntoConstraints = false
             question.setContentCompressionResistancePriority(.required, for: .horizontal)
 
             let answer = NSTextField(wrappingLabelWithString: line.answer)
             answer.applyFont(.subheading)
             answer.textColor = Design.Text.secondary
-            answer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            answer.translatesAutoresizingMaskIntoConstraints = false
 
-            let row = NSStackView(views: [question, answer])
-            row.orientation = .horizontal
-            row.alignment = .firstBaseline
-            row.distribution = .fill
-            row.spacing = Design.Spacing.medium
-            questions.append(question)
-            lines.append(row)
+            container.addSubview(question)
+            container.addSubview(answer)
+            constraints += [
+                question.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+                question.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
+                answer.leadingAnchor.constraint(
+                    equalTo: column.trailingAnchor,
+                    constant: Design.Spacing.medium
+                ),
+                answer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                question.firstBaselineAnchor.constraint(equalTo: answer.firstBaselineAnchor),
+                answer.topAnchor.constraint(
+                    equalTo: previous?.bottomAnchor ?? container.topAnchor,
+                    constant: previous == nil ? 0 : Design.Spacing.small
+                )
+            ]
+            previous = answer
         }
-
-        let stack = NSStackView(views: lines)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
-        stack.setHuggingPriority(.defaultLow, for: .horizontal)
-        stack.setAccessibilityIdentifier(Identifier.disclosure(wayIn))
-        for question in questions.dropFirst() {
-            question.widthAnchor.constraint(equalTo: questions[0].widthAnchor).isActive = true
+        if let previous {
+            constraints.append(previous.bottomAnchor.constraint(equalTo: container.bottomAnchor))
         }
-        for line in lines {
-            line.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
-        return stack
+        NSLayoutConstraint.activate(constraints)
+        container.setAccessibilityIdentifier(Identifier.disclosure(wayIn))
+        return container
     }
 
     /// This Mac's certificate: the code a phone compares, and the two operations that change it.
+    ///
+    /// The operations are ordinary settings rows rather than a band of buttons. A control group
+    /// in a full-bleed row has nothing to take the row's slack, so the first button grew to
+    /// three quarters of the card while the other two sat at the far edge; a row's label column
+    /// is what absorbs it, and it also gives each operation somewhere to say what it costs.
     private func identityCard() -> SettingsCard {
-        let actions = SettingsUI.controlGroup(
-            [identityPrepareButton, identityActivateButton, identityResetButton],
-            spacing: Design.Spacing.small
-        )
         let text = NSStackView(views: [identityCode, identityDetail, identitySuccessor])
         text.orientation = .vertical
         text.alignment = .leading
@@ -492,7 +516,22 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
         return SettingsCard(rows: [
             SettingsUI.fullRow(text),
-            SettingsUI.fullRow(actions)
+            SettingsUI.row(
+                title: "Rotate this Mac’s identity",
+                subtitle: "Prepare mints the next certificate and announces it over the "
+                    + "connection your devices already trust. Activate switches to it, and a "
+                    + "device that has connected since the announcement keeps working.",
+                control: SettingsUI.controlGroup(
+                    [identityPrepareButton, identityActivateButton],
+                    spacing: Design.Spacing.small
+                )
+            ),
+            SettingsUI.row(
+                title: "Reset this Mac’s identity",
+                subtitle: "Throws the certificate away and mints a new one. Every paired device "
+                    + "has to scan the new pairing code before it can connect again.",
+                control: identityResetButton
+            )
         ])
     }
 
@@ -703,7 +742,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         copiedReset = nil
 
         let coordinator = RemoteAccessCoordinator.shared
-        remoteAccessToggle.state = AppSettings.shared.remoteAccessEnabled ? .on : .off
         inputControlDefault.selectedIndex = RemoteInputControlDefault.allCases.firstIndex(
             of: AppSettings.shared.remoteInputControlDefault
         ) ?? 0
@@ -814,6 +852,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             }
         }
         return RemoteAccessDoorsPresentation(
+            isRemoteAccessOn: isOn,
             thisNetworkIsOn: coordinator.isThisNetworkDoorEnabled,
             tailscaleIsOn: coordinator.isTailscaleDoorEnabled,
             showsThreadingDirect: coordinator.canIssueHostedDeviceCredentials,
@@ -826,6 +865,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// `applyListeningState` is: none of these states can be reached on a developer's machine
     /// on purpose.
     func apply(_ doors: RemoteAccessDoorsPresentation) {
+        remoteAccessToggle.state = doors.isRemoteAccessOn ? .on : .off
         thisNetworkToggle.state = doors.thisNetworkIsOn ? .on : .off
         tailscaleToggle.state = doors.tailscaleIsOn ? .on : .off
         tailscaleServeToggle.state =
@@ -1548,6 +1588,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
         static func status(_ wayIn: RemoteAccessWayIn) -> String {
             "settings.remote-access.status.\(wayIn.identifierComponent)"
+        }
+
+        static func statusMark(_ wayIn: RemoteAccessWayIn) -> String {
+            "settings.remote-access.status-mark.\(wayIn.identifierComponent)"
         }
 
         static func statusHint(_ wayIn: RemoteAccessWayIn) -> String {

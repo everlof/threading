@@ -132,6 +132,9 @@ enum RemoteAccessWayIn: String, CaseIterable, Sendable {
 /// a bound LAN address, a Mac with no interface, a firewall that may be swallowing connections,
 /// a tailnet a minute into its first certificate, and no way in at all.
 struct RemoteAccessDoorsPresentation: Equatable, Sendable {
+    /// The master switch. Held here as well so the page renders from one value rather than
+    /// reading a setting for one control and a presentation for the rest.
+    let isRemoteAccessOn: Bool
     let thisNetworkIsOn: Bool
     let tailscaleIsOn: Bool
     /// Threading Direct is future work and appears only once this Mac is signed in, so a person
@@ -143,6 +146,7 @@ struct RemoteAccessDoorsPresentation: Equatable, Sendable {
     /// Everything off and nothing signed in, which is what the page shows before it has asked
     /// the coordinator anything.
     static let idle = RemoteAccessDoorsPresentation(
+        isRemoteAccessOn: false,
         thisNetworkIsOn: false,
         tailscaleIsOn: false,
         showsThreadingDirect: false,
@@ -211,19 +215,43 @@ struct RemoteDoorStatus: Equatable, Sendable {
     let hint: String?
     let tone: Tone
     let isBusy: Bool
+    /// The address a listener is actually answering on, when there is one.
+    ///
+    /// Deliberately separate from the tone. A bound address with the firewall in doubt is not a
+    /// green state — the Mac cannot observe whether an incoming connection is allowed, because a
+    /// probe from this Mac to its own LAN address is local traffic the Application Firewall does
+    /// not filter — but it is still an address, and a page that forgot that would tell somebody
+    /// nothing is bound while a listener sits on it.
+    let boundAddress: String?
 
-    init(text: String, hint: String? = nil, tone: Tone, isBusy: Bool = false) {
+    init(
+        text: String,
+        hint: String? = nil,
+        tone: Tone,
+        isBusy: Bool = false,
+        boundAddress: String? = nil
+    ) {
         self.text = text
         self.hint = hint
         self.tone = tone
         self.isBusy = isBusy
+        self.boundAddress = boundAddress
     }
 
-    /// Whether this line claims an address a phone could dial. `ready` is only ever produced
-    /// beside one: the Mac cannot observe whether an incoming connection is allowed — a probe
-    /// from this Mac to its own LAN address is local traffic the Application Firewall does not
-    /// filter — so a green state with nothing bound would be a claim nobody checked.
-    var namesABoundAddress: Bool { tone == .ready }
+    /// Whether this line is claiming a peer can get through. Only ever true beside an address.
+    var isReady: Bool { tone == .ready }
+
+    /// The line as one sentence, with its remedy after it. Both halves are already whole
+    /// sentences; this only stops them running together.
+    var sentence: String {
+        guard let hint else { return Self.terminated(text) }
+        return Self.terminated(text) + " " + hint
+    }
+
+    private static func terminated(_ text: String) -> String {
+        guard let last = text.last, !".!?…:".contains(last) else { return text }
+        return text + "."
+    }
 
     static func remoteAccessOff() -> RemoteDoorStatus {
         RemoteDoorStatus(text: L10n.string("Remote Access is off."), tone: .off)
@@ -281,9 +309,10 @@ struct RemoteDoorStatus: Equatable, Sendable {
                 tone: .attention
             )
         }
-        let text = L10n.format("Reachable at %@", address(first))
+        let primary = address(first)
+        let text = L10n.format("Reachable at %@", primary)
         let others = bindings.dropFirst().map(address)
-        var hint = others.isEmpty
+        let hint = others.isEmpty
             ? nil
             : L10n.format(
                 "Also reachable at %@.",
@@ -292,10 +321,14 @@ struct RemoteDoorStatus: Equatable, Sendable {
         // A hint the person can act on outranks one they only have to know: the firewall is the
         // first thing to suspect when a phone cannot connect to an address that is bound.
         if firewall.mayBlockIncomingConnections {
-            hint = firewallHint
-            return RemoteDoorStatus(text: text, hint: hint, tone: .attention)
+            return RemoteDoorStatus(
+                text: text,
+                hint: firewallHint,
+                tone: .attention,
+                boundAddress: primary
+            )
         }
-        return RemoteDoorStatus(text: text, hint: hint, tone: .ready)
+        return RemoteDoorStatus(text: text, hint: hint, tone: .ready, boundAddress: primary)
     }
 
     private static func unreachable(
@@ -377,7 +410,8 @@ struct RemoteDoorStatus: Equatable, Sendable {
         case .connected(let origin):
             return RemoteDoorStatus(
                 text: L10n.format("Reachable at %@", origin.remoteDisplayHost),
-                tone: .ready
+                tone: .ready,
+                boundAddress: origin.remoteDisplayHost
             )
         case .stopped, .starting:
             guard let statement = readiness.startupStatement else {
