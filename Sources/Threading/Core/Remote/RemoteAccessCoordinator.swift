@@ -129,9 +129,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
     }
 
-    private(set) var tailscaleStatus: RemoteTransportState = .stopped {
+    /// What Tailscale Serve is doing. **Not the tailnet door**, which is a listener: this is the
+    /// opt-in browser convenience, and no phone route depends on it.
+    private(set) var tailscaleServeStatus: RemoteTransportState = .stopped {
         didSet {
-            guard tailscaleStatus != oldValue else { return }
+            guard tailscaleServeStatus != oldValue else { return }
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
     }
@@ -140,6 +142,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private let identityStore: RemoteAccessIdentityStore
     private let mirrors: RemoteSessionMirrorRegistry
     private let tunnel: any RemoteRelayTransport
+    /// The `tailscale` CLI: the facts behind the tailnet door, and the Serve sub-option.
     private let tailscale: any RemoteTailnetTransport
     private let hostedService: RemoteHostedServiceController
     private let appSettings: AppSettings
@@ -222,9 +225,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             self?.refreshHostedPairingLink()
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
-        // Readiness steps advance while `tailscaleStatus` sits on `.starting`, so without this
-        // the settings page's readiness card renders whichever step was current at the last
-        // state change and freezes there until the transport connects or fails.
+        // Readiness steps advance while `tailscaleServeStatus` sits on `.starting`, so without
+        // this the settings page renders whichever step was current at the last state change and
+        // freezes there until Serve connects or fails. It is also how the CLI facts behind the
+        // tailnet door's status line reach the page: the probe publishes through the same seam.
         tailscale.onReadinessChange = {
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
@@ -251,7 +255,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     static func defaultTailnetTransport() -> any RemoteTailnetTransport {
-        isHostedTestProcess ? RefusedRemoteTransport() : TailscaleRemoteTransport()
+        isHostedTestProcess ? RefusedRemoteTransport() : TailscaleServeTransport()
     }
 
     private static var isHostedTestProcess: Bool {
@@ -370,7 +374,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         ) -> Void
     }
 
-    var tailscaleReadiness: TailscaleReadiness { tailscale.readiness }
+    /// Serve's readiness. The tailnet *door* reads `tailscaleHostFacts` and the listener.
+    var tailscaleServeReadiness: TailscaleReadiness { tailscale.readiness }
+    /// What `tailscale status` last said about this Mac.
+    var tailscaleHostFacts: TailscaleHostFacts { tailscale.hostFacts }
     var hostedServiceState: RemoteHostedServiceState { hostedService.state }
 
     /// Whether any way in an owner device could take is switched on.
@@ -385,6 +392,29 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     var isThisNetworkDoorEnabled: Bool { appSettings.remoteAccessDoors.contains(.lan) }
 
     var isTailscaleDoorEnabled: Bool { appSettings.remoteAccessTailscaleEnabled }
+
+    /// The browser convenience under it, which starts and stops on its own.
+    var isTailscaleServeEnabled: Bool { appSettings.remoteAccessTailscaleServeEnabled }
+
+    /// The `tailscale` door, with its addresses in the order the pairing code picks between them.
+    var tailscaleDoorState: RemoteAccessDoorState {
+        let state = listenerStatus.state(of: .tailscale)
+        guard case .bound(let bindings) = state else { return state }
+        return .bound(Self.orderedBindings(
+            bindings,
+            primaryInterfaceName: Self.primaryInterfaceName()
+        ))
+    }
+
+    /// Reads `tailscale status` once, when there is a reason to.
+    ///
+    /// Bounded and rare on purpose: the CLI answers a question the interface list cannot, and
+    /// nothing here is on a timer. The door itself needs no probe at all — it is bound or it is
+    /// not — so this only sharpens the sentence beside it and supplies the MagicDNS name.
+    func refreshTailscaleHostFacts() {
+        guard appSettings.remoteAccessTailscaleEnabled else { return }
+        tailscale.refreshHostFacts()
+    }
 
     /// The `lan` door, with its addresses in the order the pairing code picks between them.
     var thisNetworkDoorState: RemoteAccessDoorState {
@@ -461,18 +491,16 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         let identity = RemoteHostIdentity.current
         guard authorization.canManageHost else { return identity }
 
-        var endpoints: [RemoteHostEndpointDTO] = Self.doorEndpoints(
+        // **Serve's origin is deliberately not in here.** It is a `*.ts.net` name with a publicly
+        // trusted certificate, so a phone told to pin it would break at the next renewal and a
+        // phone told to stock-trust it would be the one endpoint no fingerprint covers. The
+        // tailnet door advertises this Mac's own tailnet address, and its MagicDNS name on the
+        // same sticky port, both pinned — one code path with the pin, which is the point of §8.
+        let endpoints: [RemoteHostEndpointDTO] = Self.doorEndpoints(
             listenerStatus,
-            advertisedHostname: appSettings.remoteAccessAdvertisedHostname
+            advertisedHostname: appSettings.remoteAccessAdvertisedHostname,
+            tailnetHostname: tailscale.hostFacts.magicDNSName
         )
-        if appSettings.remoteAccessTailscaleEnabled,
-           case .connected(let origin) = tailscaleStatus {
-            endpoints.append(RemoteHostEndpointDTO(
-                kind: RemoteTransportKind.tailscale.rawValue,
-                baseURL: origin,
-                isStable: true
-            ))
-        }
         return Self.ownerHost(
             identity,
             endpoints: endpoints,
@@ -562,7 +590,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     nonisolated static func doorEndpoints(
         _ status: RemoteListenerStatus,
         advertisedHostname: String,
-        localHostname: String? = bonjourLocalHostname()
+        localHostname: String? = bonjourLocalHostname(),
+        tailnetHostname: String? = nil
     ) -> [RemoteHostEndpointDTO] {
         var endpoints: [RemoteHostEndpointDTO] = []
         var seen: Set<URL> = []
@@ -582,9 +611,15 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             for binding in bindings {
                 append(binding.origin, door: door)
             }
-            // The `.local` name and the override are LAN-shaped answers to the same question the
-            // LAN addresses answer, so they ride with that door and appear only when it is up.
-            guard door == .lan, let port = bindings.first?.port else { continue }
+            guard let port = bindings.first?.port else { continue }
+            // A name is the same door reached the way a person's DNS reaches it, so each rides
+            // with the door whose addresses it resolves to and appears only while that door is
+            // up. The tailnet's MagicDNS name is on the *sticky* port, not Serve's: it resolves
+            // to the same `100.x` address the listener is bound to, with the same certificate.
+            if door == .tailscale, let tailnetHostname, !tailnetHostname.isEmpty {
+                append(Self.origin(host: tailnetHostname, port: port, door: door), door: door)
+            }
+            guard door == .lan else { continue }
             if let localHostname, localHostname.hasSuffix(RemoteAccessDefaults.localHostnameSuffix) {
                 append(Self.origin(host: localHostname, port: port, door: door), door: door)
             }
@@ -736,34 +771,36 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     /// Where a scanning phone is sent, and what it should pin when it arrives.
     ///
-    /// A bound LAN door wins over every transport somebody else terminates: it is the address
-    /// this Mac actually holds, it survives a restart, and the certificate at the far end is
-    /// this Mac's own. When no LAN door is bound the answer is what it has always been, and the
-    /// code carries no fingerprint, because a Serve or relay origin presents a certificate that
-    /// is not ours to pin.
+    /// A bound LAN door wins: it is the address this Mac actually holds, it survives a restart,
+    /// and it is the network the phone in the room is almost certainly already on. When no LAN
+    /// door is bound, the tailnet door is the answer, and it carries the fingerprint too — the
+    /// listener there presents the same certificate as every other routable door. Nothing falls
+    /// back to Serve or to the relay: both hand the phone a certificate that is not ours to pin,
+    /// which is exactly the second trust story §8 exists to remove.
     private var pairingDestination: (origin: URL, pinnedFingerprintCode: String?)? {
         Self.pairingDestination(
             lanBindings: listenerStatus.state(of: .lan).bindings,
+            tailnetBindings: listenerStatus.state(of: .tailscale).bindings,
             primaryInterfaceName: Self.primaryInterfaceName(),
-            pinnedFingerprint: identityStore.snapshot.fingerprint,
-            fallbackOrigin: pairingOrigin
+            pinnedFingerprint: identityStore.snapshot.fingerprint
         )
     }
 
     nonisolated static func pairingDestination(
         lanBindings: [RemoteListenerBinding],
+        tailnetBindings: [RemoteListenerBinding],
         primaryInterfaceName: String?,
-        pinnedFingerprint: RemoteHostFingerprint?,
-        fallbackOrigin: URL?
+        pinnedFingerprint: RemoteHostFingerprint?
     ) -> (origin: URL, pinnedFingerprintCode: String?)? {
-        if let binding = preferredPairingBinding(
-            lanBindings,
-            primaryInterfaceName: primaryInterfaceName
-        ), let origin = binding.origin, let pinnedFingerprint {
+        guard let pinnedFingerprint else { return nil }
+        for bindings in [lanBindings, tailnetBindings] {
+            guard let binding = preferredPairingBinding(
+                bindings,
+                primaryInterfaceName: primaryInterfaceName
+            ), let origin = binding.origin else { continue }
             return (origin, pinnedFingerprint.pairingCode)
         }
-        guard let fallbackOrigin else { return nil }
-        return (fallbackOrigin, nil)
+        return nil
     }
 
     /// The one LAN address a pairing code names, out of however many this Mac is answering on.
@@ -818,14 +855,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             RemoteAccessDefaults.globalIPv4StateKey as CFString
         ) as? [String: Any] else { return nil }
         return global[kSCDynamicStorePropNetPrimaryInterface as String] as? String
-    }
-
-    /// Where a pairing code points when no LAN door is bound: the tailnet, when that door is on
-    /// and up. Never the relay, which stopped being an owner pairing route.
-    private var pairingOrigin: URL? {
-        guard appSettings.remoteAccessTailscaleEnabled,
-              case .connected(let origin) = tailscaleStatus else { return nil }
-        return origin
     }
 
     /// Where a one-chat guest link points. Unchanged: a guest is somebody with no Threading app,
@@ -1448,11 +1477,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         if enabled { start() } else { stop() }
     }
 
-    /// Selects the `tailscale` door, and starts or stops whatever that door is made of.
+    /// Selects the `tailscale` door, and rebuilds the listeners for it.
     ///
-    /// Today that is the Serve transport; when `RemoteTailscaleDoorImplementation` becomes
-    /// `.listenerDoor` this rebuilds a listener instead, and neither the setting nor the page
-    /// changes.
+    /// The door is a bind now, so this is the same operation `setDoors` performs for the network
+    /// way in: one listener per tailnet address, presenting this Mac's own certificate. The CLI
+    /// is asked for its facts as well, because the door being down has three different causes and
+    /// only `tailscale status` can tell them apart.
     func setTailscaleDoorEnabled(_ enabled: Bool) {
         guard appSettings.remoteAccessTailscaleEnabled != enabled else { return }
         appSettings.remoteAccessTailscaleEnabled = enabled
@@ -1466,19 +1496,34 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 startTailscale(port: port, generation: transportGeneration)
             } else {
                 tailscale.stop()
-                tailscaleStatus = .stopped
+                tailscaleServeStatus = .stopped
             }
         case .listenerDoor:
             server.updateDoors(listenerConfiguration().doors)
+            if enabled { tailscale.refreshHostFacts() }
         }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
-    /// The browser convenience on the tailnet. Stored now, acted on when the `tailscale` door
-    /// stops being Serve; see `RemoteTailscaleDoorImplementation`.
+    /// The browser convenience on the tailnet: `tailscale serve` publishing the loopback listener
+    /// at this Mac's `*.ts.net` name, so a browser there meets no certificate interstitial.
+    ///
+    /// Independent of the door in both directions. The phone does not use it — it pins the
+    /// listener on the tailnet address instead — so turning it off takes no route away, and
+    /// turning it on adds none.
     func setTailscaleServeEnabled(_ enabled: Bool) {
         guard appSettings.remoteAccessTailscaleServeEnabled != enabled else { return }
         appSettings.remoteAccessTailscaleServeEnabled = enabled
+        guard case .listening(let port) = status else {
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+            return
+        }
+        if enabled {
+            startTailscale(port: port, generation: transportGeneration)
+        } else {
+            tailscale.stop()
+            tailscaleServeStatus = .stopped
+        }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
     }
 
@@ -1592,8 +1637,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// What the listener is asked to bind: the sticky port, and the routable doors the user
     /// selected. Loopback is not in the set because it is not a choice.
     ///
-    /// The `tailscale` door joins the set only once it is a bind rather than a Serve handler;
-    /// until then the switch runs a transport and the listener knows nothing about it.
+    /// The `tailscale` door is in the set because it is a bind: one listener per tailnet address,
+    /// with the same identity and the same port as every other routable door. The seam is still
+    /// consulted so a build pinned to the old Serve handler keeps the listener out of it.
     private func listenerConfiguration() -> RemoteListenerConfiguration {
         var doors = appSettings.remoteAccessDoors
         if tailscaleDoor == .listenerDoor, appSettings.remoteAccessTailscaleEnabled {
@@ -1663,10 +1709,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     /// Starts what the selected ways in are made of.
     ///
-    /// The LAN door is the listener's own business — `start` already handed it the door set — so
-    /// the only transport an owner route can need is the tailnet's, and only while that door is
-    /// still Serve. **Nothing here starts the relay.** It exists for guest shares and is started
-    /// by creating one.
+    /// Every way in an owner device can take is a listener now — the network door and the tailnet
+    /// door alike — and `start` already handed the listener its door set, so nothing here starts a
+    /// route. What is left is the browser convenience, which follows its own switch and no
+    /// phone's, and the CLI facts the tailnet door's status line reads.
+    ///
+    /// **Nothing here starts the relay.** It exists for guest shares and is started by creating
+    /// one.
     private func startTransports(port: UInt16) {
         transportGeneration += 1
         let generation = transportGeneration
@@ -1674,14 +1723,22 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         tailscale.stop()
         hostedService.start(targetPort: port)
         relayStatus = .stopped
-        tailscaleStatus = .stopped
+        tailscaleServeStatus = .stopped
 
-        if appSettings.remoteAccessTailscaleEnabled, tailscaleDoor == .serveTransport {
+        if shouldRunTailscaleServe {
             startTailscale(port: port, generation: generation)
+        } else if appSettings.remoteAccessTailscaleEnabled {
+            tailscale.refreshHostFacts()
         }
         if shouldRunRelay {
             startRelay(port: port, generation: generation)
         }
+    }
+
+    /// Serve runs for the sub-option, and for the old seam's door. Nothing else asks for it.
+    private var shouldRunTailscaleServe: Bool {
+        if appSettings.remoteAccessTailscaleServeEnabled { return true }
+        return tailscaleDoor == .serveTransport && appSettings.remoteAccessTailscaleEnabled
     }
 
     private var shouldRunRelay: Bool {
@@ -1712,7 +1769,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     private func startTailscale(port: UInt16, generation: Int) {
-        tailscaleStatus = .starting
+        tailscaleServeStatus = .starting
         tailscale.start(port: port) { [weak self] state in
             self?.transportChanged(.tailscale, state: state, generation: generation)
         }
@@ -1785,7 +1842,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         tailscale.stop()
         hostedService.stop()
         relayStatus = .stopped
-        tailscaleStatus = .stopped
+        tailscaleServeStatus = .stopped
     }
 
     /// Produces the first-install QR route without requiring cloudflared or Tailscale. The
@@ -1882,7 +1939,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
               case .listening = status else { return }
         switch kind {
         case .relay: relayStatus = state
-        case .tailscale: tailscaleStatus = state
+        case .tailscale: tailscaleServeStatus = state
         }
 
         switch state {

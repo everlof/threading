@@ -137,11 +137,43 @@ struct RemoteAccessDoorsPresentation: Equatable, Sendable {
     let isRemoteAccessOn: Bool
     let thisNetworkIsOn: Bool
     let tailscaleIsOn: Bool
+    /// The browser convenience under the tailnet way in. Not a way in of its own: no phone uses
+    /// it, and it never speaks for this Mac in the status row.
+    let tailscaleServeIsOn: Bool
     /// Threading Direct is future work and appears only once this Mac is signed in, so a person
     /// who has not signed in is not offered a way in that cannot carry anything yet.
     let showsThreadingDirect: Bool
     let statuses: [RemoteAccessWayIn: RemoteDoorStatus]
+    /// What Serve is doing, and the admin-console page that fixes it when it cannot publish.
+    let serveStatus: RemoteDoorStatus?
+    let serveRemedy: RemotePairingRemedy?
+    /// The tailnet way in's readiness rows.
+    let tailnetReadiness: RemoteTailnetReadinessPresentation
     let identity: RemoteIdentityCardPresentation
+
+    init(
+        isRemoteAccessOn: Bool,
+        thisNetworkIsOn: Bool,
+        tailscaleIsOn: Bool,
+        tailscaleServeIsOn: Bool = false,
+        showsThreadingDirect: Bool,
+        statuses: [RemoteAccessWayIn: RemoteDoorStatus],
+        serveStatus: RemoteDoorStatus? = nil,
+        serveRemedy: RemotePairingRemedy? = nil,
+        tailnetReadiness: RemoteTailnetReadinessPresentation = .idle,
+        identity: RemoteIdentityCardPresentation
+    ) {
+        self.isRemoteAccessOn = isRemoteAccessOn
+        self.thisNetworkIsOn = thisNetworkIsOn
+        self.tailscaleIsOn = tailscaleIsOn
+        self.tailscaleServeIsOn = tailscaleServeIsOn
+        self.showsThreadingDirect = showsThreadingDirect
+        self.statuses = statuses
+        self.serveStatus = serveStatus
+        self.serveRemedy = serveRemedy
+        self.tailnetReadiness = tailnetReadiness
+        self.identity = identity
+    }
 
     /// Everything off and nothing signed in, which is what the page shows before it has asked
     /// the coordinator anything.
@@ -244,9 +276,13 @@ struct RemoteDoorStatus: Equatable, Sendable {
     /// The line as one sentence, with its remedy after it. Both halves are already whole
     /// sentences; this only stops them running together.
     var sentence: String {
-        guard let hint else { return Self.terminated(text) }
-        return Self.terminated(text) + " " + hint
+        guard let hint else { return fact }
+        return fact + " " + hint
     }
+
+    /// The fact alone, terminated. What a row says when the sentence beside it already carries
+    /// the rest.
+    var fact: String { Self.terminated(text) }
 
     private static func terminated(_ text: String) -> String {
         guard let last = text.last, !".!?…:".contains(last) else { return text }
@@ -267,7 +303,6 @@ struct RemoteDoorStatus: Equatable, Sendable {
         isEnabled: Bool,
         state: RemoteAccessDoorState,
         firewall: RemoteFirewallHint,
-        preferredPort: UInt16,
         fallbackRange: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange
     ) -> RemoteDoorStatus {
         guard isEnabled else {
@@ -291,17 +326,16 @@ struct RemoteDoorStatus: Equatable, Sendable {
         case .bound(let bindings):
             return bound(bindings, firewall: firewall)
         case .notReachable(let reason):
-            return unreachable(
-                reason,
-                preferredPort: preferredPort,
-                fallbackRange: fallbackRange
-            )
+            return unreachable(reason, fallbackRange: fallbackRange)
         }
     }
 
+    /// `alsoReachableAt` carries the addresses that are not bindings: a name that resolves to one
+    /// of them, which is a route a phone can take and a listener the Mac never bound separately.
     private static func bound(
         _ bindings: [RemoteListenerBinding],
-        firewall: RemoteFirewallHint
+        firewall: RemoteFirewallHint,
+        alsoReachableAt names: [String] = []
     ) -> RemoteDoorStatus {
         guard let first = bindings.first else {
             return RemoteDoorStatus(
@@ -311,7 +345,7 @@ struct RemoteDoorStatus: Equatable, Sendable {
         }
         let primary = address(first)
         let text = L10n.format("Reachable at %@", primary)
-        let others = bindings.dropFirst().map(address)
+        let others = bindings.dropFirst().map(address) + names
         let hint = others.isEmpty
             ? nil
             : L10n.format(
@@ -333,7 +367,6 @@ struct RemoteDoorStatus: Equatable, Sendable {
 
     private static func unreachable(
         _ reason: RemoteDoorUnreachableReason,
-        preferredPort: UInt16,
         fallbackRange: ClosedRange<UInt16>
     ) -> RemoteDoorStatus {
         switch reason {
@@ -367,6 +400,8 @@ struct RemoteDoorStatus: Equatable, Sendable {
                 ),
                 tone: .attention
             )
+        case .tailscaleNotConnected:
+            return tailscaleNotConnected(.unknown)
         case .notAvailableYet:
             return RemoteDoorStatus(
                 text: L10n.string("Not available in this version of Threading."),
@@ -390,33 +425,121 @@ struct RemoteDoorStatus: Equatable, Sendable {
 
     // MARK: - Tailscale
 
-    /// The `tailscale` door's line, from the transport it is made of today.
+    /// The `tailscale` door's line, from the listener that carries it.
     ///
-    /// The readiness model already owns the sentences for a tailnet that is not ready, and it
-    /// owns them in two halves, so the failure and its remedy land on the same line rather than
-    /// in a readiness row elsewhere on the page.
+    /// It reads like the LAN door's line because it is the same kind of fact: a listener on one
+    /// of this Mac's own addresses, or the specific reason there is none. What differs is what
+    /// "no address" means. A `utun` with no `100.64.0.0/10` address is `tailscaled` not running,
+    /// not signed in, or not installed at all, and only the CLI can say which — so the facts
+    /// refine the sentence rather than deciding the state, and a bound door never consults them.
+    ///
+    /// No firewall hint: the Application Firewall filters incoming connections on the interfaces
+    /// a person joins, and a tailnet arrives inside a tunnel `tailscaled` itself opened.
     static func tailscale(
+        isEnabled: Bool,
+        state: RemoteAccessDoorState,
+        facts: TailscaleHostFacts,
+        fallbackRange: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange
+    ) -> RemoteDoorStatus {
+        guard isEnabled else { return tailscaleOff() }
+        switch state {
+        case .off:
+            return tailscaleOff()
+        case .binding:
+            return RemoteDoorStatus(
+                text: L10n.string("Binding to this Mac’s tailnet address…"),
+                tone: .working,
+                isBusy: true
+            )
+        case .bound(let bindings):
+            // The MagicDNS name is a route the phone can take and a listener the Mac never bound
+            // separately: it resolves to the address beside it, on the same port.
+            let name = facts.magicDNSName.flatMap { name in
+                bindings.first.map { "\(name):\($0.port)" }
+            }
+            return bound(bindings, firewall: .unknown, alsoReachableAt: name.map { [$0] } ?? [])
+        case .notReachable(.tailscaleNotConnected), .notReachable(.noInterface):
+            return tailscaleNotConnected(facts)
+        case .notReachable(let reason):
+            return unreachable(reason, fallbackRange: fallbackRange)
+        }
+    }
+
+    private static func tailscaleOff() -> RemoteDoorStatus {
+        RemoteDoorStatus(
+            text: L10n.string("Off. Threading is not published on your tailnet."),
+            tone: .off
+        )
+    }
+
+    /// The tailnet has no address on this Mac, said as precisely as the CLI allows.
+    ///
+    /// The remedy never says "then retry": nothing here is retried by a button. The listener set
+    /// rebuilds when the interface list changes, so the door comes back on its own the moment
+    /// `tailscaled` has an address again, and the copy says so rather than sending somebody to
+    /// press something.
+    private static func tailscaleNotConnected(_ facts: TailscaleHostFacts) -> RemoteDoorStatus {
+        switch facts.state {
+        case .notInstalled:
+            return RemoteDoorStatus(
+                text: L10n.string("Not currently reachable: Tailscale is not installed on this Mac."),
+                hint: L10n.string(
+                    "Install Tailscale and sign in on this Mac. The door comes back on its own."
+                ),
+                tone: .attention
+            )
+        case .signedOut:
+            return RemoteDoorStatus(
+                text: L10n.string(
+                    "Not currently reachable: this Mac is not signed in to Tailscale."
+                ),
+                hint: L10n.string(
+                    "Sign in to Tailscale on this Mac. The door comes back on its own."
+                ),
+                tone: .attention
+            )
+        case .stopped, .running, .unknown:
+            return RemoteDoorStatus(
+                text: L10n.string("Not currently reachable: Tailscale is not connected."),
+                hint: L10n.string(
+                    "Turn on Tailscale on this Mac. The door comes back on its own."
+                ),
+                tone: .attention
+            )
+        }
+    }
+
+    // MARK: - Open in a browser on your tailnet
+
+    /// The Serve sub-option's own line.
+    ///
+    /// Deliberately not a way in: nothing a phone does depends on it, and it is never in the
+    /// status row's list. It is a browser convenience with a certificate cost, so its line states
+    /// what it is publishing and, when it cannot, which admin-console setting is missing.
+    static func tailscaleServe(
         isEnabled: Bool,
         transport: RemoteTransportState,
         readiness: TailscaleReadiness
     ) -> RemoteDoorStatus {
         guard isEnabled else {
             return RemoteDoorStatus(
-                text: L10n.string("Off. Threading is not published on your tailnet."),
+                text: L10n.string(
+                    "Off. A browser on your tailnet gets a certificate warning."
+                ),
                 tone: .off
             )
         }
         switch transport {
         case .connected(let origin):
             return RemoteDoorStatus(
-                text: L10n.format("Reachable at %@", origin.remoteDisplayHost),
+                text: L10n.format("Serving at %@", origin.remoteDisplayOrigin),
                 tone: .ready,
-                boundAddress: origin.remoteDisplayHost
+                boundAddress: origin.remoteDisplayOrigin
             )
         case .stopped, .starting:
             guard let statement = readiness.startupStatement else {
                 return RemoteDoorStatus(
-                    text: L10n.string("Starting on your tailnet…"),
+                    text: L10n.string("Publishing on your tailnet…"),
                     tone: .working,
                     isBusy: true
                 )
@@ -432,6 +555,14 @@ struct RemoteDoorStatus: Equatable, Sendable {
                 tone: .attention
             )
         }
+    }
+
+    /// The admin-console page that fixes a Serve failure, when the CLI named one.
+    static func serveRemedy(_ readiness: TailscaleReadiness) -> RemotePairingRemedy? {
+        guard case .actionRequired(let issue, let actionURL) = readiness,
+              let actionURL,
+              let title = issue.remedyActionTitle else { return nil }
+        return RemotePairingRemedy(title: title, url: actionURL)
     }
 
     // MARK: - Threading Direct
@@ -473,5 +604,238 @@ extension URL {
         guard let host else { return absoluteString }
         guard let port, port != RemoteAccessDefaults.defaultTLSPort else { return host }
         return "\(host):\(port)"
+    }
+
+    /// The same, with the scheme, for the one line a person is meant to open in a browser.
+    /// `https://mac.tail1234.ts.net:8443/` reads as `https://mac.tail1234.ts.net:8443`.
+    var remoteDisplayOrigin: String {
+        guard let scheme else { return remoteDisplayHost }
+        return "\(scheme)://\(remoteDisplayHost)"
+    }
+}
+
+/// The three rows of the tailnet way in's readiness card.
+///
+/// It is a value rather than a `switch` inside the view controller because every state in it
+/// takes a live tailnet to reach: a Mac with no `tailscale` binary, one that is signed out, one
+/// whose `tailscaled` is not running, and one whose door is bound. The page renders this and
+/// nothing else, so all four can be asserted and photographed.
+///
+/// The rows are the *door's*, and the door is a listener: two facts the `tailscale` CLI owns,
+/// then what the listener bound. Serve's failures are not here at all — they belong to the
+/// browser sub-option that asked for Serve.
+struct RemoteTailnetReadinessPresentation: Equatable, Sendable {
+
+    struct Row: Equatable, Sendable {
+        enum Mark: Equatable, Sendable {
+            /// Not answered yet, and not being waited on either.
+            case pending
+            /// In flight. The only mark that spins.
+            case working
+            case met
+            case attention
+        }
+
+        let step: TailscaleReadinessStep
+        let title: String
+        let detail: String
+        let mark: Mark
+    }
+
+    let rows: [Row]
+
+    /// Nothing asked and nothing waiting, which is what the card holds before the page has read
+    /// the coordinator.
+    static let idle = RemoteTailnetReadinessPresentation(
+        rows: TailscaleReadinessStep.allCases.map {
+            Row(step: $0, title: "", detail: "", mark: .pending)
+        }
+    )
+
+    func row(_ step: TailscaleReadinessStep) -> Row? { rows.first { $0.step == step } }
+
+    /// Resolves the card from the CLI facts and the door.
+    ///
+    /// A bound door is proof of both CLI facts, whatever the probe managed to say: an address in
+    /// `100.64.0.0/10` on a `utun` exists only because `tailscaled` is installed, signed in and
+    /// running. So the listener outranks the probe rather than the other way round, and a probe
+    /// that could not run leaves the rows waiting instead of accusing the Mac of anything.
+    static func resolve(
+        isEnabled: Bool,
+        facts: TailscaleHostFacts,
+        doorState: RemoteAccessDoorState,
+        doorStatus: RemoteDoorStatus
+    ) -> RemoteTailnetReadinessPresentation {
+        let isBound = !doorState.bindings.isEmpty
+        let issue = isBound ? nil : facts.issue
+
+        var rows: [Row] = []
+        rows.append(
+            installedRow(isEnabled: isEnabled, isBound: isBound, facts: facts, issue: issue)
+        )
+        rows.append(
+            signedInRow(
+                isEnabled: isEnabled,
+                isBound: isBound,
+                facts: facts,
+                issue: issue,
+                status: doorStatus
+            )
+        )
+        rows.append(
+            addressRow(isEnabled: isEnabled, state: doorState, status: doorStatus, issue: issue)
+        )
+        return RemoteTailnetReadinessPresentation(rows: rows)
+    }
+
+    private static func installedRow(
+        isEnabled: Bool,
+        isBound: Bool,
+        facts: TailscaleHostFacts,
+        issue: TailscaleReadinessIssue?
+    ) -> Row {
+        let title = L10n.string("Tailscale installed")
+        guard isEnabled else {
+            return Row(
+                step: .installed,
+                title: title,
+                detail: L10n.string("Checked when the tailnet way in is on."),
+                mark: .pending
+            )
+        }
+        if issue == .notInstalled {
+            return Row(
+                step: .installed,
+                title: title,
+                detail: L10n.string(
+                    "Install Tailscale and sign in on this Mac. The door comes back on its own."
+                ),
+                mark: .attention
+            )
+        }
+        // Anything that is not "no binary at all" is proof there is one: a bound door, a status
+        // the CLI answered, or a state it named.
+        if isBound || facts.state == .running || issue != nil {
+            return Row(
+                step: .installed,
+                title: title,
+                detail: L10n.string("Tailscale is installed."),
+                mark: .met
+            )
+        }
+        return Row(
+            step: .installed,
+            title: title,
+            detail: L10n.string("Looking for Tailscale…"),
+            mark: .working
+        )
+    }
+
+    /// The remedy comes from the door's own status line rather than from a second spelling of
+    /// it. The line says "Turn on Tailscale on this Mac. The door comes back on its own", and a
+    /// row that said "then retry" beside it would be describing a button this page does not have.
+    private static func signedInRow(
+        isEnabled: Bool,
+        isBound: Bool,
+        facts: TailscaleHostFacts,
+        issue: TailscaleReadinessIssue?,
+        status: RemoteDoorStatus
+    ) -> Row {
+        let title = L10n.string("Signed in and running")
+        guard isEnabled else {
+            return Row(
+                step: .signedIn,
+                title: title,
+                detail: L10n.string("Waiting for the installation check."),
+                mark: .pending
+            )
+        }
+        if isBound || facts.state == .running {
+            return Row(
+                step: .signedIn,
+                title: title,
+                detail: L10n.string("This Mac is connected to your tailnet."),
+                mark: .met
+            )
+        }
+        switch issue {
+        case .notInstalled:
+            return Row(
+                step: .signedIn,
+                title: title,
+                detail: L10n.string("Waiting for Tailscale."),
+                mark: .pending
+            )
+        case .some(let issue):
+            return Row(
+                step: .signedIn,
+                title: title,
+                detail: status.hint ?? issue.failureStatement,
+                mark: .attention
+            )
+        case .none:
+            return Row(
+                step: .signedIn,
+                title: title,
+                detail: L10n.string("Checking your tailnet status…"),
+                mark: .working
+            )
+        }
+    }
+
+    /// `issue` is what the CLI already accounts for. A door with no address because Tailscale is
+    /// not installed is not a third failure to read: the row above it is the one to act on, and
+    /// this one is waiting for it, which is the same "everything below the failing row waits"
+    /// the card has always drawn.
+    private static func addressRow(
+        isEnabled: Bool,
+        state: RemoteAccessDoorState,
+        status: RemoteDoorStatus,
+        issue: TailscaleReadinessIssue?
+    ) -> Row {
+        let title = L10n.string("This Mac’s tailnet address")
+        guard isEnabled else {
+            return Row(
+                step: .tailnetAddress,
+                title: title,
+                detail: L10n.string("Waiting for Tailscale."),
+                mark: .pending
+            )
+        }
+        switch state {
+        case .bound:
+            // The fact alone: the way in's own line, two rows above, already carries the rest.
+            return Row(step: .tailnetAddress, title: title, detail: status.fact, mark: .met)
+        case .binding:
+            return Row(
+                step: .tailnetAddress,
+                title: title,
+                detail: L10n.string("Binding to this Mac’s tailnet address…"),
+                mark: .working
+            )
+        case .notReachable:
+            guard issue == nil else {
+                return Row(
+                    step: .tailnetAddress,
+                    title: title,
+                    detail: L10n.string("Waiting for Tailscale."),
+                    mark: .pending
+                )
+            }
+            // The door's own sentence, so the row and the status line cannot drift apart.
+            return Row(
+                step: .tailnetAddress,
+                title: title,
+                detail: status.text,
+                mark: .attention
+            )
+        case .off:
+            return Row(
+                step: .tailnetAddress,
+                title: title,
+                detail: L10n.string("Waiting for Tailscale."),
+                mark: .pending
+            )
+        }
     }
 }

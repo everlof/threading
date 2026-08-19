@@ -27,11 +27,13 @@ enum RemoteAccessDoor: String, CaseIterable, Sendable {
 
     /// The doors this build can actually bind.
     ///
-    /// `vpn` and `tailscale` are classified from the interface list already, so the status model
-    /// and the tests can talk about them, but only `lan` is bindable until the listener presents
-    /// a TLS identity. Enabling one of the others is honestly reported as
-    /// `notAvailableYet` rather than silently treated as off.
-    static let bindable: Set<RemoteAccessDoor> = [.loopback, .lan]
+    /// `tailscale` joined the set once the listener had an identity of its own: a tailnet address
+    /// is one of this Mac's addresses, so it is a bind rather than a `tailscale serve` handler,
+    /// and it presents the same pinned certificate as every other routable door. `vpn` is
+    /// classified from the interface list so the status model and the tests can talk about it,
+    /// but it is not bindable yet and enabling it is honestly reported as `notAvailableYet`
+    /// rather than silently treated as off.
+    static let bindable: Set<RemoteAccessDoor> = [.loopback, .lan, .tailscale]
 
     var isSelectable: Bool { Self.selectable.contains(self) }
 
@@ -55,6 +57,17 @@ enum RemoteAccessDoor: String, CaseIterable, Sendable {
     /// a broadcast. Same-network discovery is a convenience for the one door it can work on, and
     /// the advertised endpoint list is what makes the others work.
     var isAdvertisedOverBonjour: Bool { self == .lan }
+
+    /// What this door reports when no interface currently carries an address it would bind.
+    ///
+    /// The tailnet has its own answer because the absence means something different and is fixed
+    /// somewhere else: an `en0` with no address is a Mac off every network, while a `utun` with no
+    /// `100.64.0.0/10` address is `tailscaled` not running or not signed in. Both are "nothing to
+    /// bind", and a status line that said "no address on this network" about a tailnet would send
+    /// somebody to their Wi-Fi settings.
+    var absentInterfaceReason: RemoteDoorUnreachableReason {
+        self == .tailscale ? .tailscaleNotConnected : .noInterface
+    }
 
     /// The wire vocabulary an address on this door is advertised under.
     var endpointKind: String {
@@ -259,6 +272,9 @@ struct RemoteListenerBinding: Equatable, Hashable, Sendable {
 enum RemoteDoorUnreachableReason: String, Equatable, Sendable {
     /// No interface currently carries an address this door would bind.
     case noInterface
+    /// The tailnet door's own shape of `noInterface`: no `utun` holds a `100.64.0.0/10` address,
+    /// which is what this Mac not being on its tailnet looks like from the interface list.
+    case tailscaleNotConnected
     /// Something else holds the listener's port on this door's addresses.
     case portInUse
     /// This build classifies the door but does not bind it yet.
@@ -270,8 +286,12 @@ enum RemoteDoorUnreachableReason: String, Equatable, Sendable {
     /// Which reason a door reports when its addresses disagree. A missing identity outranks
     /// everything, because no address can answer without one; something sitting on the port is
     /// the next most actionable, and it outranks an address that simply is not here.
+    ///
+    /// The two "nothing to bind" reasons are adjacent and never compete: a door produces the one
+    /// its own interfaces mean (`RemoteAccessDoor.absentInterfaceReason`), so they are separate
+    /// answers to the same question rather than two rankings of it.
     static let reportingPriority: [RemoteDoorUnreachableReason] = [
-        .identityUnavailable, .portInUse, .noInterface, .notAvailableYet
+        .identityUnavailable, .portInUse, .noInterface, .tailscaleNotConnected, .notAvailableYet
     ]
 }
 

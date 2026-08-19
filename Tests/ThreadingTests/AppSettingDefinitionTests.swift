@@ -378,7 +378,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 74)
+        XCTAssertEqual(authoredRows.count, 75)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -435,11 +435,13 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Open a window before I start", "I start at", "I stop at", "Days",
             "If the window has not reset", "When a session hits its usage limit"
         ])
-        // The mode and its two relay switches are gone; the ways in are rows of their own. The
+        // The mode and its two relay switches are gone; the ways in are rows of their own, and
+        // the browser convenience is a row under the tailnet one rather than a way in. The
         // sign-in row is last because it is the one row on this page that is not a stored
         // setting, so it is surfaced rather than persisted and cannot be interleaved.
         XCTAssertEqual(actual["remote-access"], [
-            "Remote Access", "This network", "Tailscale", "New shared chats",
+            "Remote Access", "This network", "Tailscale",
+            "Open in a browser on your tailnet", "New shared chats",
             "Reports from your phone", "Hosted Direct"
         ])
         XCTAssertEqual(actual["github"], ["Client ID", "gh CLI", "Git credential helper"])

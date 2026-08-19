@@ -212,56 +212,47 @@ final class RemoteRelayReadinessTests: XCTestCase {
 
     // MARK: - What the pairing card says
 
-    func testAConnectedTransportWithNoPayloadIsNotProgress() {
-        // This is the state that shipped as a spinner: the connection is up, so nothing further
-        // is coming, and "Preparing your pairing code" was a promise the card could not keep.
+    /// A way in that is answering, with no payload built from it, is the state that shipped as a
+    /// spinner: nothing further is coming, and "Preparing your pairing code" was a promise the
+    /// card could not keep.
+    func testAWayInThatIsAnsweringWithNoPayloadIsNotProgress() {
         XCTAssertEqual(
             RemotePairingCardState.resolve(
                 ownerDevicePersistenceError: nil,
                 pairingCodePayload: nil,
-                transport: .connected(URL(string: "https://example.trycloudflare.com")!)
+                wayIn: .thisNetwork(
+                    isEnabled: true,
+                    state: .bound([Self.lanBinding]),
+                    firewall: .unknown
+                )
             ),
             .codeUnavailable
         )
     }
 
-    func testOnlyAnUnfinishedConnectionShowsPreparing() {
-        for transport in [RemoteTransportState.stopped, .starting] {
-            XCTAssertEqual(
-                RemotePairingCardState.resolve(
-                    ownerDevicePersistenceError: nil,
-                    pairingCodePayload: nil,
-                    transport: transport
-                ),
-                .preparing(detail: nil),
-                "\(transport) should still read as work in progress"
-            )
-        }
-    }
-
-    /// The silence this replaced: `tailscale serve` sat on the tailnet's first certificate for
-    /// close to a minute while the card said only that a code would appear "as soon as the
-    /// selected connection is ready", and the person concluded it had failed.
-    func testAPublishingTailnetSaysWhatItIsWaitingFor() throws {
-        let state = RemotePairingCardState.resolve(
+    /// Only a way in that is still coming up reads as work in progress, and it says what it is
+    /// waiting for rather than promising a code "as soon as the selected connection is ready".
+    func testOnlyAnUnfinishedWayInShowsPreparingAndSaysWhatItIsWaitingFor() {
+        let binding = RemotePairingCardState.resolve(
             ownerDevicePersistenceError: nil,
             pairingCodePayload: nil,
-            transport: .starting,
-            tailscaleReadiness: .publishing
+            wayIn: .tailscale(isEnabled: true, state: .binding, facts: .unknown)
         )
-        guard case .preparing(let detail) = state else {
-            return XCTFail("a publishing tailnet is still work in progress")
-        }
+        XCTAssertEqual(binding, .preparing(detail: "Binding to this Mac’s tailnet address…"))
+
         XCTAssertEqual(
-            detail,
-            "Waiting for the tailnet HTTPS endpoint to answer. The first time can take up to a "
-                + "minute.",
-            "the card does not say what the tailnet is doing"
+            RemotePairingCardState.resolve(
+                ownerDevicePersistenceError: nil,
+                pairingCodePayload: nil,
+                wayIn: nil
+            ),
+            .preparing(detail: nil),
+            "a page told about no way in at all is a wait, not an answer"
         )
     }
 
     /// The transport observes the command it is running and nothing else, so the states that
-    /// are not a step on the way to a door say nothing rather than guessing.
+    /// are not a step on the way to Serve publishing say nothing rather than guessing.
     func testOnlyAnInFlightCommandProducesAStartupStatement() throws {
         XCTAssertNil(TailscaleReadiness.notChecked.startupStatement)
         XCTAssertNil(TailscaleReadiness.ready(URL(string: "https://mac.ts.net:8443/")!).startupStatement)
@@ -278,14 +269,14 @@ final class RemoteRelayReadinessTests: XCTestCase {
         )
     }
 
-    func testAPayloadWinsOverTheTransportState() {
+    func testAPayloadWinsOverTheWayInState() {
         XCTAssertEqual(
             RemotePairingCardState.resolve(
                 ownerDevicePersistenceError: nil,
-                pairingCodePayload: "HTTPS://EXAMPLE.TRYCLOUDFLARE.COM/#TOKEN",
-                transport: .starting
+                pairingCodePayload: "HTTPS://192.168.1.42:8760/#TOKEN",
+                wayIn: .tailscale(isEnabled: true, state: .binding, facts: .unknown)
             ),
-            .ready(payload: "HTTPS://EXAMPLE.TRYCLOUDFLARE.COM/#TOKEN")
+            .ready(payload: "HTTPS://192.168.1.42:8760/#TOKEN")
         )
     }
 
@@ -293,55 +284,82 @@ final class RemoteRelayReadinessTests: XCTestCase {
         XCTAssertEqual(
             RemotePairingCardState.resolve(
                 ownerDevicePersistenceError: "keychain",
-                pairingCodePayload: "HTTPS://EXAMPLE.TRYCLOUDFLARE.COM/#TOKEN",
-                transport: .connected(URL(string: "https://example.trycloudflare.com")!)
+                pairingCodePayload: "HTTPS://192.168.1.42:8760/#TOKEN",
+                wayIn: .thisNetwork(
+                    isEnabled: true,
+                    state: .bound([Self.lanBinding]),
+                    firewall: .unknown
+                )
             ),
             .keychainUnavailable
         )
     }
 
-    func testAnUnavailableTransportOffersItsOwnRecovery() {
+    /// A code cannot exist and nothing else can be said: the card carries the way in's own
+    /// sentence, which already holds the fact and its remedy.
+    func testAFailingWayInCarriesItsOwnReasonAndRemedy() {
         XCTAssertEqual(
             RemotePairingCardState.resolve(
                 ownerDevicePersistenceError: nil,
                 pairingCodePayload: nil,
-                transport: .unavailable("The secure relay did not answer in time.")
+                wayIn: .tailscale(
+                    isEnabled: true,
+                    state: .notReachable(.tailscaleNotConnected),
+                    facts: TailscaleHostFacts(state: .notInstalled, magicDNSName: nil)
+                )
             ),
             .connectionUnavailable(
-                reason: "The secure relay did not answer in time.",
-                remedy: nil
+                reason: "Not currently reachable: Tailscale is not installed on this Mac. "
+                    + "Install Tailscale and sign in on this Mac. The door comes back on its own."
             ),
-            "the relay's own sentence is what the panel has to show"
+            "the panel does not say which way in failed or what fixes it"
         )
     }
 
-    // MARK: - The panel carries the reason
-
-    /// The bug this pair exists for: the page showed "Private connection unavailable. You can
-    /// still test the browser on this Mac, or retry the selected connection." while the only
-    /// explanation it had sat in a readiness row three rows above it.
-    func testTheUnavailablePanelStatesTheFailureAndItsRemedy() throws {
-        let approval = try XCTUnwrap(URL(string: "https://login.tailscale.com/f/serve?node=abc"))
-        let state = RemotePairingCardState.resolve(
-            ownerDevicePersistenceError: nil,
-            pairingCodePayload: nil,
-            transport: .unavailable(TailscaleReadinessIssue.serveNotEnabled.message),
-            tailscaleReadiness: .actionRequired(.serveNotEnabled, actionURL: approval)
+    /// The card speaks for the way in closest to carrying a code, not for the first one drawn.
+    /// A network door still binding says more than a tailnet door that is off.
+    func testTheCardSpeaksForTheWayInClosestToACode() throws {
+        let off = RemoteDoorStatus.tailscale(isEnabled: false, state: .off, facts: .unknown)
+        let failing = RemoteDoorStatus.thisNetwork(
+            isEnabled: true,
+            state: .notReachable(.noInterface),
+            firewall: .unknown
+        )
+        let working = RemoteDoorStatus.tailscale(isEnabled: true, state: .binding, facts: .unknown)
+        let ready = RemoteDoorStatus.thisNetwork(
+            isEnabled: true,
+            state: .bound([Self.lanBinding]),
+            firewall: .unknown
         )
 
+        XCTAssertEqual(RemotePairingCardState.mostAdvanced(of: [off, failing]), failing)
+        XCTAssertEqual(RemotePairingCardState.mostAdvanced(of: [off, failing, working]), working)
         XCTAssertEqual(
-            state,
-            .connectionUnavailable(
-                reason: "Tailscale Serve is not enabled for this tailnet. Enable HTTPS "
-                    + "certificates in the Tailscale admin console, then retry.",
-                remedy: RemotePairingRemedy(title: "Enable Tailscale Serve…", url: approval)
-            )
+            RemotePairingCardState.mostAdvanced(of: [off, failing, working, ready]),
+            ready
+        )
+        XCTAssertNil(RemotePairingCardState.mostAdvanced(of: []))
+    }
+
+    /// Nothing switched on is a dead end with a fact in it rather than a wait.
+    func testNoWayInIsNotAWait() {
+        XCTAssertEqual(
+            RemotePairingCardState.resolve(
+                ownerDevicePersistenceError: nil,
+                pairingCodePayload: nil,
+                wayIn: .remoteAccessOff(),
+                hasWayIn: false
+            ),
+            .noWayIn
         )
     }
 
-    /// Every issue the readiness model can express reaches the panel with both halves, so a new
-    /// one cannot arrive as a panel that says a connection is unavailable and nothing else.
-    func testEveryReadinessIssueReachesThePanelWithAReasonAndARemedy() throws {
+    // MARK: - Serve carries its own reason and its own fix
+
+    /// The bug this exists for: the page showed "Private connection unavailable" while the only
+    /// explanation it had sat in a readiness row three rows above it. Serve is a sub-option now,
+    /// so the sentence and the button belong to its row — but they still have to be there.
+    func testEveryServeIssueReachesItsRowWithAReasonAndAFix() throws {
         let approval = try XCTUnwrap(URL(string: "https://login.tailscale.com/f/serve?node=abc"))
         for issue in [
             TailscaleReadinessIssue.notInstalled,
@@ -354,44 +372,50 @@ final class RemoteRelayReadinessTests: XCTestCase {
             .portInUse,
             .serveFailed
         ] {
-            let state = RemotePairingCardState.resolve(
-                ownerDevicePersistenceError: nil,
-                pairingCodePayload: nil,
+            let readiness = TailscaleReadiness.actionRequired(issue, actionURL: approval)
+            let status = RemoteDoorStatus.tailscaleServe(
+                isEnabled: true,
                 transport: .unavailable(issue.message),
-                tailscaleReadiness: .actionRequired(issue, actionURL: approval)
+                readiness: readiness
             )
-            guard case .connectionUnavailable(let reason, let remedy) = state else {
-                return XCTFail("\(issue) did not reach the panel")
-            }
-            XCTAssertTrue(
-                reason.hasPrefix(issue.failureStatement),
-                "\(issue) does not state what failed"
-            )
-            XCTAssertTrue(
-                reason.hasSuffix(issue.remedyStatement),
-                "\(issue) does not state what fixes it"
-            )
+            XCTAssertEqual(status.text, issue.failureStatement, "\(issue) does not state what failed")
+            XCTAssertEqual(status.hint, issue.remedyStatement, "\(issue) does not state the fix")
+            XCTAssertEqual(status.tone, .attention, "\(issue)")
             XCTAssertEqual(
-                remedy?.title,
+                RemoteDoorStatus.serveRemedy(readiness)?.title,
                 issue.remedyActionTitle,
                 "\(issue) offered a button the model does not name"
             )
         }
     }
 
-    /// A remedy is a title *and* a page. An issue with no page to open shows Retry alone rather
-    /// than a button that goes nowhere.
-    func testAnIssueWithNoPageToOpenOffersNoRemedyButton() {
-        let state = RemotePairingCardState.resolve(
-            ownerDevicePersistenceError: nil,
-            pairingCodePayload: nil,
-            transport: .unavailable(TailscaleReadinessIssue.serveNotEnabled.message),
-            tailscaleReadiness: .actionRequired(.serveNotEnabled, actionURL: nil)
+    /// A remedy is a title *and* a page. An issue with no page to open offers no button rather
+    /// than one that goes nowhere.
+    func testAServeIssueWithNoPageToOpenOffersNoButton() {
+        XCTAssertNil(
+            RemoteDoorStatus.serveRemedy(.actionRequired(.serveNotEnabled, actionURL: nil))
         )
-        guard case .connectionUnavailable(_, let remedy) = state else {
-            return XCTFail("the panel lost the failure")
-        }
-        XCTAssertNil(remedy)
+        XCTAssertNil(RemoteDoorStatus.serveRemedy(.publishing))
+    }
+
+    /// Serve publishing says where, and Serve switched off says what a browser gets instead.
+    func testServeStatesWhereItIsServingAndWhatItsAbsenceCosts() throws {
+        let origin = try XCTUnwrap(URL(string: "https://mac-studio.tail1234.ts.net:8443/"))
+        let serving = RemoteDoorStatus.tailscaleServe(
+            isEnabled: true,
+            transport: .connected(origin),
+            readiness: .ready(origin)
+        )
+        XCTAssertEqual(serving.text, "Serving at https://mac-studio.tail1234.ts.net:8443")
+        XCTAssertEqual(serving.tone, .ready)
+
+        let off = RemoteDoorStatus.tailscaleServe(
+            isEnabled: false,
+            transport: .stopped,
+            readiness: .notChecked
+        )
+        XCTAssertEqual(off.text, "Off. A browser on your tailnet gets a certificate warning.")
+        XCTAssertEqual(off.tone, .off)
     }
 
     /// The readiness rows and the panel read the same value, which is what stops a reason from
@@ -401,6 +425,9 @@ final class RemoteRelayReadinessTests: XCTestCase {
         XCTAssertEqual(TailscaleReadinessIssue.signedOut.step, .signedIn)
         XCTAssertEqual(TailscaleReadinessIssue.stopped.step, .signedIn)
         XCTAssertEqual(TailscaleReadinessIssue.statusUnavailable.step, .signedIn)
+        // Serve's failures are not rows on a card about the door: the door does not go through
+        // Serve any more, and a row saying "Enable HTTPS certificates" beside a bound tailnet
+        // address would be describing a browser convenience as a way in.
         for issue in [
             TailscaleReadinessIssue.serveNotEnabled,
             .httpsRequired,
@@ -408,9 +435,127 @@ final class RemoteRelayReadinessTests: XCTestCase {
             .portInUse,
             .serveFailed
         ] {
-            XCTAssertEqual(issue.step, .privateEndpoint, "\(issue) lands on the wrong row")
+            XCTAssertNil(issue.step, "\(issue) claims a row on the door's readiness card")
         }
     }
+
+    // MARK: - The tailnet way in's readiness card
+
+    /// A bound door is proof of both CLI facts, whatever the probe managed to say. An address in
+    /// `100.64.0.0/10` on a `utun` exists only because `tailscaled` is installed, signed in and
+    /// running, so the listener outranks the probe rather than the other way round.
+    func testABoundTailnetProvesTheFactsTheProbeCouldNotRead() {
+        let state = RemoteAccessDoorState.bound([Self.tailnetBinding])
+        let card = RemoteTailnetReadinessPresentation.resolve(
+            isEnabled: true,
+            facts: .unknown,
+            doorState: state,
+            doorStatus: .tailscale(isEnabled: true, state: state, facts: .unknown)
+        )
+
+        XCTAssertEqual(card.row(.installed)?.mark, .met)
+        XCTAssertEqual(card.row(.signedIn)?.mark, .met)
+        XCTAssertEqual(card.row(.tailnetAddress)?.mark, .met)
+        XCTAssertEqual(
+            card.row(.tailnetAddress)?.detail,
+            "Reachable at 100.65.47.126:8760.",
+            "the row does not name the address the listener took"
+        )
+    }
+
+    /// The failing row is the one to act on, and the rows below it wait rather than repeating
+    /// the same failure in three different spellings.
+    func testACLIFactMarksItsOwnRowAndLeavesTheRestWaiting() {
+        let state = RemoteAccessDoorState.notReachable(.tailscaleNotConnected)
+        func card(_ facts: TailscaleHostFacts) -> RemoteTailnetReadinessPresentation {
+            .resolve(
+                isEnabled: true,
+                facts: facts,
+                doorState: state,
+                doorStatus: .tailscale(isEnabled: true, state: state, facts: facts)
+            )
+        }
+
+        let notInstalled = card(TailscaleHostFacts(state: .notInstalled, magicDNSName: nil))
+        XCTAssertEqual(notInstalled.row(.installed)?.mark, .attention)
+        XCTAssertEqual(notInstalled.row(.signedIn)?.mark, .pending)
+        XCTAssertEqual(notInstalled.row(.tailnetAddress)?.mark, .pending)
+
+        let signedOut = card(TailscaleHostFacts(state: .signedOut, magicDNSName: nil))
+        XCTAssertEqual(signedOut.row(.installed)?.mark, .met)
+        XCTAssertEqual(signedOut.row(.signedIn)?.mark, .attention)
+        XCTAssertEqual(
+            signedOut.row(.signedIn)?.detail,
+            "Sign in to Tailscale on this Mac. The door comes back on its own.",
+            "the row and the status line disagree about what to do"
+        )
+        XCTAssertEqual(signedOut.row(.tailnetAddress)?.mark, .pending)
+    }
+
+    /// A door that is down for a reason the CLI does not explain says so on the address row,
+    /// in the door's own words.
+    func testADoorFailureTheCLIDoesNotExplainLandsOnTheAddressRow() {
+        let state = RemoteAccessDoorState.notReachable(.identityUnavailable)
+        let card = RemoteTailnetReadinessPresentation.resolve(
+            isEnabled: true,
+            facts: TailscaleHostFacts(state: .running, magicDNSName: "mac.tail1234.ts.net"),
+            doorState: state,
+            doorStatus: .tailscale(
+                isEnabled: true,
+                state: state,
+                facts: TailscaleHostFacts(state: .running, magicDNSName: "mac.tail1234.ts.net")
+            )
+        )
+
+        XCTAssertEqual(card.row(.installed)?.mark, .met)
+        XCTAssertEqual(card.row(.signedIn)?.mark, .met)
+        XCTAssertEqual(card.row(.tailnetAddress)?.mark, .attention)
+        XCTAssertEqual(
+            card.row(.tailnetAddress)?.detail,
+            "Not currently reachable: this Mac has no certificate to present."
+        )
+    }
+
+    /// The card asks nothing of a Mac whose tailnet way in is switched off.
+    func testTheCardWaitsWhileTheWayInIsOff() {
+        let card = RemoteTailnetReadinessPresentation.resolve(
+            isEnabled: false,
+            facts: .unknown,
+            doorState: .off,
+            doorStatus: .tailscale(isEnabled: false, state: .off, facts: .unknown)
+        )
+        XCTAssertEqual(card.rows.map(\.mark), [.pending, .pending, .pending])
+        XCTAssertEqual(card.row(.installed)?.detail, "Checked when the tailnet way in is on.")
+    }
+
+    /// A bound door names its MagicDNS name beside its address, because that is a route the
+    /// phone can take. Serve's port is not one of them.
+    func testABoundDoorNamesItsMagicDNSNameAndNotServesPort() {
+        let state = RemoteAccessDoorState.bound([Self.tailnetBinding])
+        let status = RemoteDoorStatus.tailscale(
+            isEnabled: true,
+            state: state,
+            facts: TailscaleHostFacts(state: .running, magicDNSName: "mac.tail1234.ts.net")
+        )
+
+        XCTAssertEqual(status.text, "Reachable at 100.65.47.126:8760")
+        XCTAssertEqual(status.hint, "Also reachable at mac.tail1234.ts.net:8760.")
+        XCTAssertEqual(status.tone, .ready)
+        XCTAssertEqual(status.boundAddress, "100.65.47.126:8760")
+    }
+
+    private static let tailnetBinding = RemoteListenerBinding(
+        door: .tailscale,
+        address: RemoteNetworkAddress(interfaceName: "utun4", address: "100.65.47.126"),
+        port: 8760
+    )
+
+    /// One LAN binding, so the pairing-card cases can be built without a listener.
+    private static let lanBinding = RemoteListenerBinding(
+        door: .lan,
+        address: RemoteNetworkAddress(interfaceName: "en0", address: "192.168.1.42"),
+        port: 8760
+    )
 }
 
 private extension XCTestCase {

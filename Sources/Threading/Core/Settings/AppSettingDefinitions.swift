@@ -1028,20 +1028,6 @@ enum AppSettingDefinitions {
         absence: .falseValue,
         notification: .none
     )
-    /// The browser convenience on the tailnet, and nothing else.
-    ///
-    /// **Not operative yet, and deliberately not on the page yet.** Today the `tailscale` door
-    /// *is* Tailscale Serve (`RemoteTailscaleDoorImplementation.serveTransport`), so a switch
-    /// offering to turn Serve off would take the phone's only tailnet route with it. When the
-    /// raw tailnet bind lands, Serve becomes what §8 of the transport plan describes — "Open
-    /// Threading in a browser on your tailnet without a certificate warning" — and this is the
-    /// switch for it. It has no catalogue row until then, because a search result must lead to a
-    /// row that is on the page.
-    static let remoteAccessTailscaleServeEnabled = AppSettingDescriptor<Bool>(
-        identity: .remoteAccessTailscaleServeEnabled,
-        persistenceKey: "remoteAccessTailscaleServeEnabled",
-        absence: .registered(false)
-    )
     /// The port the listener tries first.
     ///
     /// Editable because the port is now sticky: a sticky port that collides with something else
@@ -1086,6 +1072,21 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 2, "Ways In", "Tailscale",
                             ["tailnet", "Tailscale", "VPN", "away from home"])]
     )
+    /// The browser convenience on the tailnet, and nothing else.
+    ///
+    /// Off by default and not a way in: the phone reaches this Mac at the tailnet address the
+    /// listener binds, with the certificate it pinned, so nothing here is a route. What Serve
+    /// adds is a publicly trusted certificate for the `*.ts.net` name, which is the only way a
+    /// *browser* on the tailnet opens Threading without a full-page certificate warning. What it
+    /// costs is a public certificate-transparency entry naming this Mac and the tailnet, which is
+    /// why it is a switch a person makes rather than something the tailnet door turns on.
+    static let remoteAccessTailscaleServeEnabled = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessTailscaleServeEnabled,
+        persistenceKey: "remoteAccessTailscaleServeEnabled",
+        absence: .registered(false),
+        presentations: [row("remote-access", 3, "Ways In", "Open in a browser on your tailnet",
+                            ["browser", "Serve", "certificate", "tailnet", "HTTPS"])]
+    )
     /// An address to advertise beside the ones enumerated from the interfaces.
     ///
     /// Empty means "advertise what this Mac actually has". It exists for the two cases
@@ -1119,7 +1120,7 @@ enum AppSettingDefinitions {
         persistenceKey: "phoneReportWorkspace",
         absence: .registered(PhoneReportWorkspacePolicy.sameCheckout.rawValue),
         validation: .allowedStrings(Set(PhoneReportWorkspacePolicy.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 4, "Sharing & Security", "Reports from your phone",
+        presentations: [row("remote-access", 5, "Sharing & Security", "Reports from your phone",
                             ["shake", "report", "worktree", "workspace", "isolated"])]
     )
     static let remoteInputControlDefault = AppSettingDescriptor<String>(
@@ -1127,7 +1128,7 @@ enum AppSettingDefinitions {
         persistenceKey: "remoteInputControlDefault",
         absence: .registered(RemoteInputControlDefault.collaborative.rawValue),
         validation: .allowedStrings(Set(RemoteInputControlDefault.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 3, "Sharing & Security", "New shared chats",
+        presentations: [row("remote-access", 4, "Sharing & Security", "New shared chats",
                             ["security", "collaborative", "focused", "share"])],
         remotePolicy: .ownerMutable
     )
@@ -1219,9 +1220,12 @@ enum AppSettingDefinitions {
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
         .init(remoteAccessConnectionMode), .init(remoteAccessAllowsOwnerRelayFallback),
         .init(remoteAccessKeepsRelayReady), .init(remoteAccessDoorMigration),
-        .init(remoteAccessTailscaleServeEnabled),
         .init(remoteAccessListenerPort),
+        // In catalogue order: the ways in, then the browser convenience under the tailnet one.
+        // `SettingsPages` projects its rows from this list, and a search result that lands on a
+        // row above the one it names is how that projection goes wrong.
         .init(remoteAccessDoors), .init(remoteAccessTailscaleEnabled),
+        .init(remoteAccessTailscaleServeEnabled),
         .init(remoteAccessAdvertisedHostname),
         .init(remoteAccessDiscoveryEnabled),
         .init(remoteInputControlDefault),
@@ -1266,7 +1270,7 @@ enum AppSettingDefinitions {
         // Sign-in rather than a stored setting, so it is surfaced instead of persisted. It used
         // to borrow the connection mode's second presentation, and that descriptor is now a
         // migration record with no row of its own.
-        surfaced("remoteAccess.hostedDirect", pageID: "remote-access", order: 5,
+        surfaced("remoteAccess.hostedDirect", pageID: "remote-access", order: 6,
                   section: "Connection", title: "Hosted Direct",
                   "direct", "introduce", "sign in", "Threading Direct"),
         surfaced("github.ghCLI", pageID: "github", order: 1,

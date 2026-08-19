@@ -1,10 +1,11 @@
 import Foundation
 
-/// A fix the unavailable panel can offer beside Retry: a title and the page it opens.
+/// A fix a failing row can offer beside its sentence: a title and the page it opens.
 ///
-/// It is a value rather than a URL alone because the panel has to be able to say *nothing* —
-/// most failures have no admin page to visit, and a button labelled from a missing title is how
-/// a dead-ended panel gets one anyway.
+/// It is a value rather than a URL alone because a row has to be able to say *nothing* — most
+/// failures have no admin page to visit, and a button labelled from a missing title is how a
+/// dead-ended row gets one anyway. Today the one thing that offers a page is Tailscale Serve,
+/// whose failures are all fixed in the tailnet's admin console.
 struct RemotePairingRemedy: Equatable {
     let title: String
     let url: URL
@@ -26,6 +27,12 @@ struct RemotePairingRemedy: Equatable {
 /// sat in a readiness row three rows further up, and "Preparing your pairing code" shipped while
 /// `tailscale serve` was a minute into its first certificate. A panel states the reason it is
 /// showing; it never points at another part of the page.
+///
+/// **The card reads a way in, not a transport.** Every route an owner device can take is now a
+/// listener on one of this Mac's own addresses, so what the card is waiting for, or failing on,
+/// is a door — and a door's status line already carries the fact and its remedy as words. That
+/// is also why nothing here opens an admin console any more: the one thing that offers a page is
+/// Tailscale Serve, and a browser convenience is not what a pairing code is waiting for.
 enum RemotePairingCardState: Equatable {
     /// The paired-device Keychain item could not be read, so no credential may be issued.
     case keychainUnavailable
@@ -34,22 +41,24 @@ enum RemotePairingCardState: Equatable {
     /// Remote Access is on and no way in is switched on, so nothing routable is being started.
     /// A dead end rather than a wait: the card says which switch produces a code.
     case noWayIn
-    /// The selected connection reported a reason it cannot carry traffic, and the fix for it
-    /// when the readiness model knows one.
-    case connectionUnavailable(reason: String, remedy: RemotePairingRemedy?)
+    /// The way in closest to carrying a code reported a reason it cannot, with its remedy in the
+    /// same sentence.
+    case connectionUnavailable(reason: String)
     /// The connection is still coming up. The only state that legitimately shows a spinner, and
     /// it says what it is waiting for whenever the transport can name that.
     case preparing(detail: String?)
     /// The connection is up but no pairing payload could be built from it.
     case codeUnavailable
 
-    /// `hasWayIn` defaults to true so the callers that are only asking about a transport — the
-    /// readiness tests, and every state that predates the door switches — keep reading the same.
+    /// Resolves the card from the way in that is closest to carrying a code.
+    ///
+    /// `wayIn` is the most advanced of the switched-on ways in: one that is answering, else one
+    /// that is coming up, else one that has failed. Nil is a page that has been told about no way
+    /// in at all, which is a wait rather than an answer.
     static func resolve(
         ownerDevicePersistenceError: String?,
         pairingCodePayload: String?,
-        transport: RemoteTransportState,
-        tailscaleReadiness: TailscaleReadiness? = nil,
+        wayIn: RemoteDoorStatus?,
         hasWayIn: Bool = true
     ) -> RemotePairingCardState {
         if ownerDevicePersistenceError != nil {
@@ -63,28 +72,35 @@ enum RemotePairingCardState: Equatable {
         if !hasWayIn {
             return .noWayIn
         }
-        switch transport {
-        case .unavailable(let reason):
-            guard case .actionRequired(let issue, let actionURL) = tailscaleReadiness else {
-                // Relay states its own sentence, remedy included, and has no page to open.
-                return .connectionUnavailable(reason: reason, remedy: nil)
-            }
-            return .connectionUnavailable(
-                reason: issue.explanation,
-                remedy: remedy(for: issue, actionURL: actionURL)
-            )
-        case .stopped, .starting:
-            return .preparing(detail: tailscaleReadiness?.startupStatement?.detail)
-        case .connected:
+        guard let wayIn else { return .preparing(detail: nil) }
+        switch wayIn.tone {
+        case .ready:
+            // Something is answering at an address and no code could be built from it. That is a
+            // dead end, not a step on the way to one.
             return .codeUnavailable
+        case .working:
+            return .preparing(detail: wayIn.text)
+        case .attention:
+            return .connectionUnavailable(reason: wayIn.sentence)
+        case .off:
+            return .preparing(detail: nil)
         }
     }
 
-    private static func remedy(
-        for issue: TailscaleReadinessIssue,
-        actionURL: URL?
-    ) -> RemotePairingRemedy? {
-        guard let actionURL, let title = issue.remedyActionTitle else { return nil }
-        return RemotePairingRemedy(title: title, url: actionURL)
+    /// The way in a card speaks for: the one closest to carrying a code.
+    ///
+    /// Deliberately not "the first one listed". A network door that is still binding says more
+    /// than a tailnet door that is off, and a door that is answering outranks both — the card is
+    /// about whether a code can exist, not about the order the page happens to draw switches in.
+    static func mostAdvanced(of statuses: [RemoteDoorStatus]) -> RemoteDoorStatus? {
+        func rank(_ status: RemoteDoorStatus) -> Int {
+            switch status.tone {
+            case .ready: return 0
+            case .working: return 1
+            case .attention: return 2
+            case .off: return 3
+            }
+        }
+        return statuses.min { rank($0) < rank($1) }
     }
 }

@@ -46,6 +46,47 @@ enum RemoteRelayFailure: String, Equatable, Sendable {
     }
 }
 
+/// What `tailscale status` says about this Mac's own tailnet membership.
+///
+/// The tailnet door is a listener on the address this Mac holds on its tailnet, so the *door* is
+/// answered by the listener alone: an address is there, or it is not. These are the facts the
+/// interface list cannot supply — whether the absence is a CLI that was never installed, a Mac
+/// that is signed out, a `tailscaled` that is not running, and what this Mac is called on the
+/// tailnet so the door can advertise that name beside its numeric address.
+///
+/// `.unknown` is a real answer and stays one. The probe is a child process that can fail, and a
+/// door that is bound proves the tailnet is up whatever the CLI managed to say.
+struct TailscaleHostFacts: Equatable, Sendable {
+
+    enum State: String, Equatable, Sendable {
+        /// No `tailscale` executable was found, or the probe has not run yet.
+        case unknown
+        case notInstalled
+        case signedOut
+        case stopped
+        case running
+    }
+
+    let state: State
+    /// This Mac's MagicDNS name (`mac.tail1234.ts.net`), without the trailing root label.
+    let magicDNSName: String?
+
+    static let unknown = TailscaleHostFacts(state: .unknown, magicDNSName: nil)
+
+    /// The readiness issue these facts amount to, or nil when nothing is wrong with them.
+    ///
+    /// `.unknown` is deliberately not an issue: a probe that could not answer is not a statement
+    /// that the tailnet is down, and the door's own state says whether anything is bound.
+    var issue: TailscaleReadinessIssue? {
+        switch state {
+        case .notInstalled: return .notInstalled
+        case .signedOut: return .signedOut
+        case .stopped: return .stopped
+        case .unknown, .running: return nil
+        }
+    }
+}
+
 /// A typed explanation of how far Tailscale setup reached. The ordinary transport state remains
 /// shared with Relay; this finer state powers actionable setup UI and content-free diagnostics.
 enum TailscaleReadiness: Equatable, Sendable {
@@ -100,10 +141,25 @@ struct TailscaleStartupStatement: Equatable, Sendable {
 /// The page draws the rows above the failing one as met and the rows below it as waiting, so
 /// adding an issue cannot leave it landing nowhere — the previous `switch` repeated all three
 /// rows per case and was where a new issue silently got no mark at all.
+///
+/// The third row is the tailnet **address** rather than a Serve endpoint. The door is a listener
+/// on the address this Mac holds on its tailnet, so what the row reports is what the listener
+/// bound. Serve's own failures are not rows here at all: they belong to the browser sub-option
+/// that asks for them, which is why `TailscaleReadinessIssue.step` answers nil for those.
 enum TailscaleReadinessStep: Int, CaseIterable, Equatable, Sendable {
     case installed
     case signedIn
-    case privateEndpoint
+    case tailnetAddress
+
+    /// The stable component an accessibility identifier is built from. Not copy: never
+    /// localized, never shown.
+    var identifierComponent: String {
+        switch self {
+        case .installed: return "installed"
+        case .signedIn: return "signed-in"
+        case .tailnetAddress: return "tailnet-address"
+        }
+    }
 }
 
 enum TailscaleReadinessIssue: String, Equatable, Sendable {
@@ -118,9 +174,9 @@ enum TailscaleReadinessIssue: String, Equatable, Sendable {
     case serveFailed
 
     /// The sentence the transport reports as `RemoteTransportState.unavailable`, which is what
-    /// a *remote* caller is told when a share cannot be prepared. The settings page reads
-    /// `rowDetail` and `explanation` instead: a row can be terse because it is titled, and the
-    /// panel needs both halves.
+    /// a *remote* caller is told. The settings page reads `failureStatement` and
+    /// `remedyStatement` instead, because a status line states the fact first and the remedy
+    /// after it, and a row can be terse because it is already titled.
     var message: String {
         switch self {
         case .notInstalled:
@@ -146,43 +202,20 @@ enum TailscaleReadinessIssue: String, Equatable, Sendable {
         }
     }
 
-    /// The readiness row this issue belongs to. Everything above it is met; everything below it
-    /// is still waiting.
-    var step: TailscaleReadinessStep {
+    /// The readiness row this issue belongs to, or nil when it belongs to no row.
+    ///
+    /// Everything above the failing row is met; everything below it is still waiting. The five
+    /// Serve issues answer nil because the readiness card is about the *door*, and the door does
+    /// not go through Serve any more: those failures are shown on the browser sub-option that
+    /// asked for Serve, beside the switch that turns it off again.
+    var step: TailscaleReadinessStep? {
         switch self {
         case .notInstalled:
             return .installed
         case .signedOut, .stopped, .statusUnavailable:
             return .signedIn
         case .serveNotEnabled, .httpsRequired, .permissionDenied, .portInUse, .serveFailed:
-            return .privateEndpoint
-        }
-    }
-
-    /// What the readiness row says. The row is already titled with the step it belongs to, so
-    /// it only has to say what to do about it.
-    var rowDetail: String {
-        switch self {
-        case .notInstalled:
-            return L10n.string("Install Tailscale on this Mac, then retry.")
-        case .signedOut:
-            return L10n.string("Sign in to Tailscale on this Mac, then retry.")
-        case .stopped:
-            return L10n.string("Turn on Tailscale on this Mac, then retry.")
-        case .statusUnavailable:
-            return L10n.string("Threading could not read Tailscale’s status.")
-        case .serveNotEnabled:
-            return L10n.string("Enable Tailscale Serve for this tailnet, then retry.")
-        case .httpsRequired:
-            return L10n.string("Enable Tailscale HTTPS for this tailnet, then retry.")
-        case .permissionDenied:
-            return L10n.string("Allow Threading to publish this private service, then retry.")
-        case .portInUse:
-            return L10n.string(
-                "HTTPS port 8443 already has a Tailscale Serve handler. Remove it, then retry."
-            )
-        case .serveFailed:
-            return L10n.string("Tailscale Serve could not publish Threading. Retry the connection.")
+            return nil
         }
     }
 
@@ -240,11 +273,6 @@ enum TailscaleReadinessIssue: String, Equatable, Sendable {
         }
     }
 
-    /// The failure and its remedy as the one paragraph a panel carries.
-    var explanation: String {
-        failureStatement + " " + remedyStatement
-    }
-
     /// The button that opens the page this issue is fixed on, when the CLI offered one. `nil`
     /// where there is nothing to open, so the panel shows Retry alone rather than a button that
     /// goes nowhere.
@@ -280,12 +308,26 @@ protocol RemoteRelayTransport: RemoteAccessTransport {
     var lastFailure: RemoteRelayFailure? { get }
 }
 
-/// The tailnet door, as the coordinator uses it. Readiness advances while the state sits on
-/// `.starting`, so the settings page needs both the value and the change notification.
+/// The `tailscale` CLI, as the coordinator uses it.
+///
+/// **`start` and `stop` are Tailscale Serve, not the tailnet door.** The door is a listener on
+/// this Mac's tailnet address (`RemoteTailscaleDoorImplementation.listenerDoor`); what this starts
+/// is the opt-in browser convenience that publishes the same server at the `*.ts.net` name with a
+/// publicly trusted certificate, so a browser on the tailnet meets no interstitial.
+///
+/// `hostFacts` is the other half and is not about Serve at all: it is what `tailscale status` said
+/// about this Mac, which is the only way to tell "not installed" from "signed out" from "not
+/// running", and where the MagicDNS name the door advertises comes from.
+///
+/// Readiness advances while the state sits on `.starting`, so the settings page needs both the
+/// value and the change notification.
 @MainActor
 protocol RemoteTailnetTransport: RemoteAccessTransport {
     var readiness: TailscaleReadiness { get }
+    var hostFacts: TailscaleHostFacts { get }
     var onReadinessChange: (@MainActor () -> Void)? { get set }
+    /// Reads `tailscale status` once, bounded and off the main actor, and publishes `hostFacts`.
+    func refreshHostFacts()
 }
 
 /// A door this process refuses to open.
@@ -300,7 +342,12 @@ protocol RemoteTailnetTransport: RemoteAccessTransport {
 final class RefusedRemoteTransport: RemoteRelayTransport, RemoteTailnetTransport {
     let lastFailure: RemoteRelayFailure? = nil
     let readiness: TailscaleReadiness = .notChecked
+    /// A refused process reads nothing, so the facts stay unknown rather than becoming a claim
+    /// about the developer's own machine.
+    let hostFacts: TailscaleHostFacts = .unknown
     var onReadinessChange: (@MainActor () -> Void)?
+
+    func refreshHostFacts() {}
 
     func start(
         port: UInt16,
@@ -317,23 +364,23 @@ final class RefusedRemoteTransport: RemoteRelayTransport, RemoteTailnetTransport
 
 /// What the `tailscale` door is made of.
 ///
-/// The door is a switch on the settings page; this is the seam behind it. Today the switch runs
-/// `TailscaleRemoteTransport`, which asks `tailscale serve` to publish the loopback listener on
-/// the tailnet's HTTPS port. §8 of the transport plan replaces that with a listener bound to this
-/// Mac's own tailnet address, presenting the same pinned identity as every other routable door —
-/// at which point Serve becomes only the browser convenience
-/// (`remoteAccessTailscaleServeEnabled`) and this value becomes `.listenerDoor`.
+/// The door is a switch on the settings page; this is the seam behind it. It used to run
+/// `tailscale serve`, which published the loopback listener at the tailnet's HTTPS port and left
+/// the phone trusting a certificate this Mac did not hold. §8 of the transport plan replaced that
+/// with a listener bound to this Mac's own tailnet address, presenting the same pinned identity
+/// as every other routable door, which is what makes the phone's trust one code path everywhere.
+/// Serve stayed as the browser convenience (`remoteAccessTailscaleServeEnabled`), off by default.
 ///
-/// It exists so that swap is one constant rather than a settings rewrite: nothing above the
-/// coordinator knows which of the two is carrying the door.
+/// The seam remains because it is what let that swap be one constant rather than a settings
+/// rewrite: nothing above the coordinator knows which of the two is carrying the door.
 enum RemoteTailscaleDoorImplementation: Equatable, Sendable {
     /// `tailscale serve --https=8443` proxying to the loopback listener.
     case serveTransport
     /// An `NWListener` on this Mac's tailnet address, with the pinned identity.
     case listenerDoor
 
-    /// What this build does. One line to change when the raw bind lands.
-    static let current: RemoteTailscaleDoorImplementation = .serveTransport
+    /// What this build does.
+    static let current: RemoteTailscaleDoorImplementation = .listenerDoor
 }
 
 /// **Superseded by the per-door switches.** Read only by the one migration that carries a stored

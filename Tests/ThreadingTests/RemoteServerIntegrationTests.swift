@@ -3480,7 +3480,10 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         )
     }
 
-    func testTailscaleStatusBecomesAStablePrivateHTTPSOrigin() throws {
+    /// Serve's own origin, which is the browser convenience's address and no phone's: it is a
+    /// publicly trusted `*.ts.net` certificate on Serve's dedicated port, and `/api/me` never
+    /// carries it.
+    func testTailscaleStatusBecomesAStableServeOrigin() throws {
         let status = Data("""
         {
           "BackendState": "Running",
@@ -3489,10 +3492,10 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         """.utf8)
 
         XCTAssertEqual(
-            TailscaleRemoteTransport.origin(fromStatusJSON: status),
+            TailscaleServeTransport.origin(fromStatusJSON: status),
             URL(string: "https://threading-mac.example.ts.net:8443/")
         )
-        XCTAssertNil(TailscaleRemoteTransport.origin(fromStatusJSON: Data("""
+        XCTAssertNil(TailscaleServeTransport.origin(fromStatusJSON: Data("""
         {
           "BackendState": "Stopped",
           "Self": { "DNSName": "threading-mac.example.ts.net." }
@@ -3501,13 +3504,13 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
     }
 
     func testTailscaleReadinessNamesRecoveryInsteadOfCollapsingToUnavailable() {
-        XCTAssertEqual(TailscaleRemoteTransport.readinessIssue(fromStatusJSON: Data("""
+        XCTAssertEqual(TailscaleServeTransport.readinessIssue(fromStatusJSON: Data("""
         { "BackendState": "NeedsLogin", "Self": { "DNSName": "" } }
         """.utf8)), .signedOut)
-        XCTAssertEqual(TailscaleRemoteTransport.readinessIssue(fromStatusJSON: Data("""
+        XCTAssertEqual(TailscaleServeTransport.readinessIssue(fromStatusJSON: Data("""
         { "BackendState": "Stopped", "Self": { "DNSName": "mac.example.ts.net." } }
         """.utf8)), .stopped)
-        XCTAssertEqual(TailscaleRemoteTransport.readinessIssue(fromStatusJSON: Data("{".utf8)),
+        XCTAssertEqual(TailscaleServeTransport.readinessIssue(fromStatusJSON: Data("{".utf8)),
                        .statusUnavailable)
     }
 
@@ -3533,16 +3536,16 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
     }
 
     func testTailscaleOwnsOnlyItsDedicatedServePort() {
-        XCTAssertEqual(TailscaleRemoteTransport.statusArguments, [
+        XCTAssertEqual(TailscaleServeTransport.statusArguments, [
             "status", "--json", "--peers=false",
         ])
-        XCTAssertEqual(TailscaleRemoteTransport.serveArguments(localPort: 49152), [
+        XCTAssertEqual(TailscaleServeTransport.serveArguments(localPort: 49152), [
             "serve", "--yes", "--bg", "--https=8443", "http://127.0.0.1:49152",
         ])
-        XCTAssertEqual(TailscaleRemoteTransport.stopArguments, [
+        XCTAssertEqual(TailscaleServeTransport.stopArguments, [
             "serve", "--https=8443", "off",
         ])
-        XCTAssertFalse(TailscaleRemoteTransport.stopArguments.contains("reset"))
+        XCTAssertFalse(TailscaleServeTransport.stopArguments.contains("reset"))
     }
 
     func testTailscaleRefusesToReplaceAnExistingServeHandler() {
@@ -3550,20 +3553,20 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         let occupied = Data(#"{"TCP":{"8443":{"HTTPS":true}}}"#.utf8)
         let unrelated = Data(#"{"TCP":{"443":{"HTTPS":true}}}"#.utf8)
 
-        XCTAssertTrue(TailscaleRemoteTransport.isValidServeStatus(empty))
-        XCTAssertFalse(TailscaleRemoteTransport.serveStatus(
+        XCTAssertTrue(TailscaleServeTransport.isValidServeStatus(empty))
+        XCTAssertFalse(TailscaleServeTransport.serveStatus(
             empty,
             containsHTTPSPort: 8443
         ))
-        XCTAssertTrue(TailscaleRemoteTransport.serveStatus(
+        XCTAssertTrue(TailscaleServeTransport.serveStatus(
             occupied,
             containsHTTPSPort: 8443
         ))
-        XCTAssertFalse(TailscaleRemoteTransport.serveStatus(
+        XCTAssertFalse(TailscaleServeTransport.serveStatus(
             unrelated,
             containsHTTPSPort: 8443
         ))
-        XCTAssertEqual(TailscaleRemoteTransport.serveStatusArguments, [
+        XCTAssertEqual(TailscaleServeTransport.serveStatusArguments, [
             "serve", "status", "--json",
         ])
     }

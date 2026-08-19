@@ -14,10 +14,20 @@ works away from home.
   Teleport and WireGuard. It follows **This network** and has no switch: a tunnel usually hands the
   phone an address inside the home network, which the LAN listener already answers.
 - **Tailscale** (`remoteAccessTailscaleEnabled`, off by default) publishes Threading only inside the
-  owner's tailnet. It is one switch over `RemoteTailscaleDoorImplementation`: today that is
-  `tailscale serve --https=8443` proxying to the loopback listener, and §8 of the transport plan
-  replaces it with a listener bound to this Mac's tailnet address presenting the same pinned
-  identity. Nothing above the coordinator knows which of the two is carrying it.
+  owner's tailnet. It is a listener on the address this Mac holds there, presenting the same pinned
+  certificate as every other routable door, on the same sticky port
+  (`RemoteTailscaleDoorImplementation.listenerDoor`). The iOS app therefore takes one code path
+  everywhere: it pins what it scanned, whether it reaches this Mac on the Wi-Fi, over a VPN, or on
+  the tailnet. Both of the addresses a tailnet hands out are bound, and this Mac's MagicDNS name is
+  advertised beside them on the same port.
+  - *Sub-option:* **Open in a browser on your tailnet** (`remoteAccessTailscaleServeEnabled`, off by
+    default) runs `tailscale serve --bg --https=8443` against the loopback listener. It is a
+    **browser convenience and not a way in**: what it buys is a publicly trusted certificate for
+    the `*.ts.net` name, which is the only thing that stops a browser meeting a full-page
+    interstitial against a pinned self-signed identity. It costs a public
+    certificate-transparency entry naming this Mac and the tailnet, so the page says that beside
+    the switch. **Serve's origin is never advertised to a phone**: it is terminated by a
+    certificate this Mac does not hold, and a phone told to pin it would fail at the next renewal.
 - **Hosted Direct** becomes the native owner-device default after Sign in with Apple. It uses the
   Threading service only for identity, ICE signaling and TURN fallback; ordinary traffic goes
   directly between iPhone and Mac whenever ICE succeeds.
@@ -58,10 +68,15 @@ change certificates.
 `remoteAccessAllowsOwnerRelayFallback` and `remoteAccessKeepsRelayReady` remain in the settings
 registry only so `AppSettings.migrateRemoteAccessConnectionMode()` can carry a stored `tailscale`
 or `tailscaleAndRelay` over to the tailnet switch exactly once; `relay` carries nothing and lands
-on the shipped default, `This network`. `remoteAccessTailscaleServeEnabled` is registered and not
-yet operative: it becomes the browser convenience, "open Threading in a browser on your tailnet
-without a certificate warning", when the tailnet way in stops being Serve, and it carries no
-settings row until then.
+on the shipped default, `This network`.
+
+**Retiring Serve as a route is what breaks an old phone.** An old client under `privateOnly`
+filters to `kind == "tailscale"`, and that endpoint is now `https://100.x:<port>` with a
+certificate it cannot pin, so it fails TLS rather than connecting. The phone update carrying
+pinning has to be installed before this reaches anyone; here it already is. **Tailnet ACL rules
+written against port 8443 were written for Serve.** The way in is the listener's own port, `8760`
+by default, so a rule that restricts Threading has to name that one; nothing about ACL enforcement
+itself changed, because Tailscale filters packets between nodes whatever port they are on.
 
 ## Pair an iPhone
 
@@ -71,22 +86,33 @@ settings row until then.
    for reaching this Mac from anywhere, and its readiness card identifies setup problems.
 3. In Threading on the iPhone, choose **Pair a Mac** and scan the QR code shown on the page.
 
-**A reason never lives only in a readiness row.** `TailscaleReadinessIssue` carries the row's
-line, the failure stated as a fact, the remedy, the row it belongs to, and the title of the page
-that fixes it; the readiness card and the pairing panel both read that one value, and
-`RemotePairingCardState.connectionUnavailable` carries the resulting sentence and the optional
-remedy into the panel beside **Retry Connection**. Before that, the panel said only "Private
+**A reason never lives only in a readiness row.** `TailscaleReadinessIssue` carries the failure
+stated as a fact, the remedy, the readiness row it belongs to (or `nil` for the Serve-only ones),
+and the title of the page that fixes it. Before that, the pairing panel said only "Private
 connection unavailable" while "Enable Tailscale Serve for this tailnet" sat three rows above it.
+The panel now reads a *way in* rather than a transport (`RemotePairingCardState.resolve(wayIn:)`,
+fed by `mostAdvanced(of:)`), so what it shows is the door's own status line, which already carries
+the fact and its remedy as words. Serve's failures reach the sub-option's row instead, with the
+admin-console button beside them: a browser convenience is not what a pairing code waits for.
 
-**Coming up is a state with a fact in it.** The transport observes the command it is running and
-nothing more: it has `tailscale status` in flight, or it has asked `tailscale serve` to publish
-and has not been answered. It does not probe the tailnet HTTPS endpoint, so the page says what it
-is waiting for rather than claiming to know why — `TailscaleReadiness.startupStatement` is that
-sentence, shown by the status row, the readiness row and the pairing panel alike, and it changes
-when the command's stage changes rather than on a timer. The publish stage also gets its own
+**The tailnet way in's readiness is two CLI facts and one listener fact.**
+`RemoteTailnetReadinessPresentation.resolve` builds three rows: Tailscale installed, signed in and
+running, and this Mac's tailnet address. The first two come from `tailscale status --json`
+(`TailscaleHostFacts`), which is the only way to tell "not installed" from "signed out" from "not
+running" and is also where the MagicDNS name comes from; the third is what `RemoteListenerSet`
+bound. **A bound door outranks the probe**: an address in `100.64.0.0/10` on a `utun` exists only
+because `tailscaled` is installed, signed in and running, so a probe that could not answer leaves
+the rows waiting rather than accusing the Mac of anything. The probe is one short-lived child
+process with a deadline, run when the way in is switched on and when the page appears, never on a
+timer.
+
+**Coming up is a state with a fact in it.** The door says `Binding to this Mac’s tailnet address…`
+while its listeners are coming up, and the status row, the readiness row and the pairing panel all
+show that same sentence. Serve's own wait is separate and longer:
+`TailscaleReadiness.startupStatement` says what command is in flight, and the publish stage gets a
 90-second ceiling (`RemoteTailscaleDefaults.publishTimeoutSeconds`) because a tailnet's *first*
-certificate issuance was measured at close to a minute, and the twelve seconds every other
-command gets had the app killing Serve and reporting a failure while the door was still opening.
+certificate issuance was measured at close to a minute, and the twelve seconds every other command
+gets had the app killing Serve and reporting a failure while it was still coming up.
 
 The hosted QR carries two independent scopes in its URL fragment: a temporary rendezvous-only
 credential that can form an encrypted ICE/TURN route to this Mac, and the existing one-time owner
@@ -134,9 +160,11 @@ An owner pairing is stored as one logical Mac identity, not as one hostname. iOS
 durable hosted ICE/TURN credential first, then the private endpoints the Mac advertises. Owner
 responses carry the addresses each way in is currently answering on, tailnet included, plus an
 explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still
-decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed by that
-policy, prefers Tailscale when requested, records the successful route, and can move to another
-advertised route without creating a duplicate device. Unknown future policies fail closed to
+decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed
+by that policy, with no preference between the private-network kinds — which of this Mac's own
+addresses is reachable is a fact about where the phone is standing, and it finds out by trying them
+in order — records the successful route, and can move to another advertised route without creating
+a duplicate device. Unknown future policies fail closed to
 private-only. Guest shares never receive the Mac's private endpoint list.
 
 The iOS app shows all unarchived sessions grouped by project or ordered by recent activity,
@@ -739,12 +767,11 @@ feature lock.
   time instead of in a later token check.
 - Loopback is not a door anyone chooses. `127.0.0.1` is bound whenever Remote Access is on,
   because the Hosted Direct bridge and Tailscale Serve both forward to it, and it stays cleartext
-  for the same reason. **No routable door is offered in Settings yet**, so a shipped build still
-  listens only on `127.0.0.1`. A `lan` door exists in the model and can be turned on by writing
-  the `remoteAccessDoors` default; it is out of the UI until the settings rewrite describes it.
-  While it is on, the Mac advertises each bound address, its `.local` name and any
-  `remoteAccessAdvertisedHostname` override as `https` `lan` endpoints, each marked as presenting
-  the Mac's own identity.
+  for the same reason. While the `lan` door is on, the Mac advertises each bound address, its
+  `.local` name and any `remoteAccessAdvertisedHostname` override as `https` `lan` endpoints; while
+  the `tailscale` door is on, it advertises each bound tailnet address and this Mac's MagicDNS name
+  on the same sticky port as `https` `tailscale` endpoints. Every one of them is marked as
+  presenting the Mac's own identity, and **Serve's `*.ts.net:8443` origin is never among them**.
 - **A routable door presents a certificate of this Mac's own, and the phone trusts exactly the one
   whose fingerprint it scanned.** There is no certificate authority in the path, which is not a
   downgrade from a public certificate but stronger: no authority can be induced to issue a second
@@ -800,16 +827,22 @@ feature lock.
   listener. No router port or inbound firewall rule is opened for it. Traffic passes through
   Cloudflare, where TLS is terminated, so share only work you are comfortable sending through it.
   No setting starts this: creating a share does, and it stops when the last share is gone.
-- While **Tailscale** is on, Tailscale Serve exposes the same listener as HTTPS/WSS on dedicated
-  port 8443, reachable only according to the tailnet's identity and ACL policy. Threading removes
-  only that exact Serve handler when it stops and never runs `tailscale serve reset`, which could
-  erase unrelated services. Before starting, it reads `tailscale serve status --json` and refuses
-  to replace an existing HTTPS handler on 8443; remove that handler explicitly and retry. Serve
-  runs in acknowledged background mode and every CLI probe has a bounded timeout, so a wedged CLI
-  cannot leave Remote Access permanently in Starting. Tailscale still relays encrypted WireGuard
-  traffic when peers cannot connect directly. Enabling Tailscale HTTPS publishes the
-  machine/tailnet DNS name in public certificate-transparency logs; it does not publish chat
-  contents or make the service public.
+- While **Tailscale** is on, the listener binds the addresses this Mac holds on its tailnet, with
+  the same pinned identity and the same sticky port as every other routable door. Tailscale filters
+  packets between nodes whatever port they are on, so the tailnet's ACL policy still decides who
+  may reach it; **a rule written against Serve's 8443 has to be rewritten against the listener's
+  port**, which is migration rather than a capability change. Tailscale still relays encrypted
+  WireGuard traffic when peers cannot connect directly.
+- While **Open in a browser on your tailnet** is on, Tailscale Serve additionally exposes the
+  loopback listener as HTTPS/WSS on dedicated port 8443 under the `*.ts.net` name. Threading
+  removes only that exact Serve handler when it stops and never runs `tailscale serve reset`, which
+  could erase unrelated services. Before starting, it reads `tailscale serve status --json` and
+  refuses to replace an existing HTTPS handler on 8443; remove that handler explicitly and retry.
+  Serve runs in acknowledged background mode and every CLI probe has a bounded timeout, so a wedged
+  CLI cannot leave the sub-option permanently starting. **Enabling it publishes the
+  machine/tailnet DNS name in public certificate-transparency logs**; it does not publish chat
+  contents or make the service public, and it is off by default for that reason. No phone uses it:
+  the iOS app pins the certificate this Mac holds and reaches the tailnet address directly.
 - Every launch mints a random 128-bit, one-time owner bootstrap, and every chat invite mints an
   independent random 256-bit single-use token scoped to one session. It arrives in the URL
   fragment, so the browser does not include it in its initial HTTP request or referrer. On
@@ -1002,10 +1035,11 @@ a second certificate for the same address.
   two sessions hold the same object rather than two configured alike.
 - **Two sources for a pin, and no third.** The scanned pairing link pins its own host before the
   first request is made over it. An owner `/api/me` response pins the host of every advertised
-  endpoint carrying `identity: "pinned"`. An endpoint without that flag keeps stock evaluation,
-  because Tailscale Serve presents a publicly issued certificate for its `*.ts.net` name and
-  pinning that host would refuse the one endpoint that works. A guest capability never teaches a
-  phone a pin.
+  endpoint carrying `identity: "pinned"`, which now includes the tailnet address and this Mac's
+  MagicDNS name. An endpoint without that flag keeps stock evaluation, because it is terminated by
+  somebody else's certificate and pinning that host would refuse the one endpoint that works; no
+  build advertises one today, since Serve's origin is never sent. A guest capability never teaches
+  a phone a pin.
 - **Why a `/api/me` response is trustworthy.** It exists only because the pin matched or because
   the system validated a publicly issued certificate; a refused challenge produces no response to
   read. So the fingerprints in it are the Mac's own word about its identity.
@@ -1052,14 +1086,14 @@ needs another reachable advertised route to discover the new Quick Tunnel. Hoste
 that route for signed-in owner devices; a legacy relay-only build must still scan again. The
 logical-host model now prefers an advertised stable relay URL, so a
 future named Cloudflare Tunnel can replace the quick endpoint without changing pairing or
-authorization. Provisioning and operating that named tunnel is not part of this phase. Tailscale already has a
-stable tailnet origin, so an owner paired through Tailscale reconnects after a Mac/app restart
-without rescanning as long as Tailscale is available on both devices.
+authorization. Provisioning and operating that named tunnel is not part of this phase. A tailnet
+address is stable, so an owner paired over the tailnet reconnects after a Mac or app restart
+without rescanning as long as Tailscale is running on both devices.
 
-On iPhone, Tailscale must be connected before its `*.ts.net` origin is reachable. iOS permits only
-one active packet-tunnel VPN at a time, so another VPN may prevent that connection; in that
-situation reach this Mac over the VPN you do have connected, which the network way in already
-answers.
+On iPhone, Tailscale must be connected before this Mac's tailnet address or MagicDNS name is
+reachable. iOS permits only one active packet-tunnel VPN at a time, so another VPN may prevent that
+connection; in that situation reach this Mac over the VPN you do have connected, which the network
+way in already answers.
 
 An operated release can add account-backed rendezvous and invitations. Without recipient
 accounts Threading cannot
@@ -1087,9 +1121,12 @@ If `cloudflared` is not installed, local browser mirroring still works. Install 
 brew install cloudflared
 ```
 
-For Tailscale mode, install and sign in to Tailscale on the Mac and iPhone, enable HTTPS for the
-tailnet, and make sure its ACLs allow the iPhone identity to reach the Mac. Threading invokes the
-local `tailscale` CLI; it does not sign in, change tailnet ACLs, or enable the VPN for you.
+For the tailnet way in, install and sign in to Tailscale on the Mac and iPhone, and make sure its
+ACLs allow the iPhone identity to reach the Mac **on the listener's port** (`8760` by default), not
+on Serve's 8443. Enabling HTTPS for the tailnet is needed only for the browser sub-option.
+Threading invokes the local `tailscale` CLI to read this Mac's status and, when that sub-option is
+on, to publish and remove its own Serve handler; it does not sign in, change tailnet ACLs, or
+enable the VPN for you.
 
 At the server boundary, socket parsing remains on one serial network queue. Successful
 authentication publishes one immutable `RemoteAuthenticatedPeer` under a lock — authorization,
@@ -1115,8 +1152,8 @@ with no AppKit window graph or ambient project/runtime lookup.
   command capability, and live session mirrors.
 - `Sources/Threading/Resources/RemoteClient`: dependency-free browser client. A browser on the
   LAN or the tailnet meets a certificate interstitial against a pinned self-signed identity;
-  Tailscale Serve stays as the opt-in way around that on a tailnet, and the iOS app is unaffected
-  because it pins.
+  **Open in a browser on your tailnet** (`TailscaleServeTransport`) is the opt-in way around that
+  on a tailnet, and the iOS app is unaffected because it pins.
 - `ThreadingRemoteKit`: versioned wire DTOs, pairing-link parsing, the fingerprint codec and
   pinning policy (`RemoteHostPinning`), and the discovery vocabulary both ends have to agree on
   (`RemoteServiceDiscovery`: the service type, the TXT keys, and the opaque instance name).
