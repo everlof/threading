@@ -63,6 +63,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessListenerPort
     case remoteAccessDoors
     case remoteAccessAdvertisedHostname
+    case remoteAccessDiscoveryEnabled
     case remoteInputControlDefault
     case phoneReportWorkspace
     case automaticUpdateChecksEnabled
@@ -1097,6 +1098,22 @@ enum AppSettingDefinitions {
         validation: .maximumBytes(RemoteAccessDefaults.maximumAdvertisedHostnameBytes),
         encoding: .removeEmpty
     )
+    /// Whether the LAN door is announced on the network with Bonjour.
+    ///
+    /// On, because finding the Mac by itself is the point of the same-Wi-Fi door: without it a
+    /// DHCP lease change costs a re-pair, and with it the phone re-resolves and carries on. It is
+    /// still a switch, because an advertisement is a broadcast that everyone on the network can
+    /// see. What it carries is this Mac's id, the protocol version and the certificate
+    /// fingerprint, and never the computer name, the user's name or a project name.
+    ///
+    /// Turning it off leaves the door open and the addresses advertised through `/api/me`; it
+    /// only stops the announcement, which is the same position a VPN or tailnet address is
+    /// already in, since multicast does not cross a tunnel.
+    static let remoteAccessDiscoveryEnabled = AppSettingDescriptor<Bool>(
+        identity: .remoteAccessDiscoveryEnabled,
+        persistenceKey: "remoteAccessDiscoveryEnabled",
+        absence: .registered(true)
+    )
     static let phoneReportWorkspace = AppSettingDescriptor<String>(
         identity: .phoneReportWorkspace,
         persistenceKey: "phoneReportWorkspace",
@@ -1206,6 +1223,7 @@ enum AppSettingDefinitions {
         .init(remoteAccessListenerPort),
         .init(remoteAccessDoors), .init(remoteAccessTailscaleEnabled),
         .init(remoteAccessAdvertisedHostname),
+        .init(remoteAccessDiscoveryEnabled),
         .init(remoteInputControlDefault),
         .init(phoneReportWorkspace),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),

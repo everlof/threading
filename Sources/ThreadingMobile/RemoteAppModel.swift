@@ -34,7 +34,12 @@ final class RemoteAppModel: ObservableObject {
         case offline(String)
     }
 
-    @Published private(set) var hosts: [PairedRemoteHost]
+    @Published private(set) var hosts: [PairedRemoteHost] {
+        didSet {
+            guard hosts != oldValue else { return }
+            discoveryHostsChanged()
+        }
+    }
     @Published private(set) var me: RemoteMeDTO? {
         didSet { catalogueRevision &+= 1 }
     }
@@ -64,6 +69,11 @@ final class RemoteAppModel: ObservableObject {
 
     private let store = RemoteHostStore()
     private let hostedConnections = HostedRemoteConnectionManager()
+    /// Browses for paired Macs on this network while the app is in front of somebody.
+    private let discovery = RemoteHostDiscovery()
+    /// Where each paired Mac was last found on this network. In memory only: it is a fact about
+    /// the network this phone is on right now, not something to write into a Keychain record.
+    private var discoveredAddresses = RemoteDiscoveredAddresses()
     private let continuity: MobileSessionContinuityStore
     /// True while the app is showing the canned Mac — entered from the welcome screen's Try
     /// the Demo, or by the DEBUG screenshot environment. Every mutation path short-circuits on
@@ -535,6 +545,7 @@ final class RemoteAppModel: ObservableObject {
             return
         } catch {
             guard activeHostID == hostID, refreshGeneration == generation else { return }
+            forgetDiscovered(hostID: hostID)
             let failure = connectionFailure(for: host, error: error)
             phase = .offline(failure.message)
             scheduleThemeEventsRecovery(for: hostID)
@@ -883,6 +894,67 @@ final class RemoteAppModel: ObservableObject {
         navigationPath = [.session(route.sessionID)]
     }
 
+    // MARK: - Same-network discovery
+
+    /// Starts browsing for paired Macs. Called when the app comes to the front.
+    ///
+    /// The browse exists to answer one question: has a Mac this phone is already paired with
+    /// moved to a different address on this network? It never acquires a Mac, so it does nothing
+    /// at all until something has been paired, which is also what keeps iOS from asking for Local
+    /// Network access before the app has a reason to want it.
+    func startDiscovery() {
+        guard !isDemo else { return }
+        discovery.onResolved = { [weak self] resolution in
+            self?.applyDiscovered(resolution)
+        }
+        discovery.start(hosts: hosts)
+    }
+
+    /// Stops browsing. Called when the app goes to the background, because a browse is a
+    /// multicast listener and leaving one running asks questions nobody is waiting to answer.
+    func stopDiscovery() {
+        discovery.stop()
+    }
+
+    /// Records where a paired Mac was found, and puts that record's existing pins into force for
+    /// the address so the next request over it is checked rather than refused.
+    ///
+    /// Nothing durable is written. The address is the phone's own working knowledge of this
+    /// network; the pairing, its endpoints and its pins are untouched.
+    private func applyDiscovered(_ resolution: RemoteHostDiscovery.Resolution) {
+        guard let host = hosts.first(where: { $0.id == resolution.hostRecordID }) else { return }
+        guard discoveredAddresses.record(resolution.baseURL, forHostRecordID: host.id) else {
+            return
+        }
+        RemoteHostTrust.register(discoveredHost: host, at: resolution.baseURL)
+        MobileDiagnostics.record(.hostDiscoveryMatched, fields: [
+            .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
+            .transport: RemoteHostEndpointKind.lan,
+            .origin: MobileDiagnostics.originDigest(resolution.baseURL),
+        ])
+    }
+
+    /// Forgets where a Mac was after a connection to it failed.
+    ///
+    /// The remembered address is this phone's working knowledge of a network, and a failed
+    /// connection is the evidence that it is out of date. Dropping it puts the advertised list
+    /// back in front, and clearing the browse tracking means the Mac's next announcement is
+    /// resolved again rather than recognised as something already known.
+    private func forgetDiscovered(hostID: String) {
+        guard discoveredAddresses[hostID] != nil else { return }
+        discoveredAddresses.forget(hostRecordID: hostID)
+        discovery.forgetTracking()
+    }
+
+    /// Keeps the browse and the remembered addresses aligned with what is actually paired.
+    private func discoveryHostsChanged() {
+        discoveredAddresses.retain(hostRecordIDs: Set(hosts.map(\.id)))
+        // Only ever *re-states* the match list. Starting a browse here would start one while the
+        // app is in the background, which is the scene's decision and not this one's.
+        guard discovery.isBrowsing else { return }
+        discovery.start(hosts: hosts)
+    }
+
     // MARK: - Live app-theme events
 
     private struct ConnectionCandidate {
@@ -1033,7 +1105,7 @@ final class RemoteAppModel: ObservableObject {
             preparationError = error
             await hostedConnectionFailed(hostID: host.id)
         }
-        for candidate in host.candidates
+        for candidate in host.candidates(preferring: discoveredAddresses[host.id])
         where !candidates.contains(where: { $0.link == candidate.link }) {
             candidates.append(ConnectionCandidate(
                 link: candidate.link,

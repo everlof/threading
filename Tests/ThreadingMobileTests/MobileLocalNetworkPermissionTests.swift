@@ -24,16 +24,25 @@ final class MobileLocalNetworkPermissionTests: XCTestCase {
         XCTAssertEqual(value, Self.expected)
     }
 
-    /// The two the app asks for today. Bonjour browsing needs `NSBonjourServices` as well, which
-    /// is an array and therefore does not go through `INFOPLIST_KEY_`; it is deliberately absent
-    /// until discovery ships.
+    /// Browsing for a Bonjour service needs the service type declared as well, and a browse
+    /// without it fails **silently** on iOS 14 and later: no results, no error, no prompt. That
+    /// is not a symptom anybody debugs quickly, so it is asserted against the built bundle.
+    ///
+    /// `NSBonjourServices` is an array, which `INFOPLIST_KEY_` cannot express, so this target has
+    /// a real `Info.plist` carrying that one key while every other value still comes from the
+    /// generated one. The assertion is therefore also the proof that the merge happened.
     func testTheUsageDescriptionsPresentAreTheOnesThisAppActuallyNeeds() throws {
         let info = try XCTUnwrap(Bundle.main.infoDictionary)
 
         XCTAssertNotNil(info["NSCameraUsageDescription"], "the pairing code is photographed")
-        XCTAssertNil(
-            info["NSBonjourServices"],
-            "nothing browses for a service yet, so nothing may ask for the right to"
+        XCTAssertEqual(
+            info["NSBonjourServices"] as? [String],
+            ["_threading._tcp"],
+            "exactly the one service this app browses for, and browsing is silent without it"
+        )
+        XCTAssertNotNil(
+            info["NSLocalNetworkUsageDescription"],
+            "the file that carries NSBonjourServices must not have replaced the generated keys"
         )
     }
 

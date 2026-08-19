@@ -57,6 +57,23 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         return link.pinnedFingerprintCode
     }
 
+    /// The pins this record accepts for the Mac itself, whatever address it is reached at.
+    ///
+    /// One value with two sources, in the order that keeps a rotation working: what the Mac said
+    /// over a channel that had already proved its key, and otherwise the 128 bits photographed
+    /// off its screen. A record with neither has never been given anything to check, which is
+    /// what an older pairing looks like.
+    ///
+    /// Separate from `pinnedHosts` because that answers "which *names* does this record pin",
+    /// which is a question about addresses. This answers "which certificate is this Mac", which
+    /// is what a fingerprint seen on the network is compared against.
+    var pinSet: RemoteHostPinSet? {
+        if let storedPinSet { return storedPinSet }
+        guard let code = link.pinnedFingerprintCode,
+              let scanned = RemoteHostPin(pairingCode: code) else { return nil }
+        return RemoteHostPinSet(current: scanned)
+    }
+
     /// Every host name this record pins, with the pins it accepts for it.
     ///
     /// Two sources and no others. The scanned link pins **its own host**, because that is the
@@ -84,6 +101,47 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
 
     var candidateLinks: [RemoteConnectionLink] {
         candidates.map(\.link)
+    }
+
+    /// The addresses to try, with the one this Mac was just found at on this network first.
+    ///
+    /// Discovery answers a question the advertised list cannot: the list is what the Mac last
+    /// said about itself, and after a DHCP move that is an address nothing answers on any more.
+    /// A discovered address is where it is *now*, so it leads, and the rest of the list follows
+    /// unchanged as the fallback.
+    ///
+    /// **The policy still decides.** The discovered address goes through the same fail-closed
+    /// endpoint selection as an advertised one, as the `lan` kind it is, so a record that admits
+    /// no private-network endpoint does not acquire one because something answered a broadcast.
+    func candidates(preferring discovered: URL?) -> [RemoteHostConnectionCandidate] {
+        let advertised = candidates
+        guard let discovered, admitsLAN(discovered) else { return advertised }
+
+        var result = RemoteHostConnectionCandidate.attempts(
+            baseURL: discovered,
+            kind: RemoteHostEndpointKind.lan,
+            token: link.token,
+            doorID: discovered.absoluteString
+        )
+        var seen = Set(result.map(\.link.baseURL))
+        for candidate in advertised where seen.insert(candidate.link.baseURL).inserted {
+            result.append(candidate)
+        }
+        return result
+    }
+
+    /// Whether this record's connection policy admits a `lan` address at all.
+    private func admitsLAN(_ baseURL: URL) -> Bool {
+        !RemoteHostEndpointSelection.ordered(
+            [RemoteHostEndpointDTO(
+                kind: RemoteHostEndpointKind.lan,
+                baseURL: baseURL,
+                isStable: true,
+                identity: RemoteHostEndpointIdentity.pinned
+            )],
+            policy: connectionPolicy ?? .privateOnly,
+            currentBaseURL: link.baseURL
+        ).isEmpty
     }
 
     /// Every address this phone will try for this Mac, in order.
@@ -206,10 +264,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
               let claimedHex = identity.pinnedFingerprint,
               let claimed = RemoteHostFingerprint(hex: claimedHex) else { return .unchanged }
 
-        let held = storedPinSet
-            ?? link.pinnedFingerprintCode
-                .flatMap(RemoteHostPin.init(pairingCode:))
-                .map { RemoteHostPinSet(current: $0) }
+        let held = pinSet
 
         if let held {
             let sameIdentity = held.current.matches(digest: claimed.digest)

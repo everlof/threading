@@ -103,8 +103,23 @@ final class RemoteListenerSet: @unchecked Sendable {
         identityStorage.withLock { $0 }
     }
 
+    /// What this Mac is currently broadcasting over Bonjour, if anything.
+    ///
+    /// Published rather than inferred: "the LAN door is bound" and "the LAN door is advertised"
+    /// are different facts, and only this one says which name and which TXT record left the
+    /// machine.
+    var advertisedService: RemoteServiceRegistration? {
+        advertisementStorage.withLock { $0 }
+    }
+
     private let queue: DispatchQueue
     private let addressSource: RemoteNetworkAddressSource
+    /// Where a Bonjour registration is performed. Injected so a hosted test cannot broadcast the
+    /// developer's Mac, and so a test can assert on what was registered.
+    private let advertiser: any RemoteServiceAdvertising
+    /// This Mac's stable id, which the advertisement names. A closure rather than a global read
+    /// so a test can state an id instead of borrowing the developer's own.
+    private let hostIDSource: @Sendable () -> String
     /// What a routable listener presents. Asked for on this queue, once per rebuild, and never
     /// on the main actor: resolving it reads files and imports a PKCS#12 container.
     private let identityProvider: any RemoteAccessIdentityProviding
@@ -121,6 +136,8 @@ final class RemoteListenerSet: @unchecked Sendable {
     private let requestedStorage = OSAllocatedUnfairLock<[RemoteListenerBinding]>(initialState: [])
     private let identityStorage =
         OSAllocatedUnfairLock<[RemoteNetworkAddress: ObjectIdentifier]>(initialState: [:])
+    private let advertisementStorage =
+        OSAllocatedUnfairLock<RemoteServiceRegistration?>(initialState: nil)
 
     /// Queue-owned state.
     private var listeners: [RemoteAccessDoor: [RemoteNetworkAddress: DoorListener]] = [:]
@@ -132,6 +149,13 @@ final class RemoteListenerSet: @unchecked Sendable {
     /// Why the routable doors have nothing to present, when they have nothing to present.
     /// Queue-owned like every other listener fact.
     private var identityFailure: RemoteIdentityFailure?
+    /// The fingerprint the routable listeners are presenting, kept so the advertisement can be
+    /// recomputed on a readiness change without asking the identity store again. Queue-owned.
+    private var advertisedFingerprint: RemoteHostFingerprint?
+    /// Which listener currently carries the registration. Queue-owned, and part of what decides
+    /// whether the advertisement has to be re-applied: the registration lives on a socket, so a
+    /// rebuilt listener needs it again even when nothing about the value changed.
+    private var advertisedCarrier: ObjectIdentifier?
     private var startCompletion: (@Sendable (RemoteListenerStartOutcome) -> Void)?
     /// Which start a deadline belongs to. Without it, a stop-and-start inside the deadline
     /// window lets the old start's timer fail the new one.
@@ -143,11 +167,15 @@ final class RemoteListenerSet: @unchecked Sendable {
     init(
         queue: DispatchQueue,
         addressSource: @escaping RemoteNetworkAddressSource = RemoteNetworkInterfaces.current,
-        identityProvider: any RemoteAccessIdentityProviding = RemoteAccessIdentityStore.shared
+        identityProvider: any RemoteAccessIdentityProviding = RemoteAccessIdentityStore.shared,
+        advertiser: any RemoteServiceAdvertising = RemoteServiceAdvertisers.standard(),
+        hostIDSource: @escaping @Sendable () -> String = { RemoteHostIdentity.current.id }
     ) {
         self.queue = queue
         self.addressSource = addressSource
         self.identityProvider = identityProvider
+        self.advertiser = advertiser
+        self.hostIDSource = hostIDSource
     }
 
     // MARK: - Lifecycle
@@ -189,6 +217,19 @@ final class RemoteListenerSet: @unchecked Sendable {
         }
     }
 
+    /// Turns the Bonjour advertisement on or off without touching a listener.
+    ///
+    /// Separate from `update(doors:)` because it is a separate decision: the door is whether this
+    /// Mac answers on the network, and this is whether it says so out loud.
+    func update(isDiscoveryEnabled: Bool) {
+        queue.async { [weak self] in
+            guard let self, self.isRunning else { return }
+            guard isDiscoveryEnabled != self.configuration.isDiscoveryEnabled else { return }
+            self.configuration.isDiscoveryEnabled = isDiscoveryEnabled
+            self.updateAdvertisement()
+        }
+    }
+
     /// Re-reads the interface list and applies the difference. Cheap enough for a path callback:
     /// one `getifaddrs` over the configured interfaces, and listeners that are still correct are
     /// left alone rather than recreated.
@@ -214,6 +255,10 @@ final class RemoteListenerSet: @unchecked Sendable {
             isRunning = false
             pathMonitor?.cancel()
             pathMonitor = nil
+            // Before the listeners go: a registration outliving the socket behind it would leave
+            // the network being told about a door that is closed.
+            withdrawAdvertisement()
+            advertisedFingerprint = nil
             let entries = listeners.values.flatMap { $0.values }
             pending = entries.count
             for entry in entries {
@@ -354,6 +399,10 @@ final class RemoteListenerSet: @unchecked Sendable {
                 )
             }
         }
+        // The advertisement names the certificate the doors present, so it follows a rotation for
+        // free: `reloadIdentity` rebuilds the routable listeners, this reads the promoted
+        // identity, and `publish` re-registers with the new fingerprint on the same port.
+        advertisedFingerprint = identity?.fingerprint
 
         for door in RemoteAccessDoor.allCases where door != .loopback {
             let wanted: [RemoteNetworkAddress] = enabled.contains(door)
@@ -540,7 +589,103 @@ final class RemoteListenerSet: @unchecked Sendable {
             current = identities
         }
         journalDoorTransitions(to: doors, from: previous)
+        updateAdvertisement()
         onStatusChange?(status)
+    }
+
+    // MARK: - Discovery
+
+    /// Publishes, replaces or withdraws the Bonjour advertisement to match what is bound.
+    ///
+    /// Called from `publish`, so the advertisement follows readiness rather than intent: a LAN
+    /// door that is selected but has no address answering announces nothing, and the moment its
+    /// listener is ready the announcement goes out. The identity is required as well, because the
+    /// TXT record's whole purpose is to say which certificate the port behind it presents.
+    private func updateAdvertisement() {
+        let desired = desiredAdvertisement()
+        let current = advertisementStorage.withLock { $0 }
+        let carrier = desired == nil ? nil : advertisementCarrier()
+        let carrierID = carrier.map(ObjectIdentifier.init)
+        // The carrier is part of the state, not just the value. A Wi-Fi change rebuilds the LAN
+        // listeners, and a registration left on the cancelled one disappears with it: the value
+        // would still look current while nothing on the network could hear it.
+        guard desired != current || carrierID != advertisedCarrier else { return }
+
+        guard let desired, let carrier else {
+            withdrawAdvertisement()
+            return
+        }
+        advertiser.apply(desired, to: carrier)
+        advertisementStorage.withLock { $0 = desired }
+        advertisedCarrier = carrierID
+        journal(.hostDiscoveryRegistered, .info, [
+            .transport: RemoteAccessDoor.lan.rawValue,
+            .origin: advertisedOriginPseudonym(),
+        ])
+    }
+
+    private func withdrawAdvertisement() {
+        advertisedCarrier = nil
+        guard advertisementStorage.withLock({ $0 }) != nil else { return }
+        advertiser.apply(nil, to: nil)
+        advertisementStorage.withLock { $0 = nil }
+        journal(.hostDiscoveryWithdrawn, .info, [.transport: RemoteAccessDoor.lan.rawValue])
+    }
+
+    /// What should be advertised right now, or nil when nothing should be.
+    private func desiredAdvertisement() -> RemoteServiceRegistration? {
+        guard isRunning, configuration.isDiscoveryEnabled else { return nil }
+        guard let fingerprint = advertisedFingerprint else { return nil }
+        let advertised = RemoteAccessDoor.allCases.filter(\.isAdvertisedOverBonjour)
+        let bindings = advertised
+            .flatMap { (listeners[$0] ?? [:]).values }
+            .filter(\.isReady)
+            .map(\.binding)
+        guard let port = bindings.map(\.port).min() else { return nil }
+        let advertisement = RemoteHostAdvertisement(
+            hostID: hostIDSource(),
+            protocolVersion: RemoteProtocol.current,
+            fingerprint: fingerprint
+        )
+        // A record that cannot be carried in one response is a record nobody reads reliably. The
+        // three values are far inside the limits, so this refuses rather than truncates: a
+        // truncated fingerprint would be a pin that matches something it should not.
+        guard advertisement.fitsTXTLimits else {
+            ThreadingLogger.remote.error("Remote access advertisement exceeds the TXT limits")
+            return nil
+        }
+        return RemoteServiceRegistration(advertisement: advertisement, port: port)
+    }
+
+    /// The listener that carries the registration.
+    ///
+    /// One, deterministically the lowest-sorted ready LAN address, because Bonjour advertises a
+    /// host rather than an address: the SRV record names this Mac's `.local` name and the address
+    /// records behind it already cover every interface. A second registration of the same name
+    /// and port is a conflict the platform resolves by renaming one of them.
+    private func advertisementCarrier() -> NWListener? {
+        RemoteAccessDoor.allCases
+            .filter(\.isAdvertisedOverBonjour)
+            .flatMap { (listeners[$0] ?? [:]).values }
+            .filter(\.isReady)
+            .sorted { $0.address < $1.address }
+            .first?
+            .listener
+    }
+
+    /// The addresses behind the advertisement, as a hash. The instance name and the addresses
+    /// themselves are exactly what an advertisement discloses to the network; a support report
+    /// carries neither.
+    private func advertisedOriginPseudonym() -> String {
+        let addresses = RemoteAccessDoor.allCases
+            .filter(\.isAdvertisedOverBonjour)
+            .flatMap { (listeners[$0] ?? [:]).values }
+            .filter(\.isReady)
+            .map(\.address)
+            .sorted()
+            .map { "\($0.interfaceName)|\($0.address)" }
+            .joined(separator: ",")
+        return MacRemoteDiagnostics.pseudonym(addresses, prefix: "origin")
     }
 
     private func state(of door: RemoteAccessDoor) -> RemoteAccessDoorState {

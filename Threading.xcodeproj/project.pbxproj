@@ -39,6 +39,7 @@
 		A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000002 /* RemoteHostTrustTests.swift */; };
 		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
 		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
+		A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
@@ -167,6 +168,7 @@
 		A63100010000000000000002 /* RemoteHostTrustTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostTrustTests.swift; sourceTree = "<group>"; };
 		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
 		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
+		A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostDiscoveryTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70000010000000000000001 /* Sources/Threading/Resources/Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
@@ -184,6 +186,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Threading/Resources/Info.plist,
+				"ThreadingMobile-Info.plist",
 				ThreadingMobile/ComposerAttachmentTray.swift,
 				ThreadingMobile/DemoExperience.swift,
 				ThreadingMobile/HostedRemoteConnectionManager.swift,
@@ -208,6 +211,7 @@
 				ThreadingMobile/RemoteDiagnostics.swift,
 				ThreadingMobile/RemoteExtensionPanelView.swift,
 				ThreadingMobile/RemoteGitReviewView.swift,
+				ThreadingMobile/RemoteHostDiscovery.swift,
 				ThreadingMobile/RemoteHostStore.swift,
 				ThreadingMobile/RemoteHostTrust.swift,
 				ThreadingMobile/RemoteNotifications.swift,
@@ -348,6 +352,7 @@
 				A63100010000000000000002 /* RemoteHostTrustTests.swift */,
 				A63200010000000000000002 /* RemoteHostCandidateTests.swift */,
 				A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */,
+				A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */,
 				A61200010000000000000002 /* RemoteConversationStoreTests.swift */,
 				A61100010000000000000002 /* RemoteUsageDashboardTests.swift */,
 				A61300010000000000000002 /* SessionDashboardTests.swift */,
@@ -927,6 +932,7 @@
 				A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */,
 				A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */,
 				A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */,
+				A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */,
 				A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */,
 				A61100010000000000000001 /* RemoteUsageDashboardTests.swift in Sources */,
 				A61300010000000000000001 /* SessionDashboardTests.swift in Sources */,
@@ -1153,6 +1159,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SMQ3E8Y57T;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Sources/ThreadingMobile-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threading;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -1192,6 +1199,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SMQ3E8Y57T;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Sources/ThreadingMobile-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threading;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
