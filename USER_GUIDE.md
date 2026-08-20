@@ -229,6 +229,12 @@ Nothing is opened by the click; the brand names the window rather than pointing 
 Both are skipped under Reduce Motion. A theme can restyle the whole row — its own logo, its
 own wordmark, even a gradient or image behind the list — see [Themes](#themes).
 
+Classic Player uses that slot as a tiny workload analyzer instead. Its two-digit reading is the
+number of agents working anywhere in Threading; **MAX** means at least one is using the highest
+effort its provider offers. The seven bands keep a quiet level for the active count, jump on
+meaningful new output and tool activity, then settle again. They do not measure tokens or CPU.
+With Reduce Motion the same reading is shown as a still frame.
+
 ### Arranging the sidebar
 The arrangement control at the sidebar's top opens the sidebar's view
 options in one menu: how the tree presents (**Group Sessions by Branch**, **Headings for Lone
@@ -1338,6 +1344,11 @@ to Account** submenu lists the others. Choosing one moves the whole conversation
 resumes on the new account with its full history, exactly where it left off. Useful when one
 account hits its usage limit and you want to carry on under another.
 
+On iPhone, open the chat and choose **… ▸ Chat Settings ▸ Account**. The current login includes
+its latest usage reading, as do the available destinations. The phone asks before moving because
+the running agent is stopped; after the Mac copies the transcript and changes its route, the same
+chat reopens under the selected login.
+
 It works because a conversation is just a transcript on disk that the agent replays each turn,
 so moving it is copying that file into the other account and pointing the session at it —
 Threading never touches your login. The original is left untouched, so you can move back the same
@@ -1473,7 +1484,7 @@ You can set any of this for **one chat**, for **a whole checkout**, or for every
 
 | Where | Sets it for |
 |---|---|
-| A session's **Session Options** ▸ **When the Limit Is Reached** — right-click the row, or use its `⋯`, or the pane header's Context button | that conversation |
+| A session's **Session Options** ▸ **When the Limit Is Reached** — right-click the row, use its `⋯`, the pane header's Context button, or **… ▸ Chat Settings** on iPhone | that conversation |
 | A project row's **When the Limit Is Reached** — right-click the row, or use its `⋯` | every chat in that checkout that has not answered for itself |
 | **Settings ▸ Usage Windows ▸ Limit recovery** | everything that has not answered for itself |
 
@@ -2267,6 +2278,19 @@ starts an agent — so its button waits, and says why. The invitation works once
 kept in the Mac login Keychain, so disabling Remote Access or restarting the app suspends them
 without silently making collaborators rejoin. Permission approval is an explicit right for that
 member and chat; it never grants another chat, Mac settings, or the ability to create shares.
+
+Paired owner devices also see **standalone terminals** in the iPhone and browser dashboard. Open
+one to attach to that project shell; if it is stopped, an owner may start it remotely. A terminal
+has no chat transcript, archive, workspace tools or AI permission cards, so its screen exposes
+only the terminal and terminal sharing actions.
+
+Use a standalone terminal row's **… > Share Terminal…** to give somebody access to that terminal
+alone. **View only** follows output from an already-running shell and cannot type, resize or start
+it. **Full control** can start the shell and run commands as your Mac user, including commands
+outside the project—the project folder is a starting directory, not a security boundary. Neither
+grant can approve AI permissions, see another chat or terminal, change Mac settings, or create
+shares. **Stop Sharing Terminal** revokes its unused links and accepted memberships; as with chat
+shares, merely turning Remote Access off suspends them rather than silently deleting them.
 
 You can pair several phones and tablets with the same Mac. Each receives a separate Keychain
 credential and can control sessions concurrently; Settings lists and revokes them independently.
@@ -3764,6 +3788,8 @@ Threading uses the skin's active/inactive title strip and its options, minimize,
 button pixels; Shade performs the Mac's Zoom/Restore action and Options opens the ordinary window
 menu. The rest of the app stays readable in Classic Player's authored dark material—playlist,
 equalizer, transport, cursor, and font artwork is not applied to unrelated controls.
+The top-left workload analyzer remains Threading's own clean-room display when a skin is used;
+the imported archive supplies no logo or equalizer pixels there.
 
 The original archive is not retained. Its title artwork is validated, converted to PNG, and
 stored only on this Mac beside the custom theme. Duplicating the theme duplicates that asset;

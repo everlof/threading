@@ -2644,6 +2644,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     private func applyHandledEvent(_ event: StreamEvent) {
+        recordAgentActivity(in: event)
         if case .initialised(_, let model) = event, let model {
             reportedModel = model
             if currentSession?.isCrossProviderContinuation == true {
@@ -2697,6 +2698,36 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             refreshConversationControls()
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
         }
+    }
+
+    /// Feeds the app-wide activity envelope from provider-neutral stream semantics. Replay is a
+    /// historical read, not live work; completion metrics are receipts rather than activity.
+    /// Text sizes are logarithmically compressed by `AgentActivityPulse`, while tool and plan
+    /// edges use fixed bounded weights so no provider's wire chunking becomes the visual scale.
+    private func recordAgentActivity(in event: StreamEvent) {
+        guard !isReplaying else { return }
+
+        let magnitude: Double?
+        switch event {
+        case .textDelta(let text):
+            magnitude = AgentActivityPulse.output(byteCount: text.utf8.count)
+        case .thinkingDelta(let text):
+            magnitude = AgentActivityPulse.thinking(byteCount: text.utf8.count)
+        case .assistantMessage(let blocks):
+            magnitude = blocks.contains {
+                if case .toolUse = $0 { return true }
+                return false
+            } ? AgentActivityPulse.toolTransition : AgentActivityPulse.assistantMessage
+        case .toolResults:
+            magnitude = AgentActivityPulse.toolTransition
+        case .runPlanUpdated, .backgroundWork:
+            magnitude = AgentActivityPulse.planOrBackgroundChange
+        case .initialised, .userMessage, .transcriptNotice, .turnFinished, .unknown:
+            magnitude = nil
+        }
+
+        guard let magnitude else { return }
+        AgentWorkloadMonitor.shared.recordActivity(sessionID: sessionID, magnitude: magnitude)
     }
 
     private func handleSubagent(_ event: SubagentEvent) {

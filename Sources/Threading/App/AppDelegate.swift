@@ -1032,6 +1032,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @MainActor
+    func resumeRemoteTerminal(_ terminalID: TerminalID) -> Bool {
+        guard ownsSingleInstanceLock,
+              ProjectStore.shared.terminal(withID: terminalID) != nil,
+              let mainWindowController else {
+            return false
+        }
+        mainWindowController.resumeRemoteTerminal(terminalID)
+        return true
+    }
+
+    @MainActor
+    func moveRemoteSession(
+        _ sessionID: SessionID,
+        to accountHandle: AccountHandle
+    ) -> Result<Void, RemoteSessionAccountMoveFailure> {
+        guard ownsSingleInstanceLock, let mainWindowController else {
+            return .failure(.appUnavailable)
+        }
+        guard let session = ProjectStore.shared.session(withID: sessionID) else {
+            return .failure(.sessionNotFound)
+        }
+        guard session.kind.supportsAccounts else {
+            return .failure(.unsupportedRuntime)
+        }
+        guard session.accountHandle != accountHandle else { return .success(()) }
+        guard let account = AgentAccountDiscovery.accounts(for: session.kind).first(where: {
+            $0.handle == accountHandle
+        }) else {
+            return .failure(.accountNotFound)
+        }
+
+        switch SessionMigration.move(sessionID: sessionID, to: account) {
+        case .success:
+            mainWindowController.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+            return .success(())
+        case .failure(let error):
+            return .failure(.moveRefused(error.message))
+        }
+    }
+
+    @MainActor
     func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID? {
         guard ownsSingleInstanceLock, let mainWindowController else { return nil }
         return mainWindowController.startRemoteSession(

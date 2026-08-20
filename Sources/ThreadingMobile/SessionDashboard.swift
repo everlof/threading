@@ -242,6 +242,19 @@ struct SessionDashboard: View {
         }
     }
 
+    private var terminals: [RemoteProjectTerminalSummaryDTO] {
+        guard !showsArchived, !showsSnoozed else { return [] }
+        let all = model.me?.terminals ?? []
+        let scoped = projectName.map { name in
+            all.filter { $0.projectName == name }
+        } ?? all
+        let filtered = searchText.isEmpty ? scoped : scoped.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText)
+                || $0.projectName.localizedCaseInsensitiveContains(searchText)
+        }
+        return filtered.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
+    }
+
     private var groupedSessions: [DashboardProjectSection] {
         Dictionary(grouping: sessions, by: \.projectName)
             .map {
@@ -276,36 +289,41 @@ struct SessionDashboard: View {
                     if model.phase.failure == nil {
                         loadingCard
                     }
-                } else if sessions.isEmpty {
+                } else if sessions.isEmpty, terminals.isEmpty {
                     emptyCard
-                } else if projectName != nil {
-                    SessionRowGroup(
-                        sessions: sessions,
-                        isArchived: showsArchived,
-                        showsActions: model.canManageSessions,
-                        pendingActionSessionID: pendingActionSessionID,
-                        action: perform
-                    )
-                } else if organization == .project {
-                    ForEach(groupedSessions, id: \.projectName) { project in
-                        ProjectSessionGroup(
-                            projectName: project.projectName,
-                            title: project.title,
-                            sessions: project.sessions,
+                } else {
+                    if !terminals.isEmpty {
+                        ProjectTerminalRowGroup(terminals: terminals)
+                    }
+                    if projectName != nil, !sessions.isEmpty {
+                        SessionRowGroup(
+                            sessions: sessions,
+                            isArchived: showsArchived,
+                            showsActions: model.canManageSessions,
+                            pendingActionSessionID: pendingActionSessionID,
+                            action: perform
+                        )
+                    } else if organization == .project {
+                        ForEach(groupedSessions, id: \.projectName) { project in
+                            ProjectSessionGroup(
+                                projectName: project.projectName,
+                                title: project.title,
+                                sessions: project.sessions,
+                                isArchived: showsArchived,
+                                showsActions: model.canManageSessions,
+                                pendingActionSessionID: pendingActionSessionID,
+                                action: perform
+                            )
+                        }
+                    } else if !sessions.isEmpty {
+                        SessionRowGroup(
+                            sessions: sessions,
                             isArchived: showsArchived,
                             showsActions: model.canManageSessions,
                             pendingActionSessionID: pendingActionSessionID,
                             action: perform
                         )
                     }
-                } else {
-                    SessionRowGroup(
-                        sessions: sessions,
-                        isArchived: showsArchived,
-                        showsActions: model.canManageSessions,
-                        pendingActionSessionID: pendingActionSessionID,
-                        action: perform
-                    )
                 }
 
                 if projectName == nil, notifications.shouldOfferOnboarding {
@@ -349,7 +367,7 @@ struct SessionDashboard: View {
     private var dashboardNavigation: some View {
         dashboardContent
         .refreshable { await model.refresh() }
-        .searchable(text: $searchText, prompt: "Search sessions")
+        .searchable(text: $searchText, prompt: "Search sessions and terminals")
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }

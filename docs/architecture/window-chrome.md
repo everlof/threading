@@ -615,6 +615,17 @@ the list's controls hide with the list they act on, but the band and the brand s
 that vanished took the logo with it — and the settings section list starts below the band rather
 than at the safe area.
 
+A spectrum material replaces the brand pixels in that same slot with
+`AgentWorkloadAnalyzerView`. This is a presentation gate (`material.chart_style: spectrum`), not
+a `classic-player` ID branch, so imported player skins and future themes can use it without
+duplicating activity logic. Seven fixed bands carry the bounded `AgentIntensity` envelope; the
+one-bit reading states the working-agent count (`99+` at visual overflow) and `MAX` when any
+worker is at the top of its provider's effort ladder. Count never creates views, so the header's
+cost is constant. The row remains one static-text accessibility element and reads the exact
+count/top-effort state in words.
+The analyzer has no pointer behavior, stops its frame driver when hidden or idle, and constructs
+none under Reduce Motion. Every non-spectrum material continues to honor its normal theme brand.
+
 **Both sidebar bands measure their margins from the pane, not from the platform's safe area.**
 `PaneHeaderView`/`PaneFooterView` default to `layoutGuide(for: .safeArea(cornerAdaptation:))`,
 which is right for a band whose ink can meet the window's curve — and wrong for these two, for a

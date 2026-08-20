@@ -437,6 +437,17 @@ struct RemoteClient {
         _ = try validate(data: data, response: response, accepted: 200...299)
     }
 
+    func resumeTerminal(
+        terminalID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws {
+        var request = request(url: link.resumeTerminalURL(terminalID: terminalID))
+        request.httpMethod = "POST"
+        request.setValue(requestID, forHTTPHeaderField: "X-Threading-Request-ID")
+        let (data, response) = try await dataReplayingNetworkFailure(for: request)
+        _ = try validate(data: data, response: response, accepted: 200...299)
+    }
+
     func setAppTheme(
         themeID: String,
         requestID: String = UUID().uuidString.lowercased()
@@ -529,6 +540,30 @@ struct RemoteClient {
         )
     }
 
+    func moveSessionAccount(
+        sessionID: String,
+        accountID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteMoveSessionAccountRequestDTO(accountID: accountID),
+            to: link.sessionAccountURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
+    func setSessionLimitRecovery(
+        sessionID: String,
+        policy: RemoteLimitRecoveryPolicyDTO,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: policy),
+            to: link.sessionLimitRecoveryURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
     func registerNotifications(
         _ registration: RemoteNotificationRegistrationDTO,
         requestID: String = UUID().uuidString.lowercased()
@@ -574,6 +609,29 @@ struct RemoteClient {
         try await post(
             RemoteRevokeSharesRequestDTO(),
             to: link.sessionUnshareURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
+    func createTerminalShare(
+        terminalID: String,
+        capability: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteCreateShareResponseDTO {
+        try await postResponse(
+            RemoteCreateShareRequestDTO(capability: capability),
+            to: link.terminalShareURL(terminalID: terminalID),
+            requestID: requestID
+        )
+    }
+
+    func revokeTerminalShares(
+        terminalID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteRevokeSharesRequestDTO(),
+            to: link.terminalUnshareURL(terminalID: terminalID),
             requestID: requestID
         )
     }
@@ -749,6 +807,13 @@ struct RemoteClient {
 
     func webSocketTask(sessionID: String) throws -> URLSessionWebSocketTask {
         guard let url = link.webSocketURL(sessionID: sessionID) else {
+            throw RemoteClientError.invalidResponse
+        }
+        return Self.socketSession.webSocketTask(with: url)
+    }
+
+    func terminalWebSocketTask(terminalID: String) throws -> URLSessionWebSocketTask {
+        guard let url = link.terminalWebSocketURL(terminalID: terminalID) else {
             throw RemoteClientError.invalidResponse
         }
         return Self.socketSession.webSocketTask(with: url)

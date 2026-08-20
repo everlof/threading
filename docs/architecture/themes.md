@@ -1327,6 +1327,14 @@ stock alphabet is clean-room and ships no Winamp pixels. A title containing any 
 localized character falls back as a whole to the ordinary antialiased font, preserving the copy
 instead of mixing alphabets or drawing a missing glyph.
 
+The same material's `chart_style: spectrum` now selects the sidebar brand row's workload
+presentation as well. `SidebarBrandView` replaces the logo and wordmark with a clean-room,
+seven-band analyzer drawn from ordinary theme roles and the existing five-by-six alphabet. It
+shows exact app-wide working count, a decaying semantic-output envelope, and `MAX` when any worker
+is at provider-relative top effort. The gate names the material rather than this theme, so imported
+Classic Player skins inherit it and a future authored spectrum theme can do the same. The host
+continues to own activity truth, accessibility, bounded geometry, and motion policy.
+
 ## 2026-08-12: the product has its own stock theme
 
 **Threading** (`threading`) is the adaptive stock product theme and the fresh-profile default. An

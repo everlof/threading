@@ -365,8 +365,128 @@ final class SidebarBrandViewTests: XCTestCase {
         brand.layoutSubtreeIfNeeded()
 
         let mark = try? XCTUnwrap(descendant(of: brand, as: ThreadingMarkView.self))
+        let analyzer = try? XCTUnwrap(
+            descendant(of: brand, as: AgentWorkloadAnalyzerView.self)
+        )
         XCTAssertEqual(mark?.isHidden, false)
+        XCTAssertEqual(analyzer?.isHidden, true)
         XCTAssertEqual(brand.accessibilityLabel(), AppInfo.name)
+    }
+
+    @MainActor
+    func testClassicPlayerReplacesTheBrandWithTheWorkloadAnalyzer() throws {
+        AppThemeLibrary.apply(AppThemeStyles.classicPlayer)
+        let brand = SidebarBrandView(frame: .zero)
+        brand.layoutSubtreeIfNeeded()
+
+        let mark = try XCTUnwrap(descendant(of: brand, as: ThreadingMarkView.self))
+        let analyzer = try XCTUnwrap(
+            descendant(of: brand, as: AgentWorkloadAnalyzerView.self)
+        )
+        let wordmark = try XCTUnwrap(descendant(of: brand, as: MorphingTitleLabel.self))
+
+        XCTAssertTrue(mark.isHidden)
+        XCTAssertTrue(wordmark.isHidden)
+        XCTAssertFalse(analyzer.isHidden)
+        XCTAssertEqual(brand.accessibilityLabel(), AppInfo.name)
+        XCTAssertEqual(brand.accessibilityValue() as? String, L10n.string("No agents working"))
+    }
+
+    @MainActor
+    func testWorkloadAnalyzerStatesCountAndTopEffortWithoutExposingItsPixels() throws {
+        AppThemeLibrary.apply(AppThemeStyles.classicPlayer)
+        let brand = SidebarBrandView(frame: NSRect(x: 0, y: 0, width: 180, height: 40))
+        let intensity = AgentIntensity(
+            workload: AgentWorkload(workingCount: 3, anyAtTopEffort: true),
+            recentActivity: 0.75,
+            measuredAt: 10
+        )
+        NotificationCenter.default.post(AgentIntensityDidChange(intensity: intensity))
+
+        let analyzer = try XCTUnwrap(
+            descendant(of: brand, as: AgentWorkloadAnalyzerView.self)
+        )
+        analyzer.freezePresentationForTesting(intensity: intensity, phase: 0.31)
+
+        XCTAssertEqual(
+            brand.accessibilityValue() as? String,
+            L10n.format("%@, top effort active", L10n.format("%lld agents working", Int64(3)))
+        )
+        XCTAssertFalse(analyzer.isAccessibilityElement())
+        XCTAssertNil(analyzer.hitTest(NSPoint(x: 20, y: 10)))
+        XCTAssertTrue(analyzer.displayedCellCountsForTesting.allSatisfy { $0 > 0 })
+        XCTAssertTrue(analyzer.displayedCellCountsForTesting.allSatisfy {
+            $0 <= Design.WorkloadAnalyzer.cellCount
+        })
+
+        analyzer.freezePresentationForTesting(
+            intensity: AgentIntensity(
+                workload: AgentWorkload(workingCount: 120, anyAtTopEffort: false),
+                recentActivity: 0,
+                measuredAt: 10
+            ),
+            phase: 0
+        )
+        XCTAssertEqual(analyzer.readingTitleForTesting, "99+")
+    }
+
+    @MainActor
+    func testSwitchingAwayFromClassicPlayerRestoresTheBrand() throws {
+        AppThemeLibrary.apply(AppThemeStyles.classicPlayer)
+        let brand = SidebarBrandView(frame: .zero)
+        let analyzer = try XCTUnwrap(
+            descendant(of: brand, as: AgentWorkloadAnalyzerView.self)
+        )
+        XCTAssertFalse(analyzer.isHidden)
+
+        AppThemeLibrary.apply(.system)
+
+        let mark = try XCTUnwrap(descendant(of: brand, as: ThreadingMarkView.self))
+        XCTAssertTrue(analyzer.isHidden)
+        XCTAssertFalse(mark.isHidden)
+        XCTAssertNil(brand.accessibilityValue())
+    }
+
+    @MainActor
+    func testEveryStockThemeFollowsTheSemanticSpectrumGate() throws {
+        for theme in [AppTheme.system] + AppThemeStyles.all {
+            AppThemeLibrary.apply(theme)
+            let brand = SidebarBrandView(frame: .zero)
+            let analyzer = try XCTUnwrap(
+                descendant(of: brand, as: AgentWorkloadAnalyzerView.self)
+            )
+            let expectsAnalyzer = Design.Chart.style == .spectrum
+
+            XCTAssertEqual(
+                analyzer.isHidden,
+                !expectsAnalyzer,
+                "\(theme.name) disagreed with its own chart material"
+            )
+        }
+    }
+
+    @MainActor
+    func testReduceMotionRemovesTheAnalyzersFrameDriver() {
+        AppThemeLibrary.apply(AppThemeStyles.classicPlayer)
+        Design.Motion.reduceMotionOverrideForTesting = true
+        let analyzer = AgentWorkloadAnalyzerView()
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 40))
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        host.addSubview(analyzer)
+        analyzer.setPresented(true)
+        analyzer.update(intensity: AgentIntensity(
+            workload: AgentWorkload(workingCount: 1, anyAtTopEffort: false),
+            recentActivity: 0.4,
+            measuredAt: 10
+        ))
+
+        XCTAssertFalse(analyzer.hasFrameDriverForTesting)
     }
 
     /// A chrome that renames the row renames it live — the same theme switch that repaints

@@ -1,6 +1,111 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Account": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konto" } } }
+    },
+    "Chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chatt" } } }
+    },
+    "Chat Settings": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chattinställningar" } } }
+    },
+    "Chat unavailable": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chatten är inte tillgänglig" } } }
+    },
+    "Continue as %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fortsätt som %@" } } }
+    },
+    "Continue at Reset": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fortsätt vid återställning" } } }
+    },
+    "Continue on the Best Login": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fortsätt på bästa inloggningen" } } }
+    },
+    "Limits": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Gränser" } } }
+    },
+    "Cost, tokens, limits, and reset history": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kostnad, tokens, gränser och återställningshistorik" } } }
+    },
+    "Move Chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Flytta chatt" } } }
+    },
+    "Move “%@” to %@?": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Flytta “%@” till %@?" } } }
+    },
+    "No other accounts": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inga andra konton" } } }
+    },
+    "Stop and Wait for Me": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Stanna och vänta på mig" } } }
+    },
+    "The agent stops and starts under the new account, then resumes this same conversation. Work currently in progress is interrupted.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenten stoppas och startas under det nya kontot och återupptar sedan samma konversation. Pågående arbete avbryts." } } }
+    },
+    "This controls how this chat responds when an account limit is reached.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Detta styr hur den här chatten reagerar när en kontogräns nås." } } }
+    },
+    "When the Limit Is Reached": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När gränsen nås" } } }
+    },
+    "this account": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "det här kontot" } } }
+    },
+    "this chat": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "den här chatten" } } }
+    },
+    "Anyone who accepts can start the shell and run commands as your Mac user. The project folder is only its starting directory, not a security boundary.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den som accepterar kan starta skalet och köra kommandon som din Mac-användare. Projektmappen är bara startkatalogen, inte en säkerhetsgräns." } } }
+    },
+    "Couldn’t open terminal": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det gick inte att öppna terminalen" } } }
+    },
+    "Create link": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skapa länk" } } }
+    },
+    "Opening terminal…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnar terminalen…" } } }
+    },
+    "Ready": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Redo" } } }
+    },
+    "Opens this terminal on your Mac": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnar terminalen på din Mac" } } }
+    },
+    "Search sessions and terminals": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sök bland sessioner och terminaler" } } }
+    },
+    "Share full terminal control?": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dela full terminalkontroll?" } } }
+    },
+    "Share full-control link": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dela länk med full kontroll" } } }
+    },
+    "Share terminal for viewing?": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dela terminalen för visning?" } } }
+    },
+    "Share view-only link": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dela skrivskyddad länk" } } }
+    },
+    "Starting terminal on your Mac…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Startar terminalen på din Mac…" } } }
+    },
+    "Stopped": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Stoppad" } } }
+    },
+    "Terminal actions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminalåtgärder" } } }
+    },
+    "Terminal unavailable": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminalen är inte tillgänglig" } } }
+    },
+    "Terminals": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminaler" } } }
+    },
+    "The link can watch this terminal’s output while its shell is running.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Länken kan se terminalens utdata medan skalet körs." } } }
+    },
     "Allow Local Network access": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillåt åtkomst till lokalt nätverk" } } }
     },

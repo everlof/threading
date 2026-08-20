@@ -70,6 +70,14 @@ struct RemoteRouter {
         return id.isEmpty ? nil : id
     }
 
+    /// The terminal id for a `/ws/terminal/<id>` upgrade path, else nil.
+    static func webSocketTerminalID(forPath path: String) -> String? {
+        let prefix = "/ws/terminal/"
+        guard path.hasPrefix(prefix) else { return nil }
+        let id = String(path.dropFirst(prefix.count))
+        return id.isEmpty || id.contains("/") ? nil : id
+    }
+
     static let apiSessionsPath = "/api/me"
     static let usagePath = "/api/usage"
     static let usageLimitPath = "/api/usage/limit"
@@ -91,6 +99,19 @@ struct RemoteRouter {
         guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
         let id = path.dropFirst(prefix.count).dropLast(suffix.count)
         return id.isEmpty || id.contains("/") ? nil : String(id)
+    }
+
+    /// The terminal id in `/api/terminal/<id>/resume`, else nil.
+    static func resumeTerminalID(forPath path: String) -> String? {
+        terminalID(forPath: path, action: "resume")
+    }
+
+    static func shareTerminalID(forPath path: String) -> String? {
+        terminalID(forPath: path, action: "share")
+    }
+
+    static func unshareTerminalID(forPath path: String) -> String? {
+        terminalID(forPath: path, action: "unshare")
     }
 
     /// The session id in `/api/session/<id>/theme`, else nil.
@@ -128,6 +149,14 @@ struct RemoteRouter {
 
     static func surfaceSessionID(forPath path: String) -> String? {
         sessionID(forPath: path, action: "surface")
+    }
+
+    static func accountSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: "account")
+    }
+
+    static func limitRecoverySessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: "limit-recovery")
     }
 
     static func shareSessionID(forPath path: String) -> String? {
@@ -208,6 +237,14 @@ struct RemoteRouter {
 
     private static func sessionID(forPath path: String, action: String) -> String? {
         let prefix = "/api/session/"
+        let suffix = "/\(action)"
+        guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
+        let id = path.dropFirst(prefix.count).dropLast(suffix.count)
+        return id.isEmpty || id.contains("/") ? nil : String(id)
+    }
+
+    private static func terminalID(forPath path: String, action: String) -> String? {
+        let prefix = "/api/terminal/"
         let suffix = "/\(action)"
         guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
         let id = path.dropFirst(prefix.count).dropLast(suffix.count)

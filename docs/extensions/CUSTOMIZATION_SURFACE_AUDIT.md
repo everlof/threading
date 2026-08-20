@@ -25,6 +25,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Surface | Proposed contract | First authority | Host must retain | Status |
 | --- | --- | --- | --- | --- |
 | Main window content | `application.main-window@1` | around-hook | window chrome, input routing | Implemented |
+| Sidebar workload analyzer | existing theme `material.chart_style: spectrum` | theme-selected host presentation | workload/intensity truth, exact count, effort judgement, accessibility, bounded motion | Implemented |
 | Project row | `sidebar.project-row@1` | properties, slot, replacement | selection, DnD, row actions, count | Implemented |
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
@@ -52,6 +53,13 @@ would create a visual contract that cannot truthfully describe the process behin
 therefore keeps its identity, selection, foreground-command spinner and lifecycle actions
 host-owned; a future public row starts by publishing the typed terminal context rather than by
 leaking the AppKit cell.
+
+The sidebar workload analyzer is deliberately not a second extension component around the brand
+row. It is one presentation of an existing theme-owned slot: any installed theme may select the
+spectrum material, while `SidebarBrandView` keeps the exact operational facts and accessible
+wording host-owned. Publishing replacement UI here would either expose no useful data or require
+a new brokered app-wide activity capability; theme selection provides the useful customization
+without turning runtime state into presentation authority.
 
 Account setup and reconnect remain host-only because the presentation is inseparable from an
 authentication boundary. Threading must keep the selected provider paired with the exact

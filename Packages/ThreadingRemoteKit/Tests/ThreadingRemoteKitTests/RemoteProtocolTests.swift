@@ -387,7 +387,25 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(summary.snoozedUntil)
         XCTAssertNil(summary.wokeReason)
         XCTAssertNil(summary.wokeAt)
+        XCTAssertNil(summary.accountID)
+        XCTAssertNil(summary.limitRecovery)
         XCTAssertFalse(summary.isSnoozed())
+    }
+
+    func testLimitRecoveryPolicyRecognizesOnlyStructurallyValidChoices() {
+        XCTAssertTrue(RemoteLimitRecoveryPolicyDTO(
+            action: RemoteLimitRecoveryPolicyDTO.flagOnly
+        ).isKnown)
+        XCTAssertTrue(RemoteLimitRecoveryPolicyDTO(
+            action: RemoteLimitRecoveryPolicyDTO.resumeVia,
+            accountID: "work"
+        ).isKnown)
+        XCTAssertFalse(RemoteLimitRecoveryPolicyDTO(
+            action: RemoteLimitRecoveryPolicyDTO.resumeVia
+        ).isKnown)
+        XCTAssertFalse(RemoteLimitRecoveryPolicyDTO(
+            action: "futureAction"
+        ).isKnown)
     }
 
     func testSessionSnoozeFieldsRoundTripAndDeriveFromTheDeadline() throws {
@@ -444,6 +462,7 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(me.archivedSessions)
         XCTAssertNil(me.newSessionCatalog)
         XCTAssertNil(me.features)
+        XCTAssertNil(me.terminals)
     }
 
     func testUsageDTOsRoundTripWithoutCollapsingBankedResetInventory() throws {
@@ -564,6 +583,23 @@ final class RemoteProtocolTests: XCTestCase {
                 from: JSONEncoder().encode(delta)
             ),
             delta
+        )
+
+        let terminalDelta = RemoteSessionsChangedDTO(
+            terminal: RemoteProjectTerminalSummaryDTO(
+                id: "terminal-1",
+                title: "Server",
+                projectName: "Threading",
+                state: "idle",
+                isAvailable: true
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteSessionsChangedDTO.self,
+                from: JSONEncoder().encode(terminalDelta)
+            ),
+            terminalDelta
         )
     }
 
@@ -807,6 +843,25 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             surface
         )
+        let account = RemoteMoveSessionAccountRequestDTO(accountID: "work")
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteMoveSessionAccountRequestDTO.self,
+                from: JSONEncoder().encode(account)
+            ),
+            account
+        )
+        let recovery = RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
+            action: RemoteLimitRecoveryPolicyDTO.resumeVia,
+            accountID: "work"
+        ))
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteSetSessionLimitRecoveryRequestDTO.self,
+                from: JSONEncoder().encode(recovery)
+            ),
+            recovery
+        )
     }
 
     func testConversationSnapshotRoundTrips() throws {
@@ -999,6 +1054,22 @@ final class RemoteProtocolTests: XCTestCase {
             "https://quiet-river.trycloudflare.com/api/session/abc/resume"
         )
         XCTAssertEqual(
+            link.resumeTerminalURL(terminalID: "terminal-1").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/terminal/terminal-1/resume"
+        )
+        XCTAssertEqual(
+            link.terminalShareURL(terminalID: "terminal-1").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/terminal/terminal-1/share"
+        )
+        XCTAssertEqual(
+            link.terminalUnshareURL(terminalID: "terminal-1").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/terminal/terminal-1/unshare"
+        )
+        XCTAssertEqual(
+            link.terminalWebSocketURL(terminalID: "terminal-1")?.absoluteString,
+            "wss://quiet-river.trycloudflare.com/ws/terminal/terminal-1"
+        )
+        XCTAssertEqual(
             link.sessionThemeURL(sessionID: "abc").absoluteString,
             "https://quiet-river.trycloudflare.com/api/session/abc/theme"
         )
@@ -1021,6 +1092,14 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(
             link.sessionSurfaceURL(sessionID: "abc").absoluteString,
             "https://quiet-river.trycloudflare.com/api/session/abc/surface"
+        )
+        XCTAssertEqual(
+            link.sessionAccountURL(sessionID: "abc").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/session/abc/account"
+        )
+        XCTAssertEqual(
+            link.sessionLimitRecoveryURL(sessionID: "abc").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/session/abc/limit-recovery"
         )
         XCTAssertEqual(
             link.gitReviewURL(sessionID: "abc", mode: .lastTurn).absoluteString,

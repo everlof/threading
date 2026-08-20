@@ -1,6 +1,7 @@
 # Remote access
 
-Remote access mirrors Threading sessions to a browser or to the native `ThreadingMobile` iOS app.
+Remote access mirrors Threading sessions and standalone project terminals to a browser or to the
+native `ThreadingMobile` iOS app.
 It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac,
 turn on **Remote Access**, and switch on the ways in you want. There is no connection *mode* any
 more: a mode forced one choice between overlapping things, and a way in is one switch per network,
@@ -216,6 +217,26 @@ account/window's current inventory and nearest expiry; zero is distinct from una
 historical banked-reset marker means a credit was observed being used rather than merely being
 available. One-chat guest links cannot discover or read this whole-host data.
 
+An open chat's **… ▸ Chat Settings** puts its operational controls beside that chat. **Account**
+shows the current login and its normalized usage, and can move a live conversation to another
+login for the same agent after warning that the running process will stop. **When the Limit Is
+Reached** selects the resolved per-chat answer: stop and wait for the person, continue at reset,
+continue on the best login, or continue on one named login. **Usage** opens the same whole-host
+dashboard without making the person return to the session list. These controls are owner-only;
+guest summaries omit both `accountID` and `limitRecovery`, and guest requests to either mutation
+route are denied.
+
+The account catalogue already sent once per owner response is the scaling boundary here. Each
+session adds only two optional scalars—the routed account handle and resolved recovery policy—and
+the phone joins those to the top-level agent/account catalogue only for the selected chat. It does
+not copy an account or usage array onto every session row, and the settings sheet builds account
+menus only when opened.
+
+Chat Settings is deliberately host-owned under the customization-surface gate. Threading keeps
+account discovery and credentials, transcript migration, recovery execution, usage provenance,
+confirmation, and compatibility fallback. The iOS extension composition engine has no contract
+for replacing operational session settings, so this sheet does not advertise one.
+
 Opening a dormant session resumes it
 in its existing agent UI or Native surface. Agent UI sessions mirror the CLI's terminal
 scrollback and accept keyboard input; Native sessions render user messages, assistant responses, code and tool
@@ -238,8 +259,9 @@ reasoning effort and UI surface. The stable default is the agent's own Claude Co
 Threading's Native UI remains an explicit experimental choice. Account choices include the Mac's
 latest normalized rate-limit usage, while credentials and config paths stay on the Mac. The
 session is created through the same Mac launch path as a local session and appears on both
-devices immediately. Owners can also rename, pin, archive, restore and switch a session between
-Native and its agent UI from either side. A UI switch stops the current process, then resumes
+devices immediately. Owners can also rename, pin, archive, restore, move a running chat between
+accounts, set its limit recovery, and switch it between Native and its agent UI from either side.
+A UI or account switch stops the current process, then resumes
 the same provider conversation identifier on the other surface. The session row's **Interface**
 submenu shows both choices with the active one checked on Mac and iPhone, and catalogue changes
 are pushed immediately so another open device follows the switch without waiting for polling.
@@ -513,6 +535,15 @@ Pairing and sharing are deliberately different actions:
   View only waits for a running chat, and says so beside its dimmed button: a viewer cannot wake
   a dormant one, so there would be nothing to watch. The three live in `ShareLinkGrant`, which is
   what replaced a `switch` on the alert's button *index*.
+- **Share Terminal…** in a standalone terminal's `…` menu creates the same kind of durable,
+  device-bound membership, scoped to that `TerminalID` rather than a `SessionID`. **View only**
+  receives the bounded screen seed and subsequent output but cannot start a stopped shell, type,
+  paste, send keys or resize the PTY; the button therefore waits until that shell is running.
+  **Full control** may start it and send arbitrary PTY input and viewport changes. It is the same
+  authority as sitting at that terminal on the Mac: commands run as the Mac user, and the project
+  folder is only the shell's starting directory, not a security boundary. A terminal capability
+  can never approve an AI permission request, discover chats or other terminals, manage the host,
+  or create another share.
 - **A guest cannot be somebody with only a browser any more.** That worked because the Cloudflare
   Quick Tunnel gave Threading a public origin; removing the relay removes the origin, and this is a
   real capability loss rather than a tidy-up. The browser client is unchanged and still speaks the
@@ -528,6 +559,20 @@ Pairing and sharing are deliberately different actions:
   another invitation for another person; forwarding an already accepted invite does not clone
   the membership. A credential that cannot be restored exactly fails closed rather than creating
   a replacement identity.
+
+Standalone terminals remain a separate wire type. `RemoteMeDTO.terminals` is optional and carries
+`RemoteProjectTerminalSummaryDTO`; a terminal is never adapted into `RemoteSessionSummaryDTO`, so
+an older client ignores the new catalogue instead of inventing agent, transcript, archive,
+workspace or permission behavior for a shell. WebSockets use `/ws/terminal/<TerminalID>`, lifecycle
+uses `/api/terminal/<TerminalID>/…`, and `RemoteScope.projectTerminal` compares the typed identity
+on every request. Even a terminal and chat containing identical UUID bytes do not share authority.
+
+The terminal catalogue applies the session-sized scaling gate: one bounded summary per durable
+terminal, one lazy dashboard row per visible result, and no retained view or timer per hidden
+terminal. A detail screen opens one socket and one bounded replay only when selected. This surface
+is deliberately host-owned under the customization-surface gate. Threading keeps terminal
+identity, PTY lifetime, authorization, sharing, replay and input enforcement; the iOS extension
+composition engine has no contract for replacing a raw project shell.
 
 Use **Open in Browser** to test the browser client without leaving the Mac. The owner pairing link
 can also be copied from the pairing sheet, but it is intentionally not presented as a general

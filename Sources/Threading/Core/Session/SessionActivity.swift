@@ -359,11 +359,17 @@ final class SessionActivityTracker {
 
     // MARK: - Public Methods
 
-    /// Records a chunk of output.
-    func recordOutput(byteCount: Int) {
+    /// Records a chunk of output and returns the accepted burst size when that output is strong
+    /// enough to drive a provider-neutral activity presentation.
+    ///
+    /// `nil` is as important as the byte count: unattended launch paint, resize/pointer paint,
+    /// echoed input below the working threshold, and output from an otherwise idle reporting
+    /// session are not agent activity. The caller may animate only a non-nil answer.
+    @discardableResult
+    func recordOutput(byteCount: Int) -> Int? {
         // A background relaunch's boot output is a repaint we provoked, exactly like a
         // resize — except its window ends when the session is seen, not on a timer.
-        if launchedUnattended { return }
+        if launchedUnattended { return nil }
 
         if isSuppressed {
             // A redraw we caused. It must not start a session working, but it also must not
@@ -373,13 +379,14 @@ final class SessionActivityTracker {
             if !reportsOwnActivity, turnInFlight {
                 restartQuietTimer()
             }
-            return
+            return nil
         }
 
         bytesSinceQuiet += byteCount
 
         // Below the threshold this is most likely the terminal echoing typed characters.
-        guard bytesSinceQuiet >= ActivityDefaults.workingByteThreshold else { return }
+        guard bytesSinceQuiet >= ActivityDefaults.workingByteThreshold else { return nil }
+        let acceptedByteCount = bytesSinceQuiet
 
         // An agent that reports its own turns has already said what it is doing, and its output
         // may not start or end one. It answers exactly one question the reports leave open: a
@@ -400,10 +407,11 @@ final class SessionActivityTracker {
             // the CLI repainting around its chooser as readily as it is the agent carrying on,
             // and only one of those means the session can work again — the transcript says
             // which, so nothing has to be inferred from bytes.
-            guard isVisible, turnInFlight, awaitsUser else { return }
-            awaitsUser = false
-            settle(.output)
-            return
+            if isVisible, turnInFlight, awaitsUser {
+                awaitsUser = false
+                settle(.output)
+            }
+            return activity == .working ? acceptedByteCount : nil
         }
 
         if !turnInFlight { attentionEpisodeOpen = false }
@@ -411,6 +419,7 @@ final class SessionActivityTracker {
         awaitsUser = false
         settle(.output)
         restartQuietTimer()
+        return acceptedByteCount
     }
 
     /// Notes that the terminal was resized.

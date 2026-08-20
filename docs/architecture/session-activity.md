@@ -410,6 +410,19 @@ sessions where the user is the reason nothing is happening. The drawing side is
 `AgentActivityBeamView`; see [`design-system.md`](design-system.md) and
 [`dependencies.md`](dependencies.md).
 
+The same monitor owns a theme-independent `AgentIntensity` envelope for presentations that need
+more than the beam's stepped count. Its quiet floor is still exact workload — 30% for one
+`.working` session and 10% for each additional session, bounded at full scale. Meaningful live
+events then pulse into the headroom and decay exponentially: terminal sessions contribute only
+output bursts already admitted by `SessionActivityTracker` (not launch paint, resize/pointer
+repaint, echo below the working threshold, or a finished turn's redraw), while native sessions
+contribute text/thinking deltas and semantic assistant/tool/plan/background edges. Replay and turn
+receipts contribute nothing. Byte sizes are compressed logarithmically and no token count enters
+the model: provider token reporting arrives too late, is not universal, and would make verbosity
+look like compute power. A session must still be `.working` when its pulse arrives, and the
+envelope clears immediately when the final worker settles. `AgentIntensityDidChange` publishes
+that bounded presentation value alongside the exact count and top-effort fact.
+
 **An unfinished turn may also hold one process-wide idle-sleep assertion.**
 `ActiveTurnSleepInhibitor` is started with the other real-app activity consumers and follows
 `hasTurnInFlight`, not `.working`: a permission or question inside a turn is still unfinished,

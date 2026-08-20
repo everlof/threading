@@ -93,6 +93,11 @@ enum MobileTerminalInputMode: Equatable {
     case none
 }
 
+enum RemoteLiveConnectionTarget: Equatable {
+    case session(String)
+    case projectTerminal(String)
+}
+
 struct RemotePromptSubmissionFeedback: Equatable {
     let requestID: String
     let text: String
@@ -196,6 +201,7 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var attentionRequestFeedback: RemoteAttentionRequestFeedback?
 
     let session: RemoteSessionSummaryDTO
+    let target: RemoteLiveConnectionTarget
     let conversationStore = RemoteConversationStore()
     private var client: RemoteClient
     private let reconnectClient: (@MainActor () async -> RemoteClient?)?
@@ -272,12 +278,14 @@ final class RemoteSessionConnection: ObservableObject {
 
     init(
         session: RemoteSessionSummaryDTO,
+        target: RemoteLiveConnectionTarget? = nil,
         client: RemoteClient,
         reconnectClient: (@MainActor () async -> RemoteClient?)? = nil,
         helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline,
         viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay
     ) {
         self.session = session
+        self.target = target ?? .session(session.id)
         self.client = client
         self.reconnectClient = reconnectClient
         self.helloDeadline = helloDeadline
@@ -319,14 +327,21 @@ final class RemoteSessionConnection: ObservableObject {
 
         // The demo's canned Mac takes the socket's place; everything downstream of the wire —
         // the hello, snapshots, acknowledgements — still arrives through `handle`.
-        if let script = DemoSessionScript.forDemo(link: client.link, session: session) {
+        if case .session = target,
+           let script = DemoSessionScript.forDemo(link: client.link, session: session) {
             demoScript = script
             script.begin(on: self)
             return
         }
 
         do {
-            let task = try client.webSocketTask(sessionID: session.id)
+            let task: URLSessionWebSocketTask
+            switch target {
+            case .session(let sessionID):
+                task = try client.webSocketTask(sessionID: sessionID)
+            case .projectTerminal(let terminalID):
+                task = try client.terminalWebSocketTask(terminalID: terminalID)
+            }
             self.task = task
             task.resume()
             armHelloDeadline(generation: generation)

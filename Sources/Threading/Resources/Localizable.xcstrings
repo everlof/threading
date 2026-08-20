@@ -2,11 +2,16 @@
   "sourceLanguage": "en",
   "strings": {
     "%@ · %@ · Preview": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ · %@ · Förhandsvisning"}}}},
+    "A view-only link can watch output while this shell is running. A full-control link can start the shell and run commands as your Mac user. The project folder is only the starting directory, not a security boundary. Neither grant can approve AI permissions or manage Threading.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En skrivskyddad länk kan se utdata medan skalet körs. En länk med full kontroll kan starta skalet och köra kommandon som din Mac-användare. Projektmappen är bara startkatalogen, inte en säkerhetsgräns. Ingen av behörigheterna kan godkänna AI-behörigheter eller hantera Threading."}}}},
     "Choose Simulator": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj simulator"}}}},
+    "Copy Full-Control Link": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera länk med full kontroll"}}}},
     "iOS Simulator": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "iOS-simulator"}}}},
     "Preparing %@…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förbereder %@…"}}}},
     "Refresh Simulator": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppdatera simulator"}}}},
+    "Share Terminal…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dela terminal…"}}}},
     "Simulator screen": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Simulatorskärm"}}}},
+    "Stop Sharing Terminal": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sluta dela terminal"}}}},
+    "This terminal cannot be shared yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Terminalen kan inte delas än"}}}},
     "Session Status Card": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionens statuskort"}}}},
     "Show or Hide the Session Status Card": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj sessionens statuskort"}}}},
     "%@ est.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ uppsk."}}}},
@@ -28721,7 +28726,11 @@
     "No sleep proxy on this network; an Apple TV or HomePod provides one": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen viloproxy i det här nätverket; en Apple TV eller HomePod tillhandahåller en"}}}},
     "Not checked yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inte kontrollerat än"}}}},
     "Wake for network access is off in System Settings ▸ Energy": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning för nätverksåtkomst är avstängd i Systeminställningar ▸ Energi"}}}},
-    "Waking needs an announcement on this network": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning kräver en annonsering i det här nätverket"}}}}
+    "Waking needs an announcement on this network": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning kräver en annonsering i det här nätverket"}}}},
+    "No agents working": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga agenter arbetar"}}}},
+    "One agent working": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En agent arbetar"}}}},
+    "%lld agents working": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld agenter arbetar"}}}},
+    "%@, top effort active": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@, högsta ansträngning aktiv"}}}}
   },
   "version": "1.0"
 }

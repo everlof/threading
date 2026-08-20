@@ -18,6 +18,7 @@ struct RemoteNotificationOpenRequest: Equatable, Identifiable {
 enum MobileNavigationRoute: Hashable {
     case project(String)
     case session(String)
+    case terminal(String)
 
     var sessionID: String? {
         guard case .session(let id) = self else { return nil }
@@ -680,6 +681,32 @@ final class RemoteAppModel: ObservableObject {
         throw RemoteClientError.server(408)
     }
 
+    func makeTerminalReady(_ terminal: RemoteProjectTerminalSummaryDTO) async throws {
+        guard !terminal.isAvailable, let host = activeHost else { return }
+        guard me?.share.capability == RemoteCapability.interact.rawValue else {
+            throw RemoteClientError.unauthorized
+        }
+        if isDemo { return }
+        let hostID = host.id
+        let link = try await performMutation(for: hostID) { client, requestID in
+            try await client.resumeTerminal(terminalID: terminal.id, requestID: requestID)
+            return client.link
+        }
+        let client = RemoteClient(link: link)
+        guard activeHostID == hostID else { throw CancellationError() }
+        for _ in 0..<30 {
+            try Task.checkCancellation()
+            let response = try await client.fetchMe()
+            guard activeHostID == hostID else { throw CancellationError() }
+            me = response
+            if response.terminals?.first(where: { $0.id == terminal.id })?.isAvailable == true {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        throw RemoteClientError.server(408)
+    }
+
     /// Changes the one app appearance shared by the Mac and paired clients. The local preview
     /// is applied before the round trip, then replaced by the Mac's resolved response.
     func selectAppTheme(_ themeID: String) async throws {
@@ -877,6 +904,46 @@ final class RemoteAppModel: ObservableObject {
         me = response
     }
 
+    func moveSessionAccount(
+        _ accountID: String,
+        for session: RemoteSessionSummaryDTO
+    ) async throws {
+        guard canManageSessions, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        if isDemo { return }
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.moveSessionAccount(
+                sessionID: session.id,
+                accountID: accountID,
+                requestID: requestID
+            )
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response
+    }
+
+    func setLimitRecovery(
+        _ policy: RemoteLimitRecoveryPolicyDTO,
+        for session: RemoteSessionSummaryDTO
+    ) async throws {
+        guard canManageSessions, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        if isDemo { return }
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.setSessionLimitRecovery(
+                sessionID: session.id,
+                policy: policy,
+                requestID: requestID
+            )
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response
+    }
+
     func createShare(
         for session: RemoteSessionSummaryDTO,
         capability: String,
@@ -906,6 +973,41 @@ final class RemoteAppModel: ObservableObject {
         let hostID = host.id
         let response = try await performMutation(for: hostID) { client, requestID in
             try await client.revokeShares(sessionID: session.id, requestID: requestID)
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response
+    }
+
+    func createTerminalShare(
+        for terminal: RemoteProjectTerminalSummaryDTO,
+        capability: String
+    ) async throws -> RemoteCreateShareResponseDTO {
+        guard canManageSessions, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.createTerminalShare(
+                terminalID: terminal.id,
+                capability: capability,
+                requestID: requestID
+            )
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response.me
+        return response
+    }
+
+    func revokeTerminalShares(for terminal: RemoteProjectTerminalSummaryDTO) async throws {
+        guard canManageSessions, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.revokeTerminalShares(
+                terminalID: terminal.id,
+                requestID: requestID
+            )
         }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response
@@ -1354,7 +1456,9 @@ final class RemoteAppModel: ObservableObject {
                         RemoteSessionsChangedDTO.self,
                         from: data
                     ) else { continue }
-                    if me != nil, update.session != nil || update.removedSessionID != nil {
+                    if me != nil,
+                       update.session != nil || update.removedSessionID != nil
+                        || update.terminal != nil || update.removedTerminalID != nil {
                         scheduleSessionDelta(update, for: hostID)
                     } else {
                         discardPendingSessionDeltas()
@@ -1457,7 +1561,7 @@ final class RemoteAppModel: ObservableObject {
         for hostID: String
     ) {
         guard activeHostID == hostID,
-              let key = update.removedSessionID ?? update.session?.id else { return }
+              let key = catalogueDeltaKey(update) else { return }
         pendingSessionDeltas[key] = update
         startSessionDeltaApplicationIfNeeded(for: hostID)
     }
@@ -1505,7 +1609,7 @@ final class RemoteAppModel: ObservableObject {
             // newer queued delta for the same session; otherwise replay this one against the
             // newly published snapshot instead of overwriting it with stale companion fields.
             for update in updates {
-                guard let key = update.removedSessionID ?? update.session?.id,
+                guard let key = catalogueDeltaKey(update),
                       pendingSessionDeltas[key] == nil else { continue }
                 pendingSessionDeltas[key] = update
             }
@@ -1516,6 +1620,16 @@ final class RemoteAppModel: ObservableObject {
         me = updated
         sessionDeltaApplicationTask = nil
         startSessionDeltaApplicationIfNeeded(for: hostID)
+    }
+
+    private func catalogueDeltaKey(_ update: RemoteSessionsChangedDTO) -> String? {
+        if let id = update.removedTerminalID ?? update.terminal?.id {
+            return "terminal:\(id)"
+        }
+        if let id = update.removedSessionID ?? update.session?.id {
+            return "session:\(id)"
+        }
+        return nil
     }
 
     private func discardPendingSessionDeltas() {
@@ -1773,7 +1887,11 @@ final class RemoteAppModel: ObservableObject {
                     isPinned: true,
                     terminalTheme: demoTerminalTheme,
                     inheritedTerminalThemeName: demoTerminalTheme.name,
-                    inheritedTerminalTheme: demoTerminalTheme
+                    inheritedTerminalTheme: demoTerminalTheme,
+                    accountID: "default",
+                    limitRecovery: .init(
+                        action: RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount
+                    )
                 ),
                 .init(
                     id: "ff9f4a47-4c3b-466b-bcc5-a864b0657423",
@@ -1836,6 +1954,28 @@ final class RemoteAppModel: ObservableObject {
                         isEmoji: true,
                         hue: nil
                     )
+                ),
+            ],
+            terminals: [
+                .init(
+                    id: "a98a5b1a-cdc3-43ea-9fd3-40bc03f3b1f8",
+                    title: "Development server",
+                    projectName: "AnotherTerminal",
+                    state: "working",
+                    isAvailable: true,
+                    createdAt: now - 90,
+                    terminalTheme: demoTerminalTheme,
+                    inheritedTerminalThemeName: demoTerminalTheme.name,
+                    inheritedTerminalTheme: demoTerminalTheme
+                ),
+                .init(
+                    id: "60f1a622-d187-4875-b1ca-3705ae53394c",
+                    title: "Terminal",
+                    projectName: "threading-terminal-wire-04BC7600-8ED2-4049-9479-4E058A888FE9",
+                    state: "dormant",
+                    isAvailable: false,
+                    createdAt: now - 7_200,
+                    terminalTheme: demoTerminalTheme
                 ),
             ],
             host: RemoteHostDTO(id: "demo-mac", name: "David’s MacBook Pro"),
@@ -1981,10 +2121,20 @@ private extension RemoteMeDTO {
             if $0.isPinned != $1.isPinned { return $0.isPinned }
             return ($0.lastActiveAt ?? 0) > ($1.lastActiveAt ?? 0)
         }
+        var updatedTerminals = terminals
+        if updatedTerminals != nil {
+            let changedTerminalIDs = Set(updates.compactMap {
+                $0.removedTerminalID ?? $0.terminal?.id
+            })
+            updatedTerminals?.removeAll { changedTerminalIDs.contains($0.id) }
+            updatedTerminals?.append(contentsOf: updates.compactMap(\.terminal))
+            updatedTerminals?.sort { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
+        }
         return RemoteMeDTO(
             serverProtocol: serverProtocol,
             share: share,
             sessions: updatedSessions,
+            terminals: updatedTerminals,
             host: host,
             theme: theme,
             themeCatalog: themeCatalog,
@@ -1999,6 +2149,7 @@ private extension RemoteMeDTO {
             serverProtocol: serverProtocol,
             share: share,
             sessions: sessions,
+            terminals: terminals,
             host: host,
             theme: theme,
             themeCatalog: themeCatalog,
@@ -2032,9 +2183,13 @@ private extension RemoteMeDTO {
                     terminalTheme: terminalTheme,
                     terminalThemeAssignmentID: assignmentID,
                     inheritedTerminalThemeName: session.inheritedTerminalThemeName,
-                    inheritedTerminalTheme: session.inheritedTerminalTheme
+                    inheritedTerminalTheme: session.inheritedTerminalTheme,
+                    account: session.account,
+                    accountID: session.accountID,
+                    limitRecovery: session.limitRecovery
                 )
             },
+            terminals: terminals,
             host: host,
             theme: theme,
             themeCatalog: themeCatalog,
@@ -2067,7 +2222,9 @@ private extension RemoteMeDTO {
                 inheritedTerminalTheme: session.inheritedTerminalTheme,
                 // Everything this rebuild forgets is a fact the row visibly loses until the next
                 // refresh. Switching surface must not blank the chat's account chip.
-                account: session.account
+                account: session.account,
+                accountID: session.accountID,
+                limitRecovery: session.limitRecovery
             )
         }
 
@@ -2075,6 +2232,7 @@ private extension RemoteMeDTO {
             serverProtocol: serverProtocol,
             share: share,
             sessions: sessions.map(replace),
+            terminals: terminals,
             host: host,
             theme: theme,
             themeCatalog: themeCatalog,

@@ -156,6 +156,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private var hostedPairingTask: Task<Void, Never>?
     private var pairingRedemptions: [String: PairingRedemption] = [:]
     private var sessionShares: [SessionID: [SessionShare]] = [:]
+    private var terminalShares: [TerminalID: [SessionShare]] = [:]
     /// Invalidates a listener completion that was already enqueued on main when the user
     /// switched the feature off. Without it, a fast off-after-on could put the UI back into
     /// `listening` after `stop()` had already closed the listener and revoked its token.
@@ -888,6 +889,59 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         return .success(created)
     }
 
+    /// Mints an exact-terminal invitation. `interact` grants PTY control; unlike chat shares it
+    /// can never grant permission approval because no agent permission surface belongs here.
+    func createTerminalShare(
+        for terminalID: TerminalID,
+        capability: RemoteCapability
+    ) -> Result<RemoteCreatedShare, RemoteSharePreparationError> {
+        let isListening: Bool
+        if case .listening = status { isListening = true } else { isListening = false }
+        if let refusal = Self.shareRefusal(
+            isSessionShareable: ProjectStore.shared.terminal(withID: terminalID) != nil,
+            isListening: isListening,
+            hasPrivateDoor: invitationDestination != nil
+        ) {
+            return .failure(refusal)
+        }
+        guard let invitationToken = Self.randomToken(),
+              let url = invitationURL(token: invitationToken) else {
+            return .failure(.remoteAccessUnavailable)
+        }
+        let id = UUID().uuidString.lowercased()
+        let createdAt = Date()
+        let expiresAt = createdAt.addingTimeInterval(RemoteAccessDefaults.defaultShareExpiry)
+        let share = SessionShare(
+            id: id,
+            invitationToken: invitationToken,
+            capability: capability,
+            canApprovePermissions: false,
+            createdAt: createdAt,
+            expiresAt: expiresAt,
+            members: [:]
+        )
+        var candidate = terminalShares
+        candidate[terminalID, default: []].append(share)
+        guard persistTerminalGuestShares(candidate) else {
+            return .failure(.remoteAccessUnavailable)
+        }
+        terminalShares = candidate
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + RemoteAccessDefaults.defaultShareExpiry
+        ) { [weak self] in
+            self?.expireInvitation(token: invitationToken, terminalID: terminalID)
+        }
+        sharingChanged()
+        ThreadingLogger.remote.info(
+            "Remote terminal invitation created terminal=\(terminalID.rawValue, privacy: .public) capability=\(capability.rawValue, privacy: .public)"
+        )
+        return .success(RemoteCreatedShare(
+            url: url,
+            expiresAt: expiresAt,
+            canApprovePermissions: false
+        ))
+    }
+
     /// Why an invitation cannot be minted, or nil when one can.
     ///
     /// Separated from the minting so the order of the two refusals is a value rather than a run
@@ -1065,6 +1119,48 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 authorization: authorization
             )
         }
+        for terminalID in Array(terminalShares.keys) {
+            guard var shares = terminalShares[terminalID],
+                  let index = shares.firstIndex(where: {
+                      $0.invitationToken == token && $0.expiresAt > Date()
+                  }),
+                  let accessToken = Self.randomToken() else { continue }
+            var share = shares[index]
+            let memberID = UUID().uuidString.lowercased()
+            let member = RemoteMember(
+                id: memberID,
+                displayName: normalizedName,
+                deviceID: normalizedDeviceID
+            )
+            let authorization = RemoteAuthorization(
+                shareID: memberID,
+                capability: share.capability,
+                scope: .projectTerminal(terminalID),
+                principal: .guest,
+                member: member,
+                canApprovePermissions: false
+            )
+            share.invitationToken = nil
+            share.members[memberID] = MemberRecord(
+                token: accessToken,
+                authorization: authorization,
+                joinedAt: Date()
+            )
+            shares[index] = share
+            var candidate = terminalShares
+            candidate[terminalID] = shares
+            guard persistTerminalGuestShares(candidate) else { return nil }
+            terminalShares = candidate
+            authority.set(authorization, forToken: accessToken)
+            sharingChanged()
+            ThreadingLogger.remote.notice(
+                "Remote terminal invitation redeemed terminal=\(terminalID.rawValue, privacy: .public) capability=\(share.capability.rawValue, privacy: .public)"
+            )
+            return RemoteInvitationRedemption(
+                accessToken: accessToken,
+                authorization: authorization
+            )
+        }
         return nil
     }
 
@@ -1134,6 +1230,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         !(sessionShares[sessionID]?.isEmpty ?? true)
     }
 
+    func hasTerminalShares(_ terminalID: TerminalID) -> Bool {
+        !(terminalShares[terminalID]?.isEmpty ?? true)
+    }
+
     /// Who can reach this chat: the people who accepted an invitation, and the invitations still
     /// waiting to be used. The owner's own paired devices are deliberately absent — they hold the
     /// owner credential rather than a share, reach every chat, and are shown by the sharing pane
@@ -1190,6 +1290,14 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 return
             }
         }
+        for (terminalID, shares) in terminalShares {
+            for (shareIndex, share) in shares.enumerated() where share.members[shareID] != nil {
+                var candidate = terminalShares
+                candidate[terminalID]?[shareIndex].members[shareID]?.lastSeenAt = Date()
+                if persistTerminalGuestShares(candidate) { terminalShares = candidate }
+                return
+            }
+        }
     }
 
     @discardableResult
@@ -1214,6 +1322,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         stop()
         try ownerDevices.deleteAllForAppReset()
         let removedShareCount = sessionShares.values.reduce(0) { $0 + $1.count }
+            + terminalShares.values.reduce(0) { $0 + $1.count }
         do {
             try guestShareStore.deleteAll()
         } catch {
@@ -1223,6 +1332,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             throw error
         }
         sessionShares.removeAll()
+        terminalShares.removeAll()
         guestSharePersistenceError = nil
         ThreadingLogger.remote.notice(
             "Remote guest shares deleted for app reset count=\(removedShareCount, privacy: .public)"
@@ -1295,6 +1405,21 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         )
     }
 
+    func revokeTerminalShares(_ terminalID: TerminalID) {
+        let removed = terminalShares[terminalID] ?? []
+        var candidate = terminalShares
+        candidate[terminalID] = nil
+        guard persistTerminalGuestShares(candidate) else { return }
+        terminalShares = candidate
+        for share in removed {
+            for member in share.members.values { revoke(member) }
+        }
+        sharingChanged()
+        ThreadingLogger.remote.notice(
+            "Remote terminal sharing revoked terminal=\(terminalID.rawValue, privacy: .public) shares=\(removed.count, privacy: .public)"
+        )
+    }
+
     private func revoke(_ member: MemberRecord) {
         authority.set(nil, forToken: member.token)
         RemoteNotificationService.shared.revoke(shareID: member.authorization.shareID)
@@ -1310,8 +1435,16 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         do {
             let now = Date()
             var restored: [SessionID: [SessionShare]] = [:]
+            var restoredTerminals: [TerminalID: [SessionShare]] = [:]
             for record in try guestShareStore.load() {
-                guard let sessionID = SessionID(uuidString: record.sessionID) else { continue }
+                let scope: RemoteScope
+                if record.targetKind == .projectTerminal {
+                    guard let terminalID = TerminalID(uuidString: record.sessionID) else { continue }
+                    scope = .projectTerminal(terminalID)
+                } else {
+                    guard let sessionID = SessionID(uuidString: record.sessionID) else { continue }
+                    scope = .session(sessionID)
+                }
                 let members = record.members.reduce(into: [String: MemberRecord]()) {
                     result, stored in
                     let member = RemoteMember(
@@ -1322,10 +1455,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                     let authorization = RemoteAuthorization(
                         shareID: stored.id,
                         capability: record.capability,
-                        scope: .session(sessionID),
+                        scope: scope,
                         principal: .guest,
                         member: member,
-                        canApprovePermissions: record.canApprovePermissions
+                        canApprovePermissions: record.targetKind == .projectTerminal
+                            ? false : record.canApprovePermissions
                     )
                     result[stored.id] = MemberRecord(
                         token: stored.token,
@@ -1336,30 +1470,48 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 }
                 let invitation = record.expiresAt > now ? record.invitationToken : nil
                 guard invitation != nil || !members.isEmpty else { continue }
-                restored[sessionID, default: []].append(SessionShare(
+                let share = SessionShare(
                     id: record.id,
                     invitationToken: invitation,
                     capability: record.capability,
-                    canApprovePermissions: record.canApprovePermissions,
+                    canApprovePermissions: record.targetKind == .projectTerminal
+                        ? false : record.canApprovePermissions,
                     createdAt: record.createdAt,
                     expiresAt: record.expiresAt,
                     members: members
-                ))
-                if let invitation {
-                    DispatchQueue.main.asyncAfter(
-                        deadline: .now() + max(0, record.expiresAt.timeIntervalSince(now))
-                    ) { [weak self] in
-                        self?.expireInvitation(token: invitation, sessionID: sessionID)
+                )
+                switch scope {
+                case .session(let sessionID):
+                    restored[sessionID, default: []].append(share)
+                    if let invitation {
+                        DispatchQueue.main.asyncAfter(
+                            deadline: .now() + max(0, record.expiresAt.timeIntervalSince(now))
+                        ) { [weak self] in
+                            self?.expireInvitation(token: invitation, sessionID: sessionID)
+                        }
                     }
+                case .projectTerminal(let terminalID):
+                    restoredTerminals[terminalID, default: []].append(share)
+                    if let invitation {
+                        DispatchQueue.main.asyncAfter(
+                            deadline: .now() + max(0, record.expiresAt.timeIntervalSince(now))
+                        ) { [weak self] in
+                            self?.expireInvitation(token: invitation, terminalID: terminalID)
+                        }
+                    }
+                case .allSessions:
+                    break
                 }
             }
             sessionShares = restored
+            terminalShares = restoredTerminals
             ThreadingLogger.remote.info(
-                "Remote guest shares restored sessions=\(restored.count, privacy: .public) shares=\(restored.values.reduce(0) { $0 + $1.count }, privacy: .public)"
+                "Remote guest shares restored sessions=\(restored.count, privacy: .public) terminals=\(restoredTerminals.count, privacy: .public)"
             )
         } catch {
             guestSharePersistenceError = error.localizedDescription
             sessionShares = [:]
+            terminalShares = [:]
             ThreadingLogger.remote.error(
                 "Remote guest share persistence failed stage=load error=\(error.localizedDescription, privacy: .private(mask: .hash))"
             )
@@ -1369,8 +1521,21 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private func persistGuestShares(
         _ candidate: [SessionID: [SessionShare]]
     ) -> Bool {
+        persistGuestShares(sessions: candidate, terminals: terminalShares)
+    }
+
+    private func persistTerminalGuestShares(
+        _ candidate: [TerminalID: [SessionShare]]
+    ) -> Bool {
+        persistGuestShares(sessions: sessionShares, terminals: candidate)
+    }
+
+    private func persistGuestShares(
+        sessions: [SessionID: [SessionShare]],
+        terminals: [TerminalID: [SessionShare]]
+    ) -> Bool {
         guard guestSharePersistenceError == nil else { return false }
-        let records = candidate.flatMap { sessionID, shares in
+        let sessionRecords = sessions.flatMap { sessionID, shares in
             shares.map { share in
                 RemoteGuestShareRecord(
                     id: share.id,
@@ -1393,6 +1558,31 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 )
             }
         }
+        let terminalRecords = terminals.flatMap { terminalID, shares in
+            shares.map { share in
+                RemoteGuestShareRecord(
+                    id: share.id,
+                    targetKind: .projectTerminal,
+                    sessionID: terminalID.uuidString,
+                    invitationToken: share.invitationToken,
+                    capability: share.capability,
+                    canApprovePermissions: false,
+                    createdAt: share.createdAt,
+                    expiresAt: share.expiresAt,
+                    members: share.members.values.map { member in
+                        RemoteGuestShareRecord.Member(
+                            id: member.authorization.shareID,
+                            token: member.token,
+                            displayName: member.authorization.member?.displayName ?? "Guest",
+                            deviceID: member.authorization.member?.deviceID ?? "unknown",
+                            joinedAt: member.joinedAt,
+                            lastSeenAt: member.lastSeenAt
+                        )
+                    }
+                )
+            }
+        }
+        let records = sessionRecords + terminalRecords
         do {
             try guestShareStore.save(records)
             return true
@@ -1455,6 +1645,20 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         mirrors.sessionSharingChanged()
+    }
+
+    private func expireInvitation(token: String, terminalID: TerminalID) {
+        guard var shares = terminalShares[terminalID],
+              let index = shares.firstIndex(where: { $0.invitationToken == token }) else {
+            return
+        }
+        let share = shares.remove(at: index)
+        var candidate = terminalShares
+        candidate[terminalID] = shares.isEmpty ? nil : shares
+        guard persistTerminalGuestShares(candidate) else { return }
+        terminalShares = candidate
+        for member in share.members.values { revoke(member) }
+        sharingChanged()
     }
 
     // MARK: - Master switch
@@ -1576,6 +1780,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             authority.set(record.authorization, forToken: record.token)
         }
         for shares in sessionShares.values {
+            for share in shares {
+                for member in share.members.values {
+                    authority.set(member.authorization, forToken: member.token)
+                }
+            }
+        }
+        for shares in terminalShares.values {
             for share in shares {
                 for member in share.members.values {
                     authority.set(member.authorization, forToken: member.token)

@@ -229,6 +229,37 @@ public struct RemoteSessionAccountDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// What one chat will do after its provider refuses a turn over an account limit.
+///
+/// The action stays a string so a newer host can add an outcome without making an older phone
+/// fail to decode the whole session catalogue. `accountID` is the account handle only; the
+/// session already supplies the runtime that qualifies it.
+public struct RemoteLimitRecoveryPolicyDTO: Codable, Equatable, Sendable {
+    public static let flagOnly = "flagOnly"
+    public static let waitForReset = "waitForReset"
+    public static let resumeOnBestAccount = "resumeOnBestAccount"
+    public static let resumeVia = "resumeVia"
+
+    public let action: String
+    public let accountID: String?
+
+    public init(action: String, accountID: String? = nil) {
+        self.action = action
+        self.accountID = accountID
+    }
+
+    public var isKnown: Bool {
+        switch action {
+        case Self.flagOnly, Self.waitForReset, Self.resumeOnBestAccount:
+            return accountID == nil
+        case Self.resumeVia:
+            return accountID?.isEmpty == false
+        default:
+            return false
+        }
+    }
+}
+
 /// One session as it appears to a remote client's session list.
 public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
@@ -264,6 +295,12 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     /// The login this session runs on, or nil when the row has nothing extra to say: a runtime
     /// without account routing, the CLI's default login, or a host predating this field.
     public let account: RemoteSessionAccountDTO?
+    /// The routed account handle, including `default`. Owner-only and optional for compatibility.
+    /// Clients join it to the top-level agent catalogue rather than receiving an account array
+    /// on every session row.
+    public let accountID: String?
+    /// The resolved chat/project/app answer. Owner-only; nil on older hosts and guest shares.
+    public let limitRecovery: RemoteLimitRecoveryPolicyDTO?
 
     public init(
         id: String,
@@ -285,7 +322,9 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         terminalThemeAssignmentID: String? = nil,
         inheritedTerminalThemeName: String? = nil,
         inheritedTerminalTheme: RemoteTerminalThemeDTO? = nil,
-        account: RemoteSessionAccountDTO? = nil
+        account: RemoteSessionAccountDTO? = nil,
+        accountID: String? = nil,
+        limitRecovery: RemoteLimitRecoveryPolicyDTO? = nil
     ) {
         self.id = id
         self.title = title
@@ -307,6 +346,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.inheritedTerminalThemeName = inheritedTerminalThemeName
         self.inheritedTerminalTheme = inheritedTerminalTheme
         self.account = account
+        self.accountID = accountID
+        self.limitRecovery = limitRecovery
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -314,7 +355,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         case isPinned, isArchived, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
-        case inheritedTerminalTheme, account
+        case inheritedTerminalTheme, account, accountID, limitRecovery
     }
 
     public init(from decoder: Decoder) throws {
@@ -355,6 +396,11 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
             RemoteSessionAccountDTO.self,
             forKey: .account
         )
+        accountID = try container.decodeIfPresent(String.self, forKey: .accountID)
+        limitRecovery = try container.decodeIfPresent(
+            RemoteLimitRecoveryPolicyDTO.self,
+            forKey: .limitRecovery
+        )
     }
 
     /// Derived on the client as well as the host, so a missed refresh cannot keep an expired
@@ -363,6 +409,52 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         guard !isArchived, let snoozedAt, let snoozedUntil,
               snoozedAt < snoozedUntil else { return false }
         return date.timeIntervalSince1970 < snoozedUntil
+    }
+}
+
+/// One standalone project shell in a remote catalogue.
+///
+/// Kept separate from `RemoteSessionSummaryDTO`: a shell has no agent, transcript, archive,
+/// workspace, permission-approval, or native-conversation lifecycle. Older clients ignore the
+/// optional `RemoteMeDTO.terminals` field instead of mistaking these UUIDs for chat sessions.
+public struct RemoteProjectTerminalSummaryDTO: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let projectName: String
+    /// "dormant", "idle", or "working".
+    public let state: String
+    public let isAvailable: Bool
+    public let createdAt: Double?
+    public let isShared: Bool
+    public let terminalTheme: RemoteTerminalThemeDTO?
+    public let terminalThemeAssignmentID: String?
+    public let inheritedTerminalThemeName: String?
+    public let inheritedTerminalTheme: RemoteTerminalThemeDTO?
+
+    public init(
+        id: String,
+        title: String,
+        projectName: String,
+        state: String,
+        isAvailable: Bool,
+        createdAt: Double? = nil,
+        isShared: Bool = false,
+        terminalTheme: RemoteTerminalThemeDTO? = nil,
+        terminalThemeAssignmentID: String? = nil,
+        inheritedTerminalThemeName: String? = nil,
+        inheritedTerminalTheme: RemoteTerminalThemeDTO? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.projectName = projectName
+        self.state = state
+        self.isAvailable = isAvailable
+        self.createdAt = createdAt
+        self.isShared = isShared
+        self.terminalTheme = terminalTheme
+        self.terminalThemeAssignmentID = terminalThemeAssignmentID
+        self.inheritedTerminalThemeName = inheritedTerminalThemeName
+        self.inheritedTerminalTheme = inheritedTerminalTheme
     }
 }
 
@@ -1242,13 +1334,13 @@ public struct RemoteUsageLimitDTO: Codable, Equatable, Sendable {
     }
 }
 
-/// The `GET /api/me` payload: the protocol the server speaks, what this share is, and the
-/// sessions it reaches. The protocol pair is included so a client can verify compatibility even
+/// The `GET /api/me` payload: the protocol the server speaks, what this share is, and the remote
+/// targets it reaches. The protocol pair is included so a client can verify compatibility even
 /// on a request the server chose to answer.
 public struct RemoteMeDTO: Codable, Equatable, Sendable {
     public struct Share: Codable, Equatable, Sendable {
         public let label: String
-        /// "all" for a My Devices share, "session" for a guest share of one session.
+        /// "all" for My Devices, "session" for one chat, or "terminal" for one project shell.
         public let scope: String
         public let capability: String
         /// Independently granted per chat member. An interactive guest may collaborate without
@@ -1299,6 +1391,9 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
     public let serverProtocol: RemoteProtocolInfo
     public let share: Share
     public let sessions: [RemoteSessionSummaryDTO]
+    /// Standalone shells this capability reaches. Optional keeps older hosts and clients
+    /// mutually decodable while preserving the session/terminal identity boundary.
+    public let terminals: [RemoteProjectTerminalSummaryDTO]?
     /// Optional so a version-1 client can still decode a response from the first macOS build.
     public let host: RemoteHostDTO?
     /// Optional so new clients retain their local fallback against an older host.
@@ -1316,6 +1411,7 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
         serverProtocol: RemoteProtocolInfo,
         share: Share,
         sessions: [RemoteSessionSummaryDTO],
+        terminals: [RemoteProjectTerminalSummaryDTO]? = nil,
         host: RemoteHostDTO? = nil,
         theme: RemoteThemeDTO? = nil,
         themeCatalog: RemoteThemeCatalogDTO? = nil,
@@ -1326,6 +1422,7 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
         self.serverProtocol = serverProtocol
         self.share = share
         self.sessions = sessions
+        self.terminals = terminals
         self.host = host
         self.theme = theme
         self.themeCatalog = themeCatalog
@@ -1514,6 +1611,24 @@ public struct RemoteSetSessionSurfaceRequestDTO: Codable, Equatable, Sendable {
 
     public init(surface: RemoteSessionSurface) {
         self.surface = surface
+    }
+}
+
+/// Moves a resumable conversation to another login of the same runtime.
+public struct RemoteMoveSessionAccountRequestDTO: Codable, Equatable, Sendable {
+    public let accountID: String
+
+    public init(accountID: String) {
+        self.accountID = accountID
+    }
+}
+
+/// Sets the chat-scoped answer for the next account-limit refusal.
+public struct RemoteSetSessionLimitRecoveryRequestDTO: Codable, Equatable, Sendable {
+    public let policy: RemoteLimitRecoveryPolicyDTO
+
+    public init(policy: RemoteLimitRecoveryPolicyDTO) {
+        self.policy = policy
     }
 }
 
@@ -2004,14 +2119,20 @@ public struct RemoteSessionsChangedDTO: Codable, Equatable, Sendable {
     public let type: String
     public let session: RemoteSessionSummaryDTO?
     public let removedSessionID: String?
+    public let terminal: RemoteProjectTerminalSummaryDTO?
+    public let removedTerminalID: String?
 
     public init(
         session: RemoteSessionSummaryDTO? = nil,
-        removedSessionID: String? = nil
+        removedSessionID: String? = nil,
+        terminal: RemoteProjectTerminalSummaryDTO? = nil,
+        removedTerminalID: String? = nil
     ) {
         self.type = "sessionsChanged"
         self.session = session
         self.removedSessionID = removedSessionID
+        self.terminal = terminal
+        self.removedTerminalID = removedTerminalID
     }
 }
 

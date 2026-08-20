@@ -104,6 +104,11 @@ struct RootView: View {
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "shared-link" {
                 SharedSessionLinkView(link: Self.sharedLinkDemo)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "session-settings",
+                      let session = model.me?.sessions.first {
+                MobileSessionSettingsView(sessionID: session.id, onAccountMoved: {})
+                    .environmentObject(model)
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
                         .hasPrefix("permission") == true {
                 NavigationStack {
@@ -488,6 +493,16 @@ struct RootView: View {
                         ContentUnavailableView(
                             "Session unavailable",
                             systemImage: "bubble.left.and.exclamationmark.bubble.right",
+                            description: Text("The link may have expired or the Mac may be offline.")
+                        )
+                    }
+                case .terminal(let terminalID):
+                    if let terminal = model.me?.terminals?.first(where: { $0.id == terminalID }) {
+                        ProjectTerminalDetailView(terminal: terminal)
+                    } else {
+                        ContentUnavailableView(
+                            "Terminal unavailable",
+                            systemImage: "terminal",
                             description: Text("The link may have expired or the Mac may be offline.")
                         )
                     }

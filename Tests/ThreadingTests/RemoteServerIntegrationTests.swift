@@ -1255,6 +1255,130 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(try XCTUnwrap(ProjectStore.shared.session(withID: session.id)).usesNativeUI)
     }
 
+    func testOwnerCanMoveAChatAccountAndSetItsLimitRecovery() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-controls-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: true,
+            title: "Remote controls"
+        ))
+
+        let account = try JSONEncoder().encode(
+            RemoteMoveSessionAccountRequestDTO(accountID: "work")
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/account",
+                bearer: "goodtoken",
+                body: account
+            )).status,
+            200
+        )
+        XCTAssertEqual(sessionCommands.accountMoves.last?.sessionID, session.id)
+        XCTAssertEqual(sessionCommands.accountMoves.last?.accountHandle.name, "work")
+
+        let originalPolicy = LimitRecoverySettings.policy
+        LimitRecoverySettings.policy = .flagOnly
+        defer { LimitRecoverySettings.policy = originalPolicy }
+        let recovery = try JSONEncoder().encode(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
+                action: RemoteLimitRecoveryPolicyDTO.waitForReset
+            ))
+        )
+        let recoveryProbe = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/limit-recovery",
+            bearer: "goodtoken",
+            body: recovery
+        ))
+        XCTAssertEqual(recoveryProbe.status, 200)
+        XCTAssertEqual(sessionAccess.limitRecoveryMutations.last?.sessionID, session.id)
+        XCTAssertEqual(sessionAccess.limitRecoveryMutations.last?.policy, .waitForReset)
+
+        let ownerMe = try JSONDecoder().decode(RemoteMeDTO.self, from: recoveryProbe.body)
+        let ownerSummary = try XCTUnwrap(ownerMe.sessions.first { $0.id == session.id.uuidString })
+        XCTAssertEqual(ownerSummary.accountID, session.accountHandle.name)
+        XCTAssertEqual(
+            ownerSummary.limitRecovery,
+            .init(action: RemoteLimitRecoveryPolicyDTO.waitForReset)
+        )
+
+        let inheritedRecovery = try JSONEncoder().encode(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
+                action: RemoteLimitRecoveryPolicyDTO.flagOnly
+            ))
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/limit-recovery",
+                bearer: "goodtoken",
+                body: inheritedRecovery
+            )).status,
+            200
+        )
+        XCTAssertNil(
+            sessionAccess.limitRecoveryMutations.last?.policy,
+            "matching the inherited answer must keep the chat following its broader setting"
+        )
+
+        authority.set(RemoteAuthorization(
+            shareID: "settings-guest",
+            capability: .interact,
+            scope: .session(session.id),
+            principal: .guest
+        ), forToken: "settingsguest")
+        let guestMe = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "settingsguest")).body
+        )
+        let guestSummary = try XCTUnwrap(guestMe.sessions.first)
+        XCTAssertNil(guestSummary.accountID)
+        XCTAssertNil(guestSummary.limitRecovery)
+    }
+
+    func testSessionSettingsRoutesRejectMalformedOrUnsupportedChoices() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-control-validation-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: true
+        ))
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/account",
+                bearer: "goodtoken",
+                body: Data(#"{"accountID":"../credentials"}"#.utf8)
+            )).status,
+            400
+        )
+        let futureRecovery = try JSONEncoder().encode(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(action: "futureAction"))
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/limit-recovery",
+                bearer: "goodtoken",
+                body: futureRecovery
+            )).status,
+            400
+        )
+        XCTAssertTrue(sessionCommands.accountMoves.isEmpty)
+        XCTAssertTrue(sessionAccess.limitRecoveryMutations.isEmpty)
+    }
+
     func testDormantResumeFailsClosedWithoutApplicationCommands() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-session-no-commands-\(UUID().uuidString)",
@@ -1278,6 +1402,80 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 body: Data()
             )).status,
             503
+        )
+    }
+
+    func testStandaloneTerminalCatalogAndResumeHonorTypedCapabilityScope() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-project-terminal-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let terminal = try XCTUnwrap(ProjectStore.shared.addTerminal(to: project.id))
+        defer {
+            ProjectTerminalRuntime.shared.discard(terminalID: terminal.id)
+            _ = ProjectStore.shared.removeTerminal(id: terminal.id)
+            _ = ProjectStore.shared.removeProject(id: project.id)
+            try? FileManager.default.removeItem(at: temporary)
+        }
+
+        let ownerMe = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "goodtoken")).body
+        )
+        XCTAssertEqual(ownerMe.terminals?.filter { $0.id == terminal.id.uuidString }.count, 1)
+        XCTAssertFalse(ownerMe.sessions.contains { $0.id == terminal.id.uuidString })
+        let summary = try XCTUnwrap(ownerMe.terminals?.first { $0.id == terminal.id.uuidString })
+        XCTAssertEqual(summary.state, "dormant")
+        XCTAssertFalse(summary.isAvailable)
+
+        authority.set(RemoteAuthorization(
+            shareID: "terminal-view",
+            capability: .view,
+            scope: .projectTerminal(terminal.id),
+            principal: .guest
+        ), forToken: "terminalview")
+        let guestMe = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "terminalview")).body
+        )
+        XCTAssertEqual(guestMe.share.scope, "terminal")
+        XCTAssertTrue(guestMe.sessions.isEmpty)
+        XCTAssertEqual(guestMe.terminals?.map(\.id), [terminal.id.uuidString])
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/terminal/\(terminal.id.uuidString)/resume",
+                bearer: "terminalview",
+                body: Data()
+            )).status,
+            403,
+            "view-only terminal links cannot start a shell"
+        )
+
+        authority.set(RemoteAuthorization(
+            shareID: "terminal-control",
+            capability: .interact,
+            scope: .projectTerminal(terminal.id),
+            principal: .guest
+        ), forToken: "terminalcontrol")
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/terminal/\(terminal.id.uuidString)/resume",
+                bearer: "terminalcontrol",
+                body: Data()
+            )).status,
+            202
+        )
+        XCTAssertEqual(sessionCommands.resumedTerminalIDs, [terminal.id])
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/terminal/\(TerminalID().uuidString)/resume",
+                bearer: "terminalcontrol",
+                body: Data()
+            )).status,
+            404,
+            "one terminal capability must not discover or control another terminal"
         )
     }
 
@@ -1511,6 +1709,28 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             )).status,
             403
         )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(sessionID.uuidString)/account",
+                bearer: "guesttoken",
+                body: try JSONEncoder().encode(
+                    RemoteMoveSessionAccountRequestDTO(accountID: "work")
+                )
+            )).status,
+            403
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(sessionID.uuidString)/limit-recovery",
+                bearer: "guesttoken",
+                body: try JSONEncoder().encode(
+                    RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
+                        action: RemoteLimitRecoveryPolicyDTO.waitForReset
+                    ))
+                )
+            )).status,
+            403
+        )
         let snooze = try JSONEncoder().encode(
             RemoteSetSessionSnoozeRequestDTO(snoozedUntil: Date().timeIntervalSince1970 + 3_600)
         )
@@ -1613,6 +1833,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
     func testGuestPermissionApprovalIsAnIndependentChatRight() {
         let sessionID = SessionID()
+        let terminalID = TerminalID(sessionID.rawValue)
         let guest = RemoteAuthorization(
             shareID: "guest",
             capability: .interact,
@@ -1632,6 +1853,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             scope: .allSessions,
             principal: .ownerDevice
         )
+        let terminalGuest = RemoteAuthorization(
+            shareID: "terminal-guest",
+            capability: .interact,
+            scope: .projectTerminal(terminalID),
+            principal: .guest,
+            canApprovePermissions: true
+        )
 
         XCTAssertTrue(guest.scope.covers(sessionID))
         XCTAssertFalse(guest.canApprovePermissions)
@@ -1643,6 +1871,17 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(owner.canApprovePermissions)
         XCTAssertTrue(owner.canManageHost)
         XCTAssertTrue(owner.canReadHostUsage)
+        XCTAssertTrue(terminalGuest.scope.covers(terminalID))
+        XCTAssertFalse(
+            terminalGuest.scope.covers(sessionID),
+            "equal UUID bytes must not collapse terminal and chat authority"
+        )
+        XCTAssertFalse(terminalGuest.canManageHost)
+        XCTAssertFalse(terminalGuest.canReadHostUsage)
+        XCTAssertFalse(
+            terminalGuest.canApprovePermissions,
+            "terminal capabilities never inherit an AI permission surface"
+        )
     }
 
     func testGuestPermissionProjectionIsVisibleButNotActionable() {
@@ -2135,6 +2374,25 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertNil(RemoteRouter.resumeSessionID(forPath: "/api/session/abc"))
 
         XCTAssertEqual(
+            RemoteRouter.resumeTerminalID(forPath: "/api/terminal/terminal-1/resume"),
+            "terminal-1"
+        )
+        XCTAssertEqual(
+            RemoteRouter.shareTerminalID(forPath: "/api/terminal/terminal-1/share"),
+            "terminal-1"
+        )
+        XCTAssertEqual(
+            RemoteRouter.unshareTerminalID(forPath: "/api/terminal/terminal-1/unshare"),
+            "terminal-1"
+        )
+        XCTAssertEqual(
+            RemoteRouter.webSocketTerminalID(forPath: "/ws/terminal/terminal-1"),
+            "terminal-1"
+        )
+        XCTAssertNil(RemoteRouter.resumeTerminalID(forPath: "/api/terminal/a/b/resume"))
+        XCTAssertNil(RemoteRouter.webSocketTerminalID(forPath: "/ws/terminal/a/b"))
+
+        XCTAssertEqual(
             RemoteRouter.themeSessionID(forPath: "/api/session/abc/theme"),
             "abc"
         )
@@ -2144,6 +2402,20 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             "abc"
         )
         XCTAssertNil(RemoteRouter.surfaceSessionID(forPath: "/api/session/a/b/surface"))
+        XCTAssertEqual(
+            RemoteRouter.accountSessionID(forPath: "/api/session/abc/account"),
+            "abc"
+        )
+        XCTAssertNil(RemoteRouter.accountSessionID(forPath: "/api/session/a/b/account"))
+        XCTAssertEqual(
+            RemoteRouter.limitRecoverySessionID(
+                forPath: "/api/session/abc/limit-recovery"
+            ),
+            "abc"
+        )
+        XCTAssertNil(RemoteRouter.limitRecoverySessionID(
+            forPath: "/api/session/a/b/limit-recovery"
+        ))
         XCTAssertEqual(
             RemoteRouter.snoozedSessionID(forPath: "/api/session/abc/snoozed"),
             "abc"
@@ -3073,11 +3345,18 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
         let usesNativeUI: Bool
     }
 
+    struct LimitRecoveryMutation: Equatable {
+        let sessionID: SessionID
+        let policy: LimitRecoveryPolicy?
+    }
+
     private let store: ProjectStore
     private(set) var queriedSessionIDs: [SessionID] = []
+    private(set) var queriedTerminalIDs: [TerminalID] = []
     private(set) var queriedProjectIDs: [ProjectID] = []
     private(set) var pinnedMutations: [PinnedMutation] = []
     private(set) var surfaceMutations: [SurfaceMutation] = []
+    private(set) var limitRecoveryMutations: [LimitRecoveryMutation] = []
 
     init(store: ProjectStore) {
         self.store = store
@@ -3086,6 +3365,11 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
     func session(withID sessionID: SessionID) -> AgentSession? {
         queriedSessionIDs.append(sessionID)
         return store.session(withID: sessionID)
+    }
+
+    func terminal(withID terminalID: TerminalID) -> ProjectTerminal? {
+        queriedTerminalIDs.append(terminalID)
+        return store.terminal(withID: terminalID)
     }
 
     func project(withID projectID: ProjectID) -> Project? {
@@ -3115,6 +3399,14 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
             usesNativeUI: usesNativeUI
         ))
         return store.setUsesNativeUI(usesNativeUI, for: sessionID)
+    }
+
+    func setLimitRecoveryPolicy(
+        _ policy: LimitRecoveryPolicy?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        limitRecoveryMutations.append(.init(sessionID: sessionID, policy: policy))
+        return store.setLimitRecoveryPolicy(policy, forSessionID: sessionID)
     }
 }
 
@@ -3209,14 +3501,30 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
 
     var createdSessionID: SessionID?
     var resumeResult = true
+    var accountMoveResult: Result<Void, RemoteSessionAccountMoveFailure> = .success(())
     private(set) var launches: [RemoteSessionLaunch] = []
     private(set) var resumedSessionIDs: [SessionID] = []
+    private(set) var resumedTerminalIDs: [TerminalID] = []
+    private(set) var accountMoves: [(sessionID: SessionID, accountHandle: AccountHandle)] = []
     private(set) var sessionRefreshes: [SessionRefresh] = []
     private(set) var surfaceRefreshes: [SessionID] = []
 
     func resumeRemoteSession(_ sessionID: SessionID) -> Bool {
         resumedSessionIDs.append(sessionID)
         return resumeResult
+    }
+
+    func resumeRemoteTerminal(_ terminalID: TerminalID) -> Bool {
+        resumedTerminalIDs.append(terminalID)
+        return resumeResult
+    }
+
+    func moveRemoteSession(
+        _ sessionID: SessionID,
+        to accountHandle: AccountHandle
+    ) -> Result<Void, RemoteSessionAccountMoveFailure> {
+        accountMoves.append((sessionID: sessionID, accountHandle: accountHandle))
+        return accountMoveResult
     }
 
     func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID? {
@@ -3928,6 +4236,38 @@ final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
             persistsOwnerDevice: false
         ))
         XCTAssertEqual(store.saveCount, 0)
+    }
+
+    func testStandaloneTerminalMembershipRestoresWithExactScopeAndNoAIApproval() throws {
+        let terminalID = TerminalID()
+        let store = InMemoryRemoteGuestShareStore(shares: [RemoteGuestShareRecord(
+            id: "terminal-share",
+            targetKind: .projectTerminal,
+            sessionID: terminalID.uuidString,
+            invitationToken: invitationToken,
+            capability: .interact,
+            canApprovePermissions: true,
+            createdAt: Date(),
+            expiresAt: Date(timeIntervalSinceNow: 3_600),
+            members: []
+        )])
+        let first = makeCoordinator(guestShareStore: store)
+        XCTAssertTrue(first.hasTerminalShares(terminalID))
+
+        let redemption = try XCTUnwrap(first.redeemInvitation(
+            token: invitationToken,
+            deviceID: "anna-phone",
+            displayName: "Anna",
+            persistsOwnerDevice: false
+        ))
+        XCTAssertEqual(redemption.authorization.scope, .projectTerminal(terminalID))
+        XCTAssertFalse(redemption.authorization.canApprovePermissions)
+        XCTAssertFalse(redemption.authorization.canManageHost)
+
+        let afterRestart = makeCoordinator(guestShareStore: store)
+        XCTAssertTrue(afterRestart.hasTerminalShares(terminalID))
+        XCTAssertEqual(store.shares.first?.targetKind, .projectTerminal)
+        XCTAssertFalse(store.shares.first?.canApprovePermissions ?? true)
     }
 }
 

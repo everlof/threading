@@ -493,6 +493,18 @@
     return continuityHostKey.length + ":" + continuityHostKey + sessionID;
   }
 
+  // A chat and a standalone project terminal may legitimately have the same UUID. Keep the
+  // original chat key for continuity compatibility, but give terminals their own namespace so
+  // a terminal draft, scroll position, or restored route can never be applied to the chat.
+  function continuityTargetID(session) {
+    if (!session || !session.id) { return null; }
+    return session._targetKind === "terminal" ? "terminal:" + session.id : session.id;
+  }
+
+  function activeContinuityTargetID() {
+    return continuityTargetID(activeSession);
+  }
+
   function continuityState(sessionID) {
     var key = continuitySessionKey(sessionID);
     if (!key) { return {}; }
@@ -534,14 +546,14 @@
 
   function saveConversationDraft() {
     if (!activeSessionID) { return; }
-    updateContinuity(activeSessionID, function (state) {
+    updateContinuity(activeContinuityTargetID(), function (state) {
       state.conversationDraft = els.prompt.value.trim() ? els.prompt.value : "";
     });
   }
 
   function saveTerminalDraft() {
     if (!activeSessionID) { return; }
-    updateContinuity(activeSessionID, function (state) {
+    updateContinuity(activeContinuityTargetID(), function (state) {
       state.terminalDraft = els.terminalPrompt.value.trim()
         ? els.terminalPrompt.value : "";
     });
@@ -549,7 +561,7 @@
 
   function savePendingSubmission(value) {
     if (!activeSessionID) { return; }
-    updateContinuity(activeSessionID, function (state) {
+    updateContinuity(activeContinuityTargetID(), function (state) {
       state.pendingSubmission = value || null;
     });
   }
@@ -1560,7 +1572,17 @@
     els.badge.hidden = true;
     els.sessions.innerHTML = "";
 
-    if (!me.sessions || me.sessions.length === 0) {
+    var terminalSessions = (me.terminals || []).map(function (terminal) {
+      return Object.assign({}, terminal, {
+        _targetKind: "terminal",
+        agentKind: "terminal",
+        surface: "terminal",
+        lastActiveAt: terminal.createdAt || null,
+      });
+    });
+    var allSessions = (me.sessions || []).concat(terminalSessions);
+
+    if (allSessions.length === 0) {
       setStatus(t("sessions.empty"));
       return;
     }
@@ -1570,8 +1592,11 @@
       var restoredArchive = loadContinuityArchive();
       var restoredSession = restoredArchive.lastRoute &&
         restoredArchive.lastRoute.hostKey === continuityHostKey &&
-        me.sessions.find(function (session) {
-          return session.id === restoredArchive.lastRoute.sessionID;
+        allSessions.find(function (session) {
+          var restoredKind = restoredArchive.lastRoute.targetKind || "session";
+          var sessionKind = session._targetKind === "terminal" ? "terminal" : "session";
+          return session.id === restoredArchive.lastRoute.sessionID &&
+            sessionKind === restoredKind;
         });
       if (restoredSession) {
         prepareSession(restoredSession);
@@ -1598,7 +1623,7 @@
     addDiagnosticControl(device, me);
     els.sessions.appendChild(device);
 
-    var attentionSessions = me.sessions.filter(function (session) {
+    var attentionSessions = allSessions.filter(function (session) {
       return !isSessionSnoozed(session);
     });
     var snoozedSessions = me.sessions.filter(isSessionSnoozed);
@@ -1610,20 +1635,33 @@
   }
 
   function applySessionDelta(message) {
-    if (!sessionSnapshot || (!message.session && !message.removedSessionID)) {
+    if (!sessionSnapshot || (!message.session && !message.removedSessionID &&
+        !message.terminal && !message.removedTerminalID)) {
       return false;
     }
-    var changedID = message.removedSessionID || message.session.id;
-    sessionSnapshot.sessions = (sessionSnapshot.sessions || []).filter(function (session) {
-      return session.id !== changedID;
-    });
-    if (message.session && !message.session.isArchived) {
-      sessionSnapshot.sessions.push(message.session);
+    if (message.session || message.removedSessionID) {
+      var changedID = message.removedSessionID || message.session.id;
+      sessionSnapshot.sessions = (sessionSnapshot.sessions || []).filter(function (session) {
+        return session.id !== changedID;
+      });
+      if (message.session && !message.session.isArchived) {
+        sessionSnapshot.sessions.push(message.session);
+      }
+      sessionSnapshot.sessions.sort(function (left, right) {
+        if (left.isPinned !== right.isPinned) { return left.isPinned ? -1 : 1; }
+        return (right.lastActiveAt || 0) - (left.lastActiveAt || 0);
+      });
     }
-    sessionSnapshot.sessions.sort(function (left, right) {
-      if (left.isPinned !== right.isPinned) { return left.isPinned ? -1 : 1; }
-      return (right.lastActiveAt || 0) - (left.lastActiveAt || 0);
-    });
+    if (message.terminal || message.removedTerminalID) {
+      var changedTerminalID = message.removedTerminalID || message.terminal.id;
+      sessionSnapshot.terminals = (sessionSnapshot.terminals || []).filter(function (terminal) {
+        return terminal.id !== changedTerminalID;
+      });
+      if (message.terminal) { sessionSnapshot.terminals.push(message.terminal); }
+      sessionSnapshot.terminals.sort(function (left, right) {
+        return (right.createdAt || 0) - (left.createdAt || 0);
+      });
+    }
     renderSessions(sessionSnapshot);
     return true;
   }
@@ -1707,6 +1745,7 @@
   }
 
   function agentLabel(kind) {
+    if (String(kind || "").toLowerCase() === "terminal") { return "Terminal"; }
     return String(kind || "").toLowerCase() === "claude" ? "Claude Code" : "Codex";
   }
 
@@ -1731,13 +1770,14 @@
     var generation = ++sessionListGeneration;
     els.title.textContent = session.title || t("session.defaultName");
     setStatus(t("session.resuming"));
-    fetch("/api/session/" + encodeURIComponent(session.id) + "/resume", {
+    var targetPath = session._targetKind === "terminal" ? "terminal" : "session";
+    fetch("/api/" + targetPath + "/" + encodeURIComponent(session.id) + "/resume", {
       method: "POST",
       headers: authHeaders(),
     }).then(function (res) {
       if (generation !== sessionListGeneration) { return; }
       if (!res.ok) { throw new Error("resume"); }
-      waitForSession(session.id, generation, 0);
+      waitForSession(session.id, session._targetKind, generation, 0);
     }).catch(function () {
       if (generation === sessionListGeneration) {
         setStatus(t("session.resumeFailed"));
@@ -1745,7 +1785,7 @@
     });
   }
 
-  function waitForSession(sessionID, generation, attempt) {
+  function waitForSession(sessionID, targetKind, generation, attempt) {
     if (generation !== sessionListGeneration) { return; }
     fetch("/api/me", { headers: authHeaders() }).then(function (res) {
       if (!res.ok) { throw new Error("poll"); }
@@ -1753,14 +1793,23 @@
     }).then(function (me) {
       if (generation !== sessionListGeneration) { return; }
       hostTheme = me.theme || hostTheme;
-      var session = (me.sessions || []).find(function (item) { return item.id === sessionID; });
+      var source = targetKind === "terminal" ? (me.terminals || []) : (me.sessions || []);
+      var session = source.find(function (item) { return item.id === sessionID; });
+      if (session && targetKind === "terminal") {
+        session = Object.assign({}, session, {
+          _targetKind: "terminal",
+          agentKind: "terminal",
+          surface: "terminal",
+          lastActiveAt: session.createdAt || null,
+        });
+      }
       if (session && session.isAvailable) {
         openSession(session);
         return;
       }
       if (attempt >= 39) { throw new Error("timeout"); }
       pollTimer = setTimeout(function () {
-        waitForSession(sessionID, generation, attempt + 1);
+        waitForSession(sessionID, targetKind, generation, attempt + 1);
       }, 500);
     }).catch(function () {
       if (generation === sessionListGeneration) {
@@ -1789,11 +1838,16 @@
     hasRestoredConversationViewport = false;
     hasRestoredTerminalViewport = false;
     var continuityArchive = loadContinuityArchive();
-    continuityArchive.lastRoute = { hostKey: continuityHostKey, sessionID: session.id };
+    continuityArchive.lastRoute = {
+      hostKey: continuityHostKey,
+      sessionID: session.id,
+      targetKind: session._targetKind === "terminal" ? "terminal" : "session",
+    };
     saveContinuityArchive(continuityArchive);
-    els.prompt.value = continuityState(session.id).conversationDraft || "";
-    els.terminalPrompt.value = continuityState(session.id).terminalDraft || "";
-    pendingPrompt = restorePendingSubmission(session.id);
+    var continuityID = continuityTargetID(session);
+    els.prompt.value = continuityState(continuityID).conversationDraft || "";
+    els.terminalPrompt.value = continuityState(continuityID).terminalDraft || "";
+    pendingPrompt = restorePendingSubmission(continuityID);
     if (pendingPrompt) {
       if (pendingPrompt.messageType === "terminalSubmit") {
         setTerminalComposerStatus("terminal.sendingOnce", false);
@@ -1818,8 +1872,10 @@
     });
 
     var scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    var socketTarget = session._targetKind === "terminal" ? "terminal" : "session";
     var openedSocket = new WebSocket(
-      scheme + "//" + location.host + "/ws/session/" + encodeURIComponent(session.id)
+      scheme + "//" + location.host + "/ws/" + socketTarget + "/" +
+        encodeURIComponent(session.id)
     );
     socket = openedSocket;
     openedSocket.binaryType = "arraybuffer";
@@ -1928,7 +1984,7 @@
 
   function restoreTerminalViewport() {
     if (!term || !activeSessionID || hasRestoredTerminalViewport) { return; }
-    var progress = continuityState(activeSessionID).terminalViewportProgress;
+    var progress = continuityState(activeContinuityTargetID()).terminalViewportProgress;
     var maximum = term.buffer.active.baseY;
     if (typeof progress !== "number") {
       hasRestoredTerminalViewport = true;
@@ -1943,7 +1999,7 @@
     if (!term || !activeSessionID) { return; }
     var buffer = term.buffer.active;
     var progress = buffer.baseY > 0 ? buffer.viewportY / buffer.baseY : 1;
-    updateContinuity(activeSessionID, function (state) {
+    updateContinuity(activeContinuityTargetID(), function (state) {
       state.terminalViewportProgress = Math.max(0, Math.min(1, progress));
     });
   }
@@ -2201,7 +2257,7 @@
   }
 
   function renderConversation(snapshot) {
-    var savedViewport = activeSessionID ? continuityState(activeSessionID) : {};
+    var savedViewport = activeSessionID ? continuityState(activeContinuityTargetID()) : {};
     var restoresSavedViewport = !hasRestoredConversationViewport &&
       savedViewport.conversationFollowsBottom === false &&
       typeof savedViewport.conversationViewportProgress === "number";
@@ -2518,7 +2574,7 @@
       );
       var progress = maximum > 0 ? els.conversationRows.scrollTop / maximum : 1;
       var followsBottom = maximum - els.conversationRows.scrollTop < 100;
-      updateContinuity(activeSessionID, function (state) {
+      updateContinuity(activeContinuityTargetID(), function (state) {
         state.conversationViewportProgress = Math.max(0, Math.min(1, progress));
         state.conversationFollowsBottom = followsBottom;
       });

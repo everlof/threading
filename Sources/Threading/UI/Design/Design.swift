@@ -1028,6 +1028,25 @@ enum Design {
         }
     }
 
+    // MARK: - Workload analyzer
+
+    /// The compact spectrum display that may replace the sidebar identity under a player
+    /// material. Its geometry is fixed and bounded independently of session count: the exact
+    /// count is printed beside seven visual bands rather than materializing one view per agent.
+    enum WorkloadAnalyzer {
+        static let size = NSSize(width: 86, height: 24)
+        static let contentInset = Spacing.tight
+        static let bandCount = 7
+        static let cellCount = 6
+        static let bandWidth: CGFloat = 5
+        static let bandGap: CGFloat = 2
+        static let cellHeight: CGFloat = 2
+        static let cellGap: CGFloat = 1
+        static let readingGap = Spacing.small
+        static let readingWidth: CGFloat = 15
+        static let peakHeight: CGFloat = 1
+    }
+
     enum UsageDashboard {
         static let metricCardHeight: CGFloat = 76
 
@@ -1973,6 +1992,9 @@ enum Design {
         static var brandParticleOrbitCycle: TimeInterval { reducesMotion ? 0 : 2.4 }
         /// The outer dots answer a press first; this is the whole outer-to-core cascade.
         static var brandParticlePressCascade: TimeInterval { reducesMotion ? 0 : 0.1 }
+        /// The player workload analyzer advances in deliberately stepped display frames. It is
+        /// zero under Reduce Motion, which removes the driver instead of drawing identical frames.
+        static var workloadAnalyzerFrameInterval: TimeInterval { reducesMotion ? 0 : 0.1 }
     }
 
     // MARK: - Opacity

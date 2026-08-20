@@ -433,6 +433,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond(.upgrade(sessionID: sessionID))
             return
         }
+        if request.method == "GET",
+           let terminalID = RemoteRouter.webSocketTerminalID(forPath: path) {
+            respond(.upgradeTerminal(terminalID: terminalID))
+            return
+        }
 
         // The one REST call: the share and its sessions.
         if request.method == "GET", path == RemoteRouter.apiSessionsPath {
@@ -481,6 +486,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         if request.method == "POST",
            let sessionID = RemoteRouter.resumeSessionID(forPath: path) {
             handleResume(request, sessionID: sessionID, respond: respond)
+            return
+        }
+        if request.method == "POST",
+           let terminalID = RemoteRouter.resumeTerminalID(forPath: path) {
+            handleResumeTerminal(request, terminalID: terminalID, respond: respond)
             return
         }
 
@@ -545,6 +555,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if request.method == "POST",
+           let sessionID = RemoteRouter.accountSessionID(forPath: path) {
+            handleSessionAccount(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
+           let sessionID = RemoteRouter.limitRecoverySessionID(forPath: path) {
+            handleSessionLimitRecovery(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
            let sessionID = RemoteRouter.shareSessionID(forPath: path) {
             handleCreateShare(request, sessionID: sessionID, respond: respond)
             return
@@ -553,6 +575,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         if request.method == "POST",
            let sessionID = RemoteRouter.unshareSessionID(forPath: path) {
             handleRevokeShares(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
+           let terminalID = RemoteRouter.shareTerminalID(forPath: path) {
+            handleCreateTerminalShare(request, terminalID: terminalID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
+           let terminalID = RemoteRouter.unshareTerminalID(forPath: path) {
+            handleRevokeTerminalShares(request, terminalID: terminalID, respond: respond)
             return
         }
 
@@ -828,6 +862,42 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             respond(.respond(RemoteRouter.json(
                 ["state": self.services.runtimeStatus.isRunning(sessionID: sessionID) ? "ready" : "starting"],
+                status: 202,
+                reason: "Accepted"
+            )))
+        }
+    }
+
+    private func handleResumeTerminal(
+        _ request: HTTPRequest,
+        terminalID rawTerminalID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.capability == .interact else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let terminalID = TerminalID(uuidString: rawTerminalID),
+              authorization.scope.covers(terminalID) else {
+            respond(.respond(RemoteRouter.error(404, "Not Found")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.services.sessionQueries.terminal(withID: terminalID) != nil else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            if !self.services.mirrors.isTerminalAvailable(terminalID) {
+                guard let sessionCommands = self.sessionCommands,
+                      sessionCommands.resumeRemoteTerminal(terminalID) else {
+                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                    return
+                }
+            }
+            respond(.respond(RemoteRouter.json(
+                ["state": self.services.mirrors.isTerminalAvailable(terminalID)
+                    ? "ready" : "starting"],
                 status: 202,
                 reason: "Accepted"
             )))
@@ -1586,6 +1656,153 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
+    private func handleSessionAccount(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeSessionManagement(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteMoveSessionAccountRequestDTO.self,
+            from: request.body
+        ), RemoteInboundPolicy.acceptsLaunchIdentifier(choice.accountID) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard let sessionID = SessionID(uuidString: rawSessionID),
+                  let session = self.services.sessionQueries.session(withID: sessionID) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            guard session.kind.supportsAccounts else {
+                respond(.respond(RemoteRouter.error(422, "Unsupported Runtime")))
+                return
+            }
+            guard let commands = self.sessionCommands else {
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                return
+            }
+
+            switch commands.moveRemoteSession(
+                sessionID,
+                to: AccountHandle(storedName: choice.accountID)
+            ) {
+            case .success:
+                self.services.eventLog.recordRemoteEvent("Session account changed remotely", [
+                    "session": sessionID.uuidString,
+                    "account": choice.accountID,
+                    "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                ])
+                respond(.respond(RemoteRouter.json(
+                    self.services.mirrors.meResponse(for: authorization)
+                )))
+            case .failure(.sessionNotFound):
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            case .failure(.accountNotFound), .failure(.unsupportedRuntime):
+                respond(.respond(RemoteRouter.error(422, "Unsupported Account")))
+            case .failure(.appUnavailable):
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+            case .failure(.moveRefused(let message)):
+                respond(.respond(RemoteRouter.error(409, message)))
+            }
+        }
+    }
+
+    private func handleSessionLimitRecovery(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeSessionManagement(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteSetSessionLimitRecoveryRequestDTO.self,
+            from: request.body
+        ), choice.policy.isKnown else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard let sessionID = SessionID(uuidString: rawSessionID),
+                  let session = self.services.sessionQueries.session(withID: sessionID) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            guard let policy = self.limitRecoveryPolicy(
+                choice.policy,
+                for: session
+            ) else {
+                respond(.respond(RemoteRouter.error(422, "Unsupported Recovery")))
+                return
+            }
+            let inherited = LimitRecoveryResolution.inherited(
+                beyond: .session,
+                project: self.services.sessionQueries.project(forSessionID: sessionID)?
+                    .limitRecoveryPolicy,
+                app: LimitRecoverySettings.policy
+            )
+            let result = self.services.sessionMutations.setLimitRecoveryPolicy(
+                policy == inherited ? nil : policy,
+                forSessionID: sessionID
+            )
+            switch result {
+            case .applied, .unchanged:
+                self.services.eventLog.recordRemoteEvent(
+                    "Session limit recovery changed remotely",
+                    [
+                        "session": sessionID.uuidString,
+                        "policy": choice.policy.action,
+                        "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                    ]
+                )
+                respond(.respond(RemoteRouter.json(
+                    self.services.mirrors.meResponse(for: authorization)
+                )))
+            case .targetNotFound:
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            case .unsupportedValue:
+                respond(.respond(RemoteRouter.error(422, "Unsupported Recovery")))
+            case .persistenceRefused:
+                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+            }
+        }
+    }
+
+    @MainActor
+    private func limitRecoveryPolicy(
+        _ remote: RemoteLimitRecoveryPolicyDTO,
+        for session: AgentSession
+    ) -> LimitRecoveryPolicy? {
+        switch remote.action {
+        case RemoteLimitRecoveryPolicyDTO.flagOnly:
+            return .flagOnly
+        case RemoteLimitRecoveryPolicyDTO.waitForReset:
+            return .waitForReset
+        case RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount:
+            return session.kind.supportsAccounts ? .resumeOnBestAccount : nil
+        case RemoteLimitRecoveryPolicyDTO.resumeVia:
+            guard let rawAccountID = remote.accountID,
+                  RemoteInboundPolicy.acceptsLaunchIdentifier(rawAccountID) else { return nil }
+            let handle = AccountHandle(storedName: rawAccountID)
+            guard SessionMigration.destinations(for: session).contains(where: {
+                $0.handle == handle
+            }) else { return nil }
+            return .resumeVia(AccountID(provider: session.kind, handle: handle))
+        default:
+            return nil
+        }
+    }
+
     private func handleCreateShare(
         _ request: HTTPRequest,
         sessionID rawSessionID: String,
@@ -1659,6 +1876,82 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             hostCommands.revokeSessionShares(sessionID)
+            respond(.respond(RemoteRouter.json(
+                self.services.mirrors.meResponse(for: authorization)
+            )))
+        }
+    }
+
+    private func handleCreateTerminalShare(
+        _ request: HTTPRequest,
+        terminalID rawTerminalID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let terminalID = TerminalID(uuidString: rawTerminalID) else {
+            respond(.respond(RemoteRouter.error(404, "Not Found")))
+            return
+        }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteCreateShareRequestDTO.self,
+            from: request.body
+        ), let capability = RemoteCapability(rawValue: choice.capability) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.services.sessionQueries.terminal(withID: terminalID) != nil,
+                  let hostCommands = self.hostCommands else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            switch hostCommands.createTerminalShare(for: terminalID, capability: capability) {
+            case .success(let created):
+                respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
+                    url: created.url.absoluteString,
+                    capability: capability.rawValue,
+                    canApprovePermissions: false,
+                    expiresAt: created.expiresAt.timeIntervalSince1970,
+                    me: self.services.mirrors.meResponse(for: authorization)
+                ))))
+            case .failure:
+                respond(.respond(RemoteRouter.error(503, "Sharing Not Available")))
+            }
+        }
+    }
+
+    private func handleRevokeTerminalShares(
+        _ request: HTTPRequest,
+        terminalID rawTerminalID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        guard let terminalID = TerminalID(uuidString: rawTerminalID) else {
+            respond(.respond(RemoteRouter.error(404, "Not Found")))
+            return
+        }
+        guard (try? JSONDecoder().decode(
+            RemoteRevokeSharesRequestDTO.self,
+            from: request.body
+        )) != nil else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.services.sessionQueries.terminal(withID: terminalID) != nil,
+                  let hostCommands = self.hostCommands else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            hostCommands.revokeTerminalShares(terminalID)
             respond(.respond(RemoteRouter.json(
                 self.services.mirrors.meResponse(for: authorization)
             )))
@@ -2239,6 +2532,44 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if let rawTerminalID = connection.routedTerminalID {
+            guard let terminalID = TerminalID(uuidString: rawTerminalID) else {
+                connection.sendClose(code: 4004, reason: "Unknown terminal")
+                return
+            }
+            guard authorization.scope.covers(terminalID) else {
+                recordFailedAuth(reason: "scope", device: rawDevice)
+                connection.sendClose(code: 4003, reason: "Forbidden")
+                return
+            }
+            guard connection.authenticate(
+                authorization: authorization,
+                deviceID: device,
+                deviceName: deviceName,
+                terminalReplayBudget: replayBudget
+            ) else { return }
+            DispatchQueue.main.async {
+                guard self.authorizer?.isCurrent(authorization) == true else {
+                    connection.sendClose(code: 4003, reason: "Share revoked")
+                    return
+                }
+                guard self.services.mirrors.attach(
+                    connection,
+                    to: terminalID,
+                    authorization: authorization
+                ) else {
+                    connection.sendClose(code: 4004, reason: "Terminal not available")
+                    return
+                }
+                self.services.eventLog.recordRemoteEvent("Remote terminal connected", [
+                    "terminal": terminalID.uuidString,
+                    "capability": authorization.capability.rawValue,
+                    "device": device ?? "unknown",
+                ])
+            }
+            return
+        }
+
         guard let routed = connection.routedSessionID else {
             connection.sendClose(code: 4004, reason: "Unknown session")
             return
@@ -2318,9 +2649,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             self.services.eventLog.recordRemoteEvent("Remote input refused", ["reason": "view-only"])
             return
         }
-        guard let data, let routed = connection.routedSessionID, let sessionID = SessionID(uuidString: routed) else {
-            return
-        }
+        guard let data else { return }
         guard RemoteInboundPolicy.acceptsTerminalInput(data) else {
             connection.sendText(encode(RemoteErrorDTO(code: "inputTooLarge")))
             return
@@ -2333,12 +2662,26 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 return
             }
-            let accepted = self.services.mirrors.sendInput(
-                bytes,
-                to: sessionID,
-                device: device,
-                authorization: authorization
-            )
+            let accepted: Bool
+            if let rawTerminalID = connection.routedTerminalID,
+               let terminalID = TerminalID(uuidString: rawTerminalID) {
+                accepted = self.services.mirrors.sendInput(
+                    bytes,
+                    to: terminalID,
+                    device: device,
+                    authorization: authorization
+                )
+            } else if let routed = connection.routedSessionID,
+                      let sessionID = SessionID(uuidString: routed) {
+                accepted = self.services.mirrors.sendInput(
+                    bytes,
+                    to: sessionID,
+                    device: device,
+                    authorization: authorization
+                )
+            } else {
+                accepted = false
+            }
             if !accepted {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "controlHeld")))
             }
@@ -2349,6 +2692,46 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let authorization = connection.authorization,
               authorization.capability == .interact else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
+            return
+        }
+        if let rawTerminalID = connection.routedTerminalID,
+           let terminalID = TerminalID(uuidString: rawTerminalID) {
+            guard let cols, let rows else {
+                refuseViewport(
+                    connection,
+                    cols: cols,
+                    rows: rows,
+                    refusal: .missingSize
+                )
+                return
+            }
+            guard RemoteViewportRefusal.columns.contains(cols) else {
+                refuseViewport(
+                    connection,
+                    cols: cols,
+                    rows: rows,
+                    refusal: .columnsOutOfRange
+                )
+                return
+            }
+            guard RemoteViewportRefusal.rows.contains(rows) else {
+                refuseViewport(
+                    connection,
+                    cols: cols,
+                    rows: rows,
+                    refusal: .rowsOutOfRange
+                )
+                return
+            }
+            DispatchQueue.main.async {
+                guard self.authorizer?.isCurrent(authorization) == true else { return }
+                self.services.mirrors.requestViewport(
+                    from: connection,
+                    terminalID: terminalID,
+                    cols: cols,
+                    rows: rows
+                )
+            }
             return
         }
         switch Self.viewportRequest(
@@ -2439,17 +2822,24 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func handleViewportRelease(_ connection: RemoteConnection) {
         guard let authorization = connection.authorization,
-              authorization.capability == .interact,
-              let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
+              authorization.capability == .interact else {
             return
         }
         DispatchQueue.main.async {
             guard self.authorizer?.isCurrent(authorization) == true else { return }
-            self.services.mirrors.releaseViewport(
-                from: connection,
-                sessionID: sessionID
-            )
+            if let rawTerminalID = connection.routedTerminalID,
+               let terminalID = TerminalID(uuidString: rawTerminalID) {
+                self.services.mirrors.releaseViewport(
+                    from: connection,
+                    terminalID: terminalID
+                )
+            } else if let routed = connection.routedSessionID,
+                      let sessionID = SessionID(uuidString: routed) {
+                self.services.mirrors.releaseViewport(
+                    from: connection,
+                    sessionID: sessionID
+                )
+            }
         }
     }
 
