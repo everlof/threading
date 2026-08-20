@@ -311,6 +311,23 @@ final class RemoteProtocolTests: XCTestCase {
                 terminalTheme: terminalTheme,
                 terminalThemeAssignmentID: "ocean",
                 inheritedTerminalThemeName: "Default",
+                inheritedTerminalTheme: terminalTheme,
+                accountID: "default",
+                limitRecovery: .init(
+                    action: RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount
+                )
+            )],
+            terminals: [RemoteProjectTerminalSummaryDTO(
+                id: "terminal-1",
+                title: "Server",
+                projectName: "Threading",
+                state: "working",
+                isAvailable: true,
+                createdAt: 124,
+                isShared: true,
+                terminalTheme: terminalTheme,
+                terminalThemeAssignmentID: "ocean",
+                inheritedTerminalThemeName: "Default",
                 inheritedTerminalTheme: terminalTheme
             )],
             host: RemoteHostDTO(id: "mac", name: "Developer Mac"),

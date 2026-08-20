@@ -185,6 +185,24 @@ launch scoping, connection truth, row actions and the native fallback; the macOS
 composition engine neither runs nor renders on iOS, so this surface does not advertise a visual
 replacement contract it cannot honor.
 
+Before the first catalogue arrives, the dashboard names only the operation happening now:
+checking saved connections, trying the currently named way in, or loading sessions after the Mac
+has answered. These values come from `RemoteAppModel.fetchMe` at the point each operation begins;
+there is no cosmetic timer that can claim a different step from the work the transport is doing.
+LabelMorph's traveling fade periodically crosses the unchanged current phrase, while Reduce Motion
+leaves it still. The navigation status names the same current route. The surface remains host-only
+because connection truth and fallback policy remain Threading's responsibility even while
+presentation changes. The card always renders one status row; endpoint and sticky-port
+cardinality never create retained views per network attempt.
+
+Debug builds expose those same two render components through **Settings → Developer → Connection
+progress**. `MobileConnectionProgressLab` can hold the body card, navigation item, or both at each
+authored checkpoint without starting a network request. The deterministic evidence scene is
+`THREADING_MOBILE_DEMO=connection-progress-lab`; it enters through `RootView` and renders
+`MobileConnectionProgressCard` plus `MobileConnectionNavigationTitle`, so the lab cannot become a
+parallel mock of the shipping UI. Its five stories and three surface choices are a fixed
+developer-authored set, independent of the number of endpoints or retries on a real Mac.
+
 **A row says who is talking, the way the Mac sidebar does.** Its tile is the runtime's own mark —
 Claude's starburst, OpenAI's knot, an SF Symbol for a runtime we bundle no artwork for — with an
 alternate account's chip on the bottom-trailing corner and the account's name beside the state. The
@@ -590,6 +608,21 @@ starting a chat now go through one function, so a new chat is opened with the tr
 surface can survive — a terminal still commits its final geometry immediately rather than being
 resized through every intermediate width. The session's own screen owns the wait: a brand-new
 session is not yet running, so it shows "Resuming on your Mac…" until the agent answers.
+
+**Connected to the Mac and attached to one chat are separate truths.** The dashboard's connected
+state means a route answered and returned the current catalogue; entering a row then opens that
+session's own live socket for replay, conversation deltas, presence and input. An available row
+therefore says "Opening chat…" rather than claiming the phone is connecting to the Mac again. A
+dormant row keeps "Resuming on your Mac…" until the process is ready, then passes through the same
+opening state. Leaving the detail screen closes that session socket without unpairing the phone or
+taking the dashboard offline.
+
+The navigation status is one changing phrase, so `MobileMorphingTitleLabel` uses LabelMorph's
+whole-line scroll rather than its character-by-character name morph. The scroll and a five-pulse,
+62%-depth traveling fade share one 650 ms budget; the pulses and travel are scaled into that
+window rather than retaining the showcase's multi-second timings. Dashboard route progress,
+SwiftUI terminal chrome and UIKit Native-conversation chrome all enter through this same mobile
+design boundary. Reduce Motion lands the next phrase synchronously with no scroll or fade.
 
 **A chat has one name, wherever it is drawn.** The list draws the catalogue's
 `AgentSession.displayTitle` and so does every title on the screen that list opens —

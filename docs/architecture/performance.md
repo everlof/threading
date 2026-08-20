@@ -216,6 +216,11 @@ a dormant shell is the only polling path: the selected detail performs at most 3
 catalogue checks, cancels when the host or screen changes, and stops as soon as that terminal is
 available; view-only capabilities never enter it.
 
+The pre-catalogue connection card is invariant at one current-operation row. Its activity
+treatment keeps one two-second timer, plays one bounded 650 ms LabelMorph fade, and invalidates
+the timer when that row is replaced, unmounted, or subject to Reduce Motion. Route cardinality
+never adds a view or another timer.
+
 Before this boundary, one visible dashboard issued `/api/me` every three seconds: 1,200 requests
 per hour and about 24,000 over 20 visible hours, even with no changes. The healthy steady state is
 now zero repeated REST requests: one activation/foreground snapshot, scoped deltas for row
@@ -307,6 +312,24 @@ clear-history and alternate-screen sequences during entry. The driver copies the
 final real-shell screenshot into the run directory under `/tmp/threading-profiles` when Return is
 pressed in its terminal. Re-enter both chats in one run: successive `attempt` values are the
 push/pop comparison rather than separate process launches with different caches.
+
+The first real Codex run exposed the remaining flicker as scheduling, not parser cost. Its resize
+repair arrived in 154 binary frames over 2.0 seconds; SwiftTerm spent only 61 ms feeding them, but
+38 display-link ticks ran after some frames and before later ones. The phone was therefore drawing
+valid but temporary clear/reflow states. A busy-host run also paused 695 ms between the attach
+replay and the SIGWINCH repair, which proved that the former 250 ms probe quiet period — and a
+first 500 ms reveal experiment — could both declare the surface stable too early.
+
+Initial terminal entry is now one presentation transaction. SwiftTerm mounts immediately and
+continues parsing every frame, so layout, viewport negotiation and emulator work do not wait, but
+the terminal stays behind the existing `Opening chat…` surface until the input stream has been
+quiet for one second. Four seconds is the bounded escape for a session that was already producing
+an unending stream; after reveal, live output is never delayed. The viewport sender also remembers
+the last grid it put on the wire, so the hello/update re-entrancy cannot send an identical first
+lease twice. On the same 2,400-row fixture, the corrected run received 155 frames and crossed 36
+display ticks internally, sent one 69×59 viewport instead of two, settled at 1.43 seconds, and
+revealed once at 2.49 seconds. The inspected recording shows only the loading state followed by
+the completed terminal — none of the intermediate checkpoints visible in the baseline recording.
 
 ### Scaling audit, 2026-08-08
 

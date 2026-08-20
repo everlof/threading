@@ -698,7 +698,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private var connectionStatusLabel: String {
         switch connection.phase {
-        case .connecting: return MobileL10n.string("Connecting to Mac…")
+        case .connecting: return MobileL10n.string("Opening chat…")
         case .connected:
             return model.activeHost?.name ?? MobileL10n.string("Connected")
         case .ended(let reason): return reason
@@ -1360,10 +1360,11 @@ final class MobileThemeOutlineView: UIView {
 
 private final class RemoteConversationNavigationTitleView: UIControl {
     private let titleLabel = MobileMorphingTitleLabel()
-    private let statusLabel = UILabel()
+    private let statusLabel = MobileMorphingTitleLabel()
     private let dot = UIView()
     private var titleColor = UIColor.label
     private var titleGroundColor = UIColor.systemBackground
+    private var statusLabelColor = UIColor.secondaryLabel
     /// In the status dot's place, not beside the title. Beside the title it took a column of
     /// its own and pushed the name off the bar's centre every time a turn started, and it left
     /// two marks on one line saying two different things at once. Standing where the dot stands
@@ -1395,10 +1396,7 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         ])
         dot.layer.cornerRadius = MobileDesign.Size.navigationStatusIndicator / 2
         titleLabel.isAccessibilityElement = false
-        statusLabel.font = .preferredFont(forTextStyle: .caption2)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.lineBreakMode = .byTruncatingTail
-        statusLabel.textAlignment = .center
+        statusLabel.isAccessibilityElement = false
         addAction(UIAction { [weak self] _ in self?.reconnect?() }, for: .touchUpInside)
         accessibilityTraits = .header
     }
@@ -1433,9 +1431,19 @@ private final class RemoteConversationNavigationTitleView: UIControl {
             textColor: titleColor,
             groundColor: titleGroundColor,
             alignment: .center,
-            reducesMotion: UIAccessibility.isReduceMotionEnabled
+            reducesMotion: UIAccessibility.isReduceMotionEnabled,
+            role: .chatName
         )
-        statusLabel.text = status
+        statusLabel.configure(
+            title: status,
+            textStyle: .caption2,
+            weight: .regular,
+            textColor: statusLabelColor,
+            groundColor: titleGroundColor,
+            alignment: .center,
+            reducesMotion: UIAccessibility.isReduceMotionEnabled,
+            role: .connectionStatus
+        )
         dot.backgroundColor = statusColor
         // One variant per working period, chosen on the hidden→visible edge, so a turn keeps
         // the animation it started with instead of re-rolling on every render.
@@ -1459,6 +1467,7 @@ private final class RemoteConversationNavigationTitleView: UIControl {
     func applyTheme(_ theme: RemoteThemePalette) {
         titleColor = theme.uiLabel
         titleGroundColor = theme.uiSurface
+        statusLabelColor = theme.uiSecondaryLabel
         titleLabel.configure(
             title: titleLabel.stringValue,
             textStyle: .headline,
@@ -1466,9 +1475,19 @@ private final class RemoteConversationNavigationTitleView: UIControl {
             textColor: titleColor,
             groundColor: titleGroundColor,
             alignment: .center,
-            reducesMotion: UIAccessibility.isReduceMotionEnabled
+            reducesMotion: UIAccessibility.isReduceMotionEnabled,
+            role: .chatName
         )
-        statusLabel.textColor = theme.uiSecondaryLabel
+        statusLabel.configure(
+            title: statusLabel.stringValue,
+            textStyle: .caption2,
+            weight: .regular,
+            textColor: statusLabelColor,
+            groundColor: titleGroundColor,
+            alignment: .center,
+            reducesMotion: UIAccessibility.isReduceMotionEnabled,
+            role: .connectionStatus
+        )
         orb.applyTheme(theme)
     }
 }

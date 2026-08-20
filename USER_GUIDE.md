@@ -2299,6 +2299,12 @@ The iPhone still shows that Mac once even when it knows several of its addresses
 follows the connection policy chosen on the Mac, shows the active route beside its connection
 status, and can fail over or adopt another advertised address without being paired again.
 
+When the iPhone has no session list yet, the dashboard shows only what it is doing now: checking
+saved connections, trying **Threading Direct**, **this network**, **VPN**, or **Tailscale**, or
+loading sessions after the Mac answers. The current words carry a short traveling fade; Reduce
+Motion keeps them still. If one route does not answer, Threading moves to the next saved route
+automatically; you do not need to restart the app or choose a connection manually.
+
 A connection that cannot be made says so rather than spinning. A Mac that accepts the connection
 and never answers is reported after a short wait, and the chat title stays tappable to retry. Two
 failures are named because retrying them changes nothing: **This Mac’s address has changed. Scan
@@ -2355,6 +2361,9 @@ Starting a chat from the phone opens it. The **+** button's sheet closes onto th
 screen rather than back onto the list, and stays there while the Mac starts the agent — a new
 session shows "Resuming on your Mac…" for as long as that takes. The New Session navigation bar
 keeps its title above the connected Mac and state, matching the two-row chat navigation title.
+An already-running chat says "Opening chat…" while its own live stream attaches; this does not
+mean the phone lost the dashboard connection. Connection phrases scroll as a complete line with
+a short traveling fade, while Reduce Motion changes them immediately.
 
 While the agent is working on a turn, the dotted thinking orb takes the place of the connection dot
 under the chat's title, tinted with the app theme's accent, exactly as it appears beside the

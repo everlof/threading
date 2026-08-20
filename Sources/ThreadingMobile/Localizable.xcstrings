@@ -106,6 +106,66 @@
     "The link can watch this terminal’s output while its shell is running.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Länken kan se terminalens utdata medan skalet körs." } } }
     },
+    "Body": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Innehåll" } } }
+    },
+    "Body and navigation loading states": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Laddningslägen för innehåll och navigeringsfält" } } }
+    },
+    "Both": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Båda" } } }
+    },
+    "Checking routes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollerar vägar" } } }
+    },
+    "Choose a connection step and see it in the dashboard card, the navigation bar, or both.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj ett anslutningssteg och se det i översiktskortet, navigeringsfältet eller båda." } } }
+    },
+    "Component Lab": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Komponentlabb" } } }
+    },
+    "Connection progress": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anslutningsförlopp" } } }
+    },
+    "Dashboard body": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Översiktens innehåll" } } }
+    },
+    "Developer": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Utvecklare" } } }
+    },
+    "Direct · 1/3": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Direkt · 1/3" } } }
+    },
+    "LAN · 2/3": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "LAN · 2/3" } } }
+    },
+    "Navigation bar": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Navigeringsfält" } } }
+    },
+    "State": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läge" } } }
+    },
+    "Surface": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Yta" } } }
+    },
+    "Tailscale · 3/3": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale · 3/3" } } }
+    },
+    "The navigation component is shown above. Choose another state to check its wording and transition.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Navigeringskomponenten visas ovan. Välj ett annat läge för att granska texten och övergången." } } }
+    },
+    "Checking saved connections": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollerar sparade anslutningar" } } }
+    },
+    "In progress": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Pågår" } } }
+    },
+    "Loading sessions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Läser in sessioner" } } }
+    },
+    "Trying %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Provar %@" } } }
+    },
     "Allow Local Network access": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillåt åtkomst till lokalt nätverk" } } }
     },
@@ -267,6 +327,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Det här nätverket"
+          }
+        }
+      }
+    },
+    "this network": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "det här nätverket"
           }
         }
       }
@@ -1530,12 +1600,12 @@
         }
       }
     },
-    "Connecting to Mac…": {
+    "Opening chat…": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ansluter till Mac…"
+            "value": "Öppnar chatten…"
           }
         }
       }

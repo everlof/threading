@@ -65,13 +65,24 @@ enum MobileDashboardChrome {
 
     static func connectionStatus(
         phase: RemoteAppModel.Phase,
-        connectionLabel: String?
+        connectionLabel: String?,
+        progress: RemoteAppModel.ConnectionProgress? = nil
     ) -> String {
         switch phase {
         case .idle, .offline:
             return MobileL10n.string("Not connected")
         case .connecting:
-            return MobileL10n.string("Connecting…")
+            switch progress {
+            case .tryingRoute(let kind, _, _, _):
+                return MobileL10n.string(
+                    "Trying %@",
+                    PairedRemoteHost.connectionLabelInSentence(forEndpointKind: kind)
+                )
+            case .loadingSessions:
+                return MobileL10n.string("Loading sessions")
+            case .preparingRoutes, .none:
+                return MobileL10n.string("Checking saved connections")
+            }
         case .online:
             return MobileL10n.string(
                 "Connected · %@",
@@ -80,6 +91,261 @@ enum MobileDashboardChrome {
         }
     }
 }
+
+struct MobileConnectionProgressPresentation: Equatable {
+    enum StepID: Equatable, Hashable {
+        case routes
+        case connection
+        case sessions
+    }
+
+    struct Step: Equatable {
+        let id: StepID
+        let title: String
+    }
+
+    let currentStep: Step
+
+    static func resolve(progress: RemoteAppModel.ConnectionProgress?) -> Self {
+        switch progress ?? .preparingRoutes {
+        case .preparingRoutes:
+            return MobileConnectionProgressPresentation(
+                currentStep: Step(
+                    id: .routes,
+                    title: MobileL10n.string("Checking saved connections")
+                )
+            )
+
+        case .tryingRoute(let kind, _, _, _):
+            let label = PairedRemoteHost.connectionLabelInSentence(forEndpointKind: kind)
+            return MobileConnectionProgressPresentation(
+                currentStep: Step(
+                    id: .connection,
+                    title: MobileL10n.string("Trying %@", label)
+                )
+            )
+
+        case .loadingSessions:
+            return MobileConnectionProgressPresentation(
+                currentStep: Step(
+                    id: .sessions,
+                    title: MobileL10n.string("Loading sessions")
+                )
+            )
+        }
+    }
+}
+
+/// The production dashboard card for the current operation in the bounded connection sequence.
+///
+/// Keeping the card independent of `SessionDashboard` lets the DEBUG component lab render the
+/// exact shipping hierarchy. The lab supplies a fixture value; the dashboard supplies the live
+/// transport value.
+struct MobileConnectionProgressCard: View {
+    let progress: RemoteAppModel.ConnectionProgress?
+    let freezesMotion: Bool
+
+    init(
+        progress: RemoteAppModel.ConnectionProgress?,
+        freezesMotion: Bool = false
+    ) {
+        self.progress = progress
+        self.freezesMotion = freezesMotion
+    }
+
+    var body: some View {
+        let presentation = MobileConnectionProgressPresentation.resolve(progress: progress)
+        ThemedRowGroup {
+            MobileConnectionProgressStepRow(
+                step: presentation.currentStep,
+                freezesMotion: freezesMotion
+            )
+            .padding(MobileDesign.Spacing.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+#if DEBUG
+/// One authored transport checkpoint shared by the lab's body and navigation previews.
+/// The list is deliberately fixed: adding a real progress case makes the lab and its test ask how
+/// that case should look, without building a view for every endpoint or retry.
+enum MobileConnectionProgressLabStory: String, CaseIterable, Identifiable {
+    case checking
+    case direct
+    case fallback
+    case lastRoute
+    case loadingSessions
+
+    static let defaultStory: Self = .fallback
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .checking: return MobileL10n.string("Checking routes")
+        case .direct: return MobileL10n.string("Direct · 1/3")
+        case .fallback: return MobileL10n.string("LAN · 2/3")
+        case .lastRoute: return MobileL10n.string("Tailscale · 3/3")
+        case .loadingSessions: return MobileL10n.string("Loading sessions")
+        }
+    }
+
+    var progress: RemoteAppModel.ConnectionProgress {
+        switch self {
+        case .checking:
+            return .preparingRoutes
+        case .direct:
+            return .tryingRoute(
+                kind: RemoteHostEndpointKind.hosted,
+                previousKind: nil,
+                number: 1,
+                total: 3
+            )
+        case .fallback:
+            return .tryingRoute(
+                kind: RemoteHostEndpointKind.lan,
+                previousKind: RemoteHostEndpointKind.hosted,
+                number: 2,
+                total: 3
+            )
+        case .lastRoute:
+            return .tryingRoute(
+                kind: RemoteHostEndpointKind.tailscale,
+                previousKind: RemoteHostEndpointKind.lan,
+                number: 3,
+                total: 3
+            )
+        case .loadingSessions:
+            return .loadingSessions(routeKind: RemoteHostEndpointKind.lan)
+        }
+    }
+
+    var navigationStatus: String {
+        MobileDashboardChrome.connectionStatus(
+            phase: .connecting,
+            connectionLabel: nil,
+            progress: progress
+        )
+    }
+}
+
+/// An interactive, DEBUG-only host for the two production connection-progress components.
+/// It is reachable from Settings > Developer and through the `connection-progress-lab` demo scene.
+struct MobileConnectionProgressLab: View {
+    private enum Surface: String, CaseIterable, Identifiable {
+        case both
+        case navigation
+        case body
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .both: return MobileL10n.string("Both")
+            case .navigation: return MobileL10n.string("Navigation bar")
+            case .body: return MobileL10n.string("Body")
+            }
+        }
+    }
+
+    private static let hostName = "David’s MacBook Pro"
+
+    @Environment(\.remoteTheme) private var theme
+    @State private var story = MobileConnectionProgressLabStory.defaultStory
+    @State private var surface = Surface.both
+
+    private var freezesAnimatedComponents: Bool {
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
+                VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                    Text("Connection progress")
+                        .font(.title2.bold())
+                        .foregroundStyle(theme.label)
+                    Text("Choose a connection step and see it in the dashboard card, the navigation bar, or both.")
+                        .font(.subheadline)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                ThemedRowGroup {
+                    pickerRow("State") {
+                        Picker("State", selection: $story) {
+                            ForEach(MobileConnectionProgressLabStory.allCases) { story in
+                                Text(story.title).tag(story)
+                            }
+                        }
+                    }
+                    ThemedRowDivider()
+                    pickerRow("Surface") {
+                        Picker("Surface", selection: $surface) {
+                            ForEach(Surface.allCases) { surface in
+                                Text(surface.title).tag(surface)
+                            }
+                        }
+                    }
+                }
+
+                if surface != .navigation {
+                    VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                        Text("Dashboard body")
+                            .font(.headline)
+                            .foregroundStyle(theme.label)
+                            .padding(.horizontal, MobileDesign.Spacing.inset)
+                        MobileConnectionProgressCard(
+                            progress: story.progress,
+                            freezesMotion: freezesAnimatedComponents
+                        )
+                    }
+                } else {
+                    Text("The navigation component is shown above. Choose another state to check its wording and transition.")
+                        .font(.footnote)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .padding(.horizontal, MobileDesign.Spacing.inset)
+                }
+            }
+            .padding(MobileDesign.Spacing.inset)
+        }
+        .background(theme.ground)
+        .navigationTitle(surface == .body ? "Component Lab" : "")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(theme.surface, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            if surface != .body {
+                ToolbarItem(placement: .principal) {
+                    MobileConnectionNavigationTitle(
+                        title: Self.hostName,
+                        status: story.navigationStatus,
+                        statusColor: theme.warning
+                    )
+                }
+            }
+        }
+    }
+
+    private func pickerRow<Control: View>(
+        _ title: LocalizedStringKey,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        HStack(spacing: MobileDesign.Spacing.medium) {
+            Text(title)
+                .foregroundStyle(theme.label)
+            Spacer(minLength: MobileDesign.Spacing.small)
+            control()
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .tint(theme.accent)
+        }
+        .padding(.horizontal, MobileDesign.Spacing.inset)
+        .padding(.vertical, MobileDesign.Spacing.small)
+    }
+}
+#endif
 
 /// The bounded, user-facing explanation for an owner dashboard that could not reach its Mac.
 ///
@@ -215,7 +481,8 @@ struct SessionDashboard: View {
 #if DEBUG
         // This evidence fixture borrows demo data plumbing, but represents a real failed owner
         // connection. Suppressing the demo disclaimer keeps the captured state truthful.
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "sessions-offline" {
+        if let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"],
+           ["sessions-offline", "sessions-connecting"].contains(demoMode) {
             return false
         }
 #endif
@@ -326,7 +593,11 @@ struct SessionDashboard: View {
                     }
                 }
 
-                if projectName == nil, notifications.shouldOfferOnboarding {
+                // Connection recovery owns the page until this Mac has answered. Asking about
+                // notifications underneath an unresolved route gives a first-run reader two
+                // unrelated setup stories at once, and notifications can be enabled just as
+                // safely after the catalogue arrives.
+                if projectName == nil, model.me != nil, notifications.shouldOfferOnboarding {
                     NotificationOnboardingCard()
                 }
             }
@@ -829,20 +1100,15 @@ struct SessionDashboard: View {
     private var statusText: String {
         MobileDashboardChrome.connectionStatus(
             phase: model.phase,
-            connectionLabel: model.activeHost?.connectionLabel
+            connectionLabel: model.activeHost?.connectionLabel,
+            progress: model.connectionProgress
         )
     }
 
     private var loadingCard: some View {
-        HStack(spacing: 12) {
-            ProgressView()
-            Text("Loading sessions from your Mac…")
-                .foregroundStyle(theme.secondaryLabel)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(22)
-        .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
-        .remoteThemeGlow(theme)
+        MobileConnectionProgressCard(
+            progress: model.connectionProgress
+        )
     }
 
     private func connectionRecoveryCard(_ failure: RemoteConnectionFailure) -> some View {
@@ -1056,6 +1322,99 @@ struct SessionDashboard: View {
     }
 }
 
+private struct MobileConnectionProgressStepRow: View {
+    let step: MobileConnectionProgressPresentation.Step
+    let freezesMotion: Bool
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        MobileConnectionProgressStepTitle(
+            title: step.title,
+            textColor: theme.uiLabel,
+            groundColor: theme.uiPanel,
+            weight: .semibold,
+            freezesMotion: freezesMotion
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(MobileL10n.string("In progress"))
+    }
+}
+
+/// The active step keeps its words still and lets LabelMorph's fade wave carry activity.
+/// There is one bounded row and one timer while a connection is active.
+private struct MobileConnectionProgressStepTitle: UIViewRepresentable {
+    let title: String
+    let textColor: UIColor
+    let groundColor: UIColor
+    let weight: UIFont.Weight
+    let freezesMotion: Bool
+    @Environment(\.accessibilityReduceMotion) private var reducesMotion
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> MobileMorphingTitleLabel {
+        MobileMorphingTitleLabel()
+    }
+
+    func updateUIView(_ view: MobileMorphingTitleLabel, context: Context) {
+        view.configure(
+            title: title,
+            textStyle: .subheadline,
+            weight: weight,
+            textColor: textColor,
+            groundColor: groundColor,
+            alignment: .left,
+            // This label never morphs its words. Motion here is the separately scheduled fade.
+            reducesMotion: true,
+            role: .connectionProgress
+        )
+        context.coordinator.update(
+            view: view,
+            playsFade: !reducesMotion && !freezesMotion
+        )
+    }
+
+    static func dismantleUIView(_ view: MobileMorphingTitleLabel, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    @MainActor
+    final class Coordinator {
+        private weak var view: MobileMorphingTitleLabel?
+        private var timer: Timer?
+
+        func update(view: MobileMorphingTitleLabel, playsFade: Bool) {
+            self.view = view
+            guard playsFade else {
+                stop()
+                return
+            }
+            guard timer == nil else { return }
+
+            let timer = Timer(
+                timeInterval: MobileDesign.Motion.connectionProgressFadeCadence,
+                repeats: true
+            ) { [weak view] _ in
+                Task { @MainActor in
+                    view?.playFade()
+                }
+            }
+            timer.tolerance = 0.1
+            timer.fireDate = Date(timeIntervalSinceNow: 0.1)
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+        }
+
+        func stop() {
+            timer?.invalidate()
+            timer = nil
+            view?.stopFade()
+        }
+    }
+}
+
 private struct ProjectSessionGroup: View {
     let projectName: String
     let title: String
@@ -1070,10 +1429,16 @@ private struct ProjectSessionGroup: View {
         VStack(alignment: .leading, spacing: 10) {
             NavigationLink(value: MobileNavigationRoute.project(projectName)) {
                 HStack(spacing: MobileDesign.Spacing.small) {
+                    // One line, always. A project is a folder on the Mac, and a folder name can be
+                    // anything the Mac's filesystem allows - a managed workspace carries a UUID, so
+                    // the name ran to three wrapped lines and pushed the chats it heads down the
+                    // screen. The header names the group; the full name is still what VoiceOver
+                    // reads and what the project's own screen shows.
                     Label(title, systemImage: "folder")
                         .font(.headline)
                         .foregroundStyle(theme.label)
-                    Spacer()
+                        .lineLimit(1)
+                    Spacer(minLength: MobileDesign.Spacing.tight)
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(theme.tertiaryLabel)

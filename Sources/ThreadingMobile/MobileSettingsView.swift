@@ -92,6 +92,25 @@ struct MobileSettingsView: View {
                         }
                     }
 
+#if DEBUG
+                    // Keep ordinary DEBUG builds discoverable without putting developer chrome
+                    // into the canonical shipping-Settings evidence. The lab has its own direct
+                    // evidence scene below `RootView`.
+                    if ProcessInfo.processInfo.environment[
+                        "THREADING_MOBILE_UI_EVIDENCE_ID"
+                    ] == nil {
+                        settingsSection("Developer") {
+                            SettingsNavigationRow(
+                                symbol: "square.grid.2x2",
+                                title: "Connection progress",
+                                detail: "Body and navigation loading states"
+                            ) {
+                                MobileConnectionProgressLab()
+                            }
+                        }
+                    }
+#endif
+
                     Text("These iPhone preferences are available before you connect a Mac.")
                         .font(.footnote)
                         .foregroundStyle(theme.secondaryLabel)

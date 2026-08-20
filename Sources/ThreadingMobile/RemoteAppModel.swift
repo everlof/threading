@@ -43,6 +43,21 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
+    /// The real work behind the dashboard's initial connection, kept separate from `Phase` so a
+    /// healthy background catalogue refresh does not replace "Connected" with transient network
+    /// detail. It retains semantic route kinds so localization can choose standalone or sentence
+    /// grammar later; addresses and ports remain diagnostics-only.
+    enum ConnectionProgress: Equatable {
+        case preparingRoutes
+        case tryingRoute(
+            kind: String,
+            previousKind: String?,
+            number: Int,
+            total: Int
+        )
+        case loadingSessions(routeKind: String)
+    }
+
     @Published private(set) var hosts: [PairedRemoteHost] {
         didSet {
             guard hosts != oldValue else { return }
@@ -59,8 +74,14 @@ final class RemoteAppModel: ObservableObject {
         didSet {
             guard phase != oldValue else { return }
             MobileConnectionStateLog.record(MobileDiagnostics.connectionState(phase))
+            if case .connecting = phase {
+                // The route loop owns the more specific state below.
+            } else {
+                connectionProgress = nil
+            }
         }
     }
+    @Published private(set) var connectionProgress: ConnectionProgress?
     @Published private(set) var activeHostID: String?
     @Published private(set) var storageIssue: String? = nil
     @Published private(set) var notificationOpenRequest: RemoteNotificationOpenRequest?
@@ -128,7 +149,7 @@ final class RemoteAppModel: ObservableObject {
                 hostID: "terminal-wire-lab",
                 shareID: "terminal-wire-lab",
                 scope: "all",
-                name: "Terminal Wire Lab",
+                name: "Terminal Replay",
                 link: wire.link,
                 lastConnectedAt: Date(),
                 // Nil intentionally means "this exact paired door". Adopting the integration
@@ -203,6 +224,15 @@ final class RemoteAppModel: ObservableObject {
             if demoMode == "sessions-offline" {
                 me = nil
                 phase = .offline(.transport(URLError(.timedOut), host: link.baseURL.host))
+            } else if demoMode == "sessions-connecting" {
+                me = nil
+                phase = .connecting
+                connectionProgress = .tryingRoute(
+                    kind: RemoteHostEndpointKind.lan,
+                    previousKind: RemoteHostEndpointKind.hosted,
+                    number: 2,
+                    total: 3
+                )
             } else {
                 me = Self.demoResponse
                 phase = .online
@@ -525,9 +555,12 @@ final class RemoteAppModel: ObservableObject {
         } else {
             wasOffline = false
         }
-        if !wasOnline { phase = .connecting }
+        if !wasOnline {
+            phase = .connecting
+            connectionProgress = .preparingRoutes
+        }
         do {
-            let connection = try await fetchMe(from: host)
+            let connection = try await fetchMe(from: host, reportsProgress: !wasOnline)
             let response = connection.response
             let successfulLink = connection.link
             guard activeHostID == hostID, refreshGeneration == generation else { return }
@@ -1116,6 +1149,9 @@ final class RemoteAppModel: ObservableObject {
     private struct ConnectionCandidate {
         let link: RemoteConnectionLink
         let isHosted: Bool
+        /// The product name of the way in this attempt belongs to. Port-walk attempts keep the
+        /// same kind, so presentation advances only when the route actually changes.
+        let kind: String
         /// Which advertised door this attempt belongs to, so the rest of a port walk can be
         /// abandoned once that door has answered. Nil for the hosted route, which is one
         /// rendezvous rather than an address with ports on it.
@@ -1128,8 +1164,29 @@ final class RemoteAppModel: ObservableObject {
         let isHosted: Bool
     }
 
-    private func fetchMe(from host: PairedRemoteHost) async throws -> SuccessfulConnection {
-        let prepared = await connectionCandidates(for: host)
+    private func fetchMe(
+        from host: PairedRemoteHost,
+        reportsProgress: Bool
+    ) async throws -> SuccessfulConnection {
+        let expectedRouteCount = max(host.connectionOptionLabels.count, 1)
+        var currentRouteKind: String?
+        var currentRouteNumber = 0
+
+        func beginRoute(_ kind: String) {
+            guard reportsProgress else { return }
+            guard kind != currentRouteKind else { return }
+            let previous = currentRouteKind
+            currentRouteKind = kind
+            currentRouteNumber += 1
+            connectionProgress = .tryingRoute(
+                kind: kind,
+                previousKind: previous,
+                number: currentRouteNumber,
+                total: max(expectedRouteCount, currentRouteNumber)
+            )
+        }
+
+        let prepared = await connectionCandidates(for: host, routeWillBegin: beginRoute)
         var lastError: Error = prepared.error ?? RemoteClientError.invalidResponse
         // A door that has answered is done, whatever it answered. The remaining attempts on it
         // are the sticky port range, and knocking on nine more ports after the Mac has refused a
@@ -1137,11 +1194,15 @@ final class RemoteAppModel: ObservableObject {
         var answeredDoors: Set<String> = []
         for (index, candidate) in prepared.candidates.enumerated() {
             if let doorID = candidate.doorID, answeredDoors.contains(doorID) { continue }
+            beginRoute(candidate.kind)
             do {
                 let timeout: TimeInterval? = prepared.candidates.count > 1
                     && index < prepared.candidates.count - 1
                     ? 4 : nil
                 let response = try await RemoteClient(link: candidate.link).fetchMe(timeout: timeout)
+                if reportsProgress {
+                    connectionProgress = .loadingSessions(routeKind: candidate.kind)
+                }
                 return SuccessfulConnection(
                     response: response,
                     link: candidate.link,
@@ -1241,14 +1302,23 @@ final class RemoteAppModel: ObservableObject {
     }
 
     private func connectionCandidates(
-        for host: PairedRemoteHost
+        for host: PairedRemoteHost,
+        routeWillBegin: ((String) -> Void)? = nil
     ) async -> (candidates: [ConnectionCandidate], error: Error?) {
         var candidates: [ConnectionCandidate] = []
         var preparationError: Error?
         do {
+            if host.hostedServiceURL != nil, host.hostedCredential != nil {
+                routeWillBegin?(RemoteHostEndpointKind.hosted)
+            }
             if let hostedLink = try await hostedConnections.link(for: host) {
                 candidates.append(
-                    ConnectionCandidate(link: hostedLink, isHosted: true, doorID: nil)
+                    ConnectionCandidate(
+                        link: hostedLink,
+                        isHosted: true,
+                        kind: RemoteHostEndpointKind.hosted,
+                        doorID: nil
+                    )
                 )
                 if activeHostID == host.id {
                     activeHostedHostID = host.id
@@ -1266,6 +1336,7 @@ final class RemoteAppModel: ObservableObject {
             candidates.append(ConnectionCandidate(
                 link: candidate.link,
                 isHosted: false,
+                kind: candidate.kind,
                 doorID: candidate.doorID
             ))
         }
@@ -1352,6 +1423,7 @@ final class RemoteAppModel: ObservableObject {
 
     private func invalidateRefreshes() {
         refreshGeneration &+= 1
+        connectionProgress = nil
     }
 
     private func discardHostedConnection() {
@@ -1971,7 +2043,7 @@ final class RemoteAppModel: ObservableObject {
                 .init(
                     id: "60f1a622-d187-4875-b1ca-3705ae53394c",
                     title: "Terminal",
-                    projectName: "threading-terminal-wire-04BC7600-8ED2-4049-9479-4E058A888FE9",
+                    projectName: "Strom",
                     state: "dormant",
                     isAvailable: false,
                     createdAt: now - 7_200,
@@ -2180,6 +2252,11 @@ private extension RemoteMeDTO {
                     lastActiveAt: session.lastActiveAt,
                     isPinned: session.isPinned,
                     isArchived: session.isArchived,
+                    snoozedAt: session.snoozedAt,
+                    snoozedUntil: session.snoozedUntil,
+                    wokeReason: session.wokeReason,
+                    wokeAt: session.wokeAt,
+                    isShared: session.isShared,
                     terminalTheme: terminalTheme,
                     terminalThemeAssignmentID: assignmentID,
                     inheritedTerminalThemeName: session.inheritedTerminalThemeName,
@@ -2216,6 +2293,11 @@ private extension RemoteMeDTO {
                 lastActiveAt: session.lastActiveAt,
                 isPinned: session.isPinned,
                 isArchived: session.isArchived,
+                snoozedAt: session.snoozedAt,
+                snoozedUntil: session.snoozedUntil,
+                wokeReason: session.wokeReason,
+                wokeAt: session.wokeAt,
+                isShared: session.isShared,
                 terminalTheme: session.terminalTheme,
                 terminalThemeAssignmentID: session.terminalThemeAssignmentID,
                 inheritedTerminalThemeName: session.inheritedTerminalThemeName,

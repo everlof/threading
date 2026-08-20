@@ -160,7 +160,7 @@ struct SessionDetailView: View {
                 }
             } else {
                 MobileLoadingPlaceholder(MobileL10n.string(
-                    session.isAvailable ? "Connecting…" : "Resuming on your Mac…"
+                    session.isAvailable ? "Opening chat…" : "Resuming on your Mac…"
                 ))
             }
         }
@@ -717,7 +717,7 @@ private struct RemoteNavigationTitle: View {
 
     private var label: String {
         switch connection.phase {
-        case .connecting: return MobileL10n.string("Connecting to Mac…")
+        case .connecting: return MobileL10n.string("Opening chat…")
         case .connected:
             return model.activeHost?.name ?? MobileL10n.string("Connected")
         case .ended(let reason): return reason
@@ -773,6 +773,13 @@ struct TerminalRemoteView: View {
                 initialScrollProgress: terminalContinuity?.terminalViewportProgress,
                 onScrollProgress: saveTerminalViewport
             )
+            .opacity(connection.isTerminalHydrating ? 0 : 1)
+            .overlay {
+                if connection.isTerminalHydrating {
+                    MobileLoadingPlaceholder(MobileL10n.string("Opening chat…"))
+                        .background(terminalBackground)
+                }
+            }
             .background(terminalBackground)
             // The terminal owns the padding colour so the inset reads as breathing room rather
             // than a second application panel under every authored chrome.

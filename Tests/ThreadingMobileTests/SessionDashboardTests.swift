@@ -106,6 +106,99 @@ final class SessionDashboardTests: XCTestCase {
         )
     }
 
+    func testConnectingNavigationStatusNamesTheRouteBeingTried() {
+        XCTAssertEqual(
+            MobileDashboardChrome.connectionStatus(
+                phase: .connecting,
+                connectionLabel: nil,
+                progress: .tryingRoute(
+                    kind: RemoteHostEndpointKind.lan,
+                    previousKind: RemoteHostEndpointKind.hosted,
+                    number: 2,
+                    total: 3
+                )
+            ),
+            MobileL10n.string(
+                "Trying %@",
+                MobileL10n.string("this network")
+            )
+        )
+    }
+
+    /// The connection card shows only the operation happening now. Route history, future work and
+    /// failover instructions would turn a transient status back into a checklist.
+    func testConnectionProgressShowsOnlyTheActiveNamedRoute() {
+        let presentation = MobileConnectionProgressPresentation.resolve(
+            progress: .tryingRoute(
+                kind: RemoteHostEndpointKind.lan,
+                previousKind: RemoteHostEndpointKind.hosted,
+                number: 2,
+                total: 3
+            )
+        )
+
+        XCTAssertEqual(presentation.currentStep.id, .connection)
+        XCTAssertEqual(
+            presentation.currentStep.title,
+            MobileL10n.string(
+                "Trying %@",
+                MobileL10n.string("this network")
+            )
+        )
+    }
+
+    func testConnectionProgressMovesToSessionLoadingAfterTheMacAnswers() {
+        let presentation = MobileConnectionProgressPresentation.resolve(
+            progress: .loadingSessions(routeKind: RemoteHostEndpointKind.lan)
+        )
+
+        XCTAssertEqual(presentation.currentStep.id, .sessions)
+        XCTAssertEqual(
+            presentation.currentStep.title,
+            MobileL10n.string("Loading sessions")
+        )
+    }
+
+#if DEBUG
+    func testConnectionProgressLabCoversEveryAuthoredTransportCheckpoint() {
+        XCTAssertEqual(
+            MobileConnectionProgressLabStory.allCases.map(\.progress),
+            [
+                .preparingRoutes,
+                .tryingRoute(
+                    kind: RemoteHostEndpointKind.hosted,
+                    previousKind: nil,
+                    number: 1,
+                    total: 3
+                ),
+                .tryingRoute(
+                    kind: RemoteHostEndpointKind.lan,
+                    previousKind: RemoteHostEndpointKind.hosted,
+                    number: 2,
+                    total: 3
+                ),
+                .tryingRoute(
+                    kind: RemoteHostEndpointKind.tailscale,
+                    previousKind: RemoteHostEndpointKind.lan,
+                    number: 3,
+                    total: 3
+                ),
+                .loadingSessions(routeKind: RemoteHostEndpointKind.lan),
+            ]
+        )
+        for story in MobileConnectionProgressLabStory.allCases {
+            XCTAssertEqual(
+                story.navigationStatus,
+                MobileDashboardChrome.connectionStatus(
+                    phase: .connecting,
+                    connectionLabel: nil,
+                    progress: story.progress
+                )
+            )
+        }
+    }
+#endif
+
     /// A route failure must replace the indeterminate loading card with an actionable state. The
     /// useful network facts are semantic route names; the address, port and raw timeout stay in
     /// diagnostics where they cannot turn the dashboard into a network inspector.

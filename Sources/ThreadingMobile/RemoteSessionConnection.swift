@@ -32,6 +32,13 @@ private enum RemoteMobileConnectionDefaults {
     /// its fit for the same reason all along. The first grid of a lease still goes immediately,
     /// so entering a chat sizes the agent without waiting out a quiet window.
     static let viewportSettleDelay: Duration = .milliseconds(150)
+    /// Initial PTY replay and the resize repaint are one hydration transaction on the phone.
+    /// Codex emits that repaint as many small reads; exposing each read lets Core Animation draw
+    /// clear/reflow states between them. Keep the terminal mounted and parsing, but reveal it
+    /// only after the wire has gone quiet long enough to be one completed repaint.
+    static let terminalHydrationQuietDelay: Duration = .seconds(1)
+    /// A chat that is already producing an unbounded stream must eventually become visible.
+    static let terminalHydrationMaximumDelay: Duration = .seconds(4)
 }
 
 enum MobileCollaborationPresentation {
@@ -180,6 +187,7 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var terminalTheme: RemoteTerminalThemeDTO?
     @Published private(set) var terminalColumns = 0
     @Published private(set) var terminalRows = 0
+    @Published private(set) var isTerminalHydrating: Bool
     @Published private(set) var conversationCanSend = false
     @Published private(set) var composerCapabilities: [RemoteComposerCapabilityDTO] = []
     @Published private(set) var presence: [String: RemotePresenceDTO] = [:]
@@ -218,7 +226,13 @@ final class RemoteSessionConnection: ObservableObject {
     private var connectionGeneration = 0
     private var pendingTerminalOutput = Data()
     private let pendingTerminalOutputLimit = 2 * 1_024 * 1_024
+    private let terminalHydrationQuietDelay: Duration
+    private let terminalHydrationMaximumDelay: Duration
+    private var terminalHydrationQuietTask: Task<Void, Never>?
+    private var terminalHydrationMaximumTask: Task<Void, Never>?
+    private var hasReceivedTerminalHydrationOutput = false
     private var pendingViewport: (cols: Int, rows: Int)?
+    private var lastSentTerminalViewport: (cols: Int, rows: Int)?
     private let viewportSettleDelay: Duration
     private var viewportSettleTask: Task<Void, Never>?
     private var typingIdleTask: Task<Void, Never>?
@@ -234,6 +248,11 @@ final class RemoteSessionConnection: ObservableObject {
             guard let onTerminalOutput, !pendingTerminalOutput.isEmpty else { return }
             let buffered = pendingTerminalOutput
             pendingTerminalOutput.removeAll(keepingCapacity: true)
+            // Receiving and rendering buffered bytes are separate moments. Restart hydration's
+            // quiet boundary when the terminal actually takes the buffer so it cannot reveal
+            // before SwiftTerm has parsed output that arrived ahead of the view. The static UI
+            // fixtures enter through this same buffer instead of pretending to own a socket.
+            noteTerminalHydrationOutput()
             onTerminalOutput(buffered)
         }
     }
@@ -282,7 +301,11 @@ final class RemoteSessionConnection: ObservableObject {
         client: RemoteClient,
         reconnectClient: (@MainActor () async -> RemoteClient?)? = nil,
         helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline,
-        viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay
+        viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay,
+        terminalHydrationQuietDelay: Duration =
+            RemoteMobileConnectionDefaults.terminalHydrationQuietDelay,
+        terminalHydrationMaximumDelay: Duration =
+            RemoteMobileConnectionDefaults.terminalHydrationMaximumDelay
     ) {
         self.session = session
         self.target = target ?? .session(session.id)
@@ -290,8 +313,11 @@ final class RemoteSessionConnection: ObservableObject {
         self.reconnectClient = reconnectClient
         self.helloDeadline = helloDeadline
         self.viewportSettleDelay = viewportSettleDelay
+        self.terminalHydrationQuietDelay = terminalHydrationQuietDelay
+        self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
         mirroredCaption = session.title
         surface = session.surface
+        isTerminalHydrating = session.surface == .terminal
         terminalTheme = session.terminalTheme
         deviceID = RemoteDeviceIdentity.current
         conversationStore.onCanSendChange = { [weak self] canSend in
@@ -307,6 +333,8 @@ final class RemoteSessionConnection: ObservableObject {
 #endif
         stopped = false
         phase = .connecting
+        beginTerminalHydration()
+        lastSentTerminalViewport = nil
         composerCapabilities = []
         serverFeatures.removeAll()
         supportsComposerAttachmentUploads = false
@@ -400,6 +428,11 @@ final class RemoteSessionConnection: ObservableObject {
 
     func disconnect(markEnded: Bool = true) {
         reportTyping(false)
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = nil
+        terminalHydrationMaximumTask?.cancel()
+        terminalHydrationMaximumTask = nil
+        isTerminalHydrating = false
         viewportSettleTask?.cancel()
         viewportSettleTask = nil
         if phase == .connected, capability == .interact, pendingViewport != nil {
@@ -430,6 +463,57 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
 
+    private func beginTerminalHydration() {
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = nil
+        terminalHydrationMaximumTask?.cancel()
+        terminalHydrationMaximumTask = nil
+        hasReceivedTerminalHydrationOutput = false
+        isTerminalHydrating = session.surface == .terminal
+    }
+
+    private func noteTerminalHydrationOutput() {
+        guard isTerminalHydrating else { return }
+        hasReceivedTerminalHydrationOutput = true
+        if terminalHydrationMaximumTask == nil {
+            terminalHydrationMaximumTask = Task { [weak self, terminalHydrationMaximumDelay] in
+                try? await Task.sleep(for: terminalHydrationMaximumDelay)
+                guard !Task.isCancelled else { return }
+                self?.completeTerminalHydration()
+            }
+        }
+        scheduleTerminalHydrationCompletionIfReady()
+    }
+
+    private func noteTerminalHydrationViewportSent() {
+        scheduleTerminalHydrationCompletionIfReady()
+    }
+
+    private func scheduleTerminalHydrationCompletionIfReady() {
+        guard isTerminalHydrating, hasReceivedTerminalHydrationOutput else { return }
+        // An interactive terminal is not stable until its first phone-owned grid has reached
+        // the Mac. A view-only connection never leases a viewport and can reveal its replay.
+        guard capability != .interact || pendingViewport != nil else { return }
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = Task { [weak self, terminalHydrationQuietDelay] in
+            try? await Task.sleep(for: terminalHydrationQuietDelay)
+            guard !Task.isCancelled else { return }
+            self?.completeTerminalHydration()
+        }
+    }
+
+    private func completeTerminalHydration() {
+        guard isTerminalHydrating else { return }
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = nil
+        terminalHydrationMaximumTask?.cancel()
+        terminalHydrationMaximumTask = nil
+        isTerminalHydrating = false
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.terminalHydrationCompleted(session)
+#endif
+    }
+
     func sendTerminalInput(_ data: ArraySlice<UInt8>) {
         guard phase == .connected, capability == .interact,
               inputControl?.canWrite != false else { return }
@@ -453,6 +537,13 @@ final class RemoteSessionConnection: ObservableObject {
     /// it. The local renderer already followed each step; the Mac needs only where it ended.
     func updateTerminalViewport(cols: Int, rows: Int) {
         guard cols >= 20, rows >= 4 else { return }
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.viewportObserved(
+            columns: cols,
+            rows: rows,
+            session: session
+        )
+#endif
         if pendingViewport?.cols == cols, pendingViewport?.rows == rows { return }
         let isFirstGridOfLease = pendingViewport == nil
         pendingViewport = (cols, rows)
@@ -485,6 +576,7 @@ final class RemoteSessionConnection: ObservableObject {
         viewportSettleTask = nil
         guard pendingViewport != nil else { return }
         pendingViewport = nil
+        lastSentTerminalViewport = nil
         guard phase == .connected, capability == .interact else { return }
         try? send(RemoteClientMessage(type: "viewportRelease"))
     }
@@ -698,6 +790,21 @@ final class RemoteSessionConnection: ObservableObject {
 
     private func send(_ message: RemoteClientMessage, generation: Int? = nil) throws {
         let expectedGeneration = generation ?? connectionGeneration
+        if message.type == "viewport", let cols = message.cols, let rows = message.rows {
+            if lastSentTerminalViewport?.cols == cols,
+               lastSentTerminalViewport?.rows == rows {
+                return
+            }
+            lastSentTerminalViewport = (cols, rows)
+            noteTerminalHydrationViewportSent()
+#if DEBUG
+            MobileTerminalWirePerformanceProbe.viewportSent(
+                columns: cols,
+                rows: rows,
+                session: session
+            )
+#endif
+        }
         if let demoScript {
             guard expectedGeneration == connectionGeneration, !stopped else {
                 throw RemoteClientError.invalidResponse
@@ -723,15 +830,6 @@ final class RemoteSessionConnection: ObservableObject {
                 self.scheduleReconnect(generation: expectedGeneration)
             }
         }
-#if DEBUG
-        if message.type == "viewport", let cols = message.cols, let rows = message.rows {
-            MobileTerminalWirePerformanceProbe.viewportSent(
-                columns: cols,
-                rows: rows,
-                session: session
-            )
-        }
-#endif
     }
 
     private func receiveLoop(task: URLSessionWebSocketTask, generation: Int) async {
@@ -743,6 +841,7 @@ final class RemoteSessionConnection: ObservableObject {
                 }
                 switch message {
                 case .data(let data):
+                    noteTerminalHydrationOutput()
 #if DEBUG
                     MobileTerminalWirePerformanceProbe.outputReceived(data, session: session)
 #endif
@@ -798,6 +897,7 @@ final class RemoteSessionConnection: ObservableObject {
     /// Synthesized terminal bytes, buffered exactly the way `receiveLoop` buffers real ones.
     func receiveDemoTerminalOutput(_ data: Data) {
         guard demoScript != nil else { return }
+        noteTerminalHydrationOutput()
         if let onTerminalOutput {
             onTerminalOutput(data)
         } else {
@@ -850,6 +950,9 @@ final class RemoteSessionConnection: ObservableObject {
             guard let hello = try? JSONDecoder().decode(RemoteHelloDTO.self, from: data) else { return }
             mirroredCaption = hello.title.isEmpty ? mirroredCaption : hello.title
             surface = hello.surface
+            if surface != .terminal {
+                completeTerminalHydration()
+            }
             capability = RemoteCapability(rawValue: hello.capability) ?? .view
             theme = hello.theme ?? theme
             terminalTheme = hello.terminalTheme ?? terminalTheme
@@ -877,7 +980,8 @@ final class RemoteSessionConnection: ObservableObject {
                 .capability: hello.capability,
                 .surface: hello.surface.rawValue,
             ]) { current, _ in current })
-            if let pendingViewport, capability == .interact {
+            if let pendingViewport, capability == .interact,
+               lastSentTerminalViewport == nil {
                 try? send(RemoteClientMessage(
                     type: "viewport",
                     cols: pendingViewport.cols,

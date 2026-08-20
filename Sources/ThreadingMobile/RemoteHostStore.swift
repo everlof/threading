@@ -200,7 +200,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
     var connectionOptionLabels: [String] {
         var result: [String] = []
         var seen: Set<String> = []
-        if hostedCredential != nil {
+        if hostedCredential != nil, hostedServiceURL != nil {
             let label = Self.connectionLabel(forEndpointKind: RemoteHostEndpointKind.hosted)
             result.append(label)
             seen.insert(label)
@@ -220,6 +220,16 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         case RemoteHostEndpointKind.vpn: return MobileL10n.string("VPN")
         case RemoteHostEndpointKind.hosted: return MobileL10n.string("Direct")
         default: return MobileL10n.string("Direct")
+        }
+    }
+
+    /// A route name after a verb. Product names keep their authored capitals; the descriptive
+    /// local-network phrase gets its own localization so languages can apply sentence grammar
+    /// without lowercasing an arbitrary translated label at runtime.
+    static func connectionLabelInSentence(forEndpointKind kind: String) -> String {
+        switch kind {
+        case RemoteHostEndpointKind.lan: return MobileL10n.string("this network")
+        default: return connectionLabel(forEndpointKind: kind)
         }
     }
 

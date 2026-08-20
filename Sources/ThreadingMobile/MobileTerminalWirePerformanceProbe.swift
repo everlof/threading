@@ -12,6 +12,10 @@ import UIKit
 @MainActor
 enum MobileTerminalWirePerformanceProbe {
     private static let quietPeriod = Duration.milliseconds(250)
+    /// The first replay can be followed by a SIGWINCH repaint after the Mac has reflowed a large
+    /// scrollback buffer. A normal turn's 250 ms is too short for that cross-device gap: it let
+    /// the probe declare entry complete while the recording still showed replacement screens.
+    private static let entryQuietPeriod = Duration.seconds(1)
     private static var runs: [String: Run] = [:]
     private static var attempts: [String: Int] = [:]
     private static var displayTicks: [UUID: DisplayTick] = [:]
@@ -30,6 +34,7 @@ enum MobileTerminalWirePerformanceProbe {
         guard isActive, session.surface == .terminal else { return }
         let attempt = (attempts[session.agentKind] ?? 0) + 1
         attempts[session.agentKind] = attempt
+        runs[session.id]?.entryDisplayCounter?.stop()
         runs[session.id] = Run(
             provider: session.agentKind,
             attempt: attempt,
@@ -47,10 +52,18 @@ enum MobileTerminalWirePerformanceProbe {
         run.viewCreatedAt = run.viewCreatedAt ?? CACurrentMediaTime()
     }
 
+    static func terminalHydrationCompleted(_ session: RemoteSessionSummaryDTO) {
+        guard let run = runs[session.id] else { return }
+        run.hydrationCompletedAt = run.hydrationCompletedAt ?? CACurrentMediaTime()
+    }
+
     static func outputReceived(_ data: Data, session: RemoteSessionSummaryDTO) {
         guard let run = runs[session.id] else { return }
         let now = CACurrentMediaTime()
         run.firstOutputAt = run.firstOutputAt ?? now
+        if let previous = run.lastOutputAt {
+            run.maximumOutputGap = max(run.maximumOutputGap, now - previous)
+        }
         run.lastOutputAt = now
         run.outputFrames += 1
         run.outputBytes += data.count
@@ -100,6 +113,14 @@ enum MobileTerminalWirePerformanceProbe {
         run.feedCalls += 1
         run.feedSeconds += elapsed
         run.maximumFeedSeconds = max(run.maximumFeedSeconds, elapsed)
+        if run.entryDisplayCounter == nil {
+            let counter = EntryDisplayCounter { timestamp in
+                guard let current = runs[session.id], current === run else { return }
+                run.recordDisplayOpportunity(at: timestamp)
+            }
+            run.entryDisplayCounter = counter
+            counter.start()
+        }
         if !run.entryDisplayScheduled {
             run.entryDisplayScheduled = true
             scheduleDisplayTick {
@@ -198,6 +219,25 @@ enum MobileTerminalWirePerformanceProbe {
         run.viewportCount += 1
         run.lastColumns = columns
         run.lastRows = rows
+        if run.viewportSentEvents.count < 32 {
+            run.viewportSentEvents.append(
+                "\(milliseconds(now - run.connectedAt))ms:"
+                    + "\(columns)x\(rows):"
+                    + "f\(run.outputFrames):b\(run.outputBytes)"
+            )
+        }
+    }
+
+    static func viewportObserved(
+        columns: Int,
+        rows: Int,
+        session: RemoteSessionSummaryDTO
+    ) {
+        guard let run = runs[session.id], run.viewportObservedEvents.count < 64 else { return }
+        run.viewportObservedEvents.append(
+            "\(milliseconds(CACurrentMediaTime() - run.connectedAt))ms:"
+                + "\(columns)x\(rows)"
+        )
     }
 
     static func localScrollChanged(_ session: RemoteSessionSummaryDTO) {
@@ -229,25 +269,43 @@ enum MobileTerminalWirePerformanceProbe {
         guard !run.entryLogged else { return }
         run.entryQuietTask?.cancel()
         run.entryQuietTask = Task { @MainActor in
-            try? await Task.sleep(for: quietPeriod)
+            try? await Task.sleep(for: entryQuietPeriod)
             guard !Task.isCancelled, let current = runs[sessionID], current === run,
                   !run.entryLogged, let lastFeedAt = run.lastFeedAt else { return }
             run.entryLogged = true
+            run.entryDisplayCounter?.stop()
+            run.entryDisplayCounter = nil
             writeMetric("ios-terminal-entry", run: run, fields: [
                 "connect_to_hello_ms": interval(run.connectedAt, run.helloAt),
                 "connect_to_first_bytes_ms": interval(run.connectedAt, run.firstOutputAt),
                 "connect_to_view_ms": interval(run.connectedAt, run.viewCreatedAt),
+                "connect_to_reveal_ms": interval(run.connectedAt, run.hydrationCompletedAt),
                 "connect_to_settle_ms": milliseconds(lastFeedAt - run.connectedAt),
                 "first_feed_to_display_ms": interval(run.firstFeedAt, run.firstDisplayAt),
                 "output_frames": String(run.outputFrames),
                 "output_bytes": String(run.outputBytes),
+                "max_output_gap_ms": milliseconds(run.maximumOutputGap),
                 "feed_calls": String(run.feedCalls),
                 "feed_ms": milliseconds(run.feedSeconds),
                 "max_feed_ms": milliseconds(run.maximumFeedSeconds),
+                "display_ticks_with_new_feeds": String(run.displayTicksWithNewFeeds),
+                "max_feeds_between_display_ticks": String(
+                    run.maximumFeedsBetweenDisplayTicks
+                ),
+                "first_to_last_display_tick_ms": interval(
+                    run.firstEntryDisplayAt,
+                    run.lastEntryDisplayAt
+                ),
                 "clear_screen": String(run.clearScreenCount),
                 "clear_history": String(run.clearHistoryCount),
                 "alternate_entries": String(run.alternateScreenEntries),
                 "viewport_updates": String(run.viewportCount),
+                "first_to_last_viewport_ms": interval(
+                    run.firstViewportAt,
+                    run.lastViewportAt
+                ),
+                "viewport_observed_sequence": run.viewportObservedEvents.joined(separator: ","),
+                "viewport_sent_sequence": run.viewportSentEvents.joined(separator: ","),
                 "grid": "\(run.lastColumns)x\(run.lastRows)",
             ])
         }
@@ -370,6 +428,7 @@ enum MobileTerminalWirePerformanceProbe {
         let connectedAt: CFTimeInterval
         var helloAt: CFTimeInterval?
         var viewCreatedAt: CFTimeInterval?
+        var hydrationCompletedAt: CFTimeInterval?
         var firstOutputAt: CFTimeInterval?
         var lastOutputAt: CFTimeInterval?
         var firstFeedAt: CFTimeInterval?
@@ -377,6 +436,7 @@ enum MobileTerminalWirePerformanceProbe {
         var firstDisplayAt: CFTimeInterval?
         var outputFrames = 0
         var outputBytes = 0
+        var maximumOutputGap: CFTimeInterval = 0
         var feedCalls = 0
         var feedSeconds: CFTimeInterval = 0
         var maximumFeedSeconds: CFTimeInterval = 0
@@ -388,7 +448,15 @@ enum MobileTerminalWirePerformanceProbe {
         var lastViewportAt: CFTimeInterval?
         var lastColumns = 0
         var lastRows = 0
+        var viewportObservedEvents: [String] = []
+        var viewportSentEvents: [String] = []
         var entryDisplayScheduled = false
+        var entryDisplayCounter: EntryDisplayCounter?
+        var displayTicksWithNewFeeds = 0
+        var feedsAtLastDisplayTick = 0
+        var maximumFeedsBetweenDisplayTicks = 0
+        var firstEntryDisplayAt: CFTimeInterval?
+        var lastEntryDisplayAt: CFTimeInterval?
         var entryLogged = false
         var entryQuietTask: Task<Void, Never>?
         var typing: Typing?
@@ -400,6 +468,16 @@ enum MobileTerminalWirePerformanceProbe {
             self.provider = provider
             self.attempt = attempt
             self.connectedAt = connectedAt
+        }
+
+        func recordDisplayOpportunity(at timestamp: CFTimeInterval) {
+            let newFeeds = feedCalls - feedsAtLastDisplayTick
+            guard newFeeds > 0 else { return }
+            feedsAtLastDisplayTick = feedCalls
+            displayTicksWithNewFeeds += 1
+            maximumFeedsBetweenDisplayTicks = max(maximumFeedsBetweenDisplayTicks, newFeeds)
+            firstEntryDisplayAt = firstEntryDisplayAt ?? timestamp
+            lastEntryDisplayAt = timestamp
         }
     }
 
@@ -479,6 +557,34 @@ enum MobileTerminalWirePerformanceProbe {
         @objc private func fired(_ sender: CADisplayLink) {
             sender.invalidate()
             link = nil
+            action(sender.timestamp)
+        }
+    }
+
+    /// Counts refresh boundaries that can expose a partially applied entry stream. This is not
+    /// a claim that Core Animation redrew pixels on every tick; it is the stricter scheduling
+    /// fact we need here: SwiftTerm accepted new bytes, then the display link ran, then more
+    /// bytes arrived. A clear/repaint split across those boundaries can be visible to a person.
+    private final class EntryDisplayCounter: NSObject {
+        private let action: (CFTimeInterval) -> Void
+        private var link: CADisplayLink?
+
+        init(action: @escaping (CFTimeInterval) -> Void) {
+            self.action = action
+        }
+
+        func start() {
+            let link = CADisplayLink(target: self, selector: #selector(fired(_:)))
+            self.link = link
+            link.add(to: .main, forMode: .common)
+        }
+
+        func stop() {
+            link?.invalidate()
+            link = nil
+        }
+
+        @objc private func fired(_ sender: CADisplayLink) {
             action(sender.timestamp)
         }
     }

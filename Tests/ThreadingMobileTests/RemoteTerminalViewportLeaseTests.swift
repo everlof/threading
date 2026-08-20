@@ -20,6 +20,9 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
 
     private enum Fixture {
         static let settleDelay: Duration = .milliseconds(40)
+        static let hydrationQuietDelay: Duration = .milliseconds(80)
+        static let hydrationHalfDelay: Duration = .milliseconds(40)
+        static let staticDemoHydrationWait: Duration = .milliseconds(1_200)
         /// Comfortably past the settle delay, far short of flaking on a busy machine.
         static let settleTimeout: TimeInterval = 2
         /// The grids one pinch from 9 to 13 points reports, oldest first.
@@ -110,6 +113,51 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         )
     }
 
+    /// Codex answers a resize by clearing and re-emitting terminal-owned history in many PTY
+    /// reads. The emulator must keep parsing those reads, but the phone must not reveal the
+    /// clear and partial reflow states between them.
+    @MainActor
+    func testInitialTerminalStaysHydratingUntilOutputIsQuietAfterTheViewport() async throws {
+        let connection = Self.demoConnection(
+            hydrationQuietDelay: Fixture.hydrationQuietDelay
+        )
+        connection.connect()
+
+        XCTAssertTrue(connection.isTerminalHydrating)
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+        try await Task.sleep(for: Fixture.hydrationHalfDelay)
+        XCTAssertTrue(connection.isTerminalHydrating)
+
+        // Another repaint chunk restarts the quiet boundary instead of exposing a partial frame.
+        connection.receiveDemoTerminalOutput(Data("late repaint chunk".utf8))
+        try await Task.sleep(for: Fixture.hydrationHalfDelay)
+        XCTAssertTrue(connection.isTerminalHydrating)
+        try await Task.sleep(for: Fixture.hydrationQuietDelay)
+        XCTAssertFalse(connection.isTerminalHydrating)
+    }
+
+    /// The screenshot fixtures preload terminal bytes before SwiftUI mounts the representable.
+    /// Taking that buffer must start the same hydration transaction as a real socket frame;
+    /// otherwise the animated opening placeholder remains forever and no evidence can stabilize.
+    @MainActor
+    func testBufferedStaticDemoOutputCompletesHydrationAfterTheViewport() async throws {
+        let connection = RemoteSessionConnection.demoTerminal()
+        var received = Data()
+
+        connection.onTerminalOutput = { received.append($0) }
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+        try await Task.sleep(for: Fixture.staticDemoHydrationWait)
+
+        XCTAssertFalse(received.isEmpty)
+        XCTAssertFalse(connection.isTerminalHydrating)
+    }
+
     /// `updateUIView` runs for every published change on the connection, and reinstalling an
     /// identical palette clears SwiftTerm's attribute caches and marks the whole screen dirty —
     /// a cold whole-grid repaint per presence or status tick, growing with cell count as the
@@ -155,7 +203,9 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
     // MARK: - Private Methods
 
     @MainActor
-    private static func demoConnection() -> RemoteSessionConnection {
+    private static func demoConnection(
+        hydrationQuietDelay: Duration = .milliseconds(500)
+    ) -> RemoteSessionConnection {
         let session = RemoteSessionSummaryDTO(
             id: "0e6f7d1c-5716-470b-933c-d68310644b4f",
             title: "Claude Code · AnotherTerminal",
@@ -168,7 +218,9 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         return RemoteSessionConnection(
             session: session,
             client: RemoteClient(link: link),
-            viewportSettleDelay: Fixture.settleDelay
+            viewportSettleDelay: Fixture.settleDelay,
+            terminalHydrationQuietDelay: hydrationQuietDelay,
+            terminalHydrationMaximumDelay: .seconds(2)
         )
     }
 

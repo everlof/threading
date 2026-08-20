@@ -134,6 +134,16 @@ func terminalKeyDisplayLabel(_ key: RemoteTerminalKeyDefinition) -> String {
     return prefix + label
 }
 
+/// SF Symbols used by the terminal key bar. Keeping these names testable matters because an
+/// unknown symbol produces an empty `Image` while the button continues reserving its full slot.
+enum TerminalKeyBarSymbols {
+    static let showKeyboard = "keyboard"
+    static let hideKeyboard = "keyboard.chevron.compact.down"
+    static let customizeKeys = "keyboard.badge.ellipsis"
+
+    static let all = [showKeyboard, hideKeyboard, customizeKeys]
+}
+
 /// The customizable key run under the remote terminal: layout comes from
 /// `MobileTerminalKeyboardStore` (stock per agent kind until edited), latch keys arm or lock
 /// the next press, and the trailing control opens the editor.
@@ -174,8 +184,8 @@ struct TerminalKeyBar: View {
                 Button(action: isKeyboardVisible ? bridge.dismissKeyboard : bridge.showKeyboard) {
                     trailingIcon(
                         isKeyboardVisible
-                            ? "keyboard.chevron.compact.down"
-                            : "keyboard.chevron.compact.up"
+                            ? TerminalKeyBarSymbols.hideKeyboard
+                            : TerminalKeyBarSymbols.showKeyboard
                     )
                 }
                 .accessibilityLabel(
@@ -186,7 +196,7 @@ struct TerminalKeyBar: View {
             }
 
             Button(action: customize) {
-                trailingIcon("keyboard.badge.ellipsis")
+                trailingIcon(TerminalKeyBarSymbols.customizeKeys)
             }
             .accessibilityLabel(MobileL10n.string("Customize keys"))
         }
@@ -263,7 +273,7 @@ struct TerminalKeyBar: View {
             } label: {
                 Label(
                     MobileL10n.string("Customize keys"),
-                    systemImage: "keyboard.badge.ellipsis"
+                    systemImage: TerminalKeyBarSymbols.customizeKeys
                 )
             }
         }

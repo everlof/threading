@@ -44,6 +44,15 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         XCTAssertFalse(TerminalKeyBridge().isKeyboardShowing)
     }
 
+    /// An unknown SF Symbol leaves the button's full slot in the bar but draws no glyph. That
+    /// made the show-keyboard action present and accessible while visibly indistinguishable from
+    /// empty space, so every symbol owned by this control is checked against the shipping SDK.
+    func testEveryKeyBarControlHasAVisibleSystemSymbol() {
+        for symbol in TerminalKeyBarSymbols.all {
+            XCTAssertNotNil(UIImage(systemName: symbol), "Missing SF Symbol: \(symbol)")
+        }
+    }
+
     /// A platform tripwire, not a behaviour of ours. `UIApplication.sendAction` broadcasting
     /// `resignFirstResponder` is the idiom that dismisses a `UITextField`, and the bar shipped
     /// with it — but it leaves this terminal first responder, which is why the button did

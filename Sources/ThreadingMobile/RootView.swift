@@ -55,6 +55,11 @@ struct RootView: View {
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "settings" {
                 MobileSettingsView()
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "connection-progress-lab" {
+                NavigationStack {
+                    MobileConnectionProgressLab()
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "app-icon-settings" {
                 NavigationStack {
                     MobileAppIconSettingsView()

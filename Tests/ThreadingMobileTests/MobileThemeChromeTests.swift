@@ -107,6 +107,72 @@ final class MobileMorphingTitleTests: XCTestCase {
         XCTAssertFalse(title.isAnimatingTitleForTesting)
     }
 
+    func testAConnectionStatusScrollsAsOneLineUnderTheTravelingFade() {
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+
+        configure(
+            title,
+            text: "Opening chat…",
+            reducesMotion: false,
+            role: .connectionStatus
+        )
+        window.layoutIfNeeded()
+        configure(
+            title,
+            text: "David's MacBook Pro",
+            reducesMotion: false,
+            role: .connectionStatus
+        )
+
+        XCTAssertEqual(title.stringValue, "David's MacBook Pro")
+        XCTAssertTrue(title.isAnimatingLineScrollForTesting)
+        XCTAssertTrue(title.isAnimatingTravelingFadeForTesting)
+    }
+
+    func testReduceMotionLandsAConnectionStatusWithoutEitherAnimation() {
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+
+        configure(
+            title,
+            text: "Opening chat…",
+            reducesMotion: false,
+            role: .connectionStatus
+        )
+        window.layoutIfNeeded()
+        configure(
+            title,
+            text: "David's MacBook Pro",
+            reducesMotion: true,
+            role: .connectionStatus
+        )
+
+        XCTAssertFalse(title.isAnimatingLineScrollForTesting)
+        XCTAssertFalse(title.isAnimatingTravelingFadeForTesting)
+    }
+
+    func testAConnectionProgressFadeDoesNotChangeItsWords() {
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+
+        configure(
+            title,
+            text: "Trying This network",
+            reducesMotion: true,
+            role: .connectionProgress
+        )
+        window.layoutIfNeeded()
+        title.playFade()
+
+        XCTAssertEqual(title.stringValue, "Trying This network")
+        XCTAssertTrue(title.isAnimatingTravelingFadeForTesting)
+        XCTAssertFalse(title.isAnimatingLineScrollForTesting)
+
+        title.stopFade()
+        XCTAssertFalse(title.isAnimatingTravelingFadeForTesting)
+    }
+
     func testNavigationStackCompressesALongChatNameWithoutCollapsingIt() {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
         let title = MobileMorphingTitleLabel()
@@ -169,7 +235,8 @@ final class MobileMorphingTitleTests: XCTestCase {
     private func configure(
         _ title: MobileMorphingTitleLabel,
         text: String,
-        reducesMotion: Bool
+        reducesMotion: Bool,
+        role: MobileMorphingTextRole = .chatName
     ) {
         title.configure(
             title: text,
@@ -178,7 +245,8 @@ final class MobileMorphingTitleTests: XCTestCase {
             textColor: .label,
             groundColor: .systemBackground,
             alignment: .center,
-            reducesMotion: reducesMotion
+            reducesMotion: reducesMotion,
+            role: role
         )
     }
 

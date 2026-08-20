@@ -29,7 +29,9 @@
     {"id": "session-dashboard-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light"},
     {"id": "session-dashboard-project-custom-dark", "entryID": "ios-session-dashboard", "demo": "project-sessions", "appearance": "dark", "theme": "custom"},
     {"id": "standalone-terminal-dashboard-custom-dark", "entryID": "ios-standalone-terminal", "demo": "sessions", "appearance": "dark", "theme": "custom"},
+    {"id": "session-dashboard-connecting-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "session-dashboard-offline-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-offline", "appearance": "dark", "theme": "custom"},
+    {"id": "connection-progress-lab-custom-dark", "entryID": "ios-connection-progress", "demo": "connection-progress-lab", "appearance": "dark", "theme": "custom"},
     {"id": "session-settings-custom-dark", "entryID": "ios-session-settings", "demo": "session-settings", "appearance": "dark", "theme": "custom"},
     {"id": "session-opening-connecting-custom-dark", "entryID": "ios-session-opening", "demo": "session-opening-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "session-opening-connecting-custom-light", "entryID": "ios-session-opening", "demo": "session-opening-connecting", "appearance": "light", "theme": "custom-light", "captureMode": "display"},
@@ -151,8 +153,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Session dashboard",
-      "description": "The paired owner dashboard and project-scoped chat list, with host switching in navigation chrome, project-aware session creation and actionable connection recovery.",
-      "states": ["Paired owner", "Mixed session activity", "Project grouping", "Project-scoped chat list", "Offline recovery with saved routes and identity"],
+      "description": "The paired owner dashboard and project-scoped chat list, with host switching in navigation chrome, project-aware session creation, named multi-route connection progress and actionable recovery.",
+      "states": ["Paired owner", "Mixed session activity", "Project grouping", "Project-scoped chat list", "Multi-route connection progress", "Offline recovery with saved routes and identity"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/session-dashboard-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}
@@ -187,9 +189,9 @@
       "status": "implemented",
       "priority": "important",
       "title": "Session opening states",
-      "description": "The session screen before it has a live surface: connecting to an available session, waking a dormant one on the Mac, and the failure it reports when neither happens.",
+      "description": "The session screen before it has a live surface: opening an available chat, waking a dormant one on the Mac, and the failure it reports when neither happens.",
       "states": [
-        "Connecting",
+        "Opening chat",
         "Resuming on your Mac",
         "Couldn\u2019t open session"
       ],
@@ -212,6 +214,18 @@
           "Mac-supplied"
         ]
       }
+    },
+    {
+      "id": "ios-connection-progress",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Connection progress",
+      "description": "The interactive DEBUG host for the shipping dashboard card and navigation status, showing one active transport operation at an authored checkpoint.",
+      "states": ["Checking routes", "Trying direct", "Automatic fallback", "Last saved route", "Loading sessions", "Body only", "Navigation bar only", "Both surfaces"],
+      "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
+      "capture": {"glob": "ios/connection-progress-lab-*.png"},
+      "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
     },
     {
       "id": "ios-native-conversation",
