@@ -82,6 +82,7 @@ final class ComponentGalleryViewController: NSViewController {
     static let componentNames: Set<String> = [
         "AgentActivityBeamView",
         "AgentWorkSummaryView",
+        "AgentWorkloadAnalyzerView",
         "BackdropOverlay",
         "BackdropThemedControl",
         "BrowserAnnotationOverlay",
@@ -3058,6 +3059,15 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSidebarBrandSample()
                 ),
                 story(
+                    "AgentWorkloadAnalyzerView",
+                    "The spectrum material's workload reading in place of the brand: seven "
+                        + "fixed bands off the shared AgentIntensity envelope, the working "
+                        + "count in one-bit figures, and MAX at provider-relative top effort. "
+                        + "Decorative, and it drives no timer while hidden, idle, or under "
+                        + "Reduce Motion.",
+                    makeAgentWorkloadAnalyzerSample()
+                ),
+                story(
                     "ScreenshotReportDropTargetView",
                     "The native titlebar's accepted-image state: a quiet wash and one exact "
                         + "sentence beside the traffic lights. It is transient, has no resting "
@@ -4104,6 +4114,32 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         return pane
+    }
+
+    private func makeAgentWorkloadAnalyzerSample() -> NSView {
+        let row = NSStackView(views: [
+            makeWorkloadAnalyzerSpecimen(workingCount: 0, atTopEffort: false),
+            makeWorkloadAnalyzerSpecimen(workingCount: 3, atTopEffort: false),
+            makeWorkloadAnalyzerSpecimen(workingCount: 12, atTopEffort: true)
+        ])
+        row.orientation = .horizontal
+        row.spacing = Design.Spacing.medium
+        return row
+    }
+
+    /// Presented rather than frozen, because the analyzer is a live reading and the gallery is
+    /// where its real cadence is reviewed. It starts no frame timer at an idle workload and none
+    /// under Reduce Motion, so the resting specimen stays still on the component's own terms
+    /// rather than on a test seam's.
+    private func makeWorkloadAnalyzerSpecimen(workingCount: Int, atTopEffort: Bool) -> NSView {
+        let analyzer = AgentWorkloadAnalyzerView()
+        analyzer.update(intensity: AgentIntensity(
+            workload: AgentWorkload(workingCount: workingCount, anyAtTopEffort: atTopEffort),
+            recentActivity: 0,
+            measuredAt: 0
+        ))
+        analyzer.setPresented(true)
+        return analyzer
     }
 
     private func makeSurfaceViewSample() -> NSView {

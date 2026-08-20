@@ -469,6 +469,22 @@ enum RemoteInboundPolicy {
         !value.isEmpty && value.utf8.count <= RemoteAccessDefaults.maximumLaunchIdentifierBytes
     }
 
+    /// An account handle is `AccountHandle.name`, which that type documents as the
+    /// *directory*/discovery spelling of a provider login, so a value arriving over the network
+    /// must not be able to name somewhere else on disk. The command layer does already fail
+    /// closed -- `moveRemoteSession` resolves the handle against discovered accounts and refuses
+    /// an unknown one -- but "not an account" and "not an account identifier" are different
+    /// answers, and only the second one is knowable at the boundary, where it costs nothing and
+    /// cannot be lost to a later refactor of the lookup.
+    static func acceptsAccountIdentifier(_ value: String) -> Bool {
+        acceptsLaunchIdentifier(value)
+            && !value.contains("/")
+            && !value.contains("\\")
+            && !value.contains("\u{00}")
+            && value != "."
+            && value != ".."
+    }
+
     static func acceptsRepositoryPath(_ value: String) -> Bool {
         !value.isEmpty
             && value.utf8.count <= RemoteAccessDefaults.maximumRepositoryPathBytes

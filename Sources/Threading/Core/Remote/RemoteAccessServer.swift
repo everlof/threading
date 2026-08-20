@@ -925,7 +925,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard RemoteInboundPolicy.acceptsPrompt(prompt), !prompt.isEmpty,
               RemoteInboundPolicy.acceptsLaunchIdentifier(creation.projectID),
               RemoteInboundPolicy.acceptsLaunchIdentifier(creation.agentKind),
-              creation.accountHandle.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
+              creation.accountHandle.map(RemoteInboundPolicy.acceptsAccountIdentifier) ?? true,
               creation.model.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.reasoningEffort.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.permissionMode.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
@@ -1669,7 +1669,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let choice = try? JSONDecoder().decode(
             RemoteMoveSessionAccountRequestDTO.self,
             from: request.body
-        ), RemoteInboundPolicy.acceptsLaunchIdentifier(choice.accountID) else {
+        ), RemoteInboundPolicy.acceptsAccountIdentifier(choice.accountID) else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -1792,7 +1792,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return session.kind.supportsAccounts ? .resumeOnBestAccount : nil
         case RemoteLimitRecoveryPolicyDTO.resumeVia:
             guard let rawAccountID = remote.accountID,
-                  RemoteInboundPolicy.acceptsLaunchIdentifier(rawAccountID) else { return nil }
+                  RemoteInboundPolicy.acceptsAccountIdentifier(rawAccountID) else { return nil }
             let handle = AccountHandle(storedName: rawAccountID)
             guard SessionMigration.destinations(for: session).contains(where: {
                 $0.handle == handle
