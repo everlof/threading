@@ -214,6 +214,7 @@ final class DisplayPaneController: NSViewController {
   /// The live tab's view controller currently parented into `hostedView` — the browser or a
   /// review — so switching tabs can swap it out without rebuilding its state.
   private weak var installedController: NSViewController?
+  private weak var presentedSimulator: SimulatorPaneViewController?
 
   /// The hosted controller *this pane* built, when the tab holds a value rather than a
   /// controller.
@@ -253,6 +254,7 @@ final class DisplayPaneController: NSViewController {
   private let extensionPanels: ExtensionPanelRouting
   private let customizationLookup: ComponentCustomizationHost.Lookup
   private let browserFactory: @MainActor (BrowserContextKind) -> BrowserViewController
+  private let simulatorControl: any SimulatorControlling
 
   /// Test and embedding seam for extension actions. Production routes through the shared
   /// provider slot when no explicit receiver is installed.
@@ -322,11 +324,13 @@ final class DisplayPaneController: NSViewController {
     },
     browserFactory: @escaping @MainActor (BrowserContextKind) -> BrowserViewController = {
       BrowserViewController(contextKind: $0)
-    }
+    },
+    simulatorControl: any SimulatorControlling = SimctlSimulatorControl()
   ) {
     self.extensionPanels = extensionPanels ?? ExtensionManager.shared
     self.customizationLookup = customizationLookup
     self.browserFactory = browserFactory
+    self.simulatorControl = simulatorControl
     super.init(nibName: nil, bundle: nil)
 
     appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
@@ -437,6 +441,12 @@ final class DisplayPaneController: NSViewController {
         "Terminal", "terminal", true,
         {
           [weak self] in _ = self?.addTerminalTab(for: sessionID)
+        }
+      ),
+      (
+        L10n.string("iOS Simulator"), "iphone", true,
+        {
+          [weak self] in _ = self?.activateSimulator(for: sessionID)
         }
       ),
       (
@@ -1272,6 +1282,60 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
+  // MARK: - Public — Simulator Tab
+
+  /// Reveals the session's one adopted iOS Simulator device in the right panel.
+  ///
+  /// Singleton by session: agents and people always converge on one stable tab and lease instead
+  /// of accumulating framebuffer viewers that disagree about which device a build targets.
+  @discardableResult
+  func activateSimulator(
+    for sessionID: SessionID,
+    deviceID: SimulatorDeviceID? = nil
+  ) -> SimulatorPaneViewController {
+    restoreIfNeeded(sessionID)
+    var tabs = tabsBySession[sessionID] ?? []
+    if let existing = tabs.first(where: { $0.simulator != nil }),
+      let controller = existing.simulator
+    {
+      if let deviceID { controller.selectDevice(deviceID) }
+      activeTabIDBySession[sessionID] = existing.id
+      persist(sessionID)
+      if sessionID == currentSessionID { render() }
+      return controller
+    }
+
+    let controller = makeSimulator(
+      for: sessionID,
+      preferredDeviceID: deviceID
+    )
+    let tab = DisplayTab(
+      body: .simulator(controller),
+      owningSessionID: sessionID
+    )
+    tabs.append(tab)
+    tabsBySession[sessionID] = tabs
+    activeTabIDBySession[sessionID] = tab.id
+    persist(sessionID)
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
+  private func makeSimulator(
+    for sessionID: SessionID,
+    preferredDeviceID: SimulatorDeviceID?
+  ) -> SimulatorPaneViewController {
+    let controller = SimulatorPaneViewController(
+      preferredDeviceID: preferredDeviceID,
+      control: simulatorControl
+    )
+    addChild(controller)
+    controller.onSelectedDeviceChange = { [weak self] _ in
+      self?.persist(sessionID)
+    }
+    return controller
+  }
+
   // MARK: - Public — Activity Section
 
   /// Compatibility route for **View ▸ Activity**. It now focuses Activity inside Overview.
@@ -1901,6 +1965,8 @@ final class DisplayPaneController: NSViewController {
   /// has to kill the shell, or the process outlives every view that could reach it.
   private func teardownHosted(_ tab: DisplayTab) {
     tab.terminal?.terminate()
+    tab.simulator?.terminate()
+    if presentedSimulator === tab.simulator { presentedSimulator = nil }
 
     guard let controller = tab.hostedController else { return }
     if installedController === controller { installHosted(nil) }
@@ -1941,6 +2007,7 @@ final class DisplayPaneController: NSViewController {
     let active = isShowingCurrentTheme
       ? nil
       : activeTab(for: currentSessionID) ?? fallback
+    updateSimulatorPresentation(active?.simulator)
     let performanceSpan = PerformanceRecorder.shared.begin(
       "display-pane.render",
       category: "display-pane.ui",
@@ -2203,6 +2270,14 @@ final class DisplayPaneController: NSViewController {
       installHosted(supervision)
       supervision.refresh()
 
+    case .simulator(let simulator):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(simulator)
+
     case .extensionPanel(let panel):
       imageView.image = nil
       imageView.isHidden = true
@@ -2219,6 +2294,13 @@ final class DisplayPaneController: NSViewController {
       captionLabel.isHidden = true
       contentMenuButton.isHidden = true
     }
+  }
+
+  private func updateSimulatorPresentation(_ simulator: SimulatorPaneViewController?) {
+    guard presentedSimulator !== simulator else { return }
+    presentedSimulator?.setPresented(false)
+    presentedSimulator = simulator
+    simulator?.setPresented(true)
   }
 
   /// Hides the shared web view and drops its page, so a switched-away document is not still
@@ -2331,6 +2413,7 @@ final class DisplayPaneController: NSViewController {
     case .subagents: return "subagents"
     case .sharing: return "sharing"
     case .supervision: return "supervision"
+    case .simulator: return "simulator"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
     case .browserComparison: return "browser-comparison"
@@ -2465,6 +2548,18 @@ final class DisplayPaneController: NSViewController {
       case .attachments:
         guard let controller = makeAttachments(for: sessionID) else { continue }
         tabs.append(DisplayTab(id: id, body: .attachments(controller)))
+
+      case .simulator:
+        let deviceID = persisted.simulatorDeviceID.flatMap(SimulatorDeviceID.init)
+        let controller = makeSimulator(
+          for: sessionID,
+          preferredDeviceID: deviceID
+        )
+        tabs.append(DisplayTab(
+          id: id,
+          body: .simulator(controller),
+          owningSessionID: sessionID
+        ))
 
       case .extensionPanel:
         guard let extensionIdentifier = persisted.extensionIdentifier,
@@ -2642,6 +2737,19 @@ final class DisplayPaneController: NSViewController {
       return PersistedTab(
         id: tab.id.uuidString, kind: .attachments, title: tab.title,
         subtitle: "", url: nil, html: nil, cacheFile: nil
+      )
+    }
+
+    if let simulator = tab.simulator {
+      return PersistedTab(
+        id: tab.id.uuidString,
+        kind: .simulator,
+        title: tab.title,
+        subtitle: "",
+        url: nil,
+        html: nil,
+        cacheFile: nil,
+        simulatorDeviceID: simulator.selectedDeviceID?.rawValue
       )
     }
 

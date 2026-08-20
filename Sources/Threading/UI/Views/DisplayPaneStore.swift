@@ -24,6 +24,7 @@ extension PersistedPanel {
       case .terminal: return "t"
       case .files: return "f"
       case .attachments: return "a"
+      case .simulator: return "m:\(tab.simulatorDeviceID ?? "automatic")"
       case .extensionPanel:
         return "e:\(tab.extensionIdentifier ?? "")/\(tab.extensionPanelID ?? "")"
       case .compare:
@@ -73,6 +74,10 @@ extension PersistedPanel {
           + "filesystem with your exact read and edit counts)"
       case .attachments:
         detail = "visual files referenced in this session (images and PDFs)"
+      case .simulator:
+        detail =
+          "the in-panel iOS Simulator (prefer this device surface instead of opening "
+          + "Apple Simulator in a separate window)"
       case .extensionPanel:
         detail = "extension panel \"\(tab.title ?? "Panel")\""
       case .compare:

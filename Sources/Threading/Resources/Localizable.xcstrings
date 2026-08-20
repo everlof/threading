@@ -1,6 +1,12 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ · %@ · Preview": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ · %@ · Förhandsvisning"}}}},
+    "Choose Simulator": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj simulator"}}}},
+    "iOS Simulator": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "iOS-simulator"}}}},
+    "Preparing %@…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förbereder %@…"}}}},
+    "Refresh Simulator": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppdatera simulator"}}}},
+    "Simulator screen": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Simulatorskärm"}}}},
     "Session Status Card": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionens statuskort"}}}},
     "Show or Hide the Session Status Card": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj sessionens statuskort"}}}},
     "%@ est.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ uppsk."}}}},

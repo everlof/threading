@@ -134,6 +134,27 @@
       }
     },
     {
+      "id": "simulator-pane",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Adopted iOS Simulator pane",
+      "description": "The real native conversation and display-panel shell with one session-owned iPhone framebuffer adopted into the protected right-side width instead of opening Apple Simulator as a separate window.",
+      "states": ["Booted device", "In-panel framebuffer", "Device identity", "Preview fallback"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["420-point right panel"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SimulatorPaneRenderTests.swift",
+        "test": "ThreadingTests/SimulatorPaneRenderTests/testRendersAdoptedSimulatorInRightPanel"
+      },
+      "capture": {
+        "glob": "simulator-pane-*.png"
+      }
+    },
+    {
       "id": "session-status-card",
       "kind": "component",
       "status": "implemented",
