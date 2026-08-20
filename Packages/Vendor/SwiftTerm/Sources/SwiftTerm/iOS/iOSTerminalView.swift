@@ -568,11 +568,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     @objc func doubleTap (_ gestureRecognizer: UITapGestureRecognizer)
     {
         guard gestureRecognizer.view != nil else { return }
-               
+
         if gestureRecognizer.state != .ended {
             return
         }
-        
+
+        // Over a tracking program a single tap is that program's click, so a double tap is the
+        // finger's deliberate ask for the keyboard. The pair's first tap already reached the
+        // program through the single-tap recognizer — repeating the same click cannot be what
+        // a second tap in the same spot meant.
+        if !isFirstResponder && allowMouseReporting && terminal.mouseMode.sendButtonPress() {
+            let _ = becomeFirstResponder ()
+            return
+        }
+
         if forwardTap (at: gestureRecognizer.location(in: self)) {
             return
         }

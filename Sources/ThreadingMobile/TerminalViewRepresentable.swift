@@ -80,6 +80,9 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         context.coordinator.initialScrollProgress = initialScrollProgress
         context.coordinator.onScrollProgress = onScrollProgress
         uiView.setAllowsKeyboardInput(allowsDirectInput)
+        // The key bar's show control follows this answer, and nothing else republishes it when
+        // input mode flips on a live view.
+        keyBridge.refreshKeyboardAvailability()
         uiView.allowMouseReporting = allowsDirectInput
         uiView.configureFontSizing(onChange: onFontSizeChange)
         uiView.applyPreferredFontSize(MobileTerminalFontSize.resolvedPreference(fontSize))

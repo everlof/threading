@@ -1,3 +1,4 @@
+import Combine
 import SwiftTerm
 import UIKit
 import XCTest
@@ -97,6 +98,46 @@ final class RemoteTerminalTapTests: XCTestCase {
         XCTAssertTrue(recorder.text.isEmpty, "a plain terminal has no click to report")
     }
 
+    /// Over a tracking program single taps are the program's clicks, so a double tap is the
+    /// finger's remaining way of asking for the keyboard on the terminal itself. The pair's
+    /// first tap already reached the program through the single-tap recognizer; the double-tap
+    /// handler must not send the same click again on its way to the keyboard.
+    func testADoubleTapOverATrackingProgramTakesTheKeyboardBack() {
+        let (window, view) = makeFocusedView()
+        defer { window.isHidden = true }
+        let recorder = RecordingTerminalDelegate()
+        view.terminalDelegate = recorder
+        view.feed(text: Fixture.enableSGRMouseTracking)
+        _ = view.resignFirstResponder()
+        XCTAssertFalse(view.isFirstResponder)
+
+        doubleTap(view, at: point(column: Fixture.tappedColumn, row: Fixture.tappedRow, in: view))
+
+        XCTAssertTrue(view.isFirstResponder)
+        XCTAssertTrue(
+            recorder.text.isEmpty,
+            "asking for the keyboard must not repeat the click, got \(recorder.text)"
+        )
+    }
+
+    /// With the keyboard already up there is nothing left for a double tap to ask, so it stays
+    /// what it always was over a tracking program: that program's click.
+    func testADoubleTapWhileTypingIsStillTheProgramsClick() {
+        let (window, view) = makeFocusedView()
+        defer { window.isHidden = true }
+        let recorder = RecordingTerminalDelegate()
+        view.terminalDelegate = recorder
+        view.feed(text: Fixture.enableSGRMouseTracking)
+
+        doubleTap(view, at: point(column: Fixture.tappedColumn, row: Fixture.tappedRow, in: view))
+
+        XCTAssertTrue(view.isFirstResponder)
+        XCTAssertTrue(
+            recorder.text.contains("<0;\(Fixture.tappedColumn + 1);\(Fixture.tappedRow + 1)M"),
+            "expected the program's left click, got \(recorder.text)"
+        )
+    }
+
     /// A phone that will not forward reports — view-only, or typing into a draft — must not have
     /// the gesture claimed either. SwiftTerm hands a tracking program the one-finger pan and
     /// leaves two fingers for the scrollback, so a claimed gesture that is then dropped on the
@@ -141,6 +182,41 @@ final class RemoteTerminalTapTests: XCTestCase {
         TerminalKeyBridge().showKeyboard()
     }
 
+    /// The bar decides whether to draw the show control during body evaluation, and the
+    /// terminal attaches only after the bar's first render — so availability has to be a
+    /// published change the bar is re-evaluated for, not a computed answer nothing announces.
+    /// Computed, the show control never appeared: only the dismiss half ever did.
+    func testAttachingATerminalPublishesTheShowControl() {
+        let view = makeView()
+        let bridge = TerminalKeyBridge()
+        XCTAssertFalse(bridge.canShowKeyboard)
+        var published = false
+        let subscription = bridge.objectWillChange.sink { published = true }
+        defer { subscription.cancel() }
+
+        bridge.terminalView = view
+
+        XCTAssertTrue(bridge.canShowKeyboard)
+        XCTAssertTrue(published, "the bar cannot re-evaluate for a change nobody published")
+    }
+
+    /// Input mode can flip on a live view — a session dropping to view-only must take the show
+    /// control with it, and coming back must return it.
+    func testInputModeFlipsFollowTheShowControl() {
+        let view = makeView()
+        let bridge = TerminalKeyBridge()
+        bridge.terminalView = view
+        XCTAssertTrue(bridge.canShowKeyboard)
+
+        view.setAllowsKeyboardInput(false)
+        bridge.refreshKeyboardAvailability()
+        XCTAssertFalse(bridge.canShowKeyboard)
+
+        view.setAllowsKeyboardInput(true)
+        bridge.refreshKeyboardAvailability()
+        XCTAssertTrue(bridge.canShowKeyboard)
+    }
+
     // MARK: - Private Methods
 
     private func makeView() -> RemoteTerminalView {
@@ -180,6 +256,11 @@ final class RemoteTerminalTapTests: XCTestCase {
     private func tap(_ view: RemoteTerminalView, at point: CGPoint) {
         let recognizer = EndedTap(at: point, on: view)
         view.perform(Selector(("singleTap:")), with: recognizer)
+    }
+
+    private func doubleTap(_ view: RemoteTerminalView, at point: CGPoint) {
+        let recognizer = EndedTap(at: point, on: view)
+        view.perform(Selector(("doubleTap:")), with: recognizer)
     }
 }
 

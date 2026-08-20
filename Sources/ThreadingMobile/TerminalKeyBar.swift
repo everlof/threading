@@ -9,7 +9,9 @@ import UIKit
 @MainActor
 final class TerminalKeyBridge: ObservableObject {
     @Published private(set) var latch = RemoteTerminalLatchState()
-    weak var terminalView: RemoteTerminalView?
+    weak var terminalView: RemoteTerminalView? {
+        didSet { refreshKeyboardAvailability() }
+    }
 
     var applicationCursorActive: Bool {
         terminalView?.getTerminal().applicationCursor ?? false
@@ -69,8 +71,19 @@ final class TerminalKeyBridge: ObservableObject {
     /// A view-only session refuses first responder, and a control that can do nothing should not
     /// be offered — the dismiss half was never shown to a viewer either, because a viewer could
     /// not have the keyboard up to begin with.
-    var canShowKeyboard: Bool {
-        terminalView?.canBecomeFirstResponder ?? false
+    ///
+    /// Published rather than computed, because the bar reads it during body evaluation and the
+    /// answer changes outside SwiftUI's sight: the terminal attaches only after the bar's first
+    /// render, and input mode can flip on a live view. As a computed property over an
+    /// unpublished weak reference nothing invalidated the bar, so the show control stayed
+    /// missing and only the dismiss half ever appeared.
+    @Published private(set) var canShowKeyboard = false
+
+    /// Re-reads what the attached terminal will accept. Attachment refreshes by itself; the
+    /// representable calls this after `setAllowsKeyboardInput`, the answer's other input.
+    func refreshKeyboardAvailability() {
+        let refreshed = terminalView?.canBecomeFirstResponder ?? false
+        if canShowKeyboard != refreshed { canShowKeyboard = refreshed }
     }
 
     /// Brings the system keyboard back.

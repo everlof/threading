@@ -408,6 +408,19 @@ it back. A tap over a tracking program is now that program's left click, press a
 together, and it leaves focus where the person put it; `TerminalKeyBar` carries the way back to
 the keyboard in both directions rather than only the way out.
 
+**The way back has to be reachable, twice over.** The bar's show control read
+`terminalView?.canBecomeFirstResponder` as a computed property over an unpublished weak
+reference, and both of its inputs change outside SwiftUI's sight — the terminal attaches only
+after the bar's first render, and input mode can flip on a live view — so nothing ever
+invalidated the bar and only the dismiss half appeared. `TerminalKeyBridge.canShowKeyboard` is
+published now, refreshed on attachment and after `setAllowsKeyboardInput`. And because a control
+on a bar is not where a decade of muscle memory reaches for a keyboard, a **double tap** on the
+terminal takes it back too: over a tracking program the pair's first tap is still that program's
+click (the single-tap recognizer fires on it regardless), and the second tap answers the person
+instead of repeating the click. With the keyboard already up, or nothing tracking, a double tap
+keeps its old meanings — the program's click and word selection respectively.
+`RemoteTerminalTapTests` pins all of it.
+
 **The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
 a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the
 session off its own frame and put the rest behind a scrollbar, and only resizing the *Mac* ever

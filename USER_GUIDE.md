@@ -2413,9 +2413,10 @@ removed, and the bar carries the control that puts the keyboard away and brings 
 
 **Tapping a mirrored terminal clicks it.** A full-screen TUI that draws something to click —
 Claude Code's "click to go to bottom", its option lists — receives a tap as a left click at that
-cell, whether or not the keyboard is up. Because the tap belongs to the program, it no longer
-doubles as the way to summon the keyboard: use the bar's keyboard control for that. A terminal
-with nothing tracking the mouse behaves as before, where a tap takes the keyboard back.
+cell, whether or not the keyboard is up. Because a single tap belongs to the program, it no
+longer doubles as the way to summon the keyboard: **double-tap** the terminal for that, or use
+the bar's keyboard control, which offers the way back whenever this terminal can type. A
+terminal with nothing tracking the mouse behaves as before, where a tap takes the keyboard back.
 
 Scrolling a mirrored terminal follows what the program in it wants. Full-screen agent TUIs such as
 Claude Code track the mouse and scroll their own transcript, so **one finger** moves the agent's
