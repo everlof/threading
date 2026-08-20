@@ -563,10 +563,15 @@ final class RemoteSessionMirrorRegistry {
         case .cut(let tail): connection.sendBinary(tail)
         }
 
-        guard case .cut = replay else {
+        guard case .cut = replay, let budget else {
             connection.sendBinary(RemoteTerminalModeSeed.bytes(for: snapshot.modes))
             return true
         }
+        EventLog.shared.record(.remote, "Remote replay bounded", [
+            "terminal": terminalID.uuidString,
+            "ring": String(ringSnapshot.count),
+            "budget": String(budget),
+        ])
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             var modes = snapshot.modes
@@ -1095,7 +1100,8 @@ final class RemoteSessionMirrorRegistry {
         rows: Int
     ) {
         guard connection.authenticatedPeer?.authorization.capability == .interact,
-              (20...240).contains(cols), (4...160).contains(rows),
+              RemoteViewportRefusal.columns.contains(cols),
+              RemoteViewportRefusal.rows.contains(rows),
               terminalMirrors[terminalID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let terminalApplication,
               case .available = terminalApplication.state(for: terminalID) else { return }

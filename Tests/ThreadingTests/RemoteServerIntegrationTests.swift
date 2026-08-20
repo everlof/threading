@@ -1477,6 +1477,39 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             404,
             "one terminal capability must not discover or control another terminal"
         )
+
+        // Minting a link is an owner action, and the two ways of asking for an impossible one
+        // are told apart here exactly as they are for a chat: an unreadable body is the
+        // client's mistake, an unknown role is a request the host understood and refused.
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/terminal/\(terminal.id.uuidString)/share",
+                bearer: "terminalcontrol",
+                body: try JSONEncoder().encode(
+                    RemoteCreateShareRequestDTO(capability: RemoteCapability.view.rawValue)
+                )
+            )).status,
+            403,
+            "a terminal capability cannot create another share"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/terminal/\(terminal.id.uuidString)/share",
+                bearer: "goodtoken",
+                body: Data()
+            )).status,
+            400
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/terminal/\(terminal.id.uuidString)/share",
+                bearer: "goodtoken",
+                body: try JSONEncoder().encode(
+                    RemoteCreateShareRequestDTO(capability: "administrator")
+                )
+            )).status,
+            422
+        )
     }
 
     @MainActor

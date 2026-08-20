@@ -1417,7 +1417,9 @@
         invitationRequestID = null;
         try {
           sessionStorage.setItem(tokenStorageKey, token);
-          if (body.me && body.me.share && body.me.share.scope === "session") {
+          // Every guest membership is durable, a one-chat share and a one-terminal share
+          // alike; only the owner's own "all" capability is deliberately per-tab here.
+          if (body.me && body.me.share && body.me.share.scope !== "all") {
             storedMembership = token;
             localStorage.setItem(membershipStorageKey, token);
           }
@@ -1626,7 +1628,7 @@
     var attentionSessions = allSessions.filter(function (session) {
       return !isSessionSnoozed(session);
     });
-    var snoozedSessions = me.sessions.filter(isSessionSnoozed);
+    var snoozedSessions = (me.sessions || []).filter(isSessionSnoozed);
     renderSessionSection(t("sessions.heading"), attentionSessions);
     if (snoozedSessions.length) {
       renderSessionSection(t("sessions.snoozed"), snoozedSessions);

@@ -201,6 +201,12 @@ final class ProjectTerminalViewController: NSViewController {
 extension ProjectTerminalViewController: TerminalSessionDelegate {
     func terminalSessionDidStart(_ session: TerminalSession) {
         startDirectoryTracking()
+        // The agent surfaces begin capturing at launch so the ring follows a live terminal
+        // before anybody attaches; a standalone shell is mirrored on the same terms, or a
+        // client joining later replays only what it happened to be present for.
+        if AppSettings.shared.remoteAccessEnabled {
+            RemoteSessionMirrorRegistry.shared.beginCapturing(terminalID: terminalID)
+        }
         notifyRunningState()
     }
 

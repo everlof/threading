@@ -1899,8 +1899,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let choice = try? JSONDecoder().decode(
             RemoteCreateShareRequestDTO.self,
             from: request.body
-        ), let capability = RemoteCapability(rawValue: choice.capability) else {
+        ) else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+        guard let capability = RemoteCapability(rawValue: choice.capability) else {
+            respond(.respond(RemoteRouter.error(422, "Unknown Share Role")))
             return
         }
         DispatchQueue.main.async {
