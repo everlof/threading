@@ -290,6 +290,20 @@ full-screen agent repaint. The immediate route installs the one useful final gri
 conversation sessions retain the standard navigation transition because their virtual rows do not
 control a remote process viewport.
 
+**Only a settled grid becomes a lease.** Whole-point crossings bound the pinch locally, but a
+single gesture still crosses many points — the Mac's journal recorded nineteen `Remote viewport
+applied` entries from one pinch, each a soft reset, a full scrollback reflow and an agent
+repaint, and the hellos queued behind that churn took seconds, which a phone experiences as
+"entering a chat is very much slower" precisely when the font is small and the grid is large.
+`RemoteSessionConnection.updateTerminalViewport` therefore applies every crossing to the local
+renderer immediately but leases to the Mac only the first grid of a lease (so entering sizes the
+agent at once) and thereafter the grid that has held still for
+`RemoteMobileConnectionDefaults.viewportSettleDelay`. The browser client has debounced its fit
+for the same reason all along. For the same event-frequency reason,
+`TerminalViewRepresentable.apply` installs a terminal theme only when the theme actually changed:
+`updateUIView` runs for every published change on the connection, and reinstalling an identical
+palette clears SwiftTerm's attribute caches and repaints every visible cell cold.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients
@@ -489,6 +503,29 @@ starting a chat now go through one function, so a new chat is opened with the tr
 surface can survive — a terminal still commits its final geometry immediately rather than being
 resized through every intermediate width. The session's own screen owns the wait: a brand-new
 session is not yet running, so it shows "Resuming on your Mac…" until the agent answers.
+
+**A chat has one name, wherever it is drawn.** The list draws the catalogue's
+`AgentSession.displayTitle` and so does every title on the screen that list opens —
+`MobileSessionChrome.navigationTitle(for:in:liveTitle:)` resolves it against `model.me` rather
+than against the summary the screen happened to be opened with, so a rename that lands while a
+chat is open moves both.
+
+The socket's own title is not that name, and is called `mirroredCaption` so that reading it as one
+is visibly wrong. It is what the mirrored surface calls itself right now: for a terminal, the
+agent's OSC title exactly as it was sent. The Mac never shows that string either —
+`ProjectStore.updateAgentTitle` strips its decoration, drops the captions that name the product or
+the working directory, and ranks reported against provider against chosen; `displayTitle` then
+applies the user's choice about agent titles at all. None of that has happened on the wire, so a
+phone reading the caption is not showing a slightly different name, it is showing a different
+*kind* of string. It stays a bootstrap for a catalogue value that is still empty, and nothing else.
+
+This was wrong twice for one structural reason: the rule was applied to SwiftUI's
+`navigationTitle`, which **nothing on a session screen draws**. A conversation installs its own
+`navigationItem.titleView` and a terminal supplies a principal toolbar item, and both read the
+connection directly — so the list said "Licensing strategy" and the screen it opened said
+"✳ Claude Code". Both surfaces now ask the one function, and `MobileSessionChromeTests` asks the
+shipping controller, inside the navigation controller it ships in, what its title view actually
+says: a value-level test of the rule passed the whole time.
 
 **The chat's title says when the agent is working.** The navigation title's status line carries
 the dotted thinking orb — the same mark, the same nine animations and the same accent tint as the

@@ -668,7 +668,11 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private func updateNavigationTitle() {
         navigationTitleView.update(
-            title: connection.title,
+            title: MobileSessionChrome.navigationTitle(
+                for: connection.session,
+                in: model.me,
+                liveTitle: connection.mirroredCaption
+            ),
             status: connectionStatusLabel,
             statusColor: connectionStatusColor,
             isWorking: connection.isAgentWorking,

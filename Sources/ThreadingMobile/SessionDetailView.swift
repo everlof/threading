@@ -53,6 +53,41 @@ enum MobileSessionChrome {
         catalogTitle.isEmpty ? (liveTitle ?? catalogTitle) : catalogTitle
     }
 
+    /// The same rule, resolved against the catalogue as it stands now rather than against the
+    /// summary a screen was opened with.
+    ///
+    /// **Every title surface a session screen has asks this one function.** The rule above was
+    /// applied only to the SwiftUI `navigationTitle`, which nothing on a session screen draws:
+    /// the terminal supplies a principal toolbar item and the conversation installs its own
+    /// `titleView`, and both read the socket's caption directly. So a chat answered to two
+    /// names — its own in the list, and whatever the mirrored surface last called itself in the
+    /// screen the list opens. A terminal's caption is the agent's OSC title as it was sent,
+    /// before the Mac strips its decoration, ignores the ones that name the product or the
+    /// working directory, and applies the user's choice about agent titles at all; the phone
+    /// carries none of that, so it must not be the name.
+    static func navigationTitle(
+        for session: RemoteSessionSummaryDTO,
+        in catalog: RemoteMeDTO?,
+        liveTitle: String?
+    ) -> String {
+        navigationTitle(
+            catalogTitle: currentSession(session, in: catalog).title,
+            liveTitle: liveTitle
+        )
+    }
+
+    /// The catalogue's own row for a session, falling back to the summary the screen was opened
+    /// with while the catalogue is still loading or no longer lists the row. Archived rows are
+    /// searched too, because the archive list opens the same screen.
+    static func currentSession(
+        _ session: RemoteSessionSummaryDTO,
+        in catalog: RemoteMeDTO?
+    ) -> RemoteSessionSummaryDTO {
+        catalog?.sessions.first(where: { $0.id == session.id })
+            ?? catalog?.archivedSessions?.first(where: { $0.id == session.id })
+            ?? session
+    }
+
     static func canOpenWorkspace(canManageSessions: Bool, hasClient: Bool) -> Bool {
         canManageSessions && hasClient
     }
@@ -93,7 +128,7 @@ struct SessionDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var currentSession: RemoteSessionSummaryDTO {
-        model.me?.sessions.first(where: { $0.id == session.id }) ?? session
+        MobileSessionChrome.currentSession(session, in: model.me)
     }
 
     init(session: RemoteSessionSummaryDTO) {
@@ -130,7 +165,7 @@ struct SessionDetailView: View {
         }
         .navigationTitle(MobileSessionChrome.navigationTitle(
             catalogTitle: currentSession.title,
-            liveTitle: connection?.title
+            liveTitle: connection?.mirroredCaption
         ))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -633,7 +668,11 @@ private struct RemoteNavigationTitle: View {
 
     private var title: some View {
         MobileConnectionNavigationTitle(
-            title: connection.title,
+            title: MobileSessionChrome.navigationTitle(
+                for: connection.session,
+                in: model.me,
+                liveTitle: connection.mirroredCaption
+            ),
             status: label,
             statusColor: color
         )

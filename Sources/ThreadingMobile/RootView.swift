@@ -15,6 +15,12 @@ struct RootView: View {
     @StateObject private var workspaceDemoActivity = MobileWorkspaceActivity(
         sessionID: "workspace-demo"
     )
+
+    /// A fixture's own name, the way the app takes one: from the catalogue row, never from the
+    /// socket caption the mirrored surface happens to be showing.
+    private var demoTerminalName: String { demoTerminal.session.title }
+    private var demoConversationName: String { demoConversation.session.title }
+    private var demoPermissionName: String { demoPermission.session.title }
 #endif
 
     var body: some View {
@@ -25,7 +31,7 @@ struct RootView: View {
             ) {
                 NavigationStack {
                     TerminalRemoteView(connection: demoTerminal)
-                        .navigationTitle(demoTerminal.title)
+                        .navigationTitle(demoTerminalName)
                         .navigationBarTitleDisplayMode(.inline)
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
@@ -35,7 +41,7 @@ struct RootView: View {
                 .hasPrefix("conversation") == true {
                 NavigationStack {
                     ConversationRemoteView(connection: demoConversation)
-                        .navigationTitle(demoConversation.title)
+                        .navigationTitle(demoConversationName)
                         .navigationBarTitleDisplayMode(.inline)
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "pairing" {
@@ -102,7 +108,7 @@ struct RootView: View {
                         .hasPrefix("permission") == true {
                 NavigationStack {
                     ConversationRemoteView(connection: demoPermission)
-                        .navigationTitle(demoPermission.title)
+                        .navigationTitle(demoPermissionName)
                         .navigationBarTitleDisplayMode(.inline)
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?

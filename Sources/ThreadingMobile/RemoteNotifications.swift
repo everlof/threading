@@ -121,7 +121,7 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
                 notifications: notifications,
                 inheritedTheme: theme
             )
-            controller.title = connection.title
+            controller.title = connection.mirroredCaption
             let navigationController = UINavigationController(rootViewController: controller)
             configure(navigationController, theme: theme)
             return navigationController

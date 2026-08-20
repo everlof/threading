@@ -14,6 +14,15 @@ private enum RemoteMobileConnectionDefaults {
     /// reconnect, and no terminal event in the diagnostics journal, which is exactly the shape
     /// that report could not explain. Long enough for a slow cellular handshake, far shorter than a person's patience.
     static let helloDeadline: Duration = .seconds(15)
+    /// How long a phone-owned grid must hold still before it is leased to the Mac.
+    ///
+    /// A pinch, a keyboard, or an animated layout reports one grid per crossed cell boundary,
+    /// and the Mac's journal showed nineteen leases from a single gesture. Every lease
+    /// soft-resets and reflows the Mac's emulator and SIGWINCHes the agent into a whole-screen
+    /// repaint, which is work only the settled grid deserves — the browser client has debounced
+    /// its fit for the same reason all along. The first grid of a lease still goes immediately,
+    /// so entering a chat sizes the agent without waiting out a quiet window.
+    static let viewportSettleDelay: Duration = .milliseconds(150)
 }
 
 enum MobileCollaborationPresentation {
@@ -143,7 +152,14 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .connecting
-    @Published private(set) var title: String
+    /// What the mirrored surface calls itself right now — a terminal's OSC title as the agent
+    /// sent it, or the name the Mac put in `hello`. **Not the session's name**, which is the
+    /// catalogue's `displayTitle`: the Mac strips a caption's decoration, ignores the ones that
+    /// name the product or the working directory, and applies the user's choice about agent
+    /// titles before a row is named, and none of that has happened to this string. Chrome asks
+    /// `MobileSessionChrome.navigationTitle(for:in:liveTitle:)`, which is why this is not called
+    /// `title`: read as a title it made one chat answer to two names.
+    @Published private(set) var mirroredCaption: String
     @Published private(set) var surface: RemoteSessionSurface
     @Published private(set) var capability: RemoteCapability = .view
     @Published private(set) var theme: RemoteThemeDTO?
@@ -188,6 +204,8 @@ final class RemoteSessionConnection: ObservableObject {
     private var pendingTerminalOutput = Data()
     private let pendingTerminalOutputLimit = 2 * 1_024 * 1_024
     private var pendingViewport: (cols: Int, rows: Int)?
+    private let viewportSettleDelay: Duration
+    private var viewportSettleTask: Task<Void, Never>?
     private var typingIdleTask: Task<Void, Never>?
     private var isReportingTyping = false
     private var serverFeatures: Set<String> = []
@@ -247,13 +265,15 @@ final class RemoteSessionConnection: ObservableObject {
         session: RemoteSessionSummaryDTO,
         client: RemoteClient,
         reconnectClient: (@MainActor () async -> RemoteClient?)? = nil,
-        helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline
+        helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline,
+        viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay
     ) {
         self.session = session
         self.client = client
         self.reconnectClient = reconnectClient
         self.helloDeadline = helloDeadline
-        title = session.title
+        self.viewportSettleDelay = viewportSettleDelay
+        mirroredCaption = session.title
         surface = session.surface
         terminalTheme = session.terminalTheme
         deviceID = RemoteDeviceIdentity.current
@@ -352,6 +372,8 @@ final class RemoteSessionConnection: ObservableObject {
 
     func disconnect(markEnded: Bool = true) {
         reportTyping(false)
+        viewportSettleTask?.cancel()
+        viewportSettleTask = nil
         if phase == .connected, capability == .interact, pendingViewport != nil {
             try? send(RemoteClientMessage(type: "viewportRelease"))
         }
@@ -396,16 +418,43 @@ final class RemoteSessionConnection: ObservableObject {
 
     /// Reports the grid SwiftTerm can actually display on this phone. The latest value is kept
     /// across the auth handshake so an initial layout that happens before `hello` is not lost.
+    ///
+    /// Only a settled grid becomes a lease. A pinch or an animating layout calls this once per
+    /// crossed cell boundary, and forwarding each one had the Mac reflow its emulator and
+    /// SIGWINCH the agent nineteen times in one gesture — churn that stalled every hello behind
+    /// it. The local renderer already followed each step; the Mac needs only where it ended.
     func updateTerminalViewport(cols: Int, rows: Int) {
         guard cols >= 20, rows >= 4 else { return }
-        let viewport = (cols, rows)
         if pendingViewport?.cols == cols, pendingViewport?.rows == rows { return }
-        pendingViewport = viewport
+        let isFirstGridOfLease = pendingViewport == nil
+        pendingViewport = (cols, rows)
         guard phase == .connected, capability == .interact else { return }
-        try? send(RemoteClientMessage(type: "viewport", cols: cols, rows: rows))
+        if isFirstGridOfLease {
+            try? send(RemoteClientMessage(type: "viewport", cols: cols, rows: rows))
+            return
+        }
+        viewportSettleTask?.cancel()
+        viewportSettleTask = Task { [weak self, viewportSettleDelay] in
+            try? await Task.sleep(for: viewportSettleDelay)
+            guard !Task.isCancelled else { return }
+            self?.sendSettledViewport()
+        }
+    }
+
+    private func sendSettledViewport() {
+        viewportSettleTask = nil
+        guard !stopped, phase == .connected, capability == .interact,
+              let pendingViewport else { return }
+        try? send(RemoteClientMessage(
+            type: "viewport",
+            cols: pendingViewport.cols,
+            rows: pendingViewport.rows
+        ))
     }
 
     func releaseTerminalViewport() {
+        viewportSettleTask?.cancel()
+        viewportSettleTask = nil
         guard pendingViewport != nil else { return }
         pendingViewport = nil
         guard phase == .connected, capability == .interact else { return }
@@ -759,7 +808,7 @@ final class RemoteSessionConnection: ObservableObject {
         switch envelope.type {
         case "hello":
             guard let hello = try? JSONDecoder().decode(RemoteHelloDTO.self, from: data) else { return }
-            title = hello.title.isEmpty ? title : hello.title
+            mirroredCaption = hello.title.isEmpty ? mirroredCaption : hello.title
             surface = hello.surface
             capability = RemoteCapability(rawValue: hello.capability) ?? .view
             theme = hello.theme ?? theme
@@ -804,7 +853,7 @@ final class RemoteSessionConnection: ObservableObject {
             }
         case "title":
             if let update = try? JSONDecoder().decode(RemoteTitleDTO.self, from: data) {
-                title = update.title
+                mirroredCaption = update.title
             }
         case "workspaceChanged":
             if let update = try? JSONDecoder().decode(
