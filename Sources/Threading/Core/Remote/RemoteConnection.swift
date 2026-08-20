@@ -65,6 +65,8 @@ final class RemoteConnection: @unchecked Sendable {
 
     /// The session id parsed from a `/ws/session/<id>` upgrade path, before auth.
     private(set) var routedSessionID: String?
+    /// The terminal id parsed from a `/ws/terminal/<id>` upgrade path, before auth.
+    private(set) var routedTerminalID: String?
 
     private let connection: NWConnection
     private let queue: DispatchQueue
@@ -229,18 +231,29 @@ final class RemoteConnection: @unchecked Sendable {
                     self.isHandling = false
                     self.processHTTP()
                 case .upgrade(let sessionID):
-                    self.upgrade(to: sessionID, request: request)
+                    self.upgrade(toSession: sessionID, request: request)
+                case .upgradeTerminal(let terminalID):
+                    self.upgrade(toTerminal: terminalID, request: request)
                 }
             }
         }
     }
 
-    private func upgrade(to sessionID: String, request: HTTPRequest) {
+    private func upgrade(toSession sessionID: String, request: HTTPRequest) {
+        routedSessionID = sessionID
+        upgrade(request: request)
+    }
+
+    private func upgrade(toTerminal terminalID: String, request: HTTPRequest) {
+        routedTerminalID = terminalID
+        upgrade(request: request)
+    }
+
+    private func upgrade(request: HTTPRequest) {
         guard let response = RemoteWebSocket.upgradeResponseData(for: request) else {
             write(HTTPResponse.status(400, "Bad Request").serialized, thenClose: true)
             return
         }
-        routedSessionID = sessionID
         mode = .webSocket
         isHandling = false
         idleTimer?.cancel()

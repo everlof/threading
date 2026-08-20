@@ -2273,6 +2273,19 @@ kept in the Mac login Keychain, so disabling Remote Access or restarting the app
 without silently making collaborators rejoin. Permission approval is an explicit right for that
 member and chat; it never grants another chat, Mac settings, or the ability to create shares.
 
+Paired owner devices also see **standalone terminals** in the iPhone and browser dashboard. Open
+one to attach to that project shell; if it is stopped, an owner may start it remotely. A terminal
+has no chat transcript, archive, workspace tools or AI permission cards, so its screen exposes
+only the terminal and terminal sharing actions.
+
+Use a standalone terminal row's **… > Share Terminal…** to give somebody access to that terminal
+alone. **View only** follows output from an already-running shell and cannot type, resize or start
+it. **Full control** can start the shell and run commands as your Mac user, including commands
+outside the project—the project folder is a starting directory, not a security boundary. Neither
+grant can approve AI permissions, see another chat or terminal, change Mac settings, or create
+shares. **Stop Sharing Terminal** revokes its unused links and accepted memberships; as with chat
+shares, merely turning Remote Access off suspends them rather than silently deleting them.
+
 You can pair several phones and tablets with the same Mac. Each receives a separate Keychain
 credential and can control sessions concurrently; Settings lists and revokes them independently.
 The iPhone still shows that Mac once even when it knows several of its addresses. It

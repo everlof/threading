@@ -148,8 +148,10 @@ protocol RemoteTerminalSurface: AnyObject, Sendable {
 /// they do not locate a process singleton or application window internally.
 @MainActor
 protocol RemoteTerminalSurfaceQuerying: Sendable {
-    var remoteTerminalSessionIDs: Set<SessionID> { get }
-    func remoteTerminalSurface(for sessionID: SessionID) -> (any RemoteTerminalSurface)?
+    var remoteTerminalIdentities: Set<TerminalInstanceIdentity> { get }
+    func remoteTerminalSurface(
+        for identity: TerminalInstanceIdentity
+    ) -> (any RemoteTerminalSurface)?
 }
 
 /// Foundation-only terminal operations available to remote transport and future frontends.
@@ -159,9 +161,9 @@ protocol RemoteTerminalSurfaceQuerying: Sendable {
 /// boundary either applies it to the currently running terminal or refuses it explicitly.
 @MainActor
 protocol RemoteTerminalApplicationCapability: Sendable {
-    var sessionIDs: Set<SessionID> { get }
+    var identities: Set<TerminalInstanceIdentity> { get }
 
-    func state(for sessionID: SessionID) -> RemoteTerminalStateResult
+    func state(for identity: TerminalInstanceIdentity) -> RemoteTerminalStateResult
     /// The bounded attach state of a terminal that is already being captured, without
     /// disturbing the capture.
     ///
@@ -169,20 +171,102 @@ protocol RemoteTerminalApplicationCapability: Sendable {
     /// snapshot are separate types: input, resize and every other high-frequency path reads the
     /// cheap state so none of them pays for a repaint. Reach for this only at attach frequency —
     /// a client joining, or a replay the host had to cut and must now make whole again.
-    func currentSnapshot(for sessionID: SessionID) -> RemoteTerminalCaptureResult
+    func currentSnapshot(for identity: TerminalInstanceIdentity) -> RemoteTerminalCaptureResult
     func beginCapture(
-        for sessionID: SessionID,
+        for identity: TerminalInstanceIdentity,
         output: @escaping RemoteTerminalOutputSink
     ) -> RemoteTerminalCaptureResult
-    func endCapture(for sessionID: SessionID) -> RemoteTerminalMutationResult
+    func endCapture(for identity: TerminalInstanceIdentity) -> RemoteTerminalMutationResult
     func sendInput(
         _ bytes: [UInt8],
-        to sessionID: SessionID
+        to identity: TerminalInstanceIdentity
     ) -> RemoteTerminalMutationResult
     func setViewport(
         _ grid: RemoteTerminalGrid?,
-        for sessionID: SessionID
+        for identity: TerminalInstanceIdentity
     ) -> RemoteTerminalMutationResult
+}
+
+extension RemoteTerminalApplicationCapability {
+    var sessionIDs: Set<SessionID> {
+        Set(identities.compactMap {
+            guard case .agentSession(let id) = $0 else { return nil }
+            return id
+        })
+    }
+
+    var terminalIDs: Set<TerminalID> {
+        Set(identities.compactMap {
+            guard case .projectTerminal(let id) = $0 else { return nil }
+            return id
+        })
+    }
+
+    func state(for sessionID: SessionID) -> RemoteTerminalStateResult {
+        state(for: .agentSession(sessionID))
+    }
+
+    func state(for terminalID: TerminalID) -> RemoteTerminalStateResult {
+        state(for: .projectTerminal(terminalID))
+    }
+
+    func currentSnapshot(for sessionID: SessionID) -> RemoteTerminalCaptureResult {
+        currentSnapshot(for: .agentSession(sessionID))
+    }
+
+    func currentSnapshot(for terminalID: TerminalID) -> RemoteTerminalCaptureResult {
+        currentSnapshot(for: .projectTerminal(terminalID))
+    }
+
+    func beginCapture(
+        for sessionID: SessionID,
+        output: @escaping RemoteTerminalOutputSink
+    ) -> RemoteTerminalCaptureResult {
+        beginCapture(for: .agentSession(sessionID), output: output)
+    }
+
+    func beginCapture(
+        for terminalID: TerminalID,
+        output: @escaping RemoteTerminalOutputSink
+    ) -> RemoteTerminalCaptureResult {
+        beginCapture(for: .projectTerminal(terminalID), output: output)
+    }
+
+    func endCapture(for sessionID: SessionID) -> RemoteTerminalMutationResult {
+        endCapture(for: .agentSession(sessionID))
+    }
+
+    func endCapture(for terminalID: TerminalID) -> RemoteTerminalMutationResult {
+        endCapture(for: .projectTerminal(terminalID))
+    }
+
+    func sendInput(
+        _ bytes: [UInt8],
+        to sessionID: SessionID
+    ) -> RemoteTerminalMutationResult {
+        sendInput(bytes, to: .agentSession(sessionID))
+    }
+
+    func sendInput(
+        _ bytes: [UInt8],
+        to terminalID: TerminalID
+    ) -> RemoteTerminalMutationResult {
+        sendInput(bytes, to: .projectTerminal(terminalID))
+    }
+
+    func setViewport(
+        _ grid: RemoteTerminalGrid?,
+        for sessionID: SessionID
+    ) -> RemoteTerminalMutationResult {
+        setViewport(grid, for: .agentSession(sessionID))
+    }
+
+    func setViewport(
+        _ grid: RemoteTerminalGrid?,
+        for terminalID: TerminalID
+    ) -> RemoteTerminalMutationResult {
+        setViewport(grid, for: .projectTerminal(terminalID))
+    }
 }
 
 /// Live application implementation. Its only dependency is injected at construction and owns
@@ -195,32 +279,32 @@ final class LiveRemoteTerminalApplicationCapability: RemoteTerminalApplicationCa
         self.surfaces = surfaces
     }
 
-    var sessionIDs: Set<SessionID> {
-        surfaces.remoteTerminalSessionIDs
+    var identities: Set<TerminalInstanceIdentity> {
+        surfaces.remoteTerminalIdentities
     }
 
-    func state(for sessionID: SessionID) -> RemoteTerminalStateResult {
-        guard let surface = runningSurface(for: sessionID) else { return .unavailable }
+    func state(for identity: TerminalInstanceIdentity) -> RemoteTerminalStateResult {
+        guard let surface = runningSurface(for: identity) else { return .unavailable }
         return .available(surface.remoteTerminalState)
     }
 
-    func currentSnapshot(for sessionID: SessionID) -> RemoteTerminalCaptureResult {
-        guard let surface = runningSurface(for: sessionID) else { return .unavailable }
+    func currentSnapshot(for identity: TerminalInstanceIdentity) -> RemoteTerminalCaptureResult {
+        guard let surface = runningSurface(for: identity) else { return .unavailable }
         return .captured(surface.remoteTerminalSnapshot)
     }
 
     func beginCapture(
-        for sessionID: SessionID,
+        for identity: TerminalInstanceIdentity,
         output: @escaping RemoteTerminalOutputSink
     ) -> RemoteTerminalCaptureResult {
-        guard let surface = runningSurface(for: sessionID) else { return .unavailable }
+        guard let surface = runningSurface(for: identity) else { return .unavailable }
         let snapshot = surface.remoteTerminalSnapshot
         surface.setRemoteOutputSink(output)
         return .captured(snapshot)
     }
 
-    func endCapture(for sessionID: SessionID) -> RemoteTerminalMutationResult {
-        guard let surface = surfaces.remoteTerminalSurface(for: sessionID) else {
+    func endCapture(for identity: TerminalInstanceIdentity) -> RemoteTerminalMutationResult {
+        guard let surface = surfaces.remoteTerminalSurface(for: identity) else {
             return .unavailable
         }
         surface.setRemoteOutputSink(nil)
@@ -229,18 +313,18 @@ final class LiveRemoteTerminalApplicationCapability: RemoteTerminalApplicationCa
 
     func sendInput(
         _ bytes: [UInt8],
-        to sessionID: SessionID
+        to identity: TerminalInstanceIdentity
     ) -> RemoteTerminalMutationResult {
-        guard let surface = runningSurface(for: sessionID) else { return .unavailable }
+        guard let surface = runningSurface(for: identity) else { return .unavailable }
         surface.sendRemoteInput(bytes)
         return .applied
     }
 
     func setViewport(
         _ grid: RemoteTerminalGrid?,
-        for sessionID: SessionID
+        for identity: TerminalInstanceIdentity
     ) -> RemoteTerminalMutationResult {
-        guard let surface = surfaces.remoteTerminalSurface(for: sessionID),
+        guard let surface = surfaces.remoteTerminalSurface(for: identity),
               grid == nil || surface.isRunning else {
             return .unavailable
         }
@@ -248,8 +332,10 @@ final class LiveRemoteTerminalApplicationCapability: RemoteTerminalApplicationCa
         return .applied
     }
 
-    private func runningSurface(for sessionID: SessionID) -> (any RemoteTerminalSurface)? {
-        guard let surface = surfaces.remoteTerminalSurface(for: sessionID),
+    private func runningSurface(
+        for identity: TerminalInstanceIdentity
+    ) -> (any RemoteTerminalSurface)? {
+        guard let surface = surfaces.remoteTerminalSurface(for: identity),
               surface.isRunning else {
             return nil
         }

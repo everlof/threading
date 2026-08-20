@@ -462,6 +462,7 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(me.archivedSessions)
         XCTAssertNil(me.newSessionCatalog)
         XCTAssertNil(me.features)
+        XCTAssertNil(me.terminals)
     }
 
     func testUsageDTOsRoundTripWithoutCollapsingBankedResetInventory() throws {
@@ -582,6 +583,23 @@ final class RemoteProtocolTests: XCTestCase {
                 from: JSONEncoder().encode(delta)
             ),
             delta
+        )
+
+        let terminalDelta = RemoteSessionsChangedDTO(
+            terminal: RemoteProjectTerminalSummaryDTO(
+                id: "terminal-1",
+                title: "Server",
+                projectName: "Threading",
+                state: "idle",
+                isAvailable: true
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteSessionsChangedDTO.self,
+                from: JSONEncoder().encode(terminalDelta)
+            ),
+            terminalDelta
         )
     }
 
@@ -1034,6 +1052,22 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(
             link.resumeURL(sessionID: "abc").absoluteString,
             "https://quiet-river.trycloudflare.com/api/session/abc/resume"
+        )
+        XCTAssertEqual(
+            link.resumeTerminalURL(terminalID: "terminal-1").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/terminal/terminal-1/resume"
+        )
+        XCTAssertEqual(
+            link.terminalShareURL(terminalID: "terminal-1").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/terminal/terminal-1/share"
+        )
+        XCTAssertEqual(
+            link.terminalUnshareURL(terminalID: "terminal-1").absoluteString,
+            "https://quiet-river.trycloudflare.com/api/terminal/terminal-1/unshare"
+        )
+        XCTAssertEqual(
+            link.terminalWebSocketURL(terminalID: "terminal-1")?.absoluteString,
+            "wss://quiet-river.trycloudflare.com/ws/terminal/terminal-1"
         )
         XCTAssertEqual(
             link.sessionThemeURL(sessionID: "abc").absoluteString,

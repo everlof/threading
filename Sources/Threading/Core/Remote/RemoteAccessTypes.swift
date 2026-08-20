@@ -81,17 +81,28 @@ enum PhoneReportWorkspacePolicy: String, CaseIterable, Sendable {
     }
 }
 
-/// Which sessions a share reaches.
+/// Which remote targets a share reaches.
 enum RemoteScope: Equatable, Sendable {
-    /// The owner's own devices: every live session in the app.
+    /// The owner's own devices: every remote-capable session and project terminal in the app.
     case allSessions
     /// A guest share of exactly one session.
     case session(SessionID)
+    /// A guest share of exactly one standalone project terminal.
+    case projectTerminal(TerminalID)
 
     func covers(_ sessionID: SessionID) -> Bool {
         switch self {
         case .allSessions: return true
         case .session(let allowed): return allowed == sessionID
+        case .projectTerminal: return false
+        }
+    }
+
+    func covers(_ terminalID: TerminalID) -> Bool {
+        switch self {
+        case .allSessions: return true
+        case .projectTerminal(let allowed): return allowed == terminalID
+        case .session: return false
         }
     }
 }
@@ -158,7 +169,9 @@ struct RemoteAuthorization: Equatable, Sendable {
     }
 
     var canApprovePermissions: Bool {
-        permissionApproval && capability == .interact
+        guard permissionApproval, capability == .interact else { return false }
+        if case .projectTerminal = scope { return false }
+        return true
     }
 
     var canManageHost: Bool {
@@ -294,6 +307,8 @@ enum RemoteRouteDecision: Sendable {
     /// Upgrade to a WebSocket bound to this session id. The token is validated on the first
     /// frame, not here, because a browser `WebSocket` cannot set an `Authorization` header.
     case upgrade(sessionID: String)
+    /// Upgrade to a WebSocket bound to one standalone project terminal.
+    case upgradeTerminal(terminalID: String)
 }
 
 /// Validation that runs on the remote server queue before anything is retained on or enqueued

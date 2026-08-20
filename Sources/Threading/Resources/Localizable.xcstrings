@@ -1,6 +1,11 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "A view-only link can watch output while this shell is running. A full-control link can start the shell and run commands as your Mac user. The project folder is only the starting directory, not a security boundary. Neither grant can approve AI permissions or manage Threading.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En skrivskyddad länk kan se utdata medan skalet körs. En länk med full kontroll kan starta skalet och köra kommandon som din Mac-användare. Projektmappen är bara startkatalogen, inte en säkerhetsgräns. Ingen av behörigheterna kan godkänna AI-behörigheter eller hantera Threading."}}}},
+    "Copy Full-Control Link": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera länk med full kontroll"}}}},
+    "Share Terminal…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dela terminal…"}}}},
+    "Stop Sharing Terminal": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sluta dela terminal"}}}},
+    "This terminal cannot be shared yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Terminalen kan inte delas än"}}}},
     "Session Status Card": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sessionens statuskort"}}}},
     "Show or Hide the Session Status Card": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa eller dölj sessionens statuskort"}}}},
     "%@ est.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@ uppsk."}}}},

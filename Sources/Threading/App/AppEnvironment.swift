@@ -25,7 +25,7 @@ struct AppEnvironment {
         self.settings = settings
         self.eventLog = eventLog
         self.remoteTerminals = remoteTerminals
-            ?? LiveRemoteTerminalApplicationCapability(surfaces: agentRuntime)
+            ?? Self.makeRemoteTerminalCapability(agentRuntime: agentRuntime)
     }
 
     static var live: AppEnvironment {
@@ -35,7 +35,15 @@ struct AppEnvironment {
             agentRuntime: agentRuntime,
             settings: .shared,
             eventLog: .shared,
-            remoteTerminals: LiveRemoteTerminalApplicationCapability(surfaces: agentRuntime)
+            remoteTerminals: makeRemoteTerminalCapability(agentRuntime: agentRuntime)
         )
+    }
+
+    private static func makeRemoteTerminalCapability(
+        agentRuntime: AgentRuntime
+    ) -> LiveRemoteTerminalApplicationCapability {
+        LiveRemoteTerminalApplicationCapability(surfaces: CompositeRemoteTerminalSurfaceQuery(
+            sources: [agentRuntime, ProjectTerminalRuntime.shared]
+        ))
     }
 }

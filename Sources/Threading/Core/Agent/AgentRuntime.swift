@@ -179,12 +179,15 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     // MARK: - RemoteTerminalSurfaceQuerying
 
-    var remoteTerminalSessionIDs: Set<SessionID> {
-        Set(controllers.keys)
+    var remoteTerminalIdentities: Set<TerminalInstanceIdentity> {
+        Set(controllers.keys.map(TerminalInstanceIdentity.agentSession))
     }
 
-    func remoteTerminalSurface(for sessionID: SessionID) -> (any RemoteTerminalSurface)? {
-        controllers[sessionID]?.remoteTerminalSurface
+    func remoteTerminalSurface(
+        for identity: TerminalInstanceIdentity
+    ) -> (any RemoteTerminalSurface)? {
+        guard case .agentSession(let sessionID) = identity else { return nil }
+        return controllers[sessionID]?.remoteTerminalSurface
     }
 
     // MARK: - Public Methods

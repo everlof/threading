@@ -8,6 +8,7 @@ import ThreadingRemoteKit
 @MainActor
 protocol RemoteSessionQuerying: Sendable {
     func session(withID sessionID: SessionID) -> AgentSession?
+    func terminal(withID terminalID: TerminalID) -> ProjectTerminal?
     func project(withID projectID: ProjectID) -> Project?
     func project(forSessionID sessionID: SessionID) -> Project?
 }
@@ -80,6 +81,11 @@ protocol RemoteHostCommanding: AnyObject, Sendable {
         canApprovePermissions: Bool
     ) -> Result<RemoteCreatedShare, RemoteSharePreparationError>
     func revokeSessionShares(_ sessionID: SessionID)
+    func createTerminalShare(
+        for terminalID: TerminalID,
+        capability: RemoteCapability
+    ) -> Result<RemoteCreatedShare, RemoteSharePreparationError>
+    func revokeTerminalShares(_ terminalID: TerminalID)
 }
 
 extension ProjectStore: RemoteSessionQuerying, RemoteSessionMutating {}

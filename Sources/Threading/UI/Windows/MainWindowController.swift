@@ -1793,6 +1793,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarViewController.select(sessionID: sessionID)
     }
 
+    /// Starts a standalone shell through its ordinary sidebar selection path without making
+    /// Threading key on the Mac.
+    func resumeRemoteTerminal(_ terminalID: TerminalID) {
+        if containerViewController.currentTerminalID == terminalID {
+            containerViewController.resumeCurrentTerminalIfNeeded()
+            return
+        }
+        sidebarViewController.select(terminalID: terminalID)
+    }
+
     @discardableResult
     func startRemoteSession(
         in projectID: ProjectID,

@@ -1032,6 +1032,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     @MainActor
+    func resumeRemoteTerminal(_ terminalID: TerminalID) -> Bool {
+        guard ownsSingleInstanceLock,
+              ProjectStore.shared.terminal(withID: terminalID) != nil,
+              let mainWindowController else {
+            return false
+        }
+        mainWindowController.resumeRemoteTerminal(terminalID)
+        return true
+    }
+
+    @MainActor
     func moveRemoteSession(
         _ sessionID: SessionID,
         to accountHandle: AccountHandle

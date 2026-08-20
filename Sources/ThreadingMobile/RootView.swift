@@ -496,6 +496,16 @@ struct RootView: View {
                             description: Text("The link may have expired or the Mac may be offline.")
                         )
                     }
+                case .terminal(let terminalID):
+                    if let terminal = model.me?.terminals?.first(where: { $0.id == terminalID }) {
+                        ProjectTerminalDetailView(terminal: terminal)
+                    } else {
+                        ContentUnavailableView(
+                            "Terminal unavailable",
+                            systemImage: "terminal",
+                            description: Text("The link may have expired or the Mac may be offline.")
+                        )
+                    }
                 }
             }
         }

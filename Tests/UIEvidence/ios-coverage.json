@@ -28,6 +28,7 @@
     {"id": "session-dashboard-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom"},
     {"id": "session-dashboard-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light"},
     {"id": "session-dashboard-project-custom-dark", "entryID": "ios-session-dashboard", "demo": "project-sessions", "appearance": "dark", "theme": "custom"},
+    {"id": "standalone-terminal-dashboard-custom-dark", "entryID": "ios-standalone-terminal", "demo": "sessions", "appearance": "dark", "theme": "custom"},
     {"id": "session-dashboard-offline-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-offline", "appearance": "dark", "theme": "custom"},
     {"id": "session-settings-custom-dark", "entryID": "ios-session-settings", "demo": "session-settings", "appearance": "dark", "theme": "custom"},
     {"id": "session-opening-connecting-custom-dark", "entryID": "ios-session-opening", "demo": "session-opening-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
@@ -166,6 +167,18 @@
       "states": ["Current account with usage", "Live account destination", "Resolved limit recovery", "Usage entry"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/session-settings-*.png"},
+      "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
+    },
+    {
+      "id": "ios-standalone-terminal",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Standalone terminals",
+      "description": "The paired owner catalogue for project shells, visibly separated from chat rows before either kind opens its dedicated surface.",
+      "states": ["Terminal section", "Running shell", "Dormant shell", "Project identity"],
+      "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
+      "capture": {"glob": "ios/standalone-terminal-dashboard-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
     },
     {

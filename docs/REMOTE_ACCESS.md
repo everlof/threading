@@ -1,6 +1,7 @@
 # Remote access
 
-Remote access mirrors Threading sessions to a browser or to the native `ThreadingMobile` iOS app.
+Remote access mirrors Threading sessions and standalone project terminals to a browser or to the
+native `ThreadingMobile` iOS app.
 It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac,
 turn on **Remote Access**, and switch on the ways in you want. There is no connection *mode* any
 more: a mode forced one choice between overlapping things, and a way in is one switch per network,
@@ -534,6 +535,15 @@ Pairing and sharing are deliberately different actions:
   View only waits for a running chat, and says so beside its dimmed button: a viewer cannot wake
   a dormant one, so there would be nothing to watch. The three live in `ShareLinkGrant`, which is
   what replaced a `switch` on the alert's button *index*.
+- **Share Terminal…** in a standalone terminal's `…` menu creates the same kind of durable,
+  device-bound membership, scoped to that `TerminalID` rather than a `SessionID`. **View only**
+  receives the bounded screen seed and subsequent output but cannot start a stopped shell, type,
+  paste, send keys or resize the PTY; the button therefore waits until that shell is running.
+  **Full control** may start it and send arbitrary PTY input and viewport changes. It is the same
+  authority as sitting at that terminal on the Mac: commands run as the Mac user, and the project
+  folder is only the shell's starting directory, not a security boundary. A terminal capability
+  can never approve an AI permission request, discover chats or other terminals, manage the host,
+  or create another share.
 - **A guest cannot be somebody with only a browser any more.** That worked because the Cloudflare
   Quick Tunnel gave Threading a public origin; removing the relay removes the origin, and this is a
   real capability loss rather than a tidy-up. The browser client is unchanged and still speaks the
@@ -549,6 +559,20 @@ Pairing and sharing are deliberately different actions:
   another invitation for another person; forwarding an already accepted invite does not clone
   the membership. A credential that cannot be restored exactly fails closed rather than creating
   a replacement identity.
+
+Standalone terminals remain a separate wire type. `RemoteMeDTO.terminals` is optional and carries
+`RemoteProjectTerminalSummaryDTO`; a terminal is never adapted into `RemoteSessionSummaryDTO`, so
+an older client ignores the new catalogue instead of inventing agent, transcript, archive,
+workspace or permission behavior for a shell. WebSockets use `/ws/terminal/<TerminalID>`, lifecycle
+uses `/api/terminal/<TerminalID>/…`, and `RemoteScope.projectTerminal` compares the typed identity
+on every request. Even a terminal and chat containing identical UUID bytes do not share authority.
+
+The terminal catalogue applies the session-sized scaling gate: one bounded summary per durable
+terminal, one lazy dashboard row per visible result, and no retained view or timer per hidden
+terminal. A detail screen opens one socket and one bounded replay only when selected. This surface
+is deliberately host-owned under the customization-surface gate. Threading keeps terminal
+identity, PTY lifetime, authorization, sharing, replay and input enforcement; the iOS extension
+composition engine has no contract for replacing a raw project shell.
 
 Use **Open in Browser** to test the browser client without leaving the Mac. The owner pairing link
 can also be copied from the pairing sheet, but it is intentionally not presented as a general

@@ -202,6 +202,13 @@ structural invalidations are coalesced for 350 ms. The event socket has one boun
 recovery task (1–60 seconds), is torn down in the background, and is never accompanied by
 healthy-state REST polling.
 
+Standalone project terminals add one bounded summary per durable terminal to initial and
+structural catalogues. Their dashboard group is lazy and keeps no socket, emulator, polling task
+or timer per row. Selecting one opens exactly one terminal socket and one bounded replay. Starting
+a dormant shell is the only polling path: the selected detail performs at most 30 half-second
+catalogue checks, cancels when the host or screen changes, and stops as soon as that terminal is
+available; view-only capabilities never enter it.
+
 Before this boundary, one visible dashboard issued `/api/me` every three seconds: 1,200 requests
 per hour and about 24,000 over 20 visible hours, even with no changes. The healthy steady state is
 now zero repeated REST requests: one activation/foreground snapshot, scoped deltas for row

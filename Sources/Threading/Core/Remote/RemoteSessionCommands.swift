@@ -38,6 +38,9 @@ protocol RemoteSessionCommands: AnyObject {
     /// Returns false when the application cannot currently surface the existing session.
     func resumeRemoteSession(_ sessionID: SessionID) -> Bool
 
+    /// Returns false when the application cannot surface this standalone shell.
+    func resumeRemoteTerminal(_ terminalID: TerminalID) -> Bool
+
     /// Stops, migrates and reopens a conversation under another login. The phone owns the
     /// confirmation; this application command owns the transcript transaction and live pane.
     func moveRemoteSession(
