@@ -18,8 +18,16 @@ import CoreText
 class CaretView: NSView, CALayerDelegate {
     weak var terminal: TerminalView?
     var ctline: CTLine?
+    /// Cell width of the character currently under the caret (2 for full-width
+    /// CJK). Used to center its glyph within the caret, matching the text.
+    var glyphColumnWidth: Int = 1
+    var powerlineCodePoint: UInt32?
     var bgColor: CGColor
-    var tracksFocus = true
+    var tracksFocus = true {
+        didSet {
+            updateCursorStyle()
+        }
+    }
     
     public init (frame: CGRect, cursorStyle: CursorStyle, terminal: TerminalView)
     {
@@ -28,18 +36,38 @@ class CaretView: NSView, CALayerDelegate {
         bgColor = caretColor.cgColor
         super.init(frame: frame)
         wantsLayer = true
-        
+
         updateView()
     }
-    
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    // Enable transparency support for the cursor (matches iOS behavior)
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.isOpaque = false
+        layer.backgroundColor = NSColor.clear.cgColor
+        return layer
+    }
     
     func setText (ch: CharData) {
+        glyphColumnWidth = max(1, Int(ch.width))
+        let hideBlinkingText = terminal?.textBlinkVisible == false
+            && ch.attribute.style.contains(.blink)
+        if hideBlinkingText {
+            powerlineCodePoint = nil
+        } else {
+            powerlineCodePoint = PowerlineRenderer.glyph(for: UInt32(ch.code)) == nil
+                ? nil : UInt32(ch.code)
+        }
+        let character = hideBlinkingText ? " " : (terminal?.terminal.getCharacter(for: ch) ?? " ")
         let res = NSAttributedString (
-            string: String (ch.getCharacter()),
-            attributes: terminal?.getAttributedValue(ch.attribute, usingFg: caretColor, andBg: caretTextColor ?? terminal?.nativeForegroundColor ?? NSColor.black))
+            string: UnicodeUtil.textPresentationAdjusted (character),
+            attributes: terminal?.getAttributedValue(ch.attribute,
+                                                      usingFg: terminal?.effectiveCaretColor ?? caretColor,
+                                                      andBg: terminal?.effectiveCaretTextColor ?? NSColor.black))
         ctline = CTLineCreateWithAttributedString(res)
 
         setNeedsDisplay(bounds)
@@ -52,9 +80,10 @@ class CaretView: NSView, CALayerDelegate {
     }
     
     func updateCursorStyle () {
+        let canBlink = !tracksFocus || (terminal?.hasFocus ?? true)
         switch style {
         case .blinkUnderline, .blinkBlock, .blinkBar:
-            updateAnimation(to: true)
+            updateAnimation(to: canBlink)
         case .steadyBar, .steadyBlock, .steadyUnderline:
             updateAnimation(to: false)
         }
@@ -99,7 +128,7 @@ class CaretView: NSView, CALayerDelegate {
 
     public var focused: Bool = false {
         didSet {
-            updateView()
+            updateCursorStyle()
         }
     }
 

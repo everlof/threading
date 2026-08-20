@@ -14,13 +14,15 @@ import Foundation
 ///
 public class HeadlessTerminal : TerminalDelegate, LocalProcessDelegate {
     public private(set) var terminal: Terminal!
-    var process: LocalProcess!
+    public var process: LocalProcess!
     var onEnd: (_ exitCode: Int32?) -> ()
     var dir: String?
-    
+    private let queue: DispatchQueue?
+
     public init (queue: DispatchQueue? = nil, options: TerminalOptions = TerminalOptions.default, onEnd: @escaping (_ exitCode: Int32?) -> ())
     {
         self.onEnd = onEnd
+        self.queue = queue
         terminal = Terminal(delegate: self, options: options)
         process = LocalProcess(delegate: self, dispatchQueue: queue)
     }
@@ -34,17 +36,37 @@ public class HeadlessTerminal : TerminalDelegate, LocalProcessDelegate {
         terminal.feed(buffer: slice)
     }
     
-    func send(data: ArraySlice<UInt8>) {
-        process.send (data: data)
+    public func send(data: ArraySlice<UInt8>) {
+        // Run the OSC 133 submission heuristic even for headless terminals: a
+        // host that forwards pointer events to Terminal.handleSemanticPromptClick
+        // (server-side / web embeddings) would otherwise inject clicks into a
+        // running program because the buffer never leaves `armed`. The scanner
+        // state is scalar, so hopping registration onto the process queue keeps
+        // `send` callable from any thread while serializing with `feed`.
+        // Hop onto the effective queue — matching LocalProcess's own
+        // `dispatchQueue ?? .main` fallback — so registration never races the
+        // feed path even when no queue was supplied (E.3).
+        let bytes = Array(data)
+        (queue ?? DispatchQueue.main).async { [weak self] in
+            self?.terminal.registerUserInput(bytes[...])
+        }
+        process.send(data: data)
     }
 
-    func send(_ text: String) {
+    public func send(_ text: String) {
         send (data: ([UInt8] (text.utf8))[...])
         
     }
 
+    /// Changes scrollback size for the underlying terminal at runtime.
+    /// - Parameter newScrollback: The new scrollback size in lines. Pass `nil` to disable scrollback.
+    public func changeScrollback (_ newScrollback: Int?)
+    {
+        terminal.changeScrollback(newScrollback)
+    }
+
     public func send(source: Terminal, data: ArraySlice<UInt8>) {
-        send (data: data)
+        process.send(data: data)
     }
     
 

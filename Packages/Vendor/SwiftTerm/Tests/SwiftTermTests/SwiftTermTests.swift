@@ -1,47 +1,42 @@
 #if os(macOS)
-import XCTest
+import Darwin
+import Foundation
+import Testing
 @testable import SwiftTerm
 
-final class SwiftTermTests: XCTestCase {
-    static var queue: DispatchQueue!
-
-    private final class DiagnosticEvents: @unchecked Sendable {
-        private let lock = NSLock()
-        private var storage: [SwiftTermDiagnosticEvent] = []
-
-        func append(_ event: SwiftTermDiagnosticEvent) {
-            lock.lock()
-            storage.append(event)
-            lock.unlock()
-        }
-
-        var snapshot: [SwiftTermDiagnosticEvent] {
-            lock.lock()
-            defer { lock.unlock() }
-            return storage
-        }
-    }
+final class SwiftTermTests {
+    static let esctest: String = {
+        // Compute path relative to source file to work from any working directory (including Xcode)
+        let thisFile = URL(fileURLWithPath: #filePath)
+        let projectRoot = thisFile.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return projectRoot.appendingPathComponent("esctest/esctest/esctest.py").path
+    }()
+    static let queue: DispatchQueue = {
+        let queue = DispatchQueue(label: "Runner", qos: .userInteractive, attributes: .concurrent, autoreleaseFrequency: .inherit, target: nil)
+        return queue
+    }()
+    let termConfig = "--expected-terminal xterm --xterm-checksum=334"
+    let logfile = NSTemporaryDirectory() + "log"
     
-    class override func setUp() {
-        queue = DispatchQueue(label: "Runner", qos: .userInteractive, attributes: .concurrent, autoreleaseFrequency: .inherit, target: nil)
-        
-        if !FileManager.default.fileExists(atPath: esctest) {
-            esctest = "/Users/miguel/cvs/SwiftTerm/esctest/esctest/esctest.py"
-        }
-        // Ignore SIGCHLD
-        signal (SIGCHLD, SIG_IGN)
-    }
-    
-    static var esctest = "esctest/esctest/esctest.py"
-    var termConfig = "--expected-terminal xterm --xterm-checksum=334"
-    var logfile = NSTemporaryDirectory() + "log"
-    
-    func python27Bin() -> String? {
+    func pythonBin() -> String? {
         // Check environment variable first
-        if let python27 = getenv("PYTHON_BIN") {
-            return String(validatingUTF8: python27)
+        if let pythonEnv = getenv("PYTHON_BIN") {
+            return String(validatingUTF8: pythonEnv)
         }
-        
+
+        // Check common Python 3 locations
+        let candidates = [
+            "/usr/bin/python3",
+            "/usr/local/bin/python3",
+            "/opt/homebrew/bin/python3"
+        ]
+
+        for candidate in candidates {
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+
         return nil
     }
     
@@ -53,8 +48,8 @@ final class SwiftTermTests: XCTestCase {
             return nil
         }
         
-        guard let python27 = python27Bin() else {
-            print("Skipping test - Python executable not found")
+        guard let python = pythonBin() else {
+            print("Skipping test - Python 3 executable not found")
             return nil
         }
         
@@ -75,11 +70,14 @@ final class SwiftTermTests: XCTestCase {
             print("Bailing out")
             return nil
         }
-        print ("Starting \(SwiftTermTests.esctest) with \(args)")
+        print ("Starting \(SwiftTermTests.esctest) with \(args) and python \(python)")
         args.insert(SwiftTermTests.esctest, at: 0)
-        t.process.startProcess(executable: python27, args: args, environment: nil)
+        t.process.startProcess(executable: python, args: args, environment: nil)
         
-        psem.wait ()
+        // Keep the headless terminal alive while the subprocess runs.
+        withExtendedLifetime(t) {
+            psem.wait()
+        }
         print ("Does the file exist? \(FileManager.default.fileExists (atPath: logfile))")
         do {
             let log = try String(contentsOf: URL(fileURLWithPath: logfile), encoding: .isoLatin1)
@@ -95,7 +93,7 @@ final class SwiftTermTests: XCTestCase {
         return "Should have found test marker"
     }
     
-    func testKnownGood() {
+    @Test func testKnownGood() {
         let good = [
             "BS", "CAT", "CHA", "CHT", "CNL", "CPL", "CR", "CUB", "CUD", "CUF", "CUP", "CUU",
             "DCH", "DCS", "DECBI", "DECDC", "DECDSR", "DECERA", "DECFRA", "DECIC", "DECSTBM", "DECSTR", "DL",
@@ -115,7 +113,11 @@ final class SwiftTermTests: XCTestCase {
             "DECRQM_ANSI_TTM", "DECRQM_ANSI_VEM", "DECRQM_DEC_DECAWM", "DECRQM_DEC_DECCKM", "DECRQM_DEC_DECCOLM",
             "DECRQM_DEC_DECLRMM", "DECRQM_DEC_DECNKM", "DECRQM_DEC_DECOM", "DECRQM_DEC_DECSCNM",
             "DECRQM_DEC_DECSCLM",
-            
+
+            //
+            "DECRQSS_DECSLRM",
+            "DECSCL_Level4_SupportsDECSLRMDoesntSupportDECNCSM",
+
                 // This test probes modes, and some of these modes fail due to the difference between
                 // a value configured, versus a hardwired value, so they are mostly fine, but worth
                 // submiting patches or just accepting defeat and changing the default
@@ -180,7 +182,6 @@ final class SwiftTermTests: XCTestCase {
             "DECSET_DECAWM_NoLineWrapOnTabWithLeftRightMargin",
             "DECSET_DECAWM_OnRespectsLeftRightMargin",
             "DECSET_DECAWM_TabDoesNotWrapAround",
-            "DECSET_DECCOLM",
             "DECSET_DECLRMM",
             "DECSET_DECLRMM_MarginsResetByDECSTR",
             "DECSET_DECLRMM_ModeNotResetByDECSTR",
@@ -193,6 +194,10 @@ final class SwiftTermTests: XCTestCase {
             "DECSET_Allow80To132",
                 // Failing:
                 // test_DECSET_Allow80To132
+                // Expected: like xterm's allowC132 resource, DECCOLM is off by
+                // default here, so it does nothing until an application asks for
+                // it with `CSI ? 40 h`.
+                // test_DECSET_DECCOLM
                 // test_DECSET_DECAWM_CursorAtRightMargin
                 // test_DECSET_DECAWM_OffRespectsLeftRightMargin
                 // test_DECSET_DECOM
@@ -317,16 +322,15 @@ final class SwiftTermTests: XCTestCase {
         
         let expr = "test_(\(good.joined(separator: "|")))"
 
-        XCTAssertNil(runTester (expr))
+        #expect(runTester(expr) == nil)
     }
     
     // Use this test to run a single test
-    func testSingle ()
-    {
-        XCTAssertNil(runTester ("test_ChangeColor_Hash3"))
+    @Test func testSingle() {
+        #expect(runTester("test_ChangeColor_Hash3") == nil)
     }
     
-    func testWraparound() {
+    @Test func testWraparound() {
         let h = HeadlessTerminal (queue: SwiftTermTests.queue) { exitCode in }
         let t = h.terminal!
         
@@ -337,40 +341,15 @@ final class SwiftTermTests: XCTestCase {
         }
         long.append("B")
         t.feed (text: long)
-        XCTAssertEqual(t.getCharacter (col:0, row: 0), "A")
-        XCTAssertEqual(t.getCharacter (col:1, row: 0), "a")
-        XCTAssertEqual(t.getCharacter (col:0, row: 1), "B")
-    }
-
-    func testDiagnosticsAreStructuredAndRateLimited() {
-        let events = DiagnosticEvents()
-        SwiftTermDiagnostics.installHandler { event in
-            events.append(event)
-        }
-        addTeardownBlock {
-            SwiftTermDiagnostics.removeHandler()
-        }
-
-        SwiftTermDiagnostics.emit(.error, .ptyWriteFailed, facts: ["errno": 5])
-        SwiftTermDiagnostics.emit(.error, .ptyWriteFailed, facts: ["errno": 6])
-        SwiftTermDiagnostics.emit(.fault, .bufferWidthInvariant, facts: ["expectedColumns": 80])
-
-        let captured = events.snapshot
-        XCTAssertEqual(captured.count, 2)
-        XCTAssertEqual(captured[0].code, .ptyWriteFailed)
-        XCTAssertEqual(captured[0].facts, ["errno": 5])
-        XCTAssertEqual(captured[1].code, .bufferWidthInvariant)
+        #expect(t.getCharacter (col:0, row: 0) == "A")
+        #expect(t.getCharacter (col:1, row: 0) == "a")
+        #expect(t.getCharacter (col:0, row: 1) == "B")
     }
     
     func xtestFailuresOnHeadless ()
     {
-        XCTAssertNil(runTester ("test_DECCRA"))
-        XCTAssertNil(runTester ("test_HPA"))
+        #expect(runTester("test_DECCRA") == nil)
+        #expect(runTester("test_HPA") == nil)
     }
-
-    static var allTests = [
-        ("testKnownGood", testKnownGood),
-        //("testMarkerMissing", testFailuresOnHeadless),
-    ]
 }
 #endif

@@ -96,6 +96,14 @@ public class LocalProcess {
     private var pendingGeneration: UInt64 = 0
     private let pendingLock = NSLock()
 
+    // Process exit and PTY EOF are independent kernel events. A short-lived child can be
+    // reaped before DispatchIO has delivered the final bytes buffered by the PTY, so teardown
+    // waits until both have been observed. `terminate()` remains the deliberate exception: it
+    // closes the read side immediately and discards any tail output.
+    private var childHasBeenReaped = false
+    private var reapedExitCode: Int32?
+    private var ptyReadHasEnded = false
+
     /// Identifies the child that owns the current PTY callbacks.
     ///
     /// DispatchIO callbacks can arrive after a descriptor has been closed. Tagging every read
@@ -299,7 +307,11 @@ public class LocalProcess {
 
         guard let data else {
             // A transient callback without data must not break the one-read-at-a-time chain.
-            if !done {
+            if done || errno != 0 {
+                dispatchQueue.async { [weak self] in
+                    self?.ptyReadEnded(generation: generation)
+                }
+            } else {
                 resumePtyRead(generation: generation)
             }
             return
@@ -314,7 +326,9 @@ public class LocalProcess {
         }
         
         if data.count == 0 {
-            childfd = -1
+            dispatchQueue.async { [weak self] in
+                self?.ptyReadEnded(generation: generation)
+            }
             return
         }
         var b: [UInt8] = Array.init(repeating: 0, count: data.count)
@@ -344,8 +358,27 @@ public class LocalProcess {
             }
             keepReading = true
         }
+        if errno != 0 {
+            dispatchQueue.async { [weak self] in
+                self?.ptyReadEnded(generation: generation)
+            }
+            return
+        }
         if done && keepReading {
             resumePtyRead(generation: generation)
+        }
+    }
+
+    private func ptyReadEnded(generation: UInt64) {
+        guard generation == processGeneration else { return }
+
+        ptyReadHasEnded = true
+        io?.close()
+        io = nil
+        childfd = -1
+
+        if childHasBeenReaped {
+            finishReapedProcess(generation: generation)
         }
     }
 
@@ -378,12 +411,29 @@ public class LocalProcess {
         // cancelling before the exit event arrives would leave a zombie behind instead.
         cancelChildMonitor()
 
+        childHasBeenReaped = true
+        reapedExitCode = exitCode
+
+        // A natural exit may leave unread output in the PTY even though waitpid has completed.
+        // A requested termination already closed the read side, so there is nothing to drain.
+        if terminationRequested || ptyReadHasEnded || io == nil {
+            finishReapedProcess(generation: generation)
+        }
+    }
+
+    private func finishReapedProcess(generation: UInt64) {
+        guard generation == processGeneration, childHasBeenReaped else { return }
+
+        let exitCode = reapedExitCode
         io?.close()
         io = nil
         childfd = -1
         terminationRequested = false
         running = false
         shellPid = 0
+        childHasBeenReaped = false
+        reapedExitCode = nil
+        ptyReadHasEnded = false
         delegate?.processTerminated(self, exitCode: exitCode)
     }
 
@@ -427,6 +477,9 @@ public class LocalProcess {
         processGeneration &+= 1
         let generation = processGeneration
         terminationRequested = false
+        childHasBeenReaped = false
+        reapedExitCode = nil
+        ptyReadHasEnded = false
         resetPendingOutput(for: generation)
 
         startProcessWithForkpty(

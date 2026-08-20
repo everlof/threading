@@ -312,7 +312,9 @@ final class LocalProcessTests: XCTestCase {
     }
 
     func testMainQueueOutputDrainsCompletelyAfterSustainedBackpressure() {
-        let byteCount = 24 * 1024 * 1024
+        // Twice the production high-water mark forces a suspend/resume cycle without turning
+        // this correctness check into a throughput benchmark on a contended CI host.
+        let byteCount = 8 * 1024 * 1024
         let outputExpectation = expectation(description: "all output delivered")
         let terminationExpectation = expectation(description: "producer terminated")
         let delegate = ProcessDelegate()
@@ -343,7 +345,7 @@ final class LocalProcessTests: XCTestCase {
             DispatchQueue.main.sync(execute: launchWhileHoldingMainQueue)
         }
 
-        wait(for: [outputExpectation, terminationExpectation], timeout: 10)
+        wait(for: [outputExpectation, terminationExpectation], timeout: 60)
         XCTAssertEqual(delegate.outputByteCount, byteCount)
     }
 }

@@ -31,7 +31,7 @@ class CircularList<T> {
             _count = newValue
         }
     }
-    
+
     private var _count: Int
     var maxLength: Int {
         didSet {
@@ -54,7 +54,7 @@ class CircularList<T> {
     /// does not exist, or the index requested otherwise
     //
     var makeEmpty: ((_ idx: Int) -> T)? = nil
-    
+
     public init (maxLength: Int)
     {
         array = Array.init(repeating: nil, count: Int(maxLength))
@@ -62,23 +62,25 @@ class CircularList<T> {
         self._count = 0
         self.startIndex = 0
     }
-    
+
     private func getCyclicIndex(_ index: Int) -> Int {
         return Int(startIndex + index) % (array.count)
     }
-    
+
     func debugGetCyclicIndex(_ index: Int) -> Int {
         getCyclicIndex(index)
     }
-    
+
     subscript (index: Int) -> T {
         get {
             let idx = getCyclicIndex(index)
             if let p = array [idx] {
                 return p
             } else {
-                // print ("Making empty for \(index) on type \(String (describing: self))")
-                let new = makeEmpty! (idx)
+                guard let makeEmpty = makeEmpty else {
+                    preconditionFailure("makeEmpty closure must be configured for CircularList when slot is nil")
+                }
+                let new = makeEmpty (idx)
                 array [idx] = new
                 return new
             }
@@ -87,7 +89,7 @@ class CircularList<T> {
             array [getCyclicIndex(index)] = newValue
       }
     }
-    
+
     func push (_ value: T)
     {
         array [getCyclicIndex(count)] = value
@@ -103,27 +105,23 @@ class CircularList<T> {
 
     func recycle ()
     {
-        if count != maxLength {
-            SwiftTermDiagnostics.emit(
-                .fault,
-                .bufferRecycleInvariant,
-                facts: ["count": count, "maximum": maxLength]
-            )
-            abort ()
+        precondition(count == maxLength, "can only recycle when the buffer is full")
+        guard let makeEmpty = makeEmpty else {
+            preconditionFailure("makeEmpty closure must be configured for CircularList")
         }
         let index = getCyclicIndex(count)
         startIndex += 1
-        startIndex = startIndex % maxLength        
-        array [index] = makeEmpty! (-1)
+        startIndex = startIndex % maxLength
+        array [index] = makeEmpty (-1)
     }
-    
+
     @discardableResult
     func pop () -> T {
         let v = array [getCyclicIndex(count-1)]!
         count = count - 1
         return v
     }
-    
+
     func splice (start: Int, deleteCount: Int, items: [T], change: (Int) -> Void)
     {
         if deleteCount > 0 {
@@ -151,7 +149,7 @@ class CircularList<T> {
             change(start + i)
             array [getCyclicIndex(start + i)] = items [i]
         }
-        
+
         // Adjust length as needed
         if Int(count) + ic > array.count {
             let countToTrim = count + items.count - array.count
@@ -161,36 +159,32 @@ class CircularList<T> {
             count = count + items.count
         }
      }
-    
+
     func trimStart (count: Int)
     {
         let c = count > self.count ? self.count : count
         startIndex = startIndex + c
         self.count -= count
     }
-    
+
     func shiftElements (start: Int, count: Int, offset: Int) -> Bool
     {
-        func reportFailure (_ reason: Int) -> Bool {
-            SwiftTermDiagnostics.emit(
-                .fault,
-                .bufferShiftInvariant,
-                facts: ["start": start, "count": count, "offset": offset, "reason": reason]
-            )
+        func dumpState (_ msg: String) -> Bool {
+            print ("Assertion at start=\(start) count=\(count) offset=\(offset): \(msg)")
             return false
         }
-        
+
         if count < 0 {
-            return reportFailure(1)
+            return dumpState ("count < 0")
         }
         if start < 0 {
-            return reportFailure(2)
+            return dumpState ("start < 0")
         }
         if start >= self.count {
-            return reportFailure(3)
+            return dumpState ("start >= self.count")
         }
         if start+offset <= 0 {
-            return reportFailure(4)
+            return dumpState ("start+offset <= 0")
         }
 //        precondition (count > 0)
 //        precondition (start >= 0)
@@ -216,7 +210,7 @@ class CircularList<T> {
         }
         return true
     }
-    
+
     var isFull: Bool {
         get {
             return count == maxLength
@@ -243,15 +237,16 @@ internal class CircularBufferLineList {
             _count = newValue
         }
     }
-    
+
+    public var isEmpty: Bool { count == 0 }
     public func getArray() -> [BufferLine?] {
         array
     }
-    
+
     public func getStartIndex() -> Int {
         startIndex
     }
-    
+
     private var _count: Int
     var maxLength: Int {
         didSet {
@@ -274,7 +269,18 @@ internal class CircularBufferLineList {
     /// does not exist, or the index requested otherwise
     //
     var makeEmpty: ((_ idx: Int) -> BufferLine)? = nil
-    
+
+    /// Called when a line is about to be recycled, with true if the line had images
+    var onLineRecycled: ((_ hadImages: Bool) -> Void)? = nil
+
+    /// Called when a line is pushed, with true if the line has images
+    var onLinePushed: ((_ hasImages: Bool) -> Void)? = nil
+
+    /// Called when a line object becomes a member of this list (push, splice,
+    /// or subscript assignment). The Buffer uses it to stamp the line's owner
+    /// at attach time, so a clone can never carry a template's stale owner.
+    var onLineAttached: ((_ line: BufferLine) -> Void)? = nil
+
     public init (maxLength: Int)
     {
         array = Array.init(repeating: nil, count: Int(maxLength))
@@ -282,37 +288,35 @@ internal class CircularBufferLineList {
         self._count = 0
         self.startIndex = 0
     }
-    
+
     /// The private version exists to allow the Swift optimizer to avoid calls to
     /// `swift_beginAccess`
     private func getCyclicIndex(_ index: Int) -> Int {
         return Int(startIndex &+ index) % (array.count)
     }
-    
+
     /// Public version of the same method
     func debugGetCyclicIndex(_ index: Int) -> Int {
         return getCyclicIndex(index)
     }
-    
+
     subscript (index: Int) -> BufferLine {
-        get {
+        _read {
             let idx = getCyclicIndex(index)
-            if let p = array [idx] {
-                return p
-            } else {
-                // print ("Making empty for \(index) on type \(String (describing: self))")
-                let new = makeEmpty! (idx)
-                array [idx] = new
-                return new
+            if array[idx] == nil {
+                array[idx] = makeEmpty!(idx)
             }
+            yield array[idx]!
         }
         set (newValue){
             array [getCyclicIndex(index)] = newValue
+            onLineAttached?(newValue)
       }
     }
-    
+
     func push (_ value: BufferLine)
     {
+        onLineAttached?(value)
         array [getCyclicIndex(count)] = value
         if count == array.count {
             startIndex = startIndex + 1
@@ -322,32 +326,32 @@ internal class CircularBufferLineList {
         } else {
             count = count + 1
         }
+        onLinePushed?(value.images != nil)
     }
 
-    func recycle ()
+    func recycle (clearAttribute: Attribute)
     {
-        if count != maxLength {
-            SwiftTermDiagnostics.emit(
-                .fault,
-                .bufferRecycleInvariant,
-                facts: ["count": count, "maximum": maxLength]
-            )
-            abort ()
-        }
+        precondition(count == maxLength, "can only recycle when the buffer is full")
         let index = getCyclicIndex(count)
         startIndex += 1
         startIndex = startIndex % maxLength
-        array[index]?.clear(with: CharData.defaultAttr)
+        let hadImages = array[index]?.images != nil
+        // The line object is being destroyed for reuse: its semantic prompt
+        // metadata dies with it (R2), unlike cell erasures which preserve it.
+        array[index]?.clear(with: clearAttribute)
+        array[index]?.destroySemanticState()
+        array[index]?.isWrapped = false
+        onLineRecycled?(hadImages)
         //array [index] = makeEmpty! (-1)
     }
-    
+
     @discardableResult
     func pop () -> BufferLine {
         let v = array [getCyclicIndex(count-1)]!
         count = count - 1
         return v
     }
-    
+
     func splice (start: Int, deleteCount: Int, items: [BufferLine], change: (Int) -> Void)
     {
         if deleteCount > 0 {
@@ -373,9 +377,10 @@ internal class CircularBufferLineList {
         }
         for i in 0..<ic {
             change(start + i)
+            onLineAttached?(items [i])
             array [getCyclicIndex(start + i)] = items [i]
         }
-        
+
         // Adjust length as needed
         if Int(count) + ic > array.count {
             let countToTrim = count + items.count - array.count
@@ -385,44 +390,36 @@ internal class CircularBufferLineList {
             count = count + items.count
         }
      }
-    
+
     func trimStart (count: Int)
     {
         let c = count > self.count ? self.count : count
         startIndex = startIndex + c
         self.count -= count
     }
-    
+
     func shiftElements (start: Int, count: Int, offset: Int) -> Bool
     {
-        func reportFailure (_ reason: Int) -> Bool {
-            SwiftTermDiagnostics.emit(
-                .fault,
-                .bufferShiftInvariant,
-                facts: ["start": start, "count": count, "offset": offset, "reason": reason]
-            )
+        func dumpState (_ msg: String) -> Bool {
+            print ("Assertion at start=\(start) count=\(count) offset=\(offset): \(msg)")
             return false
         }
-        
+
         if count < 0 {
-            return reportFailure(1)
+            return dumpState ("count < 0")
         }
         if start < 0 {
-            return reportFailure(2)
+            return dumpState ("start < 0")
         }
         if start >= self.count {
-            return reportFailure(3)
+            return dumpState ("start >= self.count")
         }
         if start+offset <= 0 {
-            return reportFailure(4)
+            return dumpState ("start+offset <= 0")
         }
-//        precondition (count > 0)
-//        precondition (start >= 0)
-//        precondition (start < self.count)
-//        precondition (start+offset > 0)
         if offset > 0 {
             for i in (0..<count).reversed() {
-                self [start + i + offset] = self [start + i]
+                array[getCyclicIndex(start + i + offset)] = array[getCyclicIndex(start + i)]
             }
             let expandListBy = start + count + offset - self.count
             if expandListBy > 0 {
@@ -435,12 +432,12 @@ internal class CircularBufferLineList {
             }
         } else {
             for i in 0..<count {
-                self [start + i + offset] = self [start + i]
+                array[getCyclicIndex(start + i + offset)] = array[getCyclicIndex(start + i)]
             }
         }
         return true
     }
-    
+
     var isFull: Bool {
         get {
             return count == maxLength

@@ -65,13 +65,21 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         #endif
         terminalView?.send (data)
     }
+
+    func clickAndInsertText (_ text: String)
+    {
+        #if os(iOS)
+        UIDevice.current.playInputClick()
+        #endif
+        terminalView?.insertTextFromAccessory(text)
+    }
     
     @objc func esc (_ sender: AnyObject) { clickAndSend ([0x1b]) }
     @objc func tab (_ sender: AnyObject) { clickAndSend ([0x9]) }
-    @objc func tilde (_ sender: AnyObject) { clickAndSend ([UInt8 (ascii: "~")]) }
-    @objc func pipe (_ sender: AnyObject) { clickAndSend ([UInt8 (ascii: "|")]) }
-    @objc func slash (_ sender: AnyObject) { clickAndSend ([UInt8 (ascii: "/")]) }
-    @objc func dash (_ sender: AnyObject) { clickAndSend ([UInt8 (ascii: "-")]) }
+    @objc func tilde (_ sender: AnyObject) { clickAndInsertText ("~") }
+    @objc func pipe (_ sender: AnyObject) { clickAndInsertText ("|") }
+    @objc func slash (_ sender: AnyObject) { clickAndInsertText ("/") }
+    @objc func dash (_ sender: AnyObject) { clickAndInsertText ("-") }
     @objc func f1 (_ sender: AnyObject) { clickAndSend (EscapeSequences.cmdF[0]) }
     @objc func f2 (_ sender: AnyObject) { clickAndSend (EscapeSequences.cmdF[1]) }
     @objc func f3 (_ sender: AnyObject) { clickAndSend (EscapeSequences.cmdF[2]) }
@@ -141,9 +149,7 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
 
     @objc func toggleInputKeyboard (_ sender: UIButton) {
         guard let tv = terminalView else { return }
-        let wasResponder = tv.isFirstResponder
-        if wasResponder { _ = tv.resignFirstResponder() }
-        
+
         if tv.inputView == nil {
             #if os(visionOS)
             tv.inputView = KeyboardView (frame: CGRect (origin: CGPoint.zero,
@@ -159,8 +165,9 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         } else {
             tv.inputView = nil
         }
-        if wasResponder { _ = tv.becomeFirstResponder() }
-
+        UIView.performWithoutAnimation {
+            tv.reloadInputViews()
+        }
     }
 
     @objc func toggleTouch (_ sender: UIButton) {
@@ -203,11 +210,11 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
             //leftViews.append(makeButton ("tab", #selector(tab)))
         }
         rightViews.append(makeAutoRepeatButton ("arrow.left", #selector(left)))
-        rightViews.append(makeAutoRepeatButton ("arrow.up", #selector(up)))
         rightViews.append(makeAutoRepeatButton ("arrow.down", #selector(down)))
+        rightViews.append(makeAutoRepeatButton ("arrow.up", #selector(up)))
         rightViews.append(makeAutoRepeatButton ("arrow.right", #selector(right)))
         touchButton = makeButton ("", #selector(toggleTouch), icon: "hand.draw", isNormal: false)
-        touchButton.isSelected = terminalView?.allowMouseReporting ?? false
+        touchButton.isSelected = !(terminalView?.allowMouseReporting ?? false)
         rightViews.append (touchButton)
         keyboardButton = makeButton ("", #selector(toggleInputKeyboard), icon: "keyboard.chevron.compact.down", isNormal: false)
         rightViews.append (keyboardButton)

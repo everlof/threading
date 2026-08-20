@@ -10,32 +10,67 @@ import Foundation
 
 /// Configuration option for the desired cursor style, this style can also be overwritten by the application
 /// inside the terminal, and the UI control can choose to honor this request.
-public enum CursorStyle {
+public enum CursorStyle: CaseIterable {
     case blinkBlock
     case steadyBlock
     case blinkUnderline
     case steadyUnderline
     case blinkBar
     case steadyBar
-    
-    public static func from (string: String) -> CursorStyle? {
-        switch string {
-        case "blinkBlock":
-            return .blinkBlock
-        case "steadyBlock":
-            return .steadyBlock
-        case "blinkUnderline":
-            return .blinkUnderline
-        case "steadyUnderline":
-            return .steadyUnderline
-        case "blinkBar":
-            return .blinkBar
-        case "steadyBar":
-            return .steadyBar
-        default:
-            return nil
+
+    // Beyond CaseIterable, the declaration deliberately gains no protocol
+    // conformances (Codable, CustomStringConvertible...): clients may have
+    // added those retroactively, and a library-provided conformance would
+    // collide with theirs. Only members are added below.
+
+    /// A stable, machine-readable name for the style, suitable for persisting
+    /// settings; the inverse of ``init(tagName:)``
+    public var tagName: String {
+        switch self {
+        case .blinkBlock: return "blinkBlock"
+        case .steadyBlock: return "steadyBlock"
+        case .blinkUnderline: return "blinkUnderline"
+        case .steadyUnderline: return "steadyUnderline"
+        case .blinkBar: return "blinkBar"
+        case .steadyBar: return "steadyBar"
         }
     }
+
+    /// A human-readable name for the style, for use in user interfaces
+    public var displayName: String {
+        switch self {
+        case .blinkBlock: return "Blinking Block"
+        case .steadyBlock: return "Steady Block"
+        case .blinkUnderline: return "Blinking Underline"
+        case .steadyUnderline: return "Steady Underline"
+        case .blinkBar: return "Blinking Bar"
+        case .steadyBar: return "Steady Bar"
+        }
+    }
+
+    /// Creates a cursor style from the stable name returned by ``tagName``
+    public init? (tagName: String) {
+        guard let match = CursorStyle.allCases.first (where: { $0.tagName == tagName }) else {
+            return nil
+        }
+        self = match
+    }
+
+    public static func from (string: String) -> CursorStyle? {
+        return CursorStyle (tagName: string)
+    }
+}
+
+/// Width to assign to individual (unpaired) Regional Indicator symbols (U+1F1E6–U+1F1FF).
+/// Combined flag pairs (e.g. 🇺🇸) are always rendered as width 2 regardless of this setting.
+public enum RegionalIndicatorWidth: Sendable {
+    /// Width 2: matches kitty, Ghostty, iTerm2, and the Python wcwidth >= 0.5.2 library.
+    /// This is the default and preserves SwiftTerm's existing behavior.
+    case wide
+    /// Width 1: matches system wcwidth() on macOS/Linux, Alacritty, WezTerm, Windows Terminal,
+    /// and the Unicode East Asian Width property (Neutral). Use this when running inside tmux
+    /// or other multiplexers that use wcwidth() for cursor positioning.
+    case narrow
 }
 
 /// Configuration options for the terminal at startup, these values are only read at startup
@@ -58,7 +93,21 @@ public struct TerminalOptions {
     public var tabStopWidth: Int
     /// Whether to report that sixel support is present
     public var enableSixelReported:Bool
-    
+    /// Maximum total bytes to keep for kitty image data; defaults to 320MB and is clamped to 4GB.
+    public var kittyImageCacheLimitBytes: Int
+    /// Strategy used to derive the 256-color palette from the base 16 colors.
+    public var ansi256PaletteStrategy: Ansi256PaletteStrategy
+    /// Width for individual Regional Indicator symbols. `.wide` (default) preserves existing
+    /// behavior. `.narrow` matches system wcwidth() and avoids cursor divergence with tmux.
+    public var regionalIndicatorWidth: RegionalIndicatorWidth
+    /// BiDi state for new paragraphs after startup or reset.
+    public var initialBidiState: BidiPresentationState
+    /// Maximum rows that the renderer processes as one BiDi paragraph.
+    public var maximumBidiParagraphRows: Int
+    /// Initial state for terminal-wg left and right arrow swapping. The default
+    /// is false, so the host or terminal application must opt in.
+    public var initialBidiArrowKeySwap: Bool
+
     /// Default options
     public static let `default` = TerminalOptions.init(cols: 80,
                                                        rows: 25,
@@ -68,10 +117,20 @@ public struct TerminalOptions {
                                                        screenReaderMode: false,
                                                        scrollback: 500,
                                                        tabStopWidth: 8,
-                                                       enableSixelReported: true)
+                                                       enableSixelReported: true,
+                                                       kittyImageCacheLimitBytes: 320 * 1024 * 1024,
+                                                       ansi256PaletteStrategy: .base16Lab,
+                                                       regionalIndicatorWidth: .wide,
+                                                       initialBidiState: .default,
+                                                       maximumBidiParagraphRows: 500,
+                                                       initialBidiArrowKeySwap: false)
 
   public init(cols: Int = Self.default.cols, rows: Int = Self.default.rows, convertEol: Bool = Self.default.convertEol, termName: String = Self.default.termName, cursorStyle: CursorStyle = Self.default.cursorStyle, screenReaderMode: Bool = Self.default.screenReaderMode, scrollback: Int = Self.default.scrollback, tabStopWidth: Int = Self.default.tabStopWidth,
-              enableSixelReported: Bool = Self.default.enableSixelReported) {
+              enableSixelReported: Bool = Self.default.enableSixelReported, kittyImageCacheLimitBytes: Int = Self.default.kittyImageCacheLimitBytes, ansi256PaletteStrategy: Ansi256PaletteStrategy = Self.default.ansi256PaletteStrategy,
+              regionalIndicatorWidth: RegionalIndicatorWidth = Self.default.regionalIndicatorWidth,
+              initialBidiState: BidiPresentationState = Self.default.initialBidiState,
+              maximumBidiParagraphRows: Int = Self.default.maximumBidiParagraphRows,
+              initialBidiArrowKeySwap: Bool = Self.default.initialBidiArrowKeySwap) {
         self.cols = cols
         self.rows = rows
         self.convertEol = convertEol
@@ -81,5 +140,11 @@ public struct TerminalOptions {
         self.scrollback = scrollback
         self.tabStopWidth = tabStopWidth
         self.enableSixelReported = enableSixelReported
+        self.kittyImageCacheLimitBytes = kittyImageCacheLimitBytes
+        self.ansi256PaletteStrategy = ansi256PaletteStrategy
+        self.regionalIndicatorWidth = regionalIndicatorWidth
+        self.initialBidiState = initialBidiState
+        self.maximumBidiParagraphRows = max(1, maximumBidiParagraphRows)
+        self.initialBidiArrowKeySwap = initialBidiArrowKeySwap
     }
 }

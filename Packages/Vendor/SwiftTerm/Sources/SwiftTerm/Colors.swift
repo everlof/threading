@@ -8,6 +8,19 @@
 
 import Foundation
 
+/// Strategy used to derive the 256-color palette from the first 16 ANSI colors.
+public enum Ansi256PaletteStrategy: Sendable {
+    /// Keep the historical xterm 6x6x6 cube + grayscale ramp.
+    case xterm
+    /// Generate colors from base16 + terminal background/foreground using LAB interpolation.
+    /// The cube and grayscale ramp always run dark → light, swapping the anchors on light themes.
+    case base16Lab
+    /// Like ``base16Lab`` but preserves the original bg → fg direction on light themes
+    /// instead of swapping to dark → light. This produces a "harmonious" palette where
+    /// the extended colors follow the theme's natural luminance ordering.
+    case base16LabHarmonious
+}
+
 /**
  * This represents the colors used in SwiftTerm, in particular for cells and backgrounds
  * in 16-bit RGB mode
@@ -20,6 +33,9 @@ public class Color: Hashable {
     /// Blue component 0..65535
     public var blue: UInt16
         
+    // Kept internal: these are shared, mutable Color instances that Terminal
+    // aliases directly; exposing them publicly would let a client mutation
+    // corrupt colors process-wide
     static var defaultForeground = Color (red: 35389, green: 35389, blue: 35389)
     static var defaultBackground = Color (red: 0, green: 0, blue: 0)
     
@@ -33,7 +49,8 @@ public class Color: Hashable {
         hasher.combine(blue)
     }
     
-    static let paleColors: [Color] = [
+    /// A muted, Tango-inspired 16-color ANSI palette
+    public static let paleColors: [Color] = [
         // dark colors
         Color (red8: 0x2e, green8: 0x34, blue8: 0x36),
         Color (red8: 0xcc, green8: 0x00, blue8: 0x00),
@@ -55,7 +72,8 @@ public class Color: Hashable {
         Color (red8: 0xee, green8: 0xee, blue8: 0xec)
     ]
     
-    static let vgaColors: [Color] = [
+    /// The classic VGA 16-color ANSI palette
+    public static let vgaColors: [Color] = [
         // dark colors
         Color (red8: 0, green8: 0, blue8: 0),
         Color (red8: 170, green8: 0, blue8: 0),
@@ -75,7 +93,8 @@ public class Color: Hashable {
         Color (red8: 255, green8: 255, blue8: 255),
     ]
     
-    static let terminalAppColors: [Color] = [
+    /// The 16-color ANSI palette used by Apple's Terminal.app; this is the palette installed by default
+    public static let terminalAppColors: [Color] = [
         Color (red8: 0, green8: 0, blue8: 0),
         Color (red8: 194, green8: 54, blue8: 33),
         Color (red8: 37, green8: 188, blue8: 36),
@@ -94,7 +113,8 @@ public class Color: Hashable {
         Color (red8: 233, green8: 235, blue8: 235),
     ]
     
-    static let xtermColors: [Color] = [
+    /// The 16-color ANSI palette used by xterm
+    public static let xtermColors: [Color] = [
         Color (red8: 0, green8: 0, blue8: 0),
         Color (red8: 205, green8: 0, blue8: 0),
         Color (red8: 0, green8: 205, blue8: 0),
@@ -113,7 +133,8 @@ public class Color: Hashable {
         Color (red8: 255, green8: 255, blue8: 255),
     ]
     
-    static let defaultInstalledColors: [Color] = [
+    /// An alternative default 16-color ANSI palette
+    public static let defaultInstalledColors: [Color] = [
         Color (red8: 0, green8: 0, blue8: 0),
         Color (red8: 153, green8: 0, blue8: 1),
         Color (red8: 0, green8: 166, blue8: 3),
@@ -132,13 +153,33 @@ public class Color: Hashable {
         Color (red8: 229, green8: 229, blue8: 229),
     ]
     
-    static func setupDefaultAnsiColors (initialColors: [Color]) -> [Color]
+    static func setupDefaultAnsiColors(initialColors: [Color],
+                                       strategy: Ansi256PaletteStrategy = .xterm,
+                                       backgroundColor: Color? = nil,
+                                       foregroundColor: Color? = nil) -> [Color]
     {
+        switch strategy {
+        case .xterm:
+            return generateXtermPalette(initialColors: initialColors)
+        case .base16Lab:
+            return generateBase16LabPalette(initialColors: initialColors,
+                                            backgroundColor: backgroundColor,
+                                            foregroundColor: foregroundColor,
+                                            harmonious: false)
+        case .base16LabHarmonious:
+            return generateBase16LabPalette(initialColors: initialColors,
+                                            backgroundColor: backgroundColor,
+                                            foregroundColor: foregroundColor,
+                                            harmonious: true)
+        }
+    }
+
+    private static func generateXtermPalette(initialColors: [Color]) -> [Color] {
         var colors = initialColors
-        
+
         // Fill in the remaining 240 ANSI colors.
         let v = [ 0x00, 0x5f, 0x87, 0xaf, 0xd7, 0xff ];
-        
+
         // Generate colors (16-231)
         for i in 0..<216 {
             let r = UInt16 (v [(i / 36) % 6])
@@ -155,15 +196,139 @@ public class Color: Hashable {
         }
         return colors
     }
+
+    private static func generateBase16LabPalette(initialColors: [Color],
+                                                  backgroundColor: Color?,
+                                                  foregroundColor: Color?,
+                                                  harmonious: Bool) -> [Color] {
+        guard initialColors.count >= 8 else {
+            return generateXtermPalette(initialColors: initialColors)
+        }
+
+        // Anchor array: palette 0-7 with bg/fg overriding indices 0 and 7.
+        var base8Lab = Array(initialColors.prefix(8)).map(LabColor.fromColor(_:))
+        base8Lab[0] = LabColor.fromColor(backgroundColor ?? initialColors[0])
+        base8Lab[7] = LabColor.fromColor(foregroundColor ?? initialColors[7])
+
+        // Swap anchors on light themes so the ramp runs dark → light.
+        let isLightTheme = base8Lab[7].l < base8Lab[0].l
+        if isLightTheme && !harmonious {
+            base8Lab.swapAt(0, 7)
+        }
+
+        var palette = initialColors
+
+        // 16...231: 6x6x6 color cube via trilinear interpolation in LAB.
+        for r in 0..<6 {
+            let tr = Double(r) / 5.0
+            let c0 = LabColor.lerp(tr, base8Lab[0], base8Lab[1])
+            let c1 = LabColor.lerp(tr, base8Lab[2], base8Lab[3])
+            let c2 = LabColor.lerp(tr, base8Lab[4], base8Lab[5])
+            let c3 = LabColor.lerp(tr, base8Lab[6], base8Lab[7])
+
+            for g in 0..<6 {
+                let tg = Double(g) / 5.0
+                let c4 = LabColor.lerp(tg, c0, c1)
+                let c5 = LabColor.lerp(tg, c2, c3)
+
+                for b in 0..<6 {
+                    let tb = Double(b) / 5.0
+                    let c6 = LabColor.lerp(tb, c4, c5)
+                    palette.append(c6.toColor())
+                }
+            }
+        }
+
+        // 232...255: grayscale ramp from dark to light.
+        for i in 0..<24 {
+            let t = Double(i + 1) / 25.0
+            let c = LabColor.lerp(t, base8Lab[0], base8Lab[7])
+            palette.append(c.toColor())
+        }
+
+        return palette
+    }
+
+    private struct LabColor {
+        let l: Double
+        let a: Double
+        let b: Double
+
+        static func fromColor(_ color: Color) -> LabColor {
+            var r = normalizedComponent(color.red)
+            var g = normalizedComponent(color.green)
+            var b = normalizedComponent(color.blue)
+
+            // Inverse sRGB companding.
+            r = r > 0.04045 ? pow((r + 0.055) / 1.055, 2.4) : r / 12.92
+            g = g > 0.04045 ? pow((g + 0.055) / 1.055, 2.4) : g / 12.92
+            b = b > 0.04045 ? pow((b + 0.055) / 1.055, 2.4) : b / 12.92
+
+            // Linear RGB -> XYZ (D65).
+            var x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047
+            var y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750
+            var z = (r * 0.0193339 + g * 0.1191920 + b * 0.9503041) / 1.08883
+
+            // XYZ -> LAB helper transform.
+            x = x > 0.008856 ? pow(x, 1.0 / 3.0) : 7.787 * x + 16.0 / 116.0
+            y = y > 0.008856 ? pow(y, 1.0 / 3.0) : 7.787 * y + 16.0 / 116.0
+            z = z > 0.008856 ? pow(z, 1.0 / 3.0) : 7.787 * z + 16.0 / 116.0
+
+            return LabColor(l: 116.0 * y - 16.0,
+                            a: 500.0 * (x - y),
+                            b: 200.0 * (y - z))
+        }
+
+        func toColor() -> Color {
+            let y = (l + 16.0) / 116.0
+            let x = a / 500.0 + y
+            let z = y - b / 200.0
+
+            let x3 = x * x * x
+            let y3 = y * y * y
+            let z3 = z * z * z
+            let xf = (x3 > 0.008856 ? x3 : (x - 16.0 / 116.0) / 7.787) * 0.95047
+            let yf = y3 > 0.008856 ? y3 : (y - 16.0 / 116.0) / 7.787
+            let zf = (z3 > 0.008856 ? z3 : (z - 16.0 / 116.0) / 7.787) * 1.08883
+
+            var r = xf * 3.2404542 - yf * 1.5371385 - zf * 0.4985314
+            var g = -xf * 0.9692660 + yf * 1.8760108 + zf * 0.0415560
+            var b = xf * 0.0556434 - yf * 0.2040259 + zf * 1.0572252
+
+            // Forward sRGB companding.
+            r = r > 0.0031308 ? 1.055 * pow(r, 1.0 / 2.4) - 0.055 : 12.92 * r
+            g = g > 0.0031308 ? 1.055 * pow(g, 1.0 / 2.4) - 0.055 : 12.92 * g
+            b = b > 0.0031308 ? 1.055 * pow(b, 1.0 / 2.4) - 0.055 : 12.92 * b
+
+            return Color(red8: Self.quantizedComponent(r),
+                         green8: Self.quantizedComponent(g),
+                         blue8: Self.quantizedComponent(b))
+        }
+
+        static func lerp(_ t: Double, _ from: LabColor, _ to: LabColor) -> LabColor {
+            return LabColor(l: from.l + t * (to.l - from.l),
+                            a: from.a + t * (to.a - from.a),
+                            b: from.b + t * (to.b - from.b))
+        }
+
+        private static func normalizedComponent(_ component: UInt16) -> Double {
+            let normalized = Double(component) / 65535.0
+            let eightBit = (normalized * 255.0).rounded()
+            return max(0.0, min(255.0, eightBit)) / 255.0
+        }
+
+        private static func quantizedComponent(_ value: Double) -> UInt16 {
+            let clamped = max(0.0, min(1.0, value))
+            return UInt16(clamped * 255.0 + 0.5)
+        }
+    }
     
-    // Contructs a color from 8 bit values, this can be made public,
-    // but then we probably should enforce the values to not go
-    // beyond 8 bits.   Otherwise, this can throw at runtime due to overflow.
-    init(red8: UInt16, green8: UInt16, blue8: UInt16)
+    /// Constructs a color from 8-bit component values (0...255); values above 255 are clamped
+    public init(red8: UInt16, green8: UInt16, blue8: UInt16)
     {
-        self.red = red8 * 257
-        self.green = green8 * 257
-        self.blue = blue8 * 257
+        self.red = min (red8, 255) * 257
+        self.green = min (green8, 255) * 257
+        self.blue = min (blue8, 255) * 257
     }
 
     // Contructs a color from 4 bit values, this can be made public,
@@ -192,7 +357,40 @@ public class Color: Hashable {
         let bs = String(format:"%04x", blue)
         return "rgb:\(rs)/\(gs)/\(bs)"
     }
-    
+
+    /// Formats the color as an X11-style "rgb:rrrr/gggg/bbbb" specification (16 bits per channel, lossless)
+    public func formatted () -> String
+    {
+        return formatAsXcolor ()
+    }
+
+    /// Parses an X11-style color specification: "#rgb", "#rrggbb", "#rrrgggbbb", "#rrrrggggbbbb"
+    /// or "rgb:r/g/b" forms with 1-4 hex digits per channel; returns nil if the string is not valid
+    public static func parse (_ spec: String) -> Color?
+    {
+        // The internal parseColor is lenient (it treats unparsable hex digits
+        // as zero, which is fine for the OSC paths that feed it); validate
+        // here so that the documented returns-nil-on-invalid contract holds
+        func isHex (_ s: Substring) -> Bool {
+            !s.isEmpty && s.allSatisfy { $0.isHexDigit }
+        }
+        if spec.hasPrefix ("#") {
+            let digits = spec.dropFirst ()
+            guard [3, 6, 9, 12].contains (digits.count), isHex (digits) else {
+                return nil
+            }
+        } else if spec.hasPrefix ("rgb:") {
+            let channels = spec.dropFirst (4).split (separator: "/", omittingEmptySubsequences: false)
+            guard channels.count == 3, channels.allSatisfy ({ $0.count <= 4 && isHex ($0) }) else {
+                return nil
+            }
+        } else {
+            return nil
+        }
+        return parseColor (ArraySlice ([UInt8] (spec.utf8)))
+    }
+
+
     static func parseColor (_ data: ArraySlice<UInt8>) -> Color?
     {
         // parses the hex value until the first "/" and returns both the value, and the number of bytes used
@@ -257,7 +455,7 @@ public class Color: Hashable {
             case 3:
                 let (r, _) = parseHex (rest [(p+0)..<(p+1)], &idx)
                 let (g, _) = parseHex (rest [(p+1)..<(p+2)], &idx)
-                let (b, _) = parseHex (rest [(p+1)..<(p+3)], &idx)
+                let (b, _) = parseHex (rest [(p+2)..<(p+3)], &idx)
                 return makeColor (r, g, b, scale: 1)
             case 6:
                 let (r, _) = parseHex (rest [(p+0)..<(p+2)], &idx)

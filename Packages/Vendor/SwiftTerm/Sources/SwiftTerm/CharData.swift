@@ -50,6 +50,15 @@ public struct CharacterStyle : OptionSet, Hashable {
     public static let crossedOut = CharacterStyle (rawValue: 128)
 }
 
+public enum UnderlineStyle: UInt8 {
+    case none = 0
+    case single = 1
+    case double = 2
+    case curly = 3
+    case dotted = 4
+    case dashed = 5
+}
+
 ///
 /// Attribute contains the foreground and background color information for the invidual
 /// cells, as well as the character style of the cell (bold, underline, inverse) that the character
@@ -100,16 +109,24 @@ public struct Attribute: Equatable, Hashable {
     public private(set) var fg, bg: Color
     // The cell attributes
     public private(set) var style: CharacterStyle
+    /// Underline style (optional)
+    public private(set) var underlineStyle: UnderlineStyle = .none
+    /// Optional underline color
+    public private(set) var underlineColor: Color? = nil
     
     public static func ==(lhs: Attribute, rhs: Attribute) -> Bool
     {
-        lhs.style == rhs.style && lhs.fg == rhs.fg && lhs.bg == rhs.bg
+        lhs.style == rhs.style &&
+            lhs.fg == rhs.fg &&
+            lhs.bg == rhs.bg &&
+            lhs.underlineStyle == rhs.underlineStyle &&
+            lhs.underlineColor == rhs.underlineColor
     }
     
     // Returns an attribute with just the colors
     func justColor () -> Attribute
     {
-        Attribute (fg: fg, bg: bg, style: .none)
+        Attribute (fg: fg, bg: bg, style: .none, underlineStyle: .none, underlineColor: underlineColor)
     }
     
     // Temporary, longer term in Attribute we will add a proper encoding
@@ -133,7 +150,6 @@ public struct Attribute: Equatable, Hashable {
             result += ";8"
         }
         
-        SwiftTermDiagnostics.emit(.notice, .characterSGREncodingUnsupported)
         switch fg {
         case .ansi256(let c):
             if c > 16 {
@@ -141,12 +157,12 @@ public struct Attribute: Equatable, Hashable {
             } else {
                 result += ";\(c >= 8 ? 9 : 3)\(c >= 8 ? c - 8 : c);"
             }
-        case .trueColor:
-            break
+        case .trueColor(let r, let g, let b):
+            result += ";38;2;\(r);\(g);\(b)"
         default:
             break
         }
-        
+
         switch bg {
         case .ansi256(let c):
             if c > 16 {
@@ -154,8 +170,8 @@ public struct Attribute: Equatable, Hashable {
             } else {
                 result += ";\(c >= 8 ? 10 : 4)\(c >= 8 ? c - 8 : c);"
             }
-        case .trueColor:
-            break
+        case .trueColor(let r, let g, let b):
+            result += ";48;2;\(r);\(g);\(b)"
         default:
             break
         }
@@ -174,9 +190,9 @@ public struct Attribute: Equatable, Hashable {
 /// it could in theory be changed to be 24 bits without much trouble
 public struct TinyAtom {
     var code: UInt16
-    static var map: [UInt16:Any] = [:]
-    static var lastUsed: Int = 0
-    static var lastCollected: Int = 0
+    private static let lock = NSLock()
+    private static var map: [UInt16:Any] = [:]
+    private static var lastUsed: UInt16 = 0
     static let empty = TinyAtom (code: 0)
    
     private init(code: UInt16)
@@ -184,19 +200,42 @@ public struct TinyAtom {
         self.code = code
     }
     
-    /// Returns the TinyAtom associated with the specified url, or nil if we ran out of space
+    /// Creates a caller-owned TinyAtom for the specified value, or returns nil if no codes remain.
+    ///
+    /// The caller must call ``release()`` when the atom is no longer in use. Use
+    /// ``Terminal/makePayload(value:)`` for an atom whose lifetime is managed by a terminal.
     public static func lookup (value: Any) -> TinyAtom? {
-        let next = lastUsed + 1
-        if next < UInt16.max {
-            map [UInt16 (next)] = value
-            lastUsed = next
-            return TinyAtom (code: UInt16 (next))
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard lastUsed < UInt16.max - 1 else {
+            return nil
         }
-        return nil
+        lastUsed += 1
+        let code = lastUsed
+
+        map [code] = value
+        return TinyAtom (code: code)
     }
     
     public static func release(code: UInt16) {
-        map.removeValue(forKey: code)
+        release(codes: [code])
+    }
+
+    /// Releases a caller-owned atom.
+    ///
+    /// After this call, ``target`` returns nil for this atom and for all copies of it.
+    public func release() {
+        TinyAtom.release(code: code)
+    }
+
+    static func release<S: Sequence>(codes: S) where S.Element == UInt16 {
+        lock.lock()
+        defer { lock.unlock() }
+
+        for code in codes where code != 0 {
+            map.removeValue(forKey: code)
+        }
     }
     
     /// Returns the target for the TinyAtom
@@ -205,6 +244,8 @@ public struct TinyAtom {
             if code == 0 {
                 return nil
             }
+            TinyAtom.lock.lock()
+            defer { TinyAtom.lock.unlock() }
             return TinyAtom.map [code]
         }
     }
@@ -215,7 +256,7 @@ public struct TinyAtom {
  * This uses an Int32 to store the value, if the value can not be encoded as a single Unicode.Scalar,
  * then an index is stored that is looked up in parallel, so that full grapheme clusters can be tracked.
  *
- * Use the `getCharacter` function to get the stored Character, and use the `attribute` property
+ * Use the `getCharacter` function to get simple runes, and use `Terminal.getCharacter(for:)` for extended graphemes. Use the `attribute` property
  * to retrieve the color and other character attributes.   The `width` property contains the number of
  * columns used by the `Character` stored in this `CharData` on the screen.
  *
@@ -234,15 +275,7 @@ public struct CharData: CustomDebugStringConvertible {
     }
     
     static let maxRune = 1 << 22
-    
-    // Contains the character to index mapping
-    static var charToIndexMap: [Character:Int32] = [:]
-    
-    // Contains the index to character mapping, could be a plain array
-    static var indexToCharMap: [Int32: Character] = [:]
-    static var lastCharIndex: Int32 = (1 << 22)+1
-    
-    
+
     static let defaultAttr = Attribute(fg: .defaultColor, bg: .defaultColor, style: .none)
     static let invertedAttr = Attribute(fg: .defaultInvertedColor, bg: .defaultInvertedColor, style: .none)
     
@@ -255,53 +288,80 @@ public struct CharData: CustomDebugStringConvertible {
     // This contains an assigned key
     var payload: TinyAtom
     
-    var unused: UInt8 // Purely here to align to 16 bytes
+    // Kept in the byte that previously existed only for alignment, so OSC 133
+    // semantic metadata does not increase the size of a terminal cell.
+    private var semanticContentCode: UInt8
+
+    // The single source of truth for the cell-storage encoding of a
+    // SemanticContent. Both directions switch exhaustively over this enum, so
+    // a new SemanticContent (or SemanticPromptKind) case fails to compile
+    // until it is mapped in both — it can never silently decode to `.none`.
+    private enum SemanticContentCode: UInt8 {
+        case none = 0
+        case promptInitial = 1
+        case promptRight = 2
+        case promptContinuation = 3
+        case promptSecondary = 4
+        case input = 5
+        case output = 6
+
+        var content: SemanticContent {
+            switch self {
+            case .none: return .none
+            case .promptInitial: return .prompt(.initial)
+            case .promptRight: return .prompt(.right)
+            case .promptContinuation: return .prompt(.continuation)
+            case .promptSecondary: return .prompt(.secondary)
+            case .input: return .input
+            case .output: return .output
+            }
+        }
+
+        init(_ content: SemanticContent) {
+            switch content {
+            case .none: self = .none
+            case .prompt(.initial): self = .promptInitial
+            case .prompt(.right): self = .promptRight
+            case .prompt(.continuation): self = .promptContinuation
+            case .prompt(.secondary): self = .promptSecondary
+            case .input: self = .input
+            case .output: self = .output
+            }
+        }
+    }
+
+    /// The OSC 133 role assigned to this cell, if any.
+    public var semanticContent: SemanticContent {
+        // An out-of-range byte can only come from corrupt storage; decode it
+        // as `.none` rather than trapping.
+        (SemanticContentCode(rawValue: semanticContentCode) ?? .none).content
+    }
     
     /// The color and character attributes for the cell
     public var attribute: Attribute
     
-    /// Initializes a new instance of the CharData structure with the provided attribute, character and the dimension
+    /// Initializes a new instance of the CharData structure with the provided attribute and code.
+    /// Use `Terminal.makeCharData` for Character-based construction.
     /// - Parameter attribute: an attribute containing the color and style attributes for the cell
-    /// - Parameter char: the character that will be stored in this cell
+    /// - Parameter code: the character code that will be stored in this cell
     /// - Parameter size: the number of columns used by the `Character` stored in this `CharData` on the screen.
-    init (attribute: Attribute, char: Character, size: Int8 = 1)
+    init (attribute: Attribute, code: Int32, size: Int8 = 1)
     {
         self.attribute = attribute
-        if let acode = char.asciiValue {
-            code = Int32(acode)
-        } else if char.utf16.count == 1 {
-            code = Int32 (char.utf16.first!)
-        } else {
-            if let existingIdx = CharData.charToIndexMap [char] {
-                code = existingIdx
-            } else {
-                CharData.charToIndexMap [char] = CharData.lastCharIndex
-                CharData.indexToCharMap [CharData.lastCharIndex] = char
-                code = CharData.lastCharIndex
-                CharData.lastCharIndex = CharData.lastCharIndex + 1
-            }
-        }
-        width = Int8 (size)
+        self.code = code
+        width = size
         payload = TinyAtom.empty
-        unused = 0
+        semanticContentCode = 0
     }
     
     init (attribute: Attribute, scalar: UnicodeScalar, size: Int8 = 1) {
-        self.attribute = attribute
-        code = Int32(scalar.value)
-        width = Int8 (size)
-        payload = TinyAtom.empty
-        unused = 0
+        self.init(attribute: attribute, code: Int32(scalar.value), size: size)
     }
 
     // Empty cell sets the code to zero
     init (attribute: Attribute)
     {
-        self.attribute = attribute
-        code = 0
-        width = 1
-        payload = TinyAtom.empty
-        unused = 0
+        self.init(attribute: attribute, code: 0, size: 1)
     }
     
     public var isSimpleRune: Bool {
@@ -314,6 +374,10 @@ public struct CharData: CustomDebugStringConvertible {
     mutating public func setPayload (atom: TinyAtom)
     {
         self.payload = atom
+    }
+
+    mutating func setSemanticContent(_ content: SemanticContent) {
+        semanticContentCode = SemanticContentCode(content).rawValue
     }
     
     public func getPayload () -> Any?
@@ -330,34 +394,19 @@ public struct CharData: CustomDebugStringConvertible {
     /// The `Null` character can be used when filling up parts of the screeb
     public static var Null : CharData = CharData (attribute: defaultAttr)
     
-    /// Updates the contents of this CharData with a new character.
-    /// - Parameter char: the new character that will be stored
+    /// Updates the contents of this CharData with a new code.
+    /// - Parameter code: the new character code that will be stored
     /// - Paramerter size: the number of fixed sized columns this character will take on the screen
-    mutating public func setValue (char: Character, size: Int32)
+    public mutating func setValue (code: Int32, size: Int32)
     {
-        if char.utf16.count == 1 {
-            self.code = Int32 (char.utf16.first!)
-        } else {
-            if let existingIdx = CharData.charToIndexMap [char] {
-                code = existingIdx
-            } else {
-                CharData.charToIndexMap [char] = CharData.lastCharIndex
-                CharData.indexToCharMap [CharData.lastCharIndex] = char
-                code = CharData.lastCharIndex
-                CharData.lastCharIndex = CharData.lastCharIndex + 1
-            }
-        }
+        self.code = code
         width = Int8 (size)
     }
     
     /// Use this method to retrieve the Character stored in the CharData
+    /// For extended grapheme clusters use `Terminal.getCharacter(for:)`.
     public func getCharacter () -> Character
     {
-        if code > CharData.maxRune {
-            // This is an invariant - no code can be stored without the equivalent being tracked, but for the sake
-            // of not having a "!" return a space.
-            return CharData.indexToCharMap [code] ?? " "
-        }
         if let c = Unicode.Scalar (UInt32 (code)) {
             return Character(c)
         } else {

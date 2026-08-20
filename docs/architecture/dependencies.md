@@ -36,6 +36,9 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 - **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
   - Location: `./Packages/Vendor/SwiftTerm/` (vendored source in the main repository, not a git submodule)
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
+  - Fork: https://github.com/everlof/SwiftTerm, reconciled at `7826d5c` against upstream
+    `v1.20.0` (`5d14406`). The vendored directory is the exact fork tree at that revision, without
+    its Git metadata or build output.
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
   - **The scroller seam is ours.** `MacTerminalView.installScroller` lets the embedding app
     replace only the visible `NSScroller`; SwiftTerm immediately restates its target, action,
@@ -139,6 +142,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     scrollback trim cannot turn the tail of a path into an apparently complete relative path.
     Threading's attachment detector uses this seam; agent TUIs that pre-wrap their own painted
     rows are covered separately by the provider transcript at the turn boundary.
+    The `sinceAbsoluteRow` overload is the bounded polling form: its cursor survives scrollback
+    trimming, skips stable rows above the current screen, and always rereads the screen because a
+    full-screen TUI can repaint those rows in place without producing a new one. A cursor beyond a
+    reset or replacement buffer falls back to the whole retained window. Returning a byte-bounded
+    suffix without this read cursor is not bounded work—mostly blank or short scrollback rows can
+    still all be translated before the byte budget is spent.
   - **The selection seam is ours**, and it carries copy-on-select. `selectionGestureEnded()` is
     called when a *pointer* gesture settles a selection — a drag released, a double- or
     triple-click, a shift-click extension — and `selectedText` answers what is selected, nil when

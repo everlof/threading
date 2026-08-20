@@ -87,6 +87,10 @@ public protocol TerminalDelegate: AnyObject {
     /// This method is invoked when the buffer changes from Normal to Alternate, or Alternate to Normal
     /// The default implementation does nothing.
     func bufferActivated (source: Terminal)
+
+    /// Invoked when synchronized output mode is toggled on or off.
+    /// The default implementation does nothing.
+    func synchronizedOutputChanged (source: Terminal, active: Bool)
     
     /// Should raise the bell
     /// The default implementation does nothing.
@@ -109,6 +113,13 @@ public protocol TerminalDelegate: AnyObject {
      * The default implementation returns `true`
      */
     func isProcessTrusted (source: Terminal) -> Bool
+
+    /**
+     * Returns the cell size in pixels, if known.
+     *
+     * The default implementation returns nil.
+     */
+    func cellSizeInPixels (source: Terminal) -> (width: Int, height: Int)?
     
     /**
      * This method is invoked when the `mouseMode` property has changed, and gives the UI
@@ -191,6 +202,21 @@ public protocol TerminalDelegate: AnyObject {
     func clipboardCopy(source: Terminal, content: Data)
     
     /**
+     * This method is invoked when the client application has issued an OSC 52
+     * query to read the clipboard contents.
+     *
+     * Returning the clipboard data allows the terminal application to read it;
+     * returning `nil` denies the request.  The host may use this callback to
+     * prompt the user for confirmation before providing clipboard data.
+     *
+     * The default implementation returns `nil` (denying the request for security).
+     *
+     * - Parameter source: identifies the instance of the terminal that sent this request
+     * - Returns: the current clipboard contents, or `nil` to deny the request
+     */
+    func clipboardRead(source: Terminal) -> Data?
+    
+    /**
      * Invoked when client application issues OSC 777 to show notification.
      *
      * The default implementation does nothing.
@@ -200,6 +226,16 @@ public protocol TerminalDelegate: AnyObject {
      *  - body: the body of the notification
      */
     func notify(source: Terminal, title: String, body: String)
+
+    /**
+     * Invoked when the client application issues OSC 9;4 to report progress.
+     *
+     * The default implementation does nothing.
+     * - Parameters:
+     *  - source: identifies the instance of the terminal that sent this request
+     *  - report: the parsed progress report
+     */
+    func progressReport(source: Terminal, report: Terminal.ProgressReport)
     
     /**
      * Invoked to create an image from an RGBA buffer at the current cursor position
@@ -265,6 +301,24 @@ public protocol TerminalImage {
  * that is provided in the constructor call.
  */
 open class Terminal {
+    public enum ProgressReportState: Int {
+        case remove = 0
+        case set = 1
+        case error = 2
+        case indeterminate = 3
+        case pause = 4
+    }
+
+    public struct ProgressReport: Equatable {
+        public let state: ProgressReportState
+        public let progress: UInt8?
+
+        public init(state: ProgressReportState, progress: UInt8?) {
+            self.state = state
+            self.progress = progress
+        }
+    }
+
     let MINIMUM_COLS = 2
     let MINIMUM_ROWS = 1
     
@@ -279,12 +333,69 @@ open class Terminal {
     /// Setup(isReset:) method should be called to apply changes
     public var options: TerminalOptions
     
+    // Selection services attached to this terminal.  Held weakly: the views own
+    // them.  They are notified when lines are shifted in place so they can
+    // translate their anchors (see `adjustForInPlaceScroll`).
+    private struct WeakSelection {
+        weak var value: SelectionService?
+    }
+    private var selections: [WeakSelection] = []
+
+    func register (selection: SelectionService)
+    {
+        selections.removeAll { $0.value == nil }
+        guard !selections.contains (where: { $0.value === selection }) else {
+            return
+        }
+        selections.append (WeakSelection (value: selection))
+    }
+
+    /// Notifies attached selections that `lines` rows were shifted up in place
+    /// within the absolute row range `top...bottom`.
+    func selectionsAdjustForInPlaceScroll (top: Int, bottom: Int, lines: Int)
+    {
+        for entry in selections {
+            entry.value?.adjustForInPlaceScroll (top: top, bottom: bottom, lines: lines)
+        }
+    }
+
+    /// Notifies attached selections that rows `top...bottom` were shifted only
+    /// within the columns `left...right` (margin mode).
+    func selectionsInvalidateForColumnRestrictedScroll (top: Int, bottom: Int, left: Int, right: Int)
+    {
+        for entry in selections {
+            entry.value?.invalidateForColumnRestrictedScroll (top: top, bottom: bottom, left: left, right: right)
+        }
+    }
+
     // The current buffers
     var normalBuffer, altBuffer: Buffer
     /**
      * Returns the active buffer (either the normal buffer or the alternative buffer)
      */
     public private(set) var buffer: Buffer
+
+    /// Controls whether primary pointer clicks are routed to an active OSC 133
+    /// semantic prompt. Views use this when deciding whether a click should
+    /// take precedence over local selection, links, or ordinary mouse reports.
+    public var semanticPromptClickBehavior: SemanticPromptClickBehavior = .enabled
+
+    /// The click mode most recently advertised by the active buffer's OSC 133 shell.
+    public var semanticPromptClickMode: SemanticPromptClickMode {
+        buffer.semanticClickMode
+    }
+
+    private let synchronizedOutputTimeoutSeconds: TimeInterval = 1.0
+    public private(set) var synchronizedOutputActive: Bool = false
+    private var synchronizedOutputTimeoutItem: DispatchWorkItem?
+
+    var displayBuffer: Buffer {
+        buffer
+    }
+
+    var isDisplayBufferAlternate: Bool {
+        isCurrentBufferAlternate
+    }
     
     public var isCurrentBufferAlternate: Bool {
         buffer === altBuffer
@@ -295,12 +406,43 @@ open class Terminal {
     
     // Whether the terminal is operating in application cursor mode
     public var applicationCursor : Bool = false
+
+    /// Whether DEC reverse-screen mode (DECSCNM) is active.
+    private(set) var reverseColors: Bool = false
+
+    private struct KeyboardModeState {
+        var flags: KittyKeyboardFlags = []
+        var stack: [KittyKeyboardFlags] = []
+    }
+
+    private static let keyboardModeStackLimit = 16
+    private var keyboardModeNormal = KeyboardModeState()
+    private var keyboardModeAlt = KeyboardModeState()
+
+    public var keyboardEnhancementFlags: KittyKeyboardFlags {
+        let mode = isCurrentBufferAlternate ? keyboardModeAlt : keyboardModeNormal
+        return mode.flags
+    }
     
     // You can ignore most of the defaults set here, the function
     // reset() will do that again
     var sendFocus: Bool = false
-    /// Whether DECTCEM has hidden the cursor. Readable from outside so a host serialising the
-    /// screen (for a remote mirror, a snapshot) can reproduce the cursor state it found.
+
+    /// BiDi state that new paragraphs receive.
+    public private(set) var currentBidiState: BidiPresentationState = .default
+
+    /// True when left and right cursor keys follow the resolved paragraph
+    /// direction. Hosts can change this while the terminal is running. A reset
+    /// restores `options.initialBidiArrowKeySwap`.
+    public var bidiArrowKeySwap: Bool = false
+
+    // These properties keep source compatibility with the first BiDi patch.
+    public var bidiSupportEnabled: Bool { currentBidiState.supportMode == .implicit }
+    public var bidiAutodetectDirection: Bool { currentBidiState.autodetectDirection }
+    public var bidiRTLPreference: Bool { currentBidiState.fallbackDirection == .rightToLeft }
+    public var bidiBoxMirroring: Bool { currentBidiState.boxMirroring }
+
+    private var savedBidiPrivateModes: [Int: Bool] = [:]
     public internal(set) var cursorHidden : Bool = false
     
     /// Controls the origin mode (DECOM), when set, the screen is limited to the top and bottom margins
@@ -335,23 +477,46 @@ open class Terminal {
     /// the terminal, the content will be wrapped in "ESC [ 200 ~" to start, and "ESC [ 201 ~" to end.
     public private(set) var bracketedPasteMode: Bool = false
 
-    /// DECSET 2031: the application asked to be told when the terminal's colour scheme changes,
-    /// with a `CSI ? 997 ; 1|2 n` report. Claude Code enables this at startup; a program that
-    /// hears the report re-asks `OSC 11 ; ?` and re-themes live, which is what makes a theme
-    /// switched under a running agent actually reach it — see `reportColorSchemeChange`.
+    /// DECSET 2031: the application asked to be notified when the host's
+    /// colour scheme changes, using `CSI ? 997 ; 1|2 n`.
     public private(set) var colorSchemeReportingEnabled: Bool = false
 
+    /// Tracks DECSET/DECRST private mode 1007 (Alternate Scroll Mode, xterm's "alternateScroll" resource).
+    /// When true and the alternate screen buffer is active without an application mouse-tracking mode enabled,
+    /// hosts are expected to translate scroll wheel input into cursor up/down key sequences instead of scrolling,
+    /// so that full-screen apps that do not read the mouse (e.g. `less`, `vim` without `mouse=a`) still respond
+    /// to the scroll wheel. SwiftTerm only tracks the mode's state here; translating wheel events is left to the
+    /// host view, which can read this property to decide how to route them.
+    /// xterm's own default for this resource is false; we default to true here to match modern terminals
+    /// (e.g. Ghostty) that enable it out of the box.
+    public private(set) var alternateScrollMode: Bool = true
+    
     private var charset: [UInt8:String]? = nil
+    private var gCharsets: [[UInt8:String]?] = [CharSets.defaultCharset, nil, nil, nil]
     var gcharset: Int = 0
     var reverseWraparound: Bool = false
     weak var tdel: TerminalDelegate?
     private var curAttr: Attribute = CharData.defaultAttr
+    private var charToIndexMap: [Character:Int32] = [:]
+    private var indexToCharMap: [Int32: Character] = [:]
+    private var lastCharIndex: Int32 = Int32(CharData.maxRune + 1)
     var gLevel: UInt8 = 0
     var cursorBlink: Bool = false
     
-    var allow80To132 = true
+    /// Whether DECCOLM (`CSI ? 3 h` / `CSI ? 3 l`) may resize the terminal to
+    /// 132 or 80 columns. Off by default, matching xterm's `allowC132`
+    /// resource: xterm's own `rs2` reset string contains `CSI ? 3 ; 4 l`, so
+    /// honouring DECCOLM means anything that resets the terminal — `reset`,
+    /// `tput init`, an ssh or tmux session tearing down — silently snaps the
+    /// buffer to 80 columns and leaves the rest of the view unused. Worse,
+    /// running `reset` to recover re-sends the very sequence that causes it.
+    /// An application that genuinely wants the mode can still ask for it with
+    /// `CSI ? 40 h`.
+    var allow80To132 = false
     
     public var parser: EscapeSequenceParser
+    var kittyGraphicsState = KittyGraphicsState()
+    var kittyPlacementContext: KittyPlacementContext?
     
     var refreshStart = Int.max
     var refreshEnd = -1
@@ -387,34 +552,6 @@ open class Terminal {
     /// (see the `isProcessTrusted` method in the `TerminalDelegate`).  When this is set the
     /// `hostCurrentDocumentUpdated` method on the delegate is invoked.
     public private(set) var hostCurrentDocument: String? = nil
-
-    // MARK: - Command Tracking (OSC 133 / FinalTerm)
-
-    /// Position in the buffer where the prompt started (OSC 133;A).
-    /// This is the scroll-invariant row number (absolute position in buffer history).
-    public private(set) var commandPromptStart: Position?
-
-    /// Position in the buffer where the command input started (OSC 133;B - after prompt).
-    public private(set) var commandInputStart: Position?
-
-    /// Position in the buffer where command output started (OSC 133;C - command executing).
-    /// This is for the CURRENT command being executed.
-    private var currentCommandOutputStart: Position?
-
-    /// Position in the buffer where command output ended (OSC 133;D - command finished).
-    /// This is for the CURRENT command being executed.
-    private var currentCommandOutputEnd: Position?
-
-    /// Position where the last COMPLETED command's output started.
-    /// This persists until a new command starts executing.
-    public private(set) var commandOutputStart: Position?
-
-    /// Position where the last COMPLETED command's output ended.
-    /// This persists until a new command starts executing.
-    public private(set) var commandOutputEnd: Position?
-
-    /// Exit code of the last command (from OSC 133;D;exitcode).
-    public private(set) var lastCommandExitCode: Int32?
     
     /// The current attribute used by the terminal by default
     public var currentAttribute: Attribute {
@@ -452,11 +589,8 @@ open class Terminal {
         case sgrPixel
     }
     
-    /// The protocol encoding for the terminal.
-    ///
-    /// Readable from the outside because a mirrored terminal has to be able to state this
-    /// contract to a second renderer: a client left guessing x10 while the program asked for
-    /// SGR mislocates every click past column 95 and cannot report a release at all.
+    /// The active mouse coordinate encoding. A mirrored renderer needs this to
+    /// reproduce the terminal contract exactly.
     public private(set) var mouseProtocol: MouseProtocolEncoding = .x10
 
     // This is used to track if we are setting the colors, to prevent a
@@ -473,6 +607,10 @@ open class Terminal {
             settingFgColor = true
             tdel?.setForegroundColor(source: self, color: foregroundColor)
             settingFgColor = false
+
+            if options.ansi256PaletteStrategy != .xterm {
+                rebuildAnsiPalette(notifyDelegate: true)
+            }
         }
     }
     /// This tracks the current background color for the application.
@@ -484,6 +622,26 @@ open class Terminal {
             settingBgColor = true
             tdel?.setBackgroundColor(source: self, color: backgroundColor)
             settingBgColor = false
+
+            if options.ansi256PaletteStrategy != .xterm {
+                rebuildAnsiPalette(notifyDelegate: true)
+            }
+        }
+    }
+
+    /// Strategy used to derive the extended 256-color palette (indices 16...255).
+    ///
+    /// Changing this value rebuilds the active palette immediately and refreshes the UI.
+    public var ansi256PaletteStrategy: Ansi256PaletteStrategy {
+        get {
+            options.ansi256PaletteStrategy
+        }
+        set {
+            if options.ansi256PaletteStrategy == newValue {
+                return
+            }
+            options.ansi256PaletteStrategy = newValue
+            rebuildAnsiPalette(notifyDelegate: true)
         }
     }
     
@@ -499,12 +657,20 @@ open class Terminal {
         }
     }
     
+    /// Tracks the host view's focus for subsequent focus reports. Defaults to focused.
+    var reportedFocusState: Bool = true
+
     /// Invoke this command when the terminal receives and loses focus
     public func setTerminalFocus(_ focused: Bool) {
+        reportedFocusState = focused
         if sendFocus {
-            let data: [UInt8] = cc.CSI + [focused ? 0x49 : 0x4f]
-            tdel?.send(source: self, data: data[0...])
+            sendFocusReport()
         }
+    }
+
+    func sendFocusReport() {
+        let data: [UInt8] = cc.CSI + [reportedFocusState ? 0x49 : 0x4f]
+        tdel?.send(source: self, data: data[0...])
     }
     
     ///
@@ -567,6 +733,10 @@ open class Terminal {
         }
     }
 
+    /// Whether the running application has requested shift capture via XTSHIFTESCAPE (`CSI > 1 s`).
+    /// When `true`, shift+click is forwarded to the app instead of triggering local text selection.
+    public private(set) var mouseShiftCapture: Bool = false
+
     // The next four variables determine whether setting/querying should be done using utf8 or latin1
     // and whether the values should be set or queried using hex digits, rather than actual byte streams
     var xtermTitleSetUtf = false
@@ -593,21 +763,29 @@ open class Terminal {
     public init (delegate: TerminalDelegate, options: TerminalOptions = TerminalOptions.default)
     {
         installedColors = Color.terminalAppColors
-        defaultAnsiColors = Color.setupDefaultAnsiColors (initialColors: installedColors)
+        defaultAnsiColors = Color.setupDefaultAnsiColors(initialColors: installedColors,
+                                                         strategy: options.ansi256PaletteStrategy,
+                                                         backgroundColor: Color.defaultBackground,
+                                                         foregroundColor: Color.defaultForeground)
         ansiColors = defaultAnsiColors
         tdel = delegate
         self.options = options
+        currentBidiState = options.initialBidiState
+        bidiArrowKeySwap = options.initialBidiArrowKeySwap
         // This duplicates the setup above, but
-        parser = EscapeSequenceParser ()
-        normalBuffer = Buffer(cols: cols, rows: rows, tabStopWidth: tabStopWidth, scrollback: options.scrollback)
+        parser = EscapeSequenceParser()
+        normalBuffer = Buffer(cols: cols, rows: rows, tabStopWidth: tabStopWidth,
+                              scrollback: options.scrollback, bidiState: currentBidiState)
         normalBuffer.fillViewportRows()
-        
+
         // The alt buffer should never have scrollback.
         // See http://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-The-Alternate-Screen-Buffer
-        altBuffer = Buffer (cols: cols, rows: rows, tabStopWidth: tabStopWidth, scrollback: nil)
+        altBuffer = Buffer (cols: cols, rows: rows, tabStopWidth: tabStopWidth,
+                            scrollback: nil, bidiState: currentBidiState)
         buffer = normalBuffer
 
         cc = CC(send8bit: false)
+        parser.terminal = self
         configureParser (parser)
         
         normalBuffer.scroll = { [weak self] wrapped in self?.scroll(isWrapped: wrapped) }
@@ -616,6 +794,10 @@ open class Terminal {
         setupTabStops()
 
         setup()
+    }
+
+    deinit {
+        TinyAtom.release(codes: payloadCodes)
     }
 
     /// Installs the new colors as the default colors and recomputes the
@@ -631,8 +813,18 @@ open class Terminal {
             return
         }
         installedColors = colors
-        defaultAnsiColors = Color.setupDefaultAnsiColors (initialColors: installedColors)
+        rebuildAnsiPalette(notifyDelegate: false)
+    }
+
+    private func rebuildAnsiPalette(notifyDelegate: Bool) {
+        defaultAnsiColors = Color.setupDefaultAnsiColors(initialColors: installedColors,
+                                                         strategy: options.ansi256PaletteStrategy,
+                                                         backgroundColor: backgroundColor,
+                                                         foregroundColor: foregroundColor)
         ansiColors = defaultAnsiColors
+        if notifyDelegate {
+            tdel?.colorChanged(source: self, idx: nil)
+        }
     }
     
     /// Returns the CharData at the specified column and row from the visible portion of the buffer, these are zero-based
@@ -683,12 +875,16 @@ open class Terminal {
     
     public func getCharacter (col: Int, row: Int) -> Character?
     {
-        return getCharData(col: col, row: row)?.getCharacter()
+        guard let charData = getCharData(col: col, row: row) else {
+            return nil
+        }
+        return getCharacter(for: charData)
     }
     
     public func resetNormalBuffer() {
-        normalBuffer = Buffer(cols: cols, rows: rows, tabStopWidth: tabStopWidth, scrollback: options.scrollback)
-        normalBuffer.scroll = scroll(isWrapped:)
+        normalBuffer = Buffer(cols: cols, rows: rows, tabStopWidth: tabStopWidth,
+                              scrollback: options.scrollback, bidiState: currentBidiState)
+        normalBuffer.scroll = { [weak self] wrapped in self?.scroll(isWrapped: wrapped) }
 
         normalBuffer.fillViewportRows()
         normalBuffer.setupTabStops(tabStopWidth: tabStopWidth)
@@ -698,11 +894,11 @@ open class Terminal {
         if buffer === normalBuffer {
             return
         }
+        semanticNoteAlternateScreenSwitch()
 
-        // A full-screen program can sit over thousands of normal-buffer scrollback lines. While
-        // that alternate screen is active, window resizes update only what is visible and leave
-        // this buffer at its prior grid; otherwise every drag tick reflows hidden history. Pay
-        // that cost once, at the final grid, only when the normal buffer becomes visible again.
+        // Window resizes while a full-screen program is active should only resize the visible
+        // alternate buffer. Reflowing a large, hidden normal scrollback on every drag tick is
+        // wasted work; pay that cost once, at the final grid, when it becomes visible again.
         resizeNormalBufferToCurrentGridIfNeeded()
         normalBuffer.x = altBuffer.x
         normalBuffer.y = altBuffer.y
@@ -712,6 +908,7 @@ open class Terminal {
         // when activated.
         
         if clearAlt {
+            clearKittyImages(in: altBuffer, isAlternateBuffer: true)
             altBuffer.clear ()
         }
         buffer = normalBuffer
@@ -721,6 +918,7 @@ open class Terminal {
         if buffer === altBuffer {
             return
         }
+        semanticNoteAlternateScreenSwitch()
         altBuffer.x = normalBuffer.x
         altBuffer.y = normalBuffer.y
         
@@ -729,6 +927,7 @@ open class Terminal {
         
         altBuffer.fillViewportRows(attribute: fillAttr)
         buffer = altBuffer
+        clearKittyImages(in: altBuffer, isAlternateBuffer: true)
     }
 
     private func resizeNormalBufferToCurrentGridIfNeeded() {
@@ -755,7 +954,9 @@ open class Terminal {
             normalBuffer.resize(newCols: newColumns, newRows: newRows)
             normalBuffer.savedY = normalBuffer.y + dy
         }
+        
         altBuffer.resize (newCols: newColumns, newRows: newRows)
+
     }
     public func setup (isReset: Bool = false)
     {
@@ -767,6 +968,7 @@ open class Terminal {
         if isReset {
             resetNormalBuffer()
             activateNormalBuffer(clearAlt: false)
+            resetSemanticPromptState(clearingScreenMarks: true)
         } else {
             normalBuffer.resize(newCols: cols, newRows: rows)
             altBuffer.resize(newCols: cols, newRows: rows)
@@ -776,6 +978,7 @@ open class Terminal {
         // modes
         applicationKeypad = false
         applicationCursor = false
+        setReverseColors(false)
         originMode = false
         
         setMarginMode(false)
@@ -783,15 +986,21 @@ open class Terminal {
         setWraparound(true)
         bracketedPasteMode = false
         colorSchemeReportingEnabled = false
+        alternateScrollMode = true
 
+        keyboardModeNormal = KeyboardModeState()
+        keyboardModeAlt = KeyboardModeState()
+        
         // charset'
-        charset = nil
+        gCharsets = [CharSets.defaultCharset, nil, nil, nil]
+        charset = gCharsets[0]
         gcharset = 0
         gLevel = 0
         curAttr = CharData.defaultAttr
         
         mouseMode = .off
-        
+        mouseShiftCapture = false
+
         buffer.scrollTop = 0
         buffer.scrollBottom = rows-1
         buffer.marginLeft = 0
@@ -800,7 +1009,7 @@ open class Terminal {
         cc.send8bit = false
         conformance = .vt500
         
-        allow80To132 = true
+        allow80To132 = false
         
         xtermTitleSetUtf = false
         xtermTitleQueryUtf = false
@@ -808,10 +1017,89 @@ open class Terminal {
         xtermTitleSetHex = false
         xtermTitleQueryHex = false
         
-        hyperLinkTracking = nil
+        activeHyperlink = nil
         cursorBlink = false
         hostCurrentDirectory = nil
         lineFeedMode = options.convertEol
+    }
+
+    private func updateKeyboardModeState(_ update: (inout KeyboardModeState) -> Void) {
+        if isCurrentBufferAlternate {
+            update(&keyboardModeAlt)
+        } else {
+            update(&keyboardModeNormal)
+        }
+    }
+
+    private func handleKittyKeyboardProtocol(pars: [Int], collect: cstring) -> Bool {
+        guard collect.count == 1, let prefix = collect.first else {
+            return false
+        }
+        switch prefix {
+        case UInt8(ascii: "?"):
+            sendResponse(cc.CSI, "?\(keyboardEnhancementFlags.rawValue)u")
+            return true
+        case UInt8(ascii: "="):
+            let rawFlags = pars.first ?? 0
+            let mode = pars.count > 1 ? pars[1] : 1
+            let newFlags = KittyKeyboardFlags(rawValue: rawFlags & KittyKeyboardFlags.knownMask)
+
+            // Per kitty keyboard protocol, only modes 1/2/3 are valid.
+            // Ignore invalid modes instead of mutating state.
+            guard mode == 1 || mode == 2 || mode == 3 else {
+                return true
+            }
+            updateKeyboardModeState { modeState in
+                switch mode {
+                case 1:
+                    modeState.flags = newFlags
+                case 2:
+                    modeState.flags.formUnion(newFlags)
+                case 3:
+                    modeState.flags.subtract(newFlags)
+                default:
+                    break
+                }
+            }
+            return true
+        case UInt8(ascii: ">"):
+            let rawFlags = pars.first ?? 0
+            let newFlags = KittyKeyboardFlags(rawValue: rawFlags & KittyKeyboardFlags.knownMask)
+            updateKeyboardModeState { modeState in
+                if modeState.stack.count >= Terminal.keyboardModeStackLimit {
+                    modeState.stack.removeFirst()
+                }
+                modeState.stack.append(modeState.flags)
+                modeState.flags = newFlags
+            }
+            return true
+        case UInt8(ascii: "<"):
+            let count = max(pars.first ?? 1, 1)
+            updateKeyboardModeState { modeState in
+                if count > modeState.stack.count {
+                    modeState.stack.removeAll()
+                    modeState.flags = []
+                    return
+                }
+                for _ in 0..<count {
+                    modeState.flags = modeState.stack.removeLast()
+                }
+            }
+            return true
+        default:
+            return false
+        }
+    }
+
+    func cmdCsiU(_ pars: [Int], _ collect: cstring) {
+        if handleKittyKeyboardProtocol(pars: pars, collect: collect) {
+            return
+        }
+
+        // Only plain CSI u restores cursor. Unknown CSI ... u forms should be ignored.
+        if collect.isEmpty {
+            cmdRestoreCursor(pars, collect)
+        }
     }
     
     // DCS $ q Pt ST
@@ -864,13 +1152,7 @@ open class Terminal {
             default:
                 ok = 0 // this means the request is not valid, report that to the host.
                 // invalid: DCS 0 $ r Pt ST (xterm)
-                if !terminal.silentLog {
-                    SwiftTermDiagnostics.emit(
-                        .debug,
-                        .parserUnhandledDeviceControl,
-                        facts: ["byteCount": data.count]
-                    )
-                }
+                terminal.log ("Unknown DCS + \(newData ?? "")")
                 // Do not report 'newData', because it can be exploited
                 // see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=510030
                 result = ""
@@ -880,220 +1162,36 @@ open class Terminal {
         }
     }
 
-    // Configures the EscapeSequenceParser
+    // Configures the EscapeSequenceParser with fallback handlers and print handling
     func configureParser (_ parser: EscapeSequenceParser)
     {
         parser.csiHandlerFallback = { [unowned self] (pars: [Int], collect: cstring, code: UInt8) -> () in
-            guard !self.silentLog else { return }
-            SwiftTermDiagnostics.emit(
-                .debug,
-                .parserUnhandledControlSequence,
-                facts: ["code": Int(code), "parameterCount": pars.count, "collectCount": collect.count]
-            )
+            let ch = Character(UnicodeScalar(code))
+            self.log ("SwiftTerm: Unknown CSI Code (collect=\(collect) code=\(ch) pars=\(pars))")
         }
         parser.escHandlerFallback = { [unowned self] (txt: cstring, flag: UInt8) in
-            guard !self.silentLog else { return }
-            SwiftTermDiagnostics.emit(
-                .debug,
-                .parserUnhandledEscape,
-                facts: ["code": Int(flag), "collectCount": txt.count]
-            )
+            self.log ("SwiftTerm: Unknown ESC Code: ESC + \(Character(Unicode.Scalar (flag))) txt=\(txt)")
         }
         parser.executeHandlerFallback = { [unowned self] in
-            guard !self.silentLog else { return }
-            SwiftTermDiagnostics.emit(.debug, .parserUnhandledExecute)
+            self.log ("SwiftTerm: Unknown EXECUTE code")
         }
         parser.oscHandlerFallback = { [unowned self] code, data in
-            guard !self.silentLog else { return }
-            SwiftTermDiagnostics.emit(
-                .debug,
-                .parserUnhandledOperatingSystemCommand,
-                facts: ["code": code, "byteCount": data.count]
-            )
+            self.log ("SwiftTerm: Unknown OSC code: \(code)")
+        }
+        parser.apcHandlerFallback = { [unowned self] code, data in
+            if let scalar = UnicodeScalar(Int(code)) {
+                self.log ("SwiftTerm: Unknown APC code: \(Character(scalar))")
+            } else {
+                self.log ("SwiftTerm: Unknown APC code: \(code)")
+            }
         }
         parser.printHandler = { [unowned self] slice in handlePrint (slice) }
         parser.printStateReset = { [unowned self] in printStateReset() }
-        
-        // CSI handler
-        parser.csiHandlers [UInt8 (ascii: "@")] = { [unowned self] pars, collect in cmdInsertChars (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "A")] = { [unowned self] pars, collect in cmdCursorUp (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "B")] = { [unowned self] pars, collect in cmdCursorDown (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "C")] = { [unowned self] pars, collect in cmdCursorForward (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "D")] = { [unowned self] pars, collect in cmdCursorBackward (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "E")] = { [unowned self] pars, collect in cmdCursorNextLine (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "F")] = { [unowned self] pars, collect in cmdCursorPrecedingLine (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "G")] = { [unowned self] pars, collect in cmdCursorCharAbsolute (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "H")] = { [unowned self] pars, collect in cmdCursorPosition (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "I")] = { [unowned self] pars, collect in cmdCursorForwardTab (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "J")] = { [unowned self] pars, collect in cmdEraseInDisplay (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "K")] = { [unowned self] pars, collect in cmdEraseInLine (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "L")] = { [unowned self] pars, collect in cmdInsertLines (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "M")] = { [unowned self] pars, collect in cmdDeleteLines (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "P")] = { [unowned self] pars, collect in cmdDeleteChars (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "S")] = { [unowned self] pars, collect in cmdScrollUp (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "T")] = { [unowned self] pars, collect in csiT (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "X")] = { [unowned self] pars, collect in cmdEraseChars (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "Z")] = { [unowned self] pars, collect in cmdCursorBackwardTab (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "`")] = { [unowned self] pars, collect in cmdCharPosAbsolute (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "a")] = { [unowned self] pars, collect in cmdHPositionRelative (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "b")] = { [unowned self] pars, collect in cmdRepeatPrecedingCharacter (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "c")] = { [unowned self] pars, collect in cmdSendDeviceAttributes (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "d")] = { [unowned self] pars, collect in cmdLinePosAbsolute (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "e")] = { [unowned self] pars, collect in cmdVPositionRelative (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "f")] = { [unowned self] pars, collect in cmdHVPosition (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "g")] = { [unowned self] pars, collect in cmdTabClear (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "h")] = { [unowned self] pars, collect in cmdSetMode (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "l")] = { [unowned self] pars, collect in cmdResetMode (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "m")] = { [unowned self] pars, collect in cmdCharAttributes (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "n")] = { [unowned self] pars, collect in cmdDeviceStatus (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "p")] = { [unowned self] pars, collect in csiPHandler (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "q")] = { [unowned self] pars, collect in cmdSetCursorStyle (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "r")] = { [unowned self] pars, collect in cmdSetScrollRegion (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "s")] = { [unowned self] args, cstring in
-            // "CSI s" is overloaded, can mean save cursor, but also set the margins with DECSLRM
-            if self.marginMode {
-                self.cmdSetMargins (args, cstring)
-            } else {
-                self.cmdSaveCursor (args, cstring)
-            }
-        }
-        parser.csiHandlers [UInt8 (ascii: "t")] = { [unowned self] pars, collect in csit (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "u")] = { [unowned self] pars, collect in cmdRestoreCursor (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "v")] = { [unowned self] pars, collect in csiCopyRectangularArea (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "x")] = { [unowned self] pars, collect in csiX (pars, collect) } /* x DECFRA - could be overloaded */
-        parser.csiHandlers [UInt8 (ascii: "y")] = { [unowned self] pars, collect in cmdDECRQCRA (pars, collect) } /* y - Checksum Region */
-        parser.csiHandlers [UInt8 (ascii: "z")] = { [unowned self] pars, collect in csiZ (pars, collect) } /* DECERA */
-        parser.csiHandlers [UInt8 (ascii: "{")] = { [unowned self] pars, collect in csiOpenBrace (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "}")] = { [unowned self] pars, collect in csiCloseBrace (pars, collect) }
-        parser.csiHandlers [UInt8 (ascii: "~")] = { [unowned self] pars, collect in cmdDeleteColumns (pars, collect) }
 
-        parser.executeHandlers [7]  = { [unowned self] in self.tdel?.bell (source: self) }
-        parser.executeHandlers [10] = { [unowned self] in cmdLineFeed () }
-        parser.executeHandlers [11] = { [unowned self] in cmdLineFeedBasic () }  // VT Vertical Tab - ignores auto-new-line behavior in ConvertEOL
-        parser.executeHandlers [12] = { [unowned self] in cmdLineFeedBasic () }
-        parser.executeHandlers [13] = { [unowned self] in cmdCarriageReturn () }
-        parser.executeHandlers [8]  = { [unowned self] in cmdBackspace () }
-        parser.executeHandlers [9]  = { [unowned self] in cmdTab () }
-        parser.executeHandlers [14] = { [unowned self] in cmdShiftOut () }
-        parser.executeHandlers [15] = { [unowned self] in cmdShiftIn () }
-        
-        parser.executeHandlers [0x84] = { [unowned self] in cmdIndex () }
-        parser.executeHandlers [0x85] = { [unowned self] in cmdNextLine () }
-        parser.executeHandlers [0x88] = {  [unowned self] in cmdTabSet () }
-
-        //
-        // OSC handler - ESC ]
-        //
-        //   0 - icon name + title
-        parser.oscHandlers [0] = { [unowned self] data in self.setTitle(text: String (bytes: data, encoding: .utf8) ?? "")}
-        //   1 - icon name
-        parser.oscHandlers [1] = { [unowned self] data in self.setIconTitle(text: String (bytes: data, encoding: .utf8) ?? "") }
-        //   2 - title
-        parser.oscHandlers [2] = { [unowned self] data in self.setTitle(text: String (bytes: data, encoding: .utf8) ?? "")}
-        //   3 - set property X in the form "prop=value"
-        //   4 - Change Color Number()
-        parser.oscHandlers [4] = { [unowned self] data in oscChangeOrQueryColorIndex (data) }
-        
-        //   5 - Change Special Color Number
-        //   6 - Enable/disable Special Color Number c
-
-        //   6 - current document:
-        parser.oscHandlers [6] = { [unowned self] data in oscSetCurrentDocument (data) }
-
-        //   7 - current directory? (not in xterm spec, see https://gitlab.com/gnachman/iterm2/issues/3939)
-        parser.oscHandlers [7] = { [unowned self] data in oscSetCurrentDirectory (data) }
-        
-        parser.oscHandlers [8] = { [unowned self] data in oscHyperlink (data) }
-        //  10 - Change VT100 text foreground color to Pt.
-        parser.oscHandlers [10] = { [unowned self] data in oscSetColors (data, startAt: 0) }
-        //  11 - Change VT100 text background color to Pt.
-        parser.oscHandlers [11] = { [unowned self] data in oscSetColors (data, startAt: 1) }
-        //  12 - Change text cursor color to Pt.
-        parser.oscHandlers [12] = { [unowned self] data in oscSetColors (data, startAt: 2) }
-        
-        //  13 - Change mouse foreground color to Pt.
-        //  14 - Change mouse background color to Pt.
-        //  15 - Change Tektronix foreground color to Pt.
-        //  16 - Change Tektronix background color to Pt.
-        //  17 - Change highlight background color to Pt.
-        //  18 - Change Tektronix cursor color to Pt.
-        //  19 - Change highlight foreground color to Pt.
-        //  46 - Change Log File to Pt.
-        //  50 - Set Font to Pt.
-        //  51 - reserved for Emacs shell.
-        //  52 - Clipboard operations
-        parser.oscHandlers [52] = { [unowned self] data in oscClipboard (data) }
-        // 104 ; c - Reset Color Number c.
-        parser.oscHandlers [104] = { [unowned self] data in oscResetColor (data) }
-        
-        // 105 ; c - Reset Special Color Number c.
-        // 106 ; c; f - Enable/disable Special Color Number c.
-        // 110 - Reset VT100 text foreground color.
-        // 111 - Reset VT100 text background color.
-        parser.oscHandlers[112] = { [unowned self] data in tdel?.setCursorColor(source: self, color: nil)}
-        // 113 - Reset mouse foreground color.
-        // 114 - Reset mouse background color.
-        // 115 - Reset Tektronix foreground color.
-        // 116 - Reset Tektronix background color.
-        parser.oscHandlers [777] = { [unowned self] data in oscNotification (data) }
-        parser.oscHandlers [1337] = { [unowned self] data in osciTerm2 (data) }
-
-        // OSC 133 - FinalTerm/Semantic Prompt sequences for command tracking
-        parser.oscHandlers [133] = { [unowned self] data in oscFinalTerm (data) }
-
-        //
-        // ESC handlers
-        //
-        parser.setEscHandler("6",   { [unowned self] collect, flag in self.columnIndex (back: true) })
-        parser.setEscHandler ("7",  { [unowned self] collect, flag in self.cmdSaveCursor ([], []) })
-        parser.setEscHandler ("8",  { [unowned self] collect, flag in self.cmdRestoreCursor ([], []) })
-        parser.setEscHandler ("9",  { [unowned self] collect, flag in self.columnIndex(back: false) })
-        parser.setEscHandler ("D",  { [unowned self] collect, flag in self.cmdIndex() })
-        parser.setEscHandler ("E",  { [unowned self] collect, flag in self.cmdNextLine () })
-        parser.setEscHandler ("H",  { [unowned self] collect, flag in self.cmdTabSet ()})
-        parser.setEscHandler ("M",  { [unowned self] collect, flag in self.reverseIndex() })
-        parser.setEscHandler ("=",  { [unowned self] collect, flag in self.cmdKeypadApplicationMode ()})
-        parser.setEscHandler (">",  { [unowned self] collect, flag in self.cmdKeypadNumericMode ()})
-        parser.setEscHandler ("c",  { [unowned self] collect, flag in self.cmdReset () })
-        parser.setEscHandler ("n",  { [unowned self] collect, flag in self.setgLevel (2) })
-        parser.setEscHandler ("o",  { [unowned self] collect, flag in self.setgLevel (3) })
-        parser.setEscHandler ("|",  { [unowned self] collect, flag in self.setgLevel (3) })
-        parser.setEscHandler ("}",  { [unowned self] collect, flag in self.setgLevel (2) })
-        parser.setEscHandler ("~",  { [unowned self] collect, flag in self.setgLevel (1) })
-        parser.setEscHandler ("%@", { [unowned self] collect, flag in self.cmdSelectDefaultCharset () })
-        parser.setEscHandler ("%G", { [unowned self] collect, flag in self.cmdSelectDefaultCharset () })
-        parser.setEscHandler ("#3", { [unowned self] collect, flag in self.cmdSetDoubleHeightTop() })
-        parser.setEscHandler ("#4", { [unowned self] collect, flag in self.cmdSetDoubleHeightBottom() })
-        parser.setEscHandler ("#5", { [unowned self] collect, flag in self.cmdSingleWidthSingleHeight() })
-        parser.setEscHandler ("#6", { [unowned self] collect, flag in self.cmdDoubleWidthSingleHeight () })
-        parser.setEscHandler ("#8", { [unowned self] collect, flag in self.cmdScreenAlignmentPattern () })
-        parser.setEscHandler (" G") { [unowned self] collect, flag in self.cmdSet8BitControls () }
-        parser.setEscHandler (" F") { [unowned self] collect, flag in self.cmdSet7BitControls () }
-        
-        for bflag in CharSets.all.keys {
-            let flag = String (UnicodeScalar (bflag))
-            
-            parser.setEscHandler ("(" + flag, { [unowned self] code, f in self.selectCharset ([UInt8 (ascii: "(")] + [f]) })
-            parser.setEscHandler (")" + flag, { [unowned self] code, f in self.selectCharset ([UInt8 (ascii: ")")] + [f]) })
-            parser.setEscHandler ("*" + flag, { [unowned self] code, f in self.selectCharset ([UInt8 (ascii: "*")] + [f]) })
-            parser.setEscHandler ("+" + flag, { [unowned self] code, f in self.selectCharset ([UInt8 (ascii: "+")] + [f]) })
-            parser.setEscHandler ("-" + flag, { [unowned self] code, f in self.selectCharset ([UInt8 (ascii: "-")] + [f]) })
-            parser.setEscHandler ("." + flag, { [unowned self] code, f in self.selectCharset ([UInt8 (ascii: ".")] + [f]) })
-            parser.setEscHandler ("/" + flag, { [unowned self] code, f in self.selectCharset ([UInt8 (ascii: "/")] + [f]) })
-        }
-
-        // Error handler
         parser.errorHandler = { [unowned self] state in
-            if !self.silentLog {
-                SwiftTermDiagnostics.emit(.warning, .parserStateError)
-            }
+            self.log ("SwiftTerm: Parsing error, state: \(state)")
             return state
         }
-
-        // DCS Handler
-        parser.setDcsHandler ("$q", DECRQSS (terminal: self))
-        parser.setDcsHandler ("q", SixelDcsHandler (terminal: self))
-//        parser.dscHandlerFallback = { [weak self] code, parameters in }
     }
     
     /// This allows users of the terminal to register a handler for an OSC code.
@@ -1212,13 +1310,54 @@ open class Terminal {
     
     // TODO: was this unused
     var lastBufferCol: Int = 0
+
+    /// Finds the glyph that owns the terminal cell immediately before the cursor.
+    /// A wide glyph has one or more width-zero trailing cells, so walk back to
+    /// its leading cell before attempting to extend its grapheme cluster.
+    private func combiningTarget(in buffer: Buffer) -> (y: Int, x: Int)?
+    {
+        let y = buffer.y + buffer.yBase
+        var x = buffer.x - 1
+        guard x >= 0 else { return nil }
+
+        let line = buffer.lines[y]
+        while x > 0 && line[x].width == 0 {
+            x -= 1
+        }
+
+        let cell = line[x]
+        guard cell.width > 0 && cell.code != 0 else { return nil }
+        return (y, x)
+    }
     
     func handlePrint (_ data: ArraySlice<UInt8>)
     {
         let buffer = self.buffer
+
+        // Fast path: all-ASCII, no charset remapping, no pending partial UTF-8
+        if charset == nil && readingBuffer.putbackBuffer.isEmpty {
+            var allAscii = true
+            for byte in data {
+                if byte >= 0x80 { allAscii = false; break }
+            }
+            if allAscii {
+                updateRange(borrowing: buffer, buffer.y)
+                let consumed = buffer.insertAsciiRun(
+                    data,
+                    attribute: curAttr,
+                    resolvePayload: { self.resolveActiveHyperlink() }
+                )
+                if consumed == data.count {
+                    updateRange(borrowing: buffer, buffer.y)
+                    return
+                }
+                // Partial consume (insertMode active) — fall through to per-char path
+            }
+        }
+
         readingBuffer.prepare(data)
 
-        updateRange (buffer.y)
+        updateRange(borrowing: buffer, buffer.y)
         while readingBuffer.hasNext() {
             var ch: Character = " "
             var chWidth: Int = 0
@@ -1242,39 +1381,63 @@ open class Terminal {
                         
                         // Every single mapping in the charset only takes one slot
                         chWidth = 1
-                        let charData = CharData (attribute: curAttr, char: ch, size: Int8 (chWidth))
-                        buffer.insertCharacter(charData)
+                        let charData = makeCharData (attribute: curAttr, char: ch, size: Int8 (chWidth))
+                        insertCharacter(charData)
                         continue
                     }
                 }
                 
                 let rune = UnicodeScalar (code)
                 chWidth = UnicodeUtil.columnWidth(rune: rune)
-                let charData = CharData (attribute: curAttr, scalar: rune, size: Int8 (chWidth))
-                buffer.insertCharacter(charData)
+                if chWidth > 0 {
+                    let charData = makeCharData (attribute: curAttr, scalar: rune, size: Int8 (chWidth))
+                    insertCharacter(charData)
+                }
                 continue
             } else if readingBuffer.bytesLeft() >= (n-1) {
-                var x : [UInt8] = [code]
+                // Decode the sequence in place; a temporary [UInt8] fed to
+                // UTF8.decode costs a heap allocation per character. On
+                // malformed input all n expected bytes stay consumed, even
+                // when the offending byte could start a new sequence — the
+                // same policy as the UTF8.decode call this replaces.
+                var value = UInt32(code) & (0x7F >> UInt32(n))
+                var wellFormed = true
                 for _ in 1..<n {
-                    x.append (readingBuffer.getNext())
+                    let byte = readingBuffer.getNext()
+                    if byte & 0xC0 != 0x80 {
+                        wellFormed = false
+                    }
+                    value = (value << 6) | (UInt32(byte) & 0x3F)
                 }
-                x.append(0)
-                x.withUnsafeBytes { ptr in
-                    let unsafeBound = ptr.bindMemory(to: UInt8.self)
-                    let unsafePointer = unsafeBound.baseAddress!
-                    
-                    let s = String (cString: unsafePointer)
-                    ch = s.first ?? Character (" ")
+                // Unicode.Scalar.init rejects surrogates and values above
+                // 0x10FFFF; the minimum rejects overlong encodings.
+                let minimum: UInt32 = n == 2 ? 0x80 : (n == 3 ? 0x800 : 0x10000)
+                if wellFormed, value >= minimum, let scalar = Unicode.Scalar(value) {
+                    ch = Character(scalar)
+                } else {
+                    // Invalid UTF-8 sequence, fall back to interpreting the first byte
+                    let rune = UnicodeScalar(code)
+                    chWidth = UnicodeUtil.columnWidth(rune: rune)
+                    if chWidth > 0 {
+                        let charData = makeCharData (attribute: curAttr, scalar: rune, size: Int8 (chWidth))
+                        insertCharacter(charData)
+                    }
+                    continue
+                }
 
-                    // Now the challenge is that we have a character, not a rune, and we want to compute
-                    // the width of it.
-                    if ch.unicodeScalars.count == 1 {
-                        chWidth = UnicodeUtil.columnWidth(rune: ch.unicodeScalars.first!)
-                    } else {
-                        chWidth = 0
-                        for scalar in ch.unicodeScalars {
-                            chWidth = max (chWidth, UnicodeUtil.columnWidth(rune: scalar))
+                // Now the challenge is that we have a character, not a rune, and we want to compute
+                // the width of it.
+                if ch.unicodeScalars.count == 1 {
+                    chWidth = UnicodeUtil.columnWidth(rune: ch.unicodeScalars.first!)
+                } else {
+                    chWidth = 0
+                    for scalar in ch.unicodeScalars {
+                        let width = UnicodeUtil.columnWidth(rune: scalar)
+                        if width < 0 {
+                            chWidth = -1
+                            break
                         }
+                        chWidth = max (chWidth, width)
                     }
                 }
             } else {
@@ -1282,65 +1445,216 @@ open class Terminal {
                 return
             }
 
+            if chWidth < 0 {
+                continue
+            }
+
+            // When regionalIndicatorWidth is .narrow, override individual RI width to 1.
+            // The combining logic below will widen the pair to 2 when they form a flag.
+            let narrowRI = options.regionalIndicatorWidth == .narrow
+            if narrowRI, chWidth == 2,
+               let firstScalarForRI = ch.unicodeScalars.first,
+               UnicodeUtil.isRegionalIndicator(firstScalarForRI) {
+                chWidth = 1
+            }
+
             if let firstScalar = ch.unicodeScalars.first {
-                // Variation selectors are zero-width modifiers of the character before them
-                // (VS16 selects emoji presentation), but their combining class is 0, so the
-                // combining branch alone never catches them. Falling through would spend a
-                // whole phantom cell on an invisible character and advance the cursor past
-                // where the application believes it is — its next absolute cursor position
-                // then lands one column short, on top of the glyph it just echoed.
-                let isVariationSelector = (0xFE00...0xFE0F).contains (firstScalar.value)
+                let target = combiningTarget(in: buffer)
 
-                // If this is a Unicode combining character
-                if firstScalar.properties.canonicalCombiningClass != .notReordered || isVariationSelector {
-                    // Determine if the last time we poked at a character is still valid
-                    let last = buffer.lastBufferStorage
-                    if last.cols == cols && last.rows == rows {
-                        // Fetch the old character, and attempt to combine it:
-                        let existingLine = buffer.lines [last.y]
-                        let lastx = last.x >= cols ? cols-1 : last.x
-                        var cd = existingLine [lastx]
+                // Check if we should try to combine this character with the previous one.
+                // This applies to:
+                // 1. Unicode combining characters (diacritics, etc.)
+                // 2. Emoji skin tone modifiers (e.g., 🖐 + 🏾 = 🖐🏾)
+                // 3. Zero Width Joiner (ZWJ) for emoji sequences (e.g., 👩 + ZWJ + 👩 + ZWJ + 👦 = 👩‍👩‍👦)
+                // 4. Variation selectors (e.g., U+FE0F for emoji presentation of ❤️)
+                // 5. Any character following a ZWJ (to complete the sequence)
+                // Range tests run first: the stdlib property getters cost a
+                // trie lookup each. Scalars below U+0300 never have a nonzero
+                // combining class, so the one remaining getter is skipped for
+                // ASCII and Latin-1.
+                let firstScalarValue = firstScalar.value
+                var shouldTryCombine = chWidth == 0 ||
+                                       firstScalarValue == 0x200D ||  // ZWJ
+                                       UnicodeUtil.isVariationSelector(firstScalarValue) ||
+                                       UnicodeUtil.isEmojiModifier(firstScalarValue) ||
+                                       (firstScalarValue >= 0x0300 &&
+                                        firstScalar.properties.canonicalCombiningClass != .notReordered)
 
-                        // Attemp the combination
-                        let newStr = String ([cd.getCharacter (), ch])
-
-                        // If the resulting string is 1 grapheme cluster, then it combined properly
-                        if newStr.count == 1 {
-                            if let newCh = newStr.first {
-                                cd.setValue(char: newCh, size: Int32 (cd.width))
-                                existingLine [lastx] = cd
-                                updateRange (last.y)
-                                continue
-                            }
-                        }
+                // Also check if the previous character ends with ZWJ - if so, we should combine
+                if !shouldTryCombine, let target {
+                    let existingLine = buffer.lines[target.y]
+                    let lastCode = existingLine[target.x].code
+                    let lastEndsInZWJ: Bool
+                    let lastSingleScalar: Unicode.Scalar?
+                    if lastCode >= 0, lastCode <= Int32(CharData.maxRune) {
+                        // The code is the cell's single scalar; test it
+                        // without materializing a Character.
+                        lastSingleScalar = Unicode.Scalar(UInt32(lastCode))
+                        lastEndsInZWJ = lastCode == 0x200D
+                    } else {
+                        let scalars = getCharacter (for: existingLine[target.x]).unicodeScalars
+                        lastSingleScalar = scalars.count == 1 ? scalars.first : nil
+                        lastEndsInZWJ = scalars.last?.value == 0x200D
                     }
-                    // A variation selector that could not combine is dropped rather than
-                    // given a cell of its own.
-                    if isVariationSelector {
-                        continue
+                    if lastEndsInZWJ {
+                        shouldTryCombine = true
+                    }
+                    // Regional indicator combining: pair two RIs into a flag emoji.
+                    else if UnicodeUtil.isRegionalIndicator(firstScalar),
+                            let lastScalar = lastSingleScalar,
+                            UnicodeUtil.isRegionalIndicator(lastScalar) {
+                        shouldTryCombine = true
                     }
                 }
+
+                if shouldTryCombine, let target {
+                    // Fetch the glyph before the cursor, and attempt to combine it.
+                    let existingLine = buffer.lines[target.y]
+                    let lastx = target.x
+                    var cd = existingLine [lastx]
+
+                    // Attempt the combination
+                    let newStr = String ([getCharacter (for: cd), ch])
+
+                    // If the resulting string is 1 grapheme cluster, then it combined properly
+                    if newStr.count == 1 {
+                        if let newCh = newStr.first {
+                            let oldSize = cd.width
+                            let isVs16 = firstScalar.value == 0xFE0F
+                            let isVs15 = firstScalar.value == 0xFE0E
+                            let needsEmojiVariationCheck = isVs16 || isVs15
+                            if needsEmojiVariationCheck {
+                                let baseScalar = getCharacter(for: cd).unicodeScalars.last
+                                if baseScalar == nil || !UnicodeUtil.isEmojiVs16Base(rune: baseScalar!) {
+                                    continue
+                                }
+                            }
+                            if isVs16 {
+                                if oldSize != 2 && lastx + 1 < cols {
+                                    updateCharData(&cd, char: newCh, size: 2)
+                                    let nextX = lastx + 1
+                                    var empty = makeCharData (attribute: cd.attribute, code: 0, size: 0)
+                                    empty.setSemanticContent(cd.semanticContent)
+                                    empty.setPayload(atom: cd.payload)
+                                    existingLine [nextX] = empty
+                                    buffer.x += 1
+                                } else {
+                                    updateCharData(&cd, char: newCh, size: Int32(oldSize))
+                                }
+                            } else if isVs15 {
+                                updateCharData(&cd, char: newCh, size: 1)
+                                if oldSize == 2 && buffer.x > 0 {
+                                    buffer.x -= 1
+                                }
+                            } else if narrowRI && UnicodeUtil.isRegionalIndicator(firstScalar) && oldSize == 1 && lastx + 1 < cols {
+                                // In narrow mode, two width-1 RIs combine into a width-2 flag.
+                                updateCharData(&cd, char: newCh, size: 2)
+                                var empty = makeCharData(attribute: cd.attribute, code: 0, size: 0)
+                                empty.setSemanticContent(cd.semanticContent)
+                                empty.setPayload(atom: cd.payload)
+                                existingLine [lastx + 1] = empty
+                                buffer.x += 1
+                            } else {
+                                updateCharData(&cd, char: newCh, size: Int32 (cd.width))
+                                if cd.width != oldSize {
+                                    buffer.x += 1
+                                }
+                            }
+                            existingLine [lastx] = cd
+                            updateRange(borrowing: buffer, target.y)
+                            continue
+                        }
+                    }
+                }
+            }
+            if chWidth == 0 {
+                continue
             }
             // The accessibility stack might not need this
             //let screenReaderMode = options.screenReaderMode
             //if screenReaderMode {
             //    emitChar (ch)
             //}
-            if ch != "\u{200d}" {
-                let charData = CharData (attribute: curAttr, char: ch, size: Int8 (chWidth))
-                buffer.insertCharacter(charData)
-            }
+            let charData = makeCharData (attribute: curAttr, char: ch, size: Int8 (chWidth))
+            insertCharacter(charData)
         }
-        updateRange (buffer.y)
+        updateRange(borrowing: buffer, buffer.y)
         readingBuffer.done ()
+    }
+
+    private func code (for char: Character) -> Int32
+    {
+        // A single BMP scalar is its own code. Checked directly because
+        // Character.asciiValue compares against the "\r\n" grapheme with a
+        // string comparison on every call.
+        let scalars = char.unicodeScalars
+        let first = scalars[scalars.startIndex].value
+        if scalars.index(after: scalars.startIndex) == scalars.endIndex {
+            if first <= 0xFFFF {
+                return Int32(first)
+            }
+        } else if first == 0x0D, char == "\r\n" {
+            // Character.asciiValue maps the CR-LF grapheme to LF.
+            return 10
+        }
+        if let existingIdx = charToIndexMap [char] {
+            return existingIdx
+        }
+        let newIndex = lastCharIndex
+        charToIndexMap [char] = newIndex
+        indexToCharMap [newIndex] = char
+        lastCharIndex = lastCharIndex + 1
+        return newIndex
+    }
+
+    private func character (for code: Int32) -> Character
+    {
+        if code > Int32(CharData.maxRune) {
+            return indexToCharMap [code] ?? " "
+        }
+        if let c = Unicode.Scalar (UInt32 (code)) {
+            return Character (c)
+        }
+        return " "
+    }
+
+    public func getCharacter (for charData: CharData) -> Character
+    {
+        return character (for: charData.code)
+    }
+
+    public func makeCharData (attribute: Attribute, code: Int32, size: Int8 = 1) -> CharData
+    {
+        return CharData (attribute: attribute, code: code, size: size)
+    }
+
+    public func makeCharData (attribute: Attribute, char: Character, size: Int8 = 1) -> CharData
+    {
+        return makeCharData (attribute: attribute, code: code (for: char), size: size)
+    }
+
+    public func makeCharData (attribute: Attribute, scalar: UnicodeScalar, size: Int8 = 1) -> CharData
+    {
+        return makeCharData (attribute: attribute, code: Int32 (scalar.value), size: size)
+    }
+
+    public func updateCharData (_ charData: inout CharData, char: Character, size: Int32)
+    {
+        charData.setValue (code: code (for: char), size: size)
+    }
+
+    public func updateCharData (_ charData: inout CharData, code: Int32, size: Int32)
+    {
+        charData.setValue (code: code, size: size)
     }
     
     // Inserts the specified character with the computed width into the next cell, following
     // the rules for wrapping around, scrolling and overflow expected in the terminal.
     func insertCharacter (_ charData: CharData) {
-        // TODO, make this a direct call. no need to pproxy here
         buffer.insertCharacter(
-            charData)
+            charData,
+            resolvePayload: { self.resolveActiveHyperlink() }
+        )
     }
     
 //    func insertCharacter2(_ charData: CharData) {
@@ -1396,7 +1710,6 @@ open class Terminal {
 //        }
 //
 //        // write current char to buffer and advance cursor
-//        //TODO: lastBufferStorage = (buffer, buffer.y + buffer.yBase, buffer.x, cols, rows)
 //        if buffer.x >= cols {
 //            buffer.x = cols-1
 //        }
@@ -1425,22 +1738,30 @@ open class Terminal {
     {
         let buffer = self.buffer
         let by = buffer.y
+        var movedToNextLine = false
         
-        let canScroll = buffer.x >= buffer.marginLeft && buffer.x <= buffer.marginRight
-        
+        let canScroll = !marginMode || (buffer.x >= buffer.marginLeft && buffer.x <= buffer.marginRight)
         if by == buffer.scrollBottom {
             if canScroll {
                 scroll(isWrapped: false)
+                movedToNextLine = true
             }
         } else if by == rows - 1 {
         } else {
-                buffer.y = by + 1
+            buffer.y = by + 1
+            movedToNextLine = true
+            let line = buffer.lines[buffer.yBase + buffer.y]
+            if !line.isWrapped {
+                line.bidiState = currentBidiState
+            }
         }
         
         // If the end of the line is hit, prevent this action from wrapping around to the next line.
         if buffer.x >= cols {
             buffer.x -= 1
         }
+
+        finishSemanticLineAdvance(movedToNextLine: movedToNextLine)
         
         // This event is emitted whenever the terminal outputs a LF or NL.
         emitLineFeed()
@@ -1448,7 +1769,49 @@ open class Terminal {
             buffer.x = usingMargins() ? buffer.marginLeft : 0
         }
     }
-    
+
+    /// The only writer of the continuation epoch (R1). It runs after
+    /// `scroll()` has resolved which line object the cursor landed on, so the
+    /// push, splice, and recycle scroll branches cannot disagree; the epoch
+    /// then travels with the line object.
+    ///
+    /// Stamping is gated on the interaction state (A.2): it stamps the active
+    /// group's ID only while a prompt or its input is being written, never
+    /// after submission. The user's submission (R4) normally precedes the
+    /// pty's echoed CRLF, so echoed-Enter and pre-`C` output rows (PS0, DEBUG
+    /// traps) land in the `.submitted` state and are never stamped.
+    private func finishSemanticLineAdvance(movedToNextLine: Bool) {
+        guard movedToNextLine else { return }
+        let row = buffer.yBase + buffer.y
+        guard row >= 0, row < buffer.lines.count else { return }
+        // E.4 / R1: stamp only, never write nil. An LF while submitted must not
+        // clear a dead group's epoch (that is a destruction path outside R1's
+        // list), so a non-stamping advance leaves the row untouched.
+        switch buffer.semanticInput {
+        case .prompt, .armed: break
+        case .idle, .submitted: return
+        }
+        let line = buffer.lines[row]
+        let active = buffer.activeSemanticGroupID
+        if let existing = line.semanticHardContinuationGroup, existing != active {
+            // Absorbing a row that a now-dead group stamped: drop its stale
+            // prompt/input cell tags so leftover cells cannot inflate the
+            // active group's offset walk.
+            buffer.clearStaleSemanticCells(on: line)
+        }
+        line.semanticHardContinuationGroup = active
+    }
+
+    /// A narrow backstop: `C`/`D` clears the epoch from the row the cursor
+    /// occupies when input ends, for the rare case where the pty's echoed
+    /// CRLF preceded the user's submission and the landing row was stamped.
+    /// With A.2's armed-gated stamping this is usually a no-op.
+    private func clearEchoedEnterContinuationBeforeOutput() {
+        let row = buffer.yBase + buffer.y
+        guard row >= 0, row < buffer.lines.count else { return }
+        buffer.lines[row].semanticHardContinuationGroup = nil
+    }
+
     //
     // Backspace handler (Control-h)
     //
@@ -1532,7 +1895,691 @@ open class Terminal {
     }
     
     // Operating System Commands (OSC)
-    
+
+    // MARK: - OSC 133 semantic prompts
+    //
+    // Store only what the shell said, derive everything else: the buffer
+    // stores shell-authored marks and one hard-continuation bit per line;
+    // row classification, click eligibility, and logical offsets are all
+    // computed on demand from that stored state.
+
+    /// Returns the OSC 133 semantic role for a cell addressed relative to the
+    /// start of the active buffer (including scrollback).
+    public func semanticContent(at position: Position) -> SemanticContent? {
+        guard position.col >= 0, position.col < cols,
+              position.row >= 0, position.row < buffer.lines.count else {
+            return nil
+        }
+        return buffer.lines[position.row][position.col].semanticContent
+    }
+
+    /// Returns the shell-authored OSC 133 marks stored on a buffer row.
+    public func semanticPromptMarks(at row: Int) -> [SemanticPromptAnchor] {
+        buffer.semanticPromptMarks(at: row)
+    }
+
+    /// The current buffer-absolute row of a line captured earlier, or nil if
+    /// scrollback trimming or recycling has since destroyed it. A deferred
+    /// pointer click captures the clicked line's identity **and its
+    /// `recycleGeneration`**, and re-resolves here at fire time: identity
+    /// alone is insufficient because `CircularList.recycle` keeps the trimmed
+    /// object in the array as the new bottom row, so a generation mismatch
+    /// means the object was reused for different content and the click is
+    /// dropped.
+    public func semanticRow(forLineIdentity line: BufferLine,
+                            recycleGeneration: UInt64) -> Int? {
+        guard line.recycleGeneration == recycleGeneration else { return nil }
+        return buffer.absoluteRow(of: line)
+    }
+
+    /// The `BufferLine` at a buffer-absolute row, for a view to capture a
+    /// click target's identity before deferring.
+    public func bufferLine(atRow row: Int) -> BufferLine? {
+        guard row >= 0, row < buffer.lines.count else { return nil }
+        return buffer.lines[row]
+    }
+
+    /// Returns the derived classification of a buffer row: `initial` for a
+    /// row carrying a group-opening mark, `continuation` for a row reachable
+    /// from one through soft wraps or hard continuations, nil otherwise.
+    /// Hosts use this for gutter marks and prompt navigation.
+    public func semanticRowKind(at row: Int) -> SemanticPromptKind? {
+        buffer.semanticRowKind(at: row)
+    }
+
+    /// The primary marker for the active OSC 133 prompt group.
+    public var activeSemanticPromptOrigin: Position? {
+        buffer.activeSemanticPromptOrigin
+    }
+
+    /// Sends user input through the terminal so semantic interaction state and
+    /// transport cannot diverge. Hosts should use this path for keyboard,
+    /// paste, and programmatic input.
+    public func sendUserInput(_ data: ArraySlice<UInt8>) {
+        registerUserInput(data)
+        tdel?.send(source: self, data: data)
+    }
+
+    /// Updates semantic interaction state for input delivered by a view.
+    ///
+    /// Thread contract: this mutates the incremental scanner state and the
+    /// buffer's interaction state, so it must run on the terminal's processing
+    /// thread — the same thread that calls `feed`. GUI views send on that
+    /// thread; `HeadlessTerminal.send` marshals onto its effective queue
+    /// (`dispatchQueue ?? .main`) so this still runs, serialized with `feed`,
+    /// for hosts that forward pointer clicks (do not delete that hop as dead
+    /// code — it is the submission heuristic that keeps clicks from injecting
+    /// into a running program).
+    func registerUserInput(_ data: ArraySlice<UInt8>) {
+        // A wrong suspension costs one dead click; a wrong arm injects bytes
+        // into a child process. Heuristics only ever move toward `submitted`,
+        // never toward `armed`; the next OSC 133 `B` re-arms.
+        if scanUserInputForSubmission(data), buffer.semanticInput == .armed {
+            buffer.semanticInput = .submitted
+        }
+    }
+
+    // An incremental, byte-at-a-time scanner for submission heuristics. It
+    // holds no cross-call buffer: a bracketed paste, or any escape sequence,
+    // may split across `sendUserInput` calls and the state simply carries
+    // over. A malformed CSI whose "terminator" is the ESC of the next
+    // sequence never swallows that ESC — an ESC seen mid-CSI abandons the
+    // truncated one and starts a fresh escape.
+    private enum SemanticScanState {
+        case ground
+        case escape   // saw ESC
+        case csi      // saw ESC [
+        case ss3      // saw ESC O (SS3; keypad keys under DECKPAM)
+    }
+    private var semanticScanState: SemanticScanState = .ground
+    private var semanticScanInPaste = false
+    // Parameter/intermediate bytes of the CSI in progress, bounded so a
+    // pathological run cannot grow it without limit.
+    private var semanticScanParams: [UInt8] = []
+
+    private func resetUserInputScanner() {
+        semanticScanState = .ground
+        semanticScanInPaste = false
+        semanticScanParams.removeAll(keepingCapacity: true)
+    }
+
+    private func scanUserInputForSubmission(_ data: ArraySlice<UInt8>) -> Bool {
+        var submission = false
+        for byte in data {
+            // A newline is never a valid byte inside an escape/CSI/SS3
+            // sequence, so it aborts any in-progress one and, outside a
+            // bracketed paste, is a submission. Handling it uniformly here is
+            // what makes `ESC` then `Enter` (vi-mode) register instead of
+            // being swallowed by a mid-sequence state reset.
+            if byte == 0x0d || byte == 0x0a {
+                if !semanticScanInPaste { submission = true }
+                semanticScanState = .ground
+                continue
+            }
+            switch semanticScanState {
+            case .ground:
+                if byte == 0x1b {
+                    semanticScanState = .escape
+                }
+            case .escape:
+                if byte == 0x5b {           // '['
+                    semanticScanState = .csi
+                    semanticScanParams.removeAll(keepingCapacity: true)
+                } else if byte == 0x4f {    // 'O'
+                    semanticScanState = .ss3
+                } else if byte == 0x1b {
+                    semanticScanState = .escape
+                } else {
+                    semanticScanState = .ground
+                }
+            case .csi:
+                if (0x20...0x3f).contains(byte) {   // parameter and intermediate bytes
+                    if semanticScanParams.count < 32 {
+                        semanticScanParams.append(byte)
+                    }
+                    continue
+                }
+                if (0x40...0x7e).contains(byte) {   // final byte
+                    if interpretSemanticCSI(final: byte) {
+                        submission = true
+                    }
+                    semanticScanState = .ground
+                } else if byte == 0x1b {
+                    // Not a terminator: a new escape sequence begins here.
+                    semanticScanState = .escape
+                } else {
+                    semanticScanState = .ground
+                }
+            case .ss3:
+                // ESC O M is the keypad Enter under DECKPAM, which carries no
+                // raw CR byte. Treat it as a submission (the safe side).
+                if byte == 0x4d {   // 'M'
+                    submission = true
+                }
+                semanticScanState = .ground
+            }
+        }
+        return submission
+    }
+
+    /// Interprets a completed CSI while scanning outgoing input. Returns true
+    /// when the sequence is a submission (the kitty Enter key report).
+    private func interpretSemanticCSI(final: UInt8) -> Bool {
+        let parameters = String(decoding: semanticScanParams, as: UTF8.self)
+        switch final {
+        case 0x7e: // '~' — bracketed paste markers
+            if parameters == "200" {
+                semanticScanInPaste = true
+            } else if parameters == "201" {
+                semanticScanInPaste = false
+            }
+            return false
+        case 0x75: // 'u' — kitty keyboard protocol key report
+            let fields = parameters.split(separator: ";", omittingEmptySubsequences: false)
+            let keyCode = fields.first?.split(separator: ":", omittingEmptySubsequences: false).first
+            guard keyCode == "13" else { return false }
+            let modifierParts = fields.count > 1
+                ? fields[1].split(separator: ":", omittingEmptySubsequences: false)
+                : []
+            let isRelease = modifierParts.count > 1 && modifierParts[1] == "3"
+            return !isRelease
+        default:
+            return false
+        }
+    }
+
+    /// R4: an alternate-screen switch, in either direction, ends the input
+    /// region on both buffers and stops `.input` tagging on both.
+    private func semanticNoteAlternateScreenSwitch() {
+        for screenBuffer in [normalBuffer, altBuffer] {
+            screenBuffer.semanticInput = .submitted
+            // F.2b: reset both `.input` and `.prompt`, so a prompt hook that
+            // launches a full-screen tool between `A` and `B` does not leave the
+            // tool's output tagged as prompt.
+            switch screenBuffer.semanticContent {
+            case .input, .prompt:
+                screenBuffer.semanticContent = .output
+            case .none, .output:
+                break
+            }
+        }
+    }
+
+    /// RIS / DECSTR return both buffers to `idle` and drop the semantic
+    /// prompt state; DECSTR additionally clears the marks on the screen rows
+    /// (a full reset is one of the three mark-destruction causes).
+    private func resetSemanticPromptState(clearingScreenMarks: Bool) {
+        for screenBuffer in [normalBuffer, altBuffer] {
+            screenBuffer.semanticInput = .idle
+            screenBuffer.semanticContent = .none
+            screenBuffer.semanticClickMode = .none
+            screenBuffer.semanticUsesSpecialCursorKeys = false
+            screenBuffer.clearSemanticPromptGroup()
+            if clearingScreenMarks {
+                let top = screenBuffer.yBase
+                let bottom = min(screenBuffer.yBase + rows, screenBuffer.lines.count)
+                for row in top..<bottom {
+                    screenBuffer.lines[row].destroySemanticState()
+                }
+            }
+        }
+        resetUserInputScanner()
+    }
+
+    private func semanticPromptModifiersAllow(_ modifiers: SemanticPromptClickModifiers) -> Bool {
+        switch semanticPromptClickBehavior {
+        case .disabled:
+            return false
+        case .enabled:
+            // Any modifier the views use for their own gestures keeps the
+            // click out of the semantic route under the default policy.
+            return modifiers.isEmpty
+        case .requireModifier(let required):
+            return modifiers == required
+        }
+    }
+
+    // MARK: OSC 133 click translation (R5)
+
+    /// The logical geometry of the active prompt group, built once per click:
+    /// the group's rows, and for each row the logical offset at its start,
+    /// its logical (hard) line index, and the offset at that line's start.
+    private struct SemanticGroupGeometry {
+        var rows: [Int] = []
+        var rowStartOffset: [Int] = []
+        var rowLine: [Int] = []
+        var rowLineStartOffset: [Int] = []
+        var totalOffset = 0
+        var hasInput = false
+    }
+
+    /// Walks the active group's rows in order: the origin row, then every
+    /// row reachable through the `isWrapped` chain or hard continuations.
+    /// Soft-wrapped rows join with nothing; each hard boundary counts as one
+    /// newline in the offset sequence (consumed by `cl=m`).
+    private func semanticGroupGeometry() -> SemanticGroupGeometry? {
+        guard let originRow = buffer.semanticPromptStartRow else {
+            return nil
+        }
+        var geometry = SemanticGroupGeometry()
+        var offset = 0
+        var line = 0
+        var lineStart = 0
+        var row = originRow
+        while true {
+            geometry.rows.append(row)
+            geometry.rowStartOffset.append(offset)
+            geometry.rowLine.append(line)
+            geometry.rowLineStartOffset.append(lineStart)
+            offset += semanticInputCellCount(in: row, before: cols)
+            if offset > geometry.rowStartOffset[geometry.rows.count - 1] {
+                geometry.hasInput = true
+            }
+            let next = row + 1
+            guard next < buffer.lines.count else { break }
+            let nextLine = buffer.lines[next]
+            if nextLine.isWrapped {
+                row = next
+            } else if buffer.rowContinuesActiveGroupHard(next) {
+                // Follow a hard link (epoch or PS2/right group-joining mark) of
+                // the active group only, so a dead group's stranded rows never
+                // enter the geometry.
+                offset += 1
+                line += 1
+                lineStart = offset
+                row = next
+            } else {
+                break
+            }
+        }
+        geometry.totalOffset = offset
+        return geometry
+    }
+
+    /// Counts the input cells on a row strictly before `column`. A wide
+    /// glyph counts once at its lead column; zero-width cells count zero.
+    private func semanticInputCellCount(in row: Int, before column: Int) -> Int {
+        let line = buffer.lines[row]
+        let limit = min(column, min(cols, line.count))
+        var count = 0
+        for col in 0..<limit {
+            let cell = line[col]
+            if cell.semanticContent == .input, cell.width != 0 {
+                count += 1
+            }
+        }
+        return count
+    }
+
+    /// The logical offset of a position over the group's offset sequence:
+    /// the number of input cells (and hard-boundary newlines) strictly
+    /// before it. The column is intentionally not clamped to `cols - 1`, so
+    /// a pending wrap (`buffer.x == cols`) contributes the full row.
+    private func semanticOffset(of position: Position, in geometry: SemanticGroupGeometry)
+        -> (offset: Int, line: Int, offsetInLine: Int)? {
+        guard let index = geometry.rows.firstIndex(of: position.row) else {
+            return nil
+        }
+        let offset = geometry.rowStartOffset[index]
+            + semanticInputCellCount(in: position.row, before: position.col)
+        return (offset, geometry.rowLine[index], offset - geometry.rowLineStartOffset[index])
+    }
+
+    /// Normalizes a click on a wide glyph's trailing cell to its lead column.
+    private func normalizeSemanticClickTarget(_ position: Position) -> Position {
+        let line = buffer.lines[position.row]
+        guard position.col < line.count else { return position }
+        var column = position.col
+        while column > 0, line[column].width == 0, line[column].semanticContent == .input {
+            column -= 1
+        }
+        return Position(col: column, row: position.row)
+    }
+
+    private func appendRepeatedSemanticSequence(_ sequence: [UInt8], count: Int,
+                                                to data: inout [UInt8]) {
+        guard count > 0 else { return }
+        data.reserveCapacity(data.count + sequence.count * count)
+        for _ in 0..<count {
+            data.append(contentsOf: sequence)
+        }
+    }
+
+    private func appendSemanticCursorMovement(right: Bool, count: Int, to data: inout [UInt8]) {
+        guard count > 0 else { return }
+        let sequence: [UInt8]
+        if buffer.semanticUsesSpecialCursorKeys {
+            // special_key=1 selects the CSI-u encodings the shell asked for.
+            sequence = right
+                ? [0x1b, 0x5b, 0x31, 0x75]
+                : [0x1b, 0x5b, 0x31, 0x3b, 0x31, 0x75]
+        } else if right {
+            sequence = applicationCursor ? EscapeSequences.moveRightApp : EscapeSequences.moveRightNormal
+        } else {
+            sequence = applicationCursor ? EscapeSequences.moveLeftApp : EscapeSequences.moveLeftNormal
+        }
+        appendRepeatedSemanticSequence(sequence, count: count, to: &data)
+    }
+
+    private func appendSemanticVerticalMovement(down: Bool, count: Int, to data: inout [UInt8]) {
+        guard count > 0 else { return }
+        let sequence: [UInt8]
+        if down {
+            sequence = applicationCursor ? EscapeSequences.moveDownApp : EscapeSequences.moveDownNormal
+        } else {
+            sequence = applicationCursor ? EscapeSequences.moveUpApp : EscapeSequences.moveUpNormal
+        }
+        appendRepeatedSemanticSequence(sequence, count: count, to: &data)
+    }
+
+    /// Every strategy is a pure function of the cursor's and the click's
+    /// logical offsets over the same sequence; they differ only in how the
+    /// delta is emitted.
+    private func semanticCursorMovementData(strategy: SemanticPromptCursorClickMode,
+                                            cursor: Position, click: Position,
+                                            geometry: SemanticGroupGeometry) -> [UInt8]? {
+        guard let cursorInfo = semanticOffset(of: cursor, in: geometry),
+              let clickInfo = semanticOffset(of: click, in: geometry) else {
+            return nil
+        }
+        // `cl=line` rejects a click outside the cursor's logical line (not
+        // its visual row: soft-wrapped rows are the same line).
+        if strategy == .line, cursorInfo.line != clickInfo.line {
+            return nil
+        }
+        let delta = clickInfo.offset - cursorInfo.offset
+        if delta == 0 {
+            return nil
+        }
+        var data: [UInt8] = []
+        // The shell only defines special forward and backward keys, so with
+        // special_key=1 vertical movement is emitted as horizontal steps
+        // over the same sequence (hard boundaries cost one step each).
+        let crossesLines = cursorInfo.line != clickInfo.line
+        if crossesLines, !buffer.semanticUsesSpecialCursorKeys,
+           strategy == .conservativeVertical || strategy == .smartVertical {
+            appendSemanticCursorMovement(right: false, count: cursorInfo.offsetInLine, to: &data)
+            appendSemanticVerticalMovement(down: clickInfo.line > cursorInfo.line,
+                                           count: abs(clickInfo.line - cursorInfo.line), to: &data)
+            appendSemanticCursorMovement(right: true, count: clickInfo.offsetInLine, to: &data)
+        } else {
+            appendSemanticCursorMovement(right: delta > 0, count: abs(delta), to: &data)
+        }
+        return data.isEmpty ? nil : data
+    }
+
+    /// R6: the shared arbiter entry point for the views. The snapshot was
+    /// captured at press time, before any handler mutated view state; the
+    /// click that dismisses a selection, a drag, and multi-clicks are
+    /// selection gestures and never reach the semantic route.
+    @discardableResult
+    public func handleSemanticPromptClick(at position: Position,
+                                          modifiers: SemanticPromptClickModifiers,
+                                          snapshot: SemanticPromptPointerSnapshot) -> Bool {
+        guard snapshot.pressWasSemanticEligible,
+              snapshot.clickCount == 1, !snapshot.didDrag, !snapshot.selectionWasActive else {
+            return false
+        }
+        return handleSemanticPromptClick(at: position, modifiers: modifiers)
+    }
+
+    /// A cheap pre-check (no geometry, no routing) of whether a completed
+    /// primary click could possibly route to the semantic prompt: the press
+    /// was semantic-eligible and single, no drag or active selection, the
+    /// modifier policy allows it, we are on the normal buffer, the buffer is
+    /// armed, and a click mode is set. Views use it to avoid scheduling a
+    /// deferral (retaining a line, arming a timer) when routing can never
+    /// apply — for example before any OSC 133 has been seen (F.5).
+    public func mightRouteSemanticPromptClick(modifiers: SemanticPromptClickModifiers,
+                                              snapshot: SemanticPromptPointerSnapshot) -> Bool {
+        guard snapshot.pressWasSemanticEligible,
+              snapshot.clickCount == 1,
+              !snapshot.didDrag,
+              !snapshot.selectionWasActive,
+              semanticPromptModifiersAllow(modifiers),
+              !isCurrentBufferAlternate,
+              buffer.semanticInput == .armed,
+              buffer.semanticClickMode != .none else {
+            return false
+        }
+        return true
+    }
+
+    /// Routes an eligible primary click to the active OSC 133 prompt.
+    /// `position` is addressed relative to the start of the active buffer,
+    /// matching the positions supplied by the Apple terminal views.
+    /// Eligibility is re-derived at click time: the buffer must be armed,
+    /// the clicked row must belong to the active group, and the target must
+    /// resolve onto input cells.
+    ///
+    /// Thread contract: call this on the terminal's processing thread — the
+    /// same thread that runs `feed` and `registerUserInput` — since it reads
+    /// interaction state those paths mutate. Hosts that forward pointer events
+    /// from another thread must marshal them onto that thread.
+    @discardableResult
+    public func handleSemanticPromptClick(at position: Position,
+                                          modifiers: SemanticPromptClickModifiers = []) -> Bool {
+        guard semanticPromptModifiersAllow(modifiers),
+              !isCurrentBufferAlternate,
+              buffer.semanticInput == .armed,
+              position.col >= 0, position.col < cols,
+              position.row >= 0, position.row < buffer.lines.count,
+              let geometry = semanticGroupGeometry(),
+              geometry.rows.contains(position.row),
+              geometry.hasInput else {
+            return false
+        }
+
+        switch buffer.semanticClickMode {
+        case .none:
+            return false
+        case .clickEventsAbsolute, .clickEventsRelative:
+            let x = position.col + 1
+            let y: Int
+            if buffer.semanticClickMode == .clickEventsRelative {
+                guard let relativeOrigin = buffer.semanticPromptRelativeOrigin(for: position),
+                      position.row >= relativeOrigin.row else {
+                    return false
+                }
+                y = position.row - relativeOrigin.row
+            } else {
+                // Absolute rows are reported clamped to the viewport.
+                y = min(max(position.row - buffer.yBase + 1, 1), rows)
+            }
+            sendResponse("\u{1b}[<0;\(x);\(y)M")
+            return true
+        case .cursorKeys(let strategy):
+            // The cursor's offset uses buffer.x unclamped so a pending wrap
+            // contributes the full row.
+            let cursor = Position(col: buffer.x, row: buffer.yBase + buffer.y)
+            guard geometry.rows.contains(cursor.row) else { return false }
+            let target = normalizeSemanticClickTarget(position)
+            guard let data = semanticCursorMovementData(strategy: strategy,
+                                                        cursor: cursor,
+                                                        click: target,
+                                                        geometry: geometry) else {
+                return false
+            }
+            // One concatenated write per click.
+            sendRepeatedSemanticSequence(data)
+            return true
+        }
+    }
+
+    private func sendRepeatedSemanticSequence(_ data: [UInt8]) {
+        tdel?.send(source: self, data: data[...])
+    }
+
+    // MARK: OSC 133 stream handling (R2, R4)
+
+    private struct SemanticPromptOptions {
+        var kind = SemanticPromptKind.initial
+        var clickEvents: SemanticPromptClickMode?
+        var cursorKeys: SemanticPromptClickMode?
+        var specialKeys = false
+
+        var clickMode: SemanticPromptClickMode {
+            clickEvents ?? cursorKeys ?? .none
+        }
+    }
+
+    /// Parses the option fields of an OSC 133 action. Unknown option names
+    /// (newer protocol extensions) are skipped; a known option with an
+    /// unknown or malformed value poisons the whole sequence (returns nil)
+    /// so it is ignored entirely: no cursor movement, no state change.
+    private func parseSemanticPromptOptions(_ options: [Substring]) -> SemanticPromptOptions? {
+        var result = SemanticPromptOptions()
+        for option in options {
+            guard let separator = option.firstIndex(of: "=") else { continue }
+            let value = option[option.index(after: separator)...]
+            switch option[..<separator] {
+            case "k":
+                switch value {
+                case "i": result.kind = .initial
+                case "r": result.kind = .right
+                case "c": result.kind = .continuation
+                case "s": result.kind = .secondary
+                default: return nil
+                }
+            case "cl":
+                switch value {
+                case "line": result.cursorKeys = .cursorKeys(.line)
+                case "m": result.cursorKeys = .cursorKeys(.multiple)
+                case "v": result.cursorKeys = .cursorKeys(.conservativeVertical)
+                case "w": result.cursorKeys = .cursorKeys(.smartVertical)
+                default: return nil
+                }
+            case "click_events":
+                switch value {
+                case "0": result.clickEvents = nil
+                case "1": result.clickEvents = .clickEventsAbsolute
+                case "2": result.clickEvents = .clickEventsRelative
+                default: return nil
+                }
+            case "special_key":
+                switch value {
+                case "0": result.specialKeys = false
+                case "1": result.specialKeys = true
+                default: return nil
+                }
+            default:
+                continue
+            }
+        }
+        return result
+    }
+
+    /// `A` and `N` perform a fresh-line: CR+LF unless already at the left
+    /// margin. `k=r` is exempt and never reaches this.
+    private func freshSemanticPromptLine() {
+        let left = marginMode ? buffer.marginLeft : 0
+        guard buffer.x != left else { return }
+        cmdCarriageReturn()
+        cmdLineFeedBasic()
+    }
+
+    // OSC 133 — semantic prompts. Unknown actions, and options with unknown
+    // or malformed values, are ignored entirely.
+    func oscSemanticPrompt(_ data: ArraySlice<UInt8>) {
+        guard !isCurrentBufferAlternate,
+              let text = String(bytes: data, encoding: .utf8),
+              !text.isEmpty else { return }
+        let fields = text.split(separator: ";", omittingEmptySubsequences: false)
+        guard let actionField = fields.first, actionField.count == 1,
+              let action = actionField.first else { return }
+        guard let options = parseSemanticPromptOptions(Array(fields.dropFirst())) else { return }
+
+        switch action {
+        case "A", "N":
+            let kind = options.kind
+            if kind == .right {
+                // R4: `k=r` is mark-only — no fresh-line, no origin change, and
+                // no interaction-state transition (disarming clicks and
+                // re-tagging echo as `.prompt` was a defect). It joins the
+                // current group.
+                markCurrentSemanticPrompt(kind: .right)
+                return
+            }
+            freshSemanticPromptLine()
+            if kind == .continuation {
+                // A continuation prompt joins the current group and stores no
+                // mark (continuation is a derived-only kind).
+                buffer.semanticContent = .prompt(.continuation)
+                buffer.semanticInput = .prompt
+                return
+            }
+            // R2 group allocation. `N` always allocates. `A;k=i` reuses the
+            // active group only per the identity reuse rule. `A;k=s` joins an
+            // open group and anchors a new one only when none is open.
+            let originRow = buffer.yBase + buffer.y
+            let allocates: Bool
+            if action == "N" {
+                allocates = true
+            } else if kind == .secondary {
+                allocates = !buffer.hasSemanticPromptGroup
+            } else {
+                allocates = !buffer.canReuseSemanticGroup(atRow: originRow)
+            }
+            if allocates {
+                buffer.beginSemanticPromptGroup(originRow: originRow)
+                // F.2a: `freshSemanticPromptLine`'s LF stamped this landing row
+                // with the OUTGOING group's epoch before we allocated. Clear it
+                // so the new origin row is not later absorbed against its own
+                // group's cells (E.4), wiping its prompt/input tags.
+                if originRow >= 0, originRow < buffer.lines.count {
+                    buffer.lines[originRow].semanticHardContinuationGroup = nil
+                }
+            }
+            // F.2c: a primary prompt (a repaint `A;k=i` reuse, or any fresh
+            // allocation) reconfigures the click options; a secondary join
+            // (`A;k=s`) carries none and must not wipe the group's config.
+            if kind == .initial || allocates {
+                buffer.semanticClickMode = options.clickMode
+                buffer.semanticUsesSpecialCursorKeys = options.specialKeys
+            }
+            markCurrentSemanticPrompt(kind: kind)
+            buffer.semanticContent = .prompt(kind)
+            buffer.semanticInput = .prompt
+        case "P":
+            // A mark action: it classifies the cells that follow but does not
+            // move the cursor. `k=s`/`k=c`/`k=r` join the current group;
+            // `k=i` follows the same reuse rule as `A`.
+            let kind = options.kind
+            if kind == .initial {
+                if !buffer.canReuseSemanticGroup(atRow: buffer.yBase + buffer.y) {
+                    buffer.beginSemanticPromptGroup(originRow: buffer.yBase + buffer.y)
+                }
+                // F.2c: options on both the allocate and reuse paths.
+                buffer.semanticClickMode = options.clickMode
+                buffer.semanticUsesSpecialCursorKeys = options.specialKeys
+            }
+            markCurrentSemanticPrompt(kind: kind)
+            buffer.semanticContent = .prompt(kind)
+        case "B", "I":
+            buffer.semanticContent = .input
+            buffer.semanticInput = .armed
+        case "C", "D":
+            buffer.semanticContent = .output
+            buffer.semanticInput = .submitted
+            clearEchoedEnterContinuationBeforeOutput()
+        case "L":
+            // A fresh-line with no classification change.
+            freshSemanticPromptLine()
+        default:
+            return
+        }
+    }
+
+    private func markCurrentSemanticPrompt(kind: SemanticPromptKind) {
+        // Continuation is a derived row kind (R5); the row will classify as
+        // a continuation through the hard-continuation chain, so storing a
+        // mark for it is a bug by definition (R7).
+        guard kind != .continuation else { return }
+        let row = buffer.yBase + buffer.y
+        buffer.setSemanticMark(kind: kind, row: row, column: buffer.x)
+        refresh(startRow: buffer.y, endRow: buffer.y)
+    }
+
     func resetAllColors ()
     {
         ansiColors = defaultAnsiColors
@@ -1594,59 +2641,94 @@ open class Terminal {
         }
     }
 
-    var hyperLinkTracking: (start: Position, payload: String)? = nil
-    
+    private enum ActiveHyperlink {
+        case pending(String)
+        case resolved(TinyAtom)
+        case unavailable
+    }
+
+    private var activeHyperlink: ActiveHyperlink? = nil
+    private var payloadCodes = Set<UInt16>()
+
+    private func resolveActiveHyperlink() -> TinyAtom? {
+        guard let activeHyperlink else {
+            return nil
+        }
+
+        switch activeHyperlink {
+        case .pending(let payload):
+            guard let atom = makePayload(value: payload) else {
+                self.activeHyperlink = .unavailable
+                return nil
+            }
+            self.activeHyperlink = .resolved(atom)
+            return atom
+        case .resolved(let atom):
+            return atom
+        case .unavailable:
+            return nil
+        }
+    }
+
+    /// Creates a payload atom whose lifetime is managed by this terminal.
+    ///
+    /// ``garbageCollectPayload()`` releases the atom after it is no longer present in
+    /// either terminal buffer. The terminal also releases its remaining atoms when it
+    /// is deinitialized.
+    public func makePayload(value: Any) -> TinyAtom? {
+        guard let atom = TinyAtom.lookup(value: value) else {
+            return nil
+        }
+        payloadCodes.insert(atom.code)
+        return atom
+    }
+
     func oscHyperlink (_ data: ArraySlice<UInt8>)
     {
-        let buffer = self.buffer
         if data.count == 1 && data [data.startIndex] == UInt8 (ascii: ";") {
-            // We only had the terminator, so we can close ";"
-            if let hlt = hyperLinkTracking {
-                let str = hlt.payload
-                if let urlToken = TinyAtom.lookup (value: str) {
-                    //print ("Setting the text from \(hlt.start) to \(buffer.x) on line \(buffer.y+buffer.yBase) to \(str)")
-                    
-                    // Between the time the flag was set, and now `y` might have changed negatively,
-                    // in that case, we do not flag any sequence as a hyperlink
-                    if hlt.start.row <= buffer.y+buffer.yBase {
-                        for y in hlt.start.row...(buffer.y+buffer.yBase) {
-                            let line = buffer.lines [y]
-                            let startCol = y == hlt.start.row ? min (hlt.start.col, cols-1) : 0
-                            let endCol = y == buffer.y ? min (buffer.x, cols-1) : (marginMode ? buffer.marginRight : cols-1)
-                            if endCol > startCol {
-                                for x in startCol...endCol {
-                                    var cd = line [x]
-                                    cd.setPayload(atom: urlToken)
-                                    line [x] = cd
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            hyperLinkTracking = nil
+            activeHyperlink = nil
         } else {
-            hyperLinkTracking = (start: Position(col: buffer.x, row: buffer.y+buffer.yBase), payload: String (bytes:data, encoding: .ascii) ?? "")
+            let payload = String(bytes: data, encoding: .ascii) ?? ""
+            activeHyperlink = .pending(payload)
         }
     }
     
-    // Copy to clipboard with sequence on the form:
-    //    ESC ] 52 ; c ; [base64 data] \a
-    // where c is for copy and the only thing supported.
+    // OSC 52 – clipboard access
+    //    Write:  ESC ] 52 ; <sel> ; <base64-data> ST
+    //    Query:  ESC ] 52 ; <sel> ; ?            ST
+    //
+    // <sel> is one or more characters from {c, p, q, s, 0-7} that identify
+    // the selection/clipboard buffer.  On Apple platforms every selection maps
+    // to the system clipboard, so we accept any value.  An empty <sel> is
+    // treated as "c" (system clipboard).
     func oscClipboard (_ data: ArraySlice<UInt8>) {
-        // we require data to start with c; followed by base64 content
-        guard data.count >= 2,
-              data[data.startIndex] == UInt8(ascii: "c"),
-              data[data.startIndex+1] == UInt8(ascii: ";") else {
+        // Find the semicolon that separates the selection identifier from the payload.
+        guard let sepIdx = data.firstIndex(of: UInt8(ascii: ";")) else {
             return
         }
-        
-        let base64 = Data(data[(data.startIndex+2)...])
-        guard let content = Data(base64Encoded: base64) else {
-            return
+
+        let selectionSlice = data[data.startIndex..<sepIdx]
+        let selectionChars = selectionSlice.isEmpty
+            ? "c"
+            : (String(bytes: selectionSlice, encoding: .ascii) ?? "c")
+
+        let payload = data[(sepIdx + 1)...]
+
+        if payload.count == 1 && payload[payload.startIndex] == UInt8(ascii: "?") {
+            // Read / query – ask the delegate for clipboard contents.
+            guard let content = tdel?.clipboardRead(source: self) else {
+                return
+            }
+            let base64 = content.base64EncodedString()
+            sendResponse(cc.OSC, "52;\(selectionChars);\(base64)", cc.ST)
+        } else {
+            // Write – decode the base64 payload and hand it to the delegate.
+            let base64 = Data(payload)
+            guard let content = Data(base64Encoded: base64) else {
+                return
+            }
+            tdel?.clipboardCopy(source: self, content: content)
         }
-        
-        tdel?.clipboardCopy(source: self, content: content)
     }
     
     // Notifications:
@@ -1655,110 +2737,61 @@ open class Terminal {
         guard let text = String(bytes: data, encoding: .utf8) else {
             return
         }
-
+        
         let parts = text.components(separatedBy: ";")
         guard parts.count >= 3,
               parts[0] == "notify" else {
             return
         }
-
+        
         let title = parts[1]
         let body = parts[2...].joined(separator: ";")
         tdel?.notify(source: self, title: title, body: body)
     }
 
-    // OSC 133 - FinalTerm/Semantic Prompt sequences
-    // Used for shell integration to track command boundaries
-    // Format: ESC ] 133 ; <cmd> [; <param>] BEL
-    //
-    // Commands:
-    //   A - Prompt start (fresh line, prompt will be drawn)
-    //   B - Command start (user input begins after prompt)
-    //   C - Command executed (output will follow)
-    //   D [; exitcode] - Command finished
-    //
-    // Debug helper to write to log file
-    private func osc133Log(_ message: String) {
-        #if DEBUG
-        let logPath = "/tmp/threading-osc133.log"
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "[\(timestamp)] \(message)\n"
-        if let data = line.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logPath) {
-                if let handle = FileHandle(forWritingAtPath: logPath) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
-                }
-            } else {
-                try? data.write(to: URL(fileURLWithPath: logPath))
-            }
+    @discardableResult
+    func oscProgressReport(_ data: ArraySlice<UInt8>) -> Bool {
+        guard let report = parseProgressReport(data) else {
+            return false
         }
-        #endif
+
+        tdel?.progressReport(source: self, report: report)
+        return true
     }
 
-    func oscFinalTerm(_ data: ArraySlice<UInt8>) {
-        guard let text = String(bytes: data, encoding: .utf8), !text.isEmpty else {
-            return
+    private func parseProgressReport(_ data: ArraySlice<UInt8>) -> ProgressReport? {
+        guard let text = String(bytes: data, encoding: .ascii) else {
+            return nil
         }
 
-        let parts = text.components(separatedBy: ";")
-        guard let command = parts.first, !command.isEmpty else {
-            return
+        let parts = text.split(separator: ";", omittingEmptySubsequences: false)
+        guard parts.count >= 2, parts[0] == "4" else {
+            return nil
         }
 
-        // Get current buffer position (scroll-invariant)
-        let currentPosition = Position(col: buffer.x, row: buffer.yBase + buffer.y)
-
-        switch command {
-        case "A":
-            // Prompt start - new command cycle begins
-            // Don't clear completed command output - it should persist until C is received
-            commandPromptStart = currentPosition
-            commandInputStart = nil
-            currentCommandOutputStart = nil
-            currentCommandOutputEnd = nil
-            osc133Log("A: prompt at \(currentPosition), preserved output: \(String(describing: commandOutputStart))->\(String(describing: commandOutputEnd))")
-
-        case "B":
-            // Command input start (after prompt text)
-            commandInputStart = currentPosition
-            osc133Log("B: input start at \(currentPosition)")
-
-        case "C":
-            // Command executing - output will follow
-            // Only set if not already set (avoid resetting from subcommand DEBUG traps)
-            if currentCommandOutputStart == nil {
-                currentCommandOutputStart = currentPosition
-                osc133Log("C: output START at \(currentPosition) (first C)")
-            } else {
-                osc133Log("C: IGNORED at \(currentPosition) (already have start at \(currentCommandOutputStart!))")
-            }
-            currentCommandOutputEnd = nil
-
-        case "D":
-            // Command finished - finalize the current command's output range
-            currentCommandOutputEnd = currentPosition
-
-            // Copy current command output to the "last completed" positions
-            // These will persist even after A is received
-            if let start = currentCommandOutputStart {
-                commandOutputStart = start
-                commandOutputEnd = currentCommandOutputEnd
-                osc133Log("D: output END at \(currentPosition), finalized: \(start)->\(currentPosition)")
-            } else {
-                osc133Log("D: output END at \(currentPosition), but no start position!")
-            }
-
-            // Parse exit code if provided (format: "D;0" or "D;1")
-            if parts.count > 1, let exitCode = Int32(parts[1]) {
-                lastCommandExitCode = exitCode
-                osc133Log("D: exit code = \(exitCode)")
-            }
-
-        default:
-            break
+        let statePart = parts[1]
+        guard statePart.count == 1,
+              let stateValue = Int(statePart),
+              let state = ProgressReportState(rawValue: stateValue) else {
+            return nil
         }
+
+        var progress: UInt8?
+        if parts.count >= 3, !parts[2].isEmpty {
+            guard let rawProgress = Int(parts[2]) else {
+                return nil
+            }
+            let clamped = max(0, min(rawProgress, 100))
+            progress = UInt8(clamped)
+        } else if state == .set {
+            progress = 0
+        }
+
+        if state == .remove {
+            progress = nil
+        }
+
+        return ProgressReport(state: state, progress: progress)
     }
 
     // OSC 1337 is used by iTerm2 for imgcat and other things:
@@ -1856,8 +2889,8 @@ open class Terminal {
             guard let p = data [parsePos...].firstIndex(of: UInt8 (ascii: ";")) else {
                 return
             }
-            let color = EscapeSequenceParser.parseInt(data [parsePos..<p])
-            guard color < 256 else {
+            guard let color = EscapeSequenceParser.parseDecimal(data [parsePos..<p]),
+                  color < 256 else {
                 return
             }
         
@@ -1892,65 +2925,63 @@ open class Terminal {
         sendResponse(cc.OSC, "\(oscCode);\(color.formatAsXcolor ())", cc.ST)
     }
 
-    /// Tells the application the terminal's colour scheme changed, if it subscribed (DECSET 2031).
-    ///
-    /// The report carries one bit — `CSI ? 997 ; 1 n` for dark, `; 2 n` for light — and is a
-    /// *prompt*, not the news itself: a program that hears it re-asks `OSC 11 ; ?` and reads the
-    /// answer. The embedder must therefore update `backgroundColor` **before** calling this, or
-    /// the re-ask is answered with the palette the terminal just left.
-    public func reportColorSchemeChange (dark: Bool) {
+    /// Notifies a subscribed application that the host colour scheme changed.
+    /// The application can then query OSC 10/11/12 for the new palette.
+    public func reportColorSchemeChange(dark: Bool) {
         guard colorSchemeReportingEnabled else { return }
-        sendResponse (cc.CSI, "?997;\(dark ? 1 : 2)n")
+        sendResponse(cc.CSI, "?997;\(dark ? 1 : 2)n")
     }
     
     // This handles both setting the foreground, but spill into background and cursor color
     // if more parameters are provided (ie, sending OSC 10 with #ffffff,#000000,#ff0000
     // sets the foreground to #ffffff, background to #000000 and cursor to ff0000
     //
-    // A parameter of "?" asks rather than sets, and is answered on the wire with the OSC code
-    // for the color it named: 10 foreground, 11 background, 12 cursor.
-    //
-    // - Parameter startAt: which color the *first* parameter names — 0 foreground (OSC 10),
-    // 1 background (OSC 11), 2 cursor (OSC 12). Each further parameter names the next color
-    // along, which is why this is an offset rather than an index into the parameters: read as
-    // an index, OSC 11's single parameter sits at 0 and the loop starting at 1 never ran. Every
-    // `OSC 11 ; ? ST` therefore went unanswered — and a program that asks what colour the
-    // terminal is and hears nothing assumes a dark one, which is how a light palette ended up
-    // wearing an agent's dark-theme ink.
+    // - Parameter startAt: describes which of the colors is the first to try,
+    // startAt = 0 is foreground, startAt = 1 is background, startAt = 2 is
+    // the cursor Color
     func oscSetColors (_ data: ArraySlice<UInt8>, startAt: Int)
     {
         let groups = data.split(separator: UInt8 (ascii: ";"))
-
+        guard !groups.isEmpty else {
+            return
+        }
+        let reportedColors = tdel?.getColors(source: self)
+        let queryForeground = reportedColors?.foreground ?? foregroundColor
+        let queryBackground = reportedColors?.background ?? backgroundColor
         for (offset, text) in groups.enumerated() {
-            let slot = startAt + offset
-            guard slot <= 2 else { break }
-
+            let target = startAt + offset
+            
             if text.first == UInt8 (ascii: "?") {
-                switch slot {
+                switch target {
                 case 0:
-                    reportColor (oscCode: 10, color: foregroundColor)
+                    reportColor (oscCode: 10, color: queryForeground)
                 case 1:
-                    reportColor (oscCode: 11, color: backgroundColor)
+                    reportColor (oscCode: 11, color: queryBackground)
+                case 2:
+                    reportColor (oscCode: 12, color: cursorColor ?? queryForeground)
                 default:
-                    reportColor (oscCode: 12, color: cursorColor ?? foregroundColor)
+                    break
                 }
-
+                
                 continue
             }
 
             guard let color = Color.parseColor(text) else {
                 continue
             }
-            switch slot {
+            switch target {
             case 0:
                 foregroundColor = color
                 tdel?.setForegroundColor(source: self, color: color)
             case 1:
                 backgroundColor = color
                 tdel?.setBackgroundColor(source: self, color: color)
-            default:
+            case 2:
                 cursorColor = color
                 tdel?.setCursorColor(source: self, color: color)
+                break
+            default:
+                break
             }
         }
     }
@@ -1958,7 +2989,9 @@ open class Terminal {
     func oscSetTextBackground (_ data: ArraySlice<UInt8>)
     {
         if data.first == UInt8 (ascii: "?") {
-            reportColor (oscCode: 11, color: backgroundColor)
+            let reportedColors = tdel?.getColors(source: self)
+            let queryBackground = reportedColors?.background ?? backgroundColor
+            reportColor (oscCode: 11, color: queryBackground)
             return
         }
 
@@ -2138,12 +3171,13 @@ open class Terminal {
      */
     func restrictCursor(_ limitCols: Bool = true)
     {
+        let buffer = self.buffer
         buffer.x = min (cols - (limitCols ? 1 : 0), max (0, buffer.x))
         buffer.y = originMode
             ? min (buffer.scrollBottom, max (buffer.scrollTop, buffer.y))
             : min (rows - 1, max (0, buffer.y))
-        
-        updateRange(buffer.y)
+
+        updateRange(borrowing: buffer, buffer.y)
     }
 
     //
@@ -2157,7 +3191,8 @@ open class Terminal {
     
     func setCursor (col: Int, row: Int)
     {
-        updateRange(buffer.y)
+        let buffer = self.buffer
+        updateRange(borrowing: buffer, buffer.y)
         if originMode {
             buffer.x = col + (usingMargins () ? buffer.marginLeft : 0)
             buffer.y = buffer.scrollTop + row
@@ -2290,7 +3325,7 @@ open class Terminal {
             eraseInBufferLine (y: j, start: buffer.x, end: cols, clearWrap: buffer.x == 0)
             j += 1
             while j < rows {
-                resetBufferLine (y: j)
+                resetBufferLine (y: j, bidiState: currentBidiState)
                 j += 1
             }
             updateRange (j - 1)
@@ -2300,13 +3335,13 @@ open class Terminal {
             updateRange (j)
             // Deleted front part of line and everything before. This line will no longer be wrapped.
             eraseInBufferLine (y: j, start: 0, end: buffer.x + 1, clearWrap: true)
-            if buffer.x + 1 >= cols {
+            if buffer.x + 1 >= cols && j + 1 < rows {
                 // Deleted entire previous line. This next line can no longer be wrapped.
-                buffer.lines [j + 1].isWrapped = false
+                buffer.lines [buffer.yBase + j + 1].isWrapped = false
             }
             while (j != 0) {
                 j -= 1
-                resetBufferLine (y: j)
+                resetBufferLine (y: j, bidiState: currentBidiState)
             }
             updateRange (0)
         case 2:
@@ -2314,8 +3349,9 @@ open class Terminal {
             updateRange (j - 1)
             while (j != 0) {
                 j -= 1
-                resetBufferLine (y: j)
+                resetBufferLine (y: j, clearImages: true, bidiState: currentBidiState)
             }
+            clearAllKittyImages()
             updateRange (0)
         case 3:
             // Clear scrollback (everything not in viewport)
@@ -2339,10 +3375,12 @@ open class Terminal {
     // - Parameter start: first cell index to be erased
     // - Parameter end:   end - 1 is last erased cell
     //
-    func eraseInBufferLine (y: Int, start: Int, end: Int, clearWrap: Bool = false, clearRenderMode: Bool = false)
+    func eraseInBufferLine (y: Int, start: Int, end: Int, clearWrap: Bool = false, clearRenderMode: Bool = false, clearImages: Bool = false)
     {
         let line = buffer.lines [buffer.yBase + y]
-        line.images = nil
+        if clearImages {
+            buffer.clearImagesFromLine(at: buffer.yBase + y)
+        }
         let cd = CharData (attribute: eraseAttr ())
         line.replaceCells (start: start, end: end, fillData: cd)
         if clearWrap {
@@ -2352,7 +3390,7 @@ open class Terminal {
             line.renderMode = .single
         }
     }
-    
+
     //
     // CSI Ps L
     // Insert Ps Line(s) (default = 1) (IL).
@@ -2387,8 +3425,11 @@ open class Terminal {
                     let last = buffer.lines [row]
                     last.fill (with: CharData (attribute: ea), atCol: buffer.marginLeft, len: columnCount)
                 }
+
+                selectionsInvalidateForColumnRestrictedScroll (top: row, bottom: row + rowCount, left: buffer.marginLeft, right: buffer.marginRight)
             }
         } else {
+            let inserted = p
             for _ in 0..<p {
                 p -= 1
                 // test: echo -e '\e[44m\e[1L\e[0m'
@@ -2398,9 +3439,22 @@ open class Terminal {
                 let newLine = buffer.getBlankLine (attribute: ea)
                 buffer.lines.splice (start: row, deleteCount: 0, items: [newLine], change: { line in updateRange (line) })
             }
+
+            // Rows below the cursor moved down in place.
+            selectionsAdjustForInPlaceScroll (top: row, bottom: scrollBottomAbsolute - 1, lines: -inserted)
+            let firstMovedRow = row + inserted < scrollBottomAbsolute
+                ? row + inserted : nil
+            hardenBidiLineShiftBoundaries(firstChangedRow: row,
+                                           firstMovedRow: firstMovedRow,
+                                           lastChangedRow: scrollBottomAbsolute - 1)
         }
         // this.maxRange();
         updateRange (startLine: buffer.y, endLine: buffer.scrollBottom)
+        // A restricted region leaves stale pixels / a bottom-edge ghost outside
+        // [y, scrollBottom] on the CG renderer (as in scroll()); the range above
+        // already covers full-screen, so widen to the whole viewport only when the
+        // region is restricted.
+        refreshScrolledRegion(top: buffer.scrollTop, bottom: buffer.scrollBottom, canBlit: true)
     }
     
     //
@@ -2432,8 +3486,8 @@ open class Terminal {
         var ch: UInt8
         var charset: [UInt8:String]?
         
-        if CharSets.all.keys.contains(p [1]){
-            charset = CharSets.all [p [1]]!
+        if let mappedCharset = CharSets.all[p[1]] {
+            charset = mappedCharset
         } else {
             charset = nil
         }
@@ -2497,7 +3551,7 @@ open class Terminal {
     // ESC # 8
     func cmdScreenAlignmentPattern ()
     {
-        let cell = CharData(attribute: curAttr.justColor(), char: "E")
+        let cell = makeCharData (attribute: curAttr.justColor(), char: "E", size: 1)
 
         setCursor (col: 0, row: 0)
         for yOffset in 0..<rows {
@@ -2511,8 +3565,14 @@ open class Terminal {
 
     func cmdRestoreCursor (_ pars: [Int], _ collect: cstring)
     {
-        buffer.x = buffer.savedX
-        buffer.y = buffer.savedY
+        // CSI u (no intermediates) = DECRC (Restore Cursor)
+        // CSI > Ps u / CSI < u / CSI = Ps u = Kitty keyboard protocol (not cursor commands)
+        guard collect.isEmpty else { return }
+
+        // Clamp savedX and savedY to valid ranges to prevent abort() in Debug builds.
+        // Saved values can become invalid after resize/scroll operations.
+        buffer.x = min(max(0, buffer.savedX), cols - 1)
+        buffer.y = min(max(0, buffer.savedY), rows - 1)
         curAttr = buffer.savedAttr
         charset = buffer.savedCharset
         originMode = buffer.savedOriginMode
@@ -2630,10 +3690,12 @@ open class Terminal {
         if collect.count > 0 && collect == [UInt8 (ascii: "$")] {
             // DECFRA
             if let (top, left, bottom, right) = getRectangleFromRequest(pars [1...]) {
+                let scalar = UnicodeScalar (pars [0]) ?? UnicodeScalar (32)!
+                let fillData = makeCharData (attribute: curAttr, scalar: scalar, size: 1)
                 for row in top...bottom {
                     let line = buffer.lines [row+buffer.yBase]
                     for col in left...right {
-                        line [col] = CharData(attribute: curAttr, char: Character (UnicodeScalar (pars [0]) ?? " "))
+                        line [col] = fillData
                     }
                 }
             }
@@ -2693,7 +3755,7 @@ open class Terminal {
                     let line = buffer.lines [row+buffer.yBase]
                     for col in left...right {
                         let cd = line [col]
-                        let ch = cd.code == 0 ? " " : cd.getCharacter()
+                        let ch = cd.code == 0 ? " " : getCharacter (for: cd)
                         
                         for scalar in ch.unicodeScalars {
                             checksum += scalar.value
@@ -2724,7 +3786,7 @@ open class Terminal {
             //   Pu = 0  or omitted ⇒  default to character cells.
             //   Pu = 1  ⇐  device physical pixels.
             //   Pu = 2  ⇐  character cells.
-            log("Locator reporting (DECELR) is not implemented")
+            print ("TODO: Enable Locator Reporting (DECELR)")
         default:
             break
         }
@@ -2735,10 +3797,11 @@ open class Terminal {
     func cmdDECERA (_ pars: [Int])
     {
         if let (top, left, bottom, right) = getRectangleFromRequest(pars [0...]) {
+            let fillData = makeCharData (attribute: curAttr, char: " ", size: 1)
             for row in top...bottom {
                 let line = buffer.lines [row+buffer.yBase]
                 for col in left...right {
-                    line [col] = CharData(attribute: curAttr, char: " ", size: 1)
+                    line [col] = fillData
                 }
             }
         }
@@ -2769,7 +3832,7 @@ open class Terminal {
                 let line = buffer.lines [row+buffer.yBase]
                 for col in left...right {
                     var cd = line [col]
-                    cd.setValue(char: " ", size: 1)
+                    updateCharData (&cd, char: " ", size: 1)
                     line [col] = cd
                 }
             }
@@ -2797,6 +3860,10 @@ open class Terminal {
         case refreshWindow
         /// Request that the size of the terminal be changed to the specified cols and rows
         case resizeTo(cols: Int, rows: Int)
+        /// Request that the size of the terminal be changed to the specified cols and rows.
+        /// Prefer this over `resizeTo(cols:rows:)` which cannot be disambiguated from
+        /// `resizeTo(lines:)` in switch statements due to a Swift compiler limitation.
+        case resizeTerminal(cols: Int, rows: Int)
         case restoreMaximizedWindow
         /// Attempt to maximize the window
         case maximizeWindow
@@ -2810,10 +3877,17 @@ open class Terminal {
         case reportTerminalState
         case reportTerminalPosition
         case reportTextAreaPosition
-        case reporttextAreaPixelDimension
+        // CSI 14 t
+        case reportTextAreaPixelDimension
+        // CSI 14; 2 t
+        case reportTerminalWindowPixelDimension
+        // CSI 15 t
         case reportSizeOfScreenInPixels
+        // CSI 16 t
         case reportCellSizeInPixels
+        // CSI 18 t
         case reportTextAreaCharacters
+        // CSI 19 t
         case reportScreenSizeCharacters
         case reportIconLabel
         case reportWindowTitle
@@ -2912,7 +3986,7 @@ open class Terminal {
         case [7]:
             tdel.windowCommand(source: self, command: .refreshWindow)
         case _ where pars.count == 3 && pars.first == 8:
-            tdel.windowCommand(source: self, command: .resizeTo(cols: pars [1], rows: pars [2]))
+            tdel.windowCommand(source: self, command: .resizeTerminal(cols: pars [1], rows: pars [2]))
         case [9, 0]:
             tdel.windowCommand(source: self, command: .restoreMaximizedWindow)
         case [9, 1]:
@@ -2927,22 +4001,39 @@ open class Terminal {
             tdel.windowCommand(source: self, command: .switchToFullScreen)
         case [10, 2]:
             tdel.windowCommand(source: self, command: .toggleFullScreen)
+        case [14]:
+            if let r = tdel.windowCommand(source: self, command: .reportTextAreaPixelDimension) {
+                sendResponse(r)
+            } else {
+                let cellSize = tdel.cellSizeInPixels(source: self) ?? (width: 10, height: 16)
+                sendResponse(cc.CSI, "4;\(rows * cellSize.height);\(cols * cellSize.width)t")
+            }
+        case [14, 2]:
+            if let r = tdel.windowCommand(source: self, command: .reportTerminalWindowPixelDimension) {
+                sendResponse(r)
+            } else {
+                let cellSize = tdel.cellSizeInPixels(source: self) ?? (width: 10, height: 16)
+                sendResponse(cc.CSI, "4;\(rows * cellSize.height);\(cols * cellSize.width)t")
+            }
         case [15]: // Report size in pixels
             if let r = tdel.windowCommand(source: self, command: .reportSizeOfScreenInPixels) {
                 sendResponse(r)
             } else {
-                sendResponse (cc.CSI, "5;768;1024t")
+                let cellSize = tdel.cellSizeInPixels(source: self) ?? (width: 10, height: 16)
+                sendResponse(cc.CSI, "5;\(rows * cellSize.height);\(cols * cellSize.width)t")
             }
         case [16]: // Report cell size in pixels
             // If no value is returned send 16x10
             // TODO: should surface that to the UI, should not do this here
             if let r = tdel.windowCommand(source: self, command: .reportCellSizeInPixels) {
                 sendResponse(r)
+            } else if let cellSize = tdel.cellSizeInPixels(source: self) {
+                sendResponse(cc.CSI, "6;\(cellSize.height);\(cellSize.width)t")
             } else {
                 sendResponse (cc.CSI, "6;16;10t")
             }
         case [18]:
-            if let r = tdel.windowCommand(source: self, command: .reportCellSizeInPixels) {
+            if let r = tdel.windowCommand(source: self, command: .reportTextAreaCharacters) {
                 sendResponse(r)
             } else {
                 sendResponse(cc.CSI, "8;\(rows);\(cols)t")
@@ -2996,6 +4087,8 @@ open class Terminal {
 
     func cmdSetMargins (_ pars: [Int], _ collect: cstring)
     {
+        guard collect.isEmpty else { return }
+
         var left = min (cols-1, max (0, (pars.count > 0 ? pars[0] : 1) - 1))
         let right = min (cols-1, max (0, (pars.count > 1 ? pars [1] : cols) - 1))
         
@@ -3011,6 +4104,10 @@ open class Terminal {
     //
     func cmdSaveCursor (_ pars: [Int], _ collect: cstring)
     {
+        // CSI s (no intermediates) = ANSI Save Cursor
+        // Sequences with intermediates (e.g. CSI > s) are not cursor commands
+        guard collect.isEmpty else { return }
+
         buffer.savedX = buffer.x
         buffer.savedY = buffer.y
         buffer.savedAttr = curAttr
@@ -3055,8 +4152,8 @@ open class Terminal {
     public func setCursorStyle (_ style: CursorStyle)
     {
         if options.cursorStyle != style {
-            tdel?.cursorStyleChanged(source: self, newStyle: style)
             options.cursorStyle = style
+            tdel?.cursorStyleChanged(source: self, newStyle: style)
         }
     }
     
@@ -3094,6 +4191,202 @@ open class Terminal {
         }
     }
 
+    func cmdXTVERSION(_ pars: [Int], _ collect: cstring) {
+        guard collect == [UInt8(ascii: ">")], pars == [0] else { return }
+        let identity = Terminal.xtVersionIdentity(tag: SwiftTermBuildInfo.tag,
+                                                  branch: SwiftTermBuildInfo.branch,
+                                                  version: SwiftTermBuildInfo.version)
+        sendResponse([ControlCodes.ESC, UInt8(ascii: "P")], ">|\(identity)",
+                     [ControlCodes.ESC, UInt8(ascii: "\\")])
+    }
+
+    static func xtVersionIdentity(tag: String?, branch: String?,
+                                  version: String?) -> String {
+        func printableASCII(_ value: String?) -> String? {
+            guard let value else { return nil }
+            let bytes = value.utf8.filter { $0 >= 0x20 && $0 <= 0x7e }
+            guard !bytes.isEmpty else { return nil }
+            return String(decoding: bytes, as: UTF8.self)
+        }
+
+        var identity = "SwiftTerm"
+        if var tag = printableASCII(tag) {
+            if tag.first == "v" {
+                tag.removeFirst()
+            }
+            if !tag.isEmpty {
+                identity += " \(tag)"
+            }
+        }
+        if let branch = printableASCII(branch) {
+            identity += "-\(branch)"
+        }
+        if let version = printableASCII(version), version != "unknown" {
+            identity += "+\(version)"
+        }
+        identity += ":"
+
+        if identity.utf8.count > 256 {
+            identity = String(identity.prefix(255)) + ":"
+        }
+        return identity
+    }
+
+    private func setReverseColors(_ enabled: Bool) {
+        guard reverseColors != enabled else { return }
+        reverseColors = enabled
+        updateFullScreen()
+        // This existing callback also invalidates color-dependent renderer caches.
+        tdel?.colorChanged(source: self, idx: nil)
+    }
+
+    private enum BidiStateProperty: Hashable {
+        case supportMode
+        case autodetectDirection
+        case fallbackDirection
+        case boxMirroring
+    }
+
+    private static let allBidiStateProperties: Set<BidiStateProperty> = [
+        .supportMode, .autodetectDirection, .fallbackDirection, .boxMirroring,
+    ]
+
+    private func setCurrentBidiState(
+        _ state: BidiPresentationState,
+        applying properties: Set<BidiStateProperty> = Terminal.allBidiStateProperties
+    ) {
+        currentBidiState = state
+        normalBuffer.defaultBidiState = state
+        altBuffer.defaultBidiState = state
+        applyCurrentBidiStateAtParagraphStart(properties: properties)
+        updateFullScreen()
+    }
+
+    private func updateCurrentBidiState(
+        property: BidiStateProperty,
+        _ update: (inout BidiPresentationState) -> Void
+    ) {
+        var state = currentBidiState
+        update(&state)
+        setCurrentBidiState(state, applying: [property])
+    }
+
+    /// A mode change applies to existing text only at the first logical
+    /// position of the current paragraph.
+    private func applyCurrentBidiStateAtParagraphStart(properties: Set<BidiStateProperty>) {
+        let row = buffer.yBase + buffer.y
+        guard buffer.x == 0, row >= 0, row < buffer.lines.count else {
+            return
+        }
+        var first = row
+        while first > 0 && buffer.lines[first].isWrapped {
+            first -= 1
+        }
+        guard first == row else {
+            return
+        }
+        var last = row
+        while last + 1 < buffer.lines.count && buffer.lines[last + 1].isWrapped {
+            last += 1
+        }
+        var paragraphState = buffer.lines[first].bidiState
+        if properties.contains(.supportMode) {
+            paragraphState.supportMode = currentBidiState.supportMode
+        }
+        if properties.contains(.autodetectDirection) {
+            paragraphState.autodetectDirection = currentBidiState.autodetectDirection
+        }
+        if properties.contains(.fallbackDirection) {
+            paragraphState.fallbackDirection = currentBidiState.fallbackDirection
+        }
+        if properties.contains(.boxMirroring) {
+            paragraphState.boxMirroring = currentBidiState.boxMirroring
+        }
+        for index in first...last {
+            buffer.lines[index].bidiState = paragraphState
+        }
+    }
+
+    // SCP - Select Character Path: CSI Ps SP k. Ps 1 selects LTR, Ps 2
+    // selects RTL, and Ps 0 selects the configured default.
+    func cmdSelectCharacterPath(_ pars: [Int], _ collect: cstring) {
+        let direction: BidiDirection
+        switch pars.first ?? 0 {
+        case 0:
+            direction = options.initialBidiState.fallbackDirection
+        case 1:
+            direction = .leftToRight
+        case 2:
+            direction = .rightToLeft
+        default:
+            return
+        }
+        updateCurrentBidiState(property: .fallbackDirection) {
+            $0.fallbackDirection = direction
+        }
+    }
+
+    // SPD is accepted as a compatibility alias for the original patch.
+    // CSI 0 SP S selects LTR and CSI 3 SP S selects RTL.
+    func cmdSelectPresentationDirection (_ pars: [Int], _ collect: cstring)
+    {
+        let direction: BidiDirection
+        switch pars.first ?? 0 {
+        case 0:
+            direction = .leftToRight
+        case 3:
+            direction = .rightToLeft
+        default:
+            return
+        }
+        updateCurrentBidiState(property: .fallbackDirection) {
+            $0.fallbackDirection = direction
+        }
+    }
+
+    func cmdSavePrivateModes(_ pars: [Int]) {
+        for mode in pars {
+            switch mode {
+            case 1243:
+                savedBidiPrivateModes[mode] = bidiArrowKeySwap
+            case 2500:
+                savedBidiPrivateModes[mode] = currentBidiState.boxMirroring
+            case 2501:
+                savedBidiPrivateModes[mode] = currentBidiState.autodetectDirection
+            default:
+                break
+            }
+        }
+    }
+
+    func cmdRestorePrivateModes(_ pars: [Int]) {
+        var state = currentBidiState
+        var stateChanged = false
+        var restoredProperties: Set<BidiStateProperty> = []
+        for mode in pars {
+            guard let value = savedBidiPrivateModes[mode] else {
+                continue
+            }
+            switch mode {
+            case 1243:
+                bidiArrowKeySwap = value
+            case 2500:
+                state.boxMirroring = value
+                stateChanged = true
+                restoredProperties.insert(.boxMirroring)
+            case 2501:
+                state.autodetectDirection = value
+                stateChanged = true
+                restoredProperties.insert(.autodetectDirection)
+            default:
+                break
+            }
+        }
+        if stateChanged {
+            setCurrentBidiState(state, applying: restoredProperties)
+        }
+    }
+
     func cmdDecRqm (_ pars: [Int], decMode: Bool) {
         let modeUnknown = 0
         let modeSet = 1
@@ -3121,7 +4414,7 @@ open class Terminal {
             case 4: // DECSCLM - Smooth/jump scroll, we dont implement
                 res = smoothScroll ? modeSet : modeReset
             case 5: // DECSCNM - Reverse Display Colors
-                res = curAttr == CharData.invertedAttr ? modeSet : modeReset
+                res = reverseColors ? modeSet : modeReset
             case 6: // DECOM - cursor origin
                 res = originMode ? modeSet : modeReset
             case 7: // DECAWM - Wraparound Mode
@@ -3184,6 +4477,8 @@ open class Terminal {
                 res = mouseProtocol == .utf8 ? modeSet : modeReset
             case 1006:
                 res = mouseProtocol == .sgr ? modeSet : modeReset
+            case 1007:
+                res = alternateScrollMode ? modeSet : modeReset
             case 1015:
                 res = mouseProtocol == .urxvt ? modeSet : modeReset
             case 1016:
@@ -3197,8 +4492,16 @@ open class Terminal {
                 // keyboard emulation mode: 1050, 1051, 1052, 1053, 1060, 1061
             case 2004:
                 res = bracketedPasteMode ? modeSet : modeReset
+            case 2026:
+                res = synchronizedOutputActive ? modeSet : modeReset
             case 2031:
                 res = colorSchemeReportingEnabled ? modeSet : modeReset
+            case 2500: // box drawing mirroring (terminal-wg)
+                res = bidiBoxMirroring ? modeSet : modeReset
+            case 2501: // autodetect paragraph direction (terminal-wg)
+                res = bidiAutodetectDirection ? modeSet : modeReset
+            case 1243: // swap left and right arrow keys on RTL paragraphs
+                res = bidiArrowKeySwap ? modeSet : modeReset
             default:
                 break
             }
@@ -3217,6 +4520,8 @@ open class Terminal {
                 res = modeAlwaysReset
             case 7: // VEM vertical editing
                 res = modeAlwaysReset
+            case 8: // BDSM BiDi support mode (terminal-wg)
+                res = bidiSupportEnabled ? modeSet : modeReset
             case 10: // HEM horizontal editing
                 res = modeAlwaysReset
             case 11: // PUM positioning unit
@@ -3318,6 +4623,9 @@ open class Terminal {
     /* ! - CSI ! p   Soft terminal reset (DECSTR). */
     func cmdSoftReset ()
     {
+        setCurrentBidiState(options.initialBidiState)
+        bidiArrowKeySwap = options.initialBidiArrowKeySwap
+        savedBidiPrivateModes.removeAll()
         cursorHidden = false
         insertMode = false
         originMode = false
@@ -3332,11 +4640,12 @@ open class Terminal {
         buffer.scrollBottom = rows - 1
         curAttr = CharData.defaultAttr
         buffer.softReset ()
+        resetSemanticPromptState(clearingScreenMarks: true)
 
         charset = nil
         setgLevel (0)
         conformance = .vt500
-        hyperLinkTracking = nil
+        activeHyperlink = nil
         lineFeedMode = options.convertEol
         resetAllColors()
         tdel?.showCursor(source: self)
@@ -3512,8 +4821,24 @@ open class Terminal {
     //     Ps = 4 8  ; 5  ; Ps -> Set background color to the second
     //     Ps.
     //
-    func cmdCharAttributes (_ pars: [Int], _ collect: cstring)
+    func cmdCsiM (_ pars: [Int], _ collect: cstring)
     {
+        switch collect.count {
+        case 0:
+            cmdCharAttributes(pars)
+        case 1:
+            // Configure Modifier Key Reporting Formats
+            // TODO: XTMODKEYS
+            if collect[0] == UInt8(ascii: ">") {
+                break
+            }
+        default:
+            break
+        }
+    }
+
+    @inline(__always)
+    private func cmdCharAttributes(_ pars: [Int]) {
         // Optimize a single SGR0.
         if pars.count == 1 && pars [0] == 0 {
             curAttr = CharData.defaultAttr
@@ -3525,10 +4850,126 @@ open class Terminal {
         var style = curAttr.style
         var fg = curAttr.fg
         var bg = curAttr.bg
+        var underlineStyle = curAttr.underlineStyle
+        var underlineColor = curAttr.underlineColor
         let def = CharData.defaultAttr
 
         var i = 0
         
+        let parsTxt = parser._parsTxt
+        let separators: [UInt8] = {
+            var result: [UInt8] = []
+            result.reserveCapacity(max(0, pars.count - 1))
+            for value in parsTxt where value == 0x3b || value == 0x3a {
+                result.append(value)
+            }
+            if result.count > pars.count - 1 {
+                result.removeLast(result.count - (pars.count - 1))
+            }
+            return result
+        }()
+
+        func separator(after index: Int) -> UInt8? {
+            guard index >= 0 && index < separators.count else {
+                return nil
+            }
+            return separators[index]
+        }
+
+        func colonChainEnd(from index: Int) -> Int {
+            var end = index
+            while end < pars.count - 1, separators[end] == 0x3a {
+                end += 1
+            }
+            return end
+        }
+
+        func applyUnderlineStyle(code: Int) {
+            switch code {
+            case 0:
+                style.remove(.underline)
+                underlineStyle = .none
+            case 1:
+                style = [style, .underline]
+                underlineStyle = .single
+            case 2:
+                style = [style, .underline]
+                underlineStyle = .double
+            case 3:
+                style = [style, .underline]
+                underlineStyle = .curly
+            case 4:
+                style = [style, .underline]
+                underlineStyle = .dotted
+            case 5:
+                style = [style, .underline]
+                underlineStyle = .dashed
+            default:
+                style = [style, .underline]
+                underlineStyle = .single
+            }
+        }
+
+        func parseExtendedColor(startIndex: Int, usesColon: Bool) -> (Attribute.Color?, Int) {
+            guard startIndex < pars.count else {
+                return (nil, 0)
+            }
+            let kind = pars[startIndex]
+            if usesColon {
+                let end = colonChainEnd(from: startIndex)
+                let chainLength = end - startIndex + 1
+                switch kind {
+                case 2:
+                    if chainLength >= 5 {
+                        let red = pars[startIndex + 2]
+                        let green = pars[startIndex + 3]
+                        let blue = pars[startIndex + 4]
+                        return (Attribute.Color.trueColor(red: UInt8(min(red, 255)),
+                                                         green: UInt8(min(green, 255)),
+                                                         blue: UInt8(min(blue, 255))),
+                                chainLength)
+                    } else if chainLength >= 4 {
+                        let red = pars[startIndex + 1]
+                        let green = pars[startIndex + 2]
+                        let blue = pars[startIndex + 3]
+                        return (Attribute.Color.trueColor(red: UInt8(min(red, 255)),
+                                                         green: UInt8(min(green, 255)),
+                                                         blue: UInt8(min(blue, 255))),
+                                chainLength)
+                    }
+                case 5:
+                    if chainLength >= 2 {
+                        let code = pars[startIndex + 1]
+                        return (Attribute.Color.ansi256(code: UInt8(min(255, code))), chainLength)
+                    }
+                default:
+                    break
+                }
+                return (nil, chainLength)
+            } else {
+                switch kind {
+                case 2:
+                    if startIndex + 3 < pars.count {
+                        let red = pars[startIndex + 1]
+                        let green = pars[startIndex + 2]
+                        let blue = pars[startIndex + 3]
+                        return (Attribute.Color.trueColor(red: UInt8(min(red, 255)),
+                                                         green: UInt8(min(green, 255)),
+                                                         blue: UInt8(min(blue, 255))),
+                                4)
+                    }
+                case 5:
+                    if startIndex + 1 < pars.count {
+                        let code = pars[startIndex + 1]
+                        return (Attribute.Color.ansi256(code: UInt8(min(255, code))), 2)
+                    }
+                default:
+                    break
+                }
+            }
+            return (nil, 1)
+        }
+
         // Extended Colors
         //
         // There is an ambiguity here that is troublesome, to support extended
@@ -3542,67 +4983,51 @@ open class Terminal {
         // need to continue processing
         //
         //
-        func parseExtendedColor () -> Attribute.Color? {
-            var color: Attribute.Color? = nil
-            let v = parser._parsTxt
-            
-            // If this is the new style
-            if v.count > 2 && v [2] == UInt8(ascii: ":") {
-                switch pars [i] {
-                case 2: // RGB color
-                    i += 1
-                    // Color style, we ignore "ColorSpace"
-
-                    if i+3 < parCount {
-                        color = Attribute.Color.trueColor(
-                              red: UInt8(min (pars [i+1], 255)),
-                            green: UInt8(min (pars [i+2], 255)),
-                             blue: UInt8(min (pars [i+3], 255)))
-                        i += 4
+        func parseParamSeparators(parsTxt: [UInt8], paramCount: Int) -> [UInt8?] {
+            guard paramCount > 0 else { return [] }
+            var separators: [UInt8?] = Array(repeating: nil, count: paramCount)
+            var paramIndex = 0
+            for code in parsTxt {
+                if code == UInt8(ascii: ";") || code == UInt8(ascii: ":") {
+                    if paramIndex < separators.count {
+                        separators[paramIndex] = code
                     }
-                default:
-                    break
-                }
-            } else if i < parCount {
-                switch pars [i] {
-                case 2: // RGB color
-                    i += 1
-                    if i+2 < parCount {
-                        color = Attribute.Color.trueColor(
-                              red: UInt8(min (pars [i], 255)),
-                            green: UInt8(min (pars [i+1], 255)),
-                             blue: UInt8(min (pars [i+2], 255)))
-                        i += 3
-                    }
-                    
-                case 3: // CMY color - not supported
-                    break
-                    
-                case 4: // CMYK color - not supported
-                    break
-                    
-                case 5: // indexed color
-                    if i+1 < parCount {
-                        color = Attribute.Color.ansi256(code: UInt8 (min (255, pars [i+1])))
-                        i += 1
-                    }
-                    i += 1
-
-                default:
-                    break
+                    paramIndex += 1
                 }
             }
-            return color
+            return separators
+        }
+
+        let paramSeparators = parseParamSeparators(parsTxt: parser._parsTxt, paramCount: pars.count)
+
+        func countColons(from index: Int) -> Int {
+            guard index >= 0, index < paramSeparators.count else { return 0 }
+            var count = 0
+            var idx = index
+            while idx < paramSeparators.count, paramSeparators[idx] == UInt8(ascii: ":") {
+                count += 1
+                idx += 1
+            }
+            return count
+        }
+
+        func parseExtendedColor () -> Attribute.Color? {
+            let usesColon = separator(after: i - 1) == 0x3a
+            let parsed = parseExtendedColor(startIndex: i, usesColon: usesColon)
+            i += max(parsed.1, 1)
+            return parsed.0
         }
         
         while i < parCount {
-            let p = pars [i]
+            var p = pars [i]
             switch p {
             case 0:
                 // default
                 style = def.style
                 fg = def.fg
                 bg = def.bg
+                underlineStyle = def.underlineStyle
+                underlineColor = def.underlineColor
             case 1:
                 // bold text
                 style = [style, .bold]
@@ -3613,8 +5038,15 @@ open class Terminal {
                 // italic text
                 style = [style, .italic]
             case 4:
-                // underlined text
-                style = [style, .underline]
+                if separator(after: i) == 0x3a, i + 1 < parCount {
+                    applyUnderlineStyle(code: pars[i + 1])
+                    i += 2
+                    continue
+                } else {
+                    // underlined text
+                    style = [style, .underline]
+                    underlineStyle = .single
+                }
             case 5:
                 // blink
                 style = [style, .blink]
@@ -3629,7 +5061,8 @@ open class Terminal {
                 style = [style, .crossedOut]
             case 21:
                 // double underline
-                break
+                style = [style, .underline]
+                underlineStyle = .double
             case 22:
                 // not bold nor faint
                 style.remove (.bold)
@@ -3640,6 +5073,7 @@ open class Terminal {
             case 24:
                 // not underlined
                 style.remove (.underline)
+                underlineStyle = .none
             case 25:
                 // not blink
                 style.remove (.blink)
@@ -3678,37 +5112,35 @@ open class Terminal {
                 // reset bg
                 bg = CharData.defaultAttr.bg
             case 90...97:
-                // fg bright color (8-15)
-                fg = Attribute.Color.ansi256(code: UInt8(p - 90 + 8))
+                // fg color 16
+                p += 8
+                fg = Attribute.Color.ansi256(code: UInt8(p - 90))
             case 100...107:
-                // bg bright color (8-15)
-                bg = Attribute.Color.ansi256(code: UInt8(p - 100 + 8))
+                // bg color 16
+                p += 8;
+                bg = Attribute.Color.ansi256(code: UInt8(p - 100))
                 
             case 58:
-                // WezTerm extension:
-                // https://wezterm.org/escape-sequences.html#csi-582-underline-color-rgb
                 i += 1
-                if pars.count > 2 {
-                    let wcode = pars[1]
-                    if wcode == 2 {
-                        // underline color RGB
-                        i += 4
-                    } else if wcode == 6 {
-                        // underline color RGBA
-                        i += 5
-                    }
+                if let parsed = parseExtendedColor() {
+                    underlineColor = parsed
                 }
+                continue
+
+            case 59:
+                // reset underline color
+                underlineColor = nil
                 
             default:
-                SwiftTermDiagnostics.emit(
-                    .debug,
-                    .terminalUnsupportedSGR,
-                    facts: ["attribute": p, "parameterCount": pars.count]
-                )
+                print ("Unknown SGR attribute: \(p) \(pars)")
             }
             i += 1
         }
-        curAttr = Attribute(fg: fg, bg: bg, style: style)
+        curAttr = Attribute(fg: fg,
+                            bg: bg,
+                            style: style,
+                            underlineStyle: underlineStyle,
+                            underlineColor: underlineColor)
     }
 
     //
@@ -3753,6 +5185,8 @@ open class Terminal {
     //    Ps = 1 0 0 3  -> Don't use All Motion Mouse Tracking.
     //    Ps = 1 0 0 4  -> Don't send FocusIn/FocusOut events.
     //    Ps = 1 0 0 5  -> Disable Extended Mouse Mode.
+    //    Ps = 1 0 0 7  -> Disable Alternate Scroll Mode, xterm.  This
+    //    corresponds to the alternateScroll resource.
     //    Ps = 1 0 1 0  -> Don't scroll to bottom on tty output
     //    (rxvt).
     //    Ps = 1 0 1 1  -> Don't scroll to bottom on key press (rxvt).
@@ -3818,6 +5252,9 @@ open class Terminal {
             case 4:
                 // IRM Insert/Replace Mode
                 setInsertMode(false)
+            case 8:
+                // BDSM explicit mode: present logical order, app does BiDi
+                updateCurrentBidiState(property: .supportMode) { $0.supportMode = .explicit }
             case 20:
                 // LNM—Line Feed/New Line Mode
                 lineFeedMode = false
@@ -3840,8 +5277,7 @@ open class Terminal {
                 smoothScroll = false
                 break
             case 5:
-                // Reset default color
-                curAttr = CharData.defaultAttr
+                setReverseColors(false)
             case 6:
                 // DECOM Reset
                 originMode = false
@@ -3857,7 +5293,7 @@ open class Terminal {
             case 45:
                 reverseWraparound = false
             case 66:
-                log ("Switching back to normal keypad.");
+                //log ("Switching back to normal keypad.");
                 applicationKeypad = false
                 syncScrollArea ()
             case 69:
@@ -3876,18 +5312,27 @@ open class Terminal {
                 mouseMode = .off
             case 1004: // send focusin/focusout events
                 sendFocus = false
+            case 1007: // alternate scroll mode (xterm's alternateScroll resource)
+                alternateScrollMode = false
+            case 2500: // box drawing mirroring off
+                updateCurrentBidiState(property: .boxMirroring) { $0.boxMirroring = false }
+            case 2501: // autodetect off: use the SPD-selected direction
+                updateCurrentBidiState(property: .autodetectDirection) { $0.autodetectDirection = false }
+            case 1243:
+                bidiArrowKeySwap = false
             case 1005: // utf8 ext mode mouse
+                // Resets the coordinate encoding only: 1005/1006/1015/1016 select how mouse
+                // events are encoded, independent of the tracking modes (9/1000-1003). xterm
+                // keeps tracking enabled when an encoding is reset; turning mouseMode off here
+                // broke clients (e.g. mosh re-asserts modes as "CSI ?1003l ?1003h ?1006l ?1006h"
+                // on every resize, which left tracking permanently disabled).
                 mouseProtocol = .x10
-                mouseMode = .off
             case 1006: // sgr ext mode mouse
                 mouseProtocol = .x10
-                mouseMode = .off
             case 1015: // urxvt ext mode mouse
                 mouseProtocol = .x10
-                mouseMode = .off
             case 1016: // sgrPixel mode
                 mouseProtocol = .x10
-                mouseMode = .off
             case 25: // hide cursor
                 hideCursor ()
             case 1048: // alt screen cursor
@@ -3913,8 +5358,9 @@ open class Terminal {
             case 2004: // bracketed paste mode (https://cirw.in/blog/bracketed-paste)
                 bracketedPasteMode = false
                 break
-
-            case 2031: // colour-scheme change reports (CSI ? 997 ; 1|2 n)
+            case 2026: // synchronized output (https://github.com/contour-terminal/vt-extensions)
+                endSynchronizedOutput ()
+            case 2031: // colour-scheme change reports
                 colorSchemeReportingEnabled = false
             default:
                 log ("Unhandled DEC Private Mode Reset (DECRST) with \(par)")
@@ -3969,6 +5415,8 @@ open class Terminal {
     //     Ps = 1 0 0 3  -> Use All Motion Mouse Tracking.
     //     Ps = 1 0 0 4  -> Send FocusIn/FocusOut events.
     //     Ps = 1 0 0 5  -> Enable Extended Mouse Mode.
+    //     Ps = 1 0 0 7  -> Enable Alternate Scroll Mode, xterm.  This
+    //     corresponds to the alternateScroll resource.
     //     Ps = 1 0 1 0  -> Scroll to bottom on tty output (rxvt).
     //     Ps = 1 0 1 1  -> Scroll to bottom on key press (rxvt).
     //     Ps = 1 0 3 4  -> Interpret "meta" key, sets eighth bit.
@@ -4035,6 +5483,9 @@ open class Terminal {
                 // IRM Insert/Replace Mode
                 // https://vt100.net/docs/vt510-rm/IRM.html
                 setInsertMode(true)
+            case 8:
+                // BDSM implicit mode: the terminal performs BiDi reordering
+                updateCurrentBidiState(property: .supportMode) { $0.supportMode = .implicit }
 //            case 12:
 //                 SRM—Local Echo: Send/Receive Mode
 //                 When implemented, hook up cmdDecRqm
@@ -4068,8 +5519,7 @@ open class Terminal {
                 smoothScroll = true
                 break
             case 5:
-                // Inverted colors
-                curAttr = CharData.invertedAttr
+                setReverseColors(true)
             case 6:
                 // DECOM Set
                 originMode = true
@@ -4081,7 +5531,7 @@ open class Terminal {
             case 40:
                 allow80To132 = true
             case 66:
-                log ("Serial port requested application keypad.")
+                //log ("Serial port requested application keypad.")
                 applicationKeypad = true
                 syncScrollArea ()
             case 9:
@@ -4113,6 +5563,14 @@ open class Terminal {
                    // focusin: ^[[I
                    // focusout: ^[[O
                 sendFocus = true
+            case 1007: // alternate scroll mode (xterm's alternateScroll resource)
+                alternateScrollMode = true
+            case 2500: // box drawing mirroring (terminal-wg)
+                updateCurrentBidiState(property: .boxMirroring) { $0.boxMirroring = true }
+            case 2501: // autodetect paragraph direction (terminal-wg)
+                updateCurrentBidiState(property: .autodetectDirection) { $0.autodetectDirection = true }
+            case 1243:
+                bidiArrowKeySwap = true
             case 1005:
                 // utf8 ext mode mouse
                 mouseProtocol = .utf8
@@ -4150,8 +5608,9 @@ open class Terminal {
             case 2004: // bracketed paste mode (https://cirw.in/blog/bracketed-paste)
                 // TODO: must implement bracketed paste mode
                 bracketedPasteMode = true
-
-            case 2031: // colour-scheme change reports (CSI ? 997 ; 1|2 n)
+            case 2026: // synchronized output (https://github.com/contour-terminal/vt-extensions)
+                beginSynchronizedOutput ()
+            case 2031: // colour-scheme change reports
                 colorSchemeReportingEnabled = true
             default:
                 log ("Unhandled DEC Private Mode Set (DECSET) with \(par)")
@@ -4438,22 +5897,39 @@ open class Terminal {
         let p = min (max (pars.count == 0 ? 1 : pars [0], 1), rows)
         let da = CharData.defaultAttr
 
-        let row = buffer.scrollTop + buffer.yBase
+        if marginMode {
+            let row = buffer.scrollTop + buffer.yBase
 
-        let columnCount = buffer.marginRight-buffer.marginLeft+1
-        let rowCount = buffer.scrollBottom-buffer.scrollTop
-        for _ in 0..<p {
-            for i in (0..<rowCount).reversed() {
-                let src = buffer.lines [row+i]
-                let dst = buffer.lines [row+i+1]
-                
-                dst.copyFrom(src, srcCol: buffer.marginLeft, dstCol: buffer.marginLeft, len: columnCount)
+            let columnCount = buffer.marginRight-buffer.marginLeft+1
+            let rowCount = buffer.scrollBottom-buffer.scrollTop
+            for _ in 0..<p {
+                for i in (0..<rowCount).reversed() {
+                    let src = buffer.lines [row+i]
+                    let dst = buffer.lines [row+i+1]
+
+                    dst.copyFrom(src, srcCol: buffer.marginLeft, dstCol: buffer.marginLeft, len: columnCount)
+                }
+                let last = buffer.lines [row]
+                last.fill (with: CharData (attribute: da), atCol: buffer.marginLeft, len: columnCount)
             }
-            let last = buffer.lines [row]
-            last.fill (with: CharData (attribute: da), atCol: buffer.marginLeft, len: columnCount)
+
+            selectionsInvalidateForColumnRestrictedScroll (top: row, bottom: row + rowCount, left: buffer.marginLeft, right: buffer.marginRight)
+        } else {
+            for _ in 0..<p {
+                buffer.lines.splice (start: buffer.yBase + buffer.scrollBottom, deleteCount: 1,
+                                     items: [], change: { line in updateRange (line)})
+                buffer.lines.splice (start: buffer.yBase + buffer.scrollTop, deleteCount: 0,
+                                     items: [buffer.getBlankLine (attribute: da)],
+                                     change: { line in updateRange (line) })
+            }
+
+            let top = buffer.yBase + buffer.scrollTop
+            let bottom = buffer.yBase + buffer.scrollBottom
+            selectionsAdjustForInPlaceScroll (top: top, bottom: bottom, lines: -p)
         }
+        hardenBidiScrollBoundaries(insertedAtTop: true, count: p)
         // this.maxRange();
-        updateRange (startLine: buffer.scrollTop, endLine: buffer.scrollBottom)
+        refreshScrolledRegion(top: buffer.scrollTop, bottom: buffer.scrollBottom, canBlit: false)
     }
 
     //
@@ -4479,6 +5955,8 @@ open class Terminal {
                 let last = buffer.lines [row+rowCount]
                 last.fill (with: CharData (attribute: da), atCol: buffer.marginLeft, len: columnCount)
             }
+
+            selectionsInvalidateForColumnRestrictedScroll (top: row, bottom: row + rowCount, left: buffer.marginLeft, right: buffer.marginRight)
         } else {
             for _ in 0..<p {
                 buffer.lines.splice (start: buffer.yBase + buffer.scrollTop, deleteCount: 1,
@@ -4487,9 +5965,51 @@ open class Terminal {
                                      items: [buffer.getBlankLine (attribute: da)],
                                      change: { line in updateRange (line) })
             }
+
+            let top = buffer.yBase + buffer.scrollTop
+            let bottom = buffer.yBase + buffer.scrollBottom
+            selectionsAdjustForInPlaceScroll (top: top, bottom: bottom, lines: p)
         }
+        hardenBidiScrollBoundaries(insertedAtTop: false, count: p)
         // this.maxRange();
-        updateRange (startLine: buffer.scrollTop, endLine: buffer.scrollBottom)
+        refreshScrolledRegion(top: buffer.scrollTop, bottom: buffer.scrollBottom, canBlit: false)
+    }
+
+    private func hardenBidiScrollBoundaries(insertedAtTop: Bool, count: Int) {
+        let top = buffer.yBase + buffer.scrollTop
+        let bottom = buffer.yBase + buffer.scrollBottom
+        guard top >= 0, top < buffer.lines.count else {
+            return
+        }
+        buffer.lines[top].isWrapped = false
+        let regionHeight = bottom - top + 1
+        if insertedAtTop, count < regionHeight {
+            let firstMovedRow = top + count
+            if firstMovedRow < buffer.lines.count {
+                buffer.lines[firstMovedRow].isWrapped = false
+            }
+        }
+        if bottom + 1 < buffer.lines.count {
+            buffer.lines[bottom + 1].isWrapped = false
+        }
+    }
+
+    /// Line insertion and deletion preserve the state stored with moved rows,
+    /// but they change which rows are adjacent. Break each new seam so a moved
+    /// continuation row cannot attach to a blank or unrelated row.
+    private func hardenBidiLineShiftBoundaries(firstChangedRow: Int,
+                                                firstMovedRow: Int?,
+                                                lastChangedRow: Int) {
+        if firstChangedRow >= 0, firstChangedRow < buffer.lines.count {
+            buffer.lines[firstChangedRow].isWrapped = false
+        }
+        if let firstMovedRow,
+           firstMovedRow >= 0, firstMovedRow < buffer.lines.count {
+            buffer.lines[firstMovedRow].isWrapped = false
+        }
+        if lastChangedRow + 1 < buffer.lines.count {
+            buffer.lines[lastChangedRow + 1].isWrapped = false
+        }
     }
 
     //
@@ -4550,6 +6070,8 @@ open class Terminal {
                     let last = buffer.lines [row+rowCount]
                     last.fill (with: CharData (attribute: ea), atCol: buffer.marginLeft, len: columnCount)
                 }
+
+                selectionsInvalidateForColumnRestrictedScroll (top: row, bottom: row + rowCount, left: buffer.marginLeft, right: buffer.marginRight)
             }
         } else {
             if buffer.y >= buffer.scrollTop && buffer.y <= buffer.scrollBottom {
@@ -4561,11 +6083,22 @@ open class Terminal {
                                          items: [buffer.getBlankLine (attribute: ea)],
                                          change: { line in updateRange (line)})
                 }
+
+                // Rows below the cursor moved up in place.
+                selectionsAdjustForInPlaceScroll (top: row, bottom: j, lines: p)
+                hardenBidiLineShiftBoundaries(firstChangedRow: row,
+                                               firstMovedRow: nil,
+                                               lastChangedRow: j)
             }
         }
         
         // this.maxRange();
         updateRange (startLine: buffer.y, endLine: buffer.scrollBottom)
+        // A restricted region leaves stale pixels / a bottom-edge ghost outside
+        // [y, scrollBottom] on the CG renderer (as in scroll()); the range above
+        // already covers full-screen, so widen to the whole viewport only when the
+        // region is restricted.
+        refreshScrolledRegion(top: buffer.scrollTop, bottom: buffer.scrollBottom, canBlit: true)
     }
 
     //
@@ -4609,9 +6142,13 @@ open class Terminal {
     // The cell gets replaced with the eraseChar of the terminal and the isWrapped property is set to false.
     // @param y row index
     //
-    func resetBufferLine (y: Int)
+    func resetBufferLine (y: Int, clearImages: Bool = false,
+                          bidiState: BidiPresentationState? = nil)
     {
-        eraseInBufferLine (y: y, start: 0, end: cols, clearWrap: true, clearRenderMode: true)
+        eraseInBufferLine (y: y, start: 0, end: cols, clearWrap: true, clearRenderMode: true, clearImages: clearImages)
+        if let bidiState {
+            buffer.lines[buffer.yBase + y].bidiState = bidiState
+        }
         updateRange(y)
     }
 
@@ -4639,25 +6176,29 @@ open class Terminal {
             } else if let c = item as? UInt8 {
                 buffer.append (c)
             } else {
-                SwiftTermDiagnostics.emit(.fault, .terminalSendResponseTypeInvariant)
+                log ("Do not know how to handle type \(item)")
             }
         }
         tdel?.send (source: self, data: buffer[...])
     }
     
+#if DEBUG
     public var silentLog = false
+#else
+    public var silentLog = true
+#endif
     
     func error (_ text: String)
     {
         if !silentLog {
-            SwiftTermDiagnostics.emit(.warning, .parserStateError)
+            print("Error: \(text)")
         }
     }
     
     func log (_ text: String)
     {
         if !silentLog {
-            SwiftTermDiagnostics.emit(.debug, .terminalUnsupportedSequence)
+            print("Info: \(text)")
         }
     }
     
@@ -4710,7 +6251,7 @@ open class Terminal {
     func updateRange (_ y: Int, scrolling: Bool = false)
     {        
         if !scrolling {
-            let effectiveY = buffer.yDisp + y
+            let effectiveY = buffer._yDisp + y
             if effectiveY >= 0 {
                 if effectiveY < scrollInvariantRefreshStart {
                     scrollInvariantRefreshStart = effectiveY
@@ -4730,7 +6271,31 @@ open class Terminal {
             }
         }
     }
-    
+
+    func updateRange (borrowing buffer: borrowing Buffer, _ y: Int, scrolling: Bool = false)
+    {
+        if !scrolling {
+            let effectiveY = buffer._yDisp + y
+            if effectiveY >= 0 {
+                if effectiveY < scrollInvariantRefreshStart {
+                    scrollInvariantRefreshStart = effectiveY
+                }
+                if effectiveY > scrollInvariantRefreshEnd {
+                    scrollInvariantRefreshEnd = effectiveY
+                }
+            }
+        }
+
+        if y >= 0 {
+            if y < refreshStart {
+                refreshStart = y
+            }
+            if y > refreshEnd {
+                refreshEnd = y
+            }
+        }
+    }
+
     func updateRange (startLine: Int, endLine: Int, scrolling: Bool = false)
     {
         updateRange (startLine, scrolling: scrolling)
@@ -4771,13 +6336,15 @@ open class Terminal {
      * available by scrolling.
      */
     public func garbageCollectPayload() {
-        // stop right away if there is nothing to collect
-        if TinyAtom.lastCollected == TinyAtom.lastUsed {
+        if payloadCodes.isEmpty {
             return
         }
         
         // check all atoms used in both buffers
         var used = Set<UInt16>()
+        if let activeHyperlink, case .resolved(let atom) = activeHyperlink {
+            used.insert(atom.code)
+        }
         for buffer in [normalBuffer, altBuffer] {
             // TODO use a better system than this ugly nest
             for line in buffer.lines.getArray() {
@@ -4792,16 +6359,10 @@ open class Terminal {
             }
         }
         
-        // since we create atoms in order we expect them to run out of use
-        // in order as well and stop with first atom that is still in use
-        for code in UInt16(TinyAtom.lastCollected + 1)...UInt16(TinyAtom.lastUsed) {
-            if used.contains(code) {
-                // code still in use
-                break
-            }
-            
-            TinyAtom.lastCollected = Int(code)
-            TinyAtom.release(code: code)
+        let released = payloadCodes.subtracting(used)
+        if !released.isEmpty {
+            TinyAtom.release(codes: released)
+            payloadCodes.subtract(released)
         }
     }
     
@@ -4854,13 +6415,26 @@ open class Terminal {
     /// for a soft reset see `softReset`
     public func resetToInitialState ()
     {
+        setCurrentBidiState(options.initialBidiState)
+        bidiArrowKeySwap = options.initialBidiArrowKeySwap
+        savedBidiPrivateModes.removeAll()
+        endSynchronizedOutput ()
         options.rows = rows
         options.cols = cols
         let savedCursorHidden = cursorHidden
         setup (isReset: true)
+        clearAllKittyImages()
         cursorHidden = savedCursorHidden
         refresh (startRow: 0, endRow: rows-1)
         syncScrollArea ()
+        // A full reset replaces the buffer, so the view's scroll geometry — which
+        // is derived from `lines.count` and `yDisp` — is stale. `syncScrollArea()`
+        // is a no-op stub, and none of the other paths that recompute it fire
+        // here (no buffer switch, no scrolled line, no keystroke, no resize), so
+        // notify explicitly. Without this the view keeps the contentSize and
+        // contentOffset of a buffer that no longer exists and renders blank until
+        // some unrelated layout pass happens to correct it.
+        tdel?.bufferActivated (source: self)
     }
 
     // Support for:
@@ -4911,48 +6485,125 @@ open class Terminal {
     func cmdIndex ()
     {
         restrictCursor()
-        
+
         let buffer = self.buffer
         let newY = buffer.y + 1
+
+        // When left/right margins are active, only scroll if cursor is within margins
+        let canScroll = !marginMode || (buffer.x >= buffer.marginLeft && buffer.x <= buffer.marginRight)
+
+        var movedToNextLine = false
         if newY > buffer.scrollBottom {
-            scroll ()
+            if canScroll {
+                scroll ()
+                movedToNextLine = true
+            }
         } else {
             buffer.y = newY
+            movedToNextLine = true
         }
         // If the end of the line is hit, prevent this action from wrapping around to the next line
         if buffer.x > cols {
             buffer.x -= 1
         }
+        finishSemanticLineAdvance(movedToNextLine: movedToNextLine)
     }
     
     var blankLine: BufferLine = BufferLine(cols: 0)
     
+    /// Flag the scrolled region dirty. The CoreGraphics renderer now clears any
+    /// dirtied region before painting (see AppleTerminalView), so flagging just
+    /// [top, bottom] fixes the stale rows / bottom ghost — no whole-viewport repaint
+    /// needed. Full-screen + scrollback (`canBlit`) keeps the cheap path.
+    private func refreshScrolledRegion(top: Int, bottom: Int, canBlit: Bool) {
+        if top != 0 || bottom != rows - 1 || !canBlit {
+            updateRange(startLine: top, endLine: bottom)
+        }
+    }
+
     public func scroll (isWrapped: Bool = false)
     {
         let buffer = self.buffer
+        let lines = buffer.lines
+        let scrollTop = buffer.scrollTop
+        let scrollBottom = buffer.scrollBottom
+        let bMarginLeft = buffer.marginLeft
+        let bMarginRight = buffer.marginRight
+        let hasScrollback = buffer.hasScrollback
+        let topRow = buffer.yBase + scrollTop
+        let bottomRow = buffer.yBase + scrollBottom
+        let newLineState: BidiPresentationState
+        if isWrapped, bottomRow >= 0, bottomRow < lines.count {
+            newLineState = lines[bottomRow].bidiState
+        } else {
+            newLineState = currentBidiState
+        }
+
         var newLine = blankLine
         if newLine.count != cols || newLine [0].attribute != eraseAttr () {
             newLine = buffer.getBlankLine (attribute: eraseAttr (), isWrapped: isWrapped)
             blankLine = newLine
         }
         newLine.isWrapped = isWrapped
+        newLine.bidiState = newLineState
 
-        let topRow = buffer.yBase + buffer.scrollTop
-        let bottomRow = buffer.yBase + buffer.scrollBottom
+        // When margin mode is active with left/right margins that are narrower than full width,
+        // we cannot use scrollback (can't push partial lines), so we do in-place scrolling
+        // within the margin columns only. This path is unconditional when narrow margins are
+        // active, regardless of cursor position, to ensure consistent behavior.
+        let hasNarrowMargins = marginMode && (bMarginLeft > 0 || bMarginRight < cols - 1)
+        if hasNarrowMargins {
+            let scrollRegionHeight = bottomRow - topRow + 1
+            let columnCount = bMarginRight - bMarginLeft + 1
+            let ea = eraseAttr()
 
-        if buffer.scrollTop == 0 {
+            // Shift content up within the margin columns only.
+            //
+            // LIMITATION: Line-level metadata (isWrapped, images, renderMode) cannot be
+            // partially scrolled, so we reset them on all affected lines.
+            //
+            // Ideally, isWrapped would be tracked per-column-range so that triple-click
+            // selection in one pane selects the wrapped logical line within that pane only.
+            // However, isWrapped is currently a per-BufferLine property (spanning all columns),
+            // so there's no way to represent "wrapped in cols 0-39, not wrapped in cols 40-79".
+            // Implementing column-aware wrapping would require architectural changes to the
+            // data model. For now, we clear isWrapped since partial-column scrolling breaks
+            // the line-level wrapping semantic.
+            //
+            for i in 0..<(scrollRegionHeight - 1) {
+                let src = lines[topRow + i + 1]
+                let dst = lines[topRow + i]
+                dst.copyFrom(src, srcCol: bMarginLeft, dstCol: bMarginLeft, len: columnCount)
+                dst.isWrapped = false
+                dst.bidiState = src.bidiState
+                buffer.clearImagesFromLine(at: topRow + i)
+                dst.renderMode = .single
+            }
+
+            // Clear the bottom row within the margin columns.
+            let bottomLine = lines[bottomRow]
+            bottomLine.fill(with: CharData(attribute: ea), atCol: bMarginLeft, len: columnCount)
+            bottomLine.isWrapped = false
+            bottomLine.bidiState = currentBidiState
+            buffer.clearImagesFromLine(at: bottomRow)
+            bottomLine.renderMode = .single
+
+            selectionsInvalidateForColumnRestrictedScroll (top: topRow, bottom: bottomRow, left: bMarginLeft, right: bMarginRight)
+        } else if scrollTop == 0 {
             // Determine whether the buffer is going to be trimmed after insertion.
-            let willBufferBeTrimmed = buffer.lines.isFull
+            let willBufferBeTrimmed = lines.isFull
 
             // Insert the line using the fastest method
-            if bottomRow == buffer.lines.count - 1 {
+            if bottomRow == lines.count - 1 {
                 if willBufferBeTrimmed {
-                    buffer.lines.recycle ()
+                    lines.recycle (clearAttribute: eraseAttr())
+                    lines[lines.count - 1].isWrapped = isWrapped
+                    lines[lines.count - 1].bidiState = newLineState
                 } else {
-                    buffer.lines.push (BufferLine (from: newLine))
+                    lines.push (BufferLine (from: newLine))
                 }
             } else {
-                buffer.lines.splice (start: bottomRow + 1, deleteCount: 0,
+                lines.splice (start: bottomRow + 1, deleteCount: 0,
                                      items: [BufferLine (from: newLine)],
                                      change: { line in updateRange (line)})
             }
@@ -4965,10 +6616,14 @@ open class Terminal {
                     buffer.yDisp += 1
                 }
             } else {
-                if buffer.hasScrollback {
+                if hasScrollback {
                     buffer.linesTop += 1
                 }
-                
+
+                // Recycling removes the first buffer row and shifts every
+                // remaining row up without changing yDisp.
+                selectionsAdjustForInPlaceScroll (top: 0, bottom: lines.count - 1, lines: 1)
+
                 // When the buffer is full and the user has scrolled up, keep the text
                 // stable unless ydisp is right at the top
                 if userScrolling {
@@ -4978,23 +6633,25 @@ open class Terminal {
         } else {
             // scrollTop is non-zero which means no line will be going to the
             // scrollback, instead we can just shift them in-place.
+
+            // Ensure the indices are within bounds to prevent crash (related to issue #256)
+            // This can happen when the buffer has been trimmed and yBase is stale
+            guard bottomRow < lines.count else {
+                print ("scroll: bottomRow \(bottomRow) >= lines.count \(lines.count), state: yBase=\(buffer.yBase) scrollTop=\(scrollTop) scrollBottom=\(scrollBottom) isAlternate=\(isCurrentBufferAlternate)")
+                return
+            }
+
             let scrollRegionHeight = bottomRow - topRow + 1 /*as it's zero-based*/
             if scrollRegionHeight > 1 {
-                if !buffer.lines.shiftElements (start: topRow + 1, count: scrollRegionHeight - 1, offset: -1) {
-                    SwiftTermDiagnostics.emit(
-                        .fault,
-                        .terminalScrollInvariant,
-                        facts: [
-                            "bottomRow": bottomRow,
-                            "topRow": topRow,
-                            "displayRow": buffer.yDisp,
-                            "linesTop": buffer.linesTop,
-                            "alternate": isCurrentBufferAlternate ? 1 : 0
-                        ]
-                    )
+                if !lines.shiftElements (start: topRow + 1, count: scrollRegionHeight - 1, offset: -1) {
+                    print ("Assertion on scroll, state was: bottomRow=\(bottomRow) topRow=\(topRow) yDisp=\(buffer.yDisp) linesTop=\(buffer.linesTop) isAlternate=\(isCurrentBufferAlternate)")
                 }
             }
-            buffer.lines [bottomRow] = BufferLine (from: newLine)
+            lines [bottomRow] = BufferLine (from: newLine)
+
+            // The rows moved but yDisp did not, so any selection anchored to
+            // absolute rows in this region now points at different text.
+            selectionsAdjustForInPlaceScroll (top: topRow, bottom: bottomRow, lines: 1)
         }
 
         // Move the viewport to the bottom of the buffer unless the user is
@@ -5005,11 +6662,13 @@ open class Terminal {
 
         //buffer.dump ()
         // Flag rows that need updating
-        updateRange (buffer.scrollTop, scrolling: true)
-        updateRange (buffer.scrollBottom, scrolling: true)
-        
-        if !buffer.hasScrollback {
-            updateRange(startLine: buffer.scrollTop, endLine: buffer.scrollBottom)
+        updateRange (scrollTop, scrolling: true)
+        updateRange (scrollBottom, scrolling: true)
+
+        refreshScrolledRegion(top: scrollTop, bottom: scrollBottom, canBlit: hasScrollback)
+
+        if buffer.hasAnyImages {
+            updateKittyRelativePlacementsForCurrentBuffer()
         }
 
         /**
@@ -5039,8 +6698,9 @@ open class Terminal {
     func setgLevel (_ v: UInt8)
     {
         gLevel = v
-        if let cs = CharSets.all [v] {
-            charset = cs
+        let index = Int(v)
+        if index < gCharsets.count {
+            charset = gCharsets[index]
         } else {
             charset = nil
         }
@@ -5098,7 +6758,11 @@ open class Terminal {
     
     func setgCharset (_ v: UInt8, charset: [UInt8: String]?)
     {
-        CharSets.all [v] = charset
+        let index = Int(v)
+        if index >= gCharsets.count {
+            return
+        }
+        gCharsets[index] = charset
         if gLevel == v {
             self.charset = charset
         }
@@ -5111,6 +6775,7 @@ open class Terminal {
         if newCols == self.cols && newRows == self.rows {
             return
         }
+        endSynchronizedOutput ()
         let oldCols = self.cols
         resizeBuffers(newColumns: newCols, newRows: newRows)
         self.cols = newCols
@@ -5123,7 +6788,35 @@ open class Terminal {
         altBuffer.setupTabStops (index: oldCols, tabStopWidth: tabStopWidth)
         refresh (startRow: 0, endRow: self.rows - 1)
     }
-    
+
+    /**
+     * Changes the scrollback size of the terminal after it has been instantiated.
+     * The new scrollback size only affects the normal buffer, not the alternate buffer.
+     *
+     * - Parameter newScrollback: The new scrollback size in lines. Pass `nil` to disable scrollback.
+     */
+    /// Discards the scrollback history (the lines scrolled off the top of the
+    /// visible screen) without clearing the visible screen or changing the
+    /// configured scrollback capacity
+    public func clearScrollback ()
+    {
+        // Only the normal buffer has scrollback
+        normalBuffer.clearScrollback ()
+        refresh (startRow: 0, endRow: self.rows - 1)
+    }
+
+    public func changeScrollback (_ newScrollback: Int?)
+    {
+        // Only the normal buffer has scrollback, the alt buffer should never have scrollback.
+        normalBuffer.changeHistorySize(newScrollback)
+
+        // Update the options to reflect the new scrollback size.
+        options.scrollback = newScrollback ?? 0
+
+        // Refresh the display to ensure proper rendering after scrollback size change.
+        refresh (startRow: 0, endRow: self.rows - 1)
+    }
+
     /**
      * Changes the scrollback (history) size of the terminal after it has been instantiated.
      * The new scrollback size only affects the normal buffer, not the alternate buffer.
@@ -5132,19 +6825,55 @@ open class Terminal {
      */
     public func changeHistorySize (_ newScrollback: Int?)
     {
-        // Only the normal buffer has scrollback, the alt buffer should never have scrollback
-        normalBuffer.changeHistorySize(newScrollback)
-        
-        // Update the options to reflect the new scrollback size
-        options.scrollback = newScrollback ?? 0
-        
-        // Refresh the display to ensure proper rendering after history size change
-        refresh (startRow: 0, endRow: self.rows - 1)
+        changeScrollback(newScrollback)
     }
     
     func syncScrollArea ()
     {
         // This should call the viewport sync-scroll-area
+    }
+
+    // Mirrors ghostty: flip a flag and arm a safety timer. The view layer pauses
+    // rendering while the flag is set (see updateDisplay's early-return). The
+    // live buffer is mutated normally; no snapshot is taken.
+    private func beginSynchronizedOutput ()
+    {
+        let wasActive = synchronizedOutputActive
+        synchronizedOutputActive = true
+        scheduleSynchronizedOutputTimeout()
+        if !wasActive {
+            tdel?.synchronizedOutputChanged(source: self, active: true)
+        }
+    }
+
+    private func endSynchronizedOutput ()
+    {
+        guard synchronizedOutputActive else {
+            return
+        }
+        synchronizedOutputActive = false
+        synchronizedOutputTimeoutItem?.cancel()
+        synchronizedOutputTimeoutItem = nil
+        refresh (startRow: 0, endRow: rows - 1)
+        tdel?.synchronizedOutputChanged(source: self, active: false)
+    }
+
+    private func scheduleSynchronizedOutputTimeout ()
+    {
+        synchronizedOutputTimeoutItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.synchronizedOutputActive else {
+                return
+            }
+            self.endSynchronizedOutput()
+        }
+        synchronizedOutputTimeoutItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + synchronizedOutputTimeoutSeconds, execute: workItem)
+    }
+
+    func setViewYDisp (_ newValue: Int)
+    {
+        buffer.yDisp = newValue
     }
 
     /**
@@ -5195,6 +6924,19 @@ open class Terminal {
         }
     }
     
+    // XTSHIFTESCAPE (CSI > Ps s)
+    func cmdSetShiftEscape (_ pars: [Int]) {
+        let ps = pars.isEmpty ? 0 : pars[0]
+        switch ps {
+        case 0:
+            mouseShiftCapture = false
+        case 1:
+            mouseShiftCapture = true
+        default:
+            break
+        }
+    }
+
     /**
      * Encodes the button action in the format expected by the client
      * - Parameter button: The button to encode
@@ -5244,22 +6986,6 @@ open class Terminal {
       sendEvent(buttonFlags: buttonFlags, x: x, y: y, pixelX: x, pixelY: y)
     }
     
-    /// Bit 6 of `Cb`: the event is pointer motion rather than a button transition. Only
-    /// `sendMotion` sets it, and no button number or modifier bit shares it.
-    static let mouseMotionFlag = 32
-
-    /// True only for a button *release*, the one event SGR reports with a lowercase final byte.
-    ///
-    /// `Cb & 3 == 3` reads "no button", which a release and a no-button motion both encode —
-    /// so testing those bits alone reported every hover as `CSI <32;x;y m`, a left-button
-    /// release under the pointer. A TUI that toggles a row on mouse-up then toggled it on each
-    /// pixel the pointer moved, which is how a hover highlight turned into a flicker between
-    /// open and closed. The motion flag is what separates the two.
-    private func isButtonRelease (_ buttonFlags: Int) -> Bool
-    {
-        (buttonFlags & Terminal.mouseMotionFlag) == 0 && (buttonFlags & 3) == 3
-    }
-
     /**
      * Sends a mouse event for a specific button at the specific location
      * - Parameter buttonFlags: Button flags encoded in Cb mode.
@@ -5271,18 +6997,18 @@ open class Terminal {
         //print ("got \(mouseProtocol)")
         switch mouseProtocol {
         case .x10:
-            sendResponse(cc.CSI, "M", [UInt8(buttonFlags+32), min (UInt8(255), UInt8(32 + x+1)), min (UInt8(255), UInt8(32+y+1))])
+            sendResponse(cc.CSI, "M", [UInt8(min(buttonFlags+32, 255)), UInt8(min(32 + x+1, 255)), UInt8(min(32+y+1, 255))])
         case .sgr:
-            let release = isButtonRelease (buttonFlags)
-            let bflags : Int = release ? (buttonFlags & ~3) : buttonFlags
-            let m = release ? "m" : "M"
+            let isRelease = (buttonFlags & 3) == 3 && (buttonFlags & 32) == 0
+            let bflags : Int = isRelease ? (buttonFlags & ~3) : buttonFlags
+            let m = isRelease ? "m" : "M"
             sendResponse(cc.CSI, "<\(bflags);\(x+1);\(y+1)\(m)")
         case .sgrPixel:
-            let release = isButtonRelease (buttonFlags)
-            let bflags : Int = release ? (buttonFlags & ~3) : buttonFlags
-            let m = release ? "m" : "M"
+            let isRelease = (buttonFlags & 3) == 3 && (buttonFlags & 32) == 0
+            let bflags : Int = isRelease ? (buttonFlags & ~3) : buttonFlags
+            let m = isRelease ? "m" : "M"
             sendResponse(cc.CSI, "<\(bflags);\(pixelX);\(pixelY)\(m)")
-
+            
         case .urxvt:
             sendResponse(cc.CSI, "\(buttonFlags+32);\(x+1);\(y+1)M");
         case .utf8:
@@ -5333,26 +7059,65 @@ open class Terminal {
     {
         let buffer = self.buffer
         restrictCursor()
+
+        // When left/right margins are active, only scroll if cursor is within margins
+        let canScroll = !marginMode || (buffer.x >= buffer.marginLeft && buffer.x <= buffer.marginRight)
+        
+
         if buffer.y == buffer.scrollTop {
-            // possibly move the code below to term.reverseScroll()
-            // test: echo -ne '\e[1;1H\e[44m\eM\e[0m'
-            // blankLine(true) is xterm/linux behavior
-            let scrollRegionHeight = buffer.scrollBottom - buffer.scrollTop
-            if !buffer.lines.shiftElements (start: buffer.y + buffer.yBase, count: scrollRegionHeight, offset: 1) {
-                SwiftTermDiagnostics.emit(
-                    .fault,
-                    .terminalReverseIndexInvariant,
-                    facts: [
-                        "row": buffer.y,
-                        "scrollTop": buffer.scrollTop,
-                        "displayRow": buffer.yDisp,
-                        "linesTop": buffer.linesTop,
-                        "alternate": isCurrentBufferAlternate ? 1 : 0
-                    ]
-                )
+            if canScroll {
+                // possibly move the code below to term.reverseScroll()
+                // test: echo -ne '\e[1;1H\e[44m\eM\e[0m'
+                // blankLine(true) is xterm/linux behavior
+                let topRow = buffer.yBase + buffer.scrollTop
+                let bottomRow = buffer.yBase + buffer.scrollBottom
+
+                // Ensure the start index is within bounds to prevent crash (issue #256)
+                // This can happen when the buffer has been trimmed and yBase is stale
+                guard topRow < buffer.lines.count else {
+                    print ("reverseIndex: start index \(topRow) >= lines.count \(buffer.lines.count), state: y=\(buffer.y) yBase=\(buffer.yBase) scrollTop=\(buffer.scrollTop) scrollBottom=\(buffer.scrollBottom) isAlternate=\(isCurrentBufferAlternate)")
+                    return
+                }
+
+                let hasNarrowMargins = marginMode && (buffer.marginLeft > 0 || buffer.marginRight < cols - 1)
+
+                if hasNarrowMargins {
+                    // Do in-place reverse scrolling within margin columns only
+                    let scrollRegionHeight = bottomRow - topRow + 1
+                    let columnCount = buffer.marginRight - buffer.marginLeft + 1
+                    let ea = eraseAttr()
+
+                    // Shift content down within the margin columns (reverse of scroll)
+                    for i in stride(from: scrollRegionHeight - 1, through: 1, by: -1) {
+                        let src = buffer.lines[topRow + i - 1]
+                        let dst = buffer.lines[topRow + i]
+                        dst.copyFrom(src, srcCol: buffer.marginLeft, dstCol: buffer.marginLeft, len: columnCount)
+                        dst.isWrapped = false
+                        buffer.clearImagesFromLine(at: topRow + i)
+                        dst.renderMode = .single
+                    }
+
+                    // Clear the top row within the margin columns
+                    let topLine = buffer.lines[topRow]
+                    topLine.fill(with: CharData(attribute: ea), atCol: buffer.marginLeft, len: columnCount)
+                    topLine.isWrapped = false
+                    buffer.clearImagesFromLine(at: topRow)
+                    topLine.renderMode = .single
+
+                    selectionsInvalidateForColumnRestrictedScroll (top: topRow, bottom: bottomRow, left: buffer.marginLeft, right: buffer.marginRight)
+                } else {
+                    // Full-width scrolling - use original shiftElements approach
+                    let scrollRegionHeight = buffer.scrollBottom - buffer.scrollTop
+                    if !buffer.lines.shiftElements (start: topRow, count: scrollRegionHeight, offset: 1) {
+                        print ("Assertion on reverseIndex, state was: y=\(buffer.y) scrollTop=\(buffer.scrollTop)  yDisp=\(buffer.yDisp) linesTop=\(buffer.linesTop) isAlternate=\(isCurrentBufferAlternate)")
+                    }
+                    buffer.lines [topRow] = buffer.getBlankLine (attribute: eraseAttr ())
+
+                    // Lines moved down in place; translate selections with them.
+                    selectionsAdjustForInPlaceScroll (top: topRow, bottom: bottomRow, lines: -1)
+                }
+                refreshScrolledRegion(top: buffer.scrollTop, bottom: buffer.scrollBottom, canBlit: false)
             }
-            buffer.lines [buffer.y + buffer.yBase] = buffer.getBlankLine (attribute: eraseAttr ())
-            updateRange (startLine: buffer.scrollTop, endLine: buffer.scrollBottom)
         } else if buffer.y > 0 {
             buffer.y -= 1
         }
@@ -5388,6 +7153,21 @@ open class Terminal {
         return l
     }
     
+    /// A bounded read of recent buffer text, with the position a follow-up read resumes from.
+    public struct RecentBufferText: Equatable {
+        /// The recent complete logical lines, oldest first.
+        public let text: String
+        /// One past the newest row examined, counted from the first line the emulator ever
+        /// produced so the value survives scrollback trimming. Feed it back as
+        /// `sinceAbsoluteRow` to read only what has appeared since.
+        public let nextAbsoluteRow: Int
+
+        public init (text: String, nextAbsoluteRow: Int) {
+            self.text = text
+            self.nextAbsoluteRow = nextAbsoluteRow
+        }
+    }
+
     /// Specified the kind of buffer is being requested from the terminal
     public enum BufferKind {
         /// The currently active buffer (can be either normal or alt)
@@ -5397,7 +7177,36 @@ open class Terminal {
         /// The alternate buffer, regardless of which buffer is active
         case alt
     }
-    
+
+    /// Location type for link lookup requests.
+    public enum LinkLookupLocation {
+        /// Buffer coordinates (absolute row/col in the active display buffer).
+        case buffer(Position)
+        /// Screen coordinates (row/col relative to the visible viewport).
+        case screen(Position)
+    }
+
+    /// Link lookup behavior for explicit hyperlinks and implicit detection.
+    public enum LinkLookupMode {
+        /// Only look for explicit hyperlink payloads.
+        case explicitOnly
+        /// Look for explicit hyperlinks first, then fall back to implicit detection.
+        case explicitAndImplicit
+    }
+
+    struct LinkMatch {
+        struct RowRange: Equatable {
+            let row: Int
+            let range: Range<Int>
+        }
+
+        let text: String
+        let row: Int
+        let range: Range<Int>
+        let isExplicit: Bool
+        let rowRanges: [RowRange]
+    }
+
     func bufferFromKind (kind: BufferKind) -> Buffer
     {
         switch kind {
@@ -5430,63 +7239,93 @@ open class Terminal {
         return result
     }
 
-    /// Returns the recent complete logical lines in the terminal buffer, bounded by their UTF-8
-    /// representation.
+    /// Returns a UTF-8-bounded suffix of complete logical lines. Soft-wrapped
+    /// grid rows are joined, while real line breaks remain separators. An
+    /// incomplete oldest logical line is omitted instead of returned as a
+    /// misleading fragment.
+    public func getRecentLogicalBufferText(maximumUTF8Bytes: Int,
+                                           kind: BufferKind = .active) -> String
+    {
+        getRecentLogicalBufferText(
+            maximumUTF8Bytes: maximumUTF8Bytes,
+            sinceAbsoluteRow: 0,
+            kind: kind
+        ).text
+    }
+
+    /// The incremental form of `getRecentLogicalBufferText(maximumUTF8Bytes:kind:)`.
     ///
-    /// `getBufferAsData` is a presentation export: it puts a newline after every grid row. That
-    /// is the right shape for a screen snapshot and the wrong one for consumers looking for
-    /// semantic text, because a terminal's automatic wrap is not a line break. This variant
-    /// joins rows whose `isWrapped` bit says they continue the preceding row, while preserving
-    /// real line breaks between logical lines.
+    /// The byte bound limits how much text is *returned*. It cannot limit how much is *read*: a
+    /// blank row costs one separator byte, and a terminal's scrollback is mostly blank and short
+    /// rows, so the budget is never spent and the walk reaches row zero. A caller polling a live
+    /// session therefore translated its entire scrollback on every pass to assemble a few tens of
+    /// kilobytes, on the thread the window draws on.
     ///
-    /// The bound is applied while walking backwards, before the complete buffer is materialized.
-    /// Only complete logical lines are returned. If the oldest line that would be included is
-    /// larger than the remaining budget, it and everything older are omitted rather than
-    /// returning a fragment that could be mistaken for complete text. The same rule drops a
-    /// continuation whose beginning has already fallen out of scrollback.
+    /// `sinceAbsoluteRow` bounds the read instead. Pass back the `nextAbsoluteRow` of the previous
+    /// result and only rows that have appeared since are translated again.
+    ///
+    /// The current screen is always re-read regardless of `sinceAbsoluteRow`, because a
+    /// full-screen application repaints rows in place without scrolling. Rows above the screen
+    /// have scrolled out of reach of the cursor and can no longer change, which is what makes
+    /// skipping them safe rather than merely cheaper.
+    ///
+    /// Absolute row coordinates count from the first line the emulator ever produced, so they
+    /// survive scrollback trimming and a cursor stays valid while old lines fall off the top. A
+    /// cursor from a buffer that has since been cleared or switched is ignored.
     ///
     /// - Parameters:
     ///   - maximumUTF8Bytes: The largest UTF-8 representation the result may have.
+    ///   - sinceAbsoluteRow: The absolute row the caller has already read through. Pass `0` to
+    ///     read the whole bounded window.
     ///   - kind: Which terminal buffer to inspect.
     public func getRecentLogicalBufferText (
         maximumUTF8Bytes: Int,
+        sinceAbsoluteRow: Int,
         kind: BufferKind = .active
-    ) -> String
+    ) -> RecentBufferText
     {
-        guard maximumUTF8Bytes > 0 else { return "" }
+        let inspectedBuffer = bufferFromKind(kind: kind)
+        let endAbsoluteRow = inspectedBuffer.linesTop + inspectedBuffer.lines.count
+        guard maximumUTF8Bytes > 0, inspectedBuffer.lines.count > 0 else {
+            return RecentBufferText(text: "", nextAbsoluteRow: endAbsoluteRow)
+        }
 
-        let b = bufferFromKind(kind: kind)
-        guard b.lines.count > 0 else { return "" }
+        // A cursor past the end belongs to a buffer that has since been reset or switched. Read
+        // the whole window rather than nothing, so a reset cannot silently blind the caller.
+        let requested = sinceAbsoluteRow > endAbsoluteRow
+            ? inspectedBuffer.linesTop
+            : sinceAbsoluteRow
+        // Never below the oldest retained row, and never past the top of the screen.
+        let floorAbsoluteRow = min(
+            max(requested, inspectedBuffer.linesTop),
+            inspectedBuffer.linesTop + inspectedBuffer.yBase
+        )
+        let floorRow = max(
+            0,
+            min(floorAbsoluteRow - inspectedBuffer.linesTop,
+                inspectedBuffer.lines.count - 1)
+        )
 
-        // Each entry is one logical line, with its physical rows stored newest-first because the
-        // buffer itself is being walked backwards. Logical lines use the same order until the
-        // final assembly below.
         var logicalLinesNewestFirst: [[String]] = []
         var currentRowsNewestFirst: [String] = []
         var currentBytes = 0
         var acceptedBytes = 0
 
-        for row in stride(from: b.lines.count - 1, through: 0, by: -1) {
-            let bufferLine = b.lines[row]
+        for row in stride(from: inspectedBuffer.lines.count - 1, through: floorRow, by: -1) {
+            let bufferLine = inspectedBuffer.lines[row]
             let text = bufferLine.translateToString(trimRight: true)
             let bytes = text.utf8.count
             let separatorBytes = logicalLinesNewestFirst.isEmpty ? 0 : 1
             let remaining = maximumUTF8Bytes - acceptedBytes - separatorBytes
 
-            // Stop at the first incomplete logical line. Skipping across it would no longer be a
-            // recent suffix, and returning its tail would manufacture path- or URL-shaped text.
             guard remaining >= 0,
                   currentBytes <= remaining,
-                  bytes <= remaining - currentBytes else {
-                break
-            }
+                  bytes <= remaining - currentBytes else { break }
 
             currentRowsNewestFirst.append(text)
             currentBytes += bytes
-
-            // `isWrapped` belongs to this row: true means it continues the row before it. Until
-            // a non-wrapped row is reached, the logical line has no known beginning and cannot
-            // be returned safely.
+            // Reaching `floorRow` mid-continuation drops the fragment for the same reason a
+            // continuation whose beginning fell out of scrollback is dropped.
             guard !bufferLine.isWrapped else { continue }
 
             logicalLinesNewestFirst.append(currentRowsNewestFirst)
@@ -5495,16 +7334,664 @@ open class Terminal {
             currentBytes = 0
         }
 
-        return logicalLinesNewestFirst.reversed().map { rowsNewestFirst in
-            rowsNewestFirst.reversed().joined()
-        }.joined(separator: "\n")
+        return RecentBufferText(
+            text: logicalLinesNewestFirst.reversed().map { rowsNewestFirst in
+                rowsNewestFirst.reversed().joined()
+            }.joined(separator: "\n"),
+            nextAbsoluteRow: endAbsoluteRow
+        )
     }
     
     /// Returns the text between the specified range
     ///
     public func getText (start: Position, end: Position) -> String
     {
-        let lines = getSelectedLines(p1: start, p2: end)
+        getText(start: start, end: end, buffer: buffer)
+    }
+
+    /// Returns a hyperlink or implicit link at the provided location.
+    public func link(at location: LinkLookupLocation, mode: LinkLookupMode) -> String?
+    {
+        return linkMatch(at: location, mode: mode)?.text
+    }
+
+    func getDisplayText (start: Position, end: Position) -> String
+    {
+        getText(start: start, end: end, buffer: displayBuffer)
+    }
+
+    func linkMatch(at location: LinkLookupLocation, mode: LinkLookupMode) -> LinkMatch?
+    {
+        let buffer = displayBuffer
+        guard let position = resolveLinkLocation(location, in: buffer) else {
+            return nil
+        }
+
+        if let explicit = explicitLinkMatch(at: position, in: buffer) {
+            return explicit
+        }
+
+        switch mode {
+        case .explicitOnly:
+            return nil
+        case .explicitAndImplicit:
+            return implicitLinkMatch(at: position, in: buffer)
+        }
+    }
+
+    private func resolveLinkLocation(_ location: LinkLookupLocation, in buffer: Buffer) -> Position?
+    {
+        let pos: Position
+        switch location {
+        case .buffer(let position):
+            pos = position
+        case .screen(let position):
+            pos = Position(col: position.col, row: position.row + buffer.yDisp)
+        }
+
+        if buffer.lines.isEmpty {
+            return nil
+        }
+        let row = max(0, min(pos.row, buffer.lines.count - 1))
+        let col = max(0, min(pos.col, cols - 1))
+        return Position(col: col, row: row)
+    }
+
+    private func explicitLink(at position: Position, in buffer: Buffer) -> String?
+    {
+        let line = buffer.lines[position.row]
+        guard let payload = line[position.col].getPayload() as? String else {
+            return nil
+        }
+        return parseHyperlinkPayload(payload)
+    }
+
+    private func parseHyperlinkPayload(_ payload: String) -> String?
+    {
+        let split = payload.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        guard split.count > 1 else {
+            return nil
+        }
+        return String(split[1])
+    }
+
+    private func explicitLinkMatch(at position: Position, in buffer: Buffer) -> LinkMatch?
+    {
+        guard let payloadToken = payloadCode(at: position, in: buffer) else {
+            return nil
+        }
+        let line = buffer.lines[position.row]
+        let lineLimit = min(cols, line.count)
+        guard lineLimit > 0 else {
+            return nil
+        }
+        var start = position.col
+        while start > 0 && payloadCode(at: Position(col: start - 1, row: position.row), in: buffer) == payloadToken {
+            start -= 1
+        }
+        var end = position.col
+        while end < lineLimit && payloadCode(at: Position(col: end, row: position.row), in: buffer) == payloadToken {
+            end += 1
+        }
+        guard start < end else {
+            return nil
+        }
+        let rawPayload = line[position.col].getPayload() as? String
+            ?? line[max(0, position.col - 1)].getPayload() as? String
+        guard let payload = rawPayload, let url = parseHyperlinkPayload(payload) else {
+            return nil
+        }
+        return LinkMatch(
+            text: url,
+            row: position.row,
+            range: start..<end,
+            isExplicit: true,
+            rowRanges: [.init(row: position.row, range: start..<end)]
+        )
+    }
+
+    private func implicitLinkMatch(at position: Position, in buffer: Buffer) -> LinkMatch?
+    {
+        guard let lineMap = buildGhosttyImplicitLineMap(at: position, in: buffer) else {
+            return nil
+        }
+        guard let regex = Self.ghosttyImplicitLinkRegex else {
+            return nil
+        }
+
+        let searchRange = NSRange(lineMap.text.startIndex..<lineMap.text.endIndex, in: lineMap.text)
+        let matches = regex.matches(in: lineMap.text, options: [], range: searchRange)
+        for match in matches {
+            guard match.range.length > 0,
+                  let textRange = Range(match.range, in: lineMap.text)
+            else {
+                continue
+            }
+            if suppressGhosttyLikeMatch(textRange, in: lineMap.text) {
+                continue
+            }
+
+            let startOffset = lineMap.text.distance(from: lineMap.text.startIndex, to: textRange.lowerBound)
+            let endOffset = lineMap.text.distance(from: lineMap.text.startIndex, to: textRange.upperBound)
+            guard startOffset < lineMap.cells.count else {
+                continue
+            }
+            let boundedEndOffset = min(endOffset, lineMap.cells.count)
+            guard boundedEndOffset > startOffset else {
+                continue
+            }
+
+            var containsTarget = false
+            var rowStart: Int?
+            var rowEnd: Int?
+            var rowBounds: [Int: (start: Int, end: Int)] = [:]
+            for idx in startOffset..<boundedEndOffset {
+                let cell = lineMap.cells[idx]
+                let cellEnd = cell.col + max(1, cell.width)
+
+                if var bounds = rowBounds[cell.row] {
+                    bounds.start = min(bounds.start, cell.col)
+                    bounds.end = max(bounds.end, cellEnd)
+                    rowBounds[cell.row] = bounds
+                } else {
+                    rowBounds[cell.row] = (start: cell.col, end: cellEnd)
+                }
+
+                if cell.row == lineMap.targetRow {
+                    rowStart = min(rowStart ?? cell.col, cell.col)
+                    rowEnd = max(rowEnd ?? cellEnd, cellEnd)
+                    if lineMap.targetCol >= cell.col && lineMap.targetCol < cellEnd {
+                        containsTarget = true
+                    }
+                }
+            }
+            guard containsTarget,
+                  let rowStart,
+                  let rowEnd,
+                  rowStart < rowEnd
+            else {
+                continue
+            }
+
+            let rowRanges = rowBounds
+                .keys
+                .sorted()
+                .compactMap { row -> LinkMatch.RowRange? in
+                    guard let bounds = rowBounds[row], bounds.start < bounds.end else {
+                        return nil
+                    }
+                    return .init(row: row, range: bounds.start..<bounds.end)
+                }
+
+            return LinkMatch(
+                text: String(lineMap.text[textRange]),
+                row: lineMap.targetRow,
+                range: rowStart..<rowEnd,
+                isExplicit: false,
+                rowRanges: rowRanges
+            )
+        }
+        return nil
+    }
+
+    private func payloadCode(at position: Position, in buffer: Buffer) -> UInt16?
+    {
+        guard position.row >= 0 && position.row < buffer.lines.count else {
+            return nil
+        }
+        let line = buffer.lines[position.row]
+        let lineLimit = min(cols, line.count)
+        guard lineLimit > 0 else {
+            return nil
+        }
+        let col = max(0, min(position.col, lineLimit - 1))
+        let cell = line[col]
+        if cell.hasPayload {
+            return cell.payload.code
+        }
+        if cell.code == 0 && col > 0 && line[col - 1].width == 2 {
+            let base = line[col - 1]
+            if base.hasPayload {
+                return base.payload.code
+            }
+        }
+        return nil
+    }
+
+    private struct GhosttyImplicitCellRef {
+        let row: Int
+        let col: Int
+        let width: Int
+    }
+
+    private struct GhosttyImplicitLineMap {
+        let text: String
+        let cells: [GhosttyImplicitCellRef]
+        let targetRow: Int
+        let targetCol: Int
+    }
+
+    private struct LinkRowEdgeInfo {
+        let firstCol: Int
+        let firstChar: Character
+        let lastCol: Int
+        let lastChar: Character
+    }
+
+    // Ghostty-style URL/path pattern adapted for ICU regex.
+    // Oniguruma uses a variable-length lookbehind in one branch; we keep
+    // compatibility by applying an equivalent post-match suppression rule.
+    private static let ghosttyImplicitLinkRegex: NSRegularExpression? = {
+        let urlSchemes = #"https?://|mailto:|ftp://|file:|ssh:|git://|ssh://|tel:|magnet:|ipfs://|ipns://|gemini://|gopher://|news:"#
+        // NOTE: this used to be `\[[:0-9a-fA-F]+(?:[:0-9a-fA-F]*)+\]`. That inner `(?:X*)+` is a
+        // classic catastrophic-backtracking construct: on input that opens a bracket but never
+        // closes it (e.g. `https://[aaaaaaaa...`), ICU explores exponentially many ways to split
+        // the run before failing. Measured on the unmodified pattern: 33 chars -> 2.7s,
+        // 37 chars -> 23s, 41 chars -> 297s, all on the main thread. The nested quantifier is
+        // also redundant -- `X+(?:X*)+` accepts exactly the same language as `X+` -- so removing
+        // it is behaviour-preserving. Same inputs now complete in under a millisecond.
+        let ipv6URLPattern = #"(?:\[[:0-9a-fA-F]+\](?::[0-9]+)?)"#
+        let schemeURLChars = #"[\w\-.~:/?#@!$&*+,;=%]"#
+        let pathChars = #"[\w\-.~:\/?#@!$&*+;=%]"#
+        let noTrailingPunctuation = #"(?<![,.])"#
+        let noTrailingColon = #"(?<!:)"#
+        let trailingSpacesAtEOL = #"(?: +(?= *$))?"#
+        let dottedPathLookahead = #"(?=[\w\-.~:\/?#@!$&*+;=%]*\.)"#
+        let nonDottedPathLookahead = #"(?![\w\-.~:\/?#@!$&*+;=%]*\.)"#
+        let dottedPathSpaceSegments = #"(?:(?<!:) (?!\w+:\/\/)[\w\-.~:\/?#@!$&*+;=%]*[\/.])*"#
+        let anyPathSpaceSegments = #"(?:(?<!:) (?!\w+:\/\/)[\w\-.~:\/?#@!$&*+;=%]+)*"#
+
+        // The body used to be `(?:IPV6|CHARS+SUFFIX?)+`: a `+` nested directly inside a `+`, so a
+        // run of N body characters could be split across iterations in exponentially many ways.
+        // Normally ICU exits early, because `(?<![,.])` only rejects an end position whose
+        // preceding character is `.` or `,` -- backing off one character succeeds. But when the
+        // match ends in a *run* of `.`/`,` (a URL followed by an ellipsis, dot leaders, or empty
+        // CSV fields) every end position fails and the full 2^N enumeration is forced:
+        // `https://example.com/a/b/c` + 17 dots (42 chars) blocked the main thread for 1.4s, each
+        // extra dot multiplying the time by ~2.6.
+        //
+        // Consuming one token per iteration removes the ambiguity entirely. A token is either an
+        // IPv6 literal or one URL character with its optional bracketed suffix. This keeps a
+        // suffix attached to a URL character and prevents an IPv6 literal with a port from
+        // absorbing following bracketed text.
+        let bracketedWordSuffix = #"(?:[\(\[]\w*[\)\]])"#
+        let schemeURLToken =
+            "(?:" + ipv6URLPattern + "|" +
+            schemeURLChars + "(?:" + bracketedWordSuffix + ")?)"
+        let schemeURLBranch =
+            "(?:" + urlSchemes + ")" +
+            schemeURLToken + "+" +
+            noTrailingPunctuation
+
+        let rootedOrRelativePathPrefix = #"(?:\.\.\/|\.\/|(?<!\w)~\/|(?:[\w][\w\-.]*\/)*(?<!\w)\$[A-Za-z_]\w*\/|\.[\w][\w\-.]*\/|(?<![\w~\/])\/(?!\/))"#
+        let rootedOrRelativePathBranch =
+            rootedOrRelativePathPrefix +
+            "(?:" +
+            dottedPathLookahead +
+            pathChars + "+" +
+            dottedPathSpaceSegments +
+            noTrailingColon +
+            trailingSpacesAtEOL +
+            "|" +
+            nonDottedPathLookahead +
+            pathChars + "+" +
+            anyPathSpaceSegments +
+            noTrailingColon +
+            trailingSpacesAtEOL +
+            ")"
+
+        // Ghostty uses (?<!\$\d*) here, which is unsupported by ICU.
+        // We enforce the same intent by skipping any match preceded by '$'.
+        let bareRelativePathPrefix = #"(?<!\w)[\w][\w\-.]*\/"#
+        let bareRelativePathBranch =
+            dottedPathLookahead +
+            bareRelativePathPrefix +
+            pathChars + "+" +
+            dottedPathSpaceSegments +
+            noTrailingColon +
+            trailingSpacesAtEOL
+
+        let regex = schemeURLBranch + "|" + rootedOrRelativePathBranch + "|" + bareRelativePathBranch
+        return try? NSRegularExpression(pattern: regex, options: [])
+    }()
+
+    private static let ghosttyContinuationCharacters = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~:/?#[]@!$&*+,;=%()"
+    )
+
+    private func buildGhosttyImplicitLineMap(at position: Position, in buffer: Buffer) -> GhosttyImplicitLineMap?
+    {
+        guard position.row >= 0 && position.row < buffer.lines.count else {
+            return nil
+        }
+
+        let targetRow = position.row
+        let targetLine = buffer.lines[targetRow]
+        let targetRawLimit = min(cols, targetLine.count)
+        guard targetRawLimit > 0 else {
+            return nil
+        }
+
+        var targetCol = max(0, min(position.col, targetRawLimit - 1))
+        if targetCol > 0 && targetLine[targetCol].code == 0 && targetLine[targetCol - 1].width == 2 {
+            targetCol -= 1
+        }
+
+        var startRow = targetRow
+        while startRow > 0 && buffer.lines[startRow].isWrapped {
+            startRow -= 1
+        }
+        var endRow = targetRow
+        while endRow + 1 < buffer.lines.count && buffer.lines[endRow + 1].isWrapped {
+            endRow += 1
+        }
+        if startRow == targetRow && endRow == targetRow,
+           let (heuristicStart, heuristicEnd) = heuristicImplicitGroup(around: targetRow, in: buffer)
+        {
+            startRow = heuristicStart
+            endRow = heuristicEnd
+        }
+
+        var text = ""
+        var cells: [GhosttyImplicitCellRef] = []
+        cells.reserveCapacity((endRow - startRow + 1) * cols)
+        var targetIsInsideTrimmedContent = false
+
+        for row in startRow...endRow {
+            let line = buffer.lines[row]
+            let rawLimit = min(cols, line.count)
+            if rawLimit <= 0 {
+                continue
+            }
+            let lineLimit = min(rawLimit, line.getTrimmedLength())
+            if lineLimit <= 0 {
+                continue
+            }
+            let isContinuationRow = isImplicitContinuationRow(row, startRow: startRow, in: buffer)
+            let startCol = isContinuationRow ? firstNonWhitespaceColumn(in: line, lineLimit: lineLimit) : 0
+            guard startCol < lineLimit else {
+                continue
+            }
+            if row == targetRow && targetCol >= startCol && targetCol < lineLimit {
+                targetIsInsideTrimmedContent = true
+            }
+
+            for col in startCol..<lineLimit {
+                if col > 0 && line[col].code == 0 && line[col - 1].width == 2 {
+                    continue
+                }
+                let cell = line[col]
+                var character = getCharacter(for: cell)
+                if character == "\u{0}" {
+                    character = " "
+                }
+                text.append(character)
+                cells.append(
+                    GhosttyImplicitCellRef(
+                        row: row,
+                        col: col,
+                        width: max(1, Int(cell.width))
+                    )
+                )
+            }
+        }
+
+        guard !text.isEmpty, !cells.isEmpty, targetIsInsideTrimmedContent else {
+            return nil
+        }
+
+        return GhosttyImplicitLineMap(
+            text: text,
+            cells: cells,
+            targetRow: targetRow,
+            targetCol: targetCol
+        )
+    }
+
+    private func isImplicitContinuationRow(_ row: Int, startRow: Int, in buffer: Buffer) -> Bool
+    {
+        guard row > startRow else {
+            return false
+        }
+        if buffer.lines[row].isWrapped {
+            return true
+        }
+        return canJoinImplicitRows(upper: row - 1, lower: row, in: buffer)
+    }
+
+    private func heuristicImplicitGroup(around row: Int, in buffer: Buffer) -> (start: Int, end: Int)?
+    {
+        var start = row
+        var end = row
+
+        while start > 0 && canJoinImplicitRows(upper: start - 1, lower: start, in: buffer) {
+            start -= 1
+        }
+        while end + 1 < buffer.lines.count && canJoinImplicitRows(upper: end, lower: end + 1, in: buffer) {
+            end += 1
+        }
+
+        return (start == row && end == row) ? nil : (start, end)
+    }
+
+    private func canJoinImplicitRows(upper: Int, lower: Int, in buffer: Buffer) -> Bool
+    {
+        guard let upperInfo = linkRowEdgeInfo(row: upper, in: buffer),
+              let lowerInfo = linkRowEdgeInfo(row: lower, in: buffer)
+        else {
+            return false
+        }
+
+        // Heuristic for editor-rendered wraps: the upper segment should reach
+        // near the visual right edge and the seam should form a valid link.
+        let continuationThreshold = max(0, cols - max(2, cols / 5))
+        guard upperInfo.lastCol >= continuationThreshold else {
+            return false
+        }
+
+        let upperScalars = upperInfo.lastChar.unicodeScalars
+        let lowerScalars = lowerInfo.firstChar.unicodeScalars
+        guard !upperScalars.isEmpty, !lowerScalars.isEmpty else {
+            return false
+        }
+        guard upperScalars.allSatisfy({ Self.ghosttyContinuationCharacters.contains($0) }),
+              lowerScalars.allSatisfy({ Self.ghosttyContinuationCharacters.contains($0) })
+        else {
+            return false
+        }
+
+        return seamContainsGhosttyImplicitLink(
+            upper: upper,
+            lower: lower,
+            upperLastCol: upperInfo.lastCol,
+            lowerFirstCol: lowerInfo.firstCol,
+            in: buffer
+        )
+    }
+
+    private func linkRowEdgeInfo(row: Int, in buffer: Buffer) -> LinkRowEdgeInfo?
+    {
+        guard row >= 0 && row < buffer.lines.count else {
+            return nil
+        }
+        let line = buffer.lines[row]
+        let rawLimit = min(cols, line.count)
+        guard rawLimit > 0 else {
+            return nil
+        }
+        let lineLimit = min(rawLimit, line.getTrimmedLength())
+        guard lineLimit > 0 else {
+            return nil
+        }
+
+        var first: (col: Int, char: Character)?
+        var col = 0
+        while col < lineLimit {
+            if let ch = linkCharacterAt(line: line, col: col), !ch.isWhitespace {
+                first = (col, ch)
+                break
+            }
+            col += 1
+        }
+        guard let first else {
+            return nil
+        }
+
+        var last: (col: Int, char: Character)?
+        var rcol = lineLimit - 1
+        while rcol >= first.col {
+            if let ch = linkCharacterAt(line: line, col: rcol), !ch.isWhitespace {
+                last = (rcol, ch)
+                break
+            }
+            if rcol == 0 { break }
+            rcol -= 1
+        }
+        guard let last else {
+            return nil
+        }
+
+        return LinkRowEdgeInfo(
+            firstCol: first.col,
+            firstChar: first.char,
+            lastCol: last.col,
+            lastChar: last.char
+        )
+    }
+
+    private func seamContainsGhosttyImplicitLink(
+        upper: Int,
+        lower: Int,
+        upperLastCol: Int,
+        lowerFirstCol: Int,
+        in buffer: Buffer
+    ) -> Bool
+    {
+        guard let regex = Self.ghosttyImplicitLinkRegex else {
+            return false
+        }
+        guard upper >= 0, upper < buffer.lines.count, lower >= 0, lower < buffer.lines.count else {
+            return false
+        }
+
+        let upperLine = buffer.lines[upper]
+        let upperLimit = min(min(cols, upperLine.count), upperLastCol + 1)
+        guard upperLimit > 0 else {
+            return false
+        }
+        let upperStart = max(0, upperLimit - 96)
+        let upperText = implicitLineSegmentText(line: upperLine, startCol: upperStart, endCol: upperLimit)
+        guard !upperText.isEmpty else {
+            return false
+        }
+
+        let lowerLine = buffer.lines[lower]
+        let lowerLimit = min(min(cols, lowerLine.count), lowerLine.getTrimmedLength())
+        guard lowerFirstCol < lowerLimit else {
+            return false
+        }
+        let lowerEnd = min(lowerLimit, lowerFirstCol + 96)
+        let lowerText = implicitLineSegmentText(line: lowerLine, startCol: lowerFirstCol, endCol: lowerEnd)
+        guard !lowerText.isEmpty else {
+            return false
+        }
+
+        let candidate = upperText + lowerText
+        let seamOffset = upperText.utf16.count
+        let searchRange = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
+        for match in regex.matches(in: candidate, options: [], range: searchRange) {
+            let matchStart = match.range.location
+            let matchEnd = match.range.location + match.range.length
+            guard matchStart < seamOffset, matchEnd > seamOffset else {
+                continue
+            }
+            guard let textRange = Range(match.range, in: candidate) else {
+                continue
+            }
+            if suppressGhosttyLikeMatch(textRange, in: candidate) {
+                continue
+            }
+            return true
+        }
+
+        return false
+    }
+
+    private func implicitLineSegmentText(line: BufferLine, startCol: Int, endCol: Int) -> String
+    {
+        let boundedStart = max(0, startCol)
+        let boundedEnd = min(line.count, endCol)
+        guard boundedStart < boundedEnd else {
+            return ""
+        }
+
+        var result = ""
+        result.reserveCapacity(boundedEnd - boundedStart)
+        for col in boundedStart..<boundedEnd {
+            if col > 0 && line[col].code == 0 && line[col - 1].width == 2 {
+                continue
+            }
+            var character = getCharacter(for: line[col])
+            if character == "\u{0}" {
+                character = " "
+            }
+            result.append(character)
+        }
+        return result
+    }
+
+    private func linkCharacterAt(line: BufferLine, col: Int) -> Character?
+    {
+        guard col >= 0 && col < line.count else {
+            return nil
+        }
+        let cell = line[col]
+        if cell.code != 0 {
+            return getCharacter(for: cell)
+        }
+        if col > 0 && line[col - 1].width == 2 {
+            let base = line[col - 1]
+            if base.code != 0 {
+                return getCharacter(for: base)
+            }
+        }
+        return nil
+    }
+
+    private func firstNonWhitespaceColumn(in line: BufferLine, lineLimit: Int) -> Int
+    {
+        guard lineLimit > 0 else {
+            return 0
+        }
+        var col = 0
+        while col < lineLimit {
+            let cell = line[col]
+            if cell.code != 0 {
+                if !getCharacter(for: cell).isWhitespace {
+                    return col
+                }
+            } else if col > 0 && line[col - 1].width == 2 {
+                let base = line[col - 1]
+                if base.code != 0 && !getCharacter(for: base).isWhitespace {
+                    return col
+                }
+            }
+            col += 1
+        }
+        return lineLimit
+    }
+
+    private func suppressGhosttyLikeMatch(_ range: Range<String.Index>, in text: String) -> Bool
+    {
+        guard range.lowerBound > text.startIndex else {
+            return false
+        }
+        return text[text.index(before: range.lowerBound)] == "$"
+    }
+
+    func getText (start: Position, end: Position, buffer: Buffer) -> String
+    {
+        let lines = getSelectedLines(p1: start, p2: end, buffer: buffer)
         if lines.count == 0 {
             return ""
         }
@@ -5515,23 +8002,8 @@ open class Terminal {
         return r
     }
 
-    /// Returns the output of the last command if OSC 133 shell integration is active.
-    /// Returns nil if no command output has been captured.
-    public func getLastCommandOutput() -> String? {
-        guard let start = commandOutputStart,
-              let end = commandOutputEnd else {
-            return nil
-        }
-        return getText(start: start, end: end)
-    }
-
-    /// Returns true if shell integration (OSC 133) has captured command output.
-    public var hasCommandOutput: Bool {
-        commandOutputStart != nil && commandOutputEnd != nil
-    }
-
     // This version validates the input parameters
-    func getSelectedLines(p1: Position, p2: Position) -> [Line]
+    func getSelectedLines(p1: Position, p2: Position, buffer: Buffer) -> [Line]
     {
         var start = p1
         var end = p2
@@ -5554,10 +8026,10 @@ open class Terminal {
         if end.row >= b.lines.count {
             end.row = b.lines.count-1
         }
-        return _getSelectedLines(start, end)
+        return _getSelectedLines(start, end, buffer: buffer)
     }
     
-    func _getSelectedLines(_ start: Position, _ end: Position) -> [Line]
+    func _getSelectedLines(_ start: Position, _ end: Position, buffer: Buffer) -> [Line]
     {
         var lines: [Line] = []
         let buf = buffer
@@ -5656,7 +8128,7 @@ open class Terminal {
     
     func translateBufferLineToString (buffer: Buffer, line: Int, start: Int, end: Int) -> String
     {
-        buffer.translateBufferLineToString(lineIndex: line, trimRight: true, startCol: start, endCol: end).replacingOccurrences(of: "\u{0}", with: " ")
+        buffer.translateBufferLineToString(lineIndex: line, trimRight: true, startCol: start, endCol: end, skipNullCellsFollowingWide: true, characterProvider: { self.getCharacter(for: $0) }).replacingOccurrences(of: "\u{0}", with: " ")
     }
 }
 
@@ -5684,6 +8156,10 @@ public extension TerminalDelegate {
     }
     
     func bufferActivated(source: Terminal) {
+        // nothing
+    }
+
+    func synchronizedOutputChanged(source: Terminal, active: Bool) {
         // nothing
     }
     
@@ -5717,6 +8193,10 @@ public extension TerminalDelegate {
     }
 
     func mouseModeChanged(source: Terminal) {
+    }
+
+    func cellSizeInPixels(source: Terminal) -> (width: Int, height: Int)? {
+        return nil
     }
     
     func hostCurrentDirectoryUpdated (source: Terminal) {
@@ -5755,7 +8235,14 @@ public extension TerminalDelegate {
     func clipboardCopy(source: Terminal, content: Data) {
     }
     
+    func clipboardRead(source: Terminal) -> Data? {
+        return nil
+    }
+    
     func notify(source: Terminal, title: String, body: String) {
+    }
+
+    func progressReport(source: Terminal, report: Terminal.ProgressReport) {
     }
     
     func createImageFromBitmap (source: Terminal, bytes: inout [UInt8], width: Int, height: Int){
