@@ -37,8 +37,8 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - Location: `./Packages/Vendor/SwiftTerm/` (vendored source in the main repository, not a git submodule)
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
   - Fork: https://github.com/everlof/SwiftTerm, reconciled at `7826d5c` against upstream
-    `v1.20.0` (`5d14406`). The vendored directory is the exact fork tree at that revision, without
-    its Git metadata or build output.
+    `v1.20.0` (`5d14406`). The vendored source tree matches that revision; Git metadata, build
+    output and ignored generated cache artifacts are not copied into the application repository.
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
   - **The scroller seam is ours.** `MacTerminalView.installScroller` lets the embedding app
     replace only the visible `NSScroller`; SwiftTerm immediately restates its target, action,
