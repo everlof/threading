@@ -294,6 +294,9 @@ final class RemoteSessionConnection: ObservableObject {
     func connect() {
         disconnect(markEnded: false)
         let generation = connectionGeneration
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.connectionStarted(session)
+#endif
         stopped = false
         phase = .connecting
         composerCapabilities = []
@@ -705,6 +708,15 @@ final class RemoteSessionConnection: ObservableObject {
                 self.scheduleReconnect(generation: expectedGeneration)
             }
         }
+#if DEBUG
+        if message.type == "viewport", let cols = message.cols, let rows = message.rows {
+            MobileTerminalWirePerformanceProbe.viewportSent(
+                columns: cols,
+                rows: rows,
+                session: session
+            )
+        }
+#endif
     }
 
     private func receiveLoop(task: URLSessionWebSocketTask, generation: Int) async {
@@ -716,6 +728,9 @@ final class RemoteSessionConnection: ObservableObject {
                 }
                 switch message {
                 case .data(let data):
+#if DEBUG
+                    MobileTerminalWirePerformanceProbe.outputReceived(data, session: session)
+#endif
                     if let onTerminalOutput {
                         onTerminalOutput(data)
                     } else {
@@ -840,6 +855,9 @@ final class RemoteSessionConnection: ObservableObject {
             cancelHelloDeadline()
             phase = .connected
             reconnectAttempt = 0
+#if DEBUG
+            MobileTerminalWirePerformanceProbe.helloReceived(session)
+#endif
             MobileDiagnostics.record(.socketConnected, fields: destinationFields.merging([
                 .capability: hello.capability,
                 .surface: hello.surface.rawValue,

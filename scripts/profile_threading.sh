@@ -36,6 +36,7 @@
 #   scripts/profile_threading.sh remote-conversation-stress [rows]
 #   scripts/profile_threading.sh ios-conversation-stress [seconds] [rows] [booted|simulator-UDID]
 #   scripts/profile_threading.sh cross-device-conversation-stress [seconds] [rows] [booted|simulator-UDID]
+#   scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [booted|simulator-UDID]
 #   scripts/profile_threading.sh ios-device-trace "Time Profiler" [seconds] <device-name-or-UDID> [process]
 #   scripts/profile_threading.sh ios-device-full [seconds] <device-name-or-UDID> [process]
 #   scripts/profile_threading.sh latest
@@ -316,6 +317,188 @@ run_ios_conversation_stress() {
   capture_ios_conversation_fixture \
     conversation-scroll-stress "${seconds}" "${source_rows}" \
     "${simulator_udid}" "${app}" "${output_directory}"
+}
+
+prepare_terminal_wire_mac_host() {
+  local output_directory="$1"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/mac-derived-data"
+  local build_log="${output_directory}/mac-host-build.log"
+
+  echo "Building the hosted Mac test bundle for the terminal wire lab…"
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+  ) 2>&1 | tee "${build_log}"
+
+  terminal_wire_mac_build_directory="$(
+    xcodebuild \
+      -project "${repository_directory}/Threading.xcodeproj" \
+      -scheme Threading \
+      -configuration Debug \
+      -destination "platform=macOS" \
+      -derivedDataPath "${derived_data}" \
+      -showBuildSettings \
+      -json \
+      | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+  )"
+  terminal_wire_mac_app="${terminal_wire_mac_build_directory}/Threading.app"
+  terminal_wire_test_bundle="${terminal_wire_mac_app}/Contents/PlugIns/ThreadingTests.xctest"
+  [[ -d "${terminal_wire_test_bundle}" ]] || {
+    echo "Built terminal wire test bundle not found at ${terminal_wire_test_bundle}." >&2
+    return 1
+  }
+}
+
+build_terminal_wire_helper() {
+  local output_directory="$1"
+  local scratch="${output_directory}/scenario-build"
+  echo "Building the token-free PTY fixture helper…"
+  swift build \
+    --package-path "${repository_directory}/Packages/ThreadingScenarioKit" \
+    --configuration release \
+    --scratch-path "${scratch}" \
+    --product threading-scenario
+  local bin_directory
+  bin_directory="$(
+    swift build \
+      --package-path "${repository_directory}/Packages/ThreadingScenarioKit" \
+      --configuration release \
+      --scratch-path "${scratch}" \
+      --show-bin-path
+  )"
+  terminal_wire_helper="${bin_directory}/threading-scenario"
+  [[ -x "${terminal_wire_helper}" ]] || {
+    echo "Built PTY fixture helper not found at ${terminal_wire_helper}." >&2
+    return 1
+  }
+}
+
+run_ios_terminal_wire_lab() {
+  local output_directory="$1"
+  local history_lines="$2"
+  local simulator_udid="$3"
+  [[ "${history_lines}" =~ ^[0-9]+$ ]] \
+      && (( 10#${history_lines} >= 1 && 10#${history_lines} <= 10000 )) || {
+    echo "Terminal wire history lines must be an integer from 1 through 10000." >&2
+    return 2
+  }
+  [[ -t 0 ]] || {
+    echo "ios-terminal-wire-lab is interactive; run it from a terminal." >&2
+    return 2
+  }
+
+  build_terminal_wire_helper "${output_directory}"
+  prepare_terminal_wire_mac_host "${output_directory}"
+
+  local ios_output="${output_directory}/ios"
+  mkdir -p "${ios_output}"
+  # Keep DEBUG-only fixtures and probes but optimize the measured app code.
+  build_ios_simulator_app "${simulator_udid}" "${ios_output}" Debug -O
+  local ios_app="${ios_output}/derived-data/Build/Products/Debug-iphonesimulator/ThreadingMobile.app"
+  local launch_path="${output_directory}/terminal-wire-launch.json"
+  local stop_path="${output_directory}/terminal-wire.stop"
+  local host_log="${output_directory}/mac-host.log"
+  local ios_stdout="${output_directory}/ios.stdout.log"
+  local ios_stderr="${output_directory}/ios.stderr.log"
+  rm -f "${launch_path}" "${stop_path}"
+
+  THREADING_REMOTE_TERMINAL_WIRE_FIXTURE=1 \
+  THREADING_REMOTE_TERMINAL_WIRE_HELPER="${terminal_wire_helper}" \
+  THREADING_REMOTE_TERMINAL_WIRE_HISTORY_LINES="${history_lines}" \
+  THREADING_REMOTE_TERMINAL_WIRE_LAUNCH_PATH="${launch_path}" \
+  THREADING_REMOTE_TERMINAL_WIRE_STOP_PATH="${stop_path}" \
+  THREADING_REMOTE_TERMINAL_WIRE_TIMEOUT=3600 \
+  DYLD_LIBRARY_PATH="${terminal_wire_mac_app}/Contents/MacOS" \
+  DYLD_FRAMEWORK_PATH="${terminal_wire_mac_app}/Contents/Frameworks" \
+    xcrun xctest \
+      -XCTest ThreadingTests.RemoteServerIntegrationTests/testInteractiveRemoteTerminalWireFixtureWhenEnabled \
+      "${terminal_wire_test_bundle}" >"${host_log}" 2>&1 &
+  local host_pid=$!
+
+  terminal_wire_cleanup_stop_path="${stop_path}"
+  terminal_wire_cleanup_host_pid="${host_pid}"
+
+  terminal_wire_cleanup() {
+    touch "${terminal_wire_cleanup_stop_path}"
+    if kill -0 "${terminal_wire_cleanup_host_pid}" 2>/dev/null; then
+      wait "${terminal_wire_cleanup_host_pid}" || true
+    fi
+  }
+  trap terminal_wire_cleanup EXIT INT TERM
+
+  local ready=0
+  for _ in {1..600}; do
+    if [[ -f "${launch_path}" ]]; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "${host_pid}" 2>/dev/null; then
+      echo "The Mac terminal host exited before becoming ready:" >&2
+      tail -n 80 "${host_log}" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  [[ "${ready}" == "1" ]] || {
+    echo "The Mac terminal host did not become ready within 60 seconds." >&2
+    return 1
+  }
+
+  local wire_url
+  wire_url="$(/usr/bin/plutil -extract url raw -o - "${launch_path}")"
+  [[ "${wire_url}" == http://127.0.0.1:*'/#goodtoken' ]] || {
+    echo "The host returned an invalid loopback fixture URL." >&2
+    return 1
+  }
+
+  echo "Installing the real-wire iOS app on ${simulator_udid}…"
+  xcrun simctl install "${simulator_udid}" "${ios_app}"
+  local data_container metrics_path
+  data_container="$(
+    xcrun simctl get_app_container "${simulator_udid}" codes.threading.mobile data
+  )"
+  metrics_path="${data_container}/tmp/threading-terminal-wire-performance.log"
+  rm -f "${metrics_path}"
+  SIMCTL_CHILD_THREADING_MOBILE_TERMINAL_WIRE_URL="${wire_url}" \
+    xcrun simctl launch \
+      --terminate-running-process \
+      --stdout="${ios_stdout}" \
+      --stderr="${ios_stderr}" \
+      "${simulator_udid}" \
+      codes.threading.mobile
+  open -a Simulator
+
+  echo
+  echo "Terminal Wire Lab is running with ${history_lines} generated history rows."
+  echo "  • Open Codex, scroll its terminal history, type 'more' or 'fill', then pop and reopen it."
+  echo "  • Open Claude, scroll its application-owned transcript, type the same commands, and reopen it."
+  echo "  • Each entry, typing run, submitted turn, and scroll gesture writes a THREADING_PERF line."
+  echo
+  read -r -p "Press Return here when you are finished… "
+
+  xcrun simctl io "${simulator_udid}" screenshot \
+    "${output_directory}/terminal-wire-final.png" >/dev/null
+  if [[ -f "${metrics_path}" ]]; then
+    cp "${metrics_path}" "${output_directory}/ios-terminal-wire.metrics.log"
+    echo
+    rg '^THREADING_PERF ios-terminal-' \
+      "${output_directory}/ios-terminal-wire.metrics.log" || true
+  else
+    echo "No terminal metrics were written; open at least one fixture before ending the lab." >&2
+  fi
+  touch "${stop_path}"
+  wait "${host_pid}"
+  trap - EXIT INT TERM
 }
 
 capture_ios_simulator_sample() {
@@ -2199,6 +2382,14 @@ case "${command}" in
       run_conversation_stress "${output_directory}"
     run_ios_conversation_stress \
       "${output_directory}" "${seconds}" "${rows}" "${simulator_udid}"
+    ;;
+
+  ios-terminal-wire-lab)
+    rows="${2:-2400}"
+    simulator_udid="$(resolve_booted_ios_simulator "${3:-booted}")"
+    output_directory="$(new_run_directory ios-terminal-wire-lab)"
+    run_ios_terminal_wire_lab \
+      "${output_directory}" "${rows}" "${simulator_udid}"
     ;;
 
   ios-device-trace)

@@ -256,6 +256,44 @@ installs only a changed theme, and the same test file asserts an unchanged theme
 rows. For reference the probe's grid-independent costs: a 512 KB ring replay parses in
 ~320–350 ms and the local-viewport reflow after it is 7–10 ms, at every font size.
 
+### Token-free iOS terminal wire lab, 2026-08-20
+
+A static ANSI fixture proves rendering but cannot benchmark the entry path that flickered: it
+bypasses the Mac PTY, capture ring, replay budget, WebSocket scheduling, phone-owned viewport
+lease, SIGWINCH and the TUI's resize repaint. Running a live provider for every comparison fixes
+that fidelity problem by introducing account state, network variance, private transcript data
+and paid turns. Neither is an acceptable performance baseline.
+
+`scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [simulator]` now runs the
+middle path under the shipping boundaries. An isolated hosted XCTest creates two real terminal
+sessions, starts the generated Codex- and Claude-shaped helpers on real raw-mode PTYs, and serves
+them through `RemoteAccessServer` and `RemoteSessionMirrorRegistry`. A Debug `-O` iOS build gets a
+loopback-only ephemeral pairing and uses the ordinary dashboard, session navigation,
+`RemoteSessionConnection`, WebSocket and SwiftTerm surface. The pairing, continuity, discovery
+and notification state are isolated from the simulator's ordinary app data. The bearer is a
+fixed test authority and no provider executable, credential, API or token is consulted.
+
+The two workloads deliberately disagree where provider behavior changes the cost model:
+
+- Codex leaves alternate screen, fills normal terminal scrollback, and on every real PTY width
+  change clears and re-emits the generated history. Ordinary one-finger movement measures local
+  scrollback.
+- Claude enters alternate screen with SGR mouse reporting, fills the host ring with previous
+  complete frames, redraws its composer while typing, and answers wheel reports and resize with
+  application-owned full-screen repaints. A swipe delivers several reports in one PTY read, so
+  its fixture parser removes each report by the distance from `Data.startIndex`, never by treating
+  an absolute `Data.Index` as a byte count; a regression drains one batch and then accepts the
+  next report.
+
+The opt-in probe is absent from Release builds. While this lab link is active it writes bounded
+`THREADING_PERF ios-terminal-*` records for connect→hello→first bytes→SwiftTerm feed→next display
+tick→quiet settle, viewport-message count, keystroke repaint cost, Return→stream settle, normal
+scroll event gaps, and alternate-screen wheel→response/display. It also counts clear-screen,
+clear-history and alternate-screen sequences during entry. The driver copies the metrics and a
+final real-shell screenshot into the run directory under `/tmp/threading-profiles` when Return is
+pressed in its terminal. Re-enter both chats in one run: successive `attempt` values are the
+push/pop comparison rather than separate process launches with different caches.
+
 ### Scaling audit, 2026-08-08
 
 The Tools page prompted a repository sweep for the patterns above. This is a risk inventory, not a

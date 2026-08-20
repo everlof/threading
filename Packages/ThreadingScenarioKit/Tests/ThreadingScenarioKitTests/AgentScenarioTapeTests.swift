@@ -148,6 +148,81 @@ final class AgentScenarioTapeTests: XCTestCase {
         }
     }
 
+    func testPTYReplayKeepsRawInputAndOutputBytesUnframed() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let input = Pipe()
+        let output = Pipe()
+        let hostWrite = "more\r\u{1b}[<64;12;8M"
+        try input.fileHandleForWriting.write(contentsOf: Data(hostWrite.utf8))
+        try input.fileHandleForWriting.close()
+        let initial = "\u{1b}[2J\u{1b}[HCodex fixture\r\n› "
+        let repaint = "\u{1b}[HOlder content\u{1b}[K"
+        let tape = AgentScenarioTape(
+            id: "terminal-pty-replay",
+            title: "Terminal PTY replay",
+            provider: .codex,
+            transport: .terminalPTY,
+            provenance: provenance,
+            steps: [
+                .emitAgent(channel: .terminal, payload: initial, afterMilliseconds: 0),
+                .expectHost(channel: .standardInput, payload: hostWrite),
+                .emitAgent(channel: .terminal, payload: repaint, afterMilliseconds: 0),
+                .exit(status: 0, afterMilliseconds: 0),
+            ]
+        )
+
+        let status = try AgentScenarioReplayer(delay: { _ in }).run(
+            tape: tape,
+            scenarioRoot: directory,
+            input: input.fileHandleForReading,
+            standardOutput: output.fileHandleForWriting
+        )
+        try output.fileHandleForWriting.close()
+
+        XCTAssertEqual(status, 0)
+        XCTAssertEqual(
+            output.fileHandleForReading.readDataToEndOfFile(),
+            Data((initial + repaint).utf8)
+        )
+    }
+
+    func testPTYReplayRefusesAHostWriteThatOnlyLooksLikeTheCapture() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let input = Pipe()
+        try input.fileHandleForWriting.write(contentsOf: Data("morf\r".utf8))
+        try input.fileHandleForWriting.close()
+        let tape = AgentScenarioTape(
+            id: "terminal-pty-mismatch",
+            title: "Terminal PTY mismatch",
+            provider: .claude,
+            transport: .terminalPTY,
+            provenance: provenance,
+            steps: [
+                .expectHost(channel: .standardInput, payload: "more\r"),
+                .exit(status: 0, afterMilliseconds: 0),
+            ]
+        )
+
+        XCTAssertThrowsError(try AgentScenarioReplayer(delay: { _ in }).run(
+            tape: tape,
+            scenarioRoot: directory,
+            input: input.fileHandleForReading
+        )) { error in
+            XCTAssertEqual(
+                error as? AgentScenarioReplayError,
+                .hostMessageMismatch(step: 0, reason: "terminal input bytes differ")
+            )
+        }
+    }
+
     func testFixtureWriteRejectsTraversal() {
         let tape = AgentScenarioTape(
             id: "unsafe-write",

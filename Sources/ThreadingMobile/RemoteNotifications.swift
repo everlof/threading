@@ -49,7 +49,20 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
     private let notifications: RemoteNotificationManager
 
     override init() {
-        let continuity = MobileSessionContinuityStore()
+        let continuity: MobileSessionContinuityStore
+#if DEBUG
+        if MobileTerminalWireFixtureConfiguration.current != nil,
+           let defaults = UserDefaults(suiteName: "codes.threading.mobile.terminal-wire-fixture") {
+            // Simulator fixture drafts and viewport positions must not replace the developer's
+            // ordinary app continuity. The isolated suite is disposable on every lab launch.
+            defaults.removePersistentDomain(forName: "codes.threading.mobile.terminal-wire-fixture")
+            continuity = MobileSessionContinuityStore(defaults: defaults)
+        } else {
+            continuity = MobileSessionContinuityStore()
+        }
+#else
+        continuity = MobileSessionContinuityStore()
+#endif
         self.continuity = continuity
         keyboards = MobileTerminalKeyboardStore()
         model = RemoteAppModel(continuity: continuity)

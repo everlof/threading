@@ -66,6 +66,7 @@ final class RemoteAppModel: ObservableObject {
     @Published var isPairing = false
     @Published var navigationPath: [MobileNavigationRoute] = [] {
         didSet {
+            guard !isEphemeralTerminalWireFixture else { return }
             guard let activeHostID else { return }
             if let sessionID = navigationPath.last?.sessionID {
                 continuity.setLastRoute(hostID: activeHostID, sessionID: sessionID)
@@ -87,6 +88,10 @@ final class RemoteAppModel: ObservableObject {
     /// the Demo, or by the DEBUG screenshot environment. Every mutation path short-circuits on
     /// it, so demo state changes locally and nothing ever reaches a network (`DemoExperience`).
     @Published private(set) var isDemo = false
+    /// The DEBUG simulator lab talks to a real loopback server but owns no durable pairing.
+    /// Keeping the distinction separate from `isDemo` is load-bearing: demo skips the network,
+    /// while this mode must traverse it and merely suppress local persistence and discovery.
+    private(set) var isEphemeralTerminalWireFixture = false
     private var themeEventsTask: URLSessionWebSocketTask?
     private var themeEventsReceiveTask: Task<Void, Never>?
     private var themeEventsHostID: String?
@@ -115,6 +120,27 @@ final class RemoteAppModel: ObservableObject {
     init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
         self.continuity = continuity
 #if DEBUG
+        if let wire = MobileTerminalWireFixtureConfiguration.current {
+            isEphemeralTerminalWireFixture = true
+            let host = PairedRemoteHost(
+                id: "terminal-wire-lab",
+                hostID: "terminal-wire-lab",
+                shareID: "terminal-wire-lab",
+                scope: "all",
+                name: "Terminal Wire Lab",
+                link: wire.link,
+                lastConnectedAt: Date(),
+                // Nil intentionally means "this exact paired door". Adopting the integration
+                // host's advertised production routes would move a later refresh off loopback.
+                endpoints: nil,
+                connectionPolicy: nil,
+                activeEndpointKind: RemoteHostEndpointKind.lan
+            )
+            hosts = [host]
+            activeHostID = host.id
+            phase = .connecting
+            return
+        }
         if let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"],
            let link = RemoteConnectionLink(
             string: "https://david-mac.tailnet-demo.ts.net:8443/#preview"
@@ -517,7 +543,12 @@ final class RemoteAppModel: ObservableObject {
                     .minimumProtocolVersion: String(response.serverProtocol.minimumSupported),
                 ])
             }
-            if let index = hosts.firstIndex(where: { $0.id == hostID }) {
+            if isEphemeralTerminalWireFixture {
+                // Keep the loopback door exact and in memory. The real server still supplies
+                // the catalogue and event stream; its advertised Mac routes and identity are
+                // production state that do not belong in this synthetic pairing.
+                ensureThemeEvents(for: host)
+            } else if let index = hosts.firstIndex(where: { $0.id == hostID }) {
                 let old = hosts[index]
                 var updated = old
                 // A pin is refined or followed only on the word of a channel that proved the
@@ -556,12 +587,14 @@ final class RemoteAppModel: ObservableObject {
                 RemoteHostTrust.register([updated])
                 ensureThemeEvents(for: updated)
             }
-            await reconcileHostedCredential(
-                hostID: hostID,
-                response: response,
-                successfulLink: successfulLink,
-                generation: generation
-            )
+            if !isEphemeralTerminalWireFixture {
+                await reconcileHostedCredential(
+                    hostID: hostID,
+                    response: response,
+                    successfulLink: successfulLink,
+                    generation: generation
+                )
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -924,7 +957,7 @@ final class RemoteAppModel: ObservableObject {
     /// at all until something has been paired, which is also what keeps iOS from asking for Local
     /// Network access before the app has a reason to want it.
     func startDiscovery() {
-        guard !isDemo else { return }
+        guard !isDemo, !isEphemeralTerminalWireFixture else { return }
         discovery.onResolved = { [weak self] resolution in
             self?.applyDiscovered(resolution)
         }

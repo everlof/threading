@@ -395,11 +395,10 @@ final class AgentSessionViewController: NSViewController {
     }
 
 #if DEBUG
-    /// Starts a deterministic PTY for the opt-in cross-client browser journey. It exercises the
-    /// shipping server, terminal mirror, WebSocket and composer without spending an agent turn
-    /// or depending on a developer's Claude/Codex account. The test host owns the controller and
-    /// removes the temporary project when the journey finishes.
-    func startRemoteBrowserE2EFixture() {
+    /// Starts an explicit deterministic command on the session's real PTY. Opt-in integration
+    /// harnesses use this instead of the ordinary provider launcher so they exercise the same
+    /// terminal mirror as a live agent without reading an account or spending a provider turn.
+    func startRemoteTerminalFixture(plan: AgentLaunchPlan) {
         guard !isRunning else { return }
         _ = view
         view.frame = NSRect(x: 0, y: 0, width: 900, height: 620)
@@ -408,7 +407,15 @@ final class AgentSessionViewController: NSViewController {
         isRunning = true
         activityTracker.markRunning()
         RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
-        session.start(plan: AgentLaunchPlan(
+        session.start(plan: plan)
+    }
+
+    /// Starts a deterministic PTY for the opt-in cross-client browser journey. It exercises the
+    /// shipping server, terminal mirror, WebSocket and composer without spending an agent turn
+    /// or depending on a developer's Claude/Codex account. The test host owns the controller and
+    /// removes the temporary project when the journey finishes.
+    func startRemoteBrowserE2EFixture() {
+        startRemoteTerminalFixture(plan: AgentLaunchPlan(
             executable: "/bin/sh",
             arguments: [
                 "-c",

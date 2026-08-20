@@ -46,10 +46,21 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         context.coordinator.attach(to: view)
         Self.apply(theme, to: view)
         view.accessibilityLabel = MobileL10n.string("Remote terminal")
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.terminalViewCreated(connection.session)
+#endif
 
         let coordinator = context.coordinator
+        let terminalSession = connection.session
         connection.onTerminalOutput = { [weak view] data in
-            view?.feed(byteArray: Array(data)[...])
+            guard let view else { return }
+#if DEBUG
+            MobileTerminalWirePerformanceProbe.feed(data, session: terminalSession) {
+                view.feed(byteArray: Array(data)[...])
+            }
+#else
+            view.feed(byteArray: Array(data)[...])
+#endif
             coordinator.restoreViewportIfPossible()
         }
         connection.onTerminalGridChange = { [weak view] cols, rows in
@@ -193,6 +204,9 @@ struct TerminalViewRepresentable: UIViewRepresentable {
                 Task { @MainActor in
                     guard let self, let view,
                           view.isDragging || view.isDecelerating || view.isTracking else { return }
+#if DEBUG
+                    MobileTerminalWirePerformanceProbe.localScrollChanged(self.connection.session)
+#endif
                     self.captureViewport()
                 }
             }
@@ -245,6 +259,12 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             Task { @MainActor [weak self] in
                 guard let self, self.allowsInput else { return }
                 let typed = self.keyBridge.applyLatchesToTyped(bytes)
+#if DEBUG
+                MobileTerminalWirePerformanceProbe.terminalInput(
+                    typed[...],
+                    session: self.connection.session
+                )
+#endif
                 self.connection.sendTerminalInput(typed[...])
             }
         }

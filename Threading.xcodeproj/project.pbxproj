@@ -37,6 +37,7 @@
 		A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */; };
 		A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62300010000000000000002 /* MobileAgentIdentityTests.swift */; };
 		A69900010000000000000001 /* RemoteTerminalViewportLeaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A69900010000000000000002 /* RemoteTerminalViewportLeaseTests.swift */; };
+		A70000010000000000000001 /* MobileTerminalWireFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */; };
 		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
 		A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61700010000000000000002 /* RemoteConnectionFailureTests.swift */; };
 		A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */; };
@@ -178,6 +179,7 @@
 		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
 		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
 		A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostDiscoveryTests.swift; sourceTree = "<group>"; };
+		A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileTerminalWireFixtureTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70000010000000000000001 /* Sources/Threading/Resources/Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
@@ -208,6 +210,8 @@
 				ThreadingMobile/MobileSettingsChrome.swift,
 				ThreadingMobile/MobileSettingsView.swift,
 				ThreadingMobile/MobileTerminalKeyboardStore.swift,
+				ThreadingMobile/MobileTerminalWireFixture.swift,
+				ThreadingMobile/MobileTerminalWirePerformanceProbe.swift,
 				ThreadingMobile/MobileThemeEnvironment.swift,
 				ThreadingMobile/MobileWorkingOrbView.swift,
 				ThreadingMobile/MobileWorkspaceActivity.swift,
@@ -382,6 +386,7 @@
 				A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */,
 				A62300010000000000000002 /* MobileAgentIdentityTests.swift */,
 				A69900010000000000000002 /* RemoteTerminalViewportLeaseTests.swift */,
+				A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -967,6 +972,7 @@
 				A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */,
 				A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */,
 				A69900010000000000000001 /* RemoteTerminalViewportLeaseTests.swift in Sources */,
+				A70000010000000000000001 /* MobileTerminalWireFixtureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

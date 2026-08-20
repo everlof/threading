@@ -69,7 +69,8 @@ public struct AgentScenarioReplayer {
         standardError: FileHandle = .standardError
     ) throws -> Int32 {
         try tape.validate()
-        guard tape.transport == .codexAppServer
+        guard tape.transport == .terminalPTY
+                || tape.transport == .codexAppServer
                 || tape.transport == .claudeStreamJSON
                 || tape.transport == .grokACP else {
             throw AgentScenarioReplayError.unsupportedTransport(tape.transport.rawValue)
@@ -77,23 +78,42 @@ public struct AgentScenarioReplayer {
         let root = try validatedRoot(scenarioRoot)
         var bindings = initialBindings
         bindings["SCENARIO_ROOT"] = root.path
-        var reader = BoundedLineReader(handle: input)
+        var lineReader = BoundedLineReader(handle: input)
+        var byteReader = BoundedByteReader(handle: input)
 
         for (index, step) in tape.steps.enumerated() {
             switch step {
             case .expectHost(_, let expected):
-                guard let actual = try reader.readLine(
-                    maximumBytes: AgentScenarioLimits.maximumPayloadBytes,
-                    step: index
-                ) else {
-                    throw AgentScenarioReplayError.unexpectedEndOfInput(step: index)
+                if tape.transport == .terminalPTY {
+                    let rendered = try render(expected, bindings: bindings, step: index)
+                    let expectedBytes = Data(rendered.utf8)
+                    guard let actual = try byteReader.readExactly(
+                        expectedBytes.count,
+                        maximumBytes: AgentScenarioLimits.maximumPayloadBytes,
+                        step: index
+                    ) else {
+                        throw AgentScenarioReplayError.unexpectedEndOfInput(step: index)
+                    }
+                    guard actual == expectedBytes else {
+                        throw AgentScenarioReplayError.hostMessageMismatch(
+                            step: index,
+                            reason: "terminal input bytes differ"
+                        )
+                    }
+                } else {
+                    guard let actual = try lineReader.readLine(
+                        maximumBytes: AgentScenarioLimits.maximumPayloadBytes,
+                        step: index
+                    ) else {
+                        throw AgentScenarioReplayError.unexpectedEndOfInput(step: index)
+                    }
+                    try JSONSubsetMatcher.match(
+                        expected: expected,
+                        actual: actual,
+                        bindings: &bindings,
+                        step: index
+                    )
                 }
-                try JSONSubsetMatcher.match(
-                    expected: expected,
-                    actual: actual,
-                    bindings: &bindings,
-                    step: index
-                )
 
             case .emitAgent(let channel, let payload, let milliseconds):
                 delay(milliseconds)
@@ -194,6 +214,52 @@ public struct AgentScenarioReplayer {
               let closing = value[opening.upperBound...].firstIndex(of: "}") {
             result.append(String(value[opening.upperBound..<closing]))
             cursor = value.index(after: closing)
+        }
+        return result
+    }
+}
+
+/// Reads an exact raw PTY write without imposing line or JSON framing on it.
+///
+/// Terminal input is allowed to contain Return, escape sequences, bracketed paste and mouse
+/// reports. Treating any of those as a line-oriented provider message would either wait for a
+/// newline that never comes or quietly alter the byte boundary the recorded TUI observed.
+private struct BoundedByteReader {
+    let handle: FileHandle
+
+    mutating func readExactly(
+        _ count: Int,
+        maximumBytes: Int,
+        step: Int
+    ) throws -> Data? {
+        guard count <= maximumBytes else {
+            throw AgentScenarioReplayError.hostLineTooLarge(
+                step: step,
+                maximum: maximumBytes
+            )
+        }
+        if count == 0 { return Data() }
+
+        var result = Data()
+        result.reserveCapacity(count)
+        while result.count < count {
+            let remaining = count - result.count
+            var chunk = Data(count: min(4_096, remaining))
+            let readCount: Int = try chunk.withUnsafeMutableBytes { bytes in
+                while true {
+                    let value = Darwin.read(
+                        handle.fileDescriptor,
+                        bytes.baseAddress,
+                        bytes.count
+                    )
+                    if value >= 0 { return value }
+                    if errno == EINTR { continue }
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+                }
+            }
+            guard readCount > 0 else { return nil }
+            chunk.removeSubrange(readCount..<chunk.endIndex)
+            result.append(chunk)
         }
         return result
     }

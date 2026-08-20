@@ -2859,6 +2859,114 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(attachments.first?.referencedAt, instant)
     }
 
+    /// Hosts two token-free, provider-shaped terminal workloads for the iOS simulator lab.
+    /// Unlike the static mobile demos, these are child processes on real PTYs behind the
+    /// shipping remote server. The driver supplies all file locations and stops the host with a
+    /// marker, keeping the opt-in test isolated from a developer's running Threading process.
+    func testInteractiveRemoteTerminalWireFixtureWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        try XCTSkipUnless(
+            environment["THREADING_REMOTE_TERMINAL_WIRE_FIXTURE"] == "1",
+            "Run only from the iOS terminal wire driver."
+        )
+        let helperPath = try XCTUnwrap(
+            environment["THREADING_REMOTE_TERMINAL_WIRE_HELPER"],
+            "The driver must supply its built threading-scenario executable."
+        )
+        XCTAssertTrue(
+            FileManager.default.isExecutableFile(atPath: helperPath),
+            "The terminal wire helper is not executable at \(helperPath)."
+        )
+        let historyLines = Int(
+            environment["THREADING_REMOTE_TERMINAL_WIRE_HISTORY_LINES"] ?? ""
+        ) ?? 2_400
+        XCTAssertTrue((1...10_000).contains(historyLines))
+        let launchURL = URL(fileURLWithPath: try XCTUnwrap(
+            environment["THREADING_REMOTE_TERMINAL_WIRE_LAUNCH_PATH"]
+        ))
+        let stopURL = URL(fileURLWithPath: try XCTUnwrap(
+            environment["THREADING_REMOTE_TERMINAL_WIRE_STOP_PATH"]
+        ))
+        try? FileManager.default.removeItem(at: launchURL)
+        try? FileManager.default.removeItem(at: stopURL)
+
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-terminal-wire-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        // `xcrun xctest` loads the app's test bundle without running AppDelegate, so the live
+        // composition root has not installed its terminal capability. Install that same
+        // adapter explicitly before creating the fixture controllers; otherwise `/api/me`
+        // lists the sessions but the first WebSocket auth closes with 4004 because the mirror
+        // cannot see their PTYs.
+        RemoteSessionMirrorRegistry.shared.installTerminalApplication(
+            LiveRemoteTerminalApplicationCapability(surfaces: AgentRuntime.shared)
+        )
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let codex = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: false,
+            title: "Codex · terminal wire lab"
+        ))
+        let claude = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .claude,
+            usesNativeUI: false,
+            title: "Claude · terminal wire lab"
+        ))
+        let codexController = AgentRuntime.shared.makeController(for: codex)
+        let claudeController = AgentRuntime.shared.makeController(for: claude)
+        codexController.startRemoteTerminalFixture(plan: AgentLaunchPlan(
+            executable: helperPath,
+            arguments: ["terminal-fixture", "codex", "--history-lines", String(historyLines)],
+            resumeState: .unavailable
+        ))
+        claudeController.startRemoteTerminalFixture(plan: AgentLaunchPlan(
+            executable: helperPath,
+            arguments: ["terminal-fixture", "claude", "--history-lines", String(historyLines)],
+            resumeState: .unavailable
+        ))
+        XCTAssertTrue(codexController.isRunning)
+        XCTAssertTrue(claudeController.isRunning)
+        XCTAssertNotNil(RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: codex.id))
+        XCTAssertNotNil(RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: claude.id))
+
+        let origin = "http://127.0.0.1:\(port!)"
+        let launch: [String: Any] = [
+            "url": "\(origin)/#goodtoken",
+            "codexSessionID": codex.id.uuidString,
+            "claudeSessionID": claude.id.uuidString,
+            "historyLines": historyLines,
+        ]
+        try JSONSerialization.data(withJSONObject: launch, options: [.sortedKeys])
+            .write(to: launchURL, options: .atomic)
+        print("THREADING_REMOTE_TERMINAL_WIRE_READY \(launchURL.path)")
+
+        defer {
+            try? FileManager.default.removeItem(at: launchURL)
+            try? FileManager.default.removeItem(at: stopURL)
+            AgentRuntime.shared.discard(sessionID: codex.id)
+            AgentRuntime.shared.discard(sessionID: claude.id)
+            _ = ProjectStore.shared.removeProject(id: project.id)
+            try? FileManager.default.removeItem(at: temporary)
+        }
+
+        let timeout = TimeInterval(
+            environment["THREADING_REMOTE_TERMINAL_WIRE_TIMEOUT"] ?? ""
+        ) ?? 600
+        let deadline = Date(timeIntervalSinceNow: min(max(timeout, 30), 3_600))
+        while !FileManager.default.fileExists(atPath: stopURL.path),
+              codexController.isRunning || claudeController.isRunning,
+              Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.05)))
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: stopURL.path)
+                || (!codexController.isRunning && !claudeController.isRunning),
+            "The terminal wire lab timed out before its stop marker or both fixtures finished."
+        )
+    }
+
     /// Opt-in live host for the browser-driven release gate. Unlike a fixture page, this puts a
     /// real PTY behind the shipping HTTP/WebSocket server and keeps two independently
     /// authenticated clients connected until one atomically submits `finish-e2e`.
