@@ -1290,9 +1290,10 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .idle)
 
         // A burst of redraw after the turn ended must not read as new work.
-        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 10)
+        let admitted = tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 10)
 
         XCTAssertEqual(tracker.activity, .idle)
+        XCTAssertNil(admitted, "a finished turn's repaint must not pulse the analyzer")
     }
 
     /// A relaunched process has to earn belief again: the settings file carrying the hooks is
@@ -1321,10 +1322,11 @@ final class HookLifecycleTests: XCTestCase {
         let tracker = SessionActivityTracker()
         tracker.markRunning()
 
-        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold + 1)
+        let admitted = tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold + 1)
 
         XCTAssertEqual(tracker.activity, .working)
         XCTAssertFalse(tracker.reportsOwnActivity)
+        XCTAssertEqual(admitted, ActivityDefaults.workingByteThreshold + 1)
     }
 
     // MARK: - Asking Inside a Turn

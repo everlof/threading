@@ -229,6 +229,12 @@ Nothing is opened by the click; the brand names the window rather than pointing 
 Both are skipped under Reduce Motion. A theme can restyle the whole row — its own logo, its
 own wordmark, even a gradient or image behind the list — see [Themes](#themes).
 
+Classic Player uses that slot as a tiny workload analyzer instead. Its two-digit reading is the
+number of agents working anywhere in Threading; **MAX** means at least one is using the highest
+effort its provider offers. The seven bands keep a quiet level for the active count, jump on
+meaningful new output and tool activity, then settle again. They do not measure tokens or CPU.
+With Reduce Motion the same reading is shown as a still frame.
+
 ### Arranging the sidebar
 The arrangement control at the sidebar's top opens the sidebar's view
 options in one menu: how the tree presents (**Group Sessions by Branch**, **Headings for Lone
@@ -3782,6 +3788,8 @@ Threading uses the skin's active/inactive title strip and its options, minimize,
 button pixels; Shade performs the Mac's Zoom/Restore action and Options opens the ordinary window
 menu. The rest of the app stays readable in Classic Player's authored dark material—playlist,
 equalizer, transport, cursor, and font artwork is not applied to unrelated controls.
+The top-left workload analyzer remains Threading's own clean-room display when a skin is used;
+the imported archive supplies no logo or equalizer pixels there.
 
 The original archive is not retained. Its title artwork is validated, converted to PNG, and
 stored only on this Mac beside the custom theme. Duplicating the theme duplicates that asset;

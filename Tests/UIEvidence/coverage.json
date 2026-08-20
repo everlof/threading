@@ -747,6 +747,27 @@
       }
     },
     {
+      "id": "sidebar-workload-analyzer",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Classic Player workload analyzer",
+      "description": "The real sidebar header with its brand pixels replaced by the fixed-cost spectrum presentation of app-wide agent activity.",
+      "states": ["Three agents working", "Recent meaningful output", "Top effort active"],
+      "matrix": {
+        "themes": ["Classic Player"],
+        "appearances": ["Authored dark"],
+        "sizes": ["Sidebar header"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/PaneHeaderRenderTests.swift",
+        "test": "ThreadingTests/PaneHeaderRenderTests/testRendersClassicPlayerWorkloadAnalyzer"
+      },
+      "capture": {
+        "glob": "sidebar-workload-analyzer-*.png"
+      }
+    },
+    {
       "id": "usage-dashboard-layout",
       "kind": "surface",
       "status": "implemented",

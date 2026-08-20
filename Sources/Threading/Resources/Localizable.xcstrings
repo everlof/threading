@@ -28720,7 +28720,11 @@
     "No sleep proxy on this network; an Apple TV or HomePod provides one": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen viloproxy i det här nätverket; en Apple TV eller HomePod tillhandahåller en"}}}},
     "Not checked yet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inte kontrollerat än"}}}},
     "Wake for network access is off in System Settings ▸ Energy": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning för nätverksåtkomst är avstängd i Systeminställningar ▸ Energi"}}}},
-    "Waking needs an announcement on this network": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning kräver en annonsering i det här nätverket"}}}}
+    "Waking needs an announcement on this network": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning kräver en annonsering i det här nätverket"}}}},
+    "No agents working": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga agenter arbetar"}}}},
+    "One agent working": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En agent arbetar"}}}},
+    "%lld agents working": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld agenter arbetar"}}}},
+    "%@, top effort active": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@, högsta ansträngning aktiv"}}}}
   },
   "version": "1.0"
 }

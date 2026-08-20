@@ -990,7 +990,12 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {
-        activityTracker.recordOutput(byteCount: byteCount)
+        if let acceptedByteCount = activityTracker.recordOutput(byteCount: byteCount) {
+            AgentWorkloadMonitor.shared.recordActivity(
+                sessionID: sessionID,
+                magnitude: AgentActivityPulse.output(byteCount: acceptedByteCount)
+            )
+        }
         attachmentObserver?.noteOutput()
         scheduleProviderTitleRefresh()
         scheduleCodexInterruptionRefresh()
