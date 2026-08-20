@@ -104,14 +104,15 @@ final class SidebarBrandViewTests: XCTestCase {
         mark.setHovered(false)
         XCTAssertEqual(container.opacity, 0)
         XCTAssertNil(field.animation(forKey: "particle.orbit"))
-        XCTAssertNil(field.animation(forKey: "particle.boxTurn"))
+        XCTAssertNil(field.animation(forKey: "particle.boxTumble"))
         XCTAssertTrue(dots.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
     }
 
-    /// A pass across the brand only weaves. Holding it turns the complete implied box in
-    /// perspective, on a nested layer so a click can tug it without replacing that turn.
+    /// A pass across the brand only weaves. Holding it tumbles the complete implied box through
+    /// varied directions in perspective, on a nested layer so a click can tug it without
+    /// replacing that tumble.
     @MainActor
-    func testHeldHoverAddsBoxRotationWithoutFightingThePress() throws {
+    func testHeldHoverAddsVariedBoxTumbleWithoutFightingThePress() throws {
         Design.Motion.reduceMotionOverrideForTesting = false
         let passing = ThreadingMarkView(particleMotion: .weave, heldHoverDelay: 60)
         passing.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
@@ -119,8 +120,8 @@ final class SidebarBrandViewTests: XCTestCase {
         let (_, passingField, _) = try particleLayers(in: passing)
         passing.setHovered(true)
         XCTAssertNil(
-            passingField.animation(forKey: "particle.boxTurn"),
-            "rotation began before the pointer had actually held the brand"
+            passingField.animation(forKey: "particle.boxTumble"),
+            "the tumble began before the pointer had actually held the brand"
         )
         passing.setHovered(false)
 
@@ -130,43 +131,72 @@ final class SidebarBrandViewTests: XCTestCase {
         let (container, field, dots) = try particleLayers(in: held)
         held.setHovered(true)
 
-        let boxTurn = try XCTUnwrap(
-            field.animation(forKey: "particle.boxTurn") as? CAKeyframeAnimation
+        let boxTumble = try XCTUnwrap(
+            field.animation(forKey: "particle.boxTumble") as? CAKeyframeAnimation
         )
-        XCTAssertEqual(boxTurn.keyPath, "transform")
-        let transforms = try XCTUnwrap(boxTurn.values as? [NSValue]).map(\.caTransform3DValue)
+        XCTAssertEqual(boxTumble.keyPath, "transform")
+        XCTAssertEqual(boxTumble.duration, Design.Motion.brandParticleBoxTumbleCycle)
+        let transforms = try XCTUnwrap(boxTumble.values as? [NSValue]).map(\.caTransform3DValue)
+        XCTAssertGreaterThan(transforms.count, 60, "the varied route collapsed to a few poses")
         XCTAssertTrue(
             transforms.contains {
                 abs($0.m13) > 0.001 || abs($0.m23) > 0.001
                     || abs($0.m31) > 0.001 || abs($0.m32) > 0.001
             },
-            "the box turn stayed in the dots' flat Z-axis plane"
+            "the box tumble stayed in the dots' flat Z-axis plane"
         )
         XCTAssertTrue(
             transforms.contains {
                 abs($0.m14) > 0.001 || abs($0.m24) > 0.001 || abs($0.m34) > 0.001
             },
-            "the box turn carried no perspective"
+            "the box tumble carried no perspective"
         )
+        XCTAssertTrue(
+            transforms.contains { $0.m13 > 0.03 } && transforms.contains { $0.m13 < -0.03 },
+            "yaw never changed direction"
+        )
+        XCTAssertTrue(
+            transforms.contains { $0.m23 > 0.03 } && transforms.contains { $0.m23 < -0.03 },
+            "pitch never changed direction"
+        )
+        XCTAssertTrue(
+            transforms.contains { $0.m12 > 0.03 } && transforms.contains { $0.m12 < -0.03 },
+            "the smaller roll never changed direction"
+        )
+        XCTAssertTrue(
+            transforms.allSatisfy { abs($0.m33) > 0.65 },
+            "the 24pt face turned close enough to edge-on to collapse into a line"
+        )
+        let first = try XCTUnwrap(transforms.first)
+        let last = try XCTUnwrap(transforms.last)
+        XCTAssertEqual(first.m11, last.m11, accuracy: 0.000_001)
+        XCTAssertEqual(first.m12, last.m12, accuracy: 0.000_001)
+        XCTAssertEqual(first.m13, last.m13, accuracy: 0.000_001)
+        XCTAssertEqual(first.m21, last.m21, accuracy: 0.000_001)
+        XCTAssertEqual(first.m22, last.m22, accuracy: 0.000_001)
+        XCTAssertEqual(first.m23, last.m23, accuracy: 0.000_001)
+        XCTAssertEqual(first.m31, last.m31, accuracy: 0.000_001)
+        XCTAssertEqual(first.m32, last.m32, accuracy: 0.000_001)
+        XCTAssertEqual(first.m33, last.m33, accuracy: 0.000_001)
         XCTAssertNil(
             field.animation(forKey: "particle.orbit"),
             "the held hover reused the planar particle orbit"
         )
         XCTAssertTrue(
             dots.contains { $0.animation(forKey: "particle.position") != nil },
-            "the box turn replaced Weave instead of carrying it inside"
+            "the box tumble replaced Weave instead of carrying it inside"
         )
 
         held.playPress()
         XCTAssertNotNil(container.animation(forKey: "press"))
         XCTAssertNotNil(
-            field.animation(forKey: "particle.boxTurn"),
-            "clicking replaced the box turn because both motions owned one layer"
+            field.animation(forKey: "particle.boxTumble"),
+            "clicking replaced the box tumble because both motions owned one layer"
         )
 
         held.setHovered(false)
         XCTAssertNil(field.animation(forKey: "particle.orbit"))
-        XCTAssertNil(field.animation(forKey: "particle.boxTurn"))
+        XCTAssertNil(field.animation(forKey: "particle.boxTumble"))
         XCTAssertTrue(dots.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
     }
 
@@ -179,7 +209,10 @@ final class SidebarBrandViewTests: XCTestCase {
             let mark = ThreadingMarkView(particleMotion: motion)
             mark.frame = NSRect(x: 0, y: 0, width: 64, height: 64)
             mark.layoutSubtreeIfNeeded()
-            mark.setParticlePresentation(phase: 0.34)
+            mark.setParticlePresentation(
+                phase: 0.34,
+                heldHoverPhase: motion == .weave ? 0.58 : nil
+            )
 
             let frame = try XCTUnwrap(png(of: mark))
             XCTAssertGreaterThan(frame.count, 500)
@@ -342,7 +375,7 @@ final class SidebarBrandViewTests: XCTestCase {
         let (container, field, dots) = try particleLayers(in: particleMark)
         XCTAssertEqual(container.opacity, 0)
         XCTAssertNil(field.animation(forKey: "particle.orbit"))
-        XCTAssertNil(field.animation(forKey: "particle.boxTurn"))
+        XCTAssertNil(field.animation(forKey: "particle.boxTumble"))
         XCTAssertTrue(dots.allSatisfy { ($0.animationKeys() ?? []).isEmpty })
     }
 

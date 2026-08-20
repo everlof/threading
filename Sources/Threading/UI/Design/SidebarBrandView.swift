@@ -151,6 +151,16 @@ final class SidebarBrandView: NSView, ThemedComponent {
 
     // MARK: - Public Methods
 
+    /// A stable held-hover frame for the product-shell evidence catalogue. Pointer interaction
+    /// still owns production state; this only lets a render show the real 24pt mark after its
+    /// dwell without racing Core Animation's clock.
+    func setHoverPresentation(weavePhase: CGFloat, heldHoverPhase: CGFloat) {
+        mark.setParticlePresentation(
+            phase: weavePhase,
+            heldHoverPhase: heldHoverPhase
+        )
+    }
+
     /// The launch flourish: the mark stitches itself in while the wordmark fades up under it.
     /// One-shot, host-invoked, and a no-op under Reduce Motion — the reduced launch is the
     /// finished row simply being there.

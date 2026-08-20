@@ -644,14 +644,16 @@ At rest it remains the crisp continuous vector. Hover crossfades it into the Wea
 presentation: independently tinted points run around the canonical shield and inward on its six
 canonical strands, so the flourish cannot drift from the application's silhouette. Leaving stops
 the cadence and removes every repeating animation; nothing runs at rest. A deliberate dwell adds
-a perspective pitch-and-yaw turn to the whole sampled box while Weave continues inside its local
-coordinates — the object rotates in place rather than its dots orbiting around the centre. Press sends an
-outer-to-core pulse through those points and turns the whole mark exactly one strand-step, which
-the mark's six-fold symmetry makes free (the model value never moves, so nothing is left rotated).
-The press is the whole action: the brand names the window and opens nothing, which is why the row stays
-`.staticText` and carries a documented `interactiveComponent` exception in
-`scripts/config/theme-boundary.json` rather than becoming a `ThemedControl` with a focus ring and an
-accessibility action for a press that does nothing.
+a perspective tumble to the whole sampled box while Weave continues inside its local coordinates.
+The box follows a long closed sequence of bounded pitch, yaw and smaller roll orientations: its
+direction keeps changing, its momentum stays smooth, and the 24pt face never approaches edge-on.
+The route is deterministic so visual evidence is stable, but irregular enough not to read as one
+repeated orbit. Press sends an outer-to-core pulse through those points and turns the whole mark
+exactly one strand-step, which the mark's six-fold symmetry makes free (the model value never
+moves, so nothing is left rotated). The press is the whole action: the brand names the window and
+opens nothing, which is why the row stays `.staticText` and carries a documented
+`interactiveComponent` exception in `scripts/config/theme-boundary.json` rather than becoming a
+`ThemedControl` with a focus ring and an accessibility action for a press that does nothing.
 
 Sidebar rows deliberately leave `NSTableCellView.textField` unset. Assigning it lets the table
 restyle the label on selection, which tints an unemphasized source-list row with the accent

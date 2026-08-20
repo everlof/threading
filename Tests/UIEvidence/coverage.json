@@ -29,6 +29,27 @@
       }
     },
     {
+      "id": "brand-interactions",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "supporting",
+      "title": "Top-left brand interactions",
+      "description": "The real native window shell with the sidebar brand held at a deterministic 3D tumble pose, and with the titlebar accepting one external screenshot for a report.",
+      "states": ["Held brand tumble", "Screenshot drop target"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["520×160-point native shell"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/BrandInteractionRenderTests.swift",
+        "test": "ThreadingTests/BrandInteractionRenderTests/testRendersHeldTumbleAndScreenshotDropTargetInNativeShell"
+      },
+      "capture": {
+        "glob": "brand-interaction-*.png"
+      }
+    },
+    {
       "id": "app-theme-chrome-matrix",
       "kind": "surface",
       "status": "implemented",

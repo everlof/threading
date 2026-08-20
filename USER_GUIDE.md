@@ -972,7 +972,8 @@ the description, so you can start typing what went wrong without clicking into i
 
 **A screenshot you took yourself opens the sheet too.** Drop an image file on Threading's icon in
 the Dock, or on the strip beside the traffic lights at the top of the window, and the report sheet
-opens on that picture with the marking and the description already there. This exists for the
+opens on that picture with the marking and the description already there. When the strip can take
+the image, it lights in the accent and says **Drop screenshot to report**. This exists for the
 things the inspector cannot photograph: a hover, a tooltip, a menu open over the thing it is
 covering. Take it with ⌘⇧4 while the state is on screen, then drop the file. A folder dropped on
 the icon still becomes a project.

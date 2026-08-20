@@ -1979,14 +1979,14 @@ enum Design {
         /// rest or under Reduce Motion.
         static var brandParticleWeaveCycle: TimeInterval { reducesMotion ? 0 : 1.45 }
         static var brandParticleBreathCycle: TimeInterval { reducesMotion ? 0 : 1.8 }
-        /// Weave answers an ordinary pass immediately. Rotation is earned by a deliberate
+        /// Weave answers an ordinary pass immediately. A tumble is earned by a deliberate
         /// dwell, late enough that crossing the sidebar never turns the brand into ambient
         /// motion, but soon enough to reward someone inspecting the implied box.
         static var brandParticleHoverHold: TimeInterval { reducesMotion ? 0 : 0.9 }
-        /// Once that dwell is earned, the complete particle box makes one perspective turn.
-        /// It is distinct from Orbit's planar strand-step: the dots keep weaving locally while
-        /// their shared parent turns in depth.
-        static var brandParticleBoxTurnCycle: TimeInterval { reducesMotion ? 0 : 2.8 }
+        /// Once that dwell is earned, the complete particle box follows a long, irregular closed
+        /// tumble. It is distinct from Orbit's planar strand-step: the dots keep weaving locally
+        /// while their shared parent changes direction across all three axes in depth.
+        static var brandParticleBoxTumbleCycle: TimeInterval { reducesMotion ? 0 : 7.6 }
         /// Exactly one strand-step per cycle keeps the rotating particle mark seamless: its
         /// six-fold silhouette at the end is the silhouette it had at the beginning.
         static var brandParticleOrbitCycle: TimeInterval { reducesMotion ? 0 : 2.4 }

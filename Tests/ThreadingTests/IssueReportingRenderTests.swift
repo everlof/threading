@@ -597,6 +597,7 @@ final class IssueReportingRenderTests: XCTestCase {
                 }
             }
         }
+
         // Three sheets — empty inspector, marked-up inspector, Report a Problem — in two
         // appearances under three themes.
         XCTAssertEqual(written, 18)
@@ -788,8 +789,18 @@ final class IssueReportingRenderTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        // Match the shipping shell. The screenshot destination is specifically the native,
+        // transparent strip floating over a full-size root view; a default opaque test titlebar
+        // follows a different AppKit layout path once feedback is mounted into that root.
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.contentView = NSView(frame: window.contentView?.bounds ?? .zero)
         let strip = NSPoint(x: 60, y: window.frame.height - 2)
         let content = NSPoint(x: 60, y: 20)
+        XCTAssertFalse(
+            window.isInTitlebarStrip(content),
+            "the shipping fixture began without content geometry: \(window.contentLayoutRect)"
+        )
 
         // Nothing listening: the window must not take a file it has nowhere to put.
         XCTAssertEqual(drag(png, to: strip, on: window), [])
@@ -798,9 +809,22 @@ final class IssueReportingRenderTests: XCTestCase {
         window.onScreenshotDropped = { dropped.append($0) }
 
         XCTAssertEqual(drag(png, to: strip, on: window), .copy)
+        XCTAssertTrue(
+            window.isScreenshotDropIndicatorPresented,
+            "the invisible strip accepted the screenshot without showing where it would land"
+        )
+        XCTAssertFalse(
+            window.isInTitlebarStrip(content),
+            "feedback reclassified a content point after AppKit restated its layout origin: "
+                + "\(window.contentLayoutRect)"
+        )
         XCTAssertEqual(
             drag(png, to: content, on: window), [],
             "the strip claimed a drop over the content, where a pane may have its own destination"
+        )
+        XCTAssertFalse(
+            window.isScreenshotDropIndicatorPresented,
+            "the titlebar still looked ready after the drag moved into content"
         )
         XCTAssertEqual(
             drag(notes, to: strip, on: window), [],
@@ -811,8 +835,17 @@ final class IssueReportingRenderTests: XCTestCase {
             "a multi-file drag has no single report to open"
         )
 
+        XCTAssertEqual(drag(png, to: strip, on: window), .copy)
+        window.draggingExited(nil)
+        XCTAssertFalse(window.isScreenshotDropIndicatorPresented)
+
+        XCTAssertEqual(drag(png, to: strip, on: window), .copy)
         XCTAssertTrue(window.performDragOperation(draggingInfo([png], at: strip, on: window)))
         XCTAssertEqual(dropped, [png])
+        XCTAssertFalse(
+            window.isScreenshotDropIndicatorPresented,
+            "the accepted target stayed highlighted after the report sheet took the image"
+        )
     }
 
     @MainActor

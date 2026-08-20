@@ -1,6 +1,9 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "ScreenshotReportDropTargetView": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "ScreenshotReportDropTargetView"}}}},
+    "The Threading mark drawn live: brand threads under System, the theme's accent under a style. Rest, then Weave, Breathe and Orbit from left to right; Weave is held at one box-tumble pose, Preview plays the whole route, and Replay shows the launch stitch.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading-märket ritat direkt: varumärkestrådar under System, temats accent under en stil. Vila, sedan Väv, Andas och Kretsa från vänster till höger; Väv hålls i en pose mitt i lådrotationen, Förhandsvisa spelar hela förloppet och Spela upp igen visar startsömmen."}}}},
+    "The native titlebar's accepted-image state: a quiet wash and one exact sentence beside the traffic lights. It is transient, has no resting surface, and never takes titlebar hit-testing.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den inbyggda titelradens läge för en godkänd bild: en stillsam toning och en exakt mening bredvid trafikljusen. Det är tillfälligt, har ingen vilande yta och tar aldrig titelradens träfftestning."}}}},
     "A view-only link can watch output while this shell is running. A full-control link can start the shell and run commands as your Mac user. The project folder is only the starting directory, not a security boundary. Neither grant can approve AI permissions or manage Threading.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En skrivskyddad länk kan se utdata medan skalet körs. En länk med full kontroll kan starta skalet och köra kommandon som din Mac-användare. Projektmappen är bara startkatalogen, inte en säkerhetsgräns. Ingen av behörigheterna kan godkänna AI-behörigheter eller hantera Threading."}}}},
     "Copy Full-Control Link": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera länk med full kontroll"}}}},
     "Once a day, Threading asks GitHub about the app, npm about installed Claude, Codex, Grok and OpenCode tools, and cursor.com about installed Cursor. The agent requests include no account, project, session or installed version. Turn the check off in General and nothing is asked.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En gång om dagen frågar Threading GitHub om appen, npm om installerade verktyg för Claude, Codex, Grok och OpenCode samt cursor.com om installerade Cursor. Förfrågningarna för agenter innehåller inget konto, projekt, ingen session och ingen installerad version. Stäng av kontrollen under Allmänt så skickas inga förfrågningar."}}}},
@@ -2070,6 +2073,17 @@
         }
       }
     },
+    "Drop screenshot to report": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Släpp skärmbilden för att rapportera"
+          }
+        }
+      }
+    },
     "Every day": {
       "extractionState": "manual",
       "localizations": {
@@ -2633,13 +2647,24 @@
         }
       }
     },
-    "The Threading mark drawn live: brand threads under System, the theme's accent under a style. Rest, then Weave, Breathe and Orbit from left to right; Preview holds Weave through its box turn, while Replay shows the launch stitch.": {
+    "The Threading mark drawn live: brand threads under System, the theme's accent under a style. Rest, then Weave, Breathe and Orbit from left to right; Weave is held at one box-tumble pose, Preview plays the whole route, and Replay shows the launch stitch.": {
       "extractionState": "manual",
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Threading-märket ritat live: varumärkets trådar under System, temats accent under en stil. Vila, sedan Väv, Andning och Omlopp från vänster till höger; Förhandsvisning håller Väv genom sitt boxvarv, medan Repris visar startsömmen."
+            "value": "Threading-märket ritat live: varumärkets trådar under System, temats accent under en stil. Vila, sedan Väv, Andning och Omlopp från vänster till höger; Väv hålls i en pose från boxens tumling, Förhandsvisning spelar hela rutten och Repris visar startsömmen."
+          }
+        }
+      }
+    },
+    "The native titlebar's accepted-image state: a quiet wash and one exact sentence beside the traffic lights. It is transient, has no resting surface, and never takes titlebar hit-testing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det inbyggda namnlistfältets tillstånd för en godkänd bild: en diskret toning och en exakt mening bredvid trafikljusen. Det är tillfälligt, saknar viloyta och tar aldrig över namnlistens träfftestning."
           }
         }
       }
@@ -17559,6 +17584,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "SearchResultRowView"
+          }
+        }
+      }
+    },
+    "ScreenshotReportDropTargetView": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ScreenshotReportDropTargetView"
           }
         }
       }
