@@ -168,6 +168,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 |---|---|
 | The toolbar, the pane header strips, the sidebar's silhouette, split-item behaviour, anything pinning to `topAnchor` | [`window-chrome.md`](docs/architecture/window-chrome.md) |
 | The MCP server, tool routing by session token, launch flags, the display panel and its web view | [`mcp-and-display.md`](docs/architecture/mcp-and-display.md) |
+| The session-owned in-panel iOS Simulator, CoreSimulator lifecycle, direct framebuffer/input helper, leases and agent route | [`simulator-pane.md`](docs/architecture/simulator-pane.md) |
 | The live browser an agent drives: origin grants, the accessibility snapshot, refs and semantic locators, the browser tools | [`agent-browser.md`](docs/architecture/agent-browser.md) |
 | Natively rendered conversations: the Claude/Codex stream transports, permission brokering, transcript replay, the timeline model, tool rows, diffs, the turn rail | [`native-conversations.md`](docs/architecture/native-conversations.md) |
 | The exact agent-execution ledger: provider-native adapters, redaction, hash-linked storage, filters and the live browser split | [`execution-audit.md`](docs/architecture/execution-audit.md) |
