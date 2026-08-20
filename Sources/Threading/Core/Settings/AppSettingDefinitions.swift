@@ -1110,7 +1110,10 @@ enum AppSettingDefinitions {
         persistenceKey: "automaticUpdateChecksEnabled",
         absence: .registered(true),
         presentations: [row("general", 29, "Software Updates",
-                            "Check for updates automatically", ["updates", "Sparkle"])]
+                            "Check for updates automatically", [
+                                "updates", "Sparkle", "agent", "CLI", "Claude", "Codex",
+                                "Grok", "OpenCode", "Cursor"
+                            ])]
     )
     static let preventsIdleSystemSleepWhileAgentsWork = AppSettingDescriptor<Bool>(
         identity: .preventsIdleSystemSleepWhileAgentsWork,

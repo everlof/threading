@@ -123,6 +123,22 @@ final class ProjectTerminalViewController: NSViewController {
         )
     }
 
+    /// Runs provider-authored updater commands in this visible terminal after the user pressed
+    /// the update toast's action. The plan is one shell line, so a provider prompt cannot consume
+    /// a later provider's command as if the user had typed an answer.
+    func runAgentCLIUpdates(
+        _ plan: AgentCLIUpdateExecutionPlan
+    ) -> AgentCLIUpdateExecutionReceipt? {
+        startIfNeeded()
+        guard session.isRunning else { return nil }
+
+        session.insertText(plan.shellSource + "\n")
+        return AgentCLIUpdateExecutionReceipt(
+            terminalID: terminalID,
+            toolIDs: plan.updates.map(\.id)
+        )
+    }
+
     func terminate() {
         directoryTimer.invalidate()
         session.terminate()

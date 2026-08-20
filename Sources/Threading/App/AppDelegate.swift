@@ -136,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
     private var workspaceNavigatorMenu: NSMenu?
     private var commandPaletteController: CommandPaletteViewController?
+    private var agentCLIUpdateCoordinator: AgentCLIUpdateCoordinator?
 
     /// The same semantic catalog and invocation route feeds menus, shortcuts and the palette.
     /// It deliberately re-resolves window context each time either closure runs.
@@ -581,6 +582,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // restoration and the scheduled-message services live.
         guard plan.startsBackgroundServices else { return }
 
+        // One fixed five-tool sweep at most once a day. Process and network work stay off-main;
+        // a found result waits for a visible, active main window before its toast clock starts.
+        let agentCLIUpdateCoordinator = AgentCLIUpdateCoordinator(
+            canPresent: { [weak self, weak mainWindowController] in
+                guard let self else { return false }
+                return NSApp.isActive
+                    && !self.isOnboardingActive
+                    && mainWindowController?.window?.isVisible == true
+            },
+            present: { [weak mainWindowController] updates in
+                mainWindowController?.presentAgentCLIUpdates(updates)
+            }
+        )
+        self.agentCLIUpdateCoordinator = agentCLIUpdateCoordinator
+        agentCLIUpdateCoordinator.start()
+
         // Fills empty icon slots in the background; it observes the store from here on, so
         // projects added later are swept as they appear.
         ProjectIconDiscovery.shared.start()
@@ -894,6 +911,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         isOnboardingActive = false
         NSApp.activate(ignoringOtherApps: true)
 
+        agentCLIUpdateCoordinator?.presentationMayBeReady()
         restoreSelectedSessionIfReady()
     }
 

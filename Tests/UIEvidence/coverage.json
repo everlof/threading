@@ -113,6 +113,27 @@
       }
     },
     {
+      "id": "sidebar-agent-update-toast",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Agent tool update toast",
+      "description": "The real 240-point sidebar update receipt with compact Now and Latest columns, three provider versions, and the explicit Update All action.",
+      "states": ["Current versions", "Latest versions", "Update All action"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist", "Claymorphism", "Win98"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["240-point sidebar"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ToastRenderTests.swift",
+        "test": "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastStorybook"
+      },
+      "capture": {
+        "glob": "toast-agent-updates-*.png"
+      }
+    },
+    {
       "id": "git-review-pane",
       "kind": "surface",
       "status": "implemented",

@@ -1142,7 +1142,8 @@ final class AppSettings {
         }
     }
 
-    /// Whether Threading may ask its release feed whether a newer version exists.
+    /// Whether Threading may ask its own and installed agent tools' official release sources
+    /// whether newer versions exist.
     ///
     /// Defaults to **on**, and `defaults.bool` cannot express that — an unset key reads `false`,
     /// which would ship the feature switched off for everyone who never opened Settings. The

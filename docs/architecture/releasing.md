@@ -541,6 +541,41 @@ Two questions this section used to carry are settled: the claudex key sharing is
 remains), and a dev build no longer schedules checks against the stable feed
 (`UpdateFeedPolicy.allowsScheduledChecks`, tested in `UpdateFlowTests`).
 
+## Agent CLI release notices
+
+The same **Check for updates automatically** setting also authorizes a separate daily health
+check for installed agent TUIs. Sparkle cannot answer this question: each provider owns its tool,
+version scheme, release source and update command. `AgentKind.cliUpdateDefinition` therefore makes
+the existing exhaustive five-runtime inventory the catalog: Claude Code (`@anthropic-ai/claude-code`),
+Codex (`@openai/codex`), Grok (`@xai-official/grok`) and OpenCode (`opencode-ai`) read their public
+npm `latest` documents; Cursor reads the version pinned by its public `cursor.com/install` script.
+There is no authentication and no fallback source whose meaning Threading would have to guess.
+
+Local discovery uses the same login-shell path as an agent launch. Each installed tool's version
+command is a bounded one-shot child off the main thread: five seconds, 16 KiB of stdout, inherited
+agent identity removed. Only installed tools reach the network. Their HTTPS reads run concurrently
+with a ten-second timeout and a 256 KiB response cap; a failed or malformed source is logged and
+omitted without suppressing good answers from the others. The catalog is fixed at five, so one
+daily sweep is at most five child processes and five small requests — constant in projects,
+accounts, sessions, files and transcripts. There is no user-data stress fixture to add for a
+cardinality that cannot grow with user data.
+
+`AgentCLIUpdateCoordinator` records attempts at a 24-hour cadence, cancels when the shared setting
+turns off, and holds a result while the app is inactive or onboarding covers the window. A
+fingerprint of tool/current/latest versions prevents the same receipt from returning until one of
+those facts changes. The receipt uses the existing sidebar `Toast` component, remains for the
+unattended dwell, pauses under the pointer like every toast, and aligns now/latest values
+through the toast's generic comparison table. Checking never starts an updater. Pressing **Update**
+creates a durable standalone terminal and sends it one host-built shell line; each provider command
+is a quoted argument to its own login-shell child, runs sequentially, and leaves prompts, output and
+exit-code receipts visible and interruptible. A failing provider does not suppress the next one.
+
+The customization-surface decision is deliberately **host-only**. Provider identity, trusted
+release-source selection, version precedence and whether Threading may suggest an install command
+are integrity behavior the host must own. Presentation is not a new hard-coded surface: it reuses
+the theme-native toast extension component, while the host retains source selection, scheduling,
+deduplication, trusted command selection and visible-terminal execution.
+
 ## Releasing beside the iOS companion
 
 The Mac app and the iOS companion release on different clocks — Sparkle is self-controlled and
