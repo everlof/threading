@@ -108,6 +108,7 @@ final class ComponentGalleryViewController: NSViewController {
         "FileActivityMapView",
         "GlyphView",
         "HostedServiceSignInButton",
+        "HelpPopoverButton",
         "HoverPopoverScheduler",
         "HoverTrackingView",
         "ImageCompareCanvas",
@@ -580,6 +581,42 @@ final class ComponentGalleryViewController: NSViewController {
 
         let buttonRow = row([ordinary, prominent, icon, disabled])
 
+        let helpLabel = NSTextField(labelWithString: L10n.string("Tailscale"))
+        helpLabel.applyFont(.body)
+        helpLabel.textColor = Design.Text.label
+        let help = HelpPopoverButton(topic: HelpTopic(
+            title: L10n.string("Tailscale"),
+            lines: [
+                HelpTopic.Line(
+                    term: L10n.string("Who can reach it"),
+                    detail: L10n.string("devices your tailnet ACLs allow")
+                ),
+                HelpTopic.Line(
+                    term: L10n.string("Who can see the traffic"),
+                    detail: L10n.string(
+                        "nobody reads it. Tailscale may relay it encrypted when a direct "
+                            + "connection is not possible"
+                    )
+                ),
+                HelpTopic.Line(
+                    term: L10n.string("After a restart"),
+                    detail: L10n.string("the address stays the same")
+                ),
+                HelpTopic.Line(
+                    term: L10n.string("Away from home"),
+                    detail: L10n.string("yes")
+                )
+            ],
+            paragraphs: [
+                L10n.string(
+                    "Turning this on does not put Threading on any other network. Each way in "
+                        + "above is separate."
+                )
+            ]
+        ))
+        help.setAccessibilityIdentifier("gallery.button.help")
+        let helpRow = row([helpLabel, help])
+
         let hostedSignIn = HostedServiceSignInButton()
         hostedSignIn.configure(target: self, action: #selector(buttonPressed))
         hostedSignIn.setAccessibilityIdentifier("gallery.button.hosted-sign-in")
@@ -824,6 +861,11 @@ final class ComponentGalleryViewController: NSViewController {
                         "Apple's system-authored sign-in workflow, contained by the design boundary."
                     ),
                     hostedSignIn
+                ),
+                story(
+                    "HelpPopoverButton",
+                    "A quiet mark beside a name, the themed panel it opens, and the same words on the button for a screen reader.",
+                    helpRow
                 ),
                 story("ThemedToggle", "Off, on, disabled, target/action, and accessibility.", toggleRow),
                 story(

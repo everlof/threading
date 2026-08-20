@@ -7547,6 +7547,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "FileActivityMapView",
                 "GlyphView",
                 "HostedServiceSignInButton",
+                "HelpPopoverButton",
                 "HoverPopoverScheduler",
                 "HoverTrackingView",
                 "ImageAnnotationRailView",

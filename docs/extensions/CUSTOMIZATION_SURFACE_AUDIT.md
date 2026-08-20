@@ -111,6 +111,16 @@ popover from being added without making an extension-boundary decision, while st
 host-only presentations such as the account icon picker when extensions must not replace an
 explicit user-owned choice.
 
+`design.help` is the catalogue's first entry that is not a *place* in the app: `HelpPopoverButton`
+is a component, so the same ID names every "?" in the product. That is deliberate. The panel's
+body is always the words the surface it stands on already publishes — a remote way in's four
+questions, an identity operation's cost — so an extension with something to add about that
+surface adds it to *that* surface's contract, and would gain nothing by composing into the
+sentence explaining it. What stays host-owned is the affordance: the press, the placement,
+Escape, the focus return, and the promise that the same words reach a screen reader from the
+button whether or not the panel is ever opened. Moving prose behind a press is only honest while
+that promise holds, which is why it is a component rather than a pattern each page repeats.
+
 `extension.node-detail` is host-only for a different reason from the others: its *body* is
 already an extension's own tree, so there is nothing in it for a second extension to compose
 into, and the surface exists only while a reader holds a row open. What stays host-owned there
