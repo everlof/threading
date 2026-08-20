@@ -128,11 +128,15 @@ final class AgentSessionViewController: NSViewController {
             currentDirectory: { [weak terminalSession] in
                 terminalSession?.effectiveWorkingDirectory()
             },
-            text: { [weak terminalSession] in
-                guard let terminal = terminalSession?.terminalView.getTerminal() else { return "" }
-                return terminal.getRecentLogicalBufferText(
-                    maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes
+            text: { [weak terminalSession] since in
+                guard let terminal = terminalSession?.terminalView.getTerminal() else {
+                    return .empty
+                }
+                let read = terminal.getRecentLogicalBufferText(
+                    maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes,
+                    sinceAbsoluteRow: since
                 )
+                return TerminalScanRead(text: read.text, nextAbsoluteRow: read.nextAbsoluteRow)
             },
             isEnabled: {
                 AppSettings.shared.detectsAttachmentReferences(for: agentSession.kind)

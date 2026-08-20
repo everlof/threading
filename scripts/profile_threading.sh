@@ -1604,6 +1604,21 @@ run_attachment_stress() {
       return 1
     }
 
+    # The read comes first, because it is the half that had no measurement at all. The scan
+    # fixture below starts from a ready-made String, so a whole-scrollback walk on the main
+    # thread was invisible to it for as long as it existed. Depths bracket a working day in one
+    # session and the scrollback cap.
+    local rows
+    for rows in 1000 3500 10000; do
+      THREADING_TERMINAL_READ_STRESS=1 \
+      THREADING_TERMINAL_READ_STRESS_ROWS="${rows}" \
+      DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+      DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+        xcrun xctest \
+          -XCTest ThreadingTests.TerminalIncrementalScanTests/testStressTerminalBufferReadWhenEnabled \
+          "${test_bundle}"
+    done
+
     # shape:scope:paths. Both scopes at both extremes, because the interesting comparison is
     # what widening costs on the same buffer. Matching, existence checks and containment run on
     # the worker; newly visible rows are admitted on the main actor, where wide scope may take

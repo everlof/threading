@@ -145,6 +145,13 @@ not synchronously rebuild or relayout total content on the main actor. Unknown m
 - **Debounce as camouflage.** Coalescing is correct for redundant events only after one operation
   is bounded. It does not repair a resize tick that still reflows hidden history or invalidates
   every row.
+- **Autoreleased returns inside a long loop.** Foundation hands back autoreleased Objective-C
+  objects from ordinary-looking Swift calls: `FileHandle.read(upToCount:)` returns `NSData`, and
+  `JSONDecoder` leaves an `_NSJSONReader`. A loop over thousands of files drains no pool until it
+  returns, so peak memory becomes the *sum* of every iteration's transient bytes rather than the
+  largest one. This turned a 4.4 GB cache directory into 4.4 GB of live `NSData` in one usage scan
+  (see [`usage-dashboard.md`](usage-dashboard.md)). Per-item work that allocates through
+  Objective-C needs `autoreleasepool` at the per-item boundary.
 
 The heuristic is cardinality × row richness × mutation frequency. If two are non-trivial, use a
 value model, viewport ownership, stable identity, and a stress fixture by default. A small
@@ -1153,6 +1160,72 @@ seven-point sweep kept all other main apply phases at or below 2.88 ms and warm 
 0.83 ms. Finally, the delayed transcript observer now enters through the same async scanned-record
 door as terminal and structured-message observation. It no longer resolves on a worker only to copy
 outside bytes synchronously when it returns to the main actor.
+
+### The buffer read, and the four instruments that missed it
+
+Everything above measures what happens to the text *after* the observer has it. Getting the text
+was the expensive half, and no number here described it until 2026-08-20.
+
+`SessionAttachmentDefaults.maximumTerminalScanBytes` bounds the text
+`Terminal.getRecentLogicalBufferText` **returns**. It cannot bound what that call **reads**. The
+walk goes backwards from the newest row and stops when the budget is spent, but a blank row costs
+one separator byte and real agent scrollback is mostly blank and short rows, so 3,473 rows yielded
+about 59 KB and the budget was never spent. The walk reached row zero every time, calling
+`BufferLine.translateToString` and `getTrimmedLength` on every row of every session's entire
+scrollback, on the thread the window draws on, roughly six times a second.
+
+A window left running for 25 hours with 24 live sessions was measured at a 10.3 GB physical
+footprint, 14.1 GB peak, holding 23,545,777 live `Swift.StringStorage` objects. `sample` put 91 of
+118 main-thread samples inside that walk. The recorder's own ring held 3,867 `attachments.scan`
+events out of 4,096 across a 640-second window: 6.0 scans per second, 219 MB of buffer text read,
+**one** attachment found.
+
+`sinceAbsoluteRow` bounds the read. A caller passes back the `nextAbsoluteRow` of its previous
+result and only rows produced since are translated again. Two rules keep that from being merely
+faster:
+
+- **The current screen is always re-read.** A full-screen agent TUI repaints rows in place without
+  producing a new row, so the screen is the one region that can change without moving the cursor.
+- **The cursor commits only when a scan is applied.** Advancing it at read time was tried first and
+  is wrong: a scan superseded by a newer generation is dropped, and its rows would have been
+  carried away unread with nothing to ever read them again. `TerminalIncrementalScanTests` pins
+  both, because both failures are silent.
+
+Rows above the screen have scrolled out of the cursor's reach and can no longer change, which is
+what makes skipping them safe rather than only cheap. `TerminalAttachmentObserver` also stopped
+keeping a set of every path anywhere in scrollback and now remembers a bounded
+`rememberedScannedPaths` of what it has already offered, which covers more history than the read
+window and is the first version of that set with an upper bound.
+
+**Four instruments were pointed at this feature and none of them saw it.** That is the part worth
+keeping:
+
+1. **The expensive phase was outside every span.** `attachments.scan` began *after* `text()`
+   returned, so the one recorded measurement of this feature described the worker round trip and
+   never the synchronous work that blocked the window. The read now has its own `attachments.read`
+   span. Instrument the phase you suspect is cheap; a span that starts after it proves nothing.
+2. **The stall heuristic could not tell a blocked thread from an `await`.** Requiring a span to
+   both begin and end on the main thread was meant to exclude cross-queue work, but an `await` that
+   resumes on the main actor satisfies both endpoints while occupying the thread for neither. So
+   `attachments.scan` tripped the 100 ms threshold on essentially every pass and the app exported a
+   trace every 30-second cooldown, continuously, for something that was never a stall. A signal
+   that fires constantly is worse than one that never fires: it reads as background noise, and it
+   crowded out the two genuine `main-thread.stall` events in the same window. Spans that cross
+   queues now pass `crossesQueues: true` and are excluded.
+3. **The stress fixture began after the expensive part.** `testStressAttachmentScanWhenEnabled`
+   hands the detector a ready-made `String`, so a whole-scrollback walk was structurally invisible
+   to it. `TerminalIncrementalScanTests.testStressTerminalBufferReadWhenEnabled` now sweeps the
+   read itself across scrollback depths, and `scripts/profile_threading.sh attachment-stress` runs
+   it first.
+4. **A bounded ring is a sampling window, and nothing said what filled it.** At 3,867 of 4,096
+   events, one span had evicted almost every other subsystem from the trace; read as a timeline
+   that is invisible. Every exported trace now carries `dominant_span`, `dominant_span_share`,
+   `ring_events`, `ring_distinct_spans` and `top_spans` in `otherData`, and the automatic-export
+   log line repeats them, so `log show` shows what is flooding the recorder without opening a file.
+
+The general rule, which is not specific to attachments: **a cap on output is not a cap on work.**
+A bound stated in bytes, rows or items returned says nothing about how much was examined to
+produce them, and the two diverge exactly when the content is sparse.
 
 ## Attachment preview-format stress target
 

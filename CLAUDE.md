@@ -311,6 +311,9 @@ unbounded. Read the full rationale and current audit in
 - Collapse, paginate, and cap **before** constructing views, attributed documents, images, or
   constraints. Hiding a subtree after it was built saves pixels, not construction, layout, or
   memory.
+- **A cap on output is not a cap on work.** A bound stated in bytes, rows or items *returned* says
+  nothing about how much was examined to produce them, and the two diverge exactly when the content
+  is sparse. Bound the scan, not just the result.
 - A local disclosure, toggle, append, or status change updates the affected stable identities. It
   does not clear and rebuild a whole externally sized page or timeline.
 - Layout, resize, scroll, pointer, and stream callbacks do no filesystem/process work and no work

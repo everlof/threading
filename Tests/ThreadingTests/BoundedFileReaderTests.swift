@@ -62,6 +62,49 @@ final class BoundedFileReaderTests: XCTestCase {
         }
     }
 
+    /// Reading many files in one loop must cost one file, not all of them.
+    ///
+    /// `FileHandle.read(upToCount:)` hands back autoreleased `NSData`, so without a pool per
+    /// iteration every 64 KiB chunk that built a file survives until whatever is above the reader
+    /// returns. The usage scan walks every transcript this machine has produced, and that turned
+    /// a 4.4 GB cache directory into 4.4 GB of live `NSData` in a single pass: 72,893 chunks,
+    /// most of a 14 GB peak. The caller here releases each file's bytes immediately, so anything
+    /// this test sees growing is chunks that outlived their append.
+    func testReadingManyFilesDoesNotRetainEveryFilesChunks() throws {
+        let contents = Data(repeating: 0x41, count: 1_024 * 1_024)
+        let urls: [URL] = try (0..<120).map { index in
+            let url = root.appendingPathComponent("chunked-\(index).bin")
+            try contents.write(to: url)
+            return url
+        }
+
+        let baseline = Self.physicalFootprintBytes()
+        try XCTSkipIf(baseline == 0, "Footprint is unavailable on this host.")
+        for url in urls {
+            let data = try BoundedFileReader.read(url, maximumBytes: 8 * 1_024 * 1_024)
+            XCTAssertEqual(data.count, contents.count)
+        }
+        let growth = Self.positiveDifference(Self.physicalFootprintBytes(), baseline)
+
+        // 120 MB was read. Unpooled, the chunks alone accounted for all of it; pooled, a file's
+        // chunks are gone before the next file opens. The allowance is deliberately wide so this
+        // fails on the regression rather than on a busy machine.
+        XCTAssertLessThan(
+            growth,
+            40 * 1_024 * 1_024,
+            "Reading 120 MB across 120 files grew the footprint by \(growth / 1_048_576) MB"
+        )
+    }
+
+    private static func physicalFootprintBytes() -> UInt64 {
+        let pid = pid_t(ProcessInfo.processInfo.processIdentifier)
+        return ProcessUtility.getResourceUsage(forPid: pid)?.memoryBytes ?? 0
+    }
+
+    private static func positiveDifference(_ larger: UInt64, _ smaller: UInt64) -> UInt64 {
+        larger >= smaller ? larger - smaller : 0
+    }
+
     func testShallowDirectoryReadStopsOneEntryPastTheAllowance() throws {
         for index in 0..<4 {
             try Data().write(to: root.appendingPathComponent("entry-\(index)"))

@@ -332,7 +332,7 @@ final class ThinkingOrbTintTests: XCTestCase {
             sessionID: sessionID,
             projectRoot: { root },
             currentDirectory: { root },
-            text: { renderedText },
+            text: { _ in TerminalScanRead(text: renderedText, nextAbsoluteRow: 0) },
             isEnabled: { isEnabled }
         )
 
@@ -385,7 +385,7 @@ final class ThinkingOrbTintTests: XCTestCase {
             sessionID: sessionID,
             projectRoot: { root },
             currentDirectory: { root },
-            text: { renderedText },
+            text: { _ in TerminalScanRead(text: renderedText, nextAbsoluteRow: 0) },
             now: { clock }
         )
 

@@ -1844,6 +1844,19 @@ enum AttachmentReferenceDetector {
 
 // MARK: - Terminal Observation
 
+/// One bounded read of a terminal's recent text, plus where the next read resumes.
+///
+/// The observer keeps the cursor rather than the terminal, because only the observer knows when a
+/// scan was actually consumed. A disabled or restarted observer resets it and reads the whole
+/// window again.
+struct TerminalScanRead {
+    let text: String
+    /// One past the newest row read, in coordinates that survive scrollback trimming.
+    let nextAbsoluteRow: Int
+
+    static let empty = TerminalScanRead(text: "", nextAbsoluteRow: 0)
+}
+
 /// Debounces terminal repaints and inspects SwiftTerm's bounded recent logical buffer.
 ///
 /// Reading the emulator buffer avoids treating ANSI cursor commands as path text while retaining
@@ -1872,14 +1885,20 @@ final class TerminalAttachmentObserver {
     private let sessionID: SessionID
     private let projectRoot: () -> URL?
     private let currentDirectory: () -> URL?
-    private let text: () -> String
+    private let text: (Int) -> TerminalScanRead
     private let isEnabled: () -> Bool
     private let now: () -> Date
     private let record: Recorder
     private var pendingScan: Task<Void, Never>?
     private var resolutionTask: Task<Void, Never>?
     private var lastScan: Date?
-    private var pathsInLastScan: Set<String> = []
+    /// Paths already offered, newest last. Bounded, and deliberately not tied to what is still
+    /// on screen: the point is not to re-announce a hint the user has already read, and the read
+    /// window is now only as deep as the output since the last scan. This also replaced a set
+    /// that grew with every path anywhere in scrollback.
+    private var recentlySeenPaths: [String] = []
+    private var recentlySeenPathSet: Set<String> = []
+    private var lastScannedAbsoluteRow = 0
     private var scanGeneration = 0
 
     private(set) var isScanInFlight = false
@@ -1889,7 +1908,7 @@ final class TerminalAttachmentObserver {
         sessionID: SessionID,
         projectRoot: @escaping () -> URL?,
         currentDirectory: @escaping () -> URL?,
-        text: @escaping () -> String,
+        text: @escaping (Int) -> TerminalScanRead,
         isEnabled: @escaping () -> Bool = { true },
         now: @escaping () -> Date = Date.init,
         record: @escaping Recorder = { resolution, sessionID, root, shouldAdmit in
@@ -1958,7 +1977,7 @@ final class TerminalAttachmentObserver {
         isScanInFlight = false
         lastScanMetrics = nil
         guard isEnabled() else {
-            pathsInLastScan.removeAll()
+            forgetScanHistory()
             return
         }
         guard let root = projectRoot() else { return }
@@ -1966,11 +1985,31 @@ final class TerminalAttachmentObserver {
         // Reading SwiftTerm's buffer is main-actor work. Everything after that is immutable text,
         // URLs and filesystem queries, so doing it on the queue the window draws on would turn a
         // bounded 20–55 ms regex pass into visible input and scroll latency.
-        let scanned = text()
+        //
+        // The read gets its own span because it is the only synchronous main-thread phase here.
+        // It used to sit outside every span, so the one measurement of this feature described the
+        // worker round trip and never the work that blocked the window. Reading only what is new
+        // is what keeps it bounded; the span is what keeps it honest.
+        let readSpan = PerformanceRecorder.shared.begin(
+            "attachments.read",
+            category: "attachments",
+            metadata: ["since": String(lastScannedAbsoluteRow)]
+        )
+        let read = text(lastScannedAbsoluteRow)
+        readSpan.end(metadata: [
+            "bytes": String(read.text.utf8.count),
+            "new_rows": String(max(0, read.nextAbsoluteRow - lastScannedAbsoluteRow))
+        ])
+
+        let scanned = read.text
+        let readThrough = read.nextAbsoluteRow
         let current = currentDirectory()
+        // Wall time across a worker hop. It begins and ends on the main actor without occupying
+        // it, so it must not be read as a main-thread stall.
         let span = PerformanceRecorder.shared.begin(
             "attachments.scan",
             category: "attachments",
+            crossesQueues: true,
             metadata: ["bytes": String(scanned.utf8.count)]
         )
         isScanInFlight = true
@@ -1991,10 +2030,32 @@ final class TerminalAttachmentObserver {
                 scannedBytes: scanned.utf8.count,
                 workerNanoseconds: ended - started,
                 generation: generation,
+                readThrough: readThrough,
                 projectRoot: root,
                 span: span
             )
         }
+    }
+
+    /// Remembers offered paths, newest wins, bounded.
+    private func noteSeen(_ paths: [String]) {
+        for path in paths where recentlySeenPathSet.insert(path).inserted {
+            recentlySeenPaths.append(path)
+        }
+        let overflow = recentlySeenPaths.count - SessionAttachmentDefaults.rememberedScannedPaths
+        guard overflow > 0 else { return }
+        for path in recentlySeenPaths.prefix(overflow) {
+            recentlySeenPathSet.remove(path)
+        }
+        recentlySeenPaths.removeFirst(overflow)
+    }
+
+    /// Forgets both what was offered and how far the buffer was read, so the next scan starts
+    /// from the whole bounded window again.
+    private func forgetScanHistory() {
+        recentlySeenPaths.removeAll()
+        recentlySeenPathSet.removeAll()
+        lastScannedAbsoluteRow = 0
     }
 
     private func finishScan(
@@ -2002,6 +2063,7 @@ final class TerminalAttachmentObserver {
         scannedBytes: Int,
         workerNanoseconds: UInt64,
         generation: Int,
+        readThrough: Int,
         projectRoot root: URL,
         span: PerformanceSpan
     ) async {
@@ -2012,7 +2074,7 @@ final class TerminalAttachmentObserver {
         guard isEnabled() else {
             resolutionTask = nil
             isScanInFlight = false
-            pathsInLastScan.removeAll()
+            forgetScanHistory()
             span.end(metadata: ["disabled": "1"])
             return
         }
@@ -2022,13 +2084,16 @@ final class TerminalAttachmentObserver {
         // refused rather than listed, but re-offering it on every repaint would still be work,
         // and would keep re-announcing a hint the user has already read.
         let newly = AttachmentReferenceDetector.Resolution(
-            insideProject: resolution.insideProject.filter { !pathsInLastScan.contains($0.path) },
-            outsideProject: resolution.outsideProject.filter { !pathsInLastScan.contains($0.path) },
+            insideProject: resolution.insideProject.filter { !recentlySeenPathSet.contains($0.path) },
+            outsideProject: resolution.outsideProject.filter { !recentlySeenPathSet.contains($0.path) },
             resolvedProjectRoot: resolution.resolvedProjectRoot
         )
-        pathsInLastScan = Set(
-            (resolution.insideProject + resolution.outsideProject).map(\.path)
-        )
+        noteSeen((resolution.insideProject + resolution.outsideProject).map(\.path))
+        // Only now, once this scan's text has been folded into the history that dedupes the next
+        // one, may the read cursor move past it. Advancing at read time instead would let a scan
+        // that lost a race to a newer generation carry its rows away unprocessed, and nothing
+        // would ever read them again.
+        lastScannedAbsoluteRow = max(lastScannedAbsoluteRow, readThrough)
         let filteredEnded = DispatchTime.now().uptimeNanoseconds
         let result = if newly.isEmpty {
             SessionAttachmentStore.ScannedRecordResult.empty
@@ -2234,6 +2299,9 @@ enum SessionAttachmentDefaults {
     /// couple of seconds during sustained output and nothing when the terminal is idle.
     static let terminalBusyScanInterval: TimeInterval = 2.0
     static let maximumTerminalScanBytes = 256 * 1024
+    /// How many already-offered paths an observer remembers. Covers far more history than the
+    /// read window while staying bounded, which the previous whole-scrollback set was not.
+    static let rememberedScannedPaths = 512
 }
 
 enum TranscriptAttachmentDefaults {

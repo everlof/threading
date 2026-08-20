@@ -53,6 +53,7 @@ final class PerformanceRecorder: @unchecked Sendable {
     func begin(
         _ name: StaticString,
         category: StaticString,
+        crossesQueues: Bool = false,
         metadata: [String: String] = [:]
     ) -> PerformanceSpan {
         let id = UUID()
@@ -68,7 +69,8 @@ final class PerformanceRecorder: @unchecked Sendable {
             startNanoseconds: start,
             threadID: threadID,
             metadata: sanitizedMetadata,
-            beganOnMainThread: Thread.isMainThread
+            beganOnMainThread: Thread.isMainThread,
+            crossesQueues: crossesQueues
         )
 
         withLock {
@@ -133,8 +135,12 @@ final class PerformanceRecorder: @unchecked Sendable {
             guard let self else { return }
             do {
                 let url = try self.write(document)
+                let dominant = document.otherData["dominant_span"] ?? "-"
+                let share = document.otherData["dominant_span_share"] ?? "-"
                 ThreadingLogger.performance.notice(
-                    "Automatic performance trace: \(url.path, privacy: .private(mask: .hash))"
+                    """
+                    Automatic performance trace: \(url.path, privacy: .private(mask: .hash))                     reason=\(document.otherData["reason"] ?? "-", privacy: .public)                     dominant=\(dominant, privacy: .public) (\(share, privacy: .public))                     top=\(document.otherData["top_spans"] ?? "-", privacy: .public)
+                    """
                 )
             } catch {
                 ThreadingLogger.performance.error(
@@ -198,7 +204,15 @@ final class PerformanceRecorder: @unchecked Sendable {
         // A cross-queue operation can be enqueued from main and finish on a worker. Its elapsed
         // time is useful, but it did not occupy main for that interval. Requiring both endpoints
         // keeps the automatic stall signal about synchronous main-thread work.
-        if active.beganOnMainThread, endedOnMainThread,
+        //
+        // Both endpoints are not sufficient on their own. An `await` that resumes on the main
+        // actor begins and ends on the main thread while occupying it for neither, so a span
+        // wrapping worker round-trip wall time passed this test on every pass and exported a
+        // trace every cooldown for months. It named a real problem and buried it: the signal was
+        // continuous, so it read as background noise, and the synchronous work that genuinely
+        // blocked the thread was not inside any span at all. A span that crosses queues now says
+        // so and is excluded here; the synchronous phases inside it carry their own spans.
+        if active.beganOnMainThread, endedOnMainThread, !active.crossesQueues,
            event.durationNanoseconds >= slowThreshold {
             requestAutomaticExport(reason: "slow-main-span:\(active.name)")
         }
@@ -272,15 +286,56 @@ final class PerformanceRecorder: @unchecked Sendable {
             })
             snapshotEvents.sort { $0.startNanoseconds < $1.startNanoseconds }
 
+            var otherData = [
+                "reason": String(reason.prefix(160)),
+                "process": ProcessInfo.processInfo.processName
+            ]
+            otherData.merge(Self.saturation(of: snapshotEvents)) { current, _ in current }
+
             return TraceDocument(
                 traceEvents: snapshotEvents.map(ChromeTraceEvent.init),
                 displayTimeUnit: "ms",
-                otherData: [
-                    "reason": String(reason.prefix(160)),
-                    "process": ProcessInfo.processInfo.processName
-                ]
+                otherData: otherData
             )
         }
+    }
+
+    /// Summarises which spans fill the ring, so a trace says what dominates it without anyone
+    /// having to aggregate 4,096 events by hand first.
+    ///
+    /// A bounded ring is a sampling window, and a span emitted often enough evicts everything
+    /// else in it. That happened: one span held 94% of the events and the other subsystems were
+    /// simply gone, which is invisible when a trace is read as a timeline rather than counted.
+    /// Span names are compile-time trace schema, so naming them here stays inside the recorder's
+    /// aggregate, low-cardinality contract.
+    private static func saturation(of events: [TraceEvent]) -> [String: String] {
+        guard !events.isEmpty else { return [:] }
+
+        var counts: [String: Int] = [:]
+        var durations: [String: UInt64] = [:]
+        for event in events {
+            counts[event.name, default: 0] += 1
+            durations[event.name, default: 0] += event.durationNanoseconds
+        }
+
+        let ranked = counts.sorted { left, right in
+            left.value == right.value ? left.key < right.key : left.value > right.value
+        }
+        guard let dominant = ranked.first else { return [:] }
+
+        let share = Double(dominant.value) / Double(events.count)
+        var summary = [
+            "ring_events": String(events.count),
+            "ring_distinct_spans": String(counts.count),
+            "dominant_span": dominant.key,
+            "dominant_span_events": String(dominant.value),
+            "dominant_span_share": String(format: "%.0f%%", share * 100)
+        ]
+        summary["top_spans"] = ranked.prefix(5).map { name, count in
+            let milliseconds = Double(durations[name] ?? 0) / 1_000_000
+            return String(format: "%@=%d/%.0fms", name, count, milliseconds)
+        }.joined(separator: " ")
+        return summary
     }
 
     private func write(_ document: TraceDocument) throws -> URL {
@@ -415,6 +470,7 @@ private struct ActiveSpan {
     let threadID: UInt64
     var metadata: [String: String]
     let beganOnMainThread: Bool
+    let crossesQueues: Bool
 }
 
 private struct TraceEvent {
