@@ -38,9 +38,4 @@ enum AgentCLIUpdateToast {
             identifier: identifier
         )
     }
-
-    /// Render fixtures need the real request anatomy without opening a real terminal.
-    static func request(for updates: [AgentCLIUpdate]) -> ToastRequest {
-        request(for: updates, runUpdates: { _ in })
-    }
 }

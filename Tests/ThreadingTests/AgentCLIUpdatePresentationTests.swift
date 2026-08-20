@@ -11,8 +11,9 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        suiteName = "AgentCLIUpdatePresentationTests-\(UUID().uuidString)"
+        suiteName = "AgentCLIUpdatePresentationTests"
         defaults = UserDefaults(suiteName: suiteName)
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     override func tearDown() {
@@ -77,24 +78,65 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
         XCTAssertTrue(script.contains("'/bin/sh' '-l' '-c' 'printf second'"))
         XCTAssertTrue(plan.shellSource.hasPrefix("'/bin/sh' '-l' '-c' "))
 
+        // The plan's own shells are login shells, which is the point of it — so this runs them
+        // against a scratch home rather than the developer's. A profile that prints a banner,
+        // asks a question or takes its time would otherwise decide whether this test passes,
+        // and one that blocks on input would hang the suite outright. Hence the deadline too.
+        let home = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("AgentCLIUpdatePlan-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
         let process = Process()
         let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", plan.shellSource]
+        process.environment = ["HOME": home.path, "ENV": "", "PATH": "/usr/bin:/bin"]
         process.standardOutput = output
         process.standardError = output
-        try process.run()
-        process.waitUntilExit()
+        process.standardInput = FileHandle.nullDevice
 
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        try process.run()
         let text = String(
             decoding: output.fileHandleForReading.readDataToEndOfFile(),
             as: UTF8.self
         )
+        guard exited.wait(timeout: .now() + Self.planDeadline) == .success else {
+            process.terminate()
+            return XCTFail("the update plan did not finish within \(Self.planDeadline)s")
+        }
+
         XCTAssertEqual(process.terminationStatus, 0)
         XCTAssertTrue(text.contains("First Tool updater finished with exit code 7"))
         XCTAssertTrue(text.contains("Second Tool updater finished with exit code 0"))
         XCTAssertTrue(text.contains("first"))
         XCTAssertTrue(text.contains("second"), "the first updater's exit stopped the second")
+    }
+
+    func testThePlanIsOneCommandWhoseLongestLineClearsTheTTYLimit() {
+        // Every newline in the plan falls inside a quoted word, so the shell reads all of them
+        // before it runs anything — that is what keeps an updater's prompt from swallowing the
+        // next provider's command. What each line may not do is exceed the tty's canonical-mode
+        // limit, past which the line discipline discards the whole line and says nothing.
+        let source = AgentCLIUpdateExecutionPlan(
+            updates: AgentCLIUpdateCatalog.all.map {
+                AgentCLIUpdate(
+                    id: $0.id,
+                    displayName: $0.displayName,
+                    installedVersion: "2026.08.11-e8db854",
+                    latestVersion: "2026.08.19-aabbccd",
+                    updateCommand: $0.updateCommand
+                )
+            }
+        ).shellSource
+
+        let longestLine = source.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(\.utf8.count)
+            .max() ?? 0
+        XCTAssertLessThan(longestLine, Self.terminalCanonicalLineLimit)
+        XCTAssertEqual(source.filter { $0 == "'" }.count % 2, 0, "quoting must balance")
     }
 
     func testScheduleIsDailyAndRecoversFromAClockCorrection() {
@@ -125,10 +167,158 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
             lastAttempt: now.addingTimeInterval(60),
             now: now
         ))
+        XCTAssertLessThan(
+            AgentCLIUpdateSchedule.pollInterval,
+            AgentCLIUpdateSchedule.interval,
+            "the tick has to be finer than the interval it is meant to notice"
+        )
     }
 
-    func testCoordinatorDefersUntilPresentationIsVisibleAndDeduplicatesTheReceipt() async {
+    func testCoordinatorDefersUntilPresentationIsVisibleAndRecordsOnlyAStartedRun() async {
+        var canPresent = false
+        var presentations: [[AgentCLIUpdate]] = []
+        var starts: [@MainActor () -> Void] = []
         let updates = fixtureUpdates()
+        let coordinator = makeCoordinator(
+            updates: updates,
+            canPresent: { canPresent },
+            present: { presented, didStart in
+                presentations.append(presented)
+                starts.append(didStart)
+            }
+        )
+
+        coordinator.start()
+        await settle()
+        XCTAssertTrue(presentations.isEmpty)
+
+        canPresent = true
+        coordinator.presentationMayBeReady()
+        XCTAssertEqual(presentations, [updates])
+        XCTAssertNil(
+            defaults.string(forKey: AgentCLIUpdateSchedule.lastNotificationKey),
+            "showing a band is not the user answering it"
+        )
+
+        coordinator.presentationMayBeReady()
+        XCTAssertEqual(presentations.count, 1)
+
+        starts[0]()
+        XCTAssertEqual(
+            defaults.string(forKey: AgentCLIUpdateSchedule.lastNotificationKey),
+            AgentCLIUpdateSchedule.fingerprint(for: updates)
+        )
+    }
+
+    func testAReceiptNobodySawComesBackAndOneThatWasActedOnDoesNot() async {
+        var clock = Date(timeIntervalSince1970: 1_000_000)
+        var presentations: [[AgentCLIUpdate]] = []
+        var starts: [@MainActor () -> Void] = []
+        let coordinator = makeCoordinator(
+            updates: fixtureUpdates(),
+            canPresent: { true },
+            present: { presented, didStart in
+                presentations.append(presented)
+                starts.append(didStart)
+            },
+            now: { clock }
+        )
+
+        // Day one: the band dwells its fourteen seconds behind another window and goes away.
+        coordinator.start()
+        await settle()
+        XCTAssertEqual(presentations.count, 1)
+
+        // A poll inside the interval is not a second check.
+        coordinator.checkIfDue()
+        await settle()
+        XCTAssertEqual(presentations.count, 1)
+
+        // Day two, same versions: the same news is worth saying again, because it was never heard.
+        clock = clock.addingTimeInterval(AgentCLIUpdateSchedule.interval)
+        coordinator.checkIfDue()
+        await settle()
+        XCTAssertEqual(presentations.count, 2)
+
+        // Now it is heard, and acted on.
+        starts[1]()
+        clock = clock.addingTimeInterval(AgentCLIUpdateSchedule.interval)
+        coordinator.checkIfDue()
+        await settle()
+        XCTAssertEqual(presentations.count, 2, "an answered receipt does not come back")
+    }
+
+    func testTheDaysAttemptIsSpentOnTheAnswerRatherThanTheIntent() async {
+        let center = NotificationCenter()
+        var enabled = true
+        var presentations: [[AgentCLIUpdate]] = []
+        let coordinator = makeCoordinator(
+            updates: fixtureUpdates(),
+            automaticChecksEnabled: { enabled },
+            canPresent: { true },
+            present: { presented, _ in presentations.append(presented) },
+            notificationCenter: center
+        )
+
+        coordinator.start()
+        XCTAssertNil(
+            defaults.object(forKey: AgentCLIUpdateSchedule.lastAttemptKey),
+            "an attempt that has not run yet cannot have been spent"
+        )
+
+        // Off cancels the check that just started; on asks for it again, seconds later.
+        enabled = false
+        center.post(AppSettingsDidChange())
+        enabled = true
+        center.post(AppSettingsDidChange())
+        await settle()
+
+        XCTAssertEqual(presentations.count, 1, "turning the setting back on must do something")
+        XCTAssertNotNil(defaults.object(forKey: AgentCLIUpdateSchedule.lastAttemptKey))
+    }
+
+    func testAnUnrelatedSettingChangeDoesNotDropTheBandOverTheSettingsPane() async {
+        let center = NotificationCenter()
+        var canPresent = false
+        var presentations: [[AgentCLIUpdate]] = []
+        let coordinator = makeCoordinator(
+            updates: fixtureUpdates(),
+            canPresent: { canPresent },
+            present: { presented, _ in presentations.append(presented) },
+            notificationCenter: center
+        )
+
+        coordinator.start()
+        await settle()
+        XCTAssertTrue(presentations.isEmpty)
+
+        // Settings is open inside the visible window, and the user flips the idle-sleep switch.
+        canPresent = true
+        center.post(AppSettingsDidChange())
+        await settle()
+        XCTAssertTrue(
+            presentations.isEmpty,
+            "a held receipt waits for the window and the activation, not for any setting"
+        )
+
+        coordinator.presentationMayBeReady()
+        XCTAssertEqual(presentations.count, 1)
+    }
+
+    // MARK: - Helpers
+
+    private static let planDeadline: TimeInterval = 30
+    /// `MAX_CANON` on this platform: a longer line is discarded whole by the line discipline.
+    private static let terminalCanonicalLineLimit = 1_024
+
+    private func makeCoordinator(
+        updates: [AgentCLIUpdate],
+        automaticChecksEnabled: @escaping @MainActor () -> Bool = { true },
+        canPresent: @escaping @MainActor () -> Bool,
+        present: @escaping AgentCLIUpdateCoordinator.Present,
+        now: @escaping @MainActor () -> Date = { Date(timeIntervalSince1970: 1_000_000) },
+        notificationCenter: NotificationCenter = NotificationCenter()
+    ) -> AgentCLIUpdateCoordinator {
         let report = AgentCLIUpdateReport(
             installed: [],
             updates: updates,
@@ -136,32 +326,19 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
             checkedSourceCount: updates.count,
             missingCount: 0
         )
-        var canPresent = false
-        var presentations: [[AgentCLIUpdate]] = []
-        let coordinator = AgentCLIUpdateCoordinator(
+        return AgentCLIUpdateCoordinator(
             defaults: defaults,
-            automaticChecksEnabled: { true },
+            automaticChecksEnabled: automaticChecksEnabled,
             check: { report },
-            canPresent: { canPresent },
-            present: { presentations.append($0) },
-            now: { Date(timeIntervalSince1970: 1_000_000) },
-            notificationCenter: NotificationCenter()
+            canPresent: canPresent,
+            present: present,
+            now: now,
+            notificationCenter: notificationCenter
         )
+    }
 
-        coordinator.start()
+    private func settle() async {
         for _ in 0..<20 { await Task.yield() }
-        XCTAssertTrue(presentations.isEmpty)
-
-        canPresent = true
-        coordinator.presentationMayBeReady()
-        XCTAssertEqual(presentations, [updates])
-        XCTAssertEqual(
-            defaults.string(forKey: AgentCLIUpdateSchedule.lastNotificationKey),
-            AgentCLIUpdateSchedule.fingerprint(for: updates)
-        )
-
-        coordinator.presentationMayBeReady()
-        XCTAssertEqual(presentations.count, 1)
     }
 
     private func fixtureUpdates() -> [AgentCLIUpdate] {

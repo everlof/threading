@@ -4155,8 +4155,11 @@ a guess, and a wrong guess is an interruption about a folder you approved years 
 
 **Software updates.** Once a day, Threading checks GitHub for a newer Threading release and the
 official release source for each installed agent tool: npm for Claude Code, Codex, Grok and
-OpenCode, and cursor.com for Cursor. The agent lookups include no account, project, session or
-installed-version data. Switch this traffic off under **Settings ▸ General ▸ Software Updates**;
+OpenCode, and cursor.com for Cursor. The app request carries the version you are on and your
+macOS version, the way any download does — no identifier, and nothing about your projects. The
+agent lookups include no account, project, session or installed-version data, and reach only the
+tools you actually have installed. Switch this traffic off under
+**Settings ▸ General ▸ Software Updates**;
 **Help ▸ Check for Updates…** still checks Threading when it is off, so turning off background
 traffic never means losing the ability to look for a new app release.
 

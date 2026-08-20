@@ -551,24 +551,56 @@ Codex (`@openai/codex`), Grok (`@xai-official/grok`) and OpenCode (`opencode-ai`
 npm `latest` documents; Cursor reads the version pinned by its public `cursor.com/install` script.
 There is no authentication and no fallback source whose meaning Threading would have to guess.
 
-Local discovery uses the same login-shell path as an agent launch. Each installed tool's version
-command is a bounded one-shot child off the main thread: five seconds, 16 KiB of stdout, inherited
-agent identity removed. Only installed tools reach the network. Their HTTPS reads run concurrently
-with a ten-second timeout and a 256 KiB response cap; a failed or malformed source is logged and
-omitted without suppressing good answers from the others. The catalog is fixed at five, so one
-daily sweep is at most five child processes and five small requests — constant in projects,
-accounts, sessions, files and transcripts. There is no user-data stress fixture to add for a
-cardinality that cannot grow with user data.
+Local discovery uses the same login-shell path as an agent launch, and for the same reason twice
+over. A GUI application inherits none of the user's interactive `PATH`, so the lookup has to happen
+inside a login shell — and the npm-published agents install a `#!/usr/bin/env node` launcher, which
+cannot resolve its own interpreter outside that environment either. Running the tool directly with
+the app's own environment was the first version of this, and it reported `claude` and `codex` as
+*broken* on a machine where both work: `env: node: No such file or directory`, exit 127. So
+`AgentCLIVersionProbe` puts `command -v` and the version command in **one** login shell per runtime
+— one child, not two — with a sentinel distinguishing "not installed" (silence) from "the tool
+answered badly" (a logged failure). It is a bounded one-shot child off the main thread: ten seconds
+for the profile and the command together, 64 KiB of stdout, inherited agent identity removed.
+
+Only installed tools reach the network. Their HTTPS reads run concurrently with a ten-second
+timeout and a 256 KiB response cap enforced against the transfer rather than the result, so a
+source that declares no length cannot be downloaded in full and rejected afterwards; a failed or
+malformed source is logged and omitted without suppressing good answers from the others. The
+catalog is the runtime inventory itself — `AgentCLIUpdateChecker` refuses a longer one instead of
+silently truncating to it — so one daily sweep is at most one child process per runtime and one
+small request per installed tool: five and five today, constant in projects, accounts, sessions,
+files and transcripts. There is no user-data stress fixture to add for a cardinality that cannot
+grow with user data.
 
 `AgentCLIUpdateCoordinator` records attempts at a 24-hour cadence, cancels when the shared setting
-turns off, and holds a result while the app is inactive or onboarding covers the window. A
-fingerprint of tool/current/latest versions prevents the same receipt from returning until one of
-those facts changes. The receipt uses the existing sidebar `Toast` component, remains for the
-unattended dwell, pauses under the pointer like every toast, and aligns now/latest values
-through the toast's generic comparison table. Checking never starts an updater. Pressing **Update**
-creates a durable standalone terminal and sends it one host-built shell line; each provider command
-is a quoted argument to its own login-shell child, runs sequentially, and leaves prompts, output and
-exit-code receipts visible and interruptible. A failing provider does not suppress the next one.
+turns off, and holds a result while the app is inactive or onboarding covers the window. Three
+details of that sentence are load-bearing and each was wrong first:
+
+- **The cadence needs a clock of its own.** Threading is left running for days, so "once a day"
+  driven only by launch means "once per launch". An hourly poll asks whether the interval has
+  elapsed, and returning to the app asks too; both go through the same `checkIfDue`.
+- **The attempt is stamped on the answer, not the intent.** Writing it before the work meant that
+  switching the setting off and on again — which cancels the in-flight check — had already spent
+  the day's attempt, so the user's toggle appeared to do nothing.
+- **The receipt is deduplicated on the action, not the presentation.** A fingerprint of
+  tool/current/latest versions prevents the same receipt from returning, but it is recorded when a
+  terminal actually starts the run. Recorded at presentation, a band that dwelled fourteen seconds
+  behind another window, or one whose terminal refused to open, would have silenced those versions
+  for ever.
+
+`AppSettingsDidChange` is the shared app-settings notification, so it re-checks the schedule but
+deliberately does not flush a held receipt: doing so dropped the band over the Settings pane the
+user was working in.
+
+The receipt uses the existing sidebar `Toast` component, remains for the unattended dwell, pauses
+under the pointer like every toast, and aligns now/latest values through the toast's generic
+comparison table. Checking never starts an updater. Pressing **Update** creates a durable
+standalone terminal and sends it one host-built shell command; each provider command is a quoted
+argument to its own login-shell child, runs sequentially, and leaves prompts, output and exit-code
+receipts visible and interruptible. A failing provider does not suppress the next one. That
+command spans several terminal lines, because the `printf` receipts carry real newlines — every
+one of them a continuation the shell consumes before it runs anything, and none within the tty's
+1023-byte canonical-mode limit (247 bytes at the longest, for a five-tool run).
 
 The customization-surface decision is deliberately **host-only**. Provider identity, trusted
 release-source selection, version precedence and whether Threading may suggest an install command

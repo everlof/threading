@@ -29,9 +29,16 @@ struct AgentCLIUpdateExecutionReceipt: Equatable, Sendable {
     let toolIDs: [String]
 }
 
-/// A single line for the interactive terminal, with all future commands already inside one
+/// One shell command for the interactive terminal, with every provider command already inside a
 /// quoted child-shell argument. This matters when an updater asks a question: sending several
-/// terminal lines up front could leave the later commands in the PTY as accidental prompt input.
+/// *commands* up front would leave the later ones in the PTY as accidental prompt input.
+///
+/// It is one command, not one terminal line — the `printf` formats carry real newlines, so the
+/// text arrives as a dozen or so lines. That is deliberate on both counts. The shell reads every
+/// continuation line before running anything, because each newline falls inside a quoted word, so
+/// no updater can ever be handed the next one as an answer. And no single line comes near the
+/// tty's canonical-mode limit: a five-tool run measures 247 bytes at its longest line against a
+/// hard limit of 1023, past which the line discipline discards the whole line without a word.
 enum AgentCLIUpdateShellCommand {
     static func source(for updates: [AgentCLIUpdate]) -> String {
         var wrapper = ShellCommand(word: "/bin/sh")

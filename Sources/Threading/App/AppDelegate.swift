@@ -582,8 +582,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // restoration and the scheduled-message services live.
         guard plan.startsBackgroundServices else { return }
 
-        // One fixed five-tool sweep at most once a day. Process and network work stay off-main;
-        // a found result waits for a visible, active main window before its toast clock starts.
+        // One sweep of the runtime inventory, at most once a day and re-checked while the app
+        // keeps running. Process and network work stay off-main; a found result waits for a
+        // visible, active main window before its toast clock starts.
         let agentCLIUpdateCoordinator = AgentCLIUpdateCoordinator(
             canPresent: { [weak self, weak mainWindowController] in
                 guard let self else { return false }
@@ -591,8 +592,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                     && !self.isOnboardingActive
                     && mainWindowController?.window?.isVisible == true
             },
-            present: { [weak mainWindowController] updates in
-                mainWindowController?.presentAgentCLIUpdates(updates)
+            present: { [weak mainWindowController] updates, updatesDidStart in
+                mainWindowController?.presentAgentCLIUpdates(updates, didStart: updatesDidStart)
             }
         )
         self.agentCLIUpdateCoordinator = agentCLIUpdateCoordinator

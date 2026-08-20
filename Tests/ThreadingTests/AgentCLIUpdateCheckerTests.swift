@@ -159,6 +159,72 @@ final class AgentCLIUpdateCheckerTests: XCTestCase {
         )
     }
 
+    func testTheCheckerCoversTheWholeCatalogRatherThanSilentlyTruncatingIt() async {
+        let checker = AgentCLIUpdateChecker(
+            definitions: AgentCLIUpdateCatalog.all,
+            localReader: { _ in .success("1.0.0") },
+            transport: { request in
+                let body = request.url?.host == "cursor.com"
+                    ? #"FINAL_DIR="$HOME/.local/share/cursor-agent/versions/2026.08.11-e8db854""#
+                    : #"{"version":"1.0.0"}"#
+                return AgentCLIUpdateHTTPResponse(data: Data(body.utf8), statusCode: 200)
+            }
+        )
+
+        let report = await checker.check()
+
+        XCTAssertEqual(report.installed.count, AgentKind.allCases.count)
+        XCTAssertEqual(report.checkedSourceCount, AgentKind.allCases.count)
+        XCTAssertTrue(report.failures.isEmpty)
+    }
+
+    // MARK: - Installed version probe
+
+    func testVersionProbeAsksOneLoginShellForBothTheLookupAndTheVersion() {
+        let script = AgentCLIVersionProbe.script(for: definition(id: "grok", package: "grok"))
+
+        // The lookup comes first and the version command last, in one child: a GUI app inherits
+        // no interactive PATH, and an `#!/usr/bin/env node` launcher cannot find its interpreter
+        // outside the shell that found the launcher.
+        XCTAssertTrue(script.hasPrefix("'command' '-v' 'grok'"))
+        XCTAssertTrue(script.hasSuffix("'grok' '--version'"))
+        XCTAssertTrue(script.contains(AgentCLIVersionProbe.notInstalledSentinel))
+    }
+
+    func testVersionProbeTellsAnAbsentToolApartFromABadAnswer() {
+        XCTAssertEqual(
+            AgentCLIVersionProbe.answer(forShellOutput: AgentCLIVersionProbe.notInstalledSentinel),
+            .notInstalled
+        )
+        // A login shell prints its own profile's noise onto the same stream as the answer.
+        XCTAssertEqual(
+            AgentCLIVersionProbe.answer(
+                forShellOutput: "welcome back\n\(AgentCLIVersionProbe.notInstalledSentinel)"
+            ),
+            .notInstalled
+        )
+        XCTAssertEqual(
+            AgentCLIVersionProbe.answer(forShellOutput: "2.1.237 (Claude Code)\n"),
+            .version("2.1.237")
+        )
+        XCTAssertEqual(AgentCLIVersionProbe.answer(forShellOutput: "no idea"), .unreadable)
+    }
+
+    func testCursorSourceAllowsADeclaredAssignmentButNotProseAboutOne() {
+        let declared = """
+        readonly FINAL_DIR="$HOME/.local/share/cursor-agent/versions/2026.08.11-e8db854"
+        """
+        XCTAssertEqual(
+            try? AgentCLIReleaseSource.cursorInstaller.latestVersion(in: Data(declared.utf8)),
+            "2026.08.11-e8db854"
+        )
+        XCTAssertThrowsError(
+            try AgentCLIReleaseSource.cursorInstaller.latestVersion(
+                in: Data("# FINAL_DIR= is set further down, around 1.2.3\n".utf8)
+            )
+        )
+    }
+
     private func definition(id: String, package: String) -> AgentCLIUpdateDefinition {
         AgentCLIUpdateDefinition(
             id: id,

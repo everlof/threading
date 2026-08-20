@@ -43,7 +43,7 @@ enum AgentCLIReleaseSource: Equatable, Sendable {
         case .cursorInstaller:
             guard let script = String(data: data, encoding: .utf8),
                   let finalDirectoryLine = script.split(separator: "\n").first(where: {
-                      $0.trimmingCharacters(in: .whitespaces).hasPrefix("FINAL_DIR=")
+                      AgentCLIReleaseSource.declaresCursorBuildDirectory(String($0))
                   }),
                   let version = AgentCLIVersion(String(finalDirectoryLine)),
                   version.numericComponents.count == AgentCLIUpdateDefaults.cursorVersionParts
@@ -52,6 +52,21 @@ enum AgentCLIReleaseSource: Equatable, Sendable {
             }
             return version.display
         }
+    }
+
+    /// Cursor's installer pins the build directory it is about to create, so that assignment is
+    /// the published version. The match allows the shell's two ordinary declaration prefixes
+    /// because either is a rename away; everything after it stays strict, since a loose read of
+    /// this file would offer the user an update to a version that does not exist.
+    static func declaresCursorBuildDirectory(_ line: String) -> Bool {
+        var candidate = line.trimmingCharacters(in: .whitespaces)
+        for declaration in AgentCLIUpdateDefaults.shellDeclarationPrefixes
+        where candidate.hasPrefix(declaration) {
+            candidate = String(candidate.dropFirst(declaration.count))
+                .trimmingCharacters(in: .whitespaces)
+            break
+        }
+        return candidate.hasPrefix(AgentCLIUpdateDefaults.cursorBuildDirectoryAssignment)
     }
 }
 
@@ -339,6 +354,60 @@ struct AgentCLIVersion: Equatable, Comparable, Sendable {
     private static let hyphen = Character("-").asciiValue!
 }
 
+// MARK: - Installed version
+
+/// The single login-shell probe behind one tool's installed version.
+///
+/// One child per tool rather than two, and a login shell rather than a direct `exec`. Both follow
+/// from the same fact: a GUI application inherits none of the user's interactive `PATH`, so the
+/// lookup has to happen inside a login shell anyway — and the npm-published agents install a
+/// `#!/usr/bin/env node` launcher, which cannot resolve its own interpreter outside that
+/// environment. Running the version command in the shell that just found it is what makes
+/// `grok` and `opencode` answer at all instead of exiting 127.
+///
+/// `command -v` still runs first so that "not installed" stays a different answer from "the tool
+/// answered badly": the former is silence, the latter is a logged failure.
+enum AgentCLIVersionProbe {
+
+    enum Answer: Equatable, Sendable {
+        case notInstalled
+        case version(String)
+        case unreadable
+    }
+
+    /// Printed instead of a version when the lookup finds nothing. A sentinel rather than an exit
+    /// status because a status is the tool's to use: `grok version` may exit non-zero for its own
+    /// reasons, and that has to stay distinguishable from an absent tool.
+    static let notInstalledSentinel = "__threading-agent-cli-not-installed__"
+
+    static func script(for definition: AgentCLIUpdateDefinition) -> String {
+        var lookup = ShellCommand(word: "command")
+        lookup.append(word: "-v")
+        lookup.append(word: definition.executable)
+
+        var absent = ShellCommand(word: "printf")
+        absent.append(word: "%s")
+        absent.append(word: notInstalledSentinel)
+
+        var version = ShellCommand(word: definition.executable)
+        for argument in definition.versionArguments {
+            version.append(word: argument)
+        }
+
+        return "\(lookup.source) > /dev/null 2>&1 || { \(absent.source); exit 0; }; "
+            + version.source
+    }
+
+    /// The pure half. A login shell prints its own profile's noise onto the same stream, so the
+    /// sentinel is matched at the end rather than over the whole output.
+    static func answer(forShellOutput output: String) -> Answer {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.hasSuffix(notInstalledSentinel) else { return .notInstalled }
+        guard let version = AgentCLIVersion(trimmed) else { return .unreadable }
+        return .version(version.display)
+    }
+}
+
 // MARK: - Checker
 
 struct AgentCLIUpdateHTTPResponse: Sendable {
@@ -371,7 +440,15 @@ struct AgentCLIUpdateChecker: Sendable {
         localReader: @escaping LocalReader,
         transport: @escaping Transport
     ) {
-        self.definitions = Array(definitions.prefix(AgentCLIUpdateDefaults.maximumTools))
+        // Truncating here would defeat `cliUpdateDefinition`'s exhaustive switch: the compiler
+        // would force a sixth runtime's definition to be authored and this initializer would
+        // then drop it with no diagnostic. The bound is the runtime inventory itself, so the
+        // real catalog can never reach it.
+        precondition(
+            definitions.count <= AgentCLIUpdateDefaults.maximumTools,
+            "An update check cannot exceed the runtime inventory"
+        )
+        self.definitions = definitions
         self.localReader = localReader
         self.transport = transport
     }
@@ -534,16 +611,11 @@ struct AgentCLIUpdateChecker: Sendable {
         _ definition: AgentCLIUpdateDefinition,
         shell: String
     ) -> Result<String?, AgentCLIUpdateFailure.Reason> {
-        guard let path = AgentCLIProbe.locate(
-            definition.executable,
-            shell: shell
-        ) else { return .success(nil) }
-
         let result: BoundedChildResult
         do {
             result = try BoundedChildProcess.run(
-                executable: path,
-                arguments: definition.versionArguments,
+                executable: shell,
+                arguments: ["-l", "-c", AgentCLIVersionProbe.script(for: definition)],
                 environment: AgentEnvironment.launchEnvironment(),
                 timeout: AgentCLIUpdateDefaults.versionCommandTimeout,
                 maximumOutputBytes: AgentCLIUpdateDefaults.maximumVersionOutputBytes,
@@ -563,11 +635,16 @@ struct AgentCLIUpdateChecker: Sendable {
         }
         guard !result.outputWasTruncated else { return .failure(.versionOutputTooLarge) }
 
-        let output = String(decoding: result.output, as: UTF8.self)
-        guard let version = AgentCLIVersion(output) else {
+        switch AgentCLIVersionProbe.answer(
+            forShellOutput: String(decoding: result.output, as: UTF8.self)
+        ) {
+        case .notInstalled:
+            return .success(nil)
+        case .unreadable:
             return .failure(.unreadableVersionOutput)
+        case .version(let version):
+            return .success(version)
         }
-        return .success(version.display)
     }
 
     private static func liveTransport(
@@ -590,17 +667,23 @@ struct AgentCLIUpdateChecker: Sendable {
             throw AgentCLIUpdateFailure.Reason.responseTooLarge
         }
 
-        var data = Data()
-        if expectedLength > 0 {
-            data.reserveCapacity(Int(expectedLength))
-        }
+        // The byte sequence rather than `data(for:)` because the cap has to bound the transfer,
+        // not just the result: a server that declares no length would otherwise be downloaded in
+        // full and only then rejected. Accumulating into a `[UInt8]` keeps that early abort
+        // without paying a `Data` append per byte.
+        var buffer: [UInt8] = []
+        buffer.reserveCapacity(
+            expectedLength > 0
+                ? min(Int(expectedLength), AgentCLIUpdateDefaults.maximumResponseBytes)
+                : AgentCLIUpdateDefaults.initialResponseCapacity
+        )
         for try await byte in bytes {
-            guard data.count < AgentCLIUpdateDefaults.maximumResponseBytes else {
+            guard buffer.count < AgentCLIUpdateDefaults.maximumResponseBytes else {
                 throw AgentCLIUpdateFailure.Reason.responseTooLarge
             }
-            data.append(byte)
+            buffer.append(byte)
         }
-        return AgentCLIUpdateHTTPResponse(data: data, statusCode: http.statusCode)
+        return AgentCLIUpdateHTTPResponse(data: Data(buffer), statusCode: http.statusCode)
     }
 
     private struct IndexedOutcome: Sendable {
@@ -630,14 +713,22 @@ private enum AgentCLIUpdateHTTP {
 }
 
 private enum AgentCLIUpdateDefaults {
-    static let maximumTools = 5
+    /// Derived, never a literal: the check covers the runtime inventory exactly.
+    static let maximumTools = AgentKind.allCases.count
     static let minimumVersionParts = 2
     static let cursorVersionParts = 3
     static let maximumVersionBytes = 128
     static let maximumVersionInputBytes = 16 * 1_024
-    static let maximumVersionOutputBytes = 16 * 1_024
+    /// The login shell's own profile prints onto the same stream as the answer, so this budget
+    /// covers both — matching what `AgentCLIProbe` already tolerated from the same rc files.
+    static let maximumVersionOutputBytes = 64 * 1_024
     static let maximumResponseBytes = 256 * 1_024
-    static let versionCommandTimeout: TimeInterval = 5
+    static let initialResponseCapacity = 16 * 1_024
+    /// One login shell now sources the user's profile *and* runs the version command, so the
+    /// deadline covers both. The rc files are the slow half and are the reason it is not tighter.
+    static let versionCommandTimeout: TimeInterval = 10
     static let requestTimeout: TimeInterval = 10
     static let userAgent = "Threading-Agent-CLI-Update-Check"
+    static let cursorBuildDirectoryAssignment = "FINAL_DIR="
+    static let shellDeclarationPrefixes = ["export ", "readonly "]
 }

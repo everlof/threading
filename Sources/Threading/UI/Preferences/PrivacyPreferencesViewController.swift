@@ -486,8 +486,11 @@ final class PrivacyPreferencesViewController: NSViewController {
                 title: "Update checks reach release sources",
                 detail: "Once a day, Threading asks GitHub about the app, npm about installed "
                     + "Claude, Codex, Grok and OpenCode tools, and cursor.com about installed "
-                    + "Cursor. The agent requests include no account, project, session or "
-                    + "installed version. Turn the check off in General and nothing is asked."
+                    + "Cursor. The app request carries the version you are on and your macOS "
+                    + "version, the way any download does. The agent requests include no "
+                    + "account, project, session or installed version. Neither carries an "
+                    + "identifier or anything about your projects. Turn the check off in "
+                    + "General and nothing is asked."
             ),
             SettingsUI.detailRow(
                 symbol: "lifepreserver",

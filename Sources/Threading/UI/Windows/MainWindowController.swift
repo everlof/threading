@@ -1514,7 +1514,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Shows the completed background health check in the same sidebar lane as other receipts.
     /// The checker and scheduler stay outside the window; this is presentation only.
-    func presentAgentCLIUpdates(_ updates: [AgentCLIUpdate]) {
+    ///
+    /// `didStart` is called only once a terminal is actually running the plan, which is what the
+    /// coordinator records against: a receipt that timed out unseen, or whose terminal refused to
+    /// open, leaves the same versions free to be offered again.
+    func presentAgentCLIUpdates(
+        _ updates: [AgentCLIUpdate],
+        didStart: @escaping @MainActor () -> Void
+    ) {
         guard !updates.isEmpty else { return }
         sidebarViewController.presentToast(AgentCLIUpdateToast.request(for: updates) {
             [weak self] requestedUpdates in
@@ -1526,6 +1533,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 ))
                 return
             }
+            didStart()
         })
     }
 
