@@ -121,6 +121,7 @@ final class RemoteSessionMirrorRegistry {
                         summary(
                             for: $0,
                             projectName: project.name,
+                            projectLimitRecovery: project.limitRecoveryPolicy,
                             authorization: authorization
                         )
                     }
@@ -140,6 +141,7 @@ final class RemoteSessionMirrorRegistry {
                     summary(
                         for: $0.session,
                         projectName: $0.project.name,
+                        projectLimitRecovery: $0.project.limitRecoveryPolicy,
                         authorization: authorization
                     )
                 }
@@ -184,9 +186,16 @@ final class RemoteSessionMirrorRegistry {
     private func summary(
         for session: AgentSession,
         projectName: String,
+        projectLimitRecovery: LimitRecoveryPolicy?,
         authorization: RemoteAuthorization
     ) -> RemoteSessionSummaryDTO {
         let available = AgentRuntime.shared.isRunning(sessionID: session.id)
+        let ownsSessionLifecycle = canManageSessions(authorization)
+        let resolvedLimitRecovery = LimitRecoveryResolution.resolve(
+            session: session.limitRecoveryPolicy,
+            project: projectLimitRecovery,
+            app: LimitRecoverySettings.policy
+        ).policy
         return RemoteSessionSummaryDTO(
             id: session.id.uuidString,
             title: session.displayTitle,
@@ -214,8 +223,32 @@ final class RemoteSessionMirrorRegistry {
             inheritedTerminalTheme: RemoteThemeBridge.terminalTheme(
                 ThemeAssignments.inheritedTheme(forSession: session.id)
             ),
-            account: RemoteAccountBridge.identity(for: session)
+            account: RemoteAccountBridge.identity(for: session),
+            accountID: ownsSessionLifecycle && session.kind.supportsAccounts
+                ? session.accountHandle.name
+                : nil,
+            limitRecovery: ownsSessionLifecycle
+                ? remoteLimitRecovery(resolvedLimitRecovery)
+                : nil
         )
+    }
+
+    private func remoteLimitRecovery(
+        _ policy: LimitRecoveryPolicy
+    ) -> RemoteLimitRecoveryPolicyDTO {
+        switch policy {
+        case .flagOnly:
+            return .init(action: RemoteLimitRecoveryPolicyDTO.flagOnly)
+        case .waitForReset:
+            return .init(action: RemoteLimitRecoveryPolicyDTO.waitForReset)
+        case .resumeOnBestAccount:
+            return .init(action: RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount)
+        case .resumeVia(let accountID):
+            return .init(
+                action: RemoteLimitRecoveryPolicyDTO.resumeVia,
+                accountID: accountID.handle.name
+            )
+        }
     }
 
     private func summaryOrder(
@@ -1683,6 +1716,7 @@ final class RemoteSessionMirrorRegistry {
                     return summary(
                         for: candidate,
                         projectName: project.name,
+                        projectLimitRecovery: project.limitRecoveryPolicy,
                         authorization: authorization
                     )
                 }
@@ -1705,6 +1739,7 @@ final class RemoteSessionMirrorRegistry {
             connection.sendText(encode(RemoteSessionsChangedDTO(session: summary(
                 for: session,
                 projectName: project.name,
+                projectLimitRecovery: project.limitRecoveryPolicy,
                 authorization: authorization
             ))))
         }

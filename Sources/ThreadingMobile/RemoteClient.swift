@@ -529,6 +529,30 @@ struct RemoteClient {
         )
     }
 
+    func moveSessionAccount(
+        sessionID: String,
+        accountID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteMoveSessionAccountRequestDTO(accountID: accountID),
+            to: link.sessionAccountURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
+    func setSessionLimitRecovery(
+        sessionID: String,
+        policy: RemoteLimitRecoveryPolicyDTO,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: policy),
+            to: link.sessionLimitRecoveryURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
     func registerNotifications(
         _ registration: RemoteNotificationRegistrationDTO,
         requestID: String = UUID().uuidString.lowercased()

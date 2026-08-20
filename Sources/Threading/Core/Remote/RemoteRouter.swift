@@ -130,6 +130,14 @@ struct RemoteRouter {
         sessionID(forPath: path, action: "surface")
     }
 
+    static func accountSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: "account")
+    }
+
+    static func limitRecoverySessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: "limit-recovery")
+    }
+
     static func shareSessionID(forPath path: String) -> String? {
         sessionID(forPath: path, action: "share")
     }

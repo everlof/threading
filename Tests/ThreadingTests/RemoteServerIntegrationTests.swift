@@ -1255,6 +1255,130 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(try XCTUnwrap(ProjectStore.shared.session(withID: session.id)).usesNativeUI)
     }
 
+    func testOwnerCanMoveAChatAccountAndSetItsLimitRecovery() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-controls-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: true,
+            title: "Remote controls"
+        ))
+
+        let account = try JSONEncoder().encode(
+            RemoteMoveSessionAccountRequestDTO(accountID: "work")
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/account",
+                bearer: "goodtoken",
+                body: account
+            )).status,
+            200
+        )
+        XCTAssertEqual(sessionCommands.accountMoves.last?.sessionID, session.id)
+        XCTAssertEqual(sessionCommands.accountMoves.last?.accountHandle.name, "work")
+
+        let originalPolicy = LimitRecoverySettings.policy
+        LimitRecoverySettings.policy = .flagOnly
+        defer { LimitRecoverySettings.policy = originalPolicy }
+        let recovery = try JSONEncoder().encode(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
+                action: RemoteLimitRecoveryPolicyDTO.waitForReset
+            ))
+        )
+        let recoveryProbe = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/limit-recovery",
+            bearer: "goodtoken",
+            body: recovery
+        ))
+        XCTAssertEqual(recoveryProbe.status, 200)
+        XCTAssertEqual(sessionAccess.limitRecoveryMutations.last?.sessionID, session.id)
+        XCTAssertEqual(sessionAccess.limitRecoveryMutations.last?.policy, .waitForReset)
+
+        let ownerMe = try JSONDecoder().decode(RemoteMeDTO.self, from: recoveryProbe.body)
+        let ownerSummary = try XCTUnwrap(ownerMe.sessions.first { $0.id == session.id.uuidString })
+        XCTAssertEqual(ownerSummary.accountID, session.accountHandle.name)
+        XCTAssertEqual(
+            ownerSummary.limitRecovery,
+            .init(action: RemoteLimitRecoveryPolicyDTO.waitForReset)
+        )
+
+        let inheritedRecovery = try JSONEncoder().encode(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
+                action: RemoteLimitRecoveryPolicyDTO.flagOnly
+            ))
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/limit-recovery",
+                bearer: "goodtoken",
+                body: inheritedRecovery
+            )).status,
+            200
+        )
+        XCTAssertNil(
+            sessionAccess.limitRecoveryMutations.last?.policy,
+            "matching the inherited answer must keep the chat following its broader setting"
+        )
+
+        authority.set(RemoteAuthorization(
+            shareID: "settings-guest",
+            capability: .interact,
+            scope: .session(session.id),
+            principal: .guest
+        ), forToken: "settingsguest")
+        let guestMe = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "settingsguest")).body
+        )
+        let guestSummary = try XCTUnwrap(guestMe.sessions.first)
+        XCTAssertNil(guestSummary.accountID)
+        XCTAssertNil(guestSummary.limitRecovery)
+    }
+
+    func testSessionSettingsRoutesRejectMalformedOrUnsupportedChoices() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-control-validation-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: true
+        ))
+
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/account",
+                bearer: "goodtoken",
+                body: Data(#"{"accountID":"../credentials"}"#.utf8)
+            )).status,
+            400
+        )
+        let futureRecovery = try JSONEncoder().encode(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(action: "futureAction"))
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/limit-recovery",
+                bearer: "goodtoken",
+                body: futureRecovery
+            )).status,
+            400
+        )
+        XCTAssertTrue(sessionCommands.accountMoves.isEmpty)
+        XCTAssertTrue(sessionAccess.limitRecoveryMutations.isEmpty)
+    }
+
     func testDormantResumeFailsClosedWithoutApplicationCommands() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-session-no-commands-\(UUID().uuidString)",
@@ -1508,6 +1632,28 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 "/api/session/\(sessionID.uuidString)/surface",
                 bearer: "guesttoken",
                 body: surface
+            )).status,
+            403
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(sessionID.uuidString)/account",
+                bearer: "guesttoken",
+                body: try JSONEncoder().encode(
+                    RemoteMoveSessionAccountRequestDTO(accountID: "work")
+                )
+            )).status,
+            403
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(sessionID.uuidString)/limit-recovery",
+                bearer: "guesttoken",
+                body: try JSONEncoder().encode(
+                    RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
+                        action: RemoteLimitRecoveryPolicyDTO.waitForReset
+                    ))
+                )
             )).status,
             403
         )
@@ -2144,6 +2290,20 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             "abc"
         )
         XCTAssertNil(RemoteRouter.surfaceSessionID(forPath: "/api/session/a/b/surface"))
+        XCTAssertEqual(
+            RemoteRouter.accountSessionID(forPath: "/api/session/abc/account"),
+            "abc"
+        )
+        XCTAssertNil(RemoteRouter.accountSessionID(forPath: "/api/session/a/b/account"))
+        XCTAssertEqual(
+            RemoteRouter.limitRecoverySessionID(
+                forPath: "/api/session/abc/limit-recovery"
+            ),
+            "abc"
+        )
+        XCTAssertNil(RemoteRouter.limitRecoverySessionID(
+            forPath: "/api/session/a/b/limit-recovery"
+        ))
         XCTAssertEqual(
             RemoteRouter.snoozedSessionID(forPath: "/api/session/abc/snoozed"),
             "abc"
@@ -3073,11 +3233,17 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
         let usesNativeUI: Bool
     }
 
+    struct LimitRecoveryMutation: Equatable {
+        let sessionID: SessionID
+        let policy: LimitRecoveryPolicy?
+    }
+
     private let store: ProjectStore
     private(set) var queriedSessionIDs: [SessionID] = []
     private(set) var queriedProjectIDs: [ProjectID] = []
     private(set) var pinnedMutations: [PinnedMutation] = []
     private(set) var surfaceMutations: [SurfaceMutation] = []
+    private(set) var limitRecoveryMutations: [LimitRecoveryMutation] = []
 
     init(store: ProjectStore) {
         self.store = store
@@ -3115,6 +3281,14 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
             usesNativeUI: usesNativeUI
         ))
         return store.setUsesNativeUI(usesNativeUI, for: sessionID)
+    }
+
+    func setLimitRecoveryPolicy(
+        _ policy: LimitRecoveryPolicy?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        limitRecoveryMutations.append(.init(sessionID: sessionID, policy: policy))
+        return store.setLimitRecoveryPolicy(policy, forSessionID: sessionID)
     }
 }
 
@@ -3209,14 +3383,24 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
 
     var createdSessionID: SessionID?
     var resumeResult = true
+    var accountMoveResult: Result<Void, RemoteSessionAccountMoveFailure> = .success(())
     private(set) var launches: [RemoteSessionLaunch] = []
     private(set) var resumedSessionIDs: [SessionID] = []
+    private(set) var accountMoves: [(sessionID: SessionID, accountHandle: AccountHandle)] = []
     private(set) var sessionRefreshes: [SessionRefresh] = []
     private(set) var surfaceRefreshes: [SessionID] = []
 
     func resumeRemoteSession(_ sessionID: SessionID) -> Bool {
         resumedSessionIDs.append(sessionID)
         return resumeResult
+    }
+
+    func moveRemoteSession(
+        _ sessionID: SessionID,
+        to accountHandle: AccountHandle
+    ) -> Result<Void, RemoteSessionAccountMoveFailure> {
+        accountMoves.append((sessionID: sessionID, accountHandle: accountHandle))
+        return accountMoveResult
     }
 
     func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID? {

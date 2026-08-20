@@ -20,6 +20,14 @@ struct RemoteSessionLaunch {
     let prompt: String
 }
 
+enum RemoteSessionAccountMoveFailure: Error {
+    case appUnavailable
+    case sessionNotFound
+    case accountNotFound
+    case unsupportedRuntime
+    case moveRefused(String)
+}
+
 /// The application operations the remote transport is allowed to request.
 ///
 /// `RemoteAccessServer` is Core transport code: it must not know which window or controller
@@ -29,6 +37,13 @@ struct RemoteSessionLaunch {
 protocol RemoteSessionCommands: AnyObject {
     /// Returns false when the application cannot currently surface the existing session.
     func resumeRemoteSession(_ sessionID: SessionID) -> Bool
+
+    /// Stops, migrates and reopens a conversation under another login. The phone owns the
+    /// confirmation; this application command owns the transcript transaction and live pane.
+    func moveRemoteSession(
+        _ sessionID: SessionID,
+        to accountHandle: AccountHandle
+    ) -> Result<Void, RemoteSessionAccountMoveFailure>
 
     /// Returns the durable identity only after the application has accepted the launch.
     func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID?

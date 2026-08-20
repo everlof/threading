@@ -545,6 +545,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if request.method == "POST",
+           let sessionID = RemoteRouter.accountSessionID(forPath: path) {
+            handleSessionAccount(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
+           let sessionID = RemoteRouter.limitRecoverySessionID(forPath: path) {
+            handleSessionLimitRecovery(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
            let sessionID = RemoteRouter.shareSessionID(forPath: path) {
             handleCreateShare(request, sessionID: sessionID, respond: respond)
             return
@@ -1583,6 +1595,153 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond(.respond(RemoteRouter.json(
                 self.services.mirrors.meResponse(for: authorization)
             )))
+        }
+    }
+
+    private func handleSessionAccount(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeSessionManagement(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteMoveSessionAccountRequestDTO.self,
+            from: request.body
+        ), RemoteInboundPolicy.acceptsLaunchIdentifier(choice.accountID) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard let sessionID = SessionID(uuidString: rawSessionID),
+                  let session = self.services.sessionQueries.session(withID: sessionID) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            guard session.kind.supportsAccounts else {
+                respond(.respond(RemoteRouter.error(422, "Unsupported Runtime")))
+                return
+            }
+            guard let commands = self.sessionCommands else {
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                return
+            }
+
+            switch commands.moveRemoteSession(
+                sessionID,
+                to: AccountHandle(storedName: choice.accountID)
+            ) {
+            case .success:
+                self.services.eventLog.recordRemoteEvent("Session account changed remotely", [
+                    "session": sessionID.uuidString,
+                    "account": choice.accountID,
+                    "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                ])
+                respond(.respond(RemoteRouter.json(
+                    self.services.mirrors.meResponse(for: authorization)
+                )))
+            case .failure(.sessionNotFound):
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            case .failure(.accountNotFound), .failure(.unsupportedRuntime):
+                respond(.respond(RemoteRouter.error(422, "Unsupported Account")))
+            case .failure(.appUnavailable):
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+            case .failure(.moveRefused(let message)):
+                respond(.respond(RemoteRouter.error(409, message)))
+            }
+        }
+    }
+
+    private func handleSessionLimitRecovery(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeSessionManagement(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteSetSessionLimitRecoveryRequestDTO.self,
+            from: request.body
+        ), choice.policy.isKnown else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard let sessionID = SessionID(uuidString: rawSessionID),
+                  let session = self.services.sessionQueries.session(withID: sessionID) else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            guard let policy = self.limitRecoveryPolicy(
+                choice.policy,
+                for: session
+            ) else {
+                respond(.respond(RemoteRouter.error(422, "Unsupported Recovery")))
+                return
+            }
+            let inherited = LimitRecoveryResolution.inherited(
+                beyond: .session,
+                project: self.services.sessionQueries.project(forSessionID: sessionID)?
+                    .limitRecoveryPolicy,
+                app: LimitRecoverySettings.policy
+            )
+            let result = self.services.sessionMutations.setLimitRecoveryPolicy(
+                policy == inherited ? nil : policy,
+                forSessionID: sessionID
+            )
+            switch result {
+            case .applied, .unchanged:
+                self.services.eventLog.recordRemoteEvent(
+                    "Session limit recovery changed remotely",
+                    [
+                        "session": sessionID.uuidString,
+                        "policy": choice.policy.action,
+                        "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                    ]
+                )
+                respond(.respond(RemoteRouter.json(
+                    self.services.mirrors.meResponse(for: authorization)
+                )))
+            case .targetNotFound:
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            case .unsupportedValue:
+                respond(.respond(RemoteRouter.error(422, "Unsupported Recovery")))
+            case .persistenceRefused:
+                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+            }
+        }
+    }
+
+    @MainActor
+    private func limitRecoveryPolicy(
+        _ remote: RemoteLimitRecoveryPolicyDTO,
+        for session: AgentSession
+    ) -> LimitRecoveryPolicy? {
+        switch remote.action {
+        case RemoteLimitRecoveryPolicyDTO.flagOnly:
+            return .flagOnly
+        case RemoteLimitRecoveryPolicyDTO.waitForReset:
+            return .waitForReset
+        case RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount:
+            return session.kind.supportsAccounts ? .resumeOnBestAccount : nil
+        case RemoteLimitRecoveryPolicyDTO.resumeVia:
+            guard let rawAccountID = remote.accountID,
+                  RemoteInboundPolicy.acceptsLaunchIdentifier(rawAccountID) else { return nil }
+            let handle = AccountHandle(storedName: rawAccountID)
+            guard SessionMigration.destinations(for: session).contains(where: {
+                $0.handle == handle
+            }) else { return nil }
+            return .resumeVia(AccountID(provider: session.kind, handle: handle))
+        default:
+            return nil
         }
     }
 

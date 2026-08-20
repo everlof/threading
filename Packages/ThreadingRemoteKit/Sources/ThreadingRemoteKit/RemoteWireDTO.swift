@@ -229,6 +229,37 @@ public struct RemoteSessionAccountDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// What one chat will do after its provider refuses a turn over an account limit.
+///
+/// The action stays a string so a newer host can add an outcome without making an older phone
+/// fail to decode the whole session catalogue. `accountID` is the account handle only; the
+/// session already supplies the runtime that qualifies it.
+public struct RemoteLimitRecoveryPolicyDTO: Codable, Equatable, Sendable {
+    public static let flagOnly = "flagOnly"
+    public static let waitForReset = "waitForReset"
+    public static let resumeOnBestAccount = "resumeOnBestAccount"
+    public static let resumeVia = "resumeVia"
+
+    public let action: String
+    public let accountID: String?
+
+    public init(action: String, accountID: String? = nil) {
+        self.action = action
+        self.accountID = accountID
+    }
+
+    public var isKnown: Bool {
+        switch action {
+        case Self.flagOnly, Self.waitForReset, Self.resumeOnBestAccount:
+            return accountID == nil
+        case Self.resumeVia:
+            return accountID?.isEmpty == false
+        default:
+            return false
+        }
+    }
+}
+
 /// One session as it appears to a remote client's session list.
 public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
@@ -264,6 +295,12 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     /// The login this session runs on, or nil when the row has nothing extra to say: a runtime
     /// without account routing, the CLI's default login, or a host predating this field.
     public let account: RemoteSessionAccountDTO?
+    /// The routed account handle, including `default`. Owner-only and optional for compatibility.
+    /// Clients join it to the top-level agent catalogue rather than receiving an account array
+    /// on every session row.
+    public let accountID: String?
+    /// The resolved chat/project/app answer. Owner-only; nil on older hosts and guest shares.
+    public let limitRecovery: RemoteLimitRecoveryPolicyDTO?
 
     public init(
         id: String,
@@ -285,7 +322,9 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         terminalThemeAssignmentID: String? = nil,
         inheritedTerminalThemeName: String? = nil,
         inheritedTerminalTheme: RemoteTerminalThemeDTO? = nil,
-        account: RemoteSessionAccountDTO? = nil
+        account: RemoteSessionAccountDTO? = nil,
+        accountID: String? = nil,
+        limitRecovery: RemoteLimitRecoveryPolicyDTO? = nil
     ) {
         self.id = id
         self.title = title
@@ -307,6 +346,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.inheritedTerminalThemeName = inheritedTerminalThemeName
         self.inheritedTerminalTheme = inheritedTerminalTheme
         self.account = account
+        self.accountID = accountID
+        self.limitRecovery = limitRecovery
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -314,7 +355,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         case isPinned, isArchived, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
-        case inheritedTerminalTheme, account
+        case inheritedTerminalTheme, account, accountID, limitRecovery
     }
 
     public init(from decoder: Decoder) throws {
@@ -354,6 +395,11 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         account = try container.decodeIfPresent(
             RemoteSessionAccountDTO.self,
             forKey: .account
+        )
+        accountID = try container.decodeIfPresent(String.self, forKey: .accountID)
+        limitRecovery = try container.decodeIfPresent(
+            RemoteLimitRecoveryPolicyDTO.self,
+            forKey: .limitRecovery
         )
     }
 
@@ -1514,6 +1560,24 @@ public struct RemoteSetSessionSurfaceRequestDTO: Codable, Equatable, Sendable {
 
     public init(surface: RemoteSessionSurface) {
         self.surface = surface
+    }
+}
+
+/// Moves a resumable conversation to another login of the same runtime.
+public struct RemoteMoveSessionAccountRequestDTO: Codable, Equatable, Sendable {
+    public let accountID: String
+
+    public init(accountID: String) {
+        self.accountID = accountID
+    }
+}
+
+/// Sets the chat-scoped answer for the next account-limit refusal.
+public struct RemoteSetSessionLimitRecoveryRequestDTO: Codable, Equatable, Sendable {
+    public let policy: RemoteLimitRecoveryPolicyDTO
+
+    public init(policy: RemoteLimitRecoveryPolicyDTO) {
+        self.policy = policy
     }
 }
 

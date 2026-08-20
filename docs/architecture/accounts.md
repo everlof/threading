@@ -124,6 +124,13 @@ process first (it belongs to the old account and is still writing the file), and
 touches a token — the official CLI authenticates under whichever account, so this is
 portability, not credential reuse.
 
+The paired iPhone does not implement a second migration. Its owner-only Chat Settings route sends
+one catalog account handle to the Mac, and the application composition root invokes this same
+`SessionMigration.move` transaction before reconciling the visible pane. Guest shares never
+receive that handle or reach the route. The remote session row carries only the current handle;
+account names and normalized usage stay in the one top-level owner catalogue rather than being
+repeated for every session.
+
 The copied tail is not new provider output at the destination. Transcript readers normally key
 their changed-only cache by path, so a migration also records the installed copy's exact byte
 boundary through

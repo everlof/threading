@@ -877,6 +877,46 @@ final class RemoteAppModel: ObservableObject {
         me = response
     }
 
+    func moveSessionAccount(
+        _ accountID: String,
+        for session: RemoteSessionSummaryDTO
+    ) async throws {
+        guard canManageSessions, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        if isDemo { return }
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.moveSessionAccount(
+                sessionID: session.id,
+                accountID: accountID,
+                requestID: requestID
+            )
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response
+    }
+
+    func setLimitRecovery(
+        _ policy: RemoteLimitRecoveryPolicyDTO,
+        for session: RemoteSessionSummaryDTO
+    ) async throws {
+        guard canManageSessions, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        if isDemo { return }
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.setSessionLimitRecovery(
+                sessionID: session.id,
+                policy: policy,
+                requestID: requestID
+            )
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response
+    }
+
     func createShare(
         for session: RemoteSessionSummaryDTO,
         capability: String,
@@ -1773,7 +1813,11 @@ final class RemoteAppModel: ObservableObject {
                     isPinned: true,
                     terminalTheme: demoTerminalTheme,
                     inheritedTerminalThemeName: demoTerminalTheme.name,
-                    inheritedTerminalTheme: demoTerminalTheme
+                    inheritedTerminalTheme: demoTerminalTheme,
+                    accountID: "default",
+                    limitRecovery: .init(
+                        action: RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount
+                    )
                 ),
                 .init(
                     id: "ff9f4a47-4c3b-466b-bcc5-a864b0657423",
@@ -2032,7 +2076,10 @@ private extension RemoteMeDTO {
                     terminalTheme: terminalTheme,
                     terminalThemeAssignmentID: assignmentID,
                     inheritedTerminalThemeName: session.inheritedTerminalThemeName,
-                    inheritedTerminalTheme: session.inheritedTerminalTheme
+                    inheritedTerminalTheme: session.inheritedTerminalTheme,
+                    account: session.account,
+                    accountID: session.accountID,
+                    limitRecovery: session.limitRecovery
                 )
             },
             host: host,
@@ -2067,7 +2114,9 @@ private extension RemoteMeDTO {
                 inheritedTerminalTheme: session.inheritedTerminalTheme,
                 // Everything this rebuild forgets is a fact the row visibly loses until the next
                 // refresh. Switching surface must not blank the chat's account chip.
-                account: session.account
+                account: session.account,
+                accountID: session.accountID,
+                limitRecovery: session.limitRecovery
             )
         }
 

@@ -21,6 +21,10 @@ protocol RemoteSessionMutating: Sendable {
         _ usesNativeUI: Bool,
         for sessionID: SessionID
     ) -> ProjectMutationResult
+    func setLimitRecoveryPolicy(
+        _ policy: LimitRecoveryPolicy?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult
 }
 
 /// Runtime state needed by remote resume, surface switching, and permission decisions.

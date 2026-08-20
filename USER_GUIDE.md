@@ -1338,6 +1338,11 @@ to Account** submenu lists the others. Choosing one moves the whole conversation
 resumes on the new account with its full history, exactly where it left off. Useful when one
 account hits its usage limit and you want to carry on under another.
 
+On iPhone, open the chat and choose **… ▸ Chat Settings ▸ Account**. The current login includes
+its latest usage reading, as do the available destinations. The phone asks before moving because
+the running agent is stopped; after the Mac copies the transcript and changes its route, the same
+chat reopens under the selected login.
+
 It works because a conversation is just a transcript on disk that the agent replays each turn,
 so moving it is copying that file into the other account and pointing the session at it —
 Threading never touches your login. The original is left untouched, so you can move back the same
@@ -1473,7 +1478,7 @@ You can set any of this for **one chat**, for **a whole checkout**, or for every
 
 | Where | Sets it for |
 |---|---|
-| A session's **Session Options** ▸ **When the Limit Is Reached** — right-click the row, or use its `⋯`, or the pane header's Context button | that conversation |
+| A session's **Session Options** ▸ **When the Limit Is Reached** — right-click the row, use its `⋯`, the pane header's Context button, or **… ▸ Chat Settings** on iPhone | that conversation |
 | A project row's **When the Limit Is Reached** — right-click the row, or use its `⋯` | every chat in that checkout that has not answered for itself |
 | **Settings ▸ Usage Windows ▸ Limit recovery** | everything that has not answered for itself |
 

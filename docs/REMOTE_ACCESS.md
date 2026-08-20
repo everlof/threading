@@ -216,6 +216,26 @@ account/window's current inventory and nearest expiry; zero is distinct from una
 historical banked-reset marker means a credit was observed being used rather than merely being
 available. One-chat guest links cannot discover or read this whole-host data.
 
+An open chat's **… ▸ Chat Settings** puts its operational controls beside that chat. **Account**
+shows the current login and its normalized usage, and can move a live conversation to another
+login for the same agent after warning that the running process will stop. **When the Limit Is
+Reached** selects the resolved per-chat answer: stop and wait for the person, continue at reset,
+continue on the best login, or continue on one named login. **Usage** opens the same whole-host
+dashboard without making the person return to the session list. These controls are owner-only;
+guest summaries omit both `accountID` and `limitRecovery`, and guest requests to either mutation
+route are denied.
+
+The account catalogue already sent once per owner response is the scaling boundary here. Each
+session adds only two optional scalars—the routed account handle and resolved recovery policy—and
+the phone joins those to the top-level agent/account catalogue only for the selected chat. It does
+not copy an account or usage array onto every session row, and the settings sheet builds account
+menus only when opened.
+
+Chat Settings is deliberately host-owned under the customization-surface gate. Threading keeps
+account discovery and credentials, transcript migration, recovery execution, usage provenance,
+confirmation, and compatibility fallback. The iOS extension composition engine has no contract
+for replacing operational session settings, so this sheet does not advertise one.
+
 Opening a dormant session resumes it
 in its existing agent UI or Native surface. Agent UI sessions mirror the CLI's terminal
 scrollback and accept keyboard input; Native sessions render user messages, assistant responses, code and tool
@@ -238,8 +258,9 @@ reasoning effort and UI surface. The stable default is the agent's own Claude Co
 Threading's Native UI remains an explicit experimental choice. Account choices include the Mac's
 latest normalized rate-limit usage, while credentials and config paths stay on the Mac. The
 session is created through the same Mac launch path as a local session and appears on both
-devices immediately. Owners can also rename, pin, archive, restore and switch a session between
-Native and its agent UI from either side. A UI switch stops the current process, then resumes
+devices immediately. Owners can also rename, pin, archive, restore, move a running chat between
+accounts, set its limit recovery, and switch it between Native and its agent UI from either side.
+A UI or account switch stops the current process, then resumes
 the same provider conversation identifier on the other surface. The session row's **Interface**
 submenu shows both choices with the active one checked on Mac and iPhone, and catalogue changes
 are pushed immediately so another open device follows the switch without waiting for polling.

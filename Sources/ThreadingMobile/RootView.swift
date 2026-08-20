@@ -104,6 +104,11 @@ struct RootView: View {
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "shared-link" {
                 SharedSessionLinkView(link: Self.sharedLinkDemo)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "session-settings",
+                      let session = model.me?.sessions.first {
+                MobileSessionSettingsView(sessionID: session.id, onAccountMoved: {})
+                    .environmentObject(model)
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
                         .hasPrefix("permission") == true {
                 NavigationStack {

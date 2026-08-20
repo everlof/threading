@@ -123,6 +123,7 @@ struct SessionDetailView: View {
     @State private var isConfirmingSurfaceSwitch = false
     @State private var pendingSurface = RemoteSessionSurface.terminal
     @State private var isShowingWorkspace = false
+    @State private var isShowingSessionSettings = false
     @State private var initialWorkspaceDestination: RemoteNotificationDestinationDTO?
     @State private var initialWorkspaceEventID: String?
     @Environment(\.dismiss) private var dismiss
@@ -209,6 +210,14 @@ struct SessionDetailView: View {
                 .presentationDetents([.fraction(0.72), .large])
                 .presentationDragIndicator(.visible)
             }
+        }
+        .sheet(isPresented: $isShowingSessionSettings) {
+            MobileSessionSettingsView(
+                sessionID: session.id,
+                onAccountMoved: reopenAfterAccountMove
+            )
+            .environmentObject(model)
+            .mobileTheme(theme)
         }
         .task {
             await open()
@@ -333,6 +342,13 @@ struct SessionDetailView: View {
                         Label("Snooze", systemImage: "moon.zzz")
                     }
                 }
+                if canOpenSessionSettings {
+                    Button {
+                        isShowingSessionSettings = true
+                    } label: {
+                        Label("Chat Settings", systemImage: "gearshape")
+                    }
+                }
                 Section("Interface") {
                     Button {
                         confirmSurfaceSwitch(to: .conversation)
@@ -427,6 +443,12 @@ struct SessionDetailView: View {
             surface: currentSession.surface,
             hasThemeCatalog: model.me?.themeCatalog != nil
         )
+    }
+
+    private var canOpenSessionSettings: Bool {
+        currentSession.accountID != nil
+            || currentSession.limitRecovery != nil
+            || (model.canReadUsage && model.activeHost != nil)
     }
 
     private func openWorkspace() {
@@ -551,6 +573,13 @@ struct SessionDetailView: View {
                 await open()
             }
         }
+    }
+
+    private func reopenAfterAccountMove() {
+        connection?.disconnect(markEnded: false)
+        connection = nil
+        launchError = nil
+        Task { await open() }
     }
 
     private func mutate(
