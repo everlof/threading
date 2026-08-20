@@ -744,8 +744,6 @@ final class TerminalContainerViewController: NSViewController {
 
         addChild(page)
         let content = page.view
-        content.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(content)
 
         // A cached page was detached while the theme moved, and the sweep walks windows — so it
         // never reached this tree. Re-resolve it here rather than dropping the cache: rebuilding
@@ -753,22 +751,11 @@ final class TerminalContainerViewController: NSViewController {
         // fonts that one walk can simply take again.
         if repaint { AppThemeRefresh.repaint(content) }
 
-        // One cap for every destination keeps the Settings canvas still while its contents
-        // change. It includes the glow gutters the page pads itself with, so cards and the Usage
-        // dashboard share the same visible edges.
-        let pageWidth = SettingsUIDefaults.pageWidth
-        let preferred = content.widthAnchor.constraint(equalToConstant: pageWidth)
-        preferred.priority = .defaultHigh
-
-        NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: contentTopAnchor),
-            content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            content.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            preferred,
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: pageWidth),
-            content.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: Design.Spacing.large),
-            content.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -Design.Spacing.large)
-        ])
+        // The shared canvas, stated once in `SettingsUI.install(page:in:top:)` so a page fixture
+        // is under the same constraints as the pane it will ship in. Read that function before
+        // changing anything here: the priorities in it are the fix for a page that came out at
+        // its own fitting width inside a wider pane.
+        SettingsUI.install(page: content, in: view, top: contentTopAnchor)
 
         settingsPage = page
     }

@@ -114,6 +114,82 @@ enum SettingsUI {
         )
     }
 
+    /// Pins a settings destination into its pane. **The one place that arrangement exists.**
+    ///
+    /// It is a shared function rather than five constraints written twice because the two
+    /// copies drifted, and the drift is what "it doesn't look as your image" was: the render
+    /// tests pinned a page to a bare view's four edges and photographed that, while the shell
+    /// centred it under a cap in a window. A picture of a layout nobody has is worse than no
+    /// picture, so the fixture and the app now install the page through the same call and there
+    /// is nothing left to keep in step by hand.
+    ///
+    /// The cap itself keeps the Settings canvas still while its contents change. It includes the
+    /// glow gutters the page pads itself with, so cards and the Usage dashboard share the same
+    /// visible edges.
+    ///
+    /// **The page fills the pane and is capped, rather than preferring a width.** That was a
+    /// `width == pageWidth` at `.defaultHigh` with nothing else asking for a width, so a page
+    /// whose content did not itself add up to the canvas got its *fitting* width instead: the
+    /// engine dropped the preference — the lowest-priority constraint in the set — and settled on
+    /// whatever the cards happened to need. Remote Access rendered about 690 points wide in the
+    /// states with no pairing code, with every card 594 points inside a 1,124-point canvas, which
+    /// is the drifting-edges defect `design-system.md` says this cap exists to prevent. Filling
+    /// to the margins states the width from the pane rather than from the content, so there is no
+    /// fitting size for the engine to fall back to.
+    ///
+    /// - Parameter top: where the page starts, for a pane with a header strip above it. The
+    ///   host's own top edge when there is none.
+    @discardableResult
+    static func install(
+        page content: NSView,
+        in host: NSView,
+        top: NSLayoutYAxisAnchor? = nil
+    ) -> [NSLayoutConstraint] {
+        content.translatesAutoresizingMaskIntoConstraints = false
+        if content.superview !== host { host.addSubview(content) }
+
+        let pageWidth = SettingsUIDefaults.pageWidth
+        let fills = [
+            content.leadingAnchor.constraint(
+                equalTo: host.leadingAnchor,
+                constant: Design.Spacing.large
+            ),
+            content.trailingAnchor.constraint(
+                equalTo: host.trailingAnchor,
+                constant: -Design.Spacing.large
+            )
+        ]
+        for constraint in fills { constraint.priority = .defaultHigh }
+
+        // The fallback, one step below the fill. In a pane wider than the canvas the fill fights
+        // the cap and is dropped, and *something* has to state a width after that or the page
+        // falls back to its own fitting size. A pane exactly `pageWidth + 2 * large` wide is the
+        // case that proves it: the fill and the cap are then numerically identical, either can
+        // give, and what the page came out at depended on which.
+        let preferred = content.widthAnchor.constraint(equalToConstant: pageWidth)
+        preferred.priority = NSLayoutConstraint.Priority(
+            NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
+        )
+
+        let constraints = fills + [
+            preferred,
+            content.topAnchor.constraint(equalTo: top ?? host.topAnchor),
+            content.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            content.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: pageWidth),
+            content.leadingAnchor.constraint(
+                greaterThanOrEqualTo: host.leadingAnchor,
+                constant: Design.Spacing.large
+            ),
+            content.trailingAnchor.constraint(
+                lessThanOrEqualTo: host.trailingAnchor,
+                constant: -Design.Spacing.large
+            )
+        ]
+        NSLayoutConstraint.activate(constraints)
+        return constraints
+    }
+
     private static func fixedHeaderPage(
         title: String,
         summary: String?,
@@ -376,6 +452,7 @@ enum SettingsUI {
     static func row(
         title: String,
         subtitle: String? = nil,
+        help: HelpTopic? = nil,
         control: NSView? = nil,
         subtitleField: inout NSTextField?,
         localizes: Bool = true,
@@ -419,15 +496,13 @@ enum SettingsUI {
                 labelViews.append(sub)
                 highlighted.append(sub)
             } else {
-                let sub = NSTextField(wrappingLabelWithString: text)
-                sub.applyFont(.subheading)
-                sub.textColor = Design.Text.secondary
+                let sub = wrappingSubtitle(text)
                 labelViews.append(sub)
                 subtitleField = sub
             }
         }
 
-        let row = assemble(labelViews, highlighted, control: control)
+        let row = assemble(labelViews, highlighted, help: help, control: control)
         // The tag a search result's reveal finds the row by — see `SettingsRowAnchor`.
         SettingsRowAnchor.tag(row, title: displayTitle)
         return row
@@ -463,12 +538,18 @@ enum SettingsUI {
     private static func assemble(
         _ labelViews: [NSView],
         _ highlighted: [NSView],
+        help: HelpTopic? = nil,
         control: NSView?
     ) -> NSView {
+        var labelViews = labelViews
+        if let help, let title = labelViews.first {
+            labelViews[0] = titleLine(title, help: help)
+        }
         let labels = NSStackView(views: labelViews)
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = Design.Spacing.hairline
+        fill(labels)
 
         // The labels take the row's slack, rather than a spacer taking it.
         //
@@ -506,6 +587,71 @@ enum SettingsUI {
         }
 
         return padded(row)
+    }
+
+    /// A wrapping secondary line, and the two things that decide how wide it comes out.
+    ///
+    /// A wrapping `NSTextField` hugs horizontally at `.defaultLow`, which is *exactly* the
+    /// priority the label column above it uses to claim the row's slack. Two constraints at 250
+    /// wanting opposite things is not a layout, it is a coin toss, and the layout engine spent it
+    /// differently depending on how many passes the tree had been through: a page laid out once
+    /// in a detached fixture gave every subtitle the column, and the same page in a window gave
+    /// each one its own fitting width and left the rest of the card empty beside it. The render
+    /// tests photographed the first and Remote Access shipped the second.
+    ///
+    /// So the label states outright that it has no opinion about its own width, and `fill`
+    /// pins it to the column. Either alone would settle today's arrangement; together they leave
+    /// nothing for a later layout pass to decide.
+    private static func wrappingSubtitle(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.applyFont(.subheading)
+        label.textColor = Design.Text.secondary
+        label.setContentHuggingPriority(.init(1), for: .horizontal)
+        return label
+    }
+
+    /// Pins every wrapping line in a label column to the column's own width, with a floor.
+    ///
+    /// The floor is the squeezed pane's half of the same problem. A row's trailing control keeps
+    /// its width by contract, so in a 420-point pane the label column can be left with almost
+    /// nothing — and a subtitle pinned to *that* wraps one character per line, which is worse
+    /// than the overflow it replaced. So the pin is a preference and the floor is not: the words
+    /// stay readable and run past the column instead of down it.
+    private static func fill(_ labels: NSStackView) {
+        for view in labels.arrangedSubviews {
+            guard let field = view as? NSTextField, field.cell?.wraps == true else { continue }
+            let pin = field.widthAnchor.constraint(equalTo: labels.widthAnchor)
+            pin.priority = NSLayoutConstraint.Priority(
+                NSLayoutConstraint.Priority.defaultLow.rawValue + 1
+            )
+            let floor = field.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: SettingsUIDefaults.minimumTextWidth
+            )
+            // Above the pin, below the row's own edges: the words win against the column, and
+            // the card wins against the words. A floor stated as required would push a control
+            // out of the card it is in, which is the defect one layer up.
+            floor.priority = .defaultHigh
+            NSLayoutConstraint.activate([pin, floor])
+        }
+    }
+
+    /// A row's title with the "?" that carries what used to be its third and fourth sentences.
+    ///
+    /// The mark sits beside the *last glyph of the title*, not beside its click target: a
+    /// `HelpPopoverButton` holds its press surface around a smaller mark, so the gap a container
+    /// asks for has that padding subtracted out of it — rule 9 of the theme boundary, said once
+    /// here rather than at every row that grows a "?".
+    private static func titleLine(_ title: NSView, help: HelpTopic) -> NSView {
+        let button = HelpPopoverButton(topic: help)
+        let line = NSStackView(views: [title, button])
+        line.orientation = .horizontal
+        line.alignment = .centerY
+        line.distribution = .fill
+        line.spacing = max(0, Design.Spacing.small - button.opticalHorizontalInset)
+        // The title yields to the mark rather than pushing it out of the row, the same contract
+        // `row(title:subtitle:control:)` states one screen down.
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return line
     }
 
     /// Two things on a row's trailing edge as one control — a reading and the button that acts on
@@ -553,6 +699,7 @@ enum SettingsUI {
     static func row(
         title: String,
         subtitle: String? = nil,
+        help: HelpTopic? = nil,
         control: NSView? = nil,
         localizes: Bool = true,
         highlighting query: String? = nil
@@ -561,6 +708,7 @@ enum SettingsUI {
         return row(
             title: title,
             subtitle: subtitle,
+            help: help,
             control: control,
             subtitleField: &ignored,
             localizes: localizes,
@@ -589,6 +737,7 @@ enum SettingsUI {
         symbol name: String,
         title: String,
         detail: String,
+        help: HelpTopic? = nil,
         localizes: Bool = true
     ) -> NSView {
         let image = NSImageView(image: symbolImage(name))
@@ -600,17 +749,15 @@ enum SettingsUI {
         titleField.applyFont(.body)
         titleField.textColor = Design.Text.label
 
-        let detailField = NSTextField(
-            wrappingLabelWithString: localized(detail, if: localizes)
-        )
-        detailField.applyFont(.subheading)
-        detailField.textColor = Design.Text.secondary
+        let detailField = wrappingSubtitle(localized(detail, if: localizes))
 
-        let labels = NSStackView(views: [titleField, detailField])
+        let heading: NSView = help.map { titleLine(titleField, help: $0) } ?? titleField
+        let labels = NSStackView(views: [heading, detailField])
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = Design.Spacing.hairline
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        fill(labels)
 
         let row = NSStackView(views: [image, labels])
         row.orientation = .horizontal
@@ -853,6 +1000,11 @@ enum SettingsUIDefaults {
     static let rowHeight: CGFloat = 44
     static let controlWidth: CGFloat = 220
     static let wideSegmentedControlWidth: CGFloat = 380
+
+    /// The narrowest a wrapping line in a row may be squeezed before it stops being words.
+    /// Measured rather than chosen: under the System theme a subheading fits about four short
+    /// words on a line at this width, which is the point where a sentence still reads as one.
+    static let minimumTextWidth: CGFloat = 180
 
     /// The one width every settings destination asks its pane for: the shared content canvas
     /// plus the halo gutter `SettingsUI.page` keeps clear on either side. Stated here so the
