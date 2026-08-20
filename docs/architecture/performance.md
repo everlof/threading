@@ -207,6 +207,43 @@ per hour and about 24,000 over 20 visible hours, even with no changes. The healt
 now zero repeated REST requests: one activation/foreground snapshot, scoped deltas for row
 changes, and a coalesced snapshot only for structural changes or socket recovery.
 
+### Mobile terminal viewport-lease scaling contract, 2026-08-20
+
+A phone-owned terminal grid is recomputed on every crossed cell boundary — pinch steps, the
+keyboard, any animated layout — and each recomputation used to go straight to the Mac as a
+viewport lease. A lease is the most expensive message in the protocol: the Mac soft-resets the
+session's emulator, reflows its scrollback (10,000 lines), raises SIGWINCH, and the agent answers
+with a whole-screen repaint that is appended to the ring and broadcast to every follower — all of
+it on the Mac's main thread, serialized with socket admission.
+
+The bound was wrong by a factor of the gesture, not of the schema. An iPhone issue report
+("entering a chat that has smaller texts is very much slower", 2026-08-20) correlated with the
+Mac journal: one pinch recorded **nineteen** `Remote viewport applied` entries in ~200 ms
+(06:29:07.132–07.750), and while that churn drained, `Remote client connected` for the *next*
+entered chat lagged its socket by 1.2–12.8 s (06:27:34 → 06:27:47). Entries at 13 pt, before any
+pinch, applied exactly one lease and connected in 60–150 ms — the slowdown tracked the small font
+because that is when the gesture crosses the most boundaries and the grid is largest.
+
+The contract now: the local renderer follows every crossing immediately (the pinch stays live),
+but the wire sees only the first grid of a lease — entering still sizes the agent at once — and
+after that the grid that has held still for
+`RemoteMobileConnectionDefaults.viewportSettleDelay` (150 ms; crossings inside a moving gesture
+arrive 10–60 ms apart in the journal). Release and disconnect cancel a pending settle so a
+dismissed chat never resizes the Mac afterwards. The browser client has debounced its fit at
+80 ms all along; the iOS client simply never had the same settling.
+`RemoteTerminalViewportLeaseTests` holds the boundary: a storm leases once, with the settled
+grid; the first grid is immediate; release cancels.
+
+The same report surfaced a second event-frequency defect on the phone:
+`TerminalViewRepresentable.updateUIView` reapplied the terminal theme on every published
+connection change (presence, typing, canSend, the grid), and `installColors` clears the
+attribute caches and marks the whole screen dirty — a cold whole-grid repaint per status tick,
+measured at 5.3–8.5 ms per reapply in the simulator probe (26×24 grid at 24 pt up to 70×65 at
+9 pt, 393×720 pt fixture), growing with cell count exactly as the font shrinks. `apply` now
+installs only a changed theme, and the same test file asserts an unchanged theme invalidates no
+rows. For reference the probe's grid-independent costs: a 512 KB ring replay parses in
+~320–350 ms and the local-viewport reflow after it is 7–10 ms, at every font size.
+
 ### Scaling audit, 2026-08-08
 
 The Tools page prompted a repository sweep for the patterns above. This is a risk inventory, not a

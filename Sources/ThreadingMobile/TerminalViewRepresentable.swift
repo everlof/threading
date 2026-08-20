@@ -102,7 +102,14 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         coordinator.connection.releaseTerminalViewport()
     }
 
-    private static func apply(_ theme: RemoteTerminalThemeDTO?, to view: TerminalView) {
+    /// Installs the palette only when it changed. `updateUIView` runs for every published
+    /// change on the connection — presence, typing, the grid, canSend — and reinstalling an
+    /// identical palette is not free: `installColors` clears the attribute caches and marks the
+    /// whole screen dirty, so every status tick was repainting every visible cell cold, and the
+    /// smaller the font the more cells that was.
+    static func apply(_ theme: RemoteTerminalThemeDTO?, to view: RemoteTerminalView) {
+        guard !view.hasAppliedTheme || view.appliedTheme != theme else { return }
+        view.noteAppliedTheme(theme)
         guard let theme,
               let foreground = UIColor(remoteHex: theme.foreground),
               let background = UIColor(remoteHex: theme.background) else {
@@ -276,6 +283,10 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     private(set) var usesLocalViewport = false
     private(set) var isAdjustingFontSize = false
+    /// The theme `TerminalViewRepresentable.apply` last installed. `hasAppliedTheme` tells the
+    /// very first application apart from an applied nil, whose fallback colours count too.
+    private(set) var appliedTheme: RemoteTerminalThemeDTO?
+    private(set) var hasAppliedTheme = false
     private var allowsKeyboardInput = true
     private var authoritativeColumns = 0
     private var authoritativeRows = 0
@@ -324,6 +335,11 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     func applyPreferredFontSize(_ value: Double) {
         guard !isAdjustingFontSize else { return }
         applyFontSize(value)
+    }
+
+    func noteAppliedTheme(_ theme: RemoteTerminalThemeDTO?) {
+        appliedTheme = theme
+        hasAppliedTheme = true
     }
 
     func beginFontPinch() {
