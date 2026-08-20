@@ -146,6 +146,7 @@ enum MCPToolCatalog {
     authoredContinuation,
     authoredDisplay,
     authoredBrowser,
+    authoredSimulator,
     authoredTabs,
     authoredProject,
     authoredSession,
@@ -169,6 +170,7 @@ enum MCPToolCatalog {
   static let continuation = group(id: "conversation-continuation")
   static let display = group(id: "display")
   static let browser = group(id: "browser")
+  static let simulator = group(id: "simulator")
   static let tabs = group(id: "tabs")
   static let project = group(id: "project")
   static let session = group(id: "session-lifecycle")
@@ -337,6 +339,30 @@ enum MCPToolCatalog {
       File selection and download destinations are likewise chosen by the user in native \
       panels; if one opens, ask the user to complete it in the visible browser. \
       browser_query remains an expert fallback when you already know a CSS selector.
+      """
+  )
+
+  private static let authoredSimulator = MCPToolGroup(
+    id: "simulator",
+    family: .simulator,
+    title: "iOS Simulator",
+    summary: "Let agents build into and inspect an adopted Simulator in the right panel.",
+    symbol: "iphone",
+    tools: [],
+    instruction: """
+      When developing or testing an iOS app, prefer Threading's adopted Simulator in the \
+      right display panel over opening Apple Simulator.app in a separate window. Start with \
+      simulator_prepare. It creates or focuses this session's single Simulator tab, boots or \
+      adopts one device, and returns its exact UDID. Use that UDID for xcodebuild with \
+      -destination id=<device_id>, then call simulator_install_launch with the built .app and \
+      bundle identifier. Use simulator_screenshot when you need the current pixels in your \
+      own context; the user continues seeing the same device in the panel.
+
+      Do not run open -a Simulator merely to present the app. The public fallback is currently \
+      a bounded view-only preview; commands that address the returned UDID directly may still \
+      be used when these tools do not yet expose an interaction, without opening a separate \
+      Simulator window. Keep build output in the session's project or DerivedData and never \
+      guess a device identifier.
       """
   )
 

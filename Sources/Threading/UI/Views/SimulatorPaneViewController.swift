@@ -1,5 +1,15 @@
 import AppKit
 
+enum SimulatorPaneAgentResult<Value: Sendable>: Sendable {
+    case success(Value)
+    case failure(String)
+}
+
+struct SimulatorPaneScreenshot: Sendable {
+    let data: Data
+    let device: SimulatorDevice
+}
+
 /// A session's adopted CoreSimulator device inside the right display pane.
 ///
 /// The first renderer deliberately uses bounded `simctl` screenshots. It is the public fallback
@@ -28,8 +38,12 @@ final class SimulatorPaneViewController: NSViewController {
     private var lease: SimulatorDeviceLease?
     private var preparationTask: Task<Void, Never>?
     private var preparationGeneration = 0
+    private var preparationCompletions: [
+        @MainActor @Sendable (SimulatorPaneAgentResult<SimulatorDeviceLease>) -> Void
+    ] = []
     private var frameTask: Task<Void, Never>?
     private var frameGeneration = 0
+    private var agentCommandTasks: [UUID: Task<Void, Never>] = [:]
     private var isPresented = false
 
     private(set) var presentationState: PresentationState = .idle {
@@ -194,6 +208,9 @@ final class SimulatorPaneViewController: NSViewController {
         preparationTask?.cancel()
         preparationTask = nil
         preparationGeneration += 1
+        finishPreparation(.failure("The Simulator pane was closed."))
+        agentCommandTasks.values.forEach { $0.cancel() }
+        agentCommandTasks.removeAll()
         stopFrameLoop()
         let releasedLease = lease
         lease = nil
@@ -206,6 +223,96 @@ final class SimulatorPaneViewController: NSViewController {
         guard id != selectedDeviceID else { return }
         preferredDeviceID = id
         prepare(id, releasingCurrentLease: true)
+    }
+
+    /// Agent commands enter through the same lease as the visible pane. This is the adoption
+    /// boundary: the agent asks Threading for a device instead of launching Simulator.app and
+    /// cannot accidentally create a second, invisible CoreSimulator owner.
+    func prepareForAgent(
+        deviceID: SimulatorDeviceID?,
+        completion: @escaping @MainActor @Sendable (
+            SimulatorPaneAgentResult<SimulatorDeviceLease>
+        ) -> Void
+    ) {
+        if let lease, deviceID == nil || lease.device.id == deviceID {
+            completion(.success(lease))
+            return
+        }
+
+        preparationCompletions.append(completion)
+        if preparationTask != nil, deviceID == nil || preferredDeviceID == deviceID {
+            return
+        }
+
+        preferredDeviceID = deviceID
+        prepare(deviceID, releasingCurrentLease: lease != nil)
+    }
+
+    func installAndLaunchForAgent(
+        applicationURL: URL,
+        bundleIdentifier: String,
+        arguments: [String],
+        completion: @escaping @MainActor @Sendable (
+            SimulatorPaneAgentResult<SimulatorLaunchReceipt>
+        ) -> Void
+    ) {
+        guard let lease else {
+            completion(.failure("Call simulator_prepare before installing an app."))
+            return
+        }
+        let deviceID = lease.device.id
+        let control = control
+        runAgentCommand { [weak self] in
+            do {
+                let receipt = try await control.installAndLaunch(
+                    applicationURL: applicationURL,
+                    bundleIdentifier: bundleIdentifier,
+                    on: deviceID,
+                    arguments: arguments
+                )
+                try Task.checkCancellation()
+                guard self?.lease?.device.id == deviceID else {
+                    completion(.failure("The selected Simulator changed during launch."))
+                    return
+                }
+                completion(.success(receipt))
+            } catch is CancellationError {
+                completion(.failure("The Simulator launch was cancelled."))
+            } catch {
+                completion(.failure(error.localizedDescription))
+            }
+        }
+    }
+
+    func screenshotForAgent(
+        completion: @escaping @MainActor @Sendable (
+            SimulatorPaneAgentResult<SimulatorPaneScreenshot>
+        ) -> Void
+    ) {
+        guard let device = lease?.device else {
+            completion(.failure("Call simulator_prepare before capturing the Simulator."))
+            return
+        }
+        let control = control
+        runAgentCommand { [weak self] in
+            do {
+                let data = try await control.screenshot(of: device.id)
+                try Task.checkCancellation()
+                guard let image = NSImage(data: data) else {
+                    throw SimulatorControlError.invalidScreenshot
+                }
+                guard self?.lease?.device.id == device.id else {
+                    completion(.failure("The selected Simulator changed during capture."))
+                    return
+                }
+                self?.screenView.image = image
+                completion(.success(SimulatorPaneScreenshot(data: data, device: device)))
+            } catch is CancellationError {
+                completion(.failure("The Simulator capture was cancelled."))
+            } catch {
+                completion(.failure(error.localizedDescription))
+            }
+        }
     }
 
     private func retry() {
@@ -261,6 +368,7 @@ final class SimulatorPaneViewController: NSViewController {
                 self.preferredDeviceID = preparedLease.device.id
                 self.presentationState = .ready(preparedLease.device)
                 self.onSelectedDeviceChange?(preparedLease.device.id)
+                self.finishPreparation(.success(preparedLease))
                 self.startFrameLoop()
             } catch is CancellationError {
                 return
@@ -269,7 +377,26 @@ final class SimulatorPaneViewController: NSViewController {
             } catch {
                 guard let self, !Task.isCancelled else { return }
                 self.presentationState = .failed(error.localizedDescription)
+                self.finishPreparation(.failure(error.localizedDescription))
             }
+        }
+    }
+
+    private func finishPreparation(
+        _ result: SimulatorPaneAgentResult<SimulatorDeviceLease>
+    ) {
+        let completions = preparationCompletions
+        preparationCompletions.removeAll()
+        completions.forEach { $0(result) }
+    }
+
+    private func runAgentCommand(
+        _ operation: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        let id = UUID()
+        agentCommandTasks[id] = Task { [weak self] in
+            await operation()
+            self?.agentCommandTasks[id] = nil
         }
     }
 

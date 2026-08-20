@@ -1449,6 +1449,34 @@ struct PanelActivateTabArguments: Codable, Sendable {
   let tab: PanelTabReference?
 }
 
+struct SimulatorPrepareArguments: Codable, Sendable {
+  let deviceID: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case deviceID = "device_id"
+  }
+}
+
+struct SimulatorInstallLaunchArguments: Codable, Sendable {
+  let applicationPath: String?
+  let bundleIdentifier: String?
+  let arguments: [String]?
+
+  private enum CodingKeys: String, CodingKey {
+    case applicationPath = "application_path"
+    case bundleIdentifier = "bundle_identifier"
+    case arguments
+  }
+}
+
+struct SimulatorScreenshotArguments: Codable, Sendable {
+  let includeImage: Bool?
+
+  private enum CodingKeys: String, CodingKey {
+    case includeImage = "include_image"
+  }
+}
+
 struct EmptyToolArguments: Codable, Sendable {}
 
 /// What an agent says when it files its own session away.
@@ -2334,6 +2362,10 @@ enum MCPTools {
   static let browserPerformance = MCPBuiltInTool.browserPerformance.rawValue
   static let browserAccessibilityAudit = MCPBuiltInTool.browserAccessibilityAudit.rawValue
 
+  static let simulatorPrepare = MCPBuiltInTool.simulatorPrepare.rawValue
+  static let simulatorInstallLaunch = MCPBuiltInTool.simulatorInstallLaunch.rawValue
+  static let simulatorScreenshot = MCPBuiltInTool.simulatorScreenshot.rawValue
+
   static let panelListTabs = MCPBuiltInTool.panelListTabs.rawValue
   static let panelActivateTab = MCPBuiltInTool.panelActivateTab.rawValue
 
@@ -2381,6 +2413,7 @@ enum MCPTools {
   static let continuationTools = names(in: .continuation)
   static let displayTools = names(in: .display)
   static let browserTools = names(in: .browser)
+  static let simulatorTools = names(in: .simulator)
   static let panelTools = names(in: .panel)
   static let projectTools = names(in: .project)
   static let sessionTools = names(in: .session)
@@ -5217,6 +5250,137 @@ enum MCPTools {
               \(BrowserAgentDefaults.maximumAccessibilityAuditIssues). Defaults to \
               \(BrowserAgentDefaults.defaultAccessibilityAuditIssues).
               """
+          )
+        ],
+        required: []
+      )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorPrepare,
+      name: "simulator_prepare",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Prepare Simulator",
+      detail: "Adopt an iOS Simulator device in this session's right panel.",
+      symbol: "iphone.gen3",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SimulatorPrepareArguments.self, forKey: .arguments)
+          ?? SimulatorPrepareArguments(deviceID: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorPrepare(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Create or focus this session's single adopted iOS Simulator in Threading's right \
+        display panel, then boot or adopt a device and return its exact UDID. Call this before \
+        building when the user should see the app in Threading instead of a separate Apple \
+        Simulator window. Omit device_id to prefer an already booted device, then the most \
+        recently used available iPhone. The returned device_id is the authority for an \
+        xcodebuild -destination id=<device_id> invocation.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "device_id": MCPPropertySchema(
+            type: .string,
+            description: "Optional exact CoreSimulator device UUID. Never guess this value."
+          )
+        ],
+        required: []
+      )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorInstallLaunch,
+      name: "simulator_install_launch",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Install and launch app",
+      detail: "Install a built .app and launch it on the adopted panel device.",
+      symbol: "play.square.stack",
+      decodeArguments: { container in
+        try container.decodeIfPresent(
+          SimulatorInstallLaunchArguments.self,
+          forKey: .arguments
+        ) ?? SimulatorInstallLaunchArguments(
+          applicationPath: nil,
+          bundleIdentifier: nil,
+          arguments: nil
+        )
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorInstallLaunch(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Install a built iOS .app on the device already adopted by simulator_prepare, terminate \
+        any running instance of the same bundle, and launch it in the right-panel Simulator. \
+        The application path may be absolute or relative to the session project. This tool \
+        never opens Apple Simulator.app and refuses to choose a second device implicitly.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "application_path": MCPPropertySchema(
+            type: .string,
+            description: "Existing built .app path, absolute or relative to the session project."
+          ),
+          "bundle_identifier": MCPPropertySchema(
+            type: .string,
+            description: "The app's exact bundle identifier."
+          ),
+          "arguments": MCPPropertySchema(
+            type: .array,
+            description: "Optional bounded command-line arguments passed to the app.",
+            items: MCPArrayItemSchema(type: .string)
+          ),
+        ],
+        required: ["application_path", "bundle_identifier"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorScreenshot,
+      name: "simulator_screenshot",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Capture Simulator",
+      detail: "Return the current pixels from the same Simulator shown in the panel.",
+      symbol: "iphone.and.arrow.forward",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SimulatorScreenshotArguments.self, forKey: .arguments)
+          ?? SimulatorScreenshotArguments(includeImage: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorScreenshot(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Capture the current PNG pixels from the exact Simulator device adopted in Threading's \
+        right panel. The image is returned to you by default and the same frame is placed in \
+        the visible pane. Call simulator_prepare first. Set include_image to false only when \
+        refreshing what the user sees without adding image bytes to your tool result.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "include_image": MCPPropertySchema(
+            type: .boolean,
+            description: "Include the PNG in the result. Defaults to true."
           )
         ],
         required: []

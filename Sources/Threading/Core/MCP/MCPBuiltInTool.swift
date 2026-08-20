@@ -47,6 +47,9 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case browserNetwork
   case browserPerformance
   case browserAccessibilityAudit
+  case simulatorPrepare
+  case simulatorInstallLaunch
+  case simulatorScreenshot
   case panelListTabs
   case panelActivateTab
   case setProjectIcon
@@ -91,6 +94,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
     case continuation
     case display
     case browser
+    case simulator
     case panel
     case project
     case session

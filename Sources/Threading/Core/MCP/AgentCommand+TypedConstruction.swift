@@ -112,6 +112,15 @@ extension AgentCommand {
   static func browserAccessibilityAudit(_ value: BrowserAccessibilityAuditArguments) -> Self {
     builtIn(.browserAccessibilityAudit, value)
   }
+  static func simulatorPrepare(_ value: SimulatorPrepareArguments) -> Self {
+    builtIn(.simulatorPrepare, value)
+  }
+  static func simulatorInstallLaunch(_ value: SimulatorInstallLaunchArguments) -> Self {
+    builtIn(.simulatorInstallLaunch, value)
+  }
+  static func simulatorScreenshot(_ value: SimulatorScreenshotArguments) -> Self {
+    builtIn(.simulatorScreenshot, value)
+  }
   static func panelListTabs(_ value: EmptyToolArguments) -> Self { builtIn(.panelListTabs, value) }
   static func panelActivateTab(_ value: PanelActivateTabArguments) -> Self {
     builtIn(.panelActivateTab, value)
