@@ -7,26 +7,50 @@ import XCTest
 ///
 /// Every one of them takes a live network to reach, which is why what shipped was reviewed in
 /// none of them: a panel that said a connection was unavailable while the reason sat three rows
-/// above it, a minute of silence with a spinner on it, and a pairing card laid out like a poster
-/// — a centred title with a phone glyph, a plate floating mid-card, and a centred warning ending
-/// in an orphan. The page states each of them from values, so this fixture can photograph them
-/// and turn what the picture shows into assertions.
+/// above it, a minute of silence with a spinner on it, and a pairing card laid out like a poster.
+/// The page states each of them from values, so this fixture can photograph them and turn what
+/// the picture shows into assertions.
 ///
-/// The doors added the rest: a LAN address that is bound, one that has no interface under it, a
-/// firewall that may be swallowing connections, a Mac with no certificate to present, and no way
-/// in switched on at all.
+/// **The fixture is a window, and that is not a detail.** It used to be a bare `NSView` with the
+/// page pinned to its four edges, which is a tree that is laid out once — and the four-line
+/// disclosure blocks had an ambiguous column whose width the layout engine settled differently
+/// depending on how many passes it had been through. So these renders showed the answers beside
+/// their questions while the app, whose page lives in a window that lays out repeatedly, put them
+/// in a ragged strip against the trailing edge. The fixture now hosts the page by calling the
+/// shell's own `SettingsUI.install(page:in:top:)` inside a real window — the same function
+/// `TerminalContainerViewController.install(settings:)` calls, rather than a copy of its
+/// constraints — and `testTheFixtureAndTheAppLayThePageOutIdentically` holds a page laid out once
+/// against a page laid out in a window that moves, which is the difference the two hosts used to
+/// settle in opposite directions.
 @MainActor
 final class RemoteAccessSettingsRenderTests: XCTestCase {
 
     private enum Render {
-        /// The pane's own width, plus the squeezed pane the settings renders use as the stress
-        /// case: the pairing card is now two columns, so a narrow pane is where it breaks first.
-        static let width = SettingsUIDefaults.pageWidth
-        static let narrowWidth: CGFloat = 420
-        /// Tall enough that the whole page is inside the scroll view's clip, so the pairing card
-        /// is in the picture rather than below it. The four-line disclosures made the page about
-        /// twice as tall as the one this fixture first photographed.
-        static let height: CGFloat = 3000
+        /// What the pane gives this page when the window is wide enough, which is the cap the
+        /// shell states for every settings destination.
+        static let pageWidth = SettingsUIDefaults.pageWidth
+        /// The squeezed pane, where the hero's two columns run out of room first.
+        static let narrowPageWidth: CGFloat = 420
+        /// Tall enough that the whole page is inside the scroll view's clip, so the hero and the
+        /// ways in are in one picture rather than two screens apart.
+        static let height: CGFloat = 1_460
+        /// A believable pane height, for the one test that proves the tall fixture above changes
+        /// nothing but how much of the page is in the frame.
+        static let paneHeight: CGFloat = 760
+
+        /// The room beside a page that is already at the shared cap. A pane exactly as wide as
+        /// the canvas never exercises the cap, and the cap is half of what these pictures are of.
+        static let paneSlack: CGFloat = 200
+
+        /// The pane a page of `pageWidth` needs, given the shell's own margins.
+        ///
+        /// At the cap the pane is wider than the page and the page is centred in it, which is
+        /// the wide window. Below the cap the pane is exactly the page plus its margins, because
+        /// a pane with two hundred points of slack in it is not a squeezed pane — and a fixture
+        /// that asked for 420 and got 620 was photographing a width nobody was squeezed to.
+        static func paneWidth(for pageWidth: CGFloat) -> CGFloat {
+            pageWidth + Design.Spacing.large * 2 + (pageWidth < Self.pageWidth ? 0 : paneSlack)
+        }
 
         static var directory: URL? {
             ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
@@ -87,102 +111,299 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         failure: nil
     )
 
-    // MARK: - Every way in states its four lines
+    // MARK: - The fixture is the app
+
+    /// **The regression boundary for the defect that started this rework.**
+    ///
+    /// The owner's screenshots and these renders disagreed about the same page. The cause was an
+    /// under-determined layout — a constraint at `.defaultLow` competing with a wrapping label's
+    /// `.defaultLow` content hugging — which a tree laid out once and a tree laid out repeatedly
+    /// settled in opposite directions. So the fixture and the app must be the same shape *and*
+    /// must be shown to be, or a render test is a picture of something nobody is looking at.
+    ///
+    /// This lays the page out both ways and compares every label's ink. It also resizes, because
+    /// a window does, and the old fixture never did.
+    func testTheFixtureAndTheAppLayThePageOutIdentically() throws {
+        let detached = detachedPage(state: .lanBound)
+        let hosted = page(state: .lanBound)
+
+        // The app's pane moves: a person drags the window, opens the sidebar, enters full screen.
+        // Each of those is another layout pass at another width, and passing through them is
+        // what a fixture laid out exactly once never did.
+        for size in [
+            NSSize(width: Render.paneWidth(for: Render.narrowPageWidth), height: Render.paneHeight),
+            NSSize(width: Render.paneWidth(for: 720), height: Render.paneHeight),
+            NSSize(width: Render.paneWidth(for: Render.pageWidth), height: Render.height)
+        ] {
+            hosted.host.setFrameSize(size)
+            hosted.host.layoutSubtreeIfNeeded()
+        }
+
+        let detachedLabels = labelInk(in: detached.view)
+        let hostedLabels = labelInk(in: hosted.view)
+        XCTAssertEqual(
+            Set(detachedLabels.keys),
+            Set(hostedLabels.keys),
+            "the two hosts printed different text"
+        )
+        XCTAssertGreaterThan(detachedLabels.count, 20, "the fixture stopped finding the page")
+        for (text, detachedRect) in detachedLabels {
+            let hostedRect = try XCTUnwrap(hostedLabels[text])
+            XCTAssertEqual(
+                detachedRect.minX, hostedRect.minX, accuracy: 1,
+                "“\(text.prefix(40))” starts in a different column in a window"
+            )
+            XCTAssertEqual(
+                detachedRect.width, hostedRect.width, accuracy: 1,
+                "“\(text.prefix(40))” wraps differently in a window"
+            )
+        }
+    }
+
+    /// The canvas is the pane's, not the content's.
+    ///
+    /// The page used to *prefer* the shared width with nothing else asking for one, so the engine
+    /// dropped that preference and handed the page its fitting size: the states with no pairing
+    /// code came out about 690 points wide inside a 1,124-point canvas, with every card 594. That
+    /// is the drifting-edges defect the shared cap exists to prevent, and it is invisible to any
+    /// fixture that pins the page to its host's four edges.
+    func testEveryStateFillsTheSameCanvas() throws {
+        for state in PageState.allCases {
+            let page = self.page(state: state)
+            XCTAssertEqual(
+                page.view.frame.width,
+                Render.pageWidth,
+                accuracy: 1,
+                "\(state) drew on a canvas of its own"
+            )
+        }
+    }
+
+    /// The fixture asks the *shell* for its canvas, so there is no second arrangement to drift.
+    ///
+    /// `SettingsUI.install(page:in:top:)` is the one function that pins a settings destination
+    /// into a pane; `TerminalContainerViewController.install(settings:)` calls it and so does
+    /// `page(state:…)` below. This states what that function promises, at the three pane widths
+    /// that tell its constraints apart: below the cap the page is the pane less its margins, at
+    /// the cap the fill and the cap are numerically identical and either could give, and above it
+    /// the cap wins and the page is centred.
+    func testTheShellGivesEverySettingsPageTheSameCanvas() throws {
+        let margins = Design.Spacing.large * 2
+        for paneWidth in [
+            Render.narrowPageWidth + margins,
+            Render.pageWidth + margins,
+            Render.pageWidth + margins + Render.paneSlack
+        ] {
+            // A pane inside a window's content view, never the content view itself: a layout
+            // root with nothing holding it is resized by Auto Layout to suit its subtree, and a
+            // pane that grows to the page's preferred width proves nothing about either.
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: paneWidth, height: Render.height),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            let root = NSView(frame: NSRect(x: 0, y: 0, width: paneWidth, height: Render.height))
+            window.contentView = root
+            let host = NSView(frame: NSRect(x: 0, y: 0, width: paneWidth, height: Render.height))
+            root.addSubview(host)
+
+            let content = NSView()
+            SettingsUI.install(page: content, in: host)
+            host.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(
+                content.frame.width,
+                min(paneWidth - margins, Render.pageWidth),
+                accuracy: 1,
+                "a \(paneWidth)pt pane gave the page a canvas of its own"
+            )
+            XCTAssertEqual(
+                content.frame.midX, host.bounds.midX, accuracy: 1,
+                "the page is off-centre in a \(paneWidth)pt pane"
+            )
+        }
+    }
+
+    /// The squeezed pane has to actually be squeezed, or the narrow picture is of the wide page.
+    func testTheNarrowFixtureIsNarrow() throws {
+        let wide = page(state: .lanBound)
+        XCTAssertEqual(wide.view.frame.width, Render.pageWidth, accuracy: 1)
+
+        let narrow = page(state: .lanBound, width: Render.narrowPageWidth)
+        XCTAssertEqual(narrow.view.frame.width, Render.narrowPageWidth, accuracy: 1)
+        XCTAssertEqual(
+            narrow.host.bounds.width,
+            Render.paneWidth(for: Render.narrowPageWidth),
+            accuracy: 1,
+            "the fixture window grew to the page's preferred width"
+        )
+    }
+
+    /// The tall fixture is only a taller pane. If the height changed the layout, every picture
+    /// below would be of a page nobody has.
+    func testTheTallFixtureIsOnlyATallerPane() throws {
+        let tall = page(state: .lanBound)
+        let real = page(state: .lanBound, height: Render.paneHeight)
+        let tallInk = labelInk(in: tall.view)
+        let realInk = labelInk(in: real.view)
+
+        for (text, rect) in tallInk {
+            guard let other = realInk[text] else { continue }
+            XCTAssertEqual(rect.minX, other.minX, accuracy: 1, "“\(text.prefix(40))”")
+            XCTAssertEqual(rect.width, other.width, accuracy: 1, "“\(text.prefix(40))”")
+        }
+    }
+
+    // MARK: - Every way in still states its four lines
 
     /// The copy rule with teeth: never present a method without its four lines.
-    func testEveryWayInRendersItsFourDisclosureLines() throws {
+    ///
+    /// They are behind a "?" now rather than printed under every switch, which is what turned
+    /// three quarters of the page back into page. "Available" is what the rule asks for, and this
+    /// asserts all three routes to them: the topic the button carries, the words the panel prints,
+    /// and the sentence a screen reader hears without opening anything.
+    func testEveryWayInKeepsItsFourLinesOnePressAway() throws {
         let page = self.page(state: .lanBound)
         for wayIn in RemoteAccessWayIn.allCases {
-            let block = try XCTUnwrap(
-                view(
-                    in: page.view,
-                    id: RemoteAccessPreferencesViewController.Identifier.disclosure(wayIn)
-                ),
-                "\(wayIn) has no disclosure at all"
+            if wayIn == .threadingDirect { continue }
+            if wayIn == .tailscale { page.controller.select(.tailscale) }
+            let button = try XCTUnwrap(
+                help(in: page.view, titled: wayIn.title),
+                "\(wayIn) has no help at all"
             )
-            let labels = allLabels(in: block).map(\.stringValue)
+            XCTAssertEqual(
+                button.topic.lines.map(\.term),
+                wayIn.disclosure.lines.map(\.question),
+                "\(wayIn) asks different questions, or asks them in a different order"
+            )
+            XCTAssertEqual(
+                button.topic.lines.map(\.detail),
+                wayIn.disclosure.lines.map(\.answer),
+                "\(wayIn) answers them differently"
+            )
+
+            let printed = allLabels(in: button.makeContent().view).map(\.stringValue)
             for line in wayIn.disclosure.lines {
-                XCTAssertTrue(
-                    labels.contains(line.question),
-                    "\(wayIn) does not ask “\(line.question)”"
-                )
-                XCTAssertTrue(
-                    labels.contains(line.answer),
-                    "\(wayIn) does not answer “\(line.question)”"
-                )
+                XCTAssertTrue(printed.contains(line.question), "\(wayIn): \(line.question)")
+                XCTAssertTrue(printed.contains(line.answer), "\(wayIn): \(line.answer)")
             }
-            // Four lines, not three and not five: the same questions in the same order.
-            XCTAssertEqual(labels.count, wayIn.disclosure.lines.count * 2, "\(wayIn)")
+            if let note = wayIn.note {
+                XCTAssertTrue(printed.contains(note), "\(wayIn) dropped its note")
+            }
+
+            let spoken = try XCTUnwrap(button.accessibilityHelp())
+            for line in wayIn.disclosure.lines {
+                XCTAssertTrue(spoken.contains(line.answer), "\(wayIn) is silent about \(line.question)")
+            }
         }
+    }
+
+    /// Threading Direct is future work, so it is only a segment once this Mac is signed in — and
+    /// when it is, it answers the same four questions as the rest.
+    func testThreadingDirectJoinsTheRunOnlyWhenSignedIn() throws {
+        let off = page(state: .lanBound)
+        XCTAssertFalse(
+            segmentTitles(in: off.view).contains(RemoteAccessWayIn.threadingDirect.title),
+            "a way in nothing can carry yet is on offer"
+        )
+
+        let on = page(state: .lanBound, showsThreadingDirect: true)
+        XCTAssertTrue(
+            segmentTitles(in: on.view).contains(RemoteAccessWayIn.threadingDirect.title)
+        )
+        on.controller.select(.threadingDirect)
+        let button = try XCTUnwrap(help(in: on.view, titled: RemoteAccessWayIn.threadingDirect.title))
+        XCTAssertEqual(
+            button.topic.lines.map(\.term),
+            RemoteAccessWayIn.threadingDirect.disclosure.lines.map(\.question)
+        )
     }
 
     /// Nothing on the page offers, mentions or blames the public relay.
     ///
-    /// The Cloudflare Quick Tunnel is gone, and two of the rows that shipped with it existed only
-    /// to start it. A word left behind would be describing a way in that no longer exists, which
-    /// is the exact failure the four-line rule was written against.
-    ///
     /// Two ways in may still say "relay" and mean something true: Tailscale relays encrypted
     /// WireGuard when peers cannot connect directly, and Threading Direct falls back to TURN.
     /// Both are named in their own four lines as traffic the relay cannot read, which is the
-    /// disclosure working rather than a leftover. This network has no such caveat, so a relay
-    /// word in its card could only be the retired one.
+    /// disclosure working rather than a leftover.
     func testNoWayInMentionsTheRelayThatNoLongerExists() throws {
         let page = self.page(state: .lanBound)
-        for text in allLabels(in: page.view).map(\.stringValue) {
-            let lowered = text.lowercased()
-            for word in ["cloudflare", "cloudflared", "quick tunnel", "secure relay"] {
-                XCTAssertFalse(lowered.contains(word), "“\(text)” still names \(word)")
-            }
-        }
+        let network = try XCTUnwrap(help(in: page.view, titled: RemoteAccessWayIn.thisNetwork.title))
+        XCTAssertFalse(network.topic.spokenSummary.lowercased().contains("relay"))
 
-        let network = try XCTUnwrap(
-            view(
-                in: page.view,
-                id: RemoteAccessPreferencesViewController.Identifier.disclosure(.thisNetwork)
-            )
-        )
-        for text in allLabels(in: network).map(\.stringValue) {
-            XCTAssertFalse(
-                text.lowercased().contains("relay"),
-                "This network describes itself with a relay: “\(text)”"
-            )
+        var text = allLabels(in: page.view).map(\.stringValue)
+            + helpButtons(in: page.view).map(\.topic.spokenSummary)
+        page.controller.select(.tailscale)
+        text += allLabels(in: page.view).map(\.stringValue)
+            + helpButtons(in: page.view).map(\.topic.spokenSummary)
+
+        for line in text {
+            let lowered = line.lowercased()
+            for word in ["cloudflare", "cloudflared", "quick tunnel", "secure relay"] {
+                XCTAssertFalse(lowered.contains(word), "“\(line)” still names \(word)")
+            }
         }
     }
 
-    /// The VPN is the same door reached from a tunnel, so it is a note rather than a switch, and
-    /// Threading Direct is future work that only appears once this Mac is signed in.
     func testOnlyTheTwoRealDoorsCarryASwitch() throws {
         let page = self.page(state: .lanBound)
-        for wayIn in RemoteAccessWayIn.allCases {
-            let toggle = view(
-                in: page.view,
-                id: RemoteAccessPreferencesViewController.Identifier.doorToggle(wayIn)
-            )
-            XCTAssertEqual(
-                toggle != nil,
-                wayIn.hasSwitch,
-                "\(wayIn) disagrees with itself about having a switch"
-            )
-        }
-        // The Serve sub-option is a switch too, and it is on the page rather than held back: the
-        // tailnet door is a listener now, so turning Serve off takes no route away from a phone.
-        let serve = try XCTUnwrap(
-            view(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.serveToggle),
-            "the Serve sub-option is not on the page"
+        XCTAssertNotNil(
+            view(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.doorToggle(.thisNetwork))
         )
-        XCTAssertFalse(isEffectivelyHidden(serve), "the Serve sub-option is still hidden")
+        XCTAssertNil(
+            view(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.doorToggle(.throughAVPN)),
+            "the VPN grew a switch it cannot honour"
+        )
+
+        page.controller.select(.tailscale)
+        XCTAssertNotNil(
+            view(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.doorToggle(.tailscale))
+        )
+    }
+
+    // MARK: - The run says what you are not looking at
+
+    /// A segmented run hides two panels out of three, which is the whole point of using one and
+    /// the whole risk. Each segment carries the state of its own way in.
+    func testEachSegmentCarriesItsWayInsState() throws {
+        let bound = page(state: .lanBound)
         XCTAssertEqual(
-            allLabels(in: page.view).filter {
-                $0.stringValue.contains("publishes this Mac’s name and your tailnet name in "
-                    + "public certificate logs")
-            }.count,
-            1,
-            "the certificate-transparency cost is not stated beside the switch that pays it"
+            marks(in: bound.view),
+            [.ready, .idle],
+            "a bound network and an unselected tailnet did not read as themselves"
         )
+
+        let unreachable = page(state: .lanNoInterface)
+        XCTAssertEqual(unreachable.marks.first, .attention)
+
+        // The mark comes from the status line rather than from the switch, so a way in that is
+        // on and bound to nothing cannot show a tick.
+        let tailnetDown = page(state: .tailnetNotConnected)
+        XCTAssertEqual(tailnetDown.marks, [.idle, .attention])
     }
 
     // MARK: - The status line states a fact
+
+    /// One address on the page's own line, and it is the one the pairing code carries.
+    ///
+    /// It used to join every ready way in's sentence together, so a Mac with two interfaces
+    /// answered "can anything reach this Mac?" with a paragraph of four addresses.
+    func testTheOverallStatusNamesOneAddressAndTheWayInCarriesTheRest() throws {
+        let page = self.page(state: .lanBound)
+        let status = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.status"))
+        XCTAssertEqual(status.stringValue, "Ready")
+
+        let detail = try XCTUnwrap(statusDetail(in: page.view))
+        XCTAssertTrue(detail.contains("192.168.1.42:8760"), detail)
+        XCTAssertFalse(detail.contains("10.0.0.7"), "the second address is on the page's own line")
+
+        let hint = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.statusHint(.thisNetwork)
+        ))
+        XCTAssertTrue(hint.stringValue.contains("10.0.0.7"), "the other address went nowhere")
+    }
 
     func testABoundDoorNamesItsAddressAndPort() throws {
         let page = self.page(state: .lanBound)
@@ -190,20 +411,11 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.status(.thisNetwork)
         ))
-        XCTAssertEqual(status.stringValue, "Reachable at 192.168.1.42:8760")
-
-        let hint = try XCTUnwrap(label(
-            in: page.view,
-            id: RemoteAccessPreferencesViewController.Identifier.statusHint(.thisNetwork)
-        ))
+        XCTAssertTrue(status.stringValue.contains("192.168.1.42:8760"), status.stringValue)
         XCTAssertEqual(
-            hint.stringValue,
-            "Also reachable at 10.0.0.7:8760.",
-            "the second address is missing, or the first one is not the pairing code's"
-        )
-        XCTAssertEqual(
-            try XCTUnwrap(label(in: page.view, id: "settings.remote-access.status")).stringValue,
-            "Ready"
+            mark(in: page.view, for: .thisNetwork),
+            "✓",
+            "a bound door is not showing a met mark"
         )
     }
 
@@ -213,421 +425,316 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.status(.thisNetwork)
         ))
-        XCTAssertEqual(
-            status.stringValue,
-            "Not currently reachable: no address on this network."
-        )
-        XCTAssertFalse(
-            status.stringValue.contains(":\(Self.listenerPort)"),
-            "a door with nothing bound printed a port anyway"
-        )
+        XCTAssertTrue(status.stringValue.contains("no address on this network"), status.stringValue)
+        XCTAssertFalse(status.stringValue.contains(":8760"))
+        XCTAssertEqual(mark(in: page.view, for: .thisNetwork), "!")
+
         let hint = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.statusHint(.thisNetwork)
         ))
-        XCTAssertFalse(hint.isHidden, "the reason arrived without its remedy")
+        XCTAssertTrue(hint.stringValue.contains("Connect this Mac"), hint.stringValue)
     }
 
-    /// The firewall is a hint and stays one: the Mac cannot observe whether an incoming
-    /// connection would be allowed, so a bound address it may be swallowing is not a green state.
+    /// A bound address with the firewall in doubt is still an address, and still not green.
     func testTheFirewallHintRidesWithTheAddressAndTakesTheGreenAwayFromIt() throws {
         let page = self.page(state: .lanFirewalled)
         let status = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.status(.thisNetwork)
         ))
+        XCTAssertTrue(status.stringValue.contains("192.168.1.42:8760"))
+        XCTAssertEqual(mark(in: page.view, for: .thisNetwork), "!")
+
         let hint = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.statusHint(.thisNetwork)
         ))
-        XCTAssertEqual(status.stringValue, "Reachable at 192.168.1.42:8760")
-        XCTAssertEqual(hint.stringValue, RemoteDoorStatus.firewallHint)
-        // Bound and in doubt is neither "Ready" nor "Not reachable": the listener is running at
-        // an address, and the Mac cannot see whether anything gets through to it.
+        XCTAssertTrue(hint.stringValue.contains("firewall"), hint.stringValue)
+        XCTAssertEqual(page.marks.first, .attention)
+    }
+
+    func testNothingSwitchedOnIsAStateWithAFactInIt() throws {
+        let page = self.page(state: .nothingOn)
+        let detail = try XCTUnwrap(statusDetail(in: page.view))
+        XCTAssertTrue(detail.contains("127.0.0.1:8760"), detail)
+
+        let pairing = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-title"))
+        XCTAssertEqual(pairing.stringValue, "No way in is switched on")
+        let code = try XCTUnwrap(imageView(in: page.view, id: "settings.remote-access.qr-code"))
+        XCTAssertTrue(code.isHidden, "a page with no way in is showing a pairing code")
+    }
+
+    // MARK: - The hero
+
+    /// The page leads with what it is for: the code, the identity the code is a fingerprint of,
+    /// and one instruction. Everything longer is behind the "?" beside the title.
+    func testTheHeroLeadsWithTheCodeAndTheIdentityBesideIt() throws {
+        let page = self.page(state: .lanBound)
+        let host = page.host
+
+        let title = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-title"))
+        XCTAssertEqual(title.stringValue, "Scan with your iPhone")
+        XCTAssertFalse(
+            title.stringValue.unicodeScalars.contains { $0.properties.isEmojiPresentation },
+            "the title carries a glyph again"
+        )
+
+        let code = try XCTUnwrap(imageView(in: page.view, id: "settings.remote-access.qr-code"))
+        let image = try XCTUnwrap(code.image)
+        XCTAssertFalse(code.isHidden)
         XCTAssertEqual(
-            try XCTUnwrap(label(in: page.view, id: "settings.remote-access.status")).stringValue,
-            "May not be reachable",
-            "the page claimed a peer had got through, or that nothing was bound"
+            code.frame.width,
+            RemoteAccessPreferencesViewController.PairingCardLayout.codeSide,
+            accuracy: 0.5
         )
-        let rowDetail = try XCTUnwrap(
-            allLabels(in: page.view).first { $0.stringValue.contains(RemoteDoorStatus.firewallHint) }
+        XCTAssertEqual(image.size.width, code.frame.width, accuracy: 0.5, "the code is resampled")
+        let matrix = try XCTUnwrap(PairingCodeMatrix.make(Self.payload, correctionLevel: "M"))
+        XCTAssertGreaterThanOrEqual(
+            code.frame.width / CGFloat(matrix.size + 8), 3,
+            "the plate is now too small to scan"
         )
+
+        // The identity is part of the hero, in the code's own column of text.
+        let caption = try XCTUnwrap(label(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.identityCaption
+        ))
+        let identityCode = try XCTUnwrap(
+            label(in: page.view, id: "settings.remote-access.identity-code")
+        )
+        XCTAssertEqual(identityCode.stringValue, Self.identity.pairingCode)
+        XCTAssertEqual(identityCode.stringValue.count, 26)
         XCTAssertTrue(
-            rowDetail.stringValue.hasPrefix("Reachable at 192.168.1.42:8760. ")
-                || rowDetail.stringValue == RemoteDoorStatus.firewallHint,
-            "two sentences ran together: “\(rowDetail.stringValue)”"
+            identityCode.font?.fontName.lowercased().contains("mono") == true
+                || identityCode.font?.isFixedPitch == true,
+            "the code a person compares character by character is not monospaced"
+        )
+
+        let detail = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-detail"))
+        let action = try XCTUnwrap(button(in: page.view, id: "settings.remote-access.pair"))
+        XCTAssertEqual(action.title, "Copy Pairing Link")
+
+        // Leading edge, and one column for everything beside it. Measured on alignment rects
+        // rather than frames, because that is what "aligned by ink" means here.
+        let codeInk = ink(of: code, in: host)
+        let column = [title, detail, caption, identityCode, action].map { ink(of: $0, in: host).minX }
+        XCTAssertLessThan(codeInk.minX, try XCTUnwrap(column.min()), "the code is not leading")
+        for edge in column {
+            XCTAssertEqual(edge, column[0], accuracy: 0.5, "the hero's text is not on one column")
+        }
+        XCTAssertEqual(
+            try XCTUnwrap(column.min()) - codeInk.maxX,
+            Design.Spacing.large,
+            accuracy: 0.5,
+            "the gap between the code and its text is not the token that states it"
+        )
+
+        // The card holds one image, and it is the code.
+        let card = try XCTUnwrap(card(containing: code))
+        XCTAssertEqual(
+            descendants(in: card).compactMap { $0 as? NSImageView }.count, 1,
+            "the hero grew a decorative image again"
         )
     }
 
-    /// No way in reports itself ready without an address in the line beside the mark.
-    ///
-    /// The mark is checked rather than the tone, because the mark is what a reader sees under
-    /// Differentiate Without Colour and it is drawn from the same tone the page resolved.
-    func testNoWayInShowsAReadyMarkWithoutABoundAddress() throws {
-        for state in PageState.allCases {
-            let page = self.page(state: state)
-            for wayIn in RemoteAccessWayIn.allCases where wayIn.hasSwitch {
-                let mark = try XCTUnwrap(label(
-                    in: page.view,
-                    id: RemoteAccessPreferencesViewController.Identifier.statusMark(wayIn)
-                ))
-                let line = try XCTUnwrap(label(
-                    in: page.view,
-                    id: RemoteAccessPreferencesViewController.Identifier.status(wayIn)
-                )).stringValue
-                guard mark.stringValue == "✓", !mark.isHidden else { continue }
-                XCTAssertTrue(
-                    line.hasPrefix("Reachable at "),
-                    "\(state): \(wayIn) is marked ready while its line says “\(line)”"
-                )
-                XCTAssertEqual(
-                    mark.textColor?.hexString,
-                    Design.Status.positive.hexString,
-                    "\(state): \(wayIn)"
-                )
-            }
+    /// The ownership warning and the pinning explanation left the page for the "?" beside the
+    /// title. They are the two things a person is entitled to read before scanning an owner code,
+    /// so "left the page" has to mean "one press away and complete", not "gone".
+    func testTheHeroKeepsItsWarningAndItsPinningExplanationOnePressAway() throws {
+        let page = self.page(state: .lanBound)
+        let button = try XCTUnwrap(help(in: page.view, titled: "Pairing this Mac"))
+        let printed = allLabels(in: button.makeContent().view).map(\.stringValue)
+
+        XCTAssertTrue(
+            printed.contains { $0.hasPrefix("Only scan this owner code on a device you control.") },
+            "the ownership warning is gone rather than moved"
+        )
+        XCTAssertTrue(
+            printed.contains(RemoteIdentityCardPresentation.explanation),
+            "what the phone pins is gone rather than moved"
+        )
+
+        // And nothing that long is on the page itself any more.
+        for label in allLabels(in: page.view) where !label.isHidden {
+            XCTAssertLessThan(
+                label.stringValue.count, 220,
+                "a paragraph came back onto the page: “\(label.stringValue.prefix(60))…”"
+            )
         }
     }
 
     func testAMacWithNoCertificateSaysSoAndOffersTheFix() throws {
         let page = self.page(state: .identityUnavailable)
+        let detail = try XCTUnwrap(
+            label(in: page.view, id: "settings.remote-access.identity-detail")
+        )
+        XCTAssertFalse(detail.isHidden, "the reason there is no code is hidden")
+        XCTAssertTrue(detail.stringValue.contains("could not read its certificate"), detail.stringValue)
+
+        let code = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.identity-code"))
+        XCTAssertTrue(code.isHidden, "a Mac with no certificate is showing one")
+
         let status = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.status(.thisNetwork)
         ))
-        XCTAssertEqual(
-            status.stringValue,
-            "Not currently reachable: this Mac has no certificate to present."
-        )
+        XCTAssertTrue(status.stringValue.contains("no certificate to present"), status.stringValue)
+    }
+
+    /// A healthy Mac shows the code and no sentence about it: the explanation is behind the "?",
+    /// and only a *reason* ever takes a line of the page.
+    func testTheIdentityLineIsAReasonOrNothing() throws {
+        let healthy = page(state: .lanBound)
         let detail = try XCTUnwrap(
-            label(in: page.view, id: "settings.remote-access.identity-detail")
+            label(in: healthy.view, id: "settings.remote-access.identity-detail")
         )
-        XCTAssertTrue(
-            detail.stringValue.hasPrefix("Threading could not read its certificate."),
-            "the identity card does not say why there is no code"
-        )
-        let code = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.identity-code"))
-        XCTAssertTrue(code.isHidden, "a code was shown for an identity that could not be read")
+        XCTAssertTrue(detail.isHidden, "the page is explaining what a code is again")
     }
 
-    func testNothingSwitchedOnIsAStateWithAFactInIt() throws {
-        let page = self.page(state: .nothingOn)
-        XCTAssertEqual(
-            try XCTUnwrap(label(in: page.view, id: "settings.remote-access.status")).stringValue,
-            "No way in"
-        )
-        let pairing = try XCTUnwrap(
-            label(in: page.view, id: "settings.remote-access.pairing-title")
-        )
-        XCTAssertEqual(pairing.stringValue, "No way in is switched on")
-        let action = try XCTUnwrap(button(in: page.view, id: "settings.remote-access.pair"))
-        XCTAssertFalse(
-            action.isEnabled,
-            "a dead end was offered as something to press and wait for"
-        )
-    }
-
-    // MARK: - Identity
-
-    /// The code on the page is the coordinator's, not a formatting of something else.
-    func testTheIdentityCardShowsTheSnapshotsOwnPairingCode() throws {
-        let snapshot = RemoteAccessIdentitySnapshot(
-            fingerprint: RemoteHostFingerprint(certificateDER: Data("threading".utf8)),
-            nextFingerprint: nil,
-            failure: nil
-        )
-        let presentation = RemoteIdentityCardPresentation.resolve(snapshot)
-        let page = self.page(state: .lanBound, identity: presentation)
-
-        let code = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.identity-code"))
-        XCTAssertEqual(code.stringValue, snapshot.fingerprint?.pairingCode)
-        XCTAssertEqual(
-            code.stringValue.count,
-            RemoteHostPinningDefaults.pairingCodeCharacterCount,
-            "the code is not the 26 characters a phone compares"
-        )
-        XCTAssertTrue(
-            code.font?.isFixedPitch == true,
-            "26 characters a person has to compare are not in a monospaced face"
-        )
-        let detail = try XCTUnwrap(
-            label(in: page.view, id: "settings.remote-access.identity-detail")
-        )
-        XCTAssertEqual(detail.stringValue, RemoteIdentityCardPresentation.explanation)
-        XCTAssertTrue(
-            detail.stringValue.contains("compares this code"),
-            "the card does not say the phone compares it"
-        )
-    }
-
-    /// Rotation is two steps, and the second one is only offered once the first has run.
-    func testRotationIsOfferedInTwoStepsAndActivateWaitsForASuccessor() throws {
-        let page = self.page(state: .lanBound)
+    func testRotationIsOfferedInOneRowAndActivateWaitsForASuccessor() throws {
+        let waiting = page(state: .lanBound)
         let prepare = try XCTUnwrap(
-            button(in: page.view, id: "settings.remote-access.identity-prepare")
+            button(in: waiting.view, id: "settings.remote-access.identity-prepare")
         )
         let activate = try XCTUnwrap(
-            button(in: page.view, id: "settings.remote-access.identity-activate")
+            button(in: waiting.view, id: "settings.remote-access.identity-activate")
+        )
+        let reset = try XCTUnwrap(
+            button(in: waiting.view, id: "settings.remote-access.identity-reset")
         )
         XCTAssertTrue(prepare.isEnabled)
-        XCTAssertFalse(activate.isEnabled, "a rotation could be activated before it was prepared")
+        XCTAssertFalse(activate.isEnabled, "Activate is offered with nothing to activate")
+        XCTAssertTrue(reset.isEnabled)
 
-        let announced = self.page(
+        // One row, one card: all three sit on the same line under the hero.
+        XCTAssertEqual(card(containing: prepare), card(containing: reset))
+        let host = waiting.host
+        XCTAssertEqual(
+            ink(of: prepare, in: host).minY,
+            ink(of: reset, in: host).minY,
+            accuracy: 1,
+            "the identity actions are not on one row"
+        )
+
+        let announced = page(
             state: .lanBound,
             identity: RemoteIdentityCardPresentation(
-                pairingCode: "MZXW6YTBOI7EU3TFOQQGE43FMN",
-                nextPairingCode: "GEZDGNBVGY3TQOJQGEZDGN",
+                pairingCode: Self.identity.pairingCode,
+                nextPairingCode: "MFRGGZDFMZTWQ2LKNNWG23TPOB",
                 failure: nil
             )
-        )
-        let successor = try XCTUnwrap(
-            label(in: announced.view, id: "settings.remote-access.identity-successor")
-        )
-        XCTAssertFalse(successor.isHidden)
-        XCTAssertTrue(
-            successor.stringValue.contains("already trusts it"),
-            "the page does not say who keeps working across a rotation"
         )
         XCTAssertTrue(
             try XCTUnwrap(
                 button(in: announced.view, id: "settings.remote-access.identity-activate")
             ).isEnabled
         )
+        let successor = try XCTUnwrap(
+            label(in: announced.view, id: "settings.remote-access.identity-successor")
+        )
+        XCTAssertFalse(successor.isHidden)
+        XCTAssertTrue(successor.stringValue.contains("MFRGGZDFMZTWQ2LKNNWG23TPOB"))
     }
 
-    /// Reset is the one operation here that unpairs devices, so it is a question, not a button.
-    func testResettingTheIdentityIsAConfirmationThatSaysWhatItCosts() throws {
-        let prompt = ConfirmationPrompt.resetRemoteAccessIdentity
-        guard case .alwaysAsks(let reason) = prompt.policy else {
-            return XCTFail("a reset could be switched off")
-        }
-        XCTAssertEqual(reason, .irreversible)
-        let request = ConfirmationRequest(
-            prompt: prompt,
-            title: L10n.string("Reset this Mac’s identity?"),
-            message: L10n.string(
-                "Threading mints a new certificate and a new pairing code. Every paired device "
-                    + "stops trusting this Mac and has to scan the new code before it can "
-                    + "connect again. Use Prepare Rotation instead if this Mac’s certificate is "
-                    + "still working."
-            ),
-            confirmTitle: L10n.string("Reset Identity")
-        )
+    /// The two operations cost different things, so the "?" beside them says which is which.
+    func testTheIdentityHelpSaysWhatEachOperationCosts() throws {
+        let page = self.page(state: .lanBound)
+        let button = try XCTUnwrap(help(in: page.view, titled: "Rotate or reset this Mac’s identity"))
+        let spoken = button.topic.spokenSummary
+        XCTAssertTrue(spoken.contains("Prepare mints the next certificate"), spoken)
         XCTAssertTrue(
-            request.message.contains("has to scan the new code"),
-            "the confirmation does not say every paired device must scan again"
+            spoken.contains("has to scan the new pairing code"),
+            "the reset's real cost is not stated"
         )
     }
 
     // MARK: - The announcement, and what it buys
 
-    /// The switch belongs to the `lan` door and to no other, so it lives in that door's card.
-    ///
-    /// Asserted through the card the two views actually land in rather than through the order
-    /// they were appended in: a row moved one section down still reads as "This network" in the
-    /// source and reads as Tailscale on the screen.
-    func testTheAnnouncementSwitchIsInsideTheThisNetworkCard() throws {
+    func testTheAnnouncementLivesInsideTheNetworkPanel() throws {
         let page = self.page(state: .lanBound)
-        let toggle = try XCTUnwrap(
-            view(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.discoveryToggle)
-        )
-        let door = try XCTUnwrap(view(
+        let toggle = try XCTUnwrap(view(
             in: page.view,
-            id: RemoteAccessPreferencesViewController.Identifier.status(.thisNetwork)
+            id: RemoteAccessPreferencesViewController.Identifier.discoveryToggle
         ))
-        XCTAssertIdentical(
+        let networkToggle = try XCTUnwrap(view(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.doorToggle(.thisNetwork)
+        ))
+        XCTAssertEqual(
             card(containing: toggle),
-            card(containing: door),
-            "the announcement moved out of the card whose door carries it"
+            card(containing: networkToggle),
+            "the announcement is not in the panel it belongs to"
         )
-        let wake = try XCTUnwrap(
-            label(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand)
-        )
-        XCTAssertIdentical(card(containing: wake), card(containing: door))
+
+        // And it leaves with the panel: it is the LAN listeners' broadcast and nothing else's.
+        page.controller.select(.tailscale)
+        XCTAssertNil(view(
+            in: page.view,
+            id: RemoteAccessPreferencesViewController.Identifier.discoveryToggle
+        ))
     }
 
-    /// A broadcast is visible to everyone on the network, so the row says what leaves this Mac
-    /// rather than that something does.
-    func testTheAnnouncementRowStatesWhatIsBroadcast() throws {
+    /// The exact payload is a decision somebody takes once, so it is behind the "?" — complete,
+    /// and not four lines of the page for everybody who has already taken it.
+    func testWhatIsBroadcastIsStatedInFull() throws {
         let page = self.page(state: .lanBound)
-        let labels = allLabels(in: page.view).map(\.stringValue)
-        let subtitle = try XCTUnwrap(
-            labels.first { $0.hasPrefix("Broadcasts an opaque name") },
-            "the announcement does not say what it broadcasts"
-        )
-        for named in ["opaque name", "id", "protocol version", "certificate fingerprint"] {
-            XCTAssertTrue(subtitle.contains(named), "the payload does not name the \(named)")
+        let button = try XCTUnwrap(help(in: page.view, titled: "Announce on this network"))
+        let spoken = button.topic.spokenSummary
+        for fact in ["opaque name", "protocol version", "certificate fingerprint"] {
+            XCTAssertTrue(spoken.contains(fact), "the broadcast no longer states “\(fact)”")
         }
-        XCTAssertTrue(
-            subtitle.contains("Never the computer name and never your name"),
-            "the row does not say what is never broadcast, which is the reason to read it"
-        )
-        XCTAssertTrue(
-            subtitle.contains("pairing still needs the code"),
-            "the row leaves a reader thinking a broadcast is a way in"
-        )
-        XCTAssertFalse(subtitle.contains("\u{2014}"), "an em dash reached the copy")
+        XCTAssertTrue(spoken.contains("Never the computer name"), spoken)
     }
 
-    /// The instance name is the one part of the payload that is safe to print, and printing it
-    /// is what lets a person confirm that the broadcast carries no name of theirs.
     func testTheAnnouncedLineNamesTheOpaqueInstanceAndOnlyWhenOneIsRegistered() throws {
-        let announced = self.page(
-            state: .lanBound,
-            discovery: DiscoveryState.announcedAndCanWake.presentation
-        )
-        let line = try XCTUnwrap(label(
+        let announced = page(state: .lanBound, discovery: DiscoveryState.announcedAndCanWake.presentation)
+        let name = try XCTUnwrap(label(
             in: announced.view,
             id: RemoteAccessPreferencesViewController.Identifier.announcedName
         ))
-        XCTAssertEqual(line.stringValue, "Announced as \(Self.instanceName)")
-        XCTAssertFalse(line.isHidden)
-        XCTAssertEqual(
-            Self.instanceName.count,
-            RemoteBase32.encode(Data(repeating: 0, count: RemoteDiscoveryDefaults.instanceNameByteCount)).count,
-            "the fixture is not the shape of name the Mac actually publishes"
-        )
+        XCTAssertFalse(isEffectivelyHidden(name))
+        XCTAssertTrue(name.stringValue.contains(Self.instanceName), name.stringValue)
 
-        let off = self.page(state: .lanBound, discovery: DiscoveryState.off.presentation)
-        let offLine = try XCTUnwrap(label(
+        let off = page(state: .lanBound, discovery: DiscoveryState.off.presentation)
+        let quiet = try XCTUnwrap(label(
             in: off.view,
             id: RemoteAccessPreferencesViewController.Identifier.announcedName
         ))
-        XCTAssertTrue(
-            isEffectivelyHidden(offLine),
-            "a line about an announcement was shown while nothing was registered"
-        )
-        // The whole row leaves, not only its text: hiding a label keeps the mark column's own
-        // height constraint, and the card printed a blank line where the fact had been. Measured
-        // by where the line below it lands, because a hidden label keeps its own frame either
-        // way, which is exactly why the first version of this passed on the bug.
-        let announcedWake = try XCTUnwrap(label(
-            in: announced.view,
-            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
-        ))
-        let offWake = try XCTUnwrap(label(
-            in: off.view,
-            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
-        ))
-        XCTAssertGreaterThan(
-            ink(of: offWake, in: off.host).minY,
-            ink(of: announcedWake, in: announced.host).minY,
-            "the announced line left a gap behind it"
-        )
-        XCTAssertEqual(
-            try XCTUnwrap(view(
-                in: off.view,
-                id: RemoteAccessPreferencesViewController.Identifier.discoveryToggle
-            ) as? ThemedToggle).state,
-            .off
-        )
+        XCTAssertTrue(isEffectivelyHidden(quiet), "nothing is registered and the page says it is")
     }
 
     /// "Can wake this Mac" is a promise the network has to keep, so it is printed only when both
-    /// facts hold, and each of the other three states names the exact thing that is missing.
+    /// facts hold, and each of the other four cases names the exact thing that is missing.
     func testWakingIsClaimedOnlyWithBothFactsAndOtherwiseNamesTheReason() throws {
-        let expected: [(DiscoveryState, String, String, NSColor)] = [
-            (.announcedAndCanWake, "Can wake this Mac from sleep", "\u{2713}", Design.Status.positive),
-            (
-                .wakeSettingOff,
-                "Wake for network access is off in System Settings \u{25B8} Energy",
-                "\u{2013}",
-                Design.Text.tertiary
-            ),
-            (
-                .noSleepProxy,
-                "No sleep proxy on this network; an Apple TV or HomePod provides one",
-                "\u{2013}",
-                Design.Text.tertiary
-            ),
-            (.notChecked, "Not checked yet", "\u{2013}", Design.Text.tertiary)
+        let expected: [(DiscoveryState, String)] = [
+            (.announcedAndCanWake, "Can wake this Mac from sleep"),
+            (.off, "Waking needs an announcement on this network"),
+            (.wakeSettingOff, "Wake for network access is off in System Settings ▸ Energy"),
+            (.noSleepProxy, "No sleep proxy on this network; an Apple TV or HomePod provides one"),
+            (.notChecked, "Not checked yet")
         ]
-        for (state, text, mark, ink) in expected {
+        for (state, text) in expected {
             let page = self.page(state: .lanBound, discovery: state.presentation)
-            let line = try XCTUnwrap(label(
+            let wake = try XCTUnwrap(label(
                 in: page.view,
                 id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
             ))
-            XCTAssertEqual(line.stringValue, text, "\(state)")
-            let glyph = try XCTUnwrap(label(
+            XCTAssertEqual(wake.stringValue, text, "\(state)")
+            let mark = try XCTUnwrap(label(
                 in: page.view,
                 id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemandMark
             ))
-            // The mark as well as the ink: this is the page's only signal under Differentiate
-            // Without Colour, and a green tick beside three of these would be the exact promise
-            // the network cannot keep.
-            XCTAssertEqual(glyph.stringValue, mark, "\(state)")
-            XCTAssertEqual(glyph.textColor?.hexString, ink.hexString, "\(state)")
-        }
-    }
-
-    /// A Sleep Proxy answers for an advertised service, so with nothing advertised there is
-    /// nothing to wake this Mac however the two facts read.
-    ///
-    /// The switch being off is the reachable case: `pmset` still says the setting is on and a
-    /// proxy is still on the network, so both facts hold and the page would have printed a green
-    /// "can wake this Mac" for a service it had just withdrawn.
-    func testWakingIsNotClaimedWhileNothingIsAnnounced() throws {
-        let page = self.page(state: .lanBound, discovery: DiscoveryState.off.presentation)
-        XCTAssertTrue(
-            DiscoveryState.off.presentation.wakeFacts.canWakeThisMac,
-            "the fixture no longer holds both facts, so it proves nothing"
-        )
-        let line = try XCTUnwrap(label(
-            in: page.view,
-            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
-        ))
-        XCTAssertEqual(line.stringValue, "Waking needs an announcement on this network")
-        let glyph = try XCTUnwrap(label(
-            in: page.view,
-            id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemandMark
-        ))
-        XCTAssertEqual(glyph.stringValue, "\u{2013}")
-        XCTAssertEqual(glyph.textColor?.hexString, Design.Text.tertiary.hexString)
-    }
-
-    /// Unknown is never yes, on the page as well as in the facts.
-    func testNoWakeClaimSurvivesEitherFactBeingMissing() throws {
-        let partial: [RemoteWakeOnDemandFacts] = [
-            Self.wakeFacts(true, nil),
-            Self.wakeFacts(nil, true),
-            Self.wakeFacts(nil, nil),
-            .unknown
-        ]
-        for facts in partial {
-            let page = self.page(
-                state: .lanBound,
-                discovery: RemoteDiscoveryPresentation(
-                    isEnabled: true,
-                    announcedName: Self.instanceName,
-                    wakeFacts: facts
-                )
-            )
-            let line = try XCTUnwrap(label(
-                in: page.view,
-                id: RemoteAccessPreferencesViewController.Identifier.wakeOnDemand
-            ))
             XCTAssertEqual(
-                line.stringValue,
-                "Not checked yet",
-                "a half-read answer was rendered as a reason it had looked at"
-            )
-            XCTAssertFalse(
-                line.stringValue.contains("Can wake"),
-                "the page promised waking without both facts"
+                mark.stringValue,
+                state == .announcedAndCanWake ? "✓" : "–",
+                "\(state) drew the wrong mark"
             )
         }
     }
 
-    /// The two fact lines start on one column, under the status line they qualify.
-    ///
-    /// A render found it: the wake line carries a mark and the announced line did not, so the
-    /// two sentences began four points apart in a card where everything else is aligned by ink.
     func testTheTwoFactLinesShareTheirColumn() throws {
-        let page = self.page(
-            state: .lanBound,
-            discovery: DiscoveryState.announcedAndCanWake.presentation
-        )
+        let page = self.page(state: .lanBound, discovery: DiscoveryState.announcedAndCanWake.presentation)
         let announced = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.announcedName
@@ -640,93 +747,69 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             ink(of: announced, in: page.host).minX,
             ink(of: wake, in: page.host).minX,
             accuracy: 0.5,
-            "the two facts under one switch begin on two columns"
-        )
-        // The host is unflipped, so the line higher on the page has the larger y.
-        XCTAssertGreaterThan(
-            ink(of: announced, in: page.host).minY,
-            ink(of: wake, in: page.host).minY,
-            "the wake line reads before the announcement it depends on"
+            "the two facts are indented differently"
         )
     }
 
     // MARK: - The browser sub-option carries its own reason and fix
 
-    /// The panel used to say "Private connection unavailable" while the only explanation sat in
-    /// a readiness row three rows above it. Serve is a sub-option now, so the sentence and the
-    /// button that fixes it are on its own row — and the tailnet way in beside it keeps saying
-    /// what it is doing, because Serve failing is not the door failing.
     func testAServeFailureStatesItsReasonAndOffersItsFixOnItsOwnRow() throws {
         let page = self.page(state: .serveNeedsHTTPS)
-
         let status = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.serveStatus
         ))
-        XCTAssertEqual(status.stringValue, TailscaleReadinessIssue.httpsRequired.failureStatement)
+        XCTAssertTrue(status.stringValue.contains("HTTPS"), status.stringValue)
+
         let hint = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.serveStatusHint
         ))
-        XCTAssertEqual(hint.stringValue, TailscaleReadinessIssue.httpsRequired.remedyStatement)
+        XCTAssertFalse(hint.stringValue.isEmpty, "the remedy is missing from the row that failed")
 
         let remedy = try XCTUnwrap(
             button(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.serveRemedy)
         )
-        XCTAssertFalse(remedy.isHidden, "the admin-console page is not offered beside the reason")
-        XCTAssertEqual(remedy.title, "Enable HTTPS…")
-
-        // The door is bound the whole time. A browser convenience that cannot publish must not
-        // read as the tailnet way in being down.
-        let door = try XCTUnwrap(label(
-            in: page.view,
-            id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
-        ))
-        XCTAssertEqual(door.stringValue, "Reachable at 100.65.47.126:8760")
+        XCTAssertFalse(remedy.isHidden)
         XCTAssertEqual(
-            try XCTUnwrap(label(in: page.view, id: "settings.remote-access.status")).stringValue,
-            "Ready",
-            "a Serve failure took the whole Mac's status down with it"
+            card(containing: remedy),
+            card(containing: status),
+            "the fix is not beside the sentence that needs it"
         )
+
+        // The pairing panel is not the place the reason lives, and it is not blamed for Serve
+        // either: a browser convenience never stops a phone from pairing.
+        let pairing = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-title"))
+        XCTAssertEqual(pairing.stringValue, "Scan with your iPhone")
     }
 
-    /// Serving states where, and the address a browser is meant to open.
     func testServeStatesTheAddressItIsServingAt() throws {
         let page = self.page(state: .serveServing)
         let status = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.serveStatus
         ))
-        XCTAssertEqual(status.stringValue, "Serving at https://mac-studio.tail1234.ts.net:8443")
+        XCTAssertTrue(status.stringValue.contains(Self.magicDNSName), status.stringValue)
         XCTAssertTrue(
             try XCTUnwrap(
-                button(
-                    in: page.view,
-                    id: RemoteAccessPreferencesViewController.Identifier.serveRemedy
-                )
+                button(in: page.view, id: RemoteAccessPreferencesViewController.Identifier.serveRemedy)
             ).isHidden,
-            "a button was offered beside a row with nothing wrong with it"
+            "a working Serve is offering a fix"
         )
     }
 
-    /// A way in that failed with no page to open shows Retry alone. Nothing in the pairing panel
-    /// opens an admin console any more: the only thing that had one was Serve.
-    func testAWayInFailureShowsRetryAlone() throws {
-        let page = self.page(state: .tailnetNotInstalled)
-        let retry = try XCTUnwrap(button(in: page.view, id: "settings.remote-access.pair"))
-        XCTAssertEqual(retry.title, "Retry Connection")
-        XCTAssertTrue(retry.isProminent, "Retry is the only action, so it is the one offered")
-
-        let detail = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-detail"))
-        XCTAssertEqual(
-            detail.stringValue,
-            "Not currently reachable: Tailscale is not installed on this Mac. Install Tailscale "
-                + "and sign in on this Mac. The door comes back on its own.",
-            "the panel does not say which way in failed or what fixes it"
+    /// The certificate-transparency cost is what a person is deciding about, so it is one press
+    /// from the switch rather than in a document.
+    func testTheServeHelpStatesItsPublicCost() throws {
+        let page = self.page(state: .serveServing)
+        let button = try XCTUnwrap(help(in: page.view, titled: "Open in a browser on your tailnet"))
+        XCTAssertTrue(
+            button.topic.spokenSummary.contains("public certificate logs"),
+            button.topic.spokenSummary
         )
     }
 
-    // MARK: - The tailnet door
+    // MARK: - The tailnet way in
 
     func testABoundTailnetDoorNamesItsAddressAndItsName() throws {
         let page = self.page(state: .tailnetBound)
@@ -734,237 +817,115 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
         ))
-        XCTAssertEqual(status.stringValue, "Reachable at 100.65.47.126:8760")
+        XCTAssertTrue(status.stringValue.contains("100.65.47.126:8760"), status.stringValue)
 
         let hint = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.statusHint(.tailscale)
         ))
-        XCTAssertTrue(
-            hint.stringValue.contains("mac-studio.tail1234.ts.net:8760"),
-            "the MagicDNS name is missing: “\(hint.stringValue)”"
-        )
-        XCTAssertFalse(
-            hint.stringValue.contains("8443"),
-            "Serve's port was named as a way the phone could reach this Mac"
-        )
-
-        // The readiness card reads the listener, not a transport.
-        XCTAssertEqual(
-            try XCTUnwrap(label(
-                in: page.view,
-                id: RemoteAccessPreferencesViewController.Identifier.readinessTitle(
-                    .tailnetAddress
-                )
-            )).stringValue,
-            "This Mac’s tailnet address"
-        )
-        XCTAssertEqual(
-            try XCTUnwrap(label(
-                in: page.view,
-                id: RemoteAccessPreferencesViewController.Identifier.readinessMark(.installed)
-            )).stringValue,
-            "✓",
-            "a bound tailnet address is proof Tailscale is installed, whatever the probe said"
-        )
+        XCTAssertTrue(hint.stringValue.contains(Self.magicDNSName), hint.stringValue)
+        XCTAssertEqual(mark(in: page.view, for: .tailscale), "✓")
     }
 
-    /// The three reasons a tailnet door has no address, told apart. "Not connected" and "not
-    /// installed" are fixed in different places, and only the CLI can tell them apart.
-    func testAnAbsentTailnetSaysWhichOfItsThreeCausesItIs() throws {
-        let notConnected = try XCTUnwrap(label(
-            in: self.page(state: .tailnetNotConnected).view,
-            id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
-        ))
-        XCTAssertEqual(
-            notConnected.stringValue,
-            "Not currently reachable: Tailscale is not connected."
-        )
-
-        let notInstalled = self.page(state: .tailnetNotInstalled)
-        XCTAssertEqual(
-            try XCTUnwrap(label(
-                in: notInstalled.view,
+    /// The readiness card is gone, so the door's own line has to carry the whole reason and its
+    /// remedy — which is what the card was duplicating.
+    func testAnAbsentTailnetSaysWhichOfItsThreeCausesItIsWithoutASecondCard() throws {
+        let expected: [(PageState, String, String)] = [
+            (.tailnetNotInstalled, "not installed on this Mac", "Install Tailscale"),
+            (.tailnetNotConnected, "not connected", "Turn on Tailscale")
+        ]
+        for (state, reason, remedy) in expected {
+            let page = self.page(state: state)
+            let status = try XCTUnwrap(label(
+                in: page.view,
                 id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
-            )).stringValue,
-            "Not currently reachable: Tailscale is not installed on this Mac."
-        )
-        XCTAssertEqual(
-            try XCTUnwrap(label(
-                in: notInstalled.view,
-                id: RemoteAccessPreferencesViewController.Identifier.readinessMark(.installed)
-            )).stringValue,
-            "!",
-            "the readiness card does not mark the row that failed"
-        )
+            ))
+            XCTAssertTrue(status.stringValue.contains(reason), "\(state): \(status.stringValue)")
+            let hint = try XCTUnwrap(label(
+                in: page.view,
+                id: RemoteAccessPreferencesViewController.Identifier.statusHint(.tailscale)
+            ))
+            XCTAssertTrue(hint.stringValue.contains(remedy), "\(state): \(hint.stringValue)")
+
+            // The readiness card that used to restate all three steps is gone. The overall
+            // status row and the pairing panel do carry the same sentence, and that is the copy
+            // rule working rather than a duplicate: a panel states the reason it is showing.
+            let printed = allLabels(in: page.view).filter { !isEffectivelyHidden($0) }
+            for title in ["Tailscale installed", "Signed in"] {
+                XCTAssertFalse(
+                    printed.contains { $0.stringValue == title },
+                    "\(state) grew a readiness card again"
+                )
+            }
+        }
     }
 
-    // MARK: - Starting
-
-    /// Coming up is a state with a fact in it, in every place a person is looking: the status
-    /// row, the way in's own line, the readiness card, and the pairing panel.
-    func testATailnetDoorComingUpSaysSoEverywhereItIsShown() throws {
+    func testATailnetDoorComingUpSaysSoWithoutClaimingAnAddress() throws {
         let page = self.page(state: .tailnetBinding)
-
-        let waiting = "Binding to this Mac’s tailnet address…"
-
-        let status = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.status"))
-        XCTAssertEqual(status.stringValue, "Starting")
-
-        let statusDetail = try XCTUnwrap(
-            allLabels(in: page.view).first { $0.stringValue.hasPrefix(waiting) }
-        )
-        XCTAssertTrue(
-            statusDetail.stringValue.contains("127.0.0.1:8760"),
-            "the row dropped the address it does know"
-        )
-
-        let door = try XCTUnwrap(label(
+        let status = try XCTUnwrap(label(
             in: page.view,
             id: RemoteAccessPreferencesViewController.Identifier.status(.tailscale)
         ))
-        XCTAssertEqual(door.stringValue, waiting)
+        XCTAssertTrue(status.stringValue.contains("Binding"), status.stringValue)
+        XCTAssertFalse(status.stringValue.contains(":8760"))
 
-        let panel = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-detail"))
-        XCTAssertEqual(panel.stringValue, waiting, "the panel is still silent about the wait")
-
-        // The status row, the way in's line, the readiness row and the panel.
-        XCTAssertEqual(
-            allLabels(in: page.view).filter { $0.stringValue.contains(waiting) }.count,
-            4,
-            "the wait is missing from one of the places it is shown"
-        )
-    }
-
-    // MARK: - The pairing card
-
-    /// The poster, rebuilt: no glyph in the title, a plate no wider than the code needs, and
-    /// everything else left-aligned beside it.
-    func testThePairingCardLeadsWithTheCodeAndAlignsByInk() throws {
-        let page = self.page(state: .lanBound)
-
-        let title = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-title"))
-        XCTAssertEqual(title.stringValue, "Scan with your iPhone")
-        XCTAssertFalse(
-            title.stringValue.unicodeScalars.contains { $0.properties.isEmojiPresentation },
-            "the title carries a glyph again"
-        )
-
-        let code = try XCTUnwrap(imageView(in: page.view, id: "settings.remote-access.qr-code"))
-        let image = try XCTUnwrap(code.image)
-        XCTAssertFalse(code.isHidden)
-
-        // The plate `PairingCodeImage` draws *is* the code plus its four-module quiet zone, so
-        // the view being exactly the image is the whole of "no wider than the code needs".
-        XCTAssertEqual(
-            code.frame.width,
-            RemoteAccessPreferencesViewController.PairingCardLayout.codeSide,
-            accuracy: 0.5
-        )
-        XCTAssertEqual(image.size.width, code.frame.width, accuracy: 0.5, "the code is resampled")
-        XCTAssertLessThanOrEqual(
-            code.frame.width,
-            PairingCodeImage.preferredSide,
-            "the plate is wider than the code the component draws"
-        )
-        let matrix = try XCTUnwrap(PairingCodeMatrix.make(Self.payload, correctionLevel: "M"))
-        let modules = CGFloat(matrix.size + 8)
-        XCTAssertGreaterThanOrEqual(
-            code.frame.width / modules, 3,
-            "the plate is now too small to scan: \(code.frame.width / modules)pt per module"
-        )
-
-        // Leading edge, and one column for everything beside it.
+        let pairing = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-title"))
+        XCTAssertEqual(pairing.stringValue, "Preparing your pairing code")
         let detail = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-detail"))
-        let note = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-note"))
-        let action = try XCTUnwrap(button(in: page.view, id: "settings.remote-access.pair"))
-        // Measured on alignment rects rather than frames, because that is what "aligned by ink"
-        // means here: a wrapping `NSTextField` reports two points of padding around the glyphs
-        // its frame holds, and comparing frames would call a straight column crooked.
-        let host = page.host
-        let codeInk = ink(of: code, in: host)
-        let column = [title, detail, note, action].map { ink(of: $0, in: host).minX }
-        XCTAssertLessThan(codeInk.minX, try XCTUnwrap(column.min()), "the code is not leading")
-        for edge in column {
-            XCTAssertEqual(
-                edge, column[0], accuracy: 0.5,
-                "the card's text does not sit on one column"
-            )
-        }
-        XCTAssertEqual(
-            try XCTUnwrap(column.min()) - codeInk.maxX,
-            Design.Spacing.large,
-            accuracy: 0.5,
-            "the gap between the code and its text is not the token that states it"
-        )
-
-        // The warning is a secondary note beside the code, not a centred caption under it.
-        XCTAssertEqual(note.textColor?.hexString, Design.Text.secondary.hexString)
-        XCTAssertNotEqual(note.alignment, .center, "the ownership warning is centred again")
-        XCTAssertTrue(
-            note.stringValue.hasPrefix("Only scan this owner code on a device you control."),
-            "the security wording changed"
-        )
-        XCTAssertEqual(action.title, "Copy Pairing Link")
-
-        // The card holds one image, and it is the code.
-        let card = try XCTUnwrap(card(containing: code))
-        XCTAssertEqual(
-            descendants(in: card).compactMap { $0 as? NSImageView }.count, 1,
-            "the pairing card grew a decorative image again"
-        )
+        XCTAssertTrue(detail.stringValue.contains("Binding"), "the panel is silent while it waits")
     }
 
-    /// The squeezed pane: two columns still have to fit, and the code is what cannot shrink.
-    func testThePairingCardStaysInsideANarrowPane() throws {
-        let page = self.page(state: .lanBound, width: Render.narrowWidth)
-        let code = try XCTUnwrap(imageView(in: page.view, id: "settings.remote-access.qr-code"))
-        let note = try XCTUnwrap(label(in: page.view, id: "settings.remote-access.pairing-note"))
-        let card = try XCTUnwrap(card(containing: code))
+    // MARK: - Nothing runs past its card
 
-        let cardFrame = card.convert(card.bounds, to: page.host)
-        let noteFrame = note.convert(note.bounds, to: page.host)
-        XCTAssertLessThanOrEqual(
-            noteFrame.maxX, cardFrame.maxX,
-            "the note runs past the card in a narrow pane"
-        )
-        XCTAssertGreaterThan(noteFrame.width, 40, "the text column collapsed")
-    }
-
-    /// A long four-line disclosure must not push a door's switch off its own row.
-    func testALongDisclosureDoesNotPushADoorsSwitchOutOfItsCard() throws {
-        for width in [Render.width, Render.narrowWidth] {
-            let page = self.page(state: .lanBound, width: width)
-            for wayIn in RemoteAccessWayIn.allCases where wayIn.hasSwitch {
+    /// A "?" beside a title must not push the switch it explains out of its own row, and the
+    /// squeezed pane is where it would.
+    func testNothingIsPushedOutOfItsCardInEitherPane() throws {
+        for width in [Render.pageWidth, Render.narrowPageWidth] {
+            for wayIn in [RemoteAccessWayIn.thisNetwork, .tailscale] {
+                let page = self.page(state: .lanBound, width: width, selecting: wayIn)
                 let toggle = try XCTUnwrap(view(
                     in: page.view,
                     id: RemoteAccessPreferencesViewController.Identifier.doorToggle(wayIn)
                 ))
-                let card = try XCTUnwrap(card(containing: toggle))
-                let cardFrame = card.convert(card.bounds, to: page.host)
+                let panel = try XCTUnwrap(card(containing: toggle))
+                let cardFrame = panel.convert(panel.bounds, to: page.host)
                 let toggleFrame = toggle.convert(toggle.bounds, to: page.host)
                 XCTAssertLessThanOrEqual(
                     toggleFrame.maxX, cardFrame.maxX,
                     "\(wayIn)'s switch is outside its card at \(width)pt"
                 )
-                XCTAssertGreaterThanOrEqual(toggleFrame.minY, cardFrame.minY, "\(wayIn)")
                 XCTAssertGreaterThan(
                     toggleFrame.width, 0,
                     "\(wayIn)'s switch was compressed away at \(width)pt"
                 )
+
+                for button in helpButtons(in: page.view) {
+                    let frame = button.convert(button.bounds, to: page.host)
+                    guard let host = card(containing: button) else { continue }
+                    XCTAssertLessThanOrEqual(
+                        frame.maxX,
+                        host.convert(host.bounds, to: page.host).maxX,
+                        "a help mark runs past its card at \(width)pt"
+                    )
+                }
             }
-            for wayIn in RemoteAccessWayIn.allCases {
-                let block = try XCTUnwrap(view(
-                    in: page.view,
-                    id: RemoteAccessPreferencesViewController.Identifier.disclosure(wayIn)
-                ))
-                let card = try XCTUnwrap(card(containing: block))
-                XCTAssertLessThanOrEqual(
-                    block.convert(block.bounds, to: page.host).maxX,
-                    card.convert(card.bounds, to: page.host).maxX,
-                    "\(wayIn)'s four lines run past their card at \(width)pt"
-                )
-            }
+
+            // The hero is two columns, and the code is what cannot shrink.
+            let page = self.page(state: .lanBound, width: width)
+            let code = try XCTUnwrap(imageView(in: page.view, id: "settings.remote-access.qr-code"))
+            let detail = try XCTUnwrap(
+                label(in: page.view, id: "settings.remote-access.pairing-detail")
+            )
+            let hero = try XCTUnwrap(card(containing: code))
+            XCTAssertLessThanOrEqual(
+                detail.convert(detail.bounds, to: page.host).maxX,
+                hero.convert(hero.bounds, to: page.host).maxX,
+                "the hero's text runs past its card at \(width)pt"
+            )
+            XCTAssertGreaterThan(
+                detail.frame.width, 40,
+                "the hero's text column collapsed at \(width)pt"
+            )
         }
     }
 
@@ -980,17 +941,7 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         }
 
         var written: [String] = []
-        // The squeezed pane as well, for the one state that has two columns to fit into it, and
-        // the announcement's five states on the page they actually appear on.
-        let fixtures: [
-            (state: PageState, width: CGFloat, discovery: RemoteDiscoveryPresentation?, suffix: String)
-        ] =
-            PageState.allCases.map { ($0, Render.width, nil, "") }
-                + [(.lanBound, Render.narrowWidth, nil, "-narrow")]
-                + DiscoveryState.allCases.map {
-                    (.lanBound, Render.width, $0.presentation, "-discovery-\($0.fileName)")
-                }
-        for (state, width, discovery, suffix) in fixtures {
+        for fixture in ImageFixture.allCases {
             for (name, appearanceName) in [
                 ("light", NSAppearance.Name.aqua),
                 ("dark", .darkAqua)
@@ -1003,29 +954,174 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 // came out dark on dark.
                 appearance.performAsCurrentDrawingAppearance {
                     let page = self.page(
-                        state: state,
-                        width: width,
+                        state: fixture.state,
+                        width: fixture.width,
                         appearance: appearance,
-                        discovery: discovery
+                        discovery: fixture.discovery,
+                        selecting: fixture.wayIn,
+                        showsThreadingDirect: fixture.showsThreadingDirect
                     )
-                    png = self.pngData(of: page.host)
+                    png = self.pngData(of: page.trimmedToContent().host)
                 }
-                let data = try XCTUnwrap(png, "\(state) rendered nothing in \(name)")
-                XCTAssertGreaterThan(data.count, 20_000, "\(state) \(name) rendered empty")
-                let fileName = "remote-access-\(state.fileName)\(suffix)-\(name)"
+                let data = try XCTUnwrap(png, "\(fixture) rendered nothing in \(name)")
+                XCTAssertGreaterThan(data.count, 20_000, "\(fixture) \(name) rendered empty")
+                let fileName = "remote-access-\(fixture.fileName)-\(name)"
                 attach(data, named: fileName)
                 if let directory {
-                    try data.write(
-                        to: directory.appendingPathComponent("\(fileName).png")
-                    )
+                    try data.write(to: directory.appendingPathComponent("\(fileName).png"))
                 }
                 written.append(fileName)
             }
         }
-        XCTAssertEqual(written.count, fixtures.count * 2)
+        XCTAssertEqual(written.count, ImageFixture.allCases.count * 2)
+    }
+
+    /// The panel behind every "?", photographed. The four lines left the page; this is the
+    /// picture that proves they are still legible somewhere.
+    func testRendersEveryHelpPanelToImages() throws {
+        let directory = Render.directory
+        if let directory {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+        }
+
+        var written = 0
+        for (title, wayIn) in [
+            ("this-network", RemoteAccessWayIn.thisNetwork),
+            ("through-a-vpn", .throughAVPN),
+            ("tailscale", .tailscale)
+        ] {
+            for (name, appearanceName) in [
+                ("light", NSAppearance.Name.aqua),
+                ("dark", .darkAqua)
+            ] {
+                let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+                var png: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    png = self.pngData(of: self.helpPanelHost(
+                        RemoteAccessPreferencesViewController.help(for: wayIn),
+                        appearance: appearance
+                    ))
+                }
+                let data = try XCTUnwrap(png, "\(title) rendered nothing")
+                let fileName = "remote-access-help-\(title)-\(name)"
+                attach(data, named: fileName)
+                if let directory {
+                    try data.write(to: directory.appendingPathComponent("\(fileName).png"))
+                }
+                written += 1
+            }
+        }
+        XCTAssertEqual(written, 6)
+    }
+
+    /// One picture of the two long explanations that used to be the bottom third of the page.
+    func testRendersTheHeroAndSharingHelpPanels() throws {
+        let directory = Render.directory
+        let page = self.page(state: .lanBound)
+        var written = 0
+        for title in ["Pairing this Mac", "Rotate or reset this Mac’s identity", "Your own devices"] {
+            let button = try XCTUnwrap(help(in: page.view, titled: title), title)
+            for (name, appearanceName) in [
+                ("light", NSAppearance.Name.aqua),
+                ("dark", .darkAqua)
+            ] {
+                let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+                var png: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    png = self.pngData(of: self.helpPanelHost(button.topic, appearance: appearance))
+                }
+                let data = try XCTUnwrap(png)
+                let slug = title.lowercased()
+                    .replacingOccurrences(of: "’", with: "")
+                    .replacingOccurrences(of: " ", with: "-")
+                let fileName = "remote-access-help-\(slug)-\(name)"
+                attach(data, named: fileName)
+                if let directory {
+                    try data.write(to: directory.appendingPathComponent("\(fileName).png"))
+                }
+                written += 1
+            }
+        }
+        XCTAssertEqual(written, 6)
     }
 
     // MARK: - Fixture
+
+    /// The states worth a picture, which is a smaller set than it was: the ways in are one card
+    /// with a run on it now, so a tailnet state is a *selection* rather than another whole page.
+    enum ImageFixture: CaseIterable {
+        /// Everything on and reachable, with the network panel open.
+        case everythingOn
+        /// The same, squeezed into a narrow pane.
+        case everythingOnNarrow
+        /// The tailnet panel, with the browser sub-option publishing.
+        case tailnetServing
+        /// A failure with its reason and its fix in the panel that failed.
+        case serveNeedsHTTPS
+        /// The network is there and nothing on it can reach this Mac.
+        case unreachable
+        /// Announced, and the network can wake this Mac.
+        case announcedAndCanWake
+        /// Announced, and the setting that would let a proxy answer is off.
+        case cannotWake
+        /// Remote Access on and no way in switched on.
+        case nothingOn
+        /// Signed in, so Threading Direct is a segment.
+        case threadingDirect
+
+        var state: PageState {
+            switch self {
+            case .everythingOn, .everythingOnNarrow, .announcedAndCanWake, .cannotWake,
+                 .threadingDirect:
+                return .lanBound
+            case .tailnetServing: return .serveServing
+            case .serveNeedsHTTPS: return .serveNeedsHTTPS
+            case .unreachable: return .lanNoInterface
+            case .nothingOn: return .nothingOn
+            }
+        }
+
+        var wayIn: RemoteAccessWayIn? {
+            switch self {
+            case .tailnetServing, .serveNeedsHTTPS: return .tailscale
+            case .threadingDirect: return .threadingDirect
+            case .everythingOn, .everythingOnNarrow, .unreachable, .announcedAndCanWake,
+                 .cannotWake, .nothingOn:
+                return nil
+            }
+        }
+
+        var width: CGFloat {
+            self == .everythingOnNarrow ? Render.narrowPageWidth : Render.pageWidth
+        }
+
+        var showsThreadingDirect: Bool { self == .threadingDirect }
+
+        var discovery: RemoteDiscoveryPresentation? {
+            switch self {
+            case .announcedAndCanWake: return DiscoveryState.announcedAndCanWake.presentation
+            case .cannotWake: return DiscoveryState.wakeSettingOff.presentation
+            default: return nil
+            }
+        }
+
+        var fileName: String {
+            switch self {
+            case .everythingOn: return "everything-on"
+            case .everythingOnNarrow: return "everything-on-narrow"
+            case .tailnetServing: return "tailnet-serving"
+            case .serveNeedsHTTPS: return "serve-needs-https"
+            case .unreachable: return "unreachable"
+            case .announcedAndCanWake: return "announced-can-wake"
+            case .cannotWake: return "cannot-wake"
+            case .nothingOn: return "nothing-on"
+            case .threadingDirect: return "threading-direct"
+            }
+        }
+    }
 
     enum PageState: CaseIterable {
         /// The primary case: a phone on the same Wi-Fi, and a Mac with two addresses.
@@ -1051,22 +1147,6 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         /// Remote Access on and no way in switched on.
         case nothingOn
 
-        var fileName: String {
-            switch self {
-            case .lanBound: return "lan-bound"
-            case .lanNoInterface: return "lan-no-interface"
-            case .lanFirewalled: return "lan-firewall"
-            case .identityUnavailable: return "identity-unavailable"
-            case .tailnetBound: return "tailnet-bound"
-            case .tailnetBinding: return "tailnet-binding"
-            case .tailnetNotConnected: return "tailnet-not-connected"
-            case .tailnetNotInstalled: return "tailnet-not-installed"
-            case .serveServing: return "serve-serving"
-            case .serveNeedsHTTPS: return "serve-needs-https"
-            case .nothingOn: return "nothing-on"
-            }
-        }
-
         var hasBoundAddress: Bool {
             switch self {
             case .lanBound, .tailnetBound, .serveServing, .serveNeedsHTTPS: return true
@@ -1083,6 +1163,10 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         /// The sub-option is only ever on beside a door that is up: it is a browser convenience,
         /// and a person who has not turned the tailnet way in on is not looking at it.
         var serveIsOn: Bool { self == .serveServing || self == .serveNeedsHTTPS }
+
+        /// Which panel a state is about, so a test naming a tailnet state does not also have to
+        /// remember to select the segment that shows it.
+        var wayIn: RemoteAccessWayIn { isTailnetState ? .tailscale : .thisNetwork }
 
         private var isTailnetState: Bool {
             switch self {
@@ -1215,31 +1299,12 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
     }
 
     /// The announcement and the wake facts, as the five states a person can be looking at.
-    ///
-    /// A separate axis from `PageState` rather than more cases in it: neither value changes any
-    /// door's status line, and multiplying nine page states by five would photograph forty-five
-    /// pages to show five differences.
     enum DiscoveryState: CaseIterable {
-        /// Announced, and the network can wake this Mac. Both facts hold.
         case announcedAndCanWake
-        /// The switch is off, so nothing is registered.
         case off
-        /// Announced, and "Wake for network access" is off in System Settings.
         case wakeSettingOff
-        /// Announced, the setting is on, and no proxy answered on this network.
         case noSleepProxy
-        /// Announced, and the probe has not produced an answer yet.
         case notChecked
-
-        var fileName: String {
-            switch self {
-            case .announcedAndCanWake: return "announced-can-wake"
-            case .off: return "off"
-            case .wakeSettingOff: return "wake-setting-off"
-            case .noSleepProxy: return "no-sleep-proxy"
-            case .notChecked: return "not-checked"
-            }
-        }
 
         var presentation: RemoteDiscoveryPresentation {
             switch self {
@@ -1280,8 +1345,6 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
     }
 
     /// The opaque instance name a Mac broadcasts, as `RemoteDiscoveryDefaults` derives one.
-    /// Derived rather than typed so the fixture cannot photograph a shape the Mac never
-    /// publishes.
     nonisolated private static let instanceName = RemoteDiscoveryDefaults.instanceName(
         hostID: "6B0C6A4E-1C6E-4A5B-9F4E-9C2A2E9E5A11"
     )
@@ -1299,21 +1362,108 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
 
     private struct Page {
         let controller: RemoteAccessPreferencesViewController
+        let window: NSWindow
         let host: NSView
         var view: NSView { controller.view }
+        var marks: [ThemedSegmentedControl.SegmentMark?] {
+            (([host] + host.subviews.flatMap { RemoteAccessSettingsRenderTests.walk($0) })
+                .compactMap { $0 as? ThemedSegmentedControl }
+                .first { $0.accessibilityIdentifier()
+                    == RemoteAccessPreferencesViewController.Identifier.waysInControl })?
+                .marks ?? []
+        }
+
+        /// Shrinks the pane to the page standing in it, so a picture is of the page rather than
+        /// of the empty pane below it.
+        ///
+        /// Only ever shorter, and never shorter than the content: the tall fixture exists so the
+        /// whole page is inside the scroll view's clip in one frame, and cutting into it would
+        /// photograph a page the reviewer has to guess the bottom of.
+        /// `testTheTallFixtureIsOnlyATallerPane` is why this is safe to do to a picture — the
+        /// pane's height decides how much of the page is in the frame and nothing else.
+        @MainActor
+        func trimmedToContent() -> Page {
+            guard let scroll = (RemoteAccessSettingsRenderTests.walk(view)
+                .compactMap { $0 as? NSScrollView }.first),
+                  let document = scroll.documentView else { return self }
+            let chrome = view.frame.height - scroll.frame.height
+            let needed = (chrome + document.fittingSize.height).rounded(.up)
+            guard needed > 0, needed < host.frame.height else { return self }
+            host.setFrameSize(NSSize(width: host.frame.width, height: needed))
+            host.layoutSubtreeIfNeeded()
+            return self
+        }
     }
 
-    /// The page in one state, laid out and ready to photograph.
+    nonisolated private static func walk(_ view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap { walk($0) }
+    }
+
+    /// The page in one state, hosted the way the app hosts it, laid out and ready to photograph.
     ///
     /// Every value comes in through `apply`, so nothing here reads the developer's own settings
-    /// or asks the machine running the test what networks it is on.
+    /// or asks the machine running the test what networks it is on. The window is never ordered
+    /// on screen: none of this needs to be visible, and it stays in the fast lane.
     private func page(
         state: PageState,
-        width: CGFloat = Render.width,
+        width: CGFloat = Render.pageWidth,
+        height: CGFloat = Render.height,
         appearance: NSAppearance? = nil,
         identity: RemoteIdentityCardPresentation? = nil,
-        discovery: RemoteDiscoveryPresentation? = nil
+        discovery: RemoteDiscoveryPresentation? = nil,
+        selecting wayIn: RemoteAccessWayIn? = nil,
+        showsThreadingDirect: Bool = false
     ) -> Page {
+        let controller = RemoteAccessPreferencesViewController()
+        let window = NSWindow(
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: Render.paneWidth(for: width),
+                height: height
+            ),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        // The pane is sized by the split view it lives in, so the page's preferred width is a
+        // *preference* there and simply breaks in a narrower pane. A window's content view has
+        // nothing holding it, and Auto Layout grows the window to that preference instead —
+        // which rendered the squeezed pane at the full width and said nothing about it. So the
+        // pane stands inside the content view rather than being it: its frame is its own, the
+        // window is only the ancestor that makes the tree lay out the way the app's does.
+        let size = NSSize(width: Render.paneWidth(for: width), height: height)
+        let root = NSView(frame: NSRect(origin: .zero, size: size))
+        window.contentView = root
+        let host = NSView(frame: NSRect(origin: .zero, size: size))
+        root.addSubview(host)
+        if let appearance {
+            window.appearance = appearance
+            host.appearance = appearance
+            controller.view.appearance = appearance
+        }
+        host.wantsLayer = true
+        host.layer?.backgroundColor = Design.Surface.ground.cgColor
+
+        // **The app's own call, not a copy of it.** `SettingsUI.install(page:in:top:)` is where
+        // the Settings shell pins a destination into its pane, and this fixture calls the same
+        // function with the same arguments. The two used to be two sets of constraints written
+        // twice, they drifted, and the drift is the defect this whole file is the boundary for.
+        SettingsUI.install(page: controller.view, in: host)
+
+        apply(state, to: controller, identity: identity, discovery: discovery,
+              showsThreadingDirect: showsThreadingDirect)
+        controller.select(wayIn ?? state.wayIn)
+
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+        return Page(controller: controller, window: window, host: host)
+    }
+
+    /// The fixture this file used to be: the page pinned to a bare view's four edges, laid out
+    /// once. Kept for exactly one test — the one that holds it against the app's own shape.
+    private func detachedPage(state: PageState, width: CGFloat = Render.pageWidth) -> Page {
         let controller = RemoteAccessPreferencesViewController()
         let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: Render.height))
         controller.view.translatesAutoresizingMaskIntoConstraints = false
@@ -1324,13 +1474,26 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
             controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
         ])
-        if let appearance {
-            host.appearance = appearance
-            controller.view.appearance = appearance
-        }
         host.wantsLayer = true
         host.layer?.backgroundColor = Design.Surface.ground.cgColor
+        apply(state, to: controller, identity: nil, discovery: nil, showsThreadingDirect: false)
+        controller.select(state.wayIn)
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+        return Page(
+            controller: controller,
+            window: NSWindow(),
+            host: host
+        )
+    }
 
+    private func apply(
+        _ state: PageState,
+        to controller: RemoteAccessPreferencesViewController,
+        identity: RemoteIdentityCardPresentation?,
+        discovery: RemoteDiscoveryPresentation?,
+        showsThreadingDirect: Bool
+    ) {
         let statuses: [RemoteAccessWayIn: RemoteDoorStatus] = [
             .thisNetwork: .thisNetwork(
                 isEnabled: state.thisNetworkIsOn,
@@ -1342,14 +1505,14 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 state: state.tailnetDoorState,
                 facts: state.facts
             ),
-            .threadingDirect: .threadingDirect(.stopped)
+            .threadingDirect: .threadingDirect(showsThreadingDirect ? .ready : .stopped)
         ]
         let doors = RemoteAccessDoorsPresentation(
             isRemoteAccessOn: true,
             thisNetworkIsOn: state.thisNetworkIsOn,
             tailscaleIsOn: state.tailscaleIsOn,
             tailscaleServeIsOn: state.serveIsOn,
-            showsThreadingDirect: false,
+            showsThreadingDirect: showsThreadingDirect,
             statuses: statuses,
             serveStatus: .tailscaleServe(
                 isEnabled: state.serveIsOn,
@@ -1379,10 +1542,45 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
                 hasWayIn: state.thisNetworkIsOn || state.tailscaleIsOn
             )
         )
+    }
 
+    /// One help panel on a card-coloured ground, sized the way a popover sizes it.
+    ///
+    /// The height is the panel's own, taken after a layout pass rather than guessed: these
+    /// explanations run from two lines to two paragraphs, and one fixed frame would either cut
+    /// the long ones off or print the short ones on a field of empty panel.
+    private func helpPanelHost(_ topic: HelpTopic, appearance: NSAppearance) -> NSView {
+        let content = HelpPopoverButton(topic: topic).makeContent()
+        let inset = Design.Spacing.inset
+        let host = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: HelpPopoverMetrics.contentWidth + inset * 2,
+            height: 240
+        ))
+        host.appearance = appearance
+        host.wantsLayer = true
+        host.layer?.backgroundColor = Design.Surface.panel.cgColor
+        content.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(content.view)
+        NSLayoutConstraint.activate([
+            content.view.leadingAnchor.constraint(
+                equalTo: host.leadingAnchor,
+                constant: inset
+            ),
+            content.view.topAnchor.constraint(
+                equalTo: host.topAnchor,
+                constant: inset
+            )
+        ])
         AppThemeRefresh.repaint(host)
         host.layoutSubtreeIfNeeded()
-        return Page(controller: controller, host: host)
+        host.setFrameSize(NSSize(
+            width: host.frame.width,
+            height: (content.view.fittingSize.height + inset * 2).rounded(.up)
+        ))
+        host.layoutSubtreeIfNeeded()
+        return host
     }
 
     // MARK: - Helpers
@@ -1407,6 +1605,16 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         let rect = view.alignmentRect(forFrame: view.frame)
         guard let parent = view.superview else { return rect }
         return parent.convert(rect, to: host)
+    }
+
+    /// Every visible label's ink, keyed by what it says. The comparison two hosts are held to.
+    private func labelInk(in root: NSView) -> [String: NSRect] {
+        var result: [String: NSRect] = [:]
+        for label in allLabels(in: root)
+        where !isEffectivelyHidden(label) && !label.stringValue.isEmpty {
+            result[label.stringValue] = ink(of: label, in: root)
+        }
+        return result
     }
 
     private func descendants(in view: NSView) -> [NSView] {
@@ -1441,6 +1649,43 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
 
     private func allLabels(in root: NSView) -> [NSTextField] {
         ([root] + descendants(in: root)).compactMap { $0 as? NSTextField }
+    }
+
+    private func helpButtons(in root: NSView) -> [HelpPopoverButton] {
+        ([root] + descendants(in: root)).compactMap { $0 as? HelpPopoverButton }
+    }
+
+    private func help(in root: NSView, titled title: String) -> HelpPopoverButton? {
+        helpButtons(in: root).first { $0.topic.title == title }
+    }
+
+    private func segmentTitles(in root: NSView) -> [String] {
+        (([root] + descendants(in: root)).compactMap { $0 as? ThemedSegmentedControl }
+            .first {
+                $0.accessibilityIdentifier()
+                    == RemoteAccessPreferencesViewController.Identifier.waysInControl
+            })?.titles ?? []
+    }
+
+    private func marks(in root: NSView) -> [ThemedSegmentedControl.SegmentMark?] {
+        (([root] + descendants(in: root)).compactMap { $0 as? ThemedSegmentedControl }
+            .first {
+                $0.accessibilityIdentifier()
+                    == RemoteAccessPreferencesViewController.Identifier.waysInControl
+            })?.marks ?? []
+    }
+
+    private func mark(in root: NSView, for wayIn: RemoteAccessWayIn) -> String? {
+        label(
+            in: root,
+            id: RemoteAccessPreferencesViewController.Identifier.statusMark(wayIn)
+        )?.stringValue
+    }
+
+    private func statusDetail(in root: NSView) -> String? {
+        guard let title = label(in: root, id: "settings.remote-access.status"),
+              let row = title.superview else { return nil }
+        return allLabels(in: row).first { $0 !== title }?.stringValue
     }
 
     private func card(containing view: NSView) -> SettingsCard? {

@@ -719,6 +719,31 @@ final class ComponentGalleryViewController: NSViewController {
             ))
         }
 
+        // The same run carrying state marks. A run hides every panel but one, so a choice you are
+        // not on needs a way to say where it stands; the glyph is that, and it is a glyph rather
+        // than a coloured dot so it survives Differentiate Without Colour.
+        let markedTitles = [
+            L10n.string("This network"),
+            L10n.string("Tailscale"),
+            L10n.string("Threading Direct")
+        ]
+        let markedSegmented = ThemedSegmentedControl()
+        markedSegmented.configure(
+            titles: markedTitles,
+            marks: [.ready, .attention, .idle],
+            selectedIndex: 0
+        )
+        markedSegmented.onSelect = { [weak self] index in
+            self?.showReceipt(L10n.format(
+                "ThemedSegmentedControl selected %@.",
+                markedTitles[index]
+            ))
+        }
+        let segmentedStory = NSStackView(views: [segmented, markedSegmented])
+        segmentedStory.orientation = .vertical
+        segmentedStory.alignment = .leading
+        segmentedStory.spacing = Design.Spacing.medium
+
         let navigatorCellLabel = NSTextField(
             labelWithString: L10n.string("Navigator cell")
         )
@@ -885,8 +910,10 @@ final class ComponentGalleryViewController: NSViewController {
                 ),
                 story(
                     "ThemedSegmentedControl",
-                    "Two or three fixed choices with selection, arrows, and radio-group accessibility.",
-                    segmented
+                    "Two or three fixed choices with selection, arrows, and radio-group "
+                        + "accessibility. The second run carries a state mark per choice, so the "
+                        + "panel you are not looking at still says where it stands.",
+                    segmentedStory
                 ),
                 story(
                     "NavigatorGridItemView",

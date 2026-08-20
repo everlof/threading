@@ -33,12 +33,17 @@ struct RemoteConnectionStatusPresentation: Equatable {
         localPort: UInt16
     ) -> RemoteConnectionStatusPresentation {
         let ready = statuses.filter(\.isReady)
-        if !ready.isEmpty {
+        if let first = ready.first {
             return RemoteConnectionStatusPresentation(
                 title: L10n.string("Ready"),
-                // Each ready line already names its own address; the row states them in the
-                // order the ways in are listed rather than picking one to speak for the Mac.
-                detail: ready.map(\.sentence).joined(separator: " "),
+                // **One address, and it is the one the pairing code carries.** This used to join
+                // every ready line into a single sentence, which on a Mac with two interfaces and
+                // a tailnet read as four addresses run together at the top of the page — the
+                // reader's first question ("can anything reach this Mac?") answered by a
+                // paragraph. The ways in are where an address belongs: each one names its own,
+                // lists its others, and a way in you are not looking at still shows its state on
+                // its segment. So this row states the fact and stops.
+                detail: first.fact,
                 tone: .ready,
                 isBusy: false
             )

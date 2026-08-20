@@ -24,8 +24,54 @@ final class ThemedSegmentedControl: NSView {
 
     // MARK: - Properties
 
+    /// A one-glyph state mark after a segment's title, so a choice you are *not* on still says
+    /// where it stands.
+    ///
+    /// A run of segments hides everything but the selected panel, which is the whole point of
+    /// using one — and also the whole risk: a person who switched a way in on and moved to
+    /// another segment has no way to see that the first one came up. A glyph rather than a
+    /// coloured dot, because status must survive Differentiate Without Colour, and a spoken name
+    /// beside it because it must survive not being looked at.
+    enum SegmentMark: Equatable {
+        /// Doing what it says on the tin.
+        case ready
+        /// On, and not carrying what it promised.
+        case attention
+        /// Off, or nothing to report.
+        case idle
+
+        var glyph: String {
+            switch self {
+            case .ready: return "\u{2713}"
+            case .attention: return "!"
+            case .idle: return "\u{2013}"
+            }
+        }
+
+        @MainActor
+        var tint: NSColor {
+            switch self {
+            case .ready: return Design.Status.positive
+            case .attention: return Design.Status.warning
+            case .idle: return Design.Text.tertiary
+            }
+        }
+
+        var spokenName: String {
+            switch self {
+            case .ready: return L10n.string("ready")
+            case .attention: return L10n.string("needs attention")
+            case .idle: return L10n.string("off")
+            }
+        }
+    }
+
     /// Titles in the order they are shown; the host localizes them.
     private(set) var titles: [String] = []
+
+    /// The state mark beside each title, when the run's choices have one. Empty everywhere the
+    /// choice is only a choice.
+    private(set) var marks: [SegmentMark?] = []
 
     /// Which segment is on, reported back by index. Setting it does not call `onSelect` —
     /// a host restoring a stored choice is not the user making one.
@@ -101,8 +147,13 @@ final class ThemedSegmentedControl: NSView {
 
     /// Replaces what the control offers. Selection is kept by index when the new run is at least
     /// as long, so a host re-configuring with the same choices does not silently move the user.
-    func configure(titles: [String], selectedIndex: Int = 0) {
+    func configure(
+        titles: [String],
+        marks: [SegmentMark?] = [],
+        selectedIndex: Int = 0
+    ) {
         self.titles = titles
+        self.marks = Self.padded(marks, to: titles.count)
 
         for view in segmentViews {
             stack.removeArrangedSubview(view)
@@ -110,7 +161,7 @@ final class ThemedSegmentedControl: NSView {
         }
 
         segmentViews = titles.enumerated().map { index, title in
-            let segment = SegmentView(title: title)
+            let segment = SegmentView(title: title, mark: self.marks[index])
             segment.onActivate = { [weak self] in self?.choose(index) }
             segment.onMove = { [weak self] offset, event in
                 self?.move(from: index, by: offset, focusEvent: event)
@@ -121,6 +172,24 @@ final class ThemedSegmentedControl: NSView {
 
         self.selectedIndex = titles.indices.contains(selectedIndex) ? selectedIndex : 0
         updateSelection()
+    }
+
+    /// Repaints the state marks without rebuilding the run.
+    ///
+    /// Separate from `configure` because the two change on completely different clocks: the
+    /// titles are a compile-time set, and the marks move every time the network does. Rebuilding
+    /// three controls to change three glyphs is how a run starts flickering under a network that
+    /// is settling.
+    func setMarks(_ marks: [SegmentMark?]) {
+        self.marks = Self.padded(marks, to: titles.count)
+        for (index, segment) in segmentViews.enumerated() {
+            segment.mark = self.marks.indices.contains(index) ? self.marks[index] : nil
+        }
+    }
+
+    private static func padded(_ marks: [SegmentMark?], to count: Int) -> [SegmentMark?] {
+        guard marks.count != count else { return marks }
+        return (0..<count).map { marks.indices.contains($0) ? marks[$0] : nil }
     }
 
     /// The segment at an index, for tests and for a host that needs to point at one.
@@ -175,7 +244,18 @@ private final class SegmentView: ThemedControl {
         }
     }
 
+    /// The state mark after the title. Nil takes the label out of the run's layout entirely, so a
+    /// choice with nothing to report is drawn exactly as it was before marks existed.
+    var mark: ThemedSegmentedControl.SegmentMark? {
+        didSet {
+            guard mark != oldValue else { return }
+            applyMark()
+            needsDisplay = true
+        }
+    }
+
     private let titleLabel = NSTextField(labelWithString: "")
+    private let markLabel = NSTextField(labelWithString: "")
     private var focusOrigin = KeyboardFocusOrigin()
 
     /// A pointer press keeps this segment as first responder so the next arrow key can continue
@@ -184,30 +264,60 @@ private final class SegmentView: ThemedControl {
         hasKeyboardFocus && focusOrigin.isFromKeyboard
     }
 
-    init(title: String) {
+    init(title: String, mark: ThemedSegmentedControl.SegmentMark? = nil) {
+        self.mark = mark
         super.init(frame: .zero)
 
         titleLabel.stringValue = title
         titleLabel.applyFont(.control)
         titleLabel.alignment = .center
         titleLabel.lineBreakMode = .byTruncatingTail
-        // The segment is the accessibility element; its label would otherwise be announced as a
-        // second, unrelated object inside it.
+        // The segment is the accessibility element; its labels would otherwise be announced as
+        // second, unrelated objects inside it.
         titleLabel.setAccessibilityElement(false)
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
+        // A title yields to the segment it stands in rather than pushing its own run wider.
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        markLabel.applyFont(.control)
+        markLabel.alignment = .center
+        markLabel.setAccessibilityElement(false)
+        markLabel.setContentHuggingPriority(.required, for: .horizontal)
+        markLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        // A stack rather than two pins: the mark is *after* the title, and where it sits is the
+        // run's business rather than each segment's arithmetic. Hidden, it leaves the layout, so
+        // a run with no marks is drawn exactly as it was before they existed.
+        let content = NSStackView(views: [titleLabel, markLabel])
+        content.orientation = .horizontal
+        content.alignment = .firstBaseline
+        content.distribution = .fill
+        content.spacing = Design.Spacing.small
+        content.setHuggingPriority(.required, for: .horizontal)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+
+        // The pair is centred and stays together: a mark pinned to the segment's trailing edge
+        // would sit half a run away from the name it qualifies. The margins are required and the
+        // centring is not, so a title too long for its share truncates around a mark that stays.
+        let centred = content.centerXAnchor.constraint(equalTo: centerXAnchor)
+        centred.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
+            content.centerYAnchor.constraint(equalTo: centerYAnchor),
+            content.leadingAnchor.constraint(
+                greaterThanOrEqualTo: leadingAnchor,
                 constant: Design.Spacing.medium
             ),
-            titleLabel.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
+            content.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor,
                 constant: -Design.Spacing.medium
-            )
+            ),
+            centred
         ])
+        applyMark()
+    }
+
+    private func applyMark() {
+        markLabel.stringValue = mark?.glyph ?? ""
+        markLabel.isHidden = mark == nil
     }
 
     @available(*, unavailable)
@@ -254,6 +364,9 @@ private final class SegmentView: ThemedControl {
         }
 
         titleLabel.textColor = foreground
+        // The mark keeps its own meaning under the selection plate: it is saying what the way in
+        // is doing, not whether this is the segment you are on.
+        markLabel.textColor = mark?.tint
     }
 
     // MARK: - Focus
@@ -317,6 +430,11 @@ private final class SegmentView: ThemedControl {
     override func accessibilityRole() -> NSAccessibility.Role? { .radioButton }
     override func accessibilityTitle() -> String? { titleLabel.stringValue }
     override func accessibilityValue() -> Any? { isSelected }
+
+    /// The mark is a fact about the choice rather than about the selection, so it is spoken as
+    /// help rather than folded into the title or the value. Colour alone would not have carried
+    /// it, and neither would a glyph nobody can hear.
+    override func accessibilityHelp() -> String? { mark?.spokenName }
     override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
 }
 

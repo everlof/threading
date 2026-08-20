@@ -21,7 +21,30 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// payload. Cleared on every update so a stale page cannot outlive the failure that offered it.
     private var tailscaleServeRemedyURL: URL?
     private var wayInStatusViews: [RemoteAccessWayIn: WayInStatusViews] = [:]
-    private var threadingDirectSection: NSView?
+
+    /// The run of ways in, and the one whose detail is on the page.
+    ///
+    /// A segmented run rather than a card each: three cards of four questions was the page a
+    /// person had to read top to bottom to find the one switch they came for, and two of the
+    /// three were always describing something they had not chosen. The run keeps every choice on
+    /// screen and shows one panel, and each segment carries its own state mark so a way in you
+    /// are *not* looking at can still say it came up.
+    private let waysInControl = ThemedSegmentedControl()
+    /// The card under the run, rebuilt when the choice moves. Not on every update: a status line
+    /// changes on every interface event, and a card rebuilt to change two strings is how a page
+    /// starts flickering under a network that is settling.
+    private let waysInHost = NSView()
+    private var waysInCard: SettingsCard?
+    private var waysIn: [RemoteAccessWayIn] = [.thisNetwork, .tailscale]
+    private var selectedWayIn: RemoteAccessWayIn = .thisNetwork
+    /// The structure the card was last built for. The rebuild trigger, and nothing else.
+    private var builtWaysIn: [RemoteAccessWayIn]?
+    private var builtSelection: RemoteAccessWayIn?
+    /// The last values the page was handed, so a rebuilt card can be repainted without asking
+    /// the coordinator again — which a test driving `apply` must never make it do.
+    private var lastDoors = RemoteAccessDoorsPresentation.idle
+    private var lastDiscovery = RemoteDiscoveryPresentation.idle
+
     private let discoveryToggle = ThemedToggle()
     /// The announced fact's whole row, held so it can leave the card rather than leave a gap.
     /// Hiding the label alone keeps the mark column's height constraint and prints a blank line.
@@ -44,7 +67,15 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// every notification would re-probe for every answer it received.
     private var wakeFactsDoorState: RemoteAccessDoorState?
     private var wakeFactsTask: Task<Void, Never>?
-    private let identityCode = NSTextField(labelWithString: "")
+    private let identityCaption = NSTextField(labelWithString: "")
+    /// Wrapping, and by character: 26 characters a person compares glyph by glyph must not be
+    /// truncated, and in a squeezed pane the only alternative to truncating them is a second
+    /// line. It is the one incompressible thing in the hero, so without this it pushes the whole
+    /// text column past the card.
+    private let identityCode = NSTextField(wrappingLabelWithString: "")
+    /// The one identity line that stays on the page: *why there is no code*, or that none has
+    /// been minted yet. The explanation of what the code is for moved into the hero's "?" —
+    /// a reason is not an explanation, and only one of the two belongs beside a control.
     private let identityDetail = NSTextField(wrappingLabelWithString: "")
     private let identitySuccessor = NSTextField(wrappingLabelWithString: "")
     private let identityResetButton = ThemedButton()
@@ -71,13 +102,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let pairingSpinner = ThemedSpinner()
     private let pairingDetail = NSTextField(wrappingLabelWithString: "")
     private let pairingCode = NSImageView()
-    private let pairingNote = NSTextField(wrappingLabelWithString: "")
     private let hostedSpinner = ThemedSpinner()
-    private var tailscaleStepGlyphs: [NSTextField] = []
-    private var tailscaleStepSpinners: [ThemedSpinner] = []
-    private var tailscaleStepTitles: [NSTextField] = []
-    private var tailscaleStepDetails: [NSTextField] = []
-    private var tailscaleReadinessSection: NSView?
 
     private var copiedReset: DispatchWorkItem?
     private var pairedDeviceIDs: [String] = []
@@ -162,9 +187,17 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         )
         tailscaleServeRemedyButton.setAccessibilityIdentifier(Identifier.serveRemedy)
 
+        // The caption names what the 26 characters are *for* in one line, so the code under the
+        // instruction reads as part of the same setup step rather than as a serial number.
+        identityCaption.stringValue = L10n.string("Your phone compares this code")
+        identityCaption.applyFont(.subheading)
+        identityCaption.textColor = Design.Text.tertiary
+        identityCaption.setAccessibilityIdentifier(Identifier.identityCaption)
         identityCode.applyFont(.code())
         identityCode.textColor = Design.Text.label
         identityCode.isSelectable = true
+        identityCode.lineBreakMode = .byCharWrapping
+        identityCode.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         identityCode.setAccessibilityIdentifier("settings.remote-access.identity-code")
         identityDetail.applyFont(.subheading)
         identityDetail.textColor = Design.Text.secondary
@@ -227,9 +260,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             "settings.remote-access.input-control-default"
         )
         inputControlDefault.translatesAutoresizingMaskIntoConstraints = false
-        inputControlDefault.widthAnchor.constraint(
+        // The measure the run *wants*, one step under the floor a row's words keep. Required, it
+        // was 380 points of a 300-point row, and the sentence beside it was pinned to what was
+        // left: a subtitle one character wide, wrapping down the card for eleven lines. The
+        // content pane stops at 320 points, so that is a pane somebody can actually drag to.
+        // A truncated run of two choices is legible; a column of single letters is not.
+        let wide = inputControlDefault.widthAnchor.constraint(
             equalToConstant: SettingsUIDefaults.wideSegmentedControlWidth
-        ).isActive = true
+        )
+        wide.priority = NSLayoutConstraint.Priority(
+            NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
+        )
+        wide.isActive = true
 
         for policy in PhoneReportWorkspacePolicy.allCases {
             phoneReportWorkspacePopUp.addItem(
@@ -270,6 +312,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         pairingTitle.applyFont(.emphasizedBody)
         pairingTitle.textColor = Design.Text.label
         pairingTitle.setAccessibilityIdentifier("settings.remote-access.pairing-title")
+        // Both single-line labels beside a code that cannot shrink. A squeezed pane truncates
+        // them rather than clipping them mid-glyph with nothing to say it did.
+        for label in [pairingTitle, identityCaption] {
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
         pairingDetail.applyFont(.subheading)
         pairingDetail.textColor = Design.Text.secondary
         pairingDetail.setAccessibilityIdentifier("settings.remote-access.pairing-detail")
@@ -277,10 +325,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         pairingCode.imageScaling = .scaleProportionallyUpOrDown
         pairingCode.translatesAutoresizingMaskIntoConstraints = false
         pairingCode.setAccessibilityIdentifier("settings.remote-access.qr-code")
-
-        pairingNote.applyFont(.subheading)
-        pairingNote.textColor = Design.Text.secondary
-        pairingNote.setAccessibilityIdentifier("settings.remote-access.pairing-note")
 
         pairedDevicesStack.orientation = .vertical
         pairedDevicesStack.alignment = .leading
@@ -298,32 +342,27 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.refresh() }
     }
 
+    /// The page, in the order somebody sets this up in: pair the phone, see whether anything can
+    /// reach this Mac, choose a way in, then decide what is shared.
+    ///
+    /// It used to run the other way — a connection card, three way-in cards each carrying four
+    /// questions, a readiness card duplicating one of them, and the pairing code below all of it.
+    /// The thing the page exists for was the last thing on it, and everything above it was prose.
     private func buildPage() {
-        let readiness = SettingsUI.section(
-            "Tailscale Readiness",
-            tailscaleReadinessCard()
+        let page = SettingsUI.page(
+            title: "Remote Access",
+            summary: "Continue chats from Threading on iPhone or a private browser.",
+            sections: [
+                SettingsUI.section("Set Up Your iPhone", heroCard()),
+                SettingsUI.section("Connection", connectionCard()),
+                SettingsUI.section("Ways In", waysInSection()),
+                SettingsUI.section("Sharing & Security", securityCard()),
+                SettingsUI.note(
+                    "Remote Access publishes only Threading’s authenticated remote surface. "
+                        + "MCP, extension services and other local ports stay on this Mac."
+                )
+            ]
         )
-        tailscaleReadinessSection = readiness
-        let threadingDirect = SettingsUI.section(nil, wayInCard(.threadingDirect))
-        threadingDirectSection = threadingDirect
-        let page = SettingsUI.page(title: "Remote Access", sections: [
-            SettingsUI.note(
-                "Continue chats from Threading on iPhone or a private browser. "
-                    + "Nothing is exposed until you turn it on."
-            ),
-            SettingsUI.section("Connection", connectionCard()),
-            SettingsUI.section("Ways In", wayInCard(.thisNetwork)),
-            SettingsUI.section(nil, wayInCard(.tailscale)),
-            threadingDirect,
-            readiness,
-            SettingsUI.section("Set Up Your iPhone", pairingCard()),
-            SettingsUI.section("This Mac’s Identity", identityCard()),
-            SettingsUI.section("Sharing & Security", securityCard()),
-            SettingsUI.note(
-                "Remote Access publishes only Threading’s authenticated remote surface. "
-                    + "MCP, extension services and other local ports stay on this Mac."
-            )
-        ])
         page.setAccessibilityIdentifier("settings.remote-access.page")
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -335,32 +374,255 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         ])
     }
 
+    // MARK: - Hero
+
+    /// The code, and the identity the code is a fingerprint of, as one thing.
+    ///
+    /// They were two cards a page apart, which is exactly backwards: the 26 characters under the
+    /// QR are what the phone compares against the certificate the QR carries, so a person reading
+    /// one is reading the other. The prose that used to sit between them — what pinning is, what
+    /// an owner code costs — is behind the "?" beside the title, one press away and complete.
+    private func heroCard() -> SettingsCard {
+        let heading = NSStackView(views: [
+            pairingTitle,
+            pairingSpinner,
+            HelpPopoverButton(topic: Self.pairingHelp)
+        ])
+        heading.orientation = .horizontal
+        heading.alignment = .centerY
+        heading.spacing = Design.Spacing.small
+
+        let identity = NSStackView(views: [identityCaption, identityCode])
+        identity.orientation = .vertical
+        identity.alignment = .leading
+        identity.spacing = Design.Spacing.hairline
+
+        let actions = NSStackView(views: [pairingActionButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = Design.Spacing.small
+
+        let text = NSStackView(views: [
+            heading,
+            pairingDetail,
+            identity,
+            identityDetail,
+            identitySuccessor,
+            actions
+        ])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = Design.Spacing.medium
+        // A vertical stack aligned `.leading` gives each arranged view its *fitting* width, and
+        // a wrapping label has none to give — so every paragraph is pinned to the column it sits
+        // in, or it wraps at whatever width it happens to prefer.
+        text.setHuggingPriority(.defaultLow, for: .horizontal)
+        // A stack has no intrinsic height of its own, so beside a 168pt code it was handed the
+        // code's height and spread its rows through it: the title floated a quarter of the way
+        // down the card and the gaps came out uneven where all of them are meant to be `medium`.
+        // Hugging vertically is what makes the column its content's height and the spacing the
+        // token that states it.
+        for stack in [heading, identity, actions, text] {
+            stack.setHuggingPriority(.required, for: .vertical)
+        }
+
+        let content = NSStackView(views: [pairingCode, text])
+        content.orientation = .horizontal
+        // The code is a block; the text beside it starts at its first line.
+        content.alignment = .top
+        content.distribution = .fill
+        content.spacing = Design.Spacing.large
+
+        NSLayoutConstraint.activate([
+            pairingCode.widthAnchor.constraint(equalToConstant: PairingCardLayout.codeSide),
+            pairingCode.heightAnchor.constraint(equalTo: pairingCode.widthAnchor),
+            pairingDetail.widthAnchor.constraint(equalTo: text.widthAnchor),
+            identityDetail.widthAnchor.constraint(equalTo: text.widthAnchor),
+            identitySuccessor.widthAnchor.constraint(equalTo: text.widthAnchor),
+            // The code is a wrapping label too, so it is stated like the others rather than left
+            // to hug. Left to itself it took the column in a tree laid out once and its own 177
+            // points in a window, which is the same coin toss `fillingColumn(_:spacing:)`
+            // describes — and the one the fixture and the app disagreed about. The line is
+            // leading-aligned either way, so stating it changes no pixel and settles the layout.
+            identityCode.widthAnchor.constraint(equalTo: text.widthAnchor)
+        ])
+        pairingCode.setContentHuggingPriority(.required, for: .horizontal)
+        pairingCode.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let identityActions = SettingsUI.controlGroup(
+            [identityPrepareButton, identityActivateButton, identityResetButton],
+            spacing: Design.Spacing.small
+        )
+        // Three sibling buttons on one row share their width. Equal at a priority every real
+        // constraint outranks, so nothing about the wide layout is forced — and in a squeezed
+        // pane the pressure is spread across all three, each truncating its own title, instead
+        // of the solver picking one to crush into a sliver while its neighbours stay whole.
+        for button in [identityActivateButton, identityResetButton] {
+            let equal = button.widthAnchor.constraint(
+                equalTo: identityPrepareButton.widthAnchor
+            )
+            equal.priority = .defaultLow
+            equal.isActive = true
+        }
+
+        return SettingsCard(rows: [
+            SettingsUI.fullRow(content),
+            SettingsUI.row(
+                title: "Rotate or reset this Mac’s identity",
+                help: Self.identityHelp,
+                control: identityActions
+            )
+        ])
+    }
+
+    enum PairingCardLayout {
+        /// The side the card gives the pairing code, which is also the side the image is drawn
+        /// at — the plate `PairingCodeImage` draws *is* the quiet zone, so the plate is never
+        /// wider than the code needs, and drawing at the displayed size keeps the modules from
+        /// being resampled on the way down.
+        ///
+        /// 49 modules (41 plus the four-module quiet zone on each side) at 3.4 points each, so
+        /// nearly 7 pixels per module on a 2x display against the 3.02 that
+        /// `PairingCodeImageTests` measured as the floor for a tilted, softened decode.
+        static let codeSide: CGFloat = 168
+    }
+
+    /// What the hero's "?" carries: the two things a person is entitled to read before they scan
+    /// a code that grants owner access, and neither of which is a control's caption.
+    private static var pairingHelp: HelpTopic {
+        HelpTopic(
+            title: L10n.string("Pairing this Mac"),
+            paragraphs: [
+                L10n.string(
+                    "Only scan this owner code on a device you control. It can access every chat "
+                        + "on this Mac. The code expires after one successful pairing; that "
+                        + "device stays paired until you revoke it here."
+                ),
+                RemoteIdentityCardPresentation.explanation
+            ]
+        )
+    }
+
+    /// The two operations that change the certificate, and what each of them costs.
+    private static var identityHelp: HelpTopic {
+        HelpTopic(
+            title: L10n.string("Rotate or reset this Mac’s identity"),
+            paragraphs: [
+                L10n.string(
+                    "Prepare mints the next certificate and announces it over the connection "
+                        + "your devices already trust. Activate switches to it, and a device "
+                        + "that has connected since the announcement keeps working."
+                ),
+                L10n.string(
+                    "Resetting throws the certificate away and mints a new one. Every paired "
+                        + "device has to scan the new pairing code before it can connect again."
+                )
+            ]
+        )
+    }
+
+    // MARK: - Connection
+
     private func connectionCard() -> SettingsCard {
         SettingsCard(rows: [
             SettingsUI.row(
                 title: "Remote Access",
-                subtitle: "Turning it off closes every connection and shared-chat link. "
-                    + "Your explicitly paired devices remain paired for the next time.",
+                subtitle: "Turning it off closes every connection and shared-chat link.",
+                help: HelpTopic(
+                    title: L10n.string("Remote Access"),
+                    paragraphs: [
+                        L10n.string(
+                            "Your explicitly paired devices remain paired for the next time."
+                        )
+                    ]
+                ),
                 control: remoteAccessToggle
             ),
             SettingsUI.row(
                 title: "Hosted Direct",
-                subtitle: "Uses Threading’s service only to introduce this Mac and iPhone, then "
-                    + "prefers a direct encrypted connection. TURN is used only when direct "
-                    + "network traversal cannot connect.",
+                subtitle: "Uses Threading’s service only to introduce this Mac and iPhone.",
+                help: HelpTopic(
+                    title: L10n.string("Hosted Direct"),
+                    paragraphs: [
+                        L10n.string(
+                            "It then prefers a direct encrypted connection. TURN is used only "
+                                + "when direct network traversal cannot connect."
+                        )
+                    ]
+                ),
                 control: hostedAccountControls
             ),
             SettingsUI.fullRow(connectionStatusRow())
         ])
     }
 
-    /// One way in: what it is, its switch, what it is doing right now, and the four questions
-    /// every way in answers in the same order and the same words.
+    private func connectionStatusRow() -> NSView {
+        let labels = fillingColumn([statusTitle, statusDetail], spacing: Design.Spacing.hairline)
+
+        let row = NSStackView(views: [
+            markSlot(glyph: statusGlyph, spinner: statusSpinner),
+            labels,
+            openLocallyButton
+        ])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.medium
+        return row
+    }
+
+    // MARK: - Ways in
+
+    /// The run of ways in, over the one panel it selects.
+    private func waysInSection() -> NSView {
+        waysInHost.translatesAutoresizingMaskIntoConstraints = false
+        rebuildWaysInCard()
+        return waysInHost
+    }
+
+    /// Builds the card for whichever way in is selected.
     ///
-    /// The four lines are not behind a disclosure triangle. A method whose four lines are
-    /// embarrassing is one to fix or remove, and one whose lines are fine has nothing to hide
-    /// behind a triangle either — so they are on the page, under the status they qualify.
-    private func wayInCard(_ wayIn: RemoteAccessWayIn) -> SettingsCard {
+    /// Everything the panel shows is created here, including the status views the page writes
+    /// into, so the last thing this does is hand the current values back to the new views. A page
+    /// driven entirely by `apply(_:)` — which is what makes every state photographable — must
+    /// never reach for the coordinator to repaint itself.
+    private func rebuildWaysInCard() {
+        waysInCard?.removeFromSuperview()
+        wayInStatusViews.removeAll()
+        tailscaleServeStatusViews = nil
+        announcedRow = nil
+
+        waysInControl.configure(
+            titles: waysIn.map(\.title),
+            marks: waysIn.map { segmentMark(for: $0) },
+            selectedIndex: waysIn.firstIndex(of: selectedWayIn) ?? 0
+        )
+        waysInControl.onSelect = { [weak self] index in
+            guard let self, waysIn.indices.contains(index) else { return }
+            selectedWayIn = waysIn[index]
+            rebuildWaysInCard()
+        }
+        waysInControl.setAccessibilityIdentifier(Identifier.waysInControl)
+        waysInControl.setAccessibilityLabel(L10n.string("Ways In"))
+
+        let card = SettingsCard(rows: [SettingsUI.fullRow(waysInControl)] + waysInRows())
+        card.translatesAutoresizingMaskIntoConstraints = false
+        waysInHost.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: waysInHost.topAnchor),
+            card.bottomAnchor.constraint(equalTo: waysInHost.bottomAnchor),
+            card.leadingAnchor.constraint(equalTo: waysInHost.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: waysInHost.trailingAnchor)
+        ])
+        waysInCard = card
+        builtWaysIn = waysIn
+        builtSelection = selectedWayIn
+
+        applyWayIns()
+    }
+
+    /// One way in's panel: what it is, its switch, what it is doing, and its own sub-rows.
+    private func waysInRows() -> [NSView] {
+        let wayIn = selectedWayIn
         // The copy arrives already localized from `RemoteAccessWayIn`, so the row must not look
         // it up a second time: under a translated build that lookup takes the Swedish sentence
         // as a key and finds nothing.
@@ -368,29 +630,27 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             SettingsUI.row(
                 title: wayIn.title,
                 subtitle: wayIn.promise,
+                help: Self.help(for: wayIn),
                 control: toggle(for: wayIn),
                 localizes: false
-            )
+            ),
+            SettingsUI.fullRow(statusRow(for: wayIn))
         ]
-        if wayIn.hasSwitch || wayIn == .threadingDirect {
-            rows.append(SettingsUI.fullRow(statusRow(for: wayIn)))
-        }
-        rows.append(SettingsUI.fullRow(disclosureRows(for: wayIn)))
-        if let note = wayIn.note {
-            rows.append(SettingsUI.fullRow(noteLabel(note)))
-        }
-        if wayIn == .tailscale {
-            rows.append(contentsOf: tailscaleServeRows())
-        }
-        if wayIn == .thisNetwork {
-            // The announcement and what it buys belong to this door and to no other: only the
+        switch wayIn {
+        case .thisNetwork:
+            // The announcement and what it buys belong to this way in and to no other: only the
             // LAN listeners carry it, and only a Mac on the same network can be woken by one.
             rows.append(contentsOf: discoveryRows())
             // "Through a VPN" is the same way in reached from a tunnel, so it belongs to the
-            // network card rather than to a switch of its own.
-            rows.append(contentsOf: throughAVPNRows())
+            // network panel rather than to a segment of its own. It keeps its own four lines,
+            // because a way in never appears without them.
+            rows.append(throughAVPNRow())
+        case .tailscale:
+            rows.append(contentsOf: tailscaleServeRows())
+        case .throughAVPN, .threadingDirect:
+            break
         }
-        return SettingsCard(rows: rows)
+        return rows
     }
 
     private func toggle(for wayIn: RemoteAccessWayIn) -> NSView? {
@@ -401,68 +661,102 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         }
     }
 
-    /// The VPN note's rows, inside the network card it follows.
-    private func throughAVPNRows() -> [NSView] {
-        var rows: [NSView] = [
-            SettingsUI.row(
-                title: RemoteAccessWayIn.throughAVPN.title,
-                subtitle: RemoteAccessWayIn.throughAVPN.promise,
-                localizes: false
-            ),
-            SettingsUI.fullRow(disclosureRows(for: .throughAVPN))
-        ]
-        if let note = RemoteAccessWayIn.throughAVPN.note {
-            rows.append(SettingsUI.fullRow(noteLabel(note)))
-        }
-        return rows
+    /// The four questions a way in answers, plus whatever else it has to say, behind its "?".
+    ///
+    /// The four lines are still never optional and still in the same order and the same words.
+    /// What changed is where they are: on the page they were three quarters of its height and
+    /// were being scrolled past, and behind a press they are one press from the name they belong
+    /// to and in the button's accessibility help for a reader who presses nothing.
+    static func help(for wayIn: RemoteAccessWayIn) -> HelpTopic {
+        HelpTopic(
+            title: wayIn.title,
+            lines: wayIn.disclosure.lines.map {
+                HelpTopic.Line(term: $0.question, detail: $0.answer)
+            },
+            paragraphs: wayIn.note.map { [$0] } ?? []
+        )
+    }
+
+    /// The VPN, as a note inside the network panel.
+    private func throughAVPNRow() -> NSView {
+        SettingsUI.row(
+            title: RemoteAccessWayIn.throughAVPN.title,
+            subtitle: RemoteAccessWayIn.throughAVPN.promise,
+            help: Self.help(for: .throughAVPN),
+            localizes: false
+        )
     }
 
     /// The announcement's switch and the two facts that follow from it.
     ///
-    /// Inside the network card rather than in a section of its own, because it is not a way in:
-    /// the door works without it and closing it changes nothing about who can reach this Mac.
-    /// What it changes is whether a paired phone can still find the Mac after the router hands
-    /// it a new address, and whether a connection can wake it.
+    /// It is not a way in: the door works without it and closing it changes nothing about who can
+    /// reach this Mac. What it changes is whether a paired phone can still find the Mac after the
+    /// router hands it a new address, and whether a connection can wake it.
     ///
-    /// The subtitle states the payload rather than describing it, because that is the decision
-    /// being taken: a broadcast is visible to everyone on the network, so the person switching
-    /// it on is entitled to read exactly what leaves this Mac before they do.
+    /// The exact payload is behind the "?" rather than in the subtitle. A broadcast is visible to
+    /// everyone on the network, so the person switching it on is entitled to read exactly what
+    /// leaves this Mac — which is why it is one press away and complete, and not why it should be
+    /// four lines of the page for everybody who has already decided.
     private func discoveryRows() -> [NSView] {
         let row = SettingsUI.row(
             title: "Announce on this network",
-            subtitle: "Broadcasts an opaque name, this Mac’s id, its protocol version and its "
-                + "certificate fingerprint, so a paired iPhone can find this Mac after its "
-                + "address changes. Never the computer name and never your name, and pairing "
-                + "still needs the code.",
+            subtitle: "Lets a paired iPhone find this Mac after its address changes.",
+            help: HelpTopic(
+                title: L10n.string("Announce on this network"),
+                paragraphs: [
+                    L10n.string(
+                        "Broadcasts an opaque name, this Mac’s id, its protocol version and its "
+                            + "certificate fingerprint, so a paired iPhone can find this Mac "
+                            + "after its address changes. Never the computer name and never your "
+                            + "name, and pairing still needs the code."
+                    )
+                ]
+            ),
             control: discoveryToggle
         )
 
-        let announced = NSStackView(views: [
-            markSlot(glyph: announcedGlyph, spinner: announcedSpinner),
-            announcedLabel
-        ])
-        announced.orientation = .horizontal
-        announced.alignment = .top
-        announced.distribution = .fill
-        announced.spacing = Design.Spacing.medium
-        announcedLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let announced = factRow(glyph: announcedGlyph, spinner: announcedSpinner, label: announcedLabel)
         announcedRow = announced
-
-        let wake = NSStackView(views: [
-            markSlot(glyph: wakeGlyph, spinner: wakeSpinner),
-            wakeLabel
-        ])
-        wake.orientation = .horizontal
-        wake.alignment = .top
-        wake.distribution = .fill
-        wake.spacing = Design.Spacing.medium
-        wakeLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let wake = factRow(glyph: wakeGlyph, spinner: wakeSpinner, label: wakeLabel)
 
         let facts = NSStackView(views: [announced, wake])
         facts.orientation = .vertical
         facts.alignment = .leading
         facts.spacing = Design.Spacing.small
+        // Both fact rows take the card's width, for the reason `fillingColumn(_:spacing:)` gives:
+        // a vertical stack aligned `.leading` hands each row its fitting width, and a row whose
+        // only wide thing is a wrapping label has none worth having.
+        //
+        // **A preference, and the priority is the whole point.** Required, this crushed the page.
+        // The announcement leaves the card by hiding its label *and* its row, and a hidden view
+        // leaves an `NSStackView`'s layout while its constraints stay active — so the row became
+        // its 14-point mark slot, `row.width == facts.width` handed that 14 to the column, and
+        // the column handed it up a chain of required edges to the card, the section and the
+        // page. Every state without an announcement laid out against a broken required
+        // constraint, which is a width nobody chose: 532 points inside a 1,124-point canvas.
+        for fact in [announced, wake] {
+            let pin = fact.widthAnchor.constraint(equalTo: facts.widthAnchor)
+            pin.priority = NSLayoutConstraint.Priority(
+                NSLayoutConstraint.Priority.defaultLow.rawValue + 1
+            )
+            pin.isActive = true
+        }
         return [row, SettingsUI.fullRow(facts)]
+    }
+
+    /// One announced fact: the mark, then the line, on the status column above it.
+    private func factRow(
+        glyph: NSTextField,
+        spinner: ThemedSpinner,
+        label: NSTextField
+    ) -> NSStackView {
+        label.setContentHuggingPriority(.init(1), for: .horizontal)
+        let row = NSStackView(views: [markSlot(glyph: glyph, spinner: spinner), label])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.distribution = .fill
+        row.spacing = Design.Spacing.medium
+        return row
     }
 
     /// The Serve sub-option, under the tailnet way in.
@@ -471,260 +765,123 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// listener binds, with the certificate it pinned, so nothing here is a route. What Serve buys
     /// is the one thing a pinned self-signed identity cannot give a *browser* — a publicly trusted
     /// certificate for the `*.ts.net` name — and what it costs is a public certificate-transparency
-    /// entry naming this Mac and the tailnet, which is why the cost is on the page beside the
-    /// switch rather than in a document.
+    /// entry naming this Mac and the tailnet, which is why the cost is one press from the switch
+    /// rather than in a document.
     private func tailscaleServeRows() -> [NSView] {
         let row = SettingsUI.row(
             title: "Open in a browser on your tailnet",
             subtitle: "Lets a browser on your tailnet open Threading without a certificate "
                 + "warning. The Threading app does not need this.",
+            help: HelpTopic(
+                title: L10n.string("Open in a browser on your tailnet"),
+                paragraphs: [
+                    L10n.string(
+                        "Turning it on publishes this Mac’s name and your tailnet name in public "
+                            + "certificate logs."
+                    )
+                ]
+            ),
             control: tailscaleServeToggle
         )
-        let note = noteLabel(L10n.string(
-            "Turning it on publishes this Mac’s name and your tailnet name in public "
-                + "certificate logs."
-        ))
-        return [row, SettingsUI.fullRow(serveStatusRow()), SettingsUI.fullRow(note)]
+        return [row, SettingsUI.fullRow(serveStatusRow())]
     }
 
     /// Serve's own status line, with the admin-console page that fixes it beside the sentence.
     private func serveStatusRow() -> NSView {
-        let glyph = NSTextField(labelWithString: DoorMark.idle)
-        glyph.applyFont(.body)
-        glyph.setContentHuggingPriority(.required, for: .horizontal)
-        glyph.setAccessibilityIdentifier(Identifier.serveStatusMark)
-        let spinner = ThemedSpinner()
-
-        let text = NSTextField(wrappingLabelWithString: "")
-        text.applyFont(.body)
-        text.textColor = Design.Text.label
-        text.setAccessibilityIdentifier(Identifier.serveStatus)
-        let hint = NSTextField(wrappingLabelWithString: "")
-        hint.applyFont(.subheading)
-        hint.textColor = Design.Text.secondary
-        hint.setAccessibilityIdentifier(Identifier.serveStatusHint)
-
-        let labels = NSStackView(views: [text, hint])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let row = NSStackView(views: [
-            markSlot(glyph: glyph, spinner: spinner),
-            labels,
-            tailscaleServeRemedyButton
-        ])
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.distribution = .fill
-        row.spacing = Design.Spacing.medium
-
-        tailscaleServeStatusViews = WayInStatusViews(
-            glyph: glyph,
-            spinner: spinner,
-            text: text,
-            hint: hint
+        let views = statusViews(
+            statusIdentifier: Identifier.serveStatus,
+            markIdentifier: Identifier.serveStatusMark,
+            hintIdentifier: Identifier.serveStatusHint
         )
-        return row
-    }
-
-    private func noteLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.applyFont(.subheading)
-        label.textColor = Design.Text.secondary
-        return label
+        tailscaleServeStatusViews = views
+        return statusRow(views, action: tailscaleServeRemedyButton)
     }
 
     /// One way in's live status: a mark, the fact, and the remedy when the fact alone does not
     /// say what to do about it.
     private func statusRow(for wayIn: RemoteAccessWayIn) -> NSView {
+        let views = statusViews(
+            statusIdentifier: Identifier.status(wayIn),
+            markIdentifier: Identifier.statusMark(wayIn),
+            hintIdentifier: Identifier.statusHint(wayIn)
+        )
+        wayInStatusViews[wayIn] = views
+        return statusRow(views, action: nil)
+    }
+
+    private func statusViews(
+        statusIdentifier: String,
+        markIdentifier: String,
+        hintIdentifier: String
+    ) -> WayInStatusViews {
         let glyph = NSTextField(labelWithString: DoorMark.idle)
         glyph.applyFont(.body)
         glyph.setContentHuggingPriority(.required, for: .horizontal)
-        glyph.setAccessibilityIdentifier(Identifier.statusMark(wayIn))
-        let spinner = ThemedSpinner()
+        glyph.setAccessibilityIdentifier(markIdentifier)
 
         let text = NSTextField(wrappingLabelWithString: "")
         text.applyFont(.body)
         text.textColor = Design.Text.label
-        text.setAccessibilityIdentifier(Identifier.status(wayIn))
+        text.setAccessibilityIdentifier(statusIdentifier)
+
         let hint = NSTextField(wrappingLabelWithString: "")
         hint.applyFont(.subheading)
         hint.textColor = Design.Text.secondary
-        hint.setAccessibilityIdentifier(Identifier.statusHint(wayIn))
+        hint.setAccessibilityIdentifier(hintIdentifier)
 
-        let labels = NSStackView(views: [text, hint])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // Neither line argues for a width of its own: see `fillingColumn(_:)`.
+        for label in [text, hint] {
+            label.setContentHuggingPriority(.init(1), for: .horizontal)
+        }
+        return WayInStatusViews(glyph: glyph, spinner: ThemedSpinner(), text: text, hint: hint)
+    }
 
-        let row = NSStackView(views: [markSlot(glyph: glyph, spinner: spinner), labels])
+    private func statusRow(_ views: WayInStatusViews, action: NSView?) -> NSView {
+        let labels = fillingColumn([views.text, views.hint], spacing: Design.Spacing.hairline)
+
+        var members: [NSView] = [
+            markSlot(glyph: views.glyph, spinner: views.spinner),
+            labels
+        ]
+        if let action { members.append(action) }
+
+        let row = NSStackView(views: members)
         row.orientation = .horizontal
         row.alignment = .top
         row.distribution = .fill
         row.spacing = Design.Spacing.medium
-
-        wayInStatusViews[wayIn] = WayInStatusViews(
-            glyph: glyph,
-            spinner: spinner,
-            text: text,
-            hint: hint
-        )
         return row
     }
 
-    /// The four lines. The questions share one column, and that column is as wide as the
-    /// longest of them rather than as wide as a number typed in here, so a theme with a wider
-    /// face moves the answers with it.
+    /// A column of wrapping lines that takes the width it is given, rather than the width it
+    /// happens to prefer.
     ///
-    /// The column is a layout guide rather than four equal width constraints. Equalising them
-    /// against the first label pinned the column to *that* label's width — "Who can see the
-    /// traffic" rendered as "Who can see the", clipped mid-word with no ellipsis, which is the
-    /// failure `attributed-label-ignores-cell-linebreakmode` describes in a different disguise.
-    /// A guide every question may not exceed, pulled narrow at a priority the labels outrank,
-    /// settles on the longest one by construction.
-    private func disclosureRows(for wayIn: RemoteAccessWayIn) -> NSView {
-        let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        let column = NSLayoutGuide()
-        container.addLayoutGuide(column)
-
-        // The guide is pinned on all four sides so its frame is determined; only its width is
-        // the question the labels answer.
-        var constraints: [NSLayoutConstraint] = [
-            column.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            column.topAnchor.constraint(equalTo: container.topAnchor),
-            column.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-        ]
-        let narrow = column.widthAnchor.constraint(equalToConstant: 0)
-        narrow.priority = .defaultLow
-        constraints.append(narrow)
-
-        var previous: NSView?
-        for line in wayIn.disclosure.lines {
-            let question = NSTextField(labelWithString: line.question)
-            question.applyFont(.subheading)
-            question.textColor = Design.Text.tertiary
-            question.translatesAutoresizingMaskIntoConstraints = false
-            question.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-            let answer = NSTextField(wrappingLabelWithString: line.answer)
-            answer.applyFont(.subheading)
-            answer.textColor = Design.Text.secondary
-            answer.translatesAutoresizingMaskIntoConstraints = false
-
-            container.addSubview(question)
-            container.addSubview(answer)
-            constraints += [
-                question.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-                question.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
-                answer.leadingAnchor.constraint(
-                    equalTo: column.trailingAnchor,
-                    constant: Design.Spacing.medium
-                ),
-                answer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-                question.firstBaselineAnchor.constraint(equalTo: answer.firstBaselineAnchor),
-                answer.topAnchor.constraint(
-                    equalTo: previous?.bottomAnchor ?? container.topAnchor,
-                    constant: previous == nil ? 0 : Design.Spacing.small
-                )
-            ]
-            previous = answer
-        }
-        if let previous {
-            constraints.append(previous.bottomAnchor.constraint(equalTo: container.bottomAnchor))
-        }
-        NSLayoutConstraint.activate(constraints)
-        container.setAccessibilityIdentifier(Identifier.disclosure(wayIn))
-        return container
-    }
-
-    /// This Mac's certificate: the code a phone compares, and the two operations that change it.
-    ///
-    /// The operations are ordinary settings rows rather than a band of buttons. A control group
-    /// in a full-bleed row has nothing to take the row's slack, so the first button grew to
-    /// three quarters of the card while the other two sat at the far edge; a row's label column
-    /// is what absorbs it, and it also gives each operation somewhere to say what it costs.
-    private func identityCard() -> SettingsCard {
-        let text = NSStackView(views: [identityCode, identityDetail, identitySuccessor])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = Design.Spacing.small
-        text.setHuggingPriority(.defaultLow, for: .horizontal)
-        text.setHuggingPriority(.required, for: .vertical)
-        identityDetail.widthAnchor.constraint(equalTo: text.widthAnchor).isActive = true
-        identitySuccessor.widthAnchor.constraint(equalTo: text.widthAnchor).isActive = true
-
-        return SettingsCard(rows: [
-            SettingsUI.fullRow(text),
-            SettingsUI.row(
-                title: "Rotate this Mac’s identity",
-                subtitle: "Prepare mints the next certificate and announces it over the "
-                    + "connection your devices already trust. Activate switches to it, and a "
-                    + "device that has connected since the announcement keeps working.",
-                control: SettingsUI.controlGroup(
-                    [identityPrepareButton, identityActivateButton],
-                    spacing: Design.Spacing.small
-                )
-            ),
-            SettingsUI.row(
-                title: "Reset this Mac’s identity",
-                subtitle: "Throws the certificate away and mints a new one. Every paired device "
-                    + "has to scan the new pairing code before it can connect again.",
-                control: identityResetButton
+    /// **A wrapping `NSTextField` hugs horizontally at `.defaultLow`, which is the same priority
+    /// a low-hugging label column uses to claim its row's slack.** Two constraints at 250 wanting
+    /// opposite things is not a layout, and the engine settled it differently depending on how
+    /// many passes the tree had been through: laid out once in a detached fixture every status
+    /// line spanned its card, and the same page in a window gave each line its own fitting width.
+    /// The render tests photographed the first and the app drew the second, which is most of what
+    /// "it doesn't look like your image" was. Stating both halves — no opinion from the label, an
+    /// equal-width pin from the column — leaves nothing for a later pass to decide.
+    private func fillingColumn(_ labels: [NSTextField], spacing: CGFloat) -> NSStackView {
+        let column = NSStackView(views: labels)
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = spacing
+        column.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        for label in labels {
+            label.setContentHuggingPriority(.init(1), for: .horizontal)
+            // The pin the comment above is about. A preference rather than a requirement: in a
+            // squeezed pane the row's own edges win, and a status line that ran a few points
+            // past its column is better than one the solver had to break a card to satisfy.
+            let pin = label.widthAnchor.constraint(equalTo: column.widthAnchor)
+            pin.priority = NSLayoutConstraint.Priority(
+                NSLayoutConstraint.Priority.defaultLow.rawValue + 1
             )
-        ])
-    }
-
-    /// The tailnet way in's readiness: two facts the `tailscale` CLI owns, then what the listener
-    /// bound.
-    ///
-    /// The rows carry no action button any more. The only failures that had a page to open were
-    /// Serve's, and Serve is a sub-option now: its admin-console link belongs beside the switch
-    /// that asked for it, not on a card about the door.
-    private func tailscaleReadinessCard() -> SettingsCard {
-        var rows: [NSView] = []
-        for step in TailscaleReadinessStep.allCases {
-            let glyph = NSTextField(labelWithString: DoorMark.idle)
-            glyph.applyFont(.body)
-            glyph.setContentHuggingPriority(.required, for: .horizontal)
-            glyph.setAccessibilityIdentifier(Identifier.readinessMark(step))
-            let spinner = ThemedSpinner()
-
-            let titleLabel = NSTextField(labelWithString: "")
-            titleLabel.applyFont(.body)
-            titleLabel.textColor = Design.Text.label
-            titleLabel.setAccessibilityIdentifier(Identifier.readinessTitle(step))
-            let detail = NSTextField(wrappingLabelWithString: "")
-            detail.applyFont(.subheading)
-            detail.textColor = Design.Text.secondary
-            detail.setAccessibilityIdentifier(Identifier.readinessDetail(step))
-
-            let labels = NSStackView(views: [titleLabel, detail])
-            labels.orientation = .vertical
-            labels.alignment = .leading
-            labels.spacing = Design.Spacing.hairline
-            let row = NSStackView(views: [markSlot(glyph: glyph, spinner: spinner), labels])
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.spacing = Design.Spacing.medium
-            row.distribution = .fill
-            labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            row.edgeInsets = NSEdgeInsets(
-                top: Design.Spacing.medium,
-                left: Design.Spacing.inset,
-                bottom: Design.Spacing.medium,
-                right: Design.Spacing.inset
-            )
-            rows.append(row)
-            tailscaleStepGlyphs.append(glyph)
-            tailscaleStepSpinners.append(spinner)
-            tailscaleStepTitles.append(titleLabel)
-            tailscaleStepDetails.append(detail)
+            pin.isActive = true
         }
-        return SettingsCard(rows: rows)
+        return column
     }
 
     /// One fixed-width slot holding a step's glyph and its in-flight spinner, so swapping the
@@ -751,119 +908,65 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         return slot
     }
 
-    private func connectionStatusRow() -> NSView {
-        let labels = NSStackView(views: [statusTitle, statusDetail])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let row = NSStackView(views: [
-            markSlot(glyph: statusGlyph, spinner: statusSpinner),
-            labels,
-            openLocallyButton
-        ])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = Design.Spacing.medium
-        return row
-    }
-
-    /// The pairing card: the code at the leading edge, everything it needs read beside it.
-    ///
-    /// It was a poster — a centred title with a phone glyph over a centred instruction, a plate
-    /// floating in the middle of the card, a centred two-line warning ending in an orphan, and a
-    /// button under all of it. Nothing else in the app is laid out that way, and the centring is
-    /// what made the warning read as a caption rather than as the thing it says it is. The code
-    /// sits on the same column every row of every card starts on, and the title, the
-    /// instruction, the ownership note and the action stack against its trailing side.
-    private func pairingCard() -> SettingsCard {
-        let heading = NSStackView(views: [pairingTitle, pairingSpinner])
-        heading.orientation = .horizontal
-        heading.alignment = .centerY
-        heading.spacing = Design.Spacing.small
-
-        let actions = NSStackView(views: [pairingActionButton])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = Design.Spacing.small
-
-        let text = NSStackView(views: [heading, pairingDetail, pairingNote, actions])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = Design.Spacing.medium
-        // A vertical stack aligned `.leading` gives each arranged view its *fitting* width, and
-        // a wrapping label has none to give — so both paragraphs are pinned to the column they
-        // sit in, or they wrap at whatever width they happen to prefer.
-        text.setHuggingPriority(.defaultLow, for: .horizontal)
-        // A stack has no intrinsic height of its own, so beside a 168pt code it was handed the
-        // code's height and spread its four rows through it: the title floated a quarter of the
-        // way down the card and the gaps came out 41, 19 and 15 points where all three are
-        // meant to be `medium`. Hugging vertically is what makes the column its content's
-        // height and the spacing the token that states it.
-        for stack in [heading, actions, text] {
-            stack.setHuggingPriority(.required, for: .vertical)
-        }
-
-        let content = NSStackView(views: [pairingCode, text])
-        content.orientation = .horizontal
-        // The code is a block; the text beside it starts at its first line.
-        content.alignment = .top
-        content.distribution = .fill
-        content.spacing = Design.Spacing.large
-
-        NSLayoutConstraint.activate([
-            pairingCode.widthAnchor.constraint(equalToConstant: PairingCardLayout.codeSide),
-            pairingCode.heightAnchor.constraint(equalTo: pairingCode.widthAnchor),
-            pairingDetail.widthAnchor.constraint(equalTo: text.widthAnchor),
-            pairingNote.widthAnchor.constraint(equalTo: text.widthAnchor)
-        ])
-        pairingCode.setContentHuggingPriority(.required, for: .horizontal)
-        pairingCode.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        return SettingsCard(rows: [SettingsUI.fullRow(content)])
-    }
-
-    enum PairingCardLayout {
-        /// The side the card gives the pairing code, which is also the side the image is drawn
-        /// at — the plate `PairingCodeImage` draws *is* the quiet zone, so the plate is never
-        /// wider than the code needs, and drawing at the displayed size keeps the modules from
-        /// being resampled on the way down.
-        ///
-        /// 49 modules (41 plus the four-module quiet zone on each side) at 3.4 points each, so
-        /// nearly 7 pixels per module on a 2x display against the 3.02 that
-        /// `PairingCodeImageTests` measured as the floor for a tilted, softened decode.
-        static let codeSide: CGFloat = 168
-    }
+    // MARK: - Sharing
 
     private func securityCard() -> SettingsCard {
         SettingsCard(rows: [
             SettingsUI.row(
                 title: "New shared chats",
                 subtitle: "Collaborative lets everyone with reply access send. Focused starts "
-                    + "with the Mac owner in control. You can switch a live chat at any time.",
+                    + "with the Mac owner in control.",
+                help: HelpTopic(
+                    title: L10n.string("New shared chats"),
+                    paragraphs: [L10n.string("You can switch a live chat at any time.")]
+                ),
                 control: inputControlDefault
             ),
             SettingsUI.row(
                 title: "Reports from your phone",
                 subtitle: "Shake to report, then Send to Mac, starts a chat here while you are "
-                    + "away from it. Its own workspace keeps that chat out of the checkout you "
-                    + "left open. Available for a Git project whose agent has session tools.",
+                    + "away from it.",
+                help: HelpTopic(
+                    title: L10n.string("Reports from your phone"),
+                    paragraphs: [
+                        L10n.string(
+                            "Its own workspace keeps that chat out of the checkout you left "
+                                + "open. Available for a Git project whose agent has session "
+                                + "tools."
+                        )
+                    ]
+                ),
                 control: phoneReportWorkspacePopUp
             ),
             SettingsUI.detailRow(
                 symbol: "lock.shield",
                 title: "Your own devices",
-                detail: "The QR code is owner access. A paired device can see and manage your "
-                    + "chats, send prompts, and review permission requests."
+                detail: "The QR code is owner access.",
+                help: HelpTopic(
+                    title: L10n.string("Your own devices"),
+                    paragraphs: [
+                        L10n.string(
+                            "A paired device can see and manage your chats, send prompts, and "
+                                + "review permission requests."
+                        )
+                    ]
+                )
             ),
             SettingsUI.detailRow(
                 symbol: "person.2",
                 title: "Other people",
-                detail: "Use Share Chat… from that chat’s ⋯ menu. It grants only the selected "
-                    + "chat, with view, collaboration and approval rights chosen separately. The "
-                    + "invitation points at a way in above, so the person needs the Threading app "
-                    + "and a way onto that network."
+                detail: "Use Share Chat… from that chat’s ⋯ menu.",
+                help: HelpTopic(
+                    title: L10n.string("Other people"),
+                    paragraphs: [
+                        L10n.string(
+                            "It grants only the selected chat, with view, collaboration and "
+                                + "approval rights chosen separately. The invitation points at a "
+                                + "way in above, so the person needs the Threading app and a way "
+                                + "onto that network."
+                        )
+                    ]
+                )
             ),
             pairedDevicesStack
         ])
@@ -1060,26 +1163,76 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// `applyListeningState` is: none of these states can be reached on a developer's machine
     /// on purpose.
     func apply(_ doors: RemoteAccessDoorsPresentation) {
+        lastDoors = doors
         remoteAccessToggle.state = doors.isRemoteAccessOn ? .on : .off
         thisNetworkToggle.state = doors.thisNetworkIsOn ? .on : .off
         tailscaleToggle.state = doors.tailscaleIsOn ? .on : .off
         tailscaleServeToggle.state = doors.tailscaleServeIsOn ? .on : .off
-        threadingDirectSection?.isHidden = !doors.showsThreadingDirect
-        tailscaleReadinessSection?.isHidden = !doors.tailscaleIsOn
+
+        // Threading Direct joins the run when this Mac signs in, and takes the selection with it
+        // only if the segment somebody was on has gone.
+        var offered: [RemoteAccessWayIn] = [.thisNetwork, .tailscale]
+        if doors.showsThreadingDirect { offered.append(.threadingDirect) }
+        waysIn = offered
+        if !offered.contains(selectedWayIn) { selectedWayIn = offered[0] }
+
+        if builtWaysIn != waysIn || builtSelection != selectedWayIn {
+            // Rebuilding calls back into here with the same value once the new views exist, so
+            // everything below runs against the panel that is actually on screen.
+            rebuildWaysInCard()
+            return
+        }
+
+        waysInControl.setMarks(waysIn.map { segmentMark(for: $0) })
+        applyWayIns()
+    }
+
+    /// Chooses which way in's panel is on the page.
+    ///
+    /// Internal because it is the run's counterpart to `apply(_:)`: a test photographing the
+    /// tailnet panel has to be able to select it without a pointer, and the coordinator has
+    /// nothing to say about which segment somebody is looking at.
+    func select(_ wayIn: RemoteAccessWayIn) {
+        guard waysIn.contains(wayIn), wayIn != selectedWayIn else { return }
+        selectedWayIn = wayIn
+        rebuildWaysInCard()
+    }
+
+    /// Which way in's panel is on the page.
+    var shownWayIn: RemoteAccessWayIn { selectedWayIn }
+
+    /// Paints the selected panel from the values the page was last handed.
+    private func applyWayIns() {
         for (wayIn, views) in wayInStatusViews {
-            apply(doors.status(of: wayIn), to: views)
+            apply(lastDoors.status(of: wayIn), to: views)
         }
         if let views = tailscaleServeStatusViews {
-            apply(doors.serveStatus, to: views)
+            apply(lastDoors.serveStatus, to: views)
         }
-        tailscaleServeRemedyURL = doors.serveRemedy?.url
-        tailscaleServeRemedyButton.isHidden = doors.serveRemedy == nil
-        if let remedy = doors.serveRemedy {
+        tailscaleServeRemedyURL = lastDoors.serveRemedy?.url
+        tailscaleServeRemedyButton.isHidden = lastDoors.serveRemedy == nil
+        if let remedy = lastDoors.serveRemedy {
             tailscaleServeRemedyButton.title = remedy.title
             tailscaleServeRemedyButton.setAccessibilityLabel(remedy.title)
         }
-        applyTailnetReadiness(doors.tailnetReadiness)
-        apply(doors.identity)
+        apply(lastDoors.identity)
+        apply(lastDiscovery)
+    }
+
+    /// What a segment says about a way in you are not looking at.
+    ///
+    /// Read from the same status line the panel prints, so the mark and the sentence can never
+    /// disagree: a run that derived "on" from the *switch* would show a tick beside a way in
+    /// that is switched on and bound to nothing.
+    private func segmentMark(
+        for wayIn: RemoteAccessWayIn
+    ) -> ThemedSegmentedControl.SegmentMark? {
+        guard let status = lastDoors.status(of: wayIn) else { return nil }
+        switch status.tone {
+        case .ready: return .ready
+        case .attention: return .attention
+        case .off, .working: return .idle
+        }
     }
 
     /// Renders the announcement and the wake fact. The other entry point a test drives.
@@ -1089,6 +1242,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// promise §15 of the transport plan says settings must not make on a network that cannot
     /// keep it.
     func apply(_ discovery: RemoteDiscoveryPresentation) {
+        lastDiscovery = discovery
         discoveryToggle.state = discovery.isEnabled ? .on : .off
 
         announcedLabel.stringValue = discovery.announcement ?? ""
@@ -1152,10 +1306,13 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private func apply(_ identity: RemoteIdentityCardPresentation) {
         identityCode.stringValue = identity.pairingCode ?? ""
         identityCode.isHidden = identity.pairingCode == nil
-        identityDetail.stringValue = identity.failure
-            ?? (identity.pairingCode == nil
-                ? RemoteIdentityCardPresentation.notMintedYet
-                : RemoteIdentityCardPresentation.explanation)
+        identityCaption.isHidden = identity.pairingCode == nil
+        // Only a *reason* stays on the page. What the code is for is one press away behind the
+        // hero's "?", where it is read once rather than every time somebody opens this page.
+        let reason = identity.failure
+            ?? (identity.pairingCode == nil ? RemoteIdentityCardPresentation.notMintedYet : nil)
+        identityDetail.stringValue = reason ?? ""
+        identityDetail.isHidden = reason == nil
         identitySuccessor.isHidden = identity.nextPairingCode == nil
         identitySuccessor.stringValue = identity.nextPairingCode.map {
             L10n.format(
@@ -1408,49 +1565,14 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         statusSpinner.isAnimating = busy
     }
 
-    /// The readiness card, drawn from one resolved value.
+    /// The tailnet readiness rows are gone from the page, and the value behind them stays.
     ///
-    /// Every issue used to restate all three rows here, which is how a new one could land with
-    /// no mark at all and how the row's copy drifted from the sentence the transport reported.
-    /// The rows are resolved outside the view now (`RemoteTailnetReadinessPresentation`), so what
-    /// this does is paint three marks and six labels, and every state in it can be photographed
-    /// without a tailnet.
-    func applyTailnetReadiness(_ readiness: RemoteTailnetReadinessPresentation) {
-        let steps = TailscaleReadinessStep.allCases
-        guard tailscaleStepGlyphs.count == steps.count,
-              tailscaleStepSpinners.count == steps.count,
-              tailscaleStepTitles.count == steps.count,
-              tailscaleStepDetails.count == steps.count else { return }
-
-        for step in steps {
-            guard let row = readiness.row(step) else { continue }
-            let index = step.rawValue
-            tailscaleStepTitles[index].stringValue = row.title
-            tailscaleStepDetails[index].stringValue = row.detail
-            let isWorking = row.mark == .working
-            tailscaleStepSpinners[index].setAccessibilityLabel(row.detail)
-            tailscaleStepSpinners[index].isAnimating = isWorking
-            tailscaleStepGlyphs[index].isHidden = isWorking
-            tailscaleStepGlyphs[index].stringValue = Self.mark(for: row.mark)
-            tailscaleStepGlyphs[index].textColor = Self.ink(for: row.mark)
-        }
-    }
-
-    private static func mark(for mark: RemoteTailnetReadinessPresentation.Row.Mark) -> String {
-        switch mark {
-        case .met: return DoorMark.ready
-        case .attention: return DoorMark.attention
-        case .pending, .working: return DoorMark.idle
-        }
-    }
-
-    private static func ink(for mark: RemoteTailnetReadinessPresentation.Row.Mark) -> NSColor {
-        switch mark {
-        case .met: return Design.Status.positive
-        case .attention: return Design.Status.warning
-        case .pending, .working: return Design.Text.tertiary
-        }
-    }
+    /// They named three steps — installed, signed in, an address — and the tailnet way in's own
+    /// status line already states whichever of the three failed *with its remedy in the same
+    /// sentence*: "Tailscale is not installed on this Mac. Install Tailscale and sign in on this
+    /// Mac. The door comes back on its own." A card repeating that under it was a second place
+    /// for the same fact to be, which is the arrangement §9's copy rules were written against.
+    /// `RemoteTailnetReadinessPresentation` and its tests are untouched; nothing draws it.
 
     private func rebuildPairedDevices(
         _ devices: [RemoteAccessCoordinator.PairedOwnerDevice],
@@ -1549,14 +1671,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         }
         pairingCode.image = code
         pairingCode.isHidden = code == nil
-        pairingNote.isHidden = code == nil
-        pairingNote.stringValue = code == nil
-            ? ""
-            : L10n.string(
-                "Only scan this owner code on a device you control. It can access every chat "
-                    + "on this Mac. The code expires after one successful pairing; that device "
-                    + "stays paired until you revoke it here."
-            )
     }
 
     // MARK: - Actions
@@ -1777,9 +1891,9 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             "settings.remote-access.status-hint.\(wayIn.identifierComponent)"
         }
 
-        static func disclosure(_ wayIn: RemoteAccessWayIn) -> String {
-            "settings.remote-access.disclosure.\(wayIn.identifierComponent)"
-        }
+        /// The run of ways in, and the caption above the hero's identity code.
+        static let waysInControl = "settings.remote-access.ways-in"
+        static let identityCaption = "settings.remote-access.identity-caption"
 
         /// The Serve sub-option. Not a way in, so it is named rather than derived from one.
         static let serveToggle = "settings.remote-access.tailscale-serve"
@@ -1787,18 +1901,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         static let serveStatusMark = "settings.remote-access.status-mark.tailscale-serve"
         static let serveStatusHint = "settings.remote-access.status-hint.tailscale-serve"
         static let serveRemedy = "settings.remote-access.tailscale-serve-remedy"
-
-        static func readinessTitle(_ step: TailscaleReadinessStep) -> String {
-            "settings.remote-access.readiness.\(step.identifierComponent)"
-        }
-
-        static func readinessDetail(_ step: TailscaleReadinessStep) -> String {
-            "settings.remote-access.readiness-detail.\(step.identifierComponent)"
-        }
-
-        static func readinessMark(_ step: TailscaleReadinessStep) -> String {
-            "settings.remote-access.readiness-mark.\(step.identifierComponent)"
-        }
     }
 
 }

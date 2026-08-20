@@ -318,7 +318,6 @@
     "Temporarily unavailable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillfälligt otillgänglig"}}}},
     "This surface cannot play media documents.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här ytan kan inte spela mediadokument."}}}},
     "Threading carries no player for “%@” documents.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading har ingen spelare för ”%@”-dokument."}}}},
-    "Uses Threading’s service only to introduce this Mac and iPhone, then prefers a direct encrypted connection. TURN is used only when direct network traversal cannot connect.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använder Threadings tjänst enbart för att introducera denna Mac och iPhone och föredrar därefter en direkt krypterad anslutning. TURN används bara när en direkt anslutning inte kan upprättas genom nätverket."}}}},
     "Its checkout or working directory changed before a terminal could accept the command.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dess checkout eller arbetskatalog ändrades innan en terminal kunde ta emot kommandot."}}}},
     "Project Scripts": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Projektskript"}}}},
     "Run Command": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kör kommando"}}}},
@@ -3733,9 +3732,6 @@
     "Controller": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Styrning" } } }
     },
-    "Collaborative lets everyone with reply access send. Focused starts with the Mac owner in control. You can switch a live chat at any time.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Samarbete låter alla med svarsåtkomst skicka. Fokuserat börjar med Mac-ägaren i kontroll. Du kan växla en aktiv chatt när som helst." } } }
-    },
     "Everyone with reply access can send. Terminal lines are still submitted atomically.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Alla med svarsåtkomst kan skicka. Terminalrader skickas fortfarande atomärt." } } }
     },
@@ -3756,9 +3752,6 @@
     },
     "Reports from your phone": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rapporter från din telefon" } } }
-    },
-    "Shake to report, then Send to Mac, starts a chat here while you are away from it. Its own workspace keeps that chat out of the checkout you left open. Available for a Git project whose agent has session tools.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skaka för att rapportera och sedan Skicka till Mac startar en chatt här medan du är borta från den. En egen arbetsyta håller chatten utanför utcheckningen du lämnade öppen. Tillgängligt för ett Git-projekt vars agent har sessionsverktyg." } } }
     },
     "The project’s own checkout": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Projektets egen utcheckning" } } }
@@ -3888,9 +3881,6 @@
     },
     "Signed in and running": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inloggad och igång" } } }
-    },
-    "Tailscale Readiness": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale-status" } } }
     },
     "Tailscale Serve could not publish Threading on this tailnet.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tailscale Serve kunde inte publicera Threading på detta tailnet." } } }
@@ -4053,11 +4043,6 @@
     "Threading could not read its paired-device Keychain item. It will not overwrite that item or issue a credential it cannot preserve.": {
       "localizations": {
         "sv": { "stringUnit": { "state": "translated", "value": "Threading kunde inte läsa nyckelringsposten för parkopplade enheter. Posten skrivs inte över och en autentiseringsuppgift som inte kan bevaras utfärdas inte." } }
-      }
-    },
-    "Turning it off closes every connection and shared-chat link. Your explicitly paired devices remain paired for the next time.": {
-      "localizations": {
-        "sv": { "stringUnit": { "state": "translated", "value": "När du stänger av funktionen stängs alla anslutningar och delade chattlänkar. Dina uttryckligen parkopplade enheter förblir parkopplade till nästa gång." } }
       }
     },
     "App-owned transient surfaces with themed chrome, Escape, focus return, and accessibility.": {
@@ -8631,17 +8616,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fortsätt"
-          }
-        }
-      }
-    },
-    "Continue chats from Threading on iPhone or a private browser. Nothing is exposed until you turn it on.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fortsätt chattar från Threading på iPhone eller en privat webbläsare. Inget visas förrän du aktiverar det."
           }
         }
       }
@@ -19416,17 +19390,6 @@
         }
       }
     },
-    "The QR code is owner access. A paired device can see and manage your chats, send prompts, and review permission requests.": {
-      "extractionState": "stale",
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "QR-koden ger ägaråtkomst. En parkopplad enhet kan se och hantera alla konversationer, skicka instruktioner och granska behörighetsförfrågningar."
-          }
-        }
-      }
-    },
     "The Threading mark drawn live: brand threads under System, the theme's accent under a style. Click it to replay the launch stitch.": {
       "extractionState": "stale",
       "localizations": {
@@ -21469,12 +21432,12 @@
         }
       }
     },
-    "Two or three fixed choices with selection, arrows, and radio-group accessibility.": {
+    "Two or three fixed choices with selection, arrows, and radio-group accessibility. The second run carries a state mark per choice, so the panel you are not looking at still says where it stands.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Två eller tre fasta val med markering, piltangenter och radiogruppstillgänglighet."
+            "value": "Två eller tre fasta val med markering, piltangenter och radiogruppstillgänglighet. Den andra raden bär ett tillståndsmärke per val, så panelen du inte tittar på säger ändå var den står."
           }
         }
       }
@@ -21850,9 +21813,6 @@
           }
         }
       }
-    },
-    "Use Share Chat… from that chat’s ⋯ menu. It grants only the selected chat, with view, collaboration and approval rights chosen separately. The invitation points at a way in above, so the person needs the Threading app and a way onto that network.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd Dela konversation… i konversationens ⋯-meny. Den ger åtkomst endast till den valda konversationen, med visning, samarbete och godkännande valda var för sig. Inbjudan pekar på ett sätt in ovan, så personen behöver Threading-appen och en väg in på det nätverket." } } }
     },
     "Use Website Favicon": {
       "extractionState": "stale",
@@ -28661,7 +28621,6 @@
     "This Mac mints its certificate the first time a way in needs one.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här Mac-datorn skapar sitt certifikat första gången en väg in behöver ett."}}}},
     "This Mac’s certificate file is not a certificate. Resetting the identity mints a new one, and every paired device has to scan again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här Mac-datorns certifikatfil är inte ett certifikat. Att återställa identiteten skapar ett nytt, och varje parkopplad enhet måste skanna igen."}}}},
     "This Mac’s certificate was written by a newer version of Threading. Update Threading rather than resetting the identity, which would unpair every device.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här Mac-datorns certifikat skrevs av en nyare version av Threading. Uppdatera Threading i stället för att återställa identiteten, vilket skulle koppla bort varje enhet."}}}},
-    "This Mac’s Identity": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här Mac-datorns identitet"}}}},
     "This Mac’s tailnet address": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här Mac-datorns tailnet-adress"}}}},
     "This network": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det här nätverket"}}}},
     "Threading could not mint a certificate on this Mac. Try again, and report it if it keeps failing.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kunde inte skapa ett certifikat på den här Mac-datorn. Försök igen och rapportera det om det fortsätter misslyckas."}}}},
@@ -28686,9 +28645,6 @@
     "Your phone reaches this Mac when both are on the same Wi-Fi.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Telefonen når den här Mac-datorn när båda är på samma Wi-Fi."}}}},
     "your signed-in devices": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "dina inloggade enheter"}}}},
     "Prepare mints the next certificate and announces it over the connection your devices already trust. Activate switches to it, and a device that has connected since the announcement keeps working.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förbered skapar nästa certifikat och aviserar det över anslutningen som dina enheter redan litar på. Aktivera byter till det, och en enhet som har anslutit sedan aviseringen fortsätter fungera."}}}},
-    "Reset this Mac’s identity": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ den här Mac-datorns identitet"}}}},
-    "Rotate this Mac’s identity": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rotera den här Mac-datorns identitet"}}}},
-    "Throws the certificate away and mints a new one. Every paired device has to scan the new pairing code before it can connect again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kastar bort certifikatet och skapar ett nytt. Varje parkopplad enhet måste skanna den nya parkopplingskoden innan den kan ansluta igen."}}}},
     "May not be reachable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kanske inte går att nå"}}}},
     "Ports %1$@ to %2$@ are all in use on this Mac. Quit whatever is holding them, then turn Remote Access on again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Portarna %1$@ till %2$@ är alla upptagna på den här Mac-datorn. Avsluta det som håller dem och slå sedan på Fjärråtkomst igen."}}}},
     "Threading could not open its listener on this Mac. Turn Remote Access on again, and report it if it keeps failing.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kunde inte öppna sin lyssnare på den här Mac-datorn. Slå på Fjärråtkomst igen och rapportera det om det fortsätter misslyckas."}}}},
@@ -28718,7 +28674,26 @@
     "Waking needs an announcement on this network": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väckning kräver en annonsering i det här nätverket"}}}},
     "%@, help": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@, hjälp"}}}},
     "HelpPopoverButton": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "HelpPopoverButton"}}}},
-    "A quiet mark beside a name, the themed panel it opens, and the same words on the button for a screen reader.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ett diskret märke bredvid ett namn, panelen det öppnar och samma ord på knappen för en skärmläsare."}}}}
+    "A quiet mark beside a name, the themed panel it opens, and the same words on the button for a screen reader.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ett diskret märke bredvid ett namn, panelen det öppnar och samma ord på knappen för en skärmläsare."}}}},
+    "ready": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "klar"}}}},
+    "needs attention": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "behöver åtgärd"}}}},
+    "A paired device can see and manage your chats, send prompts, and review permission requests.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En parkopplad enhet kan se och hantera dina chattar, skicka prompter och granska behörighetsförfrågningar."}}}},
+    "Collaborative lets everyone with reply access send. Focused starts with the Mac owner in control.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Samarbete låter alla med svarsåtkomst skicka. Fokuserat börjar med Mac-ägaren i kontroll."}}}},
+    "It grants only the selected chat, with view, collaboration and approval rights chosen separately. The invitation points at a way in above, so the person needs the Threading app and a way onto that network.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den ger endast åtkomst till den valda chatten, med visning, samarbete och godkännande valda var för sig. Inbjudan pekar på en väg in ovan, så personen behöver Threading-appen och en väg in på det nätverket."}}}},
+    "It then prefers a direct encrypted connection. TURN is used only when direct network traversal cannot connect.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Därefter föredras en direkt krypterad anslutning. TURN används endast när direkt nätverkstraversering inte kan ansluta."}}}},
+    "Its own workspace keeps that chat out of the checkout you left open. Available for a Git project whose agent has session tools.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "En egen arbetsyta håller chatten borta från utcheckningen du lämnade öppen. Tillgängligt för ett Git-projekt vars agent har sessionsverktyg."}}}},
+    "Lets a paired iPhone find this Mac after its address changes.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låter en parkopplad iPhone hitta den här Macen efter att adressen ändrats."}}}},
+    "Pairing this Mac": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Parkoppla den här Macen"}}}},
+    "Resetting throws the certificate away and mints a new one. Every paired device has to scan the new pairing code before it can connect again.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställning kastar certifikatet och skapar ett nytt. Varje parkopplad enhet måste skanna den nya parkopplingskoden innan den kan ansluta igen."}}}},
+    "Rotate or reset this Mac’s identity": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rotera eller återställ den här Macens identitet"}}}},
+    "Shake to report, then Send to Mac, starts a chat here while you are away from it.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skaka för att rapportera, sedan Skicka till Mac, startar en chatt här medan du är borta från den."}}}},
+    "The QR code is owner access.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "QR-koden ger ägaråtkomst."}}}},
+    "Turning it off closes every connection and shared-chat link.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Att stänga av den avslutar varje anslutning och delad chattlänk."}}}},
+    "Use Share Chat… from that chat’s ⋯ menu.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använd Dela chatt… i chattens ⋯-meny."}}}},
+    "Uses Threading’s service only to introduce this Mac and iPhone.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använder Threadings tjänst enbart för att presentera den här Macen och iPhone."}}}},
+    "You can switch a live chat at any time.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Du kan byta i en pågående chatt när som helst."}}}},
+    "Your explicitly paired devices remain paired for the next time.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dina uttryckligen parkopplade enheter förblir parkopplade till nästa gång."}}}},
+    "Your phone compares this code": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Din telefon jämför den här koden"}}}}
   },
   "version": "1.0"
 }
