@@ -44,6 +44,7 @@ idea that comes back every six months.
 | [Repository setup hooks](repository-setup-hooks.md) — a checked-in command that runs when Threading creates a worktree | **Reject** automatic execution; **prototype** an offer that still needs a press |
 | [DOM source attribution](dom-source-attribution.md) — click an element in the browser, get `Component` and `file:line` | **Reject** a bundled framework provider; **wait for demand** on reading what a page already publishes |
 | [A named Cloudflare Tunnel](named-cloudflare-tunnel.md) — a stable hostname for the owner's phone instead of a per-launch Quick Tunnel one | **Reject**: it buys address stability, which a sticky port already buys, by putting a third party that terminates TLS on the owner's daily route and asking every user for a domain |
+| [Compressing the terminal mirror's wire](compressed-terminal-mirror.md) — deflate the mirror's binary frames for cellular joins | **Wait for demand**: bytes stopped being the scarce resource once the replay was bounded; reopen on a measured non-LAN join dominated by transfer |
 
 ## Measurements these records rest on
 
