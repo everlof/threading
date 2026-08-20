@@ -868,6 +868,31 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(message.token, "t")
     }
 
+    func testAuthFrameCarriesAReplayBudgetAndOlderClientsStillOmitIt() throws {
+        let auth = RemoteClientMessage(
+            type: "auth",
+            token: "t",
+            device: "d",
+            deviceName: "iPhone",
+            replayBudget: 128 * 1024,
+            protocolVersion: 1,
+            protocolMinimum: 1
+        )
+        let encoded = try JSONEncoder().encode(auth)
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteClientMessage.self, from: encoded).replayBudget,
+            128 * 1024
+        )
+
+        let olderFrame = #"{"type":"auth","token":"t","device":"d","protocolVersion":1}"#
+        let older = try JSONDecoder().decode(
+            RemoteClientMessage.self,
+            from: Data(olderFrame.utf8)
+        )
+        XCTAssertNil(older.replayBudget)
+    }
+
     func testClientMessageDecodesAPermissionDecision() throws {
         let json = #"{"type":"permission","id":"permission-1","decision":"allow"}"#
         let message = try JSONDecoder().decode(RemoteClientMessage.self, from: Data(json.utf8))

@@ -495,6 +495,49 @@ final class RemoteSessionMirrorRegistry {
         }.map(\.rawValue)
     }
 
+    /// CAN, which returns a client's escape-sequence parser to ground.
+    private static let cancelPendingSequence: UInt8 = 0x18
+
+    /// What a joining client's replay is made of: nothing, the ring whole, or a cut tail.
+    ///
+    /// A cut carries only the tail. What has to follow it — a freshly synthesized repaint — is
+    /// the caller's business rather than this decision's, because the caller is the only thing
+    /// that knows *when* it may be read; see `attachTerminal`.
+    enum TerminalReplay: Equatable {
+        /// The ring is empty, so there is no history to replay at all.
+        case nothing
+        /// The ring in full, byte for byte.
+        case whole(Data)
+        /// The ring's newest bytes within budget, behind CAN. A fresh repaint owes to follow.
+        case cut(tail: Data)
+    }
+
+    /// How much of the ring a joining client is owed, given the budget it stated.
+    ///
+    /// Without a budget the client gets the ring whole, which is the only correct answer when it
+    /// has not said what it can hold. With one, it gets the ring's newest `budget` bytes behind
+    /// CAN, and a freshly synthesized repaint follows. Both halves of that are load-bearing:
+    ///
+    /// - CAN comes first for the reason the mode seed also begins with one. A byte window over a
+    ///   raw PTY stream can end inside an escape sequence, and cutting the head off the ring
+    ///   means it can now *begin* inside one too; without CAN the client's parser eats the first
+    ///   bytes of real output as the tail of a sequence it never saw the start of.
+    /// - The fresh repaint is what keeps the visible screen exact. The ring was seeded at capture
+    ///   with a repaint of the screen as it stood then, and that seed sits at the head — the
+    ///   part a budget cuts away. Replaying a tail alone reproduces only the output since some
+    ///   arbitrary byte offset, so the screen has to be restated as it is now.
+    ///
+    /// The tail is not inert history. It is raw output, and every side effect it has on the
+    /// client's emulator persists except where the two seeds that follow restate it — the
+    /// repaint restates buffer, charset, attributes, contents and cursor; the mode seed restates
+    /// the sticky modes. What the tail is *for* is scrollback; what makes the visible screen
+    /// right is the repaint.
+    static func terminalReplay(ring: Data, budget: Int?) -> TerminalReplay {
+        guard !ring.isEmpty else { return .nothing }
+        guard let budget, budget > 0, ring.count > budget else { return .whole(ring) }
+        return .cut(tail: Data([Self.cancelPendingSequence]) + ring.suffix(budget))
+    }
+
     private func attachTerminal(
         _ connection: RemoteConnection,
         sessionID: SessionID,
@@ -520,12 +563,53 @@ final class RemoteSessionMirrorRegistry {
         sendLatestWorkspaceActivity(to: connection, sessionID: sessionID)
 
         let ringSnapshot = mirrors[sessionID]?.ring.snapshot() ?? Data()
-        if !ringSnapshot.isEmpty { connection.sendBinary(ringSnapshot) }
-        // After the ring rather than before it. The ring is replayed history: it can arm mouse
-        // tracking the program has since dropped, and — far more often — it holds no arming
-        // sequence at all, because a TUI sends that once at startup and 512 KB of output rolled
-        // it away. The statement is what is true now, so it has to be the last word.
-        connection.sendBinary(RemoteTerminalModeSeed.bytes(for: snapshot.modes))
+        let budget = connection.authenticatedPeer?.terminalReplayBudget
+        let replay = Self.terminalReplay(ring: ringSnapshot, budget: budget)
+        switch replay {
+        case .nothing:
+            break
+        case .whole(let ring):
+            connection.sendBinary(ring)
+        case .cut(let tail):
+            connection.sendBinary(tail)
+        }
+
+        guard case .cut = replay, let budget else {
+            // After the ring rather than before it. The ring is replayed history: it can arm
+            // mouse tracking the program has since dropped, and — far more often — it holds no
+            // arming sequence at all, because a TUI sends that once at startup and 512 KB of
+            // output rolled it away. The statement is what is true now, so it has to be the
+            // last word.
+            connection.sendBinary(RemoteTerminalModeSeed.bytes(for: snapshot.modes))
+            return true
+        }
+
+        EventLog.shared.record(.remote, "Remote replay bounded", [
+            "session": sessionID.uuidString,
+            "ring": String(ringSnapshot.count),
+            "budget": String(budget),
+        ])
+        // The ring lags the emulator by one main-queue hop: the capture sink hands its bytes to
+        // `broadcast` through `DispatchQueue.main.async`, so output SwiftTerm has already applied
+        // to the emulator can still be queued and unbroadcast at the moment a client attaches.
+        // The tail therefore has to go now, ahead of those bytes, and the repaint has to go
+        // after them. That asymmetry is exactly-once reasoning: a repaint is idempotent against
+        // output the client has already applied, so restating a screen that already includes
+        // those bytes is harmless — but the bytes themselves are incremental, and applying them
+        // twice is not. A line-oriented TUI answers a second application with duplicated rows.
+        // One continuation carries both seeds, so the modes remain the last word.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            var modes = snapshot.modes
+            if case .captured(let fresh) =
+                self.terminalApplication?.currentSnapshot(for: sessionID) {
+                connection.sendBinary(fresh.screenSeed)
+                modes = fresh.modes
+            }
+            // Stated even when the terminal has gone in the meantime: a client that attached to
+            // a live session must not be left wearing whatever modes the tail happened to arm.
+            connection.sendBinary(RemoteTerminalModeSeed.bytes(for: modes))
+        }
         return true
     }
 

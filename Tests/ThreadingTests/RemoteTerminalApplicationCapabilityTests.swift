@@ -41,6 +41,64 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
         XCTAssertEqual(output, [Data("next".utf8)])
     }
 
+    /// The host re-reads the screen when it had to cut a joining client's replay. That read runs
+    /// against a terminal somebody else is already mirroring, so it must synthesize a repaint
+    /// without touching the capture that is feeding every attached phone.
+    func testCurrentSnapshotRepaintsWithoutDisturbingAnEstablishedCapture() {
+        let sessionID = SessionID()
+        let snapshot = RemoteTerminalSnapshot(
+            grid: RemoteTerminalGrid(cols: 120, rows: 40),
+            title: "Mirrored terminal",
+            screenSeed: Data("repaint".utf8),
+            remoteViewport: nil
+        )
+        let surface = RecordingSurface(isRunning: true, snapshot: snapshot)
+        let capability = LiveRemoteTerminalApplicationCapability(
+            surfaces: RecordingQuery(surfaces: [sessionID: surface])
+        )
+
+        var output: [Data] = []
+        XCTAssertEqual(
+            capability.beginCapture(for: sessionID) { output.append($0) },
+            .captured(snapshot)
+        )
+
+        XCTAssertEqual(capability.currentSnapshot(for: sessionID), .captured(snapshot))
+        XCTAssertEqual(surface.snapshotReadCount, 2, "the repaint is synthesized, not cached")
+
+        surface.emit(Data("live".utf8))
+        XCTAssertEqual(
+            output,
+            [Data("live".utf8)],
+            "reading the screen must not detach the sink the mirror is fanning out from"
+        )
+    }
+
+    func testCurrentSnapshotRefusesAMissingOrStoppedTerminal() {
+        let stoppedID = SessionID()
+        let missingID = SessionID()
+        let surface = RecordingSurface(
+            isRunning: false,
+            snapshot: RemoteTerminalSnapshot(
+                grid: RemoteTerminalGrid(cols: 80, rows: 24),
+                title: "Stopped",
+                screenSeed: Data("stale".utf8),
+                remoteViewport: nil
+            )
+        )
+        let capability = LiveRemoteTerminalApplicationCapability(
+            surfaces: RecordingQuery(surfaces: [stoppedID: surface])
+        )
+
+        XCTAssertEqual(capability.currentSnapshot(for: stoppedID), .unavailable)
+        XCTAssertEqual(capability.currentSnapshot(for: missingID), .unavailable)
+        XCTAssertEqual(
+            surface.snapshotReadCount,
+            0,
+            "a terminal that has exited has no screen worth synthesizing"
+        )
+    }
+
     func testLiveCapabilityRefusesMissingAndStoppedRuntimeMutations() {
         let stoppedID = SessionID()
         let missingID = SessionID()
@@ -107,6 +165,10 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
         XCTAssertEqual(registry.beginCapturing(sessionID: sessionID), snapshot.state)
         XCTAssertEqual(capability.captureSessionIDs, [sessionID])
         XCTAssertEqual(capability.stateSessionIDs, [sessionID])
+        XCTAssertTrue(
+            capability.snapshotSessionIDs.isEmpty,
+            "keeping the ring is not an attach; only a cut replay re-reads the screen"
+        )
 
         registry.remoteAccessStopped()
         XCTAssertEqual(capability.viewportCalls, [
@@ -177,6 +239,7 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
         let sessionID: SessionID
         let snapshot: RemoteTerminalSnapshot
         private(set) var stateSessionIDs: [SessionID] = []
+        private(set) var snapshotSessionIDs: [SessionID] = []
         private(set) var captureSessionIDs: [SessionID] = []
         private(set) var endedSessionIDs: [SessionID] = []
         private(set) var viewportCalls: [ViewportCall] = []
@@ -191,6 +254,11 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
         func state(for sessionID: SessionID) -> RemoteTerminalStateResult {
             stateSessionIDs.append(sessionID)
             return sessionID == self.sessionID ? .available(snapshot.state) : .unavailable
+        }
+
+        func currentSnapshot(for sessionID: SessionID) -> RemoteTerminalCaptureResult {
+            snapshotSessionIDs.append(sessionID)
+            return sessionID == self.sessionID ? .captured(snapshot) : .unavailable
         }
 
         func beginCapture(

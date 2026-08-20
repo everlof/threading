@@ -304,6 +304,35 @@ for the same reason all along. For the same event-frequency reason,
 `updateUIView` runs for every published change on the connection, and reinstalling an identical
 palette clears SwiftTerm's attribute caches and repaints every visible cell cold.
 
+**A joining client states how much replay it can keep.** The phone's emulator holds SwiftTerm's
+default 500-line scrollback, so the Mac's whole 512 KB ring was parsed in full and immediately
+trimmed down to that — 330–350 ms of main-thread time on every chat entry, most of it thrown
+away. The `auth` frame may therefore carry `replayBudget`, a statement about the client's own
+emulator rather than a request for a privilege, and the Mac holds it to its own range like every
+inbound value: a stated budget is clamped up to `minimumTerminalReplayBudgetBytes` (16 KB, a
+floor on the tail so the ask still buys scrollback worth having — screen exactness never depends
+on it) and down to the ring, because no more history exists than the ring holds. A budget the
+ring already fits inside changes nothing, and the field must be a JSON integer: the auth decoder
+is strict, so a float would refuse the whole frame rather than just the field.
+
+When the budget does cut the ring, the replay becomes two binary frames instead of one: CAN
+(0x18) followed by the ring's newest `budget` bytes, then a freshly synthesized repaint of the
+visible screen. Both halves are load-bearing. CAN is there for the reason the mode seed also
+begins with one — a byte window over a raw PTY stream can end inside an escape sequence, and
+cutting the head off the ring means it can now *begin* inside one too. The fresh repaint is what
+keeps the visible screen exact: the ring was seeded at capture with a repaint of the screen as it
+stood then, and that seed lives at the head, which is precisely the part a budget cuts away. The
+tail exists to give the client scrollback — but it is raw output, and its emulator side effects
+persist except where the two seeds restate them, which is why the repaint selects ASCII into G0
+before painting (a tail can end inside a line-drawing burst that CAN does not undo) and why it is
+sent from the main queue *behind* any broadcast the ring had not yet absorbed — the emulator runs
+ahead of the ring, and a repaint containing bytes the client then receives again would apply
+them twice. The mode seed still has the last word. A truncated replay records
+`Remote replay bounded` in the journal with the ring size and the budget applied. Back-compat
+runs both ways with no protocol bump: a client that omits the field — every earlier build, and
+the browser client — receives the whole ring byte for byte, and a host that predates the field
+ignores it and does the same.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients

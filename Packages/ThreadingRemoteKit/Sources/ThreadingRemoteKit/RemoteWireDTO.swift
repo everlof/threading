@@ -2910,6 +2910,14 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
     /// identity — `device` is what authorization is bound to — and it arrives from the network,
     /// so the host normalises and bounds it exactly as it does a member's display name.
     public let deviceName: String?
+    /// How many bytes of terminal replay this client can usefully retain when it joins.
+    ///
+    /// Additive and optional, so it needs no protocol bump: a client that predates it omits the
+    /// field and receives the host's whole ring exactly as before. It is a statement about the
+    /// client's own emulator — a renderer keeping a short scrollback parses a long replay only
+    /// to trim most of it away — and never an entitlement, so the host bounds it the way it
+    /// bounds every inbound value rather than replaying whatever number arrives.
+    public let replayBudget: Int?
     public let protocolVersion: Int?
     public let protocolMinimum: Int?
     public let data: String?
@@ -2940,6 +2948,7 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         token: String? = nil,
         device: String? = nil,
         deviceName: String? = nil,
+        replayBudget: Int? = nil,
         protocolVersion: Int? = nil,
         protocolMinimum: Int? = nil,
         data: String? = nil,
@@ -2960,6 +2969,7 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         self.token = token
         self.device = device
         self.deviceName = deviceName
+        self.replayBudget = replayBudget
         self.protocolVersion = protocolVersion
         self.protocolMinimum = protocolMinimum
         self.data = data

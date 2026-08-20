@@ -234,6 +234,18 @@ dismissed chat never resizes the Mac afterwards. The browser client has debounce
 `RemoteTerminalViewportLeaseTests` holds the boundary: a storm leases once, with the settled
 grid; the first grid is immediate; release cancels.
 
+The remaining grid-independent entry cost was the replay itself: the phone parsed the Mac's
+whole 512 KB ring and then trimmed nearly all of it, because its emulator keeps SwiftTerm's
+default 500-line scrollback. The client now states a 128 KB `replayBudget` in its auth frame and
+the host answers a larger ring with CAN + the ring's newest bytes within budget + a freshly
+synthesized repaint of the visible screen (the ring's own seed sits at the head, which is the
+part a budget cuts away), then the mode seed as before. Measured on the same fixture
+(393×720 pt, 9 pt font, 141×43 authoritative grid, three runs each): full 512 KB ring parsed in
+348–357 ms; CAN + 128 KB tail + a ~20 KB repaint parsed in 103–105 ms — ~3.4×, about 250 ms off
+every chat entry, cellular transfer down by the same factor. Absent budget (older phones, the
+browser client) replays the full ring unchanged. `RemoteTerminalReplayTests` pins the replay
+composition and the policy bounds; the truncation writes `Remote replay bounded` to the journal.
+
 The same report surfaced a second event-frequency defect on the phone:
 `TerminalViewRepresentable.updateUIView` reapplied the terminal theme on every published
 connection change (presence, typing, canSend, the grid), and `installColors` clears the

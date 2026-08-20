@@ -38,7 +38,8 @@ final class RemoteScreenSeedTests: XCTestCase {
         var rest = Substring(seed)
         while let escape = rest.firstIndex(of: "\u{1b}") {
             out += rest[rest.startIndex..<escape]
-            // Every sequence this seed emits is CSI, terminated by an alphabetic final byte.
+            // Every sequence this seed emits — CSI, and the `ESC ( B` charset designation —
+            // ends on its first alphabetic byte.
             guard let final = rest[escape...].firstIndex(where: { $0.isLetter }) else {
                 return out
             }
@@ -132,9 +133,38 @@ final class RemoteScreenSeedTests: XCTestCase {
         terminal.feed(text: "hello")
 
         XCTAssertTrue(
-            seed(terminal).hasPrefix("\u{1b}[H\u{1b}[2J"),
+            seed(terminal).hasPrefix("\u{1b}(B\u{1b}[H\u{1b}[2J"),
             "a client may already hold a previous screen; the seed must start from a clear one"
         )
+    }
+
+    /// A seed can follow an arbitrary cut of the raw stream, and CAN resets no charset
+    /// designation — so a repaint sent while G0 still holds the DEC line-drawing set an ncurses
+    /// border left armed would spell every letter of itself as a box glyph.
+    func testSeedDesignatesAsciiBeforeWritingAnyGlyph() throws {
+        let terminal = makeTerminal()
+        terminal.feed(text: "hello")
+
+        let bytes = seed(terminal)
+        let charset = try XCTUnwrap(bytes.range(of: "\u{1b}(B"))
+        let firstGlyph = try XCTUnwrap(bytes.range(of: "hello"))
+
+        XCTAssertTrue(
+            charset.upperBound <= firstGlyph.lowerBound,
+            "ASCII must be designated into G0 ahead of the repaint's own text"
+        )
+    }
+
+    /// The margins and origin mode a cut head armed describe where the live output that follows
+    /// the seed is aimed, so the seed leaves both alone rather than tidying them away.
+    func testSeedRestatesNeitherScrollingMarginsNorOriginMode() {
+        let terminal = makeTerminal()
+        terminal.feed(text: "hello")
+
+        let bytes = seed(terminal)
+
+        XCTAssertFalse(bytes.contains("\u{1b}[r"), "DECSTBM must not be reset by the repaint")
+        XCTAssertFalse(bytes.contains("\u{1b}[?6l"), "DECOM must not be reset by the repaint")
     }
 
     func testAlternateBufferIsEnteredBeforeTheRepaint() {

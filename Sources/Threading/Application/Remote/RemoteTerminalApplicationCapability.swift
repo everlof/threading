@@ -162,6 +162,14 @@ protocol RemoteTerminalApplicationCapability: Sendable {
     var sessionIDs: Set<SessionID> { get }
 
     func state(for sessionID: SessionID) -> RemoteTerminalStateResult
+    /// The bounded attach state of a terminal that is already being captured, without
+    /// disturbing the capture.
+    ///
+    /// This synthesizes one O(grid) repaint, which is the whole reason `state(for:)` and the
+    /// snapshot are separate types: input, resize and every other high-frequency path reads the
+    /// cheap state so none of them pays for a repaint. Reach for this only at attach frequency —
+    /// a client joining, or a replay the host had to cut and must now make whole again.
+    func currentSnapshot(for sessionID: SessionID) -> RemoteTerminalCaptureResult
     func beginCapture(
         for sessionID: SessionID,
         output: @escaping RemoteTerminalOutputSink
@@ -194,6 +202,11 @@ final class LiveRemoteTerminalApplicationCapability: RemoteTerminalApplicationCa
     func state(for sessionID: SessionID) -> RemoteTerminalStateResult {
         guard let surface = runningSurface(for: sessionID) else { return .unavailable }
         return .available(surface.remoteTerminalState)
+    }
+
+    func currentSnapshot(for sessionID: SessionID) -> RemoteTerminalCaptureResult {
+        guard let surface = runningSurface(for: sessionID) else { return .unavailable }
+        return .captured(surface.remoteTerminalSnapshot)
     }
 
     func beginCapture(

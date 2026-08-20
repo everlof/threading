@@ -329,6 +329,22 @@ enum RemoteInboundPolicy {
         normalizedMemberName(rawValue)
     }
 
+    /// How much terminal replay a joining client says it can keep, held to the host's own range.
+    ///
+    /// Only a missing or non-positive value is "no statement", and only that is answered with
+    /// the whole ring. Anything else is a statement and stays one: it is clamped into the range
+    /// rather than discarded, because the host's fresh repaint makes any tail length
+    /// screen-correct, so honouring a small ask costs the client scrollback while refusing it
+    /// costs the client the parse it asked to avoid. The upper end is the ring itself — a larger
+    /// number is not a request for more history, because none exists.
+    static func normalizedTerminalReplayBudget(_ rawValue: Int?) -> Int? {
+        guard let rawValue, rawValue > 0 else { return nil }
+        return min(
+            max(rawValue, RemoteAccessDefaults.minimumTerminalReplayBudgetBytes),
+            RemoteAccessDefaults.ringBufferBytes
+        )
+    }
+
     static func normalizedMemberName(_ rawValue: String?) -> String? {
         // Bounded before the per-scalar work below, not after it: the length that decides the
         // answer is the *normalized* one, so without this a frame-sized name was normalized in

@@ -3,6 +3,15 @@ import ThreadingRemoteKit
 
 private enum RemoteMobileConnectionDefaults {
     static let conversationPageRows = 64
+    /// How much of the Mac's replay this phone asks for when it joins a terminal.
+    ///
+    /// The emulator here keeps SwiftTerm's default 500-line scrollback, so the Mac's whole
+    /// 512 KB ring was parsed in full and then immediately trimmed down to that — 330–350 ms of
+    /// main-thread work at chat entry, most of it thrown away. This comfortably fills the
+    /// scrollback the phone actually keeps plus the visible screen, and brings the parse down to
+    /// roughly a third of that even counting the repaint the Mac sends after a cut replay — so a
+    /// shorter replay is not a dimmer one, only a cheaper one.
+    static let terminalReplayBudgetBytes = 128 * 1024
     /// Stay inside the Mac's five-minute replay window even after timer and network jitter.
     static let acknowledgedSubmissionRetrySeconds: TimeInterval = 4 * 60
     /// How long a socket may stay open without the Mac greeting it.
@@ -323,6 +332,7 @@ final class RemoteSessionConnection: ObservableObject {
                 token: client.link.token,
                 device: deviceID,
                 deviceName: RemoteDeviceIdentity.currentName,
+                replayBudget: RemoteMobileConnectionDefaults.terminalReplayBudgetBytes,
                 protocolVersion: RemoteProtocol.current,
                 protocolMinimum: RemoteProtocol.minimumSupported
             ), generation: generation)

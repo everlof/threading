@@ -19,6 +19,13 @@ import SwiftTerm
 /// - It walks the whole scrollback and drops every attribute, so the seed was a large colourless
 ///   dump that the ring then truncated mid-line.
 ///
+/// The repaint states the ground it needs and no more: buffer, charset designation, attributes,
+/// screen contents, cursor. Scrolling margins (DECSTBM) and origin mode (DECOM) are deliberately
+/// *not* restated, so a seed that follows a cut stream inherits whatever the cut head armed.
+/// That is the safer residual: those two describe the region the live output still being
+/// streamed is aimed at, and resetting them would misplace everything that arrives after the
+/// seed in order to tidy what came before it.
+///
 /// A pure function over a `Terminal`, so the byte stream is unit-tested directly.
 enum RemoteScreenSeed {
 
@@ -26,6 +33,8 @@ enum RemoteScreenSeed {
 
     private enum Sequence {
         static let enterAlternateBuffer = "\u{1b}[?1049h"
+        /// Designates ASCII into G0. See `repaint`.
+        static let selectAsciiG0 = "\u{1b}(B"
         static let clearScreen = "\u{1b}[H\u{1b}[2J"
         static let resetAttributes = "\u{1b}[0m"
         static let hideCursor = "\u{1b}[?25l"
@@ -74,9 +83,15 @@ enum RemoteScreenSeed {
         if terminal.isCurrentBufferAlternate {
             out += Sequence.enterAlternateBuffer
         }
+        // Designate ASCII into G0 before writing a single glyph. A seed can follow an arbitrary
+        // cut of the raw stream, and an ncurses program draws its borders by leaving G0 on the
+        // DEC line-drawing set for the length of the burst; CAN returns the parser to ground but
+        // resets no designation, so a repaint sent under a live line-drawing G0 spells every
+        // letter of itself as a box glyph.
+        //
         // Erasing does not clear SGR, and the client may hold a colour from a truncated earlier
         // seed. Rows are rendered assuming they begin on default attributes, so say so.
-        out += Sequence.clearScreen + Sequence.resetAttributes
+        out += Sequence.selectAsciiG0 + Sequence.clearScreen + Sequence.resetAttributes
 
         for row in 0..<terminal.rows {
             if row > 0 {

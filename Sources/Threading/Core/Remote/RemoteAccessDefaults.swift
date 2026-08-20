@@ -193,6 +193,15 @@ enum RemoteAccessDefaults {
     /// client so it sees roughly the current screen. Large enough to hold a full TUI repaint.
     static let ringBufferBytes = 512 * 1024
 
+    /// The floor a stated replay budget is raised to.
+    ///
+    /// This is a floor on *scrollback*, not on correctness: the fresh repaint the host sends
+    /// after a cut makes the visible screen exact at any tail length, so a tiny budget costs
+    /// history rather than a right-looking screen. It exists so a client that states a budget
+    /// still gets a tail worth scrolling through — far below this the tail is a few lines of a
+    /// wide grid and the ask is more plausibly a mistake than an intention.
+    static let minimumTerminalReplayBudgetBytes = 16 * 1024
+
     // MARK: - Auth rate limiting
 
     /// Failed-auth attempts (bad token, unapproved device rejected) are counted per device and

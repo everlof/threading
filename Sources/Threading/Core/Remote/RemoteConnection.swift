@@ -11,6 +11,9 @@ struct RemoteAuthenticatedPeer: Equatable, Sendable {
     let authorization: RemoteAuthorization
     let deviceID: String?
     let deviceName: String?
+    /// The bounded terminal replay this peer asked for, or `nil` when it stated none and is
+    /// therefore owed the whole ring.
+    let terminalReplayBudget: Int?
     let authenticatedAt: Date
 }
 
@@ -119,7 +122,8 @@ final class RemoteConnection: @unchecked Sendable {
     func authenticate(
         authorization: RemoteAuthorization,
         deviceID: String?,
-        deviceName: String?
+        deviceName: String?,
+        terminalReplayBudget: Int?
     ) -> Bool {
         let installed = authenticatedPeerState.withLock { peer in
             guard peer == nil else { return false }
@@ -127,6 +131,7 @@ final class RemoteConnection: @unchecked Sendable {
                 authorization: authorization,
                 deviceID: deviceID,
                 deviceName: deviceName,
+                terminalReplayBudget: terminalReplayBudget,
                 authenticatedAt: Date()
             )
             return true

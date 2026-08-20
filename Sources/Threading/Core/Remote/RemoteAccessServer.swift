@@ -2220,6 +2220,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         let rawDevice = message.device
         let device = RemoteInboundPolicy.normalizedDeviceID(rawDevice)
         let deviceName = RemoteInboundPolicy.normalizedDeviceName(message.deviceName)
+        let replayBudget = RemoteInboundPolicy.normalizedTerminalReplayBudget(message.replayBudget)
         let authorization: RemoteAuthorization
         switch resolveAuthorization(for: message.token, device: rawDevice) {
         case .authorized(let resolved):
@@ -2247,7 +2248,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             guard connection.authenticate(
                 authorization: authorization,
                 deviceID: device,
-                deviceName: deviceName
+                deviceName: deviceName,
+                terminalReplayBudget: replayBudget
             ) else { return }
             DispatchQueue.main.async {
                 self.services.mirrors.attachThemeEvents(connection)
@@ -2269,7 +2271,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard connection.authenticate(
             authorization: authorization,
             deviceID: device,
-            deviceName: deviceName
+            deviceName: deviceName,
+            terminalReplayBudget: replayBudget
         ) else { return }
 
         DispatchQueue.main.async {
