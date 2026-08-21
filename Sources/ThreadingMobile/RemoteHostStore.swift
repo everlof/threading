@@ -216,21 +216,17 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
         switch kind {
         case RemoteHostEndpointKind.tailscale: return MobileL10n.string("Tailscale")
         case RemoteHostEndpointKind.relay: return MobileL10n.string("Relay")
-        case RemoteHostEndpointKind.lan: return MobileL10n.string("This network")
+        case RemoteHostEndpointKind.lan: return MobileL10n.string("LAN")
         case RemoteHostEndpointKind.vpn: return MobileL10n.string("VPN")
         case RemoteHostEndpointKind.hosted: return MobileL10n.string("Direct")
         default: return MobileL10n.string("Direct")
         }
     }
 
-    /// A route name after a verb. Product names keep their authored capitals; the descriptive
-    /// local-network phrase gets its own localization so languages can apply sentence grammar
-    /// without lowercasing an arbitrary translated label at runtime.
+    /// A route name after a verb. Every route is a compact, established network term, so the
+    /// same label works both as a standalone value and inside a status sentence.
     static func connectionLabelInSentence(forEndpointKind kind: String) -> String {
-        switch kind {
-        case RemoteHostEndpointKind.lan: return MobileL10n.string("this network")
-        default: return connectionLabel(forEndpointKind: kind)
-        }
+        connectionLabel(forEndpointKind: kind)
     }
 
     var menuTitle: String {
@@ -348,7 +344,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
 struct RemoteHostConnectionCandidate: Equatable, Sendable {
     let link: RemoteConnectionLink
     /// The Mac's semantic name for this door. It follows every fallback attempt so presentation
-    /// can collapse a sticky-port walk back to one human route such as "This network".
+    /// can collapse a sticky-port walk back to one human route such as "LAN".
     let kind: String
     /// Attempts sharing this identifier are the same advertised door at another port of the
     /// sticky range. An answer from one of them ends the walk over the rest.

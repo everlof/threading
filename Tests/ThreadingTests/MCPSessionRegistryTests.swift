@@ -797,6 +797,8 @@ final class MCPWireTests: XCTestCase {
     XCTAssertTrue(prefix.contains("watch_session"))
     XCTAssertTrue(prefix.contains("display panel"))
     XCTAssertTrue(prefix.contains("archive_session"))
+    XCTAssertTrue(prefix.contains("rename/re-title"))
+    XCTAssertTrue(prefix.contains("set_session_name"))
     XCTAssertTrue(prefix.contains("list_reclaimable_storage"))
     XCTAssertTrue(prefix.hasSuffix("."), "the bounded prefix must stand on its own")
   }
@@ -807,6 +809,7 @@ final class MCPWireTests: XCTestCase {
     XCTAssertFalse(ordinaryPrefix.contains("browser_navigate"))
     XCTAssertFalse(ordinaryPrefix.contains("display panel"))
     XCTAssertFalse(ordinaryPrefix.contains("archive_session"))
+    XCTAssertFalse(ordinaryPrefix.contains("set_session_name"))
     XCTAssertFalse(ordinaryPrefix.contains("list_reclaimable_storage"))
     XCTAssertFalse(ordinaryPrefix.contains("watch_session"))
 
@@ -819,6 +822,8 @@ final class MCPWireTests: XCTestCase {
     let sessionPrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.session])
     XCTAssertTrue(sessionPrefix.contains("close/archive/finish"))
     XCTAssertTrue(sessionPrefix.contains("after your reply"))
+    XCTAssertTrue(sessionPrefix.contains("rename/re-title"))
+    XCTAssertTrue(sessionPrefix.contains("set_session_name"))
     XCTAssertFalse(sessionPrefix.contains("list_reclaimable_storage"))
 
     let workspacePrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.workspace])

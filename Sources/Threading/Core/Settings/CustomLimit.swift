@@ -170,9 +170,14 @@ struct CustomLimit: Codable, Equatable, Identifiable {
     /// a fixed cap would fire alerts at a line the user never drew.
     var isSupported: Bool {
         guard metric.isImplemented else { return false }
-        // A synthetic window with no span is a rule whose question has no length. It decodes and
-        // is listed; it is not evaluated, because there is nothing to evaluate it over.
-        if metric == .syntheticWindow { return trailingSpan != nil }
+        // A synthetic window with no span is a rule whose question has no length. One outside the
+        // bounded authoring range would turn an account refresh into a history walk the UI cannot
+        // create. Both decode and remain listed, but neither is evaluated.
+        if metric == .syntheticWindow {
+            guard let trailingSpan else { return false }
+            return trailingSpan >= CustomLimitDefaults.minimumSyntheticWindowSpan
+                && trailingSpan <= CustomLimitDefaults.maximumSyntheticWindowSpan
+        }
         return true
     }
 
@@ -334,6 +339,21 @@ enum CustomLimitDefaults {
         (UsageDefaults.fiveHourSeconds, 0.15),
         (24 * 3_600, 0.30)
     ]
+
+    /// The custom rolling-window editor stays inside one hour through one week.
+    ///
+    /// A synthetic rule reads quarter-hour history every time it is evaluated. The rule count is
+    /// already bounded; bounding the span as well keeps a user-authored value from turning a
+    /// routine account refresh into an unbounded history walk. One week still covers the useful
+    /// "give me a daily / multi-day budget" shapes without pretending this control is a second
+    /// long-term quota system.
+    static let syntheticWindowHourRange = 1...(7 * 24)
+    static let minimumSyntheticWindowHours = syntheticWindowHourRange.lowerBound
+    static let maximumSyntheticWindowHours = syntheticWindowHourRange.upperBound
+    static let minimumSyntheticWindowSpan: TimeInterval = 3_600
+    static let maximumSyntheticWindowSpan: TimeInterval = TimeInterval(
+        maximumSyntheticWindowHours * 3_600
+    )
 
     /// How many rules one account may hold.
     ///

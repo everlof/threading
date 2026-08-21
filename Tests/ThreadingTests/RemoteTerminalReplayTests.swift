@@ -17,6 +17,14 @@ final class RemoteTerminalReplayTests: XCTestCase {
         static let budget = 16 * 1024
     }
 
+    func testSessionConnectionsAdvertiseTransportParking() {
+        XCTAssertTrue(
+            RemoteSessionMirrorRegistry.advertisedFeatures(for: nil).contains(
+                "sessionConnectionParking"
+            )
+        )
+    }
+
     // MARK: - Replay composition
 
     func testAClientThatStatesNoBudgetGetsTheRingWhole() {

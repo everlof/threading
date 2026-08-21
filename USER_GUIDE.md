@@ -1750,8 +1750,16 @@ Open a login's fold and choose **Add Limit…**. The menu offers the windows tha
 reports — `5-hour`, `Weekly`, and any window your plan meters per model — and, under each, the
 line you want:
 
-- **It reaches 50% / 75% / 90%** — one notification, once, when that window gets there.
-- **Every 10%** — a notification at each tenth of the way up.
+- **It reaches 50% / 75% / 90%** — one notification, once, when that window gets there. Under
+  **Custom values…**, choose **Custom alert…** for any whole percentage from 1% through 99%.
+- **Every 10%** — a notification at each tenth of the way up. **Custom values… → Custom
+  repeating alert…** sets another whole-percentage step.
+
+The same **Custom values…** submenu contains an exact spending cap, an exact reserved share, and
+a rolling budget with both its percentage and its window in hours. Rolling windows are kept
+between 1 and 168 hours so account refreshes remain bounded. A reserved share means the part of
+usage the clock has released that Threading leaves unused; for example, leaving 37% lets Threading
+use the other 63% of the pace available so far.
 
 A line is announced **once per window**, and everything re-arms when the window resets. If a
 reading jumps past two of your lines at once — 48% to 61% with lines at 50% and 60% — you get one
@@ -1784,14 +1792,14 @@ pill's number and its ring's fill stay the provider's own figure either way.
 pick:
 
 - *It reaches 50% / 75% / 90%* and *Every 10%* — a notification, nothing more.
-- *Keep it under 80%* — Threading also **stops spending that account on its own**: a scheduled
+- *Keep it under 80%* (or **Custom spending limit…**) — Threading also **stops spending that account on its own**: a scheduled
   send waits for the reset instead of going, the morning usage-window poke stands down, the
   account stops being offered as somewhere to move a rate-limited conversation, and an agent
   asking to message a session on it is refused with your line as the reason.
-- *Always leave them 50%* — the shared-login rule. The line **rises with the clock**: at any
+- *Always leave them 50%* (or **Custom reserved share…**) — the shared-login rule. The line **rises with the clock**: at any
   moment, at least the share you named of what time has released is still there for whoever else
   uses that login.
-- *No more than 15% in any 5h* — a shorter window recreated on a plan that no longer meters one.
+- *No more than 15% in any 5h* (or **Custom shorter window…**) — a shorter window recreated on a plan that no longer meters one.
   It measures what was actually spent in the last five hours, so one enthusiastic morning cannot
   quietly spend the week.
 
@@ -2304,9 +2312,24 @@ shares, merely turning Remote Access off suspends them rather than silently dele
 
 You can pair several phones and tablets with the same Mac. Each receives a separate Keychain
 credential and can control sessions concurrently; Settings lists and revokes them independently.
-The iPhone still shows that Mac once even when it knows several of its addresses. It
-follows the connection policy chosen on the Mac, shows the active route beside its connection
-status, and can fail over or adopt another advertised address without being paired again.
+The iPhone still shows that Mac once even when it knows several of its addresses. It follows the
+connection policy chosen on the Mac, shows the active route beside its connection status, and can
+fail over or adopt another advertised address without being paired again.
+
+### Faster return to a chat on iPhone
+
+When you leave a chat, the iPhone normally keeps up to three authenticated connections warm for
+60 seconds. It does not keep the terminal running on the phone: while held, that connection gets
+no output or conversation updates, owns no terminal size, and does not appear as a viewer on the
+Mac. Returning to the same chat reuses the secure connection and then receives a fresh screen or
+conversation snapshot. Older Mac builds that cannot park safely disconnect as usual.
+
+Open **iPhone Settings → Advanced** to choose a 5–300 second hold and a pool size from 0–8; set
+the size to zero to disable it. The page shows current use, reuse hit rate, pool misses,
+average and longest holds, holds that expired or were evicted without reuse, why each aggregate
+ended, and fixed timing buckets. These metrics stay on the iPhone and contain counts and timings,
+not Mac names, chat names, prompts, or a connection history. Use **Reset connection metrics** to
+start a new comparison after changing the settings.
 
 When the iPhone has no session list yet, the dashboard shows only what it is doing now: checking
 saved connections, trying **Threading Direct**, **this network**, **VPN**, or **Tailscale**, or
@@ -2439,6 +2462,16 @@ and an unused invitation does not change that. The key bar's controls remain imm
 iPhone notification settings, **In-app collaboration** lets you independently hide people
 presence, hide typing indicators, or turn off independent drafts for shared terminals. These
 in-app indicators never create a push notification.
+
+To select terminal text on iPhone, long-press a word: it is selected at once, with handles to
+drag, and the edit menu appears when you lift — slide before lifting to extend from that word.
+The selection stays while the agent keeps printing. Beside **Copy**, the menu offers **Add to
+message**, which turns the selected lines into a chip ("2 lines" and the first of them) and
+clears the highlight; the chip's × removes it again. In the independent composer the chip is
+sent with what you type. In a direct-input terminal the chip waits above the key bar, and its
+insert control types the lines at the TUI's cursor without pressing Return, so you can finish
+the prompt first. Either way the lines arrive as one paste when the program supports it, which
+Claude Code shows as a single "[Pasted text]" token. A view-only link can copy but not quote.
 
 The key bar under the terminal is customizable per agent, per device — a Termius-style keyboard
 that goes further than Termius's fixed catalogue. Every bar starts from a stock layout for its
@@ -2628,15 +2661,24 @@ different theme redraws it correctly rather than restoring old colours. Comparis
 breakdowns come as bars, rankings as horizontal bars with the names down the side, and
 progressions as a line. Hover any bar for its exact value — or, when a ranking's names are longer
 than the space beside it (paths, test names), **hover the truncated name itself** and the chart
-states the whole entry and its value. The **⋯** menu's **Copy Chart Data** hands you the numbers
-as a table you can paste into a spreadsheet.
+states the whole entry and its value.
+
+**Taking a chart with you.** Under every chart in the panel are two buttons. The first copies the
+chart **as a picture** — exactly what you are looking at, in your theme, at the width you dragged
+the panel to — for pasting into a message or a document. The second copies **the numbers behind
+it** as a table for a spreadsheet. Each button wears a checkmark for a moment to say the
+pasteboard took it.
 
 **A chart takes the room its own shape needs.** A ranking is a row per entry, so in a tall panel
 it sits at the top with ground below it rather than stretching eight entries into eight bands of
 mostly gap — and a long ranking is shown at full length in the panel even though the same chart is
 capped inline, where an over-tall row would be something to scroll past. Charts that put the value
-on the vertical axis — columns, lines, areas — still use the whole panel, because there the extra
-height is more resolution rather than more gap.
+on the vertical axis — columns, lines, areas — use the whole panel, because there the extra
+height is more resolution rather than more gap — up to the point where a plot dragged narrow would
+stand more than twice as tall as it is wide, past which the chart hands the height back rather
+than drawing threads with no room for the names underneath. Nothing about a chart decides how
+narrow the panel may be dragged: a long title ends in an ellipsis and states itself in full on the
+pointer.
 
 In a natively rendered conversation the chart also appears **inline, where the agent produced
 it**, and stays visible when the rest of that turn's work folds away — the picture is part of the

@@ -129,14 +129,19 @@ enum MobileDesign {
         /// more slowly than short ones.
         static let nameMorphCascade: TimeInterval = 0.3
         /// A connection phrase is one line changing state, not characters becoming a new name.
-        /// Keep the complete scroll and its traveling fade inside one bounded chrome response.
+        /// Keep the complete scroll and its single shared breath inside one bounded chrome
+        /// response. The scroll has to clear a caption's full line height: the old 0.2 intensity
+        /// moved only about 70% of one line, leaving both phrases stacked over each other.
         static let connectionStatusMorphDuration: TimeInterval = 0.65
-        static let connectionStatusMorphIntensity = 0.2
-        static let connectionStatusFadePulseCount = 5
-        static let connectionStatusFadeMinimumOpacity: Float = 0.38
-        static let connectionStatusFadePulseDuration: TimeInterval = 0.1
+        static let connectionStatusMorphIntensity = 0.72
+        /// Every glyph shares one eased trough. Repeating five 100 ms troughs and staggering
+        /// them across the sentence made the leading half flicker while a trailing `Book Pro`
+        /// stayed fully lit, so the status did not read as one moving line.
+        static let connectionStatusFadePulseCount = 1
+        static let connectionStatusFadeMinimumOpacity: Float = 0.66
+        static let connectionStatusFadePulseDuration: TimeInterval = 0.65
         static let connectionStatusFadePauseDuration: TimeInterval = 0
-        static let connectionStatusFadeTravelDuration: TimeInterval = 0.15
+        static let connectionStatusFadeTravelDuration: TimeInterval = 0
         /// Restate the one active dashboard step without keeping every row in motion.
         static let connectionProgressFadeCadence: TimeInterval = 2
     }

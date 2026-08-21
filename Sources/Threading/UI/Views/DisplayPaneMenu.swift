@@ -62,24 +62,16 @@ extension DisplayPaneController {
         item(L10n.string("Reload"), symbol: "arrow.clockwise") { [weak self] in self?.reloadHTML() }
       ]
 
-    case .chart(let spec):
-      // A chart is the one content kind whose source is small enough to hand back whole, and
-      // the numbers are what a reader wants next — into a spreadsheet, or into a message.
-      return [
-        item(L10n.string("Copy Chart Data"), symbol: "tablecells") {
-          [weak self] in self?.copyChartData(spec)
-        }
-      ]
+    case .chart:
+      // A chart's actions are on the chart, in `ChartPaneViewController`'s own footer: the
+      // picture, and the numbers behind it. They cannot be offered from here, because the
+      // hosted content view covers the button that opens this menu — see
+      // `DisplayPaneController`, where the chart case says so.
+      return []
 
     case .semanticScene, nil:
       return []
     }
-  }
-
-  private func copyChartData(_ spec: ChartSpec) {
-    let pasteboard = NSPasteboard.general
-    pasteboard.clearContents()
-    pasteboard.setString(spec.tabSeparatedValues, forType: .string)
   }
 
   private func item(

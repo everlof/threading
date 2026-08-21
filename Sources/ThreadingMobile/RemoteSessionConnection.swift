@@ -120,6 +120,8 @@ private struct PendingRemoteSubmission {
     let requestID: String
     let messageType: String
     let text: String
+    let contextAttachments: [RemoteConversationContextAttachmentDTO]
+    let attachmentUploadIDs: [String]
     let createdAt: Date
 }
 
@@ -171,6 +173,13 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
 
+    private enum WarmTransportState: Equatable {
+        case active
+        case parking
+        case parked
+        case resuming
+    }
+
     @Published private(set) var phase: Phase = .connecting
     /// What the mirrored surface calls itself right now — a terminal's OSC title as the agent
     /// sent it, or the name the Mac put in `hello`. **Not the session's name**, which is the
@@ -195,10 +204,14 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var supportsAtomicTerminalSubmission = false
     @Published private(set) var supportsAttentionRequests = false
     @Published private(set) var supportsFocusedInputControl = false
+    @Published private(set) var supportsSessionConnectionParking = false
     /// Whether this connection may hand the Mac files to send with a prompt. False for a
     /// view-only or guest link, which the host never advertises the feature to — so the composer
     /// draws no attach button rather than one that would be refused.
     @Published private(set) var supportsComposerAttachmentUploads = false
+    /// Direct-input terminals use a separate negotiated mutation: uploaded files enter the
+    /// workspace and their paths are inserted at the TUI cursor without an implicit Return.
+    @Published private(set) var supportsTerminalAttachmentInsertion = false
     @Published private(set) var inputControl: RemoteInputControlStateDTO?
     @Published private(set) var inputControlEvents: [RemoteInputControlEventDTO] = []
     @Published private(set) var inputControlResult: RemoteInputControlResultDTO?
@@ -243,6 +256,7 @@ final class RemoteSessionConnection: ObservableObject {
     private var typingIdleTask: Task<Void, Never>?
     private var isReportingTyping = false
     private var serverFeatures: Set<String> = []
+    private var warmTransportState: WarmTransportState = .active
     private var pendingPromptSubmission: PendingRemoteSubmission?
     private var pendingAttentionRequest: PendingAttentionRequest?
     /// Non-nil only for the demo sentinel link: plays the Mac's half of the socket in-process,
@@ -272,6 +286,9 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
     var onWorkspaceChanged: ((RemoteWorkspaceChangedDTO) -> Void)?
+    /// Set only while the pool owns this connection. A transport that dies while no view is
+    /// mounted removes itself from the pool instead of starting an invisible reconnect loop.
+    var onPooledConnectionInvalidated: (() -> Void)?
 
     /// True while this session's agent is working on a turn — what the navigation title's orb
     /// is drawn for. See `MobileAgentTurnActivity` for why `canSend` is the signal.
@@ -291,6 +308,10 @@ final class RemoteSessionConnection: ObservableObject {
             capability: capability,
             state: inputControl
         )
+    }
+
+    var isReadyForConnectionPool: Bool {
+        phase == .connected && task != nil && warmTransportState == .active
     }
 
     func terminalInputMode(settingEnabled: Bool) -> MobileTerminalInputMode {
@@ -347,9 +368,12 @@ final class RemoteSessionConnection: ObservableObject {
         composerCapabilities = []
         serverFeatures.removeAll()
         supportsComposerAttachmentUploads = false
+        supportsTerminalAttachmentInsertion = false
         supportsAtomicTerminalSubmission = false
         supportsAttentionRequests = false
         supportsFocusedInputControl = false
+        supportsSessionConnectionParking = false
+        warmTransportState = .active
         inputControl = nil
         inputControlEvents = []
         attentionRecipients = []
@@ -466,6 +490,8 @@ final class RemoteSessionConnection: ObservableObject {
         reconnectTask = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
+        warmTransportState = .active
+        onPooledConnectionInvalidated = nil
         presence.removeAll()
         attentionRecipients = []
         pendingAttentionRequest = nil
@@ -480,6 +506,82 @@ final class RemoteSessionConnection: ObservableObject {
                 .reason: "user",
             ]) { current, _ in current })
         }
+    }
+
+    /// Turns a visible session connection into a transport-only warm entry.
+    ///
+    /// No renderer callback survives this boundary. The host's `sessionPark` removes the socket
+    /// from PTY fan-out, collaboration presence and viewport ownership; keeping those alive would
+    /// be a hidden terminal, not a connection pool.
+    @discardableResult
+    func parkForReuse() -> Bool {
+        guard phase == .connected,
+              supportsSessionConnectionParking,
+              case .session = target,
+              task != nil,
+              warmTransportState == .active else { return false }
+
+        reportTyping(false)
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = nil
+        terminalHydrationMaximumTask?.cancel()
+        terminalHydrationMaximumTask = nil
+        viewportSettleTask?.cancel()
+        viewportSettleTask = nil
+        isTerminalHydrating = false
+        pendingViewport = nil
+        lastSentTerminalViewport = nil
+        onTerminalOutput = nil
+        onTerminalGridChange = nil
+        onWorkspaceChanged = nil
+        warmTransportState = .parking
+        do {
+            try send(RemoteClientMessage(type: "sessionPark"))
+            return true
+        } catch {
+            warmTransportState = .active
+            return false
+        }
+    }
+
+    /// Reattaches a parked authenticated socket. The normal `hello` and bounded replay/snapshot
+    /// remain the synchronization boundary, so resuming cannot expose state accumulated while
+    /// the phone was away.
+    @discardableResult
+    func resumeFromPool() -> Bool {
+        guard phase == .connected,
+              supportsSessionConnectionParking,
+              task != nil,
+              warmTransportState == .parking || warmTransportState == .parked else {
+            return false
+        }
+        warmTransportState = .resuming
+        phase = .connecting
+        beginTerminalHydration()
+        lastSentTerminalViewport = nil
+        presence.removeAll()
+        attentionRecipients = []
+        pendingTerminalOutput.removeAll(keepingCapacity: true)
+        armHelloDeadline(generation: connectionGeneration)
+        do {
+            try send(RemoteClientMessage(type: "sessionResume"))
+            return true
+        } catch {
+            cancelHelloDeadline()
+            warmTransportState = .active
+            return false
+        }
+    }
+
+    private var isOwnedByConnectionPool: Bool {
+        warmTransportState == .parking || warmTransportState == .parked
+    }
+
+    private func invalidatePooledConnection() {
+        let invalidated = onPooledConnectionInvalidated
+        onPooledConnectionInvalidated = nil
+        disconnect(markEnded: false)
+        invalidated?()
     }
 
     private func beginTerminalHydration() {
@@ -671,10 +773,34 @@ final class RemoteSessionConnection: ObservableObject {
     /// Submits a device-local terminal draft as one PTY write. A host must advertise the
     /// capability because older hosts only understand shared raw keystrokes.
     @discardableResult
-    func submitTerminalLine(_ text: String) -> String? {
+    func submitTerminalLine(
+        _ text: String,
+        attachmentUploadIDs: [String] = []
+    ) -> String? {
         let line = text.trimmingCharacters(in: .newlines)
         guard supportsAtomicTerminalSubmission, inputControl?.canWrite != false else { return nil }
-        return sendSubmission(type: "terminalSubmit", text: line, permitsLegacyHost: false)
+        return sendSubmission(
+            type: "terminalSubmit",
+            text: line,
+            attachmentUploadIDs: attachmentUploadIDs,
+            permitsLegacyHost: false
+        )
+    }
+
+    /// Hands staged files to the session and inserts their quoted workspace paths at the live
+    /// terminal cursor. This deliberately does not send Return: the direct-input TUI still owns
+    /// editing and submission of the line.
+    @discardableResult
+    func insertTerminalAttachments(_ attachmentUploadIDs: [String]) -> String? {
+        guard supportsTerminalAttachmentInsertion,
+              inputControl?.canWrite != false,
+              !attachmentUploadIDs.isEmpty else { return nil }
+        return sendSubmission(
+            type: "terminalAttachmentInsert",
+            text: "",
+            attachmentUploadIDs: attachmentUploadIDs,
+            permitsLegacyHost: false
+        )
     }
 
     @discardableResult
@@ -719,6 +845,8 @@ final class RemoteSessionConnection: ObservableObject {
                 requestID: requestID,
                 messageType: type,
                 text: text,
+                contextAttachments: contextAttachments,
+                attachmentUploadIDs: attachmentUploadIDs,
                 createdAt: Date()
             )
             isPromptSubmissionPending = supportsAcknowledgement
@@ -888,6 +1016,10 @@ final class RemoteSessionConnection: ObservableObject {
             Task { @MainActor in
                 guard let self, self.connectionGeneration == expectedGeneration,
                       self.stopped == false, self.task === task else { return }
+                if self.isOwnedByConnectionPool {
+                    self.invalidatePooledConnection()
+                    return
+                }
                 self.fail(
                     with: RemoteConnectionFailure.transport(
                         error,
@@ -933,6 +1065,10 @@ final class RemoteSessionConnection: ObservableObject {
             return
         } catch {
             guard !stopped, connectionGeneration == generation, self.task === task else { return }
+            if isOwnedByConnectionPool {
+                invalidatePooledConnection()
+                return
+            }
             fail(
                 with: RemoteConnectionFailure.transport(error, host: destinationHost),
                 httpStatus: Self.httpStatus(of: task)
@@ -1038,11 +1174,18 @@ final class RemoteSessionConnection: ObservableObject {
             supportsFocusedInputControl = serverFeatures.contains(
                 RemoteWebSocketFeature.focusedInputControl.rawValue
             )
+            supportsSessionConnectionParking = serverFeatures.contains(
+                RemoteWebSocketFeature.sessionConnectionParking.rawValue
+            )
             supportsComposerAttachmentUploads = serverFeatures.contains(
                 RemoteWebSocketFeature.composerAttachmentUploads.rawValue
             )
+            supportsTerminalAttachmentInsertion = serverFeatures.contains(
+                RemoteWebSocketFeature.terminalAttachmentInsertion.rawValue
+            )
             updateTerminalGrid(cols: hello.cols, rows: hello.rows)
             cancelHelloDeadline()
+            warmTransportState = .active
             phase = .connected
 #if DEBUG
             MobileTerminalWirePerformanceProbe.helloReceived(
@@ -1070,6 +1213,15 @@ final class RemoteSessionConnection: ObservableObject {
                 ))
             }
             resendPendingPromptIfSupported()
+        case "sessionParked":
+            // This frame is ordered after any PTY output already queued when the host detached
+            // us, and before a later resumed hello. Dropping the buffer here makes a fresh view's
+            // replay authoritative even when pop and push happen in consecutive gestures.
+            pendingTerminalOutput.removeAll(keepingCapacity: true)
+            pendingTerminalReady = nil
+            if warmTransportState == .parking {
+                warmTransportState = .parked
+            }
         case "resize":
             if let resize = try? JSONDecoder().decode(RemoteResizeDTO.self, from: data) {
                 updateTerminalGrid(cols: resize.cols, rows: resize.rows)
@@ -1218,6 +1370,10 @@ final class RemoteSessionConnection: ObservableObject {
             )
         case "ended":
             let ended = try? JSONDecoder().decode(RemoteEndedDTO.self, from: data)
+            if isOwnedByConnectionPool {
+                invalidatePooledConnection()
+                return
+            }
             stopped = true
             switch ended?.reason {
             case "sessionClosed":
@@ -1239,6 +1395,10 @@ final class RemoteSessionConnection: ObservableObject {
             ]) { current, _ in current })
         case "error":
             let error = try? JSONDecoder().decode(RemoteErrorDTO.self, from: data)
+            if isOwnedByConnectionPool {
+                invalidatePooledConnection()
+                return
+            }
             if error?.code == "invalidConversationPage" {
                 conversationStore.cancelLoadingEarlier()
             }
@@ -1432,11 +1592,22 @@ final class RemoteSessionConnection: ObservableObject {
             finishPendingPrompt(with: .unavailable)
             return
         }
+        if pending.messageType == "terminalAttachmentInsert",
+           !supportsTerminalAttachmentInsertion {
+            finishPendingPrompt(with: .unavailable)
+            return
+        }
         isPromptSubmissionPending = true
         try? send(RemoteClientMessage(
             type: pending.messageType,
             text: pending.text,
-            requestID: pending.requestID
+            requestID: pending.requestID,
+            contextAttachments: pending.contextAttachments.isEmpty
+                ? nil
+                : pending.contextAttachments,
+            attachmentUploadIDs: pending.attachmentUploadIDs.isEmpty
+                ? nil
+                : pending.attachmentUploadIDs
         ))
     }
 
@@ -1474,6 +1645,7 @@ final class RemoteSessionConnection: ObservableObject {
     static func demoTerminal() -> RemoteSessionConnection {
         let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
         let isCodexFixture = demoMode == "terminal-ansi"
+            || demoMode == "terminal-attachments"
             || demoMode == "terminal-codex-tui"
         let agentName = isCodexFixture ? "Codex" : "Claude Code"
         let session = RemoteSessionSummaryDTO(
@@ -1514,9 +1686,34 @@ final class RemoteSessionConnection: ObservableObject {
         connection.supportsAtomicTerminalSubmission = true
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true
+        connection.supportsComposerAttachmentUploads = true
+        connection.supportsTerminalAttachmentInsertion = true
         connection.inputControl = ownerOnlyInputControlState()
         let lines: [String]
         switch demoMode {
+        case "terminal-selection":
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;35mClaude Code\u{1b}[0m",
+                "\u{1b}[2mSonnet · AnotherTerminal\u{1b}[0m",
+                "",
+                "\u{23FA} Bash(sudo nginx -t)",
+                "  \u{23BF}  nginx: the configuration file /etc/nginx/nginx.conf syntax is ok",
+                "",
+                "\u{1b}[31mnginx: [emerg] unknown directive \"serer_name\" in /etc/nginx/sites-enabled/app:12\u{1b}[0m",
+                "\u{1b}[31mnginx: configuration file /etc/nginx/nginx.conf test failed\u{1b}[0m",
+                "",
+                "\u{23FA} Read(/etc/nginx/sites-enabled/app)",
+                "  \u{23BF}  Read 41 lines",
+                "",
+                "❯ ",
+            ]
+        case "terminal-attachments":
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;36mCodex\u{1b}[0m  AnotherTerminal",
+                "\u{1b}[2mDirect TUI input · attachment paths insert at the cursor\u{1b}[0m",
+                "",
+                "› Compare the screenshots in ",
+            ]
         case "terminal-ansi":
             lines = [
                 "\u{1b}[2J\u{1b}[H\u{1b}[1;36mCodex\u{1b}[0m  ANSI and Unicode fixture",

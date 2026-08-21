@@ -33,12 +33,13 @@ enum HookLifecycleEvent: String, CaseIterable {
 
     /// A tool whose whole result is the user's answer was called, so the turn is parked on them.
     ///
-    /// Separate from `awaitingUser`, which is the runtime's own notion of waiting and is both
-    /// late and ambiguous: Claude raises one `Notification` for a permission prompt and for an
-    /// idle prompt alike, and only six seconds after the *keyboard* goes quiet — so a user
-    /// reading the question, or arrowing through its options, is never reported at all. This
-    /// event is the tool call itself. It arrives before the question is drawn, it names the call
-    /// that raised it, and only that call ending clears it.
+    /// Separate from `awaitingUser`, which is the runtime's own notion of waiting and is late:
+    /// Claude raises one `Notification` *hook* for a permission prompt and for an idle prompt
+    /// alike — `HookNotificationKind` is what tells those apart, out of the payload — and only
+    /// six seconds after the *keyboard* goes quiet, so a user reading the question, or arrowing
+    /// through its options, is never reported at all. This event is the tool call itself. It
+    /// arrives before the question is drawn, it names the call that raised it, and only that
+    /// call ending clears it.
     ///
     /// Which tools count is `TurnBlockingTools`, per runtime.
     case blockingAskOpened
@@ -165,6 +166,47 @@ enum HookRegistrationDefaults {
     static let matcherKey = "matcher"
 }
 
+// MARK: - Hook Notification Kind
+
+/// Why a runtime raised its own "waiting" notice, on the one axis that decides whether the
+/// notice is evidence of anything: whether somebody is actually being asked.
+///
+/// Claude raises the same `Notification` hook for a permission prompt and for a prompt that has
+/// merely sat idle, and for years the event name was all Threading read — so the two were the
+/// same fact here. They are not the same fact in the payload: `notification_type` names which,
+/// and `idle_prompt` is the CLI saying outright that *nothing* is being asked. That distinction
+/// is the whole reason this type exists; see `SessionActivityTracker.noteAwaitingUser`.
+enum HookNotificationKind: Equatable, Sendable {
+
+    /// The prompt has sat idle with nobody typing at it. Measured on CLI 2.1.238: raised once
+    /// `messageIdleNotifThresholdMs` (60s) passes, carrying "Claude is waiting for your input".
+    ///
+    /// It names no question, because there is none — which is exactly why a session that is
+    /// waiting on its own delegated work is the shape that raises it.
+    case idlePrompt
+
+    /// Anything else, **including a notice that named no type at all**.
+    ///
+    /// A permission prompt, a background child asking for input, a runtime that predates the
+    /// field, a type a later CLI invents: all of them read as a notice worth flagging, which is
+    /// what every notice read as before the field was parsed. Suppression is opt-in by exact
+    /// name, so the failure direction of an unknown type is the loud one.
+    case unspecified
+
+    /// Reads the kind out of the type a runtime reported.
+    ///
+    /// One recognised spelling, deliberately. `BackgroundWorkKind` reads two because both of
+    /// Claude's surfaces report background work; only the hook reports this.
+    init(reportedType: String?) {
+        switch reportedType {
+        case "idle_prompt":
+            self = .idlePrompt
+        default:
+            self = .unspecified
+        }
+    }
+}
+
 // MARK: - Hook Lifecycle Report
 
 /// One lifecycle event, as it arrived from a hook.
@@ -224,6 +266,14 @@ struct HookLifecycleReport {
     /// Codex report — 0.144.6 has no equivalent, so those sessions keep the old behaviour.
     let backgroundWork: [BackgroundTask]
 
+    /// Why the runtime says it is waiting — meaningful on `awaitingUser`, the only event that
+    /// carries one.
+    ///
+    /// `.unspecified` on every other event, and on an `awaitingUser` whose payload named no
+    /// type. Those are the same fact downstream, since only an exactly recognised kind is ever
+    /// treated as anything less than a notice worth flagging.
+    let notification: HookNotificationKind
+
     /// Builds a report from a hook's JSON payload, or nil if it names no event.
     init?(sessionID: SessionID, event: HookLifecycleEvent?, payload: [String: Any]) {
         guard let event else { return nil }
@@ -252,6 +302,12 @@ struct HookLifecycleReport {
                 kind: BackgroundWorkKind(reportedType: task["type"] as? String)
             )
         }
+        // Read on every event rather than only on `awaitingUser`: a payload that names a type
+        // means the same thing whatever hook carried it, and a read gated on the event would
+        // have to be kept in step with the event list forever.
+        self.notification = HookNotificationKind(
+            reportedType: Self.text(payload["notification_type"])
+        )
     }
 
     /// A payload string, or nil when the key is absent *or* present and empty.

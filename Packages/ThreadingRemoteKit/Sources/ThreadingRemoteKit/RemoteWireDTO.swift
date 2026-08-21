@@ -2084,12 +2084,19 @@ public enum RemoteWebSocketFeature: String, Codable, CaseIterable, Sendable {
     /// ordered ready frame. A client that sees this feature can reveal on that boundary rather
     /// than guessing from network silence.
     case terminalHydrationBoundary
+    /// An authenticated session socket may leave the live mirror without closing, then attach
+    /// again later. While parked it receives no terminal output or collaboration traffic and
+    /// owns no viewport; the transport alone remains warm.
+    case sessionConnectionParking
     /// A composing client may hand the host file bytes and submit them beside its prompt.
     ///
     /// Advertised only when the connection could actually use it. Uploading is an owner-scope
     /// write into the host's own attachment custody, so a view-only or guest connection never
     /// sees the feature and never renders an attach affordance it would be refused for.
     case composerAttachmentUploads
+    /// A direct terminal client may place uploaded files in the session workspace and insert
+    /// their quoted paths into the PTY without submitting the current TUI line.
+    case terminalAttachmentInsertion
 }
 
 /// A live theme change while a session is already open.
@@ -2441,6 +2448,19 @@ public struct RemoteTerminalReadyDTO: Codable, Equatable, Sendable {
     public init(requestID: String? = nil) {
         self.type = "terminalReady"
         self.requestID = requestID
+    }
+}
+
+/// Confirms that a session socket has left the live mirror and is now transport-only.
+///
+/// The acknowledgement is ordered before any later resumed `hello`, which lets a client discard
+/// bytes that were already in flight when it asked to park without ever mixing them into the
+/// resumed renderer.
+public struct RemoteSessionParkedDTO: Codable, Equatable, Sendable {
+    public let type: String
+
+    public init() {
+        self.type = "sessionParked"
     }
 }
 

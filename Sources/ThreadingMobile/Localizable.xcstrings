@@ -1,6 +1,168 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%d / %d": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d / %d" } } }
+    },
+    "%d min %d sec": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d min %d sek" } } }
+    },
+    "%d minutes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d minuter" } } }
+    },
+    "%d of %d": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d av %d" } } }
+    },
+    "%d seconds": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d sekunder" } } }
+    },
+    "1 minute": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 minut" } } }
+    },
+    "1 second": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 sekund" } } }
+    },
+    "Advanced": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avancerat" } } }
+    },
+    "1–2 minutes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1–2 minuter" } } }
+    },
+    "15–30 seconds": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "15–30 sekunder" } } }
+    },
+    "2 minutes or more": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "2 minuter eller mer" } } }
+    },
+    "30–60 seconds": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "30–60 sekunder" } } }
+    },
+    "5–15 seconds": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "5–15 sekunder" } } }
+    },
+    "App backgrounded": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Appen lades i bakgrunden" } } }
+    },
+    "Average before reuse": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Genomsnitt före återanvändning" } } }
+    },
+    "Average without reuse": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Genomsnitt utan återanvändning" } } }
+    },
+    "Connection lost while held": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anslutningen bröts under hålltiden" } } }
+    },
+    "Connection reuse": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återanvänd anslutningar" } } }
+    },
+    "Connection reuse and metrics": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återanvändning och mätvärden" } } }
+    },
+    "Connections parked": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Parkerade anslutningar" } } }
+    },
+    "Could not enter pool": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kunde inte läggas i poolen" } } }
+    },
+    "Expired": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tidsgränsen gick ut" } } }
+    },
+    "Held connections": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hållna anslutningar" } } }
+    },
+    "Held without reuse": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hållna utan återanvändning" } } }
+    },
+    "Hold connections": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Håll anslutningar" } } }
+    },
+    "Hold timing": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hålltider" } } }
+    },
+    "Live now": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Just nu" } } }
+    },
+    "Longest hold": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Längsta hålltid" } } }
+    },
+    "Mac does not support reuse": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen stöder inte återanvändning" } } }
+    },
+    "Memory pressure": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Minnestryck" } } }
+    },
+    "Oldest hold": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Äldsta hålltid" } } }
+    },
+    "Peak pool size": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Största poolstorlek" } } }
+    },
+    "Pool size": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Poolstorlek" } } }
+    },
+    "Pool misses": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Missar i poolen" } } }
+    },
+    "Pool outcomes": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Poolresultat" } } }
+    },
+    "Pool was full": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Poolen var full" } } }
+    },
+    "Reuse by hold time": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återanvändning efter hålltid" } } }
+    },
+    "Reuse hit rate": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Träffgrad för återanvändning" } } }
+    },
+    "Reused": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återanvända" } } }
+    },
+    "Settings changed": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inställningarna ändrades" } } }
+    },
+    "Since metrics reset": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sedan mätvärdena nollställdes" } } }
+    },
+    "Switched Macs": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bytte Mac" } } }
+    },
+    "Under 5 seconds": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Under 5 sekunder" } } }
+    },
+    "Connection reuse settings stay unchanged.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inställningarna för anslutningsåteranvändning ändras inte." } } }
+    },
+    "Each row is reused / not reused. These fixed buckets show whether a shorter or longer hold would change the result without keeping a log.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Varje rad visar återanvända / inte återanvända. De fasta intervallen visar om en kortare eller längre hålltid skulle ändra resultatet utan att spara en logg." } } }
+    },
+    "Less than 1 second": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mindre än 1 sekund" } } }
+    },
+    "Metrics reset %@": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mätvärden återställdes %@" } } }
+    },
+    "Reset Metrics": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nollställ mätvärden" } } }
+    },
+    "Reset connection metrics": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nollställ anslutningsmätvärden" } } }
+    },
+    "Reset connection metrics?": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nollställa anslutningsmätvärden?" } } }
+    },
+    "Stored only on this iPhone. Metrics contain counts and timings, never Mac names, chat names, prompts, or a connection history.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparas bara på denna iPhone. Mätvärdena innehåller antal och tider, aldrig Mac-namn, chattnamn, prompter eller anslutningshistorik." } } }
+    },
+    "Threading keeps only the authenticated connection warm. Parked chats receive no terminal output, hold no viewport, and do not appear as viewers on the Mac. Set the pool size to zero to turn reuse off.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Threading håller bara den autentiserade anslutningen varm. Parkerade chattar tar inte emot terminalutdata, behåller ingen visningsyta och visas inte som läsare på Macen. Sätt poolstorleken till noll för att stänga av återanvändning." } } }
+    },
+    "Unsupported is the number of opens against older Macs that cannot park a session transport safely. They always disconnect normally.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Stöds inte räknar öppningar mot äldre Macar som inte säkert kan parkera en sessionsanslutning. De kopplas alltid från på vanligt sätt." } } }
+    },
+    "Up to %d connections": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Upp till %d anslutningar" } } }
+    },
     "Account": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konto" } } }
     },
@@ -324,22 +486,12 @@
         }
       }
     },
-    "This network": {
+    "LAN": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Det här nätverket"
-          }
-        }
-      }
-    },
-    "this network": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "det här nätverket"
+            "value": "LAN"
           }
         }
       }
@@ -813,6 +965,9 @@
     "The Mac rejected this line. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade raden. Ditt utkast finns kvar." } } }
     },
+    "The Mac couldn’t insert these files. They’re still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn kunde inte infoga filerna. De finns kvar." } } }
+    },
     "The Mac rejected this prompt. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade prompten. Ditt utkast finns kvar." } } }
     },
@@ -822,6 +977,9 @@
     "The session changed before this line could be sent. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen ändrades innan raden kunde skickas. Ditt utkast finns kvar." } } }
     },
+    "The session changed before these files could be inserted. They’re still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen ändrades innan filerna kunde infogas. De finns kvar." } } }
+    },
     "These indicators stay inside the live chat and never create push notifications.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Indikatorerna stannar i den aktiva chatten och skapar aldrig pushnotiser." } } }
     },
@@ -830,6 +988,9 @@
     },
     "This line could not be retried safely. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Raden kunde inte skickas igen säkert. Ditt utkast finns kvar." } } }
+    },
+    "These files could not be retried safely. They’re still here.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Filerna kunde inte skickas igen säkert. De finns kvar." } } }
     },
     "Typing indicators": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skrivindikatorer" } } }

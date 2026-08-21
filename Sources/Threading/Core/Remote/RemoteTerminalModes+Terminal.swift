@@ -12,7 +12,8 @@ extension RemoteTerminalModes {
         self.init(
             mouseReporting: RemoteTerminalMouseReporting(terminal),
             applicationCursorKeys: terminal.applicationCursor,
-            bracketedPaste: terminal.bracketedPasteMode
+            bracketedPaste: terminal.bracketedPasteMode,
+            keyboardEnhancementFlags: terminal.keyboardEnhancementFlags.rawValue
         )
     }
 }

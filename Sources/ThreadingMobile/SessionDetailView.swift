@@ -1,6 +1,8 @@
 import ThreadingRemoteKit
+import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 #if DEBUG
 /// The session screen's opening states, held still for the iOS evidence catalogue.
@@ -227,7 +229,15 @@ struct SessionDetailView: View {
             openPendingNotificationDestination()
         }
         .onDisappear {
-            connection?.disconnect(markEnded: false)
+            guard let connection else { return }
+            guard let hostID = model.activeHostID else {
+                connection.disconnect(markEnded: false)
+                return
+            }
+            MobileSessionConnectionPool.shared.park(
+                connection,
+                for: MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
+            )
         }
         .onChange(of: currentSession.surface) { _, newSurface in
             // A surface switch made on the Mac (or another paired phone) arrives through the
@@ -481,6 +491,18 @@ struct SessionDetailView: View {
             return
         }
 #endif
+        if let hostID = model.activeHostID {
+            let pool = MobileSessionConnectionPool.shared
+            pool.discardEntries(exceptHostID: hostID)
+            let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
+            if let warmed = pool.take(key) as? RemoteSessionConnection {
+                warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
+                    workspaceActivity?.receive(event)
+                }
+                connection = warmed
+                return
+            }
+        }
         do {
             // A UI switch deliberately tears down the old process. Always ask readiness from
             // the newest catalogue row rather than the immutable navigation value, which may
@@ -735,6 +757,13 @@ struct TerminalRemoteView: View {
     @Environment(\.remoteTheme) private var inheritedTheme
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
+    @State private var directAttachmentTray: ComposerAttachmentTray?
+    @State private var directAttachmentItems: [ComposerAttachmentItem] = []
+    @State private var directAttachmentNotice: String?
+    @State private var directAttachmentPhotoItems: [PhotosPickerItem] = []
+    @State private var isImportingDirectAttachmentFiles = false
+    @State private var pendingDirectAttachmentInsertionID: String?
+    @State private var selectionQuotes: [RemoteTerminalSelectionQuote] = []
     @StateObject private var keyBridge = TerminalKeyBridge()
     @AppStorage(MobileTerminalFontSize.preferenceKey)
     private var terminalFontSize = MobileTerminalFontSize.defaultValue
@@ -763,28 +792,7 @@ struct TerminalRemoteView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TerminalViewRepresentable(
-                connection: connection,
-                theme: connection.terminalTheme,
-                allowsDirectInput: allowsDirectInput,
-                keyBridge: keyBridge,
-                fontSize: terminalFontSize,
-                onFontSizeChange: { terminalFontSize = $0 },
-                initialScrollProgress: terminalContinuity?.terminalViewportProgress,
-                onScrollProgress: saveTerminalViewport
-            )
-            .opacity(connection.isTerminalHydrating ? 0 : 1)
-            .overlay {
-                if connection.isTerminalHydrating {
-                    MobileLoadingPlaceholder(MobileL10n.string("Opening chat…"))
-                        .background(terminalBackground)
-                }
-            }
-            .background(terminalBackground)
-            // The terminal owns the padding colour so the inset reads as breathing room rather
-            // than a second application panel under every authored chrome.
-            .padding(MobileDesign.Spacing.small)
-            .background(terminalBackground)
+            terminalSurface
             TerminalCollaborationBar(
                 connection: connection,
                 askForInput: { showsAttentionRequest = true }
@@ -792,13 +800,48 @@ struct TerminalRemoteView: View {
             InputControlBar(connection: connection)
             AttentionActivityBanner(connection: connection)
             if usesIndependentComposer {
-                TerminalLineComposer(connection: connection)
+                TerminalLineComposer(
+                    connection: connection,
+                    bridge: keyBridge,
+                    quotes: $selectionQuotes
+                )
+            }
+            if allowsDirectInput, !selectionQuotes.isEmpty {
+                TerminalSelectionQuoteTray(
+                    quotes: selectionQuotes,
+                    placement: .standalone(insert: TerminalSelectionQuoteTray.Insert(
+                        isEnabled: canInsertSelectionQuotes,
+                        action: insertSelectionQuotes
+                    )),
+                    remove: removeSelectionQuote
+                )
+            }
+            if allowsDirectInput,
+               !directAttachmentItems.isEmpty || directAttachmentNotice != nil {
+                DirectTerminalAttachmentTray(
+                    items: directAttachmentItems,
+                    notice: directAttachmentNotice,
+                    isPending: pendingDirectAttachmentInsertionID != nil
+                        && connection.isPromptSubmissionPending,
+                    canInsert: canInsertDirectAttachments,
+                    remove: { directAttachmentTray?.remove($0) },
+                    insert: insertDirectAttachments
+                )
             }
             TerminalKeyBar(
                 connection: connection,
                 bridge: keyBridge,
                 agentKind: connection.session.agentKind,
-                customize: { showsKeyboardEditor = true }
+                customize: { showsKeyboardEditor = true },
+                showsAttachmentKey: allowsDirectInput
+                    && connection.supportsTerminalAttachmentInsertion,
+                canAttach: directAttachmentTray?.canAcceptMore == true
+                    || isDirectAttachmentEvidence,
+                attachmentPhotoItems: $directAttachmentPhotoItems,
+                attachmentSelectionLimit: remainingDirectAttachmentSlots,
+                chooseAttachmentFiles: {
+                    isImportingDirectAttachmentFiles = true
+                }
             )
         }
         .toolbarBackground(theme.surface, for: .navigationBar)
@@ -818,6 +861,50 @@ struct TerminalRemoteView: View {
                 .environmentObject(keyboards)
                 .mobileTheme(theme)
         }
+        .onAppear(perform: configureDirectAttachments)
+        .onAppear(perform: seedSelectionQuotesForEvidence)
+        .onChange(of: model.client != nil) { _, _ in
+            configureDirectAttachments()
+        }
+        .onChange(of: directAttachmentPhotoItems) { _, items in
+            Task { await loadDirectAttachmentPhotos(items) }
+        }
+        .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
+            handleDirectAttachmentInsertion(feedback)
+        }
+        .fileImporter(
+            isPresented: $isImportingDirectAttachmentFiles,
+            allowedContentTypes: ComposerAttachmentSources.documentTypes,
+            allowsMultipleSelection: true
+        ) { result in
+            importDirectAttachmentFiles(result)
+        }
+    }
+
+    private var terminalSurface: some View {
+        TerminalViewRepresentable(
+            connection: connection,
+            theme: connection.terminalTheme,
+            allowsDirectInput: allowsDirectInput,
+            keyBridge: keyBridge,
+            fontSize: terminalFontSize,
+            onFontSizeChange: { terminalFontSize = $0 },
+            initialScrollProgress: terminalContinuity?.terminalViewportProgress,
+            onScrollProgress: saveTerminalViewport,
+            quoteSelection: inputMode == .none ? nil : addSelectionQuote
+        )
+        .opacity(connection.isTerminalHydrating ? 0 : 1)
+        .overlay {
+            if connection.isTerminalHydrating {
+                MobileLoadingPlaceholder(MobileL10n.string("Opening chat…"))
+                    .background(terminalBackground)
+            }
+        }
+        .background(terminalBackground)
+        // The terminal owns the padding colour so the inset reads as breathing room rather
+        // than a second application panel under every authored chrome.
+        .padding(MobileDesign.Spacing.small)
+        .background(terminalBackground)
     }
 
     private var terminalContinuity: MobileSessionContinuityStore.SessionState? {
@@ -832,6 +919,237 @@ struct TerminalRemoteView: View {
             hostID: hostID,
             sessionID: connection.session.id
         )
+    }
+
+    private var remainingDirectAttachmentSlots: Int {
+        max(
+            1,
+            RemoteAttachmentUploadLimits.maximumPerMessage
+                - (directAttachmentTray?.items.count ?? 0)
+        )
+    }
+
+    // MARK: - Quoted selection
+
+    private var canInsertSelectionQuotes: Bool {
+        if isSelectionQuoteEvidence { return true }
+        return connection.phase == .connected
+            && connection.capability == .interact
+            && connection.inputControl?.canWrite != false
+    }
+
+    private func addSelectionQuote(_ text: String) {
+        guard let quote = RemoteTerminalSelectionQuote(selectedText: text) else { return }
+        selectionQuotes = RemoteTerminalSelectionQuote.appending(quote, to: selectionQuotes)
+    }
+
+    private func removeSelectionQuote(_ id: UUID) {
+        selectionQuotes.removeAll { $0.id == id }
+    }
+
+    /// Types the quotes at the TUI's cursor, as one paste when the program has bracketed paste
+    /// on. Return stays with the person: the TUI still owns editing and submission.
+    private func insertSelectionQuotes() {
+        guard canInsertSelectionQuotes, !selectionQuotes.isEmpty else { return }
+        connection.sendTerminalKey(RemoteTerminalSelectionQuote.insertionText(
+            for: selectionQuotes,
+            bracketedPaste: keyBridge.bracketedPasteActive
+        ))
+        selectionQuotes = []
+    }
+
+    private var isSelectionQuoteEvidence: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "terminal-selection"
+#else
+        false
+#endif
+    }
+
+    private func seedSelectionQuotesForEvidence() {
+#if DEBUG
+        guard isSelectionQuoteEvidence, selectionQuotes.isEmpty,
+              let quote = RemoteTerminalSelectionQuote(selectedText: """
+              nginx: [emerg] unknown directive "serer_name" in /etc/nginx/sites-enabled/app:12
+              nginx: configuration file /etc/nginx/nginx.conf test failed
+              """) else { return }
+        selectionQuotes = [quote]
+#endif
+    }
+
+    private var canInsertDirectAttachments: Bool {
+        if isDirectAttachmentEvidence { return !directAttachmentItems.isEmpty }
+        return connection.phase == .connected
+            && connection.capability == .interact
+            && connection.inputControl?.canWrite != false
+            && pendingDirectAttachmentInsertionID == nil
+            && directAttachmentTray?.isSettling == false
+            && directAttachmentTray?.readyUploadIDs.isEmpty == false
+    }
+
+    private func configureDirectAttachments() {
+        if isDirectAttachmentEvidence {
+            guard directAttachmentItems.isEmpty else { return }
+            var image = ComposerAttachmentItem(
+                name: "terminal-layout.png",
+                thumbnail: nil,
+                systemImage: "photo"
+            )
+            image.state = .ready(uploadID: "evidence-image")
+            var document = ComposerAttachmentItem(
+                name: "review notes.pdf",
+                thumbnail: nil,
+                systemImage: "doc.richtext"
+            )
+            document.state = .ready(uploadID: "evidence-document")
+            directAttachmentItems = [image, document]
+            return
+        }
+        guard directAttachmentTray == nil, let client = model.client else { return }
+        let tray = ComposerAttachmentTray(client: client, sessionID: connection.session.id)
+        tray.onChange = {
+            directAttachmentItems = tray.items
+            directAttachmentNotice = tray.notice
+        }
+        directAttachmentTray = tray
+    }
+
+    private var isDirectAttachmentEvidence: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            == "terminal-attachments"
+#else
+        false
+#endif
+    }
+
+    private func loadDirectAttachmentPhotos(_ items: [PhotosPickerItem]) async {
+        guard let tray = directAttachmentTray else { return }
+        for item in items {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let type = item.supportedContentTypes.first else {
+                tray.reportUnreadableFile()
+                continue
+            }
+            tray.add(
+                data: data,
+                name: "photo-\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "jpg")",
+                type: type
+            )
+        }
+        directAttachmentPhotoItems = []
+    }
+
+    private func importDirectAttachmentFiles(_ result: Result<[URL], Error>) {
+        guard let urls = try? result.get() else {
+            directAttachmentTray?.reportUnreadableFile()
+            return
+        }
+        for url in urls {
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url),
+                  let type = UTType(filenameExtension: url.pathExtension),
+                  let tray = directAttachmentTray else {
+                directAttachmentTray?.reportUnreadableFile()
+                continue
+            }
+            tray.add(data: data, name: url.lastPathComponent, type: type)
+        }
+    }
+
+    private func insertDirectAttachments() {
+        guard let ids = directAttachmentTray?.readyUploadIDs,
+              let requestID = connection.insertTerminalAttachments(ids) else { return }
+        directAttachmentNotice = nil
+        pendingDirectAttachmentInsertionID = requestID
+    }
+
+    private func handleDirectAttachmentInsertion(
+        _ feedback: RemotePromptSubmissionFeedback?
+    ) {
+        guard let feedback,
+              feedback.requestID == pendingDirectAttachmentInsertionID else { return }
+        pendingDirectAttachmentInsertionID = nil
+        if feedback.status == .accepted {
+            directAttachmentTray?.clear()
+            directAttachmentNotice = nil
+            return
+        }
+        switch feedback.status {
+        case .busy, .rejected:
+            directAttachmentNotice = MobileL10n.string(
+                "The Mac couldn’t insert these files. They’re still here."
+            )
+        case .unavailable:
+            directAttachmentNotice = MobileL10n.string(
+                "The session changed before these files could be inserted. They’re still here."
+            )
+        case .conflict:
+            directAttachmentNotice = MobileL10n.string(
+                "These files could not be retried safely. They’re still here."
+            )
+        case .accepted:
+            break
+        }
+    }
+}
+
+private struct DirectTerminalAttachmentTray: View {
+    let items: [ComposerAttachmentItem]
+    let notice: String?
+    let isPending: Bool
+    let canInsert: Bool
+    let remove: (UUID) -> Void
+    let insert: () -> Void
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if isPending || notice != nil {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    if isPending {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(isPending ? MobileL10n.string("Sending once…") : notice ?? "")
+                }
+                .font(.caption)
+                .foregroundStyle(notice == nil ? theme.secondaryLabel : theme.warning)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MobileDesign.Spacing.inset)
+                .padding(.top, MobileDesign.Spacing.small)
+            }
+
+            if !items.isEmpty {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    TerminalAttachmentStrip(items: items, theme: theme, remove: remove)
+                        .frame(height: ComposerAttachmentMetrics.stripHeight)
+                    Button(action: insert) {
+                        Image(systemName: "text.insert")
+                            .font(.headline)
+                            .frame(
+                                width: MobileDesign.Size.minimumTapTarget,
+                                height: MobileDesign.Size.minimumTapTarget
+                            )
+                            .background(
+                                canInsert ? theme.accent : theme.controlResting,
+                                in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                            )
+                            .foregroundStyle(
+                                canInsert ? theme.ground : theme.secondaryLabel
+                            )
+                    }
+                    .disabled(!canInsert)
+                    .accessibilityLabel(MobileL10n.string("Insert without submitting"))
+                }
+                .padding(.horizontal, MobileDesign.Spacing.inset)
+                .padding(.vertical, MobileDesign.Spacing.small)
+            }
+        }
+        .background(theme.panel)
+        .overlay(alignment: .top) {
+            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
+        }
     }
 }
 
@@ -909,12 +1227,21 @@ private struct TerminalCollaborationBar: View {
 
 private struct TerminalLineComposer: View {
     @ObservedObject var connection: RemoteSessionConnection
+    @ObservedObject var bridge: TerminalKeyBridge
+    @Binding var quotes: [RemoteTerminalSelectionQuote]
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
     @Environment(\.remoteTheme) private var theme
     @State private var draft = ""
     @State private var pendingSubmissionID: String?
+    /// The draft as it was when the pending line left, so acceptance clears only a draft the
+    /// person has not edited since.
+    @State private var pendingSubmissionDraft: String?
     @State private var submissionNotice: String?
+    @State private var attachmentTray: ComposerAttachmentTray?
+    @State private var attachmentItems: [ComposerAttachmentItem] = []
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var isImportingFiles = false
     @FocusState private var draftIsFocused: Bool
 
     var body: some View {
@@ -925,7 +1252,46 @@ private struct TerminalLineComposer: View {
                 statusLabel(submissionNotice, isWarning: true)
             }
 
+            if !attachmentItems.isEmpty {
+                TerminalAttachmentStrip(
+                    items: attachmentItems,
+                    theme: theme,
+                    remove: { attachmentTray?.remove($0) }
+                )
+            }
+            if !quotes.isEmpty {
+                TerminalSelectionQuoteTray(
+                    quotes: quotes,
+                    placement: .inComposer,
+                    remove: { id in quotes.removeAll { $0.id == id } }
+                )
+            }
+
             HStack(alignment: .center, spacing: MobileDesign.Spacing.small) {
+                Menu {
+                    PhotosPicker(
+                        selection: $photoItems,
+                        maxSelectionCount: remainingAttachmentSlots,
+                        matching: .any(of: [.images, .videos])
+                    ) {
+                        Label(MobileL10n.string("Photo Library"), systemImage: "photo.on.rectangle")
+                    }
+                    Button {
+                        isImportingFiles = true
+                    } label: {
+                        Label("Files", systemImage: "folder")
+                    }
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.headline)
+                        .frame(
+                            width: MobileDesign.Size.minimumTapTarget,
+                            height: MobileDesign.Size.minimumTapTarget
+                        )
+                }
+                .disabled(attachmentTray?.canAcceptMore != true)
+                .accessibilityLabel(MobileL10n.string("Attachments"))
+
                 TextField("Compose on this device…", text: $draft, axis: .vertical)
                     .focused($draftIsFocused)
                     .mobileUIEvidenceKeyboardFocus($draftIsFocused)
@@ -967,6 +1333,31 @@ private struct TerminalLineComposer: View {
             handle(feedback)
         }
         .onAppear(perform: restoreDraft)
+        .onAppear(perform: configureAttachments)
+        .onChange(of: photoItems) { _, items in
+            Task { await loadPhotos(items) }
+        }
+        .fileImporter(
+            isPresented: $isImportingFiles,
+            allowedContentTypes: ComposerAttachmentSources.documentTypes,
+            allowsMultipleSelection: true
+        ) { result in
+            guard let urls = try? result.get() else {
+                attachmentTray?.reportUnreadableFile()
+                return
+            }
+            for url in urls {
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url),
+                      let type = UTType(filenameExtension: url.pathExtension),
+                      let tray = attachmentTray else {
+                    attachmentTray?.reportUnreadableFile()
+                    continue
+                }
+                tray.add(data: data, name: url.lastPathComponent, type: type)
+            }
+        }
     }
 
     private var canSubmit: Bool {
@@ -974,7 +1365,10 @@ private struct TerminalLineComposer: View {
             && connection.capability == .interact
             && connection.inputControl?.canWrite != false
             && !connection.isPromptSubmissionPending
-            && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && attachmentTray?.isSettling != true
+            && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !quotes.isEmpty
+                || attachmentTray?.readyUploadIDs.isEmpty == false)
     }
 
     private func statusLabel(
@@ -997,9 +1391,52 @@ private struct TerminalLineComposer: View {
     }
 
     private func submit() {
-        if let requestID = connection.submitTerminalLine(draft) {
+        let line = RemoteTerminalSelectionQuote.submissionText(
+            for: quotes,
+            draft: draft,
+            bracketedPaste: bridge.bracketedPasteActive
+        )
+        if let requestID = connection.submitTerminalLine(
+            line,
+            attachmentUploadIDs: attachmentTray?.readyUploadIDs ?? []
+        ) {
             pendingSubmissionID = requestID
+            pendingSubmissionDraft = draft
         }
+    }
+
+    private var remainingAttachmentSlots: Int {
+        max(
+            1,
+            RemoteAttachmentUploadLimits.maximumPerMessage - (attachmentTray?.items.count ?? 0)
+        )
+    }
+
+    private func configureAttachments() {
+        guard attachmentTray == nil, let client = model.client else { return }
+        let tray = ComposerAttachmentTray(client: client, sessionID: connection.session.id)
+        tray.onChange = {
+            attachmentItems = tray.items
+            submissionNotice = tray.notice
+        }
+        attachmentTray = tray
+    }
+
+    private func loadPhotos(_ items: [PhotosPickerItem]) async {
+        guard let tray = attachmentTray else { return }
+        for item in items {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let type = item.supportedContentTypes.first else {
+                tray.reportUnreadableFile()
+                continue
+            }
+            tray.add(
+                data: data,
+                name: "photo-\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "jpg")",
+                type: type
+            )
+        }
+        photoItems = []
     }
 
     private func restoreDraft() {
@@ -1024,11 +1461,15 @@ private struct TerminalLineComposer: View {
     private func handle(_ feedback: RemotePromptSubmissionFeedback?) {
         guard let feedback, feedback.requestID == pendingSubmissionID else { return }
         pendingSubmissionID = nil
+        let sentDraft = pendingSubmissionDraft
+        pendingSubmissionDraft = nil
         if feedback.status == .accepted {
-            if draft.trimmingCharacters(in: .newlines) == feedback.text {
+            if draft == sentDraft {
                 draft = ""
             }
+            quotes = []
             submissionNotice = nil
+            attachmentTray?.clear()
             return
         }
         switch feedback.status {
@@ -1051,6 +1492,23 @@ private struct TerminalLineComposer: View {
         case .accepted:
             break
         }
+    }
+}
+
+private struct TerminalAttachmentStrip: UIViewRepresentable {
+    let items: [ComposerAttachmentItem]
+    let theme: RemoteThemePalette
+    let remove: (UUID) -> Void
+
+    func makeUIView(context: Context) -> ComposerAttachmentStripView {
+        let view = ComposerAttachmentStripView()
+        view.onRemove = remove
+        return view
+    }
+
+    func updateUIView(_ view: ComposerAttachmentStripView, context: Context) {
+        view.onRemove = remove
+        view.update(items: items, theme: theme)
     }
 }
 

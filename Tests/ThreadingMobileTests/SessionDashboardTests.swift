@@ -132,7 +132,7 @@ final class SessionDashboardTests: XCTestCase {
             ),
             MobileL10n.string(
                 "Trying %@",
-                MobileL10n.string("this network")
+                MobileL10n.string("LAN")
             )
         )
     }
@@ -154,7 +154,7 @@ final class SessionDashboardTests: XCTestCase {
             presentation.currentStep.title,
             MobileL10n.string(
                 "Trying %@",
-                MobileL10n.string("this network")
+                MobileL10n.string("LAN")
             )
         )
     }
@@ -230,7 +230,7 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(presentation.lastConnection, MobileL10n.string("Tailscale"))
         XCTAssertEqual(
             Set(presentation.routesTried),
-            Set([MobileL10n.string("Tailscale"), MobileL10n.string("This network")])
+            Set([MobileL10n.string("Tailscale"), MobileL10n.string("LAN")])
         )
         XCTAssertEqual(
             presentation.identityCode?.count,

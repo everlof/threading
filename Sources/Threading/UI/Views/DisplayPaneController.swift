@@ -181,7 +181,10 @@ final class DisplayPaneController: NSViewController {
     label.textColor = Design.Text.tertiary
     label.lineBreakMode = .byTruncatingMiddle
     label.alignment = .right
-    label.setContentCompressionResistancePriority(Self.truncatingPriority, for: .horizontal)
+    label.setContentCompressionResistancePriority(
+      Design.Priority.belowFittingSize,
+      for: .horizontal
+    )
     return label
   }()
   private lazy var contentMenuButton: ThemedButton = {
@@ -203,12 +206,12 @@ final class DisplayPaneController: NSViewController {
     label.textColor = Design.Text.tertiary
     label.alignment = .center
     label.lineBreakMode = .byTruncatingTail
-    label.setContentCompressionResistancePriority(Self.truncatingPriority, for: .horizontal)
+    label.setContentCompressionResistancePriority(
+      Design.Priority.belowFittingSize,
+      for: .horizontal
+    )
     return label
   }()
-  private static let truncatingPriority = NSLayoutConstraint.Priority(
-    NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1
-  )
   private let appEvents = AppEventObservations()
 
   /// The live tab's view controller currently parented into `hostedView` — the browser or a
@@ -2058,13 +2061,16 @@ final class DisplayPaneController: NSViewController {
         documentWebViewHasContent = true
         webView.loadHTMLString(Self.themed(html), baseURL: nil)
       case .chart(let spec):
-        // The chart draws its own caption, so the panel's is stood down — but the content menu
-        // stays: copying the numbers out is the one thing a chart tab owes the reader.
+        // The chart draws its own caption *and* its own actions, so both of the panel's stand
+        // down. The menu button is not merely redundant here — it is unreachable: `hostedView`
+        // is added last, runs to the foot of the pane, and a chart's ground is opaque, so the
+        // `⋯` was underneath it and the copy it offered could never be clicked. See
+        // `ChartPaneViewController`, which is where those two actions now live.
         imageView.image = nil
         imageView.isHidden = true
         hideHTML()
         captionLabel.isHidden = true
-        contentMenuButton.isHidden = false
+        contentMenuButton.isHidden = true
         installHosted(
           ChartPaneViewController(spec: spec, subtitle: content.subtitle),
           owned: true

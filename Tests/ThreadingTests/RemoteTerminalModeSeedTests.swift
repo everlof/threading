@@ -60,7 +60,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
 
     func testTheArmedModesAreReadOffTheEmulator() {
         let terminal = makeTerminal()
-        terminal.feed(text: Fixture.agentArming + "\u{1b}[?1h\u{1b}[?2004h")
+        terminal.feed(text: Fixture.agentArming + "\u{1b}[?1h\u{1b}[?2004h\u{1b}[>7u")
 
         let modes = RemoteTerminalModes(terminal)
 
@@ -68,6 +68,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
         XCTAssertEqual(modes.mouseReporting?.encoding, .sgr)
         XCTAssertTrue(modes.applicationCursorKeys)
         XCTAssertTrue(modes.bracketedPaste)
+        XCTAssertEqual(modes.keyboardEnhancementFlags, 7)
     }
 
     /// The phone's key bar asks its own emulator whether an arrow should be SS3 or CSI, and its
@@ -75,24 +76,30 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
     /// start, so a late joiner sent the sequences a full-screen program had not asked for.
     func testTheOtherStickyModesReachAClientThatNeverSawTheProgramStart() {
         let mac = makeTerminal()
-        mac.feed(text: "\u{1b}[?1h\u{1b}[?2004h")
+        mac.feed(text: "\u{1b}[?1h\u{1b}[?2004h\u{1b}[>7u")
         let phone = makeTerminal()
 
         phone.feed(byteArray: [UInt8](statement(for: mac)))
 
         XCTAssertTrue(phone.applicationCursor, "an arrow would go out as CSI where the TUI wants SS3")
         XCTAssertTrue(phone.bracketedPasteMode, "an unbracketed multi-line paste runs line by line")
+        XCTAssertEqual(
+            phone.keyboardEnhancementFlags.rawValue,
+            7,
+            "a touch key must report the event lifecycle the TUI negotiated"
+        )
     }
 
     func testTheStatementTurnsTheOtherStickyModesBackOff() {
         let mac = makeTerminal()
         let phone = makeTerminal()
-        phone.feed(text: "\u{1b}[?1h\u{1b}[?2004h")
+        phone.feed(text: "\u{1b}[?1h\u{1b}[?2004h\u{1b}[>7u")
 
         phone.feed(byteArray: [UInt8](statement(for: mac)))
 
         XCTAssertFalse(phone.applicationCursor)
         XCTAssertFalse(phone.bracketedPasteMode)
+        XCTAssertTrue(phone.keyboardEnhancementFlags.isEmpty)
     }
 
     // MARK: - The Statement

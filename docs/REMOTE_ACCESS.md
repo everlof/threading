@@ -488,13 +488,14 @@ be SS3 or CSI (DECCKM) and got the wrong answer; a paste went out unbracketed, w
 multi-line paste line by line.
 
 `RemoteTerminalModeSeed` states them instead. `RemoteTerminalState.modes` — mouse tracking and its
-encoding, application cursor keys, bracketed paste — is read off the Mac's live emulator, and
-`attachTerminal` sends the private-mode statement **after** the ring, because the ring is replayed
-history and history holds modes that stopped being true: an agent that has since exited to a shell
-would otherwise leave the phone reporting clicks into a prompt as pasted escape text. The
-statement is authoritative rather than additive — every tracking mode and every encoding is reset
-before the ones in force are set, and tracking is set last, because resetting an encoding also
-stops tracking on this emulator.
+encoding, application cursor keys, bracketed paste, and kitty keyboard-enhancement flags — is read
+off the Mac's live emulator, and `attachTerminal` sends the mode statement **after** the ring,
+because the ring is replayed history and history holds modes that stopped being true: an agent
+that has since exited to a shell would otherwise leave the phone reporting clicks into a prompt
+as pasted escape text. The statement is authoritative rather than additive — every tracking mode
+and every encoding is reset before the ones in force are set, kitty flags are replaced even when
+the answer is zero, and tracking is set last, because resetting an encoding also stops tracking
+on this emulator.
 
 **A tap also has to be the button a TUI listens for.** Two things in the fork stood between an
 armed phone and a click. iOS encoded every tap as xterm button 1, the *middle* button, where the
@@ -570,6 +571,20 @@ notification preferences, in-app presence/typing, independent terminal drafts an
 diagnostics are useful without a Mac and stay available from the dashboard's `…` menu after
 pairing. The stock icon picker is manual because iOS confirms every icon change; when a connected
 Mac uses a built-in style, the picker names that style as the matching choice.
+
+**Settings → Advanced** controls the bounded warm-session pool. Its defaults are 60 seconds and
+three connections; hold time can be set from 5–300 seconds and size from 0–8, with zero disabling
+reuse. Popping a chat parks only its authenticated WebSocket. The host first removes it from PTY
+and conversation fan-out, releases its viewport, presence, typing and input-control state, and the
+phone retains no terminal renderer. Reopening that same chat resumes through the ordinary hello
+and bounded replay/snapshot path. A Mac that does not advertise `sessionConnectionParking` is
+always disconnected normally.
+
+The same page exposes the evidence for changing those defaults: current and peak occupancy,
+reuse hits and misses, hit rate, actual hold timing, holds that ended without reuse, each expiry or
+eviction reason, unsupported hosts, and fixed reuse/unused age buckets. These aggregates persist
+only on that iPhone and contain no Mac id, session id, title, prompt or per-connection history.
+Backgrounding or a memory warning drains the pool; lowering either setting applies immediately.
 
 The Mac and paired iPhone share one in-app appearance. Choose **Appearance** in the iPhone
 dashboard's `…` menu, use **Settings → Mac appearance**, or choose an app theme on the Mac; the
@@ -678,11 +693,13 @@ opening state. Leaving the detail screen closes that session socket without unpa
 taking the dashboard offline.
 
 The navigation status is one changing phrase, so `MobileMorphingTitleLabel` uses LabelMorph's
-whole-line scroll rather than its character-by-character name morph. The scroll and a five-pulse,
-62%-depth traveling fade share one 650 ms budget; the pulses and travel are scaled into that
-window rather than retaining the showcase's multi-second timings. Dashboard route progress,
-SwiftUI terminal chrome and UIKit Native-conversation chrome all enter through this same mobile
-design boundary. Reduce Motion lands the next phrase synchronously with no scroll or fade.
+whole-line scroll rather than its character-by-character name morph. The scroll clears one full
+caption line and one synchronized, shallow opacity breath shares its 650 ms budget. This is
+deliberately not a traveling wave: when "Opening chat…" gives way immediately to a Mac name, a
+staggered pulse leaves the trailing `Book Pro` fully lit while the leading half flickers, and the
+phrase stops reading as one line. Dashboard route progress, SwiftUI terminal chrome and UIKit
+Native-conversation chrome all enter through this same mobile design boundary. Reduce Motion
+lands the next phrase synchronously with no scroll or fade.
 
 **A chat has one name, wherever it is drawn.** The list draws the catalogue's
 `AgentSession.displayTitle` and so does every title on the screen that list opens —
@@ -746,9 +763,13 @@ session either.
 
 ## Sending a file from the phone
 
-The composer's paperclip attaches a photo or a document to the next prompt. It is the only route
-by which a remote client can cause the Mac to keep a file, so it is worth saying exactly what it
-does and where it stops.
+The composer's paperclip attaches a photo or a document to the next prompt. A direct-input TUI
+keeps the same paperclip as a fixed utility cap at the start of its control-key bar; picked files
+appear in a bounded tray above the bar, and its explicit Insert action types their quoted session
+paths at the current cursor without Return. The explicit step matters because an upload may
+finish after the person has moved the TUI cursor. Neither mode lets asynchronous transfer mutate
+the terminal unexpectedly. This is the only route by which a remote client can cause the Mac to
+keep a file, so it is worth saying exactly what it does and where it stops.
 
 **The bytes go over first, and the prompt names them afterwards.** `POST …/attachment-upload`
 carries one chunk of base64 inside the same JSON envelope every other mutation uses; chunk 0
@@ -961,6 +982,20 @@ cardinality checks; duplicate key identities and oversized actions are refused w
 the active or durable layout. Keys ride the existing `input` frame, so the server's
 capability/Focused-mode/size checks apply unchanged and no protocol bump was needed.
 
+A named cap takes its bytes from SwiftTerm's live encoder rather than stopping at that classic
+fallback. Codex negotiates kitty keyboard event reporting before `/model`; under that contract a
+touch arrow is a press followed by a release, and enhanced functional-key spelling takes
+precedence over DECCKM. The bar owns both ends of a touch and sends both events in one ordered PTY
+write. Snippets and hand-authored raw sequences remain verbatim by definition.
+
+Modifier caps have two compatible lifetimes. A completed tap still cycles off → armed → locked →
+off, but the cap is also active from touch-down to touch-up, so holding ⌃ or ⌥ with one finger and
+tapping an arrow with another sends one real xterm chord. Using a modifier in that held chord
+consumes its later button activation instead of accidentally arming the following key. One shared
+button style owns the immediate pressed travel and theme fill for every cap; retained, prewarmed
+feedback generators acknowledge completed key and latch actions instead of constructing a cold
+generator after each release.
+
 It is the only bar over the keyboard. SwiftTerm fits its own `TerminalAccessory` — a fixed
 esc/ctrl/tab/arrow row — from `TerminalView`'s initializer, which stacked a second row of nearly
 the same keys under this one; `RemoteTerminalView.dropBuiltInKeyboardAccessory()` clears it
@@ -980,6 +1015,9 @@ already up produced no notification and no button — it now asks the bridge on 
 trailing controls are a bare `Image` in a reserved 44pt frame with no fill behind it, which
 answers taps on the glyph alone; the key caps are hit-testable across their whole cap only
 because each carries a background. `contentShape` makes the reserved area the real one.
+The two trailing SF Symbols also cannot be aligned by their equal frames: the dismissal chevron
+and customization badge extend below different keyboard-shaped motifs. Their group aligns on the
+symbols' first text baseline, which puts the shared keyboard chassis on one visible ink line.
 
 iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
 terminal drafts are written locally as they change, pending request ids survive a reconnect, and
@@ -1340,7 +1378,7 @@ a second certificate for the same address.
 - **The dashboard stops loading when the attempt has stopped.** An offline phase retains the
   structured failure rather than only its sentence, so an owner with no cached catalogue gets a
   recovery card instead of an indeterminate “Loading sessions…” card. It names only the saved
-  doors in product language (This network, Tailscale, VPN or Direct), never an address or port,
+  doors in compact product language (LAN, Tailscale, VPN or Direct), never an address or port,
   offers the cause-specific next step, and keeps re-scanning available after an ordinary route
   failure. The complete 26-character identity already pinned by the phone is shown for comparison
   with **Settings ▸ Remote Access** on the Mac; a mismatch has no “trust this answer” shortcut.

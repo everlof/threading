@@ -18,7 +18,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     /// `nil` when nothing typed here can reach the Mac, in which case the menu offers no such
     /// action. Defaulted so the view composes without a quote sink while the composer wiring
     /// that supplies one is being assembled.
-    let quoteSelection: (@MainActor (String) -> Void)? = nil
+    var quoteSelection: (@MainActor (String) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(

@@ -11,6 +11,40 @@ enum KittyKey {
     case none
 }
 
+/// A non-text key exposed to terminal clients that provide their own accessory-key chrome.
+///
+/// Those controls still have to use the emulator's encoder: once a program enables the kitty
+/// keyboard protocol, a hard-coded legacy escape sequence is no longer a complete key event.
+/// Keep this surface to the keys an accessory bar can reasonably present rather than exposing
+/// SwiftTerm's complete internal functional-key model.
+public enum TerminalFunctionalKey {
+    case escape
+    case enter
+    case tab
+    case backspace
+    case delete
+    case up
+    case down
+    case left
+    case right
+    case home
+    case end
+    case pageUp
+    case pageDown
+    case f1
+    case f2
+    case f3
+    case f4
+    case f5
+    case f6
+    case f7
+    case f8
+    case f9
+    case f10
+    case f11
+    case f12
+}
+
 enum KittyFunctionalKey {
     case escape
     case enter
@@ -1107,6 +1141,67 @@ struct KittyKeyboardEncoder {
                 return codepoint
             }
             return nil
+        }
+    }
+}
+
+public extension Terminal {
+    /// Encodes one functional-key event with the same DECCKM and kitty-keyboard state used by
+    /// SwiftTerm's built-in hardware and software keyboard paths.
+    ///
+    /// Custom terminal chrome should call this rather than keeping a second escape-sequence
+    /// table. In particular, a client that owns a touch key can encode both its press and its
+    /// release when the program requested event reporting.
+    func encodedFunctionalKey(
+        _ key: TerminalFunctionalKey,
+        modifiers: KittyKeyboardModifiers = [],
+        eventType: KittyKeyboardEventType = .press,
+        backspaceSendsControlH: Bool = false
+    ) -> [UInt8]? {
+        KittyKeyboardEncoder(
+            flags: keyboardEnhancementFlags,
+            applicationCursor: applicationCursor,
+            applicationKeypad: applicationKeypad,
+            backspaceSendsControlH: backspaceSendsControlH
+        ).encode(KittyKeyEvent(
+            key: .functional(key.kittyFunctionalKey),
+            modifiers: modifiers,
+            eventType: eventType,
+            text: nil,
+            shiftedKey: nil,
+            baseLayoutKey: nil
+        ))
+    }
+}
+
+private extension TerminalFunctionalKey {
+    var kittyFunctionalKey: KittyFunctionalKey {
+        switch self {
+        case .escape: return .escape
+        case .enter: return .enter
+        case .tab: return .tab
+        case .backspace: return .backspace
+        case .delete: return .delete
+        case .up: return .up
+        case .down: return .down
+        case .left: return .left
+        case .right: return .right
+        case .home: return .home
+        case .end: return .end
+        case .pageUp: return .pageUp
+        case .pageDown: return .pageDown
+        case .f1: return .f1
+        case .f2: return .f2
+        case .f3: return .f3
+        case .f4: return .f4
+        case .f5: return .f5
+        case .f6: return .f6
+        case .f7: return .f7
+        case .f8: return .f8
+        case .f9: return .f9
+        case .f10: return .f10
+        case .f11: return .f11
+        case .f12: return .f12
         }
     }
 }

@@ -676,7 +676,7 @@ final class RemoteSessionMirrorRegistry {
     static func advertisedFeatures(for authorization: RemoteAuthorization?) -> [String] {
         RemoteWebSocketFeature.allCases.filter { feature in
             switch feature {
-            case .composerAttachmentUploads:
+            case .composerAttachmentUploads, .terminalAttachmentInsertion:
                 return authorization?.principal == .ownerDevice
                     && authorization?.scope == .allSessions
                     && authorization?.capability == .interact
@@ -963,6 +963,25 @@ final class RemoteSessionMirrorRegistry {
         }
         broadcastInputControl(sessionID)
         followersChanged(sessionID)
+    }
+
+    /// Leaves a session mirror while keeping the authenticated WebSocket itself alive.
+    ///
+    /// Parking deliberately reuses the complete detach path: a phone that is no longer showing
+    /// the session must stop receiving PTY bytes, disappear from presence, release its viewport
+    /// and give up input control exactly as if its socket had closed. The only retained resource
+    /// is the transport owned by `RemoteConnection`.
+    @discardableResult
+    func park(_ connection: RemoteConnection, sessionID: SessionID) -> Bool {
+        let key = ObjectIdentifier(connection)
+        guard sessionByConnection[key] == sessionID else { return false }
+        detach(connection)
+        connection.sendText(encode(RemoteSessionParkedDTO()))
+        return true
+    }
+
+    func isAttached(_ connection: RemoteConnection, to sessionID: SessionID) -> Bool {
+        sessionByConnection[ObjectIdentifier(connection)] == sessionID
     }
 
     /// Stable people currently viewing one live surface. Multiple sockets and owner devices
@@ -1322,6 +1341,7 @@ final class RemoteSessionMirrorRegistry {
     /// individual keystrokes into one malformed Claude/Codex prompt.
     func submitTerminalLine(
         _ text: String,
+        stagedAttachmentPaths: [String] = [],
         to sessionID: SessionID,
         device: String?,
         authorization: RemoteAuthorization,
@@ -1338,7 +1358,9 @@ final class RemoteSessionMirrorRegistry {
                 requestID: $0
             )
         }
-        let fingerprint = Data(SHA256.hash(data: Data(("terminal\0" + text).utf8)))
+        let fingerprint = Data(SHA256.hash(data: Data(
+            ("terminal\0" + text + "\0" + stagedAttachmentPaths.joined(separator: "\0")).utf8
+        )))
         if let replayKey {
             switch promptReplayCache.decision(for: replayKey, fingerprint: fingerprint) {
             case .new:
@@ -1355,10 +1377,12 @@ final class RemoteSessionMirrorRegistry {
             status = .rejected
         } else if mirrors[sessionID]?.surface == .terminal,
            RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-           terminalApplication?.sendInput(
-               Array((text + "\r").utf8),
-               to: sessionID
-           ) == .applied {
+           let line = promptText(
+               text,
+               stagedAttachmentPaths: stagedAttachmentPaths,
+               for: sessionID
+           ),
+           terminalApplication?.sendInput(Array((line + "\r").utf8), to: sessionID) == .applied {
             recordFirstInput(device: device, sessionID: sessionID)
             RemoteNotificationService.shared.recordInteraction(
                 sessionID: sessionID,
@@ -1372,6 +1396,66 @@ final class RemoteSessionMirrorRegistry {
         if let replayKey {
             promptReplayCache.store(status, for: replayKey, fingerprint: fingerprint)
         }
+        return status
+    }
+
+    /// Takes custody of phone uploads and types only their quoted workspace paths into the PTY.
+    /// Direct mode belongs to the terminal application, so adding Return here would unexpectedly
+    /// submit whatever the person was editing before the upload finished.
+    func insertTerminalAttachments(
+        stagedPaths: [String],
+        into sessionID: SessionID,
+        device: String?,
+        authorization: RemoteAuthorization,
+        requestID: String
+    ) -> RemotePromptSubmissionStatus {
+        let replayKey = RemotePromptReplayCache.Key(
+            sessionID: sessionID.uuidString,
+            principalID: [
+                authorization.principal == .ownerDevice ? "owner" : "guest",
+                authorization.member?.id ?? authorization.shareID,
+                device ?? "legacy",
+            ].joined(separator: ":"),
+            requestID: requestID
+        )
+        let fingerprint = Data(SHA256.hash(data: Data(
+            ("terminal-attachments\0" + stagedPaths.joined(separator: "\0")).utf8
+        )))
+        switch promptReplayCache.decision(for: replayKey, fingerprint: fingerprint) {
+        case .replay(let status):
+            return status
+        case .conflict:
+            return .conflict
+        case .new:
+            break
+        }
+
+        let status: RemotePromptSubmissionStatus
+        if !canWrite(sessionID: sessionID, authorization: authorization) {
+            status = .rejected
+        } else if mirrors[sessionID]?.surface == .terminal,
+                  RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+                  let inserted = promptText(
+                      "",
+                      stagedAttachmentPaths: stagedPaths,
+                      for: sessionID
+                  ),
+                  !inserted.isEmpty,
+                  terminalApplication?.sendInput(
+                      Array(inserted.utf8),
+                      to: sessionID
+                  ) == .applied {
+            recordFirstInput(device: device, sessionID: sessionID)
+            RemoteNotificationService.shared.recordInteraction(
+                sessionID: sessionID,
+                authorization: authorization
+            )
+            status = .accepted
+        } else {
+            status = .unavailable
+        }
+
+        promptReplayCache.store(status, for: replayKey, fingerprint: fingerprint)
         return status
     }
 

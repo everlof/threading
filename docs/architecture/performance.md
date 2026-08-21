@@ -383,13 +383,27 @@ reveal. Frame-by-frame inspection at 500 ms intervals again shows only the loade
 complete terminal. The measured artifacts are
 `/tmp/threading-profiles/20260821T131423Z-ios-terminal-wire-lab`.
 
-Starting a session socket from the row tap rather than the detail's task is not a useful next
-optimization: the real view is created 9–12 ms after connection start, so it can recover only
-that small scheduling slice. Preconnecting dashboard rows would violate the catalogue scaling
-contract above by adding sockets, replay buffers and terminal capture per candidate. Reusing one
-recently popped connection could remove the ~110 ms handshake, but it changes viewport-release,
-presence and renderer lifetime semantics and is deliberately a separate bounded-cache experiment,
-not part of this entry repair.
+Starting a session socket from the row tap rather than the detail's task is not useful: the real
+view is created 9–12 ms after connection start, so it can recover only that small scheduling
+slice. Preconnecting dashboard rows would violate the catalogue scaling contract above by adding
+sockets, replay buffers and terminal capture per candidate.
+
+The separate bounded-cache experiment now ships as iOS session connection reuse. Pop sends
+`sessionPark`; the Mac runs the complete mirror detach path before acknowledging it, so the socket
+receives no PTY output or conversation deltas, owns no viewport or hydration transaction, leaves
+presence/input control, and retains no SwiftTerm renderer. Only the authenticated WebSocket stays
+warm. Push sends `sessionResume`, and the ordinary attach path supplies a new authoritative hello,
+bounded replay or conversation snapshot, collaboration state and hydration boundary. It therefore
+removes the roughly 110 ms TLS/WebSocket/auth handshake without letting stale output or a stale
+grid leak into the new view.
+
+Its scaling contract is explicit: the default is three parked transports for 60 seconds; the
+device setting is bounded to 0–8 transports and 5–300 seconds. Park, lookup and eviction do O(1)
+work at that bound, terminal history remains the one host-side per-session ring rather than a
+per-parked-client buffer, and parked clients are absent from subscriber fan-out. Telemetry is one
+fixed-size aggregate value—hits, misses, expiry/eviction causes, occupancy, totals/maxima and six
+age buckets—not an event or session history. Reducing either setting evicts excess state
+immediately; backgrounding or a memory warning drains it.
 
 ### Scaling audit, 2026-08-08
 

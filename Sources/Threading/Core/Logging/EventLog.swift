@@ -69,6 +69,13 @@ final class EventLog: @unchecked Sendable {
         /// and a run that misfired unobserved can only be reconstructed from what it wrote
         /// down. See `limit-recovery.md`.
         case limitRecovery
+
+        /// Curfews. Its own category for `limitRecovery`'s reason, one degree further: a curfew
+        /// acts by definition when nobody is watching — it sends a wrap-up, holds a session
+        /// against its own outbox, and types an Escape into a terminal at four in the morning —
+        /// so a run that misfired unobserved can only be reconstructed from what it wrote down.
+        /// See `curfew.md`.
+        case curfew
     }
 
     /// How the launch before this one ended, as *this* launch found it.

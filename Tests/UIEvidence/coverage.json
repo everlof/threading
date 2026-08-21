@@ -726,6 +726,27 @@
       }
     },
     {
+      "id": "custom-limit-authoring",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Custom limit authoring",
+      "description": "The production Accounts Settings page scrolled to its expanded limit folds, its real Add Limit submenu, the compact Custom values submenu with all five exact inputs, plus the themed numeric dialogs for a reserved share and a custom rolling window.",
+      "states": ["Expanded account limits", "Add Limit choices", "Custom values choices", "Custom reserved share", "Custom rolling window"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["System light", "Authored fixed-theme appearances"],
+        "sizes": ["Shared Settings width", "Themed alert"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AccountLimitsSectionTests.swift",
+        "test": "ThreadingTests/AccountLimitsSectionTests/testRendersCustomLimitAuthoringSurfaces"
+      },
+      "capture": {
+        "glob": "account-limit-custom-*.png"
+      }
+    },
+    {
       "id": "onboarding-layouts",
       "kind": "surface",
       "status": "implemented",

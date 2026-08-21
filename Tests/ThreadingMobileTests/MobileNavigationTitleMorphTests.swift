@@ -154,7 +154,7 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
     /// The status dot and phrase are one reading. Giving the phrase the title's full invisible
     /// slot left the dot at that slot's leading edge, more than a hundred points from the words.
     func testTheConnectionStatusHugsItsWordsInsteadOfTheTitleSlot() throws {
-        let status = "Trying This network"
+        let status = "Trying LAN"
         let fixture = hosted(title: "David's MacBook Pro", status: status)
         let titleLabel = try morphingLabel(with: "David's MacBook Pro", in: fixture.window)
         let statusLabel = try morphingLabel(with: status, in: fixture.window)

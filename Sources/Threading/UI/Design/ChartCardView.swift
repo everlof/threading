@@ -140,11 +140,19 @@ final class ChartCardView: NSView, ThemedComponent {
 
     private enum Layout {
         static let titleSpacing = Design.Spacing.small
+
+        /// The plot's floor and its ceiling are one rule read from both ends, so they are stated
+        /// together and at one priority — which is what keeps them from arguing. Neither is
+        /// required: a required height inside pane content is the window's own minimum.
+        static let plotHeight = NSLayoutConstraint.Priority.defaultHigh
     }
 
     private(set) var spec: ChartSpec
     private let titleLabel: NSTextField
     private var chart: ThemedTimeSeriesChartView
+    /// The ceiling on how tall the plot may stand for the width it turned out to have — see
+    /// `applyPlotCeiling`, which is where the width is finally known.
+    private var plotCeiling: NSLayoutConstraint?
 
     var chartForTesting: ThemedTimeSeriesChartView { chart }
 
@@ -201,6 +209,18 @@ final class ChartCardView: NSView, ThemedComponent {
 
         applyTitle()
         addSubview(titleLabel)
+        // **A title is a sentence, and a sentence is not a measurement.** The trailing `<=` below
+        // is required, so at an ordinary label's resistance the longest title an agent had
+        // written was the narrowest the display panel — and therefore the window — could be
+        // dragged: the chart in the screenshot that reported this had stopped a 420pt pane going
+        // any further. The line already promises to end in an ellipsis and the whole title is on
+        // the pointer (`applyTitle`); `Design.Priority.belowFittingSize` is what makes the promise
+        // hold through the fitting-size pass as well.
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(
+            Design.Priority.belowFittingSize,
+            for: .horizontal
+        )
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: topAnchor),
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -232,6 +252,11 @@ final class ChartCardView: NSView, ThemedComponent {
             chart.removeFromSuperview()
             chart = replacement
             attach(replacement)
+        } else {
+            // A kind may change without the chart being rebuilt — a bar chart re-specced as a
+            // ranking is the same view drawn sideways — and the ceiling is the one thing that has
+            // to move with the axis the values are on.
+            applyPlotCeiling()
         }
         chart.setModel(newSpec.themedModel, animated: animated && !rebuilds)
     }
@@ -252,9 +277,21 @@ final class ChartCardView: NSView, ThemedComponent {
         let minimumHeight = chart.heightAnchor.constraint(
             greaterThanOrEqualToConstant: Design.Chart.minimumCardHeight
         )
-        minimumHeight.priority = .defaultHigh
+        minimumHeight.priority = Layout.plotHeight
         chart.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         chart.setContentHuggingPriority(.defaultLow, for: .vertical)
+
+        // How tall the plot may stand, which `applyPlotCeiling` reads from the width this card
+        // ends up with. **A number rather than a multiple of `widthAnchor`**, and that is the
+        // whole of the difference: a constraint tying the two dimensions together can be
+        // satisfied from either end, so the solver was free to make the *pane* wider instead of
+        // the chart shorter — and did, holding an 82pt panel open at 307. Nothing here relates a
+        // height to a width, so no chart can decide how narrow its pane may be.
+        let ceiling = chart.heightAnchor.constraint(
+            lessThanOrEqualToConstant: Design.Chart.preferredHeight
+        )
+        ceiling.priority = Layout.plotHeight
+        plotCeiling = ceiling
 
         NSLayoutConstraint.activate([
             minimumHeight,
@@ -266,10 +303,100 @@ final class ChartCardView: NSView, ThemedComponent {
             chart.trailingAnchor.constraint(equalTo: trailingAnchor),
             chart.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+        applyPlotCeiling()
+    }
+
+    /// The card's width is only known here, and it changes every time the divider moves.
+    override func layout() {
+        super.layout()
+        applyPlotCeiling()
+    }
+
+    /// How tall the plot may stand for the width it has.
+    ///
+    /// A value axis does resolve better for being taller, which is why a column chart takes the
+    /// pane it is given — but only while the plot is still a picture. Dragged narrow, a
+    /// full-height panel drew 700 points of column over 120 points of plot: bars reduced to
+    /// threads, with nowhere under them to write the names of the categories they measure. Past
+    /// `Design.Chart.maximumPlotAspect` the chart hands the height back to the pane instead of
+    /// stretching into it, which is the answer a ranking already gives.
+    ///
+    /// A **ranking** is the exception, and it is the same exception `boundedHeight(for:)` makes:
+    /// its categories run down the page, so its height is the data itself, and a rule derived
+    /// from its width would compress rows to satisfy a proportion nobody reads.
+    ///
+    /// Written only when it changes: this runs on every layout pass, and assigning a constant
+    /// marks the view dirty, so writing an unchanged value would lay the card out again on the
+    /// next pass and never stop.
+    private func applyPlotCeiling() {
+        guard let plotCeiling else { return }
+        let applies = spec.kind != .ranking
+        if plotCeiling.isActive != applies { plotCeiling.isActive = applies }
+        guard applies else { return }
+
+        let ceiling = max(
+            Design.Chart.minimumCardHeight,
+            bounds.width * Design.Chart.maximumPlotAspect
+        )
+        guard abs(plotCeiling.constant - ceiling) > 0.5 else { return }
+        plotCeiling.constant = ceiling
     }
 
     func applyTheme() {
         applyTitle()
+    }
+
+    // MARK: - Taking the Chart With You
+
+    /// The card as a picture, at the size and in the theme it is currently drawn at.
+    ///
+    /// **Cached from the live view rather than re-rendered from the spec.** What the reader is
+    /// looking at is this theme, this width, these category names thinned to the ones that fit —
+    /// and a second renderer would be a second chart, differing in exactly the places a picture
+    /// is taken to preserve.
+    ///
+    /// The ground is painted behind it and the card is inset into it by the air a pane gives it,
+    /// because a card is transparent and a chart is mostly ink: pasted into a document, the
+    /// alternative is a dark axis on whatever happens to be underneath.
+    func drawnAsImage() -> NSImage? {
+        guard bounds.width >= 1, bounds.height >= 1 else { return nil }
+        guard let drawn = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
+        cacheDisplay(in: bounds, to: drawn)
+
+        let padding = Design.Spacing.inset
+        let size = NSSize(
+            width: bounds.width + padding * 2,
+            height: bounds.height + padding * 2
+        )
+        // The window's scale rather than the screen's: a picture taken from a Retina window is
+        // worth its pixels, and `lockFocus` would have resolved that against whichever display
+        // is main rather than the one the chart is on.
+        let scale = window?.backingScaleFactor ?? 1
+        guard let canvas = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int((size.width * scale).rounded()),
+            pixelsHigh: Int((size.height * scale).rounded()),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+        canvas.size = size
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: canvas)
+        Design.Surface.ground.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        drawn.draw(in: NSRect(origin: NSPoint(x: padding, y: padding), size: bounds.size))
+
+        let image = NSImage(size: size)
+        image.addRepresentation(canvas)
+        image.accessibilityDescription = spec.title
+        return image
     }
 
     /// The title, and the whole title on the pointer.
@@ -300,8 +427,20 @@ final class ChartCardView: NSView, ThemedComponent {
             string: spec.title,
             attributes: [
                 .font: Design.Typography.heading(),
-                .foregroundColor: Design.Text.label
+                .foregroundColor: Design.Text.label,
+                .paragraphStyle: Self.truncating
             ]
         )
     }
+
+    /// **Only the string can say a title may end in an ellipsis.** A field's own `lineBreakMode`
+    /// is overridden by the paragraph style its attributed content carries, so a card whose label
+    /// was set to truncate in every way a caller can express clipped its title mid-glyph instead
+    /// — which is what a narrow pane actually drew, and what no assertion about the field was
+    /// ever going to notice.
+    private static let truncating: NSParagraphStyle = {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        return paragraph
+    }()
 }
