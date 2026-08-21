@@ -513,6 +513,11 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     /// Holds the trailing run on the query's own optical centre; see `textInkCenterOffset`.
     private var trailingControlsCentering: NSLayoutConstraint?
 
+    /// The room the run last asked for. Kept only to notice when it changes shape — a control
+    /// appearing or leaving moves the edge the pointer's I-beam stops at, and nothing about a
+    /// *subview's* visibility invalidates this view's own cursor rectangles.
+    private var trailingControlsWidth: CGFloat = 0
+
     private lazy var trailingControls: NSStackView = {
         trailingControlsBuilt = true
         let stack = NSStackView(views: [clearButton])
@@ -631,6 +636,59 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
         trailingContentInset = width > 0
             ? Layout.actionEdgeGap + width + Layout.actionTextGap
             : ThemedTextField.Layout.inset
+        guard width != trailingControlsWidth else { return }
+        trailingControlsWidth = width
+        window?.invalidateCursorRects(for: self)
+    }
+
+    // MARK: - Pointer
+
+    /// Where the trailing run begins, in this field's own coordinates — nil while it holds
+    /// nothing visible.
+    ///
+    /// Read from the controls' **frames** rather than derived from the room the text yields: a
+    /// themed button's frame reaches past the alignment rect the stack lays it out by, so the
+    /// two answers differ by an optical inset, and it is the frame the pointer meets.
+    private var trailingControlsLeadingEdge: CGFloat? {
+        guard trailingControlsBuilt else { return nil }
+        return trailingControls.arrangedSubviews
+            .filter { !$0.isHidden }
+            .map { $0.convert($0.bounds, to: self).minX }
+            .min()
+    }
+
+    /// `rect` clipped to the query's own side of the trailing run — the whole of it while the
+    /// run holds nothing, and nothing where a control stands.
+    ///
+    /// The caret's cursor belongs to the words, not to the buttons riding inside the field.
+    /// `NSTextField` registers **one** I-beam rectangle over its entire bounds — measured: it
+    /// ignores the cell's drawing rect, so the inset that keeps the *text* clear of the controls
+    /// does not keep the *pointer* clear of them — and it registers none at all once the field
+    /// is neither editable nor selectable. So the pointer went on saying "type here" over
+    /// Settings' Ask AI and over the ✕ that every search field in the app carries.
+    ///
+    /// Carved rather than covered by an arrow rectangle laid on top: overlapping cursor
+    /// rectangles are documented as undefined, and which of two AppKit prefers is a precedence
+    /// this repository has already failed to measure once (see `CoveredWindowCursor`, and the
+    /// design-system note of 2026-08-13). With nothing registered over a button it keeps the
+    /// ordinary arrow, which is what every other `ThemedButton` in the window shows.
+    func textCursorRect(clipping rect: NSRect) -> NSRect {
+        guard let edge = trailingControlsLeadingEdge else { return rect }
+        let query = NSRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: max(0, edge - bounds.minX),
+            height: bounds.height
+        )
+        return rect.intersection(query)
+    }
+
+    /// AppKit's own I-beam arrives through here, which is what lets the clip above be the whole
+    /// fix: whatever the field would have claimed, it claims only over the query.
+    override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
+        let query = textCursorRect(clipping: rect)
+        guard !query.isEmpty else { return }
+        super.addCursorRect(query, cursor: cursor)
     }
 
     override var stringValue: String {
