@@ -179,6 +179,29 @@ final class ConversationOutboxTests: XCTestCase {
         XCTAssertEqual(handed?.state, .handedOver)
     }
 
+    /// The held drain has to read the next item's origin *before* deciding whether it may hand
+    /// anything over, so peeking has to answer exactly what `handOverNext()` would take — and
+    /// leave it untouched, because a row put back after being taken is indistinguishable in the
+    /// rail from one a transport refused.
+    func testPeekingNamesTheNextItemWithoutTakingIt() {
+        var outbox = ConversationOutbox()
+        XCTAssertNil(outbox.nextPending)
+
+        let first = outbox.append(prompt("mine"))!
+        outbox.append(prompt("and this"), origin: .curfewWindDown)
+
+        XCTAssertEqual(outbox.nextPending?.id, first)
+        XCTAssertEqual(outbox.nextPending?.state, .queued)
+        XCTAssertEqual(outbox.nextPending?.origin, .user)
+        // Asking twice is still asking: nothing was consumed.
+        XCTAssertEqual(outbox.handOverNext()?.id, first)
+
+        // Handed-over rows are history; the peek moves past them to what is still owed.
+        XCTAssertEqual(outbox.nextPending?.origin, .curfewWindDown)
+        XCTAssertEqual(outbox.nextPending?.id, outbox.handOverNext()?.id)
+        XCTAssertNil(outbox.nextPending)
+    }
+
     // MARK: - Turn Outcome
 
     func testStoppedIsNotAnError() {

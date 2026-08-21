@@ -28871,7 +28871,8 @@
     "Releases this session now; nothing else about the rule changes.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Släpper sessionen nu; inget annat i regeln ändras."}}}},
     "Until %@": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Till %@"}}}},
     "Until quiet hours": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Till tysta timmar"}}}},
-    "Until quiet hours (%@)": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Till tysta timmar (%@)"}}}}
+    "Until quiet hours (%@)": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Till tysta timmar (%@)"}}}},
+    "Standing down for quiet hours until %@.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Står över för tysta timmar till %@."}}}}
   },
   "version": "1.0"
 }

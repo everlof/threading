@@ -69,6 +69,16 @@ struct ConversationOutbox: Equatable, Sendable {
     /// the queue's own gestures are concerned.
     var pending: [Item] { items.filter { $0.state.isPending } }
 
+    /// The item `handOverNext()` would take, without taking it.
+    ///
+    /// A held session's drain has to read the next item's `origin` *before* deciding whether it
+    /// may hand anything over, and `handOverNext()` marks what it returns. Peeking through
+    /// `pending.first` would build the whole filtered array to look at one element; more to the
+    /// point, a decision that has to un-hand-over what it just took is a decision with a window
+    /// in it — a reclaim would put the message back at the front of the queue with its state
+    /// rewritten, which is indistinguishable in the rail from a transport refusing it.
+    var nextPending: Item? { items.first { $0.state.isPending } }
+
     /// Whether another message may be written. A refusal is stated rather than silently dropping
     /// the oldest: a queue that quietly forgets what somebody typed is worse than one that says
     /// it is full.

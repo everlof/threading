@@ -97,6 +97,11 @@ enum UsageWindowHold: Equatable {
     /// statement about spending. The difference is whose line it is, which is why it is its own
     /// row rather than folded into that one.
     case customLimitReached(reason: String)
+    /// The standing quiet-hours window is open. Last of all, because it is the widest line the
+    /// user has drawn: a curfew every session inherits, over every account, for these hours of
+    /// every day. Opening a usage window inside it would spend the one thing the window is for —
+    /// a message sent while its owner is asleep — to move a boundary they asked nothing about.
+    case quietHours(until: Date)
 }
 
 // MARK: - Usage Window Plan
@@ -172,6 +177,10 @@ enum UsageWindowPlan {
         /// Whether one of the user's own limits stands in the way, and what it says. Gathered by
         /// the caller like everything else here, so the rules themselves stay pure.
         var customLimitHold: CustomLimitHold = .clear
+        /// When the standing quiet-hours window containing `now` closes, or nil when none is
+        /// open. Gathered by the caller like everything else here — the window arithmetic lives
+        /// in `QuietHours` and the rules below stay a function of what they were handed.
+        var quietHoursUntil: Date?
         var calendar: Calendar = .current
     }
 
@@ -232,6 +241,13 @@ enum UsageWindowPlan {
             return .hold(.customLimitReached(
                 reason: CustomLimitReceipt.holdReason(input.customLimitHold)
             ))
+        }
+
+        // Last of all, after the account's own line: quiet hours are a standing curfew drawn over
+        // every account at once, so a poke held here is held for every login the user has, and
+        // naming the narrower reason first tells them which one they can change today.
+        if let until = input.quietHoursUntil {
+            return .hold(.quietHours(until: until))
         }
 
         return .poke

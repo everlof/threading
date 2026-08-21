@@ -404,6 +404,8 @@ final class UsageWindowPreferencesViewController: NSViewController {
             // The rule's own sentence, not a paraphrase: the page that explains why nothing
             // happened this morning should say it in the same words as everywhere else.
             return reason
+        case .quietHours(let until):
+            return UsageWindowStrings.holdQuietHours(Self.time.string(from: until))
         }
     }
 
@@ -672,6 +674,10 @@ private enum UsageWindowStrings {
 
     static func holdBeforePokeTime(_ time: String) -> String {
         L10n.format("Waiting until %@.", time)
+    }
+
+    static func holdQuietHours(_ time: String) -> String {
+        L10n.format("Standing down for quiet hours until %@.", time)
     }
 
     static func holdWeeklyAheadOfPace(_ percent: Int) -> String {

@@ -75,6 +75,7 @@ final class WorkspaceControlPlaneTests: XCTestCase {
             SessionID, String?, SessionID
         ) -> SessionArchiveRequestOutcome = { _, _, _ in .scheduled },
         moveCount: @escaping (SessionID, SessionID, Date) -> Int = { _, _, _ in 0 },
+        heldByCurfew: @escaping (SessionID) -> String? = { _ in nil },
         armWatch: @escaping (
             SessionID, SessionID, TimeInterval?
         ) -> SessionWatchCenter.WatchArmOutcome = { _, _, timeout in
@@ -106,6 +107,7 @@ final class WorkspaceControlPlaneTests: XCTestCase {
                 armWatch: armWatch,
                 pendingPermission: pendingPermission,
                 resolvePermission: resolvePermission,
+                heldByCurfew: heldByCurfew,
                 grants: grants,
                 requestManagerArchive: requestManagerArchive,
                 accountMoveCount: moveCount
@@ -436,6 +438,81 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         )
         moveCount = 0
         XCTAssertNil(plane.admitMove(workspace.peer.id, from: actor))
+    }
+
+    /// A session past its curfew is not spent by the app on anybody else's initiative: not by a
+    /// message from a sibling, not by being woken, and — where the *manager* is the one under a
+    /// curfew — not by starting a second session to carry on in, which is the loop a curfew
+    /// exists to end.
+    ///
+    /// The reason travels intact rather than being paraphrased at the boundary: this refusal has
+    /// a different remedy from a limit's, and a caller that cannot tell them apart will either
+    /// give up on an account that is fine or keep trying siblings that are not.
+    func testACurfewRefusesSendResumeAndSpawnInItsOwnWords() throws {
+        var workspace = makeWorkspace()
+        // A resume is only ever offered for a native chat, so the target has to be one before
+        // the curfew is the reason it is refused rather than the surface.
+        workspace.project.sessions[1].usesNativeUI = true
+        let actor = ControlActor.agentSession(workspace.caller.id)
+        let grant = ControlGrant.manager(
+            sessionID: workspace.caller.id,
+            projectID: workspace.project.id,
+            maximumPermissionMode: .manual,
+            origin: .newManagerTemplate
+        )
+        let reason = CurfewReceiptWords.holdReason(
+            since: Date(timeIntervalSince1970: 1_775_016_000)
+        )
+        var held: Set<SessionID> = [workspace.peer.id]
+        let delivered = Delivered()
+        let plane = makePlane(
+            workspace,
+            delivered: delivered,
+            grants: { _ in [grant] },
+            heldByCurfew: { held.contains($0) ? reason : nil }
+        )
+
+        guard case .refused(.targetHeldByCurfew(let sendReason)) = send(
+            plane,
+            "one more thing",
+            to: workspace.peer.id,
+            from: actor
+        ) else { return XCTFail("a message reached a session past its curfew") }
+        XCTAssertEqual(sendReason, reason)
+        XCTAssertTrue(delivered.texts.isEmpty, "the plane delivered before refusing")
+
+        XCTAssertEqual(
+            plane.admitResume(workspace.peer.id, from: actor),
+            .targetHeldByCurfew(reason: reason)
+        )
+
+        // Spawn asks about the **manager**, because the child does not exist yet.
+        let plan = ScheduledSessionPlan(
+            reservedSessionID: SessionID(),
+            projectID: workspace.project.id,
+            kind: .claude,
+            accountHandle: .standard,
+            model: nil,
+            reasoningEffort: nil,
+            branch: nil,
+            usesNativeUI: true,
+            permissionMode: nil
+        )
+        XCTAssertNil(
+            plane.admitSpawn(plan, from: actor),
+            "a manager that is not held was refused a spawn"
+        )
+
+        held.insert(workspace.caller.id)
+        XCTAssertEqual(
+            plane.admitSpawn(plan, from: actor),
+            .targetHeldByCurfew(reason: reason)
+        )
+
+        XCTAssertTrue(
+            ControlRefusal.targetHeldByCurfew(reason: reason).toolWords.contains(reason),
+            "the tool's wording dropped the curfew's own sentence"
+        )
     }
 
     func testAnUnknownCallerHasNoScopeAndNoListing() {
