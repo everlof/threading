@@ -713,18 +713,7 @@ struct SessionDashboard: View {
                 get: { surfaceChangeRequest != nil },
                 set: { if !$0 { surfaceChangeRequest = nil } }
             ),
-            actions: [
-                ThemedDialogAction("Switch UI", systemImage: "rectangle.2.swap") {
-                    guard let request = surfaceChangeRequest else { return }
-                    surfaceChangeRequest = nil
-                    mutate(request.session) {
-                        try await model.setSurface(request.surface, for: request.session)
-                    }
-                },
-                ThemedDialogAction("Cancel", role: .cancel) {
-                    surfaceChangeRequest = nil
-                },
-            ]
+            actions: surfaceChangeActions(for: surfaceChangeRequest)
         )
         .themedConfirmationDialog(
             sharingSession.map {
@@ -735,30 +724,7 @@ struct SessionDashboard: View {
                 get: { sharingSession != nil },
                 set: { if !$0 { sharingSession = nil } }
             ),
-            actions: [
-                ThemedDialogAction(
-                    "View only",
-                    systemImage: "eye",
-                    isEnabled: sharingSession?.isAvailable == true
-                ) {
-                    createShare(capability: "view")
-                },
-                ThemedDialogAction(
-                    "Allow collaboration",
-                    systemImage: "person.2"
-                ) {
-                    createShare(capability: "interact")
-                },
-                ThemedDialogAction(
-                    "Collaboration + approvals",
-                    systemImage: "checkmark.shield"
-                ) {
-                    createShare(capability: "interact", canApprovePermissions: true)
-                },
-                ThemedDialogAction("Cancel", role: .cancel) {
-                    sharingSession = nil
-                },
-            ]
+            actions: shareRoleActions(for: sharingSession)
         )
         .themedAlert(
             "Rename session",
@@ -991,11 +957,56 @@ struct SessionDashboard: View {
         }
     }
 
+    /// The three grants, built from the chat they are about.
+    ///
+    /// The session is captured here rather than read back inside the handler. A system action
+    /// sheet clears its presentation binding as part of dismissing and runs the chosen button's
+    /// handler after that, so a handler that asked `sharingSession` again would find the nil the
+    /// binding had just written and silently mint nothing.
+    private func shareRoleActions(
+        for session: RemoteSessionSummaryDTO?
+    ) -> [ThemedDialogAction] {
+        guard let session else { return [] }
+        return [
+            ThemedDialogAction("View only", isEnabled: session.isAvailable) {
+                createShare(for: session, capability: RemoteCapability.view.rawValue)
+            },
+            ThemedDialogAction("Allow collaboration") {
+                createShare(for: session, capability: RemoteCapability.interact.rawValue)
+            },
+            ThemedDialogAction("Collaboration + approvals") {
+                createShare(
+                    for: session,
+                    capability: RemoteCapability.interact.rawValue,
+                    canApprovePermissions: true
+                )
+            },
+            ThemedDialogAction("Cancel", role: .cancel) { sharingSession = nil },
+        ]
+    }
+
+    /// The same capture, for the same reason, on the surface switch.
+    private func surfaceChangeActions(
+        for request: SurfaceChangeRequest?
+    ) -> [ThemedDialogAction] {
+        guard let request else { return [] }
+        return [
+            ThemedDialogAction("Switch UI") {
+                surfaceChangeRequest = nil
+                mutate(request.session) {
+                    try await model.setSurface(request.surface, for: request.session)
+                }
+            },
+            ThemedDialogAction("Cancel", role: .cancel) { surfaceChangeRequest = nil },
+        ]
+    }
+
     private func createShare(
+        for session: RemoteSessionSummaryDTO,
         capability: String,
         canApprovePermissions: Bool = false
     ) {
-        guard let session = sharingSession, pendingActionSessionID == nil else { return }
+        guard pendingActionSessionID == nil else { return }
         sharingSession = nil
         pendingActionSessionID = session.id
         Task {
@@ -1035,12 +1046,17 @@ struct SessionDashboard: View {
         return MobileAgentIdentity.resolve(session.agentKind).originalUITitle
     }
 
+    /// One sentence, because an action sheet's message is a caption rather than a page.
+    ///
+    /// It used to carry a four-line paragraph about single use, the 24-hour expiry, how long an
+    /// accepted member stays and what approval is. Three of those four facts are said again on
+    /// the link-ready sheet, next to the link they are about, and the fourth is the third
+    /// button's own title. What is left is the question the sheet is asking.
+    ///
+    /// The availability hint stays, because it is the only thing on screen that explains why one
+    /// of the three is dimmed.
     private var sharingDialogMessage: String {
-        var result = MobileL10n.string(
-            "This single-use invitation opens only this chat and expires in 24 hours if unused. "
-                + "An accepted member stays until you stop sharing. Permission approval is a "
-                + "separate right for people you trust."
-        )
+        var result = MobileL10n.string("Choose what this person can do in this chat.")
         if sharingSession?.isAvailable == false {
             result += MobileL10n.string(
                 " Start the chat first to create a view-only link."

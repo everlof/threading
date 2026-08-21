@@ -50,6 +50,9 @@ struct ThemedDialogAction: Identifiable {
     let isEnabled: Bool
     let perform: () -> Void
 
+    /// `systemImage` decorates an alert's own buttons. A confirmation is the operating system's
+    /// action sheet, which draws titles only, so the glyph is deliberately dropped there rather
+    /// than re-skinned back in.
     init(
         _ title: String,
         systemImage: String? = nil,
@@ -62,6 +65,14 @@ struct ThemedDialogAction: Identifiable {
         self.role = role
         self.isEnabled = isEnabled
         self.perform = perform
+    }
+
+    var buttonRole: ButtonRole? {
+        switch role {
+        case .standard: nil
+        case .cancel: .cancel
+        case .destructive: .destructive
+        }
     }
 }
 
@@ -77,18 +88,12 @@ struct ThemedDialogTextField {
     }
 }
 
-private enum ThemedDialogStyle {
-    case alert
-    case confirmation
-}
-
 private struct ThemedDialogModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var isPresented: Bool
 
     let title: String
     let message: String?
-    let style: ThemedDialogStyle
     let textField: ThemedDialogTextField?
     let actions: [ThemedDialogAction]
 
@@ -101,7 +106,6 @@ private struct ThemedDialogModifier: ViewModifier {
                     ThemedDialogPresentation(
                         title: title,
                         message: message,
-                        style: style,
                         textField: textField,
                         actions: actions,
                         dismiss: dismiss
@@ -118,12 +122,7 @@ private struct ThemedDialogModifier: ViewModifier {
 
     private var transition: AnyTransition {
         guard !reduceMotion else { return .opacity }
-        switch style {
-        case .alert:
-            return .scale(scale: 0.94).combined(with: .opacity)
-        case .confirmation:
-            return .move(edge: .bottom).combined(with: .opacity)
-        }
+        return .scale(scale: 0.94).combined(with: .opacity)
     }
 
     private func dismiss() {
@@ -131,11 +130,53 @@ private struct ThemedDialogModifier: ViewModifier {
     }
 }
 
+/// The bottom-anchored confirmation, which is the operating system's and not ours.
+///
+/// It used to be a card of our own: the theme's panel fill, our radii, our divider, our spring.
+/// Two things were wrong with that. It read as nothing — an iPhone owner knows what an action
+/// sheet standing on the bottom edge is, and a themed slab floating in the middle of the list
+/// is a message from no one. And it *was* floating, because the overlay it lived in is only as
+/// tall as the view it decorates, so "anchored to the bottom" meant the bottom of whatever the
+/// modifier happened to be attached to rather than the bottom of the screen.
+///
+/// This is the same exception the boundary already makes for the share sheet and the permission
+/// prompts: a surface whose presentation and trust story belong to iOS stays native and is not
+/// imitated. `ThemedDialog` remains the single seam, so a call site still says
+/// `themedConfirmationDialog` and still hands over `ThemedDialogAction` values.
+///
+/// **An item-backed dialog captures its item.** The system clears `isPresented` as part of
+/// dismissing, and the button's handler runs after that, so a handler that reads the `@State`
+/// the presentation binding nils out reads nothing. Build the actions from the item and let the
+/// closures capture it.
+private struct ThemedConfirmationDialogModifier: ViewModifier {
+    @Binding var isPresented: Bool
+
+    let title: String
+    let message: String?
+    let actions: [ThemedDialogAction]
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            title,
+            isPresented: $isPresented,
+            titleVisibility: .visible
+        ) {
+            ForEach(actions) { action in
+                Button(action.title, role: action.buttonRole) { action.perform() }
+                    .disabled(!action.isEnabled)
+            }
+        } message: {
+            if let message, !message.isEmpty {
+                Text(message)
+            }
+        }
+    }
+}
+
 private struct ThemedDialogPresentation: View {
     private enum Metrics {
         static let alertMaximumWidth: CGFloat = 420
-        static let confirmationMaximumWidth: CGFloat = 560
-        static let bottomClearance: CGFloat = 48
+        static let headerSpacing: CGFloat = 10
         static let regularScrollHeight: CGFloat = 280
         static let accessibilityScrollHeight: CGFloat = 360
     }
@@ -146,35 +187,19 @@ private struct ThemedDialogPresentation: View {
 
     let title: String
     let message: String?
-    let style: ThemedDialogStyle
     let textField: ThemedDialogTextField?
     let actions: [ThemedDialogAction]
     let dismiss: () -> Void
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                scrim
+        ZStack {
+            scrim
 
-                if style == .alert {
-                    dialogCard
-                        .frame(maxWidth: Metrics.alertMaximumWidth)
-                        .padding(.horizontal, MobileDesign.Spacing.large)
-                } else {
-                    VStack {
-                        Spacer(minLength: Metrics.bottomClearance)
-                        dialogCard
-                            .frame(maxWidth: Metrics.confirmationMaximumWidth)
-                            .padding(.horizontal, MobileDesign.Spacing.medium)
-                            .padding(
-                                .bottom,
-                                max(geometry.safeAreaInsets.bottom, MobileDesign.Spacing.medium)
-                            )
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            dialogCard
+                .frame(maxWidth: Metrics.alertMaximumWidth)
+                .padding(.horizontal, MobileDesign.Spacing.large)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         .onAppear {
@@ -198,11 +223,6 @@ private struct ThemedDialogPresentation: View {
         Color.black
             .opacity(theme.colorScheme == .light ? 0.28 : 0.58)
             .ignoresSafeArea()
-            .contentShape(Rectangle())
-            .onTapGesture {
-                guard style == .confirmation else { return }
-                dismiss()
-            }
             .accessibilityHidden(true)
     }
 
@@ -238,22 +258,19 @@ private struct ThemedDialogPresentation: View {
     }
 
     private var dialogHeader: some View {
-        VStack(
-            alignment: style == .alert ? .center : .leading,
-            spacing: 10
-        ) {
+        VStack(alignment: .center, spacing: Metrics.headerSpacing) {
             Text(title)
                 .font(.headline)
                 .foregroundStyle(theme.label)
-                .multilineTextAlignment(style == .alert ? .center : .leading)
-                .frame(maxWidth: .infinity, alignment: titleAlignment)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, alignment: .center)
 
             if let message, !message.isEmpty {
                 Text(message)
                     .font(.subheadline)
                     .foregroundStyle(theme.secondaryLabel)
-                    .multilineTextAlignment(style == .alert ? .center : .leading)
-                    .frame(maxWidth: .infinity, alignment: titleAlignment)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
 
             if let textField {
@@ -288,7 +305,7 @@ private struct ThemedDialogPresentation: View {
 
     @ViewBuilder
     private var actionArea: some View {
-        if style == .alert, actions.count <= 2, !dynamicTypeSize.isAccessibilitySize {
+        if actions.count <= 2, !dynamicTypeSize.isAccessibilitySize {
             HStack(spacing: MobileDesign.Spacing.medium) {
                 ForEach(actions) { action in
                     actionButton(
@@ -362,10 +379,6 @@ private struct ThemedDialogPresentation: View {
         )
     }
 
-    private var titleAlignment: Alignment {
-        style == .alert ? .center : .leading
-    }
-
     private var cardRadius: CGFloat {
         theme.panelRadius
     }
@@ -408,14 +421,18 @@ extension View {
                 isPresented: isPresented,
                 title: MobileL10n.string(title),
                 message: message.map { MobileL10n.string($0) },
-                style: .alert,
                 textField: textField,
                 actions: actions
             )
         )
     }
 
-    /// Presents a themed action dialog anchored to the bottom of the screen.
+    /// Presents the operating system's action sheet, anchored to the bottom of the screen.
+    ///
+    /// This is the one place in `ThreadingMobile` that may say `confirmationDialog`;
+    /// `check_mobile_theme_boundaries.py` enforces that, for the same reason the settings row
+    /// plate has one owner. An item-backed call site builds its actions from the item and lets
+    /// the handlers capture it: the system clears `isPresented` before the handler runs.
     func themedConfirmationDialog(
         _ title: String,
         message: String? = nil,
@@ -423,12 +440,10 @@ extension View {
         actions: [ThemedDialogAction]
     ) -> some View {
         modifier(
-            ThemedDialogModifier(
+            ThemedConfirmationDialogModifier(
                 isPresented: isPresented,
                 title: MobileL10n.string(title),
                 message: message.map { MobileL10n.string($0) },
-                style: .confirmation,
-                textField: nil,
                 actions: actions
             )
         )

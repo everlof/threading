@@ -41,6 +41,28 @@ or:
 )
 ```
 
+### The two halves are made of different things
+
+`themedAlert` is drawn by this app: a centred panel in the remote theme's material, because an
+alert is Threading speaking and it should look like Threading.
+
+`themedConfirmationDialog` is the operating system's action sheet. It used to be a card of our
+own and it was wrong twice over. It read as nothing: an iPhone owner knows what an action sheet
+standing on the bottom edge of the screen is, and a themed slab floating in the middle of a list
+is a message from no one. And it *was* floating, because the overlay a `ViewModifier` adds is
+only as tall as the view it decorates, so "anchored to the bottom" meant the bottom of whatever
+the modifier happened to be attached to. The share-role chooser shipped that way and the owner
+reported it as a prompt that "floats too much".
+
+This is the same exception the boundary already makes below for the share sheet and the
+permission prompts, and that the composer's attachment-source sheet already took: a surface whose
+presentation and trust story belong to iOS stays native and is not imitated. The system chrome is
+the point. Do not re-skin it, and do not read the change as permission to reach for
+`.confirmationDialog` at a call site — `scripts/check_mobile_theme_boundaries.py` fails the build
+on one outside `ThemedDialog.swift`, so there is still exactly one component for these prompts.
+
+`systemImage` therefore decorates an alert's buttons only. An action sheet draws titles.
+
 ### Extension rule
 
 **Extend `ThemedDialog` as soon as an application-owned dialog needs something it cannot
@@ -57,12 +79,12 @@ similar operating-system surfaces remain native and are not imitated or themed.
 
 The shared primitive owns:
 
-- compact alerts and bottom-anchored confirmations;
+- compact themed alerts, and bottom-anchored confirmations in the system's own chrome;
 - standard, cancel, destructive and disabled actions;
 - optional text input and keyboard focus;
-- resolved semantic colour, light/dark mode, border weight, radii and panel glow;
+- resolved semantic colour, light/dark mode, border weight, radii and panel glow, for alerts;
 - modal hit testing and VoiceOver announcement;
-- Dynamic Type layout and Reduce Motion transitions;
+- Dynamic Type layout and Reduce Motion transitions, for alerts;
 - outside-tap dismissal for confirmations, while alerts require an explicit action.
 
 Remote themes own material — colours, radii, border weight and glow — while
@@ -70,8 +92,13 @@ Remote themes own material — colours, radii, border weight and glow — while
 inset from the panel edge, and filled actions use the active theme's control radius. Do not put
 spacing into an individual dialog or make it vary by decorative theme.
 
-Action handlers run before the presentation binding is cleared. This preserves item-backed
-dialogs whose handler needs to read the selected session before dismissal.
+**An item-backed confirmation captures its item.** An alert still runs its handler before the
+presentation binding is cleared, so a handler may read the selected session on the way out. The
+system action sheet does not work that way: it clears `isPresented` as part of dismissing and
+calls the button's handler afterwards, so a handler that reads the `@State` the binding nils out
+reads nothing and does its work on nobody. Build the actions from the item and let the closures
+capture it, the way `SessionDashboard.shareRoleActions(for:)` does. Three call sites depended on
+the old ordering and all three would have silently stopped working.
 
 ## Settings surfaces
 
