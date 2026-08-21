@@ -474,6 +474,16 @@
         }
       }
     },
+    "Open in the Threading app. Works for someone on your Wi-Fi or tailnet.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna i Threading-appen. Fungerar för någon på ditt wifi eller ditt tailnet."
+          }
+        }
+      }
+    },
     "Opening attachment…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppnar bilaga…" } } }
     },
@@ -1330,32 +1340,32 @@
         }
       }
     },
-    "Can collaborate and approve requests": {
+    "Can collaborate in “%@” and approve requests": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kan samarbeta och godkänna begäranden"
+            "value": "Kan samarbeta i “%@” och godkänna begäranden"
           }
         }
       }
     },
-    "Can collaborate in this chat": {
+    "Can collaborate in “%@”": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kan samarbeta i den här chatten"
+            "value": "Kan samarbeta i “%@”"
           }
         }
       }
     },
-    "Can view this chat": {
+    "Can view “%@”": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kan visa den här chatten"
+            "value": "Kan visa “%@”"
           }
         }
       }

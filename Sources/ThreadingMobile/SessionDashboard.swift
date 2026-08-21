@@ -1688,7 +1688,31 @@ private struct SessionListItem: View {
     }
 }
 
+/// What a freshly minted invitation says about itself, and the two ways to hand it over.
+///
+/// **Three text styles, not five.** It used to set a title, the chat's name, the grant, the
+/// expiry and a closing paragraph in five different sizes down one narrow column, which reads as
+/// five unrelated announcements rather than one answer. The chat's name moved into the sentence
+/// that says what the link grants — that sentence is *about* the chat, so it may as well name it
+/// — and the expiry and the closing line share the footnote they were always both saying.
+///
+/// **Two buttons the same size.** The secondary used to be a bordered pill about half the width
+/// of the primary, which made copying look like a different class of action rather than the same
+/// action through a different door. Both are now the dialog action height, both full width, one
+/// filled with the accent and one with the theme's quiet control fill; the border is gone,
+/// matching the resting controls everywhere else on the phone.
+///
+/// **The closing line wraps.** It was a `Text` built by concatenating two literals, which is a
+/// `String` expression rather than a literal — so SwiftUI chose `Text(verbatim:)` and the
+/// sentence was never localized at all, appearing in English inside a Swedish app. It was also
+/// clipped mid-word, because the content stood in a fixed `.medium` sheet with no way to scroll
+/// and the last view in the stack is the one that gets compressed. It goes through `MobileL10n`
+/// and states its own height now, inside a scroll view that can always reach it.
 struct SharedSessionLinkView: View {
+    private enum Metrics {
+        static let markSize: CGFloat = 42
+    }
+
     let link: SharedSessionLink
     @Environment(\.remoteTheme) private var theme
     @Environment(\.dismiss) private var dismiss
@@ -1696,76 +1720,66 @@ struct SharedSessionLinkView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 22) {
-                Image(systemName: link.capability == "interact"
-                    ? "person.2.badge.gearshape"
-                    : "person.2")
-                    .font(.system(size: 42, weight: .light))
-                    .foregroundStyle(theme.accent)
+            ScrollView {
+                VStack(spacing: MobileDesign.Spacing.large) {
+                    Image(systemName: markSymbol)
+                        .font(.system(size: Metrics.markSize, weight: .light))
+                        .foregroundStyle(theme.accent)
+                        .accessibilityHidden(true)
 
-                VStack(spacing: 7) {
-                    Text("Link ready")
-                        .font(.title2.bold())
-                    Text(link.sessionTitle)
-                        .font(.headline)
-                    Text(MobileL10n.string(link.capability == "interact"
-                        ? (link.canApprovePermissions
-                            ? "Can collaborate and approve requests"
-                            : "Can collaborate in this chat")
-                        : "Can view this chat"))
-                        .font(.subheadline)
-                        .foregroundStyle(theme.secondaryLabel)
-                    Text("Unused invite expires \(link.expiresAt.formatted(.relative(presentation: .named)))")
-                        .font(.caption)
-                        .foregroundStyle(theme.tertiaryLabel)
-                }
-                .multilineTextAlignment(.center)
+                    VStack(spacing: MobileDesign.Spacing.small) {
+                        Text("Link ready")
+                            .font(.title2.bold())
+                            .foregroundStyle(theme.label)
 
-                ShareLink(item: link.url) {
-                    Label("Share link", systemImage: "square.and.arrow.up")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 56)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(theme.accentForeground)
-                .background(
-                    theme.accent,
-                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                )
+                        Text(grantLine)
+                            .font(.body)
+                            .foregroundStyle(theme.secondaryLabel)
 
-                Button {
-                    UIPasteboard.general.string = link.url.absoluteString
-                    copied = true
-                } label: {
-                    Label(MobileL10n.string(copied ? "Copied" : "Copy link"), systemImage: copied
-                        ? "checkmark"
-                        : "doc.on.doc")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(theme.label)
-                .padding(.horizontal, MobileDesign.Spacing.large)
-                .frame(minHeight: MobileDesign.Size.minimumTapTarget)
-                .background(
-                    theme.controlResting,
-                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: theme.controlRadius)
-                        .stroke(theme.border, lineWidth: theme.borderWidth)
-                }
-
-                Text(
-                    "The invite works once. After acceptance, access lasts until you stop "
-                        + "sharing and never extends to another chat."
-                )
-                    .font(.footnote)
-                    .foregroundStyle(theme.secondaryLabel)
+                        Text(expiryLine)
+                            .font(.footnote)
+                            .foregroundStyle(theme.secondaryLabel)
+                    }
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(spacing: MobileDesign.Spacing.medium) {
+                        ShareLink(item: sharedText) {
+                            actionLabel("Share link", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(theme.accentForeground)
+                        .background(
+                            theme.accent,
+                            in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                        )
+
+                        Button {
+                            UIPasteboard.general.string = sharedText
+                            copied = true
+                        } label: {
+                            actionLabel(
+                                copied ? "Copied" : "Copy link",
+                                systemImage: copied ? "checkmark" : "doc.on.doc"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(theme.label)
+                        .background(
+                            theme.controlResting,
+                            in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                        )
+                    }
+
+                    Text(SharedSessionLinkCopy.footer)
+                        .font(.footnote)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(MobileDesign.Spacing.pane)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(theme.ground)
             .navigationTitle("Share chat")
             .navigationBarTitleDisplayMode(.inline)
@@ -1775,7 +1789,83 @@ struct SharedSessionLinkView: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+    }
+
+    private func actionLabel(_ title: String, systemImage: String) -> some View {
+        Label(MobileL10n.string(title), systemImage: systemImage)
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: MobileDesign.Size.dialogActionHeight)
+            .contentShape(Rectangle())
+    }
+
+    private var markSymbol: String {
+        link.capability == RemoteCapability.interact.rawValue
+            ? "person.2.badge.gearshape"
+            : "person.2"
+    }
+
+    private var grantLine: String {
+        SharedSessionLinkCopy.grant(
+            chatTitle: link.sessionTitle,
+            capability: link.capability,
+            canApprovePermissions: link.canApprovePermissions
+        )
+    }
+
+    private var expiryLine: String {
+        MobileL10n.string(
+            "Unused invite expires %@",
+            link.expiresAt.formatted(.relative(presentation: .named))
+        )
+    }
+
+    private var sharedText: String {
+        SharedSessionLinkCopy.sharedText(for: link.url)
+    }
+}
+
+/// The words an invitation leaves Threading with.
+///
+/// A value rather than three computed properties on the view, so a test can hold the sentence
+/// the recipient reads without standing a sheet up first.
+enum SharedSessionLinkCopy {
+    /// One line saying what the link grants, naming the chat it grants.
+    static func grant(
+        chatTitle: String,
+        capability: String,
+        canApprovePermissions: Bool
+    ) -> String {
+        guard capability == RemoteCapability.interact.rawValue else {
+            return MobileL10n.string("Can view “%@”", chatTitle)
+        }
+        return canApprovePermissions
+            ? MobileL10n.string("Can collaborate in “%@” and approve requests", chatTitle)
+            : MobileL10n.string("Can collaborate in “%@”", chatTitle)
+    }
+
+    static var footer: String {
+        MobileL10n.string(
+            "The invite works once. After acceptance, access lasts until you stop sharing "
+                + "and never extends to another chat."
+        )
+    }
+
+    /// What the recipient is actually sent.
+    ///
+    /// The invitation used to travel as the bare `https` URL of a private door, so tapping it on
+    /// the recipient's phone opened Safari at a LAN address with a certificate no browser can
+    /// vouch for. The composition is `ThreadingRemoteKit`'s, shared with the Mac's own copy
+    /// actions so the two cannot drift.
+    static func sharedText(for shareURL: URL) -> String {
+        RemoteInvitationShare.text(shareURL: shareURL, guidance: guidance)
+    }
+
+    static var guidance: String {
+        MobileL10n.string(
+            "Open in the Threading app. Works for someone on your Wi-Fi or tailnet."
+        )
     }
 }
 
