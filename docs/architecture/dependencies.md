@@ -97,11 +97,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - **Main-queue output is bounded.** PTY reads pause once pending terminal data reaches the
     4 MiB high-water mark and resume below 1 MiB. The kernel PTY buffer then supplies
     normal producer backpressure instead of an unbounded queue growing behind a busy AppKit
-    thread. One completed `DispatchIO` read starts one successor; partial callbacks do not fork
-    additional read chains. Reads and queued chunks carry a launch generation; starting the next
-    process clears the previous generation so late DispatchIO callbacks cannot leak old bytes
-    into the replacement terminal. Deinitialization closes the PTY, cancels the monitor and gives
-    the child to an independent waiter so it cannot remain a zombie.
+    thread. `DispatchIO` may split one 128 KiB read into roughly one callback per KiB; adjacent
+    fragments already waiting at the main-queue drain are delivered as one bounded parser call,
+    while an isolated interactive fragment is delivered immediately. One completed read starts
+    one successor; partial callbacks do not fork additional read chains. Reads and queued chunks
+    carry a launch generation; starting the next process clears the previous generation so late
+    DispatchIO callbacks cannot leak old bytes into the replacement terminal. Deinitialization
+    closes the PTY, cancels the monitor and gives the child to an independent waiter so it cannot
+    remain a zombie.
   - **Mouse-wheel coordinates are viewport-relative.** Full-screen clients such as Claude enable
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets

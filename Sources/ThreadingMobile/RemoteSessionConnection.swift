@@ -618,9 +618,7 @@ final class RemoteSessionConnection: ObservableObject {
             // can supersede the immediate first lease while its repaint is still in flight;
             // giving it a new id makes the earlier boundary harmless instead of revealing the
             // newer resize half-painted.
-            let created = UUID().uuidString.lowercased()
-            terminalHydrationRequestID = created
-            requestID = created
+            requestID = UUID().uuidString.lowercased()
         } else {
             requestID = nil
         }
@@ -856,12 +854,21 @@ final class RemoteSessionConnection: ObservableObject {
                lastSentTerminalViewport?.rows == rows {
                 return
             }
+            // The hydration generation belongs to the viewport that actually crosses the
+            // wire. Constructing a message is not sending it: a settled layout can return to
+            // the already-leased grid and hit the duplicate guard above. Recording its fresh
+            // request id before that guard would make the real host boundary look stale and
+            // leave the opening placeholder up until the emergency timeout.
+            if let requestID = message.requestID {
+                terminalHydrationRequestID = requestID
+            }
             lastSentTerminalViewport = (cols, rows)
             noteTerminalHydrationViewportSent()
 #if DEBUG
             MobileTerminalWirePerformanceProbe.viewportSent(
                 columns: cols,
                 rows: rows,
+                hasHydrationRequestID: message.requestID != nil,
                 session: session
             )
 #endif
@@ -1038,7 +1045,12 @@ final class RemoteSessionConnection: ObservableObject {
             cancelHelloDeadline()
             phase = .connected
 #if DEBUG
-            MobileTerminalWirePerformanceProbe.helloReceived(session)
+            MobileTerminalWirePerformanceProbe.helloReceived(
+                session,
+                supportsHydrationBoundary: serverFeatures.contains(
+                    RemoteWebSocketFeature.terminalHydrationBoundary.rawValue
+                )
+            )
 #endif
             MobileDiagnostics.recordConnectivity(.socketConnected, fields: socketFields(
                 phase: "hello"
@@ -1067,6 +1079,15 @@ final class RemoteSessionConnection: ObservableObject {
                 RemoteTerminalReadyDTO.self,
                 from: data
             ) else { return }
+#if DEBUG
+            MobileTerminalWirePerformanceProbe.terminalReadyReceived(
+                session,
+                hasRequestID: ready.requestID != nil,
+                matchesExpectedRequest: capability == .interact
+                    ? ready.requestID == terminalHydrationRequestID
+                    : ready.requestID == nil
+            )
+#endif
             // Text and binary WebSocket messages are ordered, but SwiftTerm may not be mounted
             // yet. Keep the boundary behind the buffered bytes in the renderer as well as on
             // the socket or a fast host could reveal before the view parsed its final seed.

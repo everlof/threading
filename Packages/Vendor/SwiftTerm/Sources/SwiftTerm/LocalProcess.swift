@@ -85,6 +85,10 @@ public class LocalProcess {
 
     private let usesMainQueue: Bool
     private let pendingChunkFlushThreshold = 32
+    /// DispatchIO is free to split one read into many partial callbacks. Those fragments carry
+    /// no semantic boundary, so deliver adjacent fragments that are already waiting as one
+    /// bounded parser call. A lone interactive fragment still reaches the delegate immediately.
+    private let pendingDeliveryMaximumBytes = 128 * 1024
     private let pendingTimeSliceNanoseconds: UInt64 = 4_000_000
     private let pendingHighWaterBytes = 4 * 1024 * 1024
     private let pendingLowWaterBytes = 1 * 1024 * 1024
@@ -205,7 +209,7 @@ public class LocalProcess {
         let startedAt = DispatchTime.now().uptimeNanoseconds
 
         while true {
-            var chunk: [UInt8]?
+            var delivery: [UInt8]?
             var shouldResumeRead = false
 
             pendingLock.lock()
@@ -214,15 +218,40 @@ public class LocalProcess {
                 return
             }
             if pendingChunkIndex < pendingChunks.count {
-                chunk = pendingChunks[pendingChunkIndex]
-                pendingChunkIndex += 1
-                if pendingChunkIndex >= pendingChunkFlushThreshold {
+                let firstIndex = pendingChunkIndex
+                var endIndex = firstIndex
+                var deliveryBytes = 0
+                while endIndex < pendingChunks.count {
+                    let nextBytes = pendingChunks[endIndex].count
+                    if deliveryBytes > 0,
+                       deliveryBytes + nextBytes > pendingDeliveryMaximumBytes {
+                        break
+                    }
+                    deliveryBytes += nextBytes
+                    endIndex += 1
+                }
+
+                if endIndex == firstIndex + 1 {
+                    delivery = pendingChunks[firstIndex]
+                } else {
+                    var joined = [UInt8]()
+                    joined.reserveCapacity(deliveryBytes)
+                    for index in firstIndex..<endIndex {
+                        joined.append(contentsOf: pendingChunks[index])
+                    }
+                    delivery = joined
+                }
+                pendingChunkIndex = endIndex
+                if pendingChunkIndex == pendingChunks.count {
+                    pendingChunks.removeAll(keepingCapacity: true)
+                    pendingChunkIndex = 0
+                } else if pendingChunkIndex >= pendingChunkFlushThreshold {
                     pendingChunks.removeFirst(pendingChunkIndex)
                     pendingChunkIndex = 0
                 }
 
-                if let chunk {
-                    pendingBytes -= chunk.count
+                if let delivery {
+                    pendingBytes -= delivery.count
                     if readSuspendedForBackpressure && pendingBytes <= pendingLowWaterBytes {
                         readSuspendedForBackpressure = false
                         shouldResumeRead = true
@@ -241,8 +270,8 @@ public class LocalProcess {
             if shouldResumeRead {
                 resumePtyRead(generation: generation)
             }
-            if let chunk {
-                delegate?.dataReceived(slice: chunk[...])
+            if let delivery {
+                delegate?.dataReceived(slice: delivery[...])
             }
 
             if DispatchTime.now().uptimeNanoseconds - startedAt >= pendingTimeSliceNanoseconds {

@@ -42,9 +42,13 @@ enum MobileTerminalWirePerformanceProbe {
         )
     }
 
-    static func helloReceived(_ session: RemoteSessionSummaryDTO) {
+    static func helloReceived(
+        _ session: RemoteSessionSummaryDTO,
+        supportsHydrationBoundary: Bool
+    ) {
         guard let run = runs[session.id] else { return }
         run.helloAt = run.helloAt ?? CACurrentMediaTime()
+        run.hostSupportsHydrationBoundary = supportsHydrationBoundary
     }
 
     static func terminalViewCreated(_ session: RemoteSessionSummaryDTO) {
@@ -57,6 +61,32 @@ enum MobileTerminalWirePerformanceProbe {
         run.hydrationCompletedAt = run.hydrationCompletedAt ?? CACurrentMediaTime()
     }
 
+    /// The host queues two final binary frames immediately before its text boundary: the
+    /// authoritative screen seed and the current mode seed. Remembering only the newest three
+    /// binary arrivals gives the lab exact repaint/quiet/marker phases without changing the
+    /// shipping wire DTO or retaining an unbounded per-frame timeline.
+    static func terminalReadyReceived(
+        _ session: RemoteSessionSummaryDTO,
+        hasRequestID: Bool,
+        matchesExpectedRequest: Bool
+    ) {
+        guard let run = runs[session.id] else { return }
+        run.terminalReadyFrames += 1
+        if hasRequestID {
+            run.terminalReadyFramesWithRequestID += 1
+        }
+        guard matchesExpectedRequest, run.hydrationBoundaryAt == nil else { return }
+        run.hydrationBoundaryAt = CACurrentMediaTime()
+        guard let viewportAt = run.lastViewportAt,
+              run.recentOutputEvents.count == 3,
+              run.recentOutputEvents[0].timestamp >= viewportAt else { return }
+        run.lastRepaintOutputAt = run.recentOutputEvents[0].timestamp
+        run.finalScreenSeedAt = run.recentOutputEvents[1].timestamp
+        run.finalModeSeedAt = run.recentOutputEvents[2].timestamp
+        run.finalScreenSeedBytes = run.recentOutputEvents[1].byteCount
+        run.finalModeSeedBytes = run.recentOutputEvents[2].byteCount
+    }
+
     static func outputReceived(_ data: Data, session: RemoteSessionSummaryDTO) {
         guard let run = runs[session.id] else { return }
         let now = CACurrentMediaTime()
@@ -65,6 +95,10 @@ enum MobileTerminalWirePerformanceProbe {
             run.maximumOutputGap = max(run.maximumOutputGap, now - previous)
         }
         run.lastOutputAt = now
+        run.recentOutputEvents.append(OutputEvent(timestamp: now, byteCount: data.count))
+        if run.recentOutputEvents.count > 3 {
+            run.recentOutputEvents.removeFirst(run.recentOutputEvents.count - 3)
+        }
         run.outputFrames += 1
         run.outputBytes += data.count
         run.clearScreenCount += occurrences(of: [0x1b, 0x5b, 0x32, 0x4a], in: data)
@@ -210,6 +244,7 @@ enum MobileTerminalWirePerformanceProbe {
     static func viewportSent(
         columns: Int,
         rows: Int,
+        hasHydrationRequestID: Bool,
         session: RemoteSessionSummaryDTO
     ) {
         guard let run = runs[session.id] else { return }
@@ -217,6 +252,9 @@ enum MobileTerminalWirePerformanceProbe {
         run.firstViewportAt = run.firstViewportAt ?? now
         run.lastViewportAt = now
         run.viewportCount += 1
+        if hasHydrationRequestID {
+            run.viewportRequestsWithHydrationID += 1
+        }
         run.lastColumns = columns
         run.lastRows = rows
         if run.viewportSentEvents.count < 32 {
@@ -281,6 +319,36 @@ enum MobileTerminalWirePerformanceProbe {
                 "connect_to_view_ms": interval(run.connectedAt, run.viewCreatedAt),
                 "connect_to_reveal_ms": interval(run.connectedAt, run.hydrationCompletedAt),
                 "connect_to_settle_ms": milliseconds(lastFeedAt - run.connectedAt),
+                "viewport_to_last_repaint_ms": interval(
+                    run.lastViewportAt,
+                    run.lastRepaintOutputAt
+                ),
+                "last_repaint_to_final_seed_ms": interval(
+                    run.lastRepaintOutputAt,
+                    run.finalScreenSeedAt
+                ),
+                "final_seed_to_mode_seed_ms": interval(
+                    run.finalScreenSeedAt,
+                    run.finalModeSeedAt
+                ),
+                "mode_seed_to_boundary_ms": interval(
+                    run.finalModeSeedAt,
+                    run.hydrationBoundaryAt
+                ),
+                "final_screen_seed_bytes": String(run.finalScreenSeedBytes),
+                "final_mode_seed_bytes": String(run.finalModeSeedBytes),
+                "boundary_to_reveal_ms": interval(
+                    run.hydrationBoundaryAt,
+                    run.hydrationCompletedAt
+                ),
+                "host_hydration_boundary": run.hostSupportsHydrationBoundary ? "1" : "0",
+                "viewport_requests_with_hydration_id": String(
+                    run.viewportRequestsWithHydrationID
+                ),
+                "terminal_ready_frames": String(run.terminalReadyFrames),
+                "terminal_ready_frames_with_request_id": String(
+                    run.terminalReadyFramesWithRequestID
+                ),
                 "first_feed_to_display_ms": interval(run.firstFeedAt, run.firstDisplayAt),
                 "output_frames": String(run.outputFrames),
                 "output_bytes": String(run.outputBytes),
@@ -429,6 +497,16 @@ enum MobileTerminalWirePerformanceProbe {
         var helloAt: CFTimeInterval?
         var viewCreatedAt: CFTimeInterval?
         var hydrationCompletedAt: CFTimeInterval?
+        var hydrationBoundaryAt: CFTimeInterval?
+        var hostSupportsHydrationBoundary = false
+        var viewportRequestsWithHydrationID = 0
+        var terminalReadyFrames = 0
+        var terminalReadyFramesWithRequestID = 0
+        var lastRepaintOutputAt: CFTimeInterval?
+        var finalScreenSeedAt: CFTimeInterval?
+        var finalModeSeedAt: CFTimeInterval?
+        var finalScreenSeedBytes = 0
+        var finalModeSeedBytes = 0
         var firstOutputAt: CFTimeInterval?
         var lastOutputAt: CFTimeInterval?
         var firstFeedAt: CFTimeInterval?
@@ -437,6 +515,7 @@ enum MobileTerminalWirePerformanceProbe {
         var outputFrames = 0
         var outputBytes = 0
         var maximumOutputGap: CFTimeInterval = 0
+        var recentOutputEvents: [OutputEvent] = []
         var feedCalls = 0
         var feedSeconds: CFTimeInterval = 0
         var maximumFeedSeconds: CFTimeInterval = 0
@@ -479,6 +558,11 @@ enum MobileTerminalWirePerformanceProbe {
             firstEntryDisplayAt = firstEntryDisplayAt ?? timestamp
             lastEntryDisplayAt = timestamp
         }
+    }
+
+    private struct OutputEvent {
+        let timestamp: CFTimeInterval
+        let byteCount: Int
     }
 
     private final class Typing {

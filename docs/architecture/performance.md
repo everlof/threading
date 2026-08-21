@@ -349,6 +349,48 @@ behind the boundary. Frame-by-frame inspection of the simulator recording shows 
 followed by one complete, stable terminal for both providers. The run artifacts are
 `/tmp/threading-profiles/20260821T100838Z-ios-terminal-wire-lab`.
 
+A second instrumented pass found that those feed/settle numbers did not prove the placeholder's
+own lifetime. A viewport message used to install its new hydration request id while the message
+was *constructed*, before `send` rejected a duplicate grid. If layout crossed another cell count
+and settled back on the grid already leased, that unsent id replaced the generation actually on
+the wire. The Mac returned the correct ordered boundary, but the phone treated it as stale; since
+the host had advertised the boundary, the legacy one-second fallback was deliberately disabled
+and the visible loader survived until the four-second emergency timeout. Request-id ownership now
+moves only after the duplicate guard, beside the update of `lastSentTerminalViewport`.
+`testAnUnsentDuplicateViewportCannotReplaceTheHydrationGeneration` holds that exact return-to-the-
+same-grid case.
+
+The same pass removed transport callback amplification below the terminal protocol. SwiftTerm's
+`DispatchIO` read is 128 KB, but Darwin commonly delivered it as roughly 1 KB partial callbacks;
+each partial became a main-thread emulator feed, capture update and WebSocket frame. Adjacent
+fragments that are already waiting when the main-queue drain runs are now joined into bounded
+128 KB deliveries. There is no coalescing timer, so an isolated keystroke/output fragment is still
+delivered immediately; the existing time slice, generation checks and 4 MB/1 MB backpressure
+remain intact. The 8 MiB backpressure test still passes, and a new 512 KiB fixture asserts exact
+byte delivery with a bounded callback count.
+
+With both repairs, three entries per provider measured Codex at 742 ms cold and 553/542 ms warm
+(547 ms warm median) and Claude at 376 ms cold and 359/375 ms warm (367 ms warm median). Codex
+fell from 155–157 output frames to seven; Claude fell from seven to five. Every capable-host run
+sent one hydration request id and received one matching `terminalReady`; marker-to-reveal was
+0.04–0.07 ms. The warm Codex path was approximately 113 ms to hello, 15 ms from hello to the
+viewport, 235 ms for the resize repair to reach the phone, and 184 ms from its last repaint frame
+to the final seed. Warm Claude was approximately 116 ms to hello, 19 ms to the viewport, 37 ms to
+the repaint and 195 ms to the final seed. The last interval is the Mac's nominal 200 ms local
+quiet boundary. Observed repaint/final-seed gaps still reached 208 ms, so reducing that guard
+without a provider-owned repaint-complete signal would trade latency for the original partial
+reveal. Frame-by-frame inspection at 500 ms intervals again shows only the loader followed by one
+complete terminal. The measured artifacts are
+`/tmp/threading-profiles/20260821T131423Z-ios-terminal-wire-lab`.
+
+Starting a session socket from the row tap rather than the detail's task is not a useful next
+optimization: the real view is created 9–12 ms after connection start, so it can recover only
+that small scheduling slice. Preconnecting dashboard rows would violate the catalogue scaling
+contract above by adding sockets, replay buffers and terminal capture per candidate. Reusing one
+recently popped connection could remove the ~110 ms handshake, but it changes viewport-release,
+presence and renderer lifetime semantics and is deliberately a separate bounded-cache experiment,
+not part of this entry repair.
+
 ### Scaling audit, 2026-08-08
 
 The Tools page prompted a repository sweep for the patterns above. This is a risk inventory, not a

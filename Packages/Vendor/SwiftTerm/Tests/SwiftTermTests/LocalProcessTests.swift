@@ -348,11 +348,50 @@ final class LocalProcessTests: XCTestCase {
         wait(for: [outputExpectation, terminationExpectation], timeout: 60)
         XCTAssertEqual(delegate.outputByteCount, byteCount)
     }
+
+    func testMainQueueBatchesDispatchIOFragmentsAlreadyWaitingForDelivery() {
+        let byteCount = 512 * 1024
+        let outputExpectation = expectation(description: "all batched output delivered")
+        let terminationExpectation = expectation(description: "producer terminated")
+        let delegate = ProcessDelegate()
+        delegate.capturesText = false
+        delegate.expectedByteCount = byteCount
+        delegate.onExpectedByteCount = { outputExpectation.fulfill() }
+        delegate.onTermination = { _ in terminationExpectation.fulfill() }
+        let process = LocalProcess(delegate: delegate)
+
+        let launchWhileHoldingMainQueue = {
+            process.startProcess(
+                executable: "/usr/bin/head",
+                args: ["-c", String(byteCount), "/dev/zero"],
+                environment: nil,
+                execName: "head"
+            )
+            // DispatchIO can produce hundreds of partial callbacks for one bounded read. Let
+            // them queue before the main-thread drain so the test holds the batching boundary.
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+
+        if Thread.isMainThread {
+            launchWhileHoldingMainQueue()
+        } else {
+            DispatchQueue.main.sync(execute: launchWhileHoldingMainQueue)
+        }
+
+        wait(for: [outputExpectation, terminationExpectation], timeout: 10)
+        XCTAssertEqual(delegate.outputByteCount, byteCount)
+        XCTAssertLessThanOrEqual(
+            delegate.outputCallbackCount,
+            16,
+            "already queued PTY fragments should arrive in bounded parser-sized batches"
+        )
+    }
 }
 
 private final class ProcessDelegate: LocalProcessDelegate {
     var output = ""
     var outputByteCount = 0
+    var outputCallbackCount = 0
     var expectedByteCount: Int?
     var exitCode: Int32?
     var onOutput: ((String) -> Void)?
@@ -368,6 +407,7 @@ private final class ProcessDelegate: LocalProcessDelegate {
     }
 
     func dataReceived(slice: ArraySlice<UInt8>) {
+        outputCallbackCount += 1
         outputByteCount += slice.count
         onBytes?(slice)
         if capturesText, let text = String(bytes: slice, encoding: .utf8) {

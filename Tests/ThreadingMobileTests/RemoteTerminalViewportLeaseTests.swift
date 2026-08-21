@@ -223,6 +223,52 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         XCTAssertFalse(connection.isTerminalHydrating)
     }
 
+    /// A layout can briefly cross another cell count and then settle back on the grid already
+    /// leased to the Mac. The duplicate lease is intentionally not sent; its newly constructed
+    /// request id must not replace the id of the viewport that really did cross the wire.
+    @MainActor
+    func testAnUnsentDuplicateViewportCannotReplaceTheHydrationGeneration() async throws {
+        let session = RemoteSessionSummaryDTO(
+            id: "0e6f7d1c-5716-470b-933c-d68310644b4f",
+            title: "Codex · AnotherTerminal",
+            agentKind: "codex",
+            surface: .terminal,
+            state: "running",
+            projectName: "AnotherTerminal"
+        )
+        let connection = RemoteSessionConnection(
+            session: session,
+            client: RemoteClient(
+                link: RemoteConnectionLink(
+                    string: "https://viewport-generation.invalid/#fixture"
+                )!
+            ),
+            viewportSettleDelay: Fixture.settleDelay,
+            terminalHydrationQuietDelay: .seconds(2),
+            terminalHydrationMaximumDelay: .seconds(2)
+        )
+        connection.receiveServerTextForTesting(Self.encoded(RemoteHelloDTO(
+            surface: .terminal,
+            capability: RemoteCapability.interact.rawValue,
+            cols: 80,
+            rows: 24,
+            title: "Current terminal",
+            features: [RemoteWebSocketFeature.terminalHydrationBoundary.rawValue]
+        )))
+
+        connection.updateTerminalViewport(cols: 48, rows: 41)
+        let sentRequestID = try XCTUnwrap(connection.terminalHydrationRequestIDForTesting)
+        connection.updateTerminalViewport(cols: 47, rows: 41)
+        connection.updateTerminalViewport(cols: 48, rows: 41)
+        try await Task.sleep(for: Fixture.settleDelay * 2)
+
+        XCTAssertEqual(connection.terminalHydrationRequestIDForTesting, sentRequestID)
+        connection.receiveServerTextForTesting(Self.encoded(
+            RemoteTerminalReadyDTO(requestID: sentRequestID)
+        ))
+        XCTAssertFalse(connection.isTerminalHydrating)
+    }
+
     /// The screenshot fixtures preload terminal bytes before SwiftUI mounts the representable.
     /// Taking that buffer must start the same hydration transaction as a real socket frame;
     /// otherwise the animated opening placeholder remains forever and no evidence can stabilize.
