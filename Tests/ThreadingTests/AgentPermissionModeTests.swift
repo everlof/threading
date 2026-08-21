@@ -97,8 +97,15 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
             XCTAssertFalse(stated.isEmpty, "\(kind) claims the vocabulary but produces no flags")
 
             for flag in stated {
+                let actual: String?
+                if flag.name == AgentDefaults.codexConfigFlag,
+                   let key = flag.value.split(separator: "=", maxSplits: 1).first {
+                    actual = Self.codexConfigOverride(String(key), in: words)
+                } else {
+                    actual = Self.value(after: flag.name, in: words)
+                }
                 XCTAssertEqual(
-                    Self.value(after: flag.name, in: words),
+                    actual,
                     flag.value,
                     "\(kind)'s native launch dropped \(flag.name)"
                 )
@@ -119,7 +126,9 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
 
             let approval = try XCTUnwrap(Self.value(after: "--ask-for-approval", in: words))
             let sandbox = try XCTUnwrap(Self.value(after: "--sandbox", in: words))
-            let reviewer = try XCTUnwrap(Self.value(after: "--config", in: words))
+            let reviewer = try XCTUnwrap(
+                Self.codexConfigOverride(AgentDefaults.codexApprovalsReviewerKey, in: words)
+            )
 
             XCTAssertTrue(
                 ["untrusted", "on-request", "never"].contains(approval),
@@ -151,11 +160,11 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
         let manual = try Self.launchWords(kind: .codex, mode: .manual)
 
         XCTAssertEqual(
-            Self.value(after: AgentDefaults.codexConfigFlag, in: auto),
+            Self.codexConfigOverride(AgentDefaults.codexApprovalsReviewerKey, in: auto),
             "approvals_reviewer=\"auto_review\""
         )
         XCTAssertEqual(
-            Self.value(after: AgentDefaults.codexConfigFlag, in: manual),
+            Self.codexConfigOverride(AgentDefaults.codexApprovalsReviewerKey, in: manual),
             "approvals_reviewer=\"user\"",
             "a persistent reviewer setting must not silently turn Manual into Auto-review"
         )
@@ -781,6 +790,19 @@ final class AgentPermissionModeTests: HostedStoreTestCase {
     private static func value(after flag: String, in words: [String]) -> String? {
         guard let index = words.firstIndex(of: flag), index + 1 < words.count else { return nil }
         return words[index + 1]
+    }
+
+    /// Codex accepts several independent `--config key=value` pairs. Find the one this assertion
+    /// owns rather than relying on an unrelated launch override appearing before or after it.
+    private static func codexConfigOverride(_ key: String, in words: [String]) -> String? {
+        guard words.count > 1 else { return nil }
+        let prefix = "\(key)="
+        for index in 0..<(words.count - 1)
+        where words[index] == AgentDefaults.codexConfigFlag
+            && words[index + 1].hasPrefix(prefix) {
+            return words[index + 1]
+        }
+        return nil
     }
 
     private static func descendants(of root: NSView) -> [NSView] {

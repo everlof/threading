@@ -4174,6 +4174,8 @@ run as part of the background check: a sidebar receipt aligns the now/latest ver
 table. **Update** opens a named standalone terminal and runs the provider's
 own command there, with every prompt, result and exit code visible. When several tools have news,
 **Update All** runs them sequentially in that terminal and continues to the next if one fails.
+Because Threading provides that notice, Codex chats launched inside Threading skip Codex's own
+startup update screen; this does not change Codex's setting when you launch it elsewhere.
 
 **Keeping the Mac awake.** **Settings ▸ General ▸ Power ▸ Keep this Mac awake while agents work**
 prevents automatic system sleep while at least one agent turn is working or waiting for your

@@ -602,6 +602,14 @@ command spans several terminal lines, because the `printf` receipts carry real n
 one of them a continuation the shell consumes before it runs anything, and none within the tty's
 1023-byte canonical-mode limit (247 bytes at the longest, for a five-tool run).
 
+That host-owned check also makes Threading the central update manager for every Codex process it
+starts. Each Codex invocation therefore receives the documented one-run override
+`check_for_update_on_startup=false`. Without it, a session restored in the background can stop at
+Codex's own update menu before anybody opens the chat, duplicating Threading's receipt and leaving
+the conversation unavailable for work. The override is applied to terminal, native and headless
+launches so none of their streams can acquire unsolicited startup UI, and it never edits the
+account's `config.toml`; Codex launched outside Threading keeps the user's own policy.
+
 The customization-surface decision is deliberately **host-only**. Provider identity, trusted
 release-source selection, version precedence and whether Threading may suggest an install command
 are integrity behavior the host must own. Presentation is not a new hard-coded surface: it reuses
