@@ -199,6 +199,14 @@ THREADING_MOBILE_DEMO=themed-dialog-alert
 THREADING_MOBILE_DEMO=themed-dialog-confirmation
 ```
 
+The confirmation fixture is captured in `display` mode. The app-owned capture renders the key
+window, and the system's action sheet is not in it; that is the same reason the keyboard states
+are captured that way. On iOS 26 the sheet also anchors to the view that presented it rather than
+to the bottom edge, and it draws no Cancel button — a `.cancel` action is dropped in that
+presentation exactly as it is in an iPad popover, and tapping outside is the cancel. Both are the
+system's decisions, verified by giving the fixture a fourth standard action: the fourth one drew,
+the cancel did not.
+
 The settings surfaces are in the iOS evidence catalogue instead, including the three editor
 destinations that are reachable only from inside the key-bar editor and were therefore the last
 to keep UIKit's grey plate:
