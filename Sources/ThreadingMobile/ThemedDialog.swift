@@ -372,7 +372,7 @@ private struct ThemedDialogPresentation: View {
                     .stroke(theme.border, lineWidth: theme.borderWidth)
             }
         }
-        .opacity(action.isEnabled ? 1 : 0.42)
+        .opacity(action.isEnabled ? 1 : MobileDesign.Opacity.disabledAction)
         .disabled(!action.isEnabled)
         .accessibilityHint(
             action.role == .destructive ? MobileL10n.string("Destructive action") : ""
@@ -492,17 +492,16 @@ struct ThemedDialogDemoView: View {
                 ThemedDialogAction("Rename"),
             ]
         )
+        // The share-role chooser used to stand here. It is the first stage of the Share Chat
+        // sheet now, so this fixture shows a confirmation that is still one: the surface
+        // switch, which asks a single question about work already in flight.
         .themedConfirmationDialog(
-            "Share “Remote access review”",
-            message: "Choose what this person can do in this chat.",
+            MobileL10n.string("Show in %@?", MobileL10n.string("Native (Experimental)")),
+            message: "The agent restarts in the selected UI and resumes this same session. "
+                + "Work currently in progress is interrupted.",
             isPresented: confirmationBinding,
             actions: [
-                ThemedDialogAction("View only", systemImage: "eye"),
-                ThemedDialogAction("Allow collaboration", systemImage: "person.2"),
-                ThemedDialogAction(
-                    "Collaboration + approvals",
-                    systemImage: "checkmark.shield"
-                ),
+                ThemedDialogAction("Switch UI", systemImage: "rectangle.2.swap"),
                 ThemedDialogAction("Cancel", role: .cancel),
             ]
         )

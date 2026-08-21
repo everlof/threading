@@ -240,6 +240,7 @@
 				ThreadingMobile/SessionDashboard.swift,
 				ThreadingMobile/SessionDetailView.swift,
 				ThreadingMobile/SessionWorkspaceView.swift,
+				ThreadingMobile/ShareChatSheet.swift,
 				ThreadingMobile/TerminalKeyBar.swift,
 				ThreadingMobile/TerminalKeyboardEditorView.swift,
 				ThreadingMobile/TerminalViewRepresentable.swift,

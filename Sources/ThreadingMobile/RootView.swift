@@ -108,7 +108,16 @@ struct RootView: View {
                 RemoteDiagnosticsView()
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "shared-link" {
-                SharedSessionLinkDemoHost(link: Self.sharedLinkDemo)
+                SharedSessionLinkDemoHost(link: ShareChatDemo.link)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "share-chat-roles" {
+                ShareChatDemoHost(isChatRunning: true, choice: nil)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "share-chat-blocked" {
+                ShareChatDemoHost(isChatRunning: false, choice: nil)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "share-chat-link" {
+                ShareChatDemoHost(isChatRunning: true, choice: .collaborateAndApprove)
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "session-settings",
                       let session = model.me?.sessions.first {
@@ -432,20 +441,6 @@ struct RootView: View {
         ),
     ]
 
-    /// A pinned invitation to a LAN door, which is what a real one is: the fixture used to hold
-    /// a fragment-less `threading.example` URL, so the share text it composed fell back to the
-    /// bare address and the demo exercised none of the routing.
-    private static let sharedLinkDemo = SharedSessionLink(
-        sessionTitle: "Remote access review",
-        url: URL(
-            string: "https://192.168.1.181:8760/#demo-invitation."
-                + String(repeating: "A", count: 26)
-        )!,
-        capability: "interact",
-        canApprovePermissions: true,
-        expiresAt: Date().addingTimeInterval(86_400)
-    )
-
     @MainActor
     private func openIssueReportDemoIfNeeded() async {
         let mode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
@@ -555,6 +550,46 @@ private struct SharedSessionLinkDemoHost: View {
             .task {
                 try? await Task.sleep(for: .milliseconds(250))
                 isPresented = true
+            }
+    }
+}
+
+/// Share Chat as it is actually met, at whichever stage the fixture asks for.
+///
+/// The link stage is reached by *choosing a grant*, not by seeding the sheet with one, so the
+/// photograph proves the transition the owner asked for rather than the destination alone. The
+/// flow is held here rather than inside `ShareChatSheet`, which is what lets the fixture reach
+/// in and make that choice.
+private struct ShareChatDemoHost: View {
+    private enum Timing {
+        static let beforePresenting = 250
+        static let beforeChoosing = 400
+    }
+
+    @Environment(\.remoteTheme) private var theme
+    @StateObject private var flow: ShareChatFlow
+    @State private var isPresented = false
+
+    private let choice: ShareChatRole?
+
+    init(isChatRunning: Bool, choice: ShareChatRole?) {
+        _flow = StateObject(wrappedValue: ShareChatDemo.flow(isChatRunning: isChatRunning))
+        self.choice = choice
+    }
+
+    var body: some View {
+        theme.ground
+            .ignoresSafeArea()
+            .sheet(isPresented: $isPresented) {
+                ShareChatSheetContent(flow: flow)
+                    .mobileTheme(theme)
+            }
+            .task {
+                try? await Task.sleep(for: .milliseconds(Timing.beforePresenting))
+                isPresented = true
+                guard let choice else { return }
+                try? await Task.sleep(for: .milliseconds(Timing.beforeChoosing))
+                await flow.choose(choice)
             }
     }
 }

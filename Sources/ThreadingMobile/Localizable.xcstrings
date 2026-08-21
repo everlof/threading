@@ -838,16 +838,6 @@
     "Typing indicators": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skrivindikatorer" } } }
     },
-    " Start the chat first to create a view-only link.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": " Starta chatten först för att skapa en länk med endast visningsåtkomst."
-          }
-        }
-      }
-    },
     "%@   Loading usage…": {
       "localizations": {
         "sv": {
@@ -1230,6 +1220,16 @@
         }
       }
     },
+    "Also answers requests for you.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svarar även på begäranden åt dig."
+          }
+        }
+      }
+    },
     "Appearance": {
       "localizations": {
         "sv": {
@@ -1450,12 +1450,12 @@
         }
       }
     },
-    "Choose what this person can do in this chat.": {
+    "Choose what this person can do.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Välj vad den här personen kan göra i chatten."
+            "value": "Välj vad den här personen kan göra."
           }
         }
       }
@@ -1606,6 +1606,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ansluter"
+          }
+        }
+      }
+    },
+    "Couldn’t create link": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kunde inte skapa länk"
           }
         }
       }
@@ -2135,6 +2145,26 @@
     },
     "No turn recorded yet. A baseline is captured before the agent starts working.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ingen tur har registrerats ännu. En baslinje sparas innan agenten börjar arbeta." } } }
+    },
+    "Reads the chat, writes nothing.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser chatten, skriver inget."
+          }
+        }
+      }
+    },
+    "Start the chat first to share it view-only.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta chatten först för att dela den med endast visning."
+          }
+        }
+      }
     },
     "This Turn": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här turen" } } }
@@ -3828,6 +3858,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Arbetsyta"
+          }
+        }
+      }
+    },
+    "Writes messages and steers the agent.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skriver meddelanden och styr agenten."
           }
         }
       }

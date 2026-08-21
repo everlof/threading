@@ -423,13 +423,14 @@ private struct SurfaceChangeRequest {
     let surface: RemoteSessionSurface
 }
 
-struct SharedSessionLink: Identifiable {
-    let id = UUID()
-    let sessionTitle: String
-    let url: URL
-    let capability: String
-    let canApprovePermissions: Bool
-    let expiresAt: Date
+/// The chat Share Chat was asked about, held for as long as its sheet is up.
+///
+/// Identified by the chat rather than by a fresh `UUID`, so re-asking about the same chat
+/// reuses the presentation instead of stacking a second one on it.
+struct ShareChatRequest: Identifiable {
+    let session: RemoteSessionSummaryDTO
+
+    var id: String { session.id }
 }
 
 struct SessionDashboard: View {
@@ -456,8 +457,7 @@ struct SessionDashboard: View {
     @State private var actionError: String?
     @State private var pendingActionSessionID: String?
     @State private var surfaceChangeRequest: SurfaceChangeRequest?
-    @State private var sharingSession: RemoteSessionSummaryDTO?
-    @State private var sharedLink: SharedSessionLink?
+    @State private var shareRequest: ShareChatRequest?
     @State private var showsUsage = false
     private let projectName: String?
     let openSettings: () -> Void
@@ -664,9 +664,13 @@ struct SessionDashboard: View {
                 .environmentObject(model)
                 .mobileTheme(theme)
         }
-        .sheet(item: $sharedLink) { link in
-            SharedSessionLinkView(link: link)
-                .mobileTheme(theme)
+        .sheet(item: $shareRequest) { request in
+            ShareChatSheet(
+                chatTitle: request.session.title,
+                isChatRunning: request.session.isAvailable,
+                mint: { role in try await mintShareLink(for: request.session, role: role) }
+            )
+            .mobileTheme(theme)
         }
         .sheet(isPresented: $showsUsage) {
             if let link = model.activeHost?.link {
@@ -714,17 +718,6 @@ struct SessionDashboard: View {
                 set: { if !$0 { surfaceChangeRequest = nil } }
             ),
             actions: surfaceChangeActions(for: surfaceChangeRequest)
-        )
-        .themedConfirmationDialog(
-            sharingSession.map {
-                MobileL10n.string("Share “%@”", $0.title)
-            } ?? "Share session",
-            message: sharingDialogMessage,
-            isPresented: Binding(
-                get: { sharingSession != nil },
-                set: { if !$0 { sharingSession = nil } }
-            ),
-            actions: shareRoleActions(for: sharingSession)
         )
         .themedAlert(
             "Rename session",
@@ -951,38 +944,10 @@ struct SessionDashboard: View {
             guard surface != session.surface else { return }
             surfaceChangeRequest = .init(session: session, surface: surface)
         case .share:
-            sharingSession = session
+            shareRequest = .init(session: session)
         case .stopSharing:
             mutate(session) { try await model.revokeShares(for: session) }
         }
-    }
-
-    /// The three grants, built from the chat they are about.
-    ///
-    /// The session is captured here rather than read back inside the handler. A system action
-    /// sheet clears its presentation binding as part of dismissing and runs the chosen button's
-    /// handler after that, so a handler that asked `sharingSession` again would find the nil the
-    /// binding had just written and silently mint nothing.
-    private func shareRoleActions(
-        for session: RemoteSessionSummaryDTO?
-    ) -> [ThemedDialogAction] {
-        guard let session else { return [] }
-        return [
-            ThemedDialogAction("View only", isEnabled: session.isAvailable) {
-                createShare(for: session, capability: RemoteCapability.view.rawValue)
-            },
-            ThemedDialogAction("Allow collaboration") {
-                createShare(for: session, capability: RemoteCapability.interact.rawValue)
-            },
-            ThemedDialogAction("Collaboration + approvals") {
-                createShare(
-                    for: session,
-                    capability: RemoteCapability.interact.rawValue,
-                    canApprovePermissions: true
-                )
-            },
-            ThemedDialogAction("Cancel", role: .cancel) { sharingSession = nil },
-        ]
     }
 
     /// The same capture, for the same reason, on the surface switch.
@@ -1001,39 +966,30 @@ struct SessionDashboard: View {
         ]
     }
 
-    private func createShare(
+    /// Mints one invitation for the sheet's chosen grant.
+    ///
+    /// It throws rather than posting an error of its own: the sheet is the surface that asked,
+    /// so the sheet is where the failure has to appear. Reporting it on the dashboard behind an
+    /// open sheet is a message nobody can see.
+    private func mintShareLink(
         for session: RemoteSessionSummaryDTO,
-        capability: String,
-        canApprovePermissions: Bool = false
-    ) {
-        guard pendingActionSessionID == nil else { return }
-        sharingSession = nil
-        pendingActionSessionID = session.id
-        Task {
-            defer { pendingActionSessionID = nil }
-            do {
-                let response = try await model.createShare(
-                    for: session,
-                    capability: capability,
-                    canApprovePermissions: canApprovePermissions
-                )
-                guard let url = URL(string: response.url) else {
-                    throw RemoteClientError.invalidResponse
-                }
-                sharedLink = SharedSessionLink(
-                    sessionTitle: session.title,
-                    url: url,
-                    capability: response.capability,
-                    canApprovePermissions: response.canApprovePermissions,
-                    expiresAt: Date(timeIntervalSince1970: response.expiresAt)
-                )
-            } catch is CancellationError {
-                return
-            } catch {
-                MobileDiagnostics.logDegraded(.sessionAction, error: error)
-                actionError = error.localizedDescription
-            }
+        role: ShareChatRole
+    ) async throws -> SharedSessionLink {
+        let response = try await model.createShare(
+            for: session,
+            capability: role.capability.rawValue,
+            canApprovePermissions: role.canApprovePermissions
+        )
+        guard let url = URL(string: response.url) else {
+            throw RemoteClientError.invalidResponse
         }
+        return SharedSessionLink(
+            sessionTitle: session.title,
+            url: url,
+            capability: response.capability,
+            canApprovePermissions: response.canApprovePermissions,
+            expiresAt: Date(timeIntervalSince1970: response.expiresAt)
+        )
     }
 
     private func surfaceTitle(
@@ -1044,25 +1000,6 @@ struct SessionDashboard: View {
             return MobileL10n.string("Native (Experimental)")
         }
         return MobileAgentIdentity.resolve(session.agentKind).originalUITitle
-    }
-
-    /// One sentence, because an action sheet's message is a caption rather than a page.
-    ///
-    /// It used to carry a four-line paragraph about single use, the 24-hour expiry, how long an
-    /// accepted member stays and what approval is. Three of those four facts are said again on
-    /// the link-ready sheet, next to the link they are about, and the fourth is the third
-    /// button's own title. What is left is the question the sheet is asking.
-    ///
-    /// The availability hint stays, because it is the only thing on screen that explains why one
-    /// of the three is dimmed.
-    private var sharingDialogMessage: String {
-        var result = MobileL10n.string("Choose what this person can do in this chat.")
-        if sharingSession?.isAvailable == false {
-            result += MobileL10n.string(
-                " Start the chat first to create a view-only link."
-            )
-        }
-        return result
     }
 
     private func mutate(
@@ -1685,211 +1622,6 @@ private struct SessionListItem: View {
                 Label("Archive", systemImage: "archivebox")
             }
         }
-    }
-}
-
-/// What a freshly minted invitation says about itself, and the two ways to hand it over.
-///
-/// **Three text styles, not five.** It used to set a title, the chat's name, the grant, the
-/// expiry and a closing paragraph in five different sizes down one narrow column, which reads as
-/// five unrelated announcements rather than one answer. The chat's name moved into the sentence
-/// that says what the link grants — that sentence is *about* the chat, so it may as well name it
-/// — and the expiry and the closing line share the footnote they were always both saying.
-///
-/// **Two buttons the same size.** The secondary used to be a bordered pill about half the width
-/// of the primary, which made copying look like a different class of action rather than the same
-/// action through a different door. Both are now the dialog action height, both full width, one
-/// filled with the accent and one with the theme's quiet control fill; the border is gone,
-/// matching the resting controls everywhere else on the phone.
-///
-/// **The closing line wraps.** It was a `Text` built by concatenating two literals, which is a
-/// `String` expression rather than a literal — so SwiftUI chose `Text(verbatim:)` and the
-/// sentence was never localized at all, appearing in English inside a Swedish app. It was also
-/// clipped mid-word, because the content stood in a fixed `.medium` sheet with no way to scroll
-/// and the last view in the stack is the one that gets compressed. It goes through `MobileL10n`
-/// and states its own height now, inside a scroll view that can always reach it.
-struct SharedSessionLinkView: View {
-    private enum Metrics {
-        static let markSize: CGFloat = 42
-    }
-
-    let link: SharedSessionLink
-    @Environment(\.remoteTheme) private var theme
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var copied = false
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: MobileDesign.Spacing.large) {
-                    Image(systemName: markSymbol)
-                        .font(.system(size: Metrics.markSize, weight: .light))
-                        .foregroundStyle(theme.accent)
-                        .accessibilityHidden(true)
-
-                    VStack(spacing: MobileDesign.Spacing.small) {
-                        Text("Link ready")
-                            .font(.title2.bold())
-                            .foregroundStyle(theme.label)
-
-                        Text(grantLine)
-                            .font(.body)
-                            .foregroundStyle(theme.secondaryLabel)
-
-                        Text(expiryLine)
-                            .font(.footnote)
-                            .foregroundStyle(theme.secondaryLabel)
-                    }
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(spacing: MobileDesign.Spacing.medium) {
-                        ShareLink(item: sharedText) {
-                            actionLabel(
-                                MobileL10n.string("Share link"),
-                                systemImage: "square.and.arrow.up"
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(theme.accentForeground)
-                        .background(
-                            theme.accent,
-                            in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                        )
-
-                        Button {
-                            UIPasteboard.general.string = sharedText
-                            copied = true
-                        } label: {
-                            actionLabel(
-                                MobileL10n.string(copied ? "Copied" : "Copy link"),
-                                systemImage: copied ? "checkmark" : "doc.on.doc"
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(theme.label)
-                        .background(
-                            theme.controlResting,
-                            in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                        )
-                    }
-
-                    Text(SharedSessionLinkCopy.footer)
-                        .font(.footnote)
-                        .foregroundStyle(theme.secondaryLabel)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(MobileDesign.Spacing.pane)
-            }
-            .background(theme.ground)
-            .navigationTitle("Share chat")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents(detents)
-    }
-
-    /// How tall the sheet opens, decided before it is presented.
-    ///
-    /// A fixed `.medium` detent is half of what clipped the closing line: the content stood in a
-    /// sheet sized to half the screen whatever it contained, with no scroll view to reach the
-    /// rest, and the last view in a stack is the one compression finds. Half a screen fits this
-    /// content at the ordinary type sizes and cannot fit it at an accessibility one, so that
-    /// case opens at full height instead.
-    ///
-    /// Stated once rather than measured. `presentationDetents` is read when the sheet is
-    /// presented, so a content height taken from a `GeometryReader` in the content's own
-    /// background arrives a layout pass too late to move anything. Content longer than the
-    /// detent scrolls, which is the ordinary behaviour of a sheet and is not the defect that was
-    /// reported: nothing is cut off any more.
-    private var detents: Set<PresentationDetent> {
-        dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large]
-    }
-
-    /// Both actions, the same shape: full width, the dialog action height, one filled with the
-    /// accent and one with the theme's quiet control fill. The title arrives localized, because
-    /// a `MobileL10n` key has to be readable where it is written.
-    private func actionLabel(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.headline)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: MobileDesign.Size.dialogActionHeight)
-            .contentShape(Rectangle())
-    }
-
-    private var markSymbol: String {
-        link.capability == RemoteCapability.interact.rawValue
-            ? "person.2.badge.gearshape"
-            : "person.2"
-    }
-
-    private var grantLine: String {
-        SharedSessionLinkCopy.grant(
-            chatTitle: link.sessionTitle,
-            capability: link.capability,
-            canApprovePermissions: link.canApprovePermissions
-        )
-    }
-
-    private var expiryLine: String {
-        MobileL10n.string(
-            "Unused invite expires %@",
-            link.expiresAt.formatted(.relative(presentation: .named))
-        )
-    }
-
-    private var sharedText: String {
-        SharedSessionLinkCopy.sharedText(for: link.url)
-    }
-}
-
-/// The words an invitation leaves Threading with.
-///
-/// A value rather than three computed properties on the view, so a test can hold the sentence
-/// the recipient reads without standing a sheet up first.
-enum SharedSessionLinkCopy {
-    /// One line saying what the link grants, naming the chat it grants.
-    static func grant(
-        chatTitle: String,
-        capability: String,
-        canApprovePermissions: Bool
-    ) -> String {
-        guard capability == RemoteCapability.interact.rawValue else {
-            return MobileL10n.string("Can view “%@”", chatTitle)
-        }
-        return canApprovePermissions
-            ? MobileL10n.string("Can collaborate in “%@” and approve requests", chatTitle)
-            : MobileL10n.string("Can collaborate in “%@”", chatTitle)
-    }
-
-    static var footer: String {
-        MobileL10n.string(
-            "The invite works once. After acceptance, access lasts until you stop sharing "
-                + "and never extends to another chat."
-        )
-    }
-
-    /// What the recipient is actually sent.
-    ///
-    /// The invitation used to travel as the bare `https` URL of a private door, so tapping it on
-    /// the recipient's phone opened Safari at a LAN address with a certificate no browser can
-    /// vouch for. The composition is `ThreadingRemoteKit`'s, shared with the Mac's own copy
-    /// actions so the two cannot drift.
-    static func sharedText(for shareURL: URL) -> String {
-        RemoteInvitationShare.text(shareURL: shareURL, guidance: guidance)
-    }
-
-    static var guidance: String {
-        MobileL10n.string(
-            "Open in the Threading app. Works for someone on your Wi-Fi or tailnet."
-        )
     }
 }
 
