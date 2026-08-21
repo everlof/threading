@@ -183,6 +183,53 @@ final class ShareChatSheetTests: XCTestCase {
         }
     }
 
+    // MARK: - What the recipient is sent
+
+    /// The invitation used to travel as `url.absoluteString` and nothing else, from three
+    /// separate call sites: both copy actions here and the iPhone's share sheet. That handed
+    /// somebody a bare `https://192.168.1.181:8760/#…` — no way to know it wanted the Threading
+    /// app, no way to know it wanted their network, and a certificate interstitial waiting if
+    /// they tapped it in a browser, because the pin that vouches for that door lives in the app.
+    func testACopiedInvitationSaysWhatItNeedsAndOpensInTheApp() throws {
+        let shareURL = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: try XCTUnwrap(URL(string: "https://192.168.1.181:8760")),
+            token: "invitation-bearer",
+            pinnedFingerprintCode: String(repeating: "A", count: 26)
+        )).shareURL
+
+        let lines = ShareInvitationText.pasteboard(for: shareURL)
+            .split(separator: "\n")
+            .map(String.init)
+
+        XCTAssertEqual(lines.count, 3)
+        XCTAssertEqual(lines[0], ShareInvitationText.guidance)
+        XCTAssertTrue(
+            lines[1].hasPrefix("threading://join#"),
+            "the app link goes first because it is the one that works"
+        )
+        XCTAssertEqual(
+            lines[2],
+            shareURL.absoluteString,
+            "the https line stays for the messaging clients that will not linkify a scheme"
+        )
+    }
+
+    /// The Mac and the iPhone compose through the same `RemoteInvitationShare`, so a recipient
+    /// reads the same message whichever end minted the link. This holds the Mac's half to that
+    /// composition rather than to a sentence of its own.
+    func testTheMacComposesTheSameMessageTheKitDefines() throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: try XCTUnwrap(URL(string: "https://mac.tail1234.ts.net")),
+            token: "invitation-bearer"
+        ))
+
+        XCTAssertEqual(
+            ShareInvitationText.pasteboard(for: link.shareURL),
+            RemoteInvitationShare.text(for: link, guidance: ShareInvitationText.guidance)
+        )
+        XCTAssertTrue(ShareInvitationText.guidance.contains("Threading"))
+    }
+
     // MARK: - Rendered
 
     /// The accessory sits on the alert's own material rather than a themed ground, so the one
