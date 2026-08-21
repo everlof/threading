@@ -28855,7 +28855,23 @@
     "Threading cannot tell whether this session is working, so it only stops delivering messages.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kan inte avgöra om sessionen arbetar, så den slutar bara leverera meddelanden."}}}},
     "This session has been under a curfew since %@, so Threading is not spending it on its own.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här sessionen har haft spärrtid sedan %@, så Threading spenderar den inte på egen hand."}}}},
     "Its curfew passed before the session was free.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Spärrtiden passerade innan sessionen blev ledig."}}}},
-    "Threading was not running.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kördes inte."}}}}
+    "Threading was not running.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Threading kördes inte."}}}},
+    "In 3 hours": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Om 3 timmar"}}}},
+    "Tonight at %@": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "I kväll %@"}}}},
+    "Until the %@ window resets": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tills %@-fönstret återställs"}}}},
+    "At quiet hours (%@)": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Vid tysta timmar (%@)"}}}},
+    "Ends this session when the standing quiet hours next begin.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Avslutar sessionen när de tysta timmarna börjar nästa gång."}}}},
+    "Ends at %@": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Slutar %@"}}}},
+    "No curfew": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen spärrtid"}}}},
+    "Nothing ends this session; it runs until you stop it.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inget avslutar sessionen; den kör tills du stoppar den."}}}},
+    "Follow quiet hours": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Följ tysta timmar"}}}},
+    "Held every night with every other session that has not said otherwise.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hålls varje natt tillsammans med alla andra sessioner som inte sagt något annat."}}}},
+    "Quiet hours never hold this session; it keeps working through them.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tysta timmar håller aldrig den här sessionen; den fortsätter arbeta genom dem."}}}},
+    "Lift Curfew": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Häv spärrtid"}}}},
+    "Releases this session now; nothing else about the rule changes.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Släpper sessionen nu; inget annat i regeln ändras."}}}},
+    "Until %@": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Till %@"}}}},
+    "Until quiet hours": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Till tysta timmar"}}}},
+    "Until quiet hours (%@)": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Till tysta timmar (%@)"}}}}
   },
   "version": "1.0"
 }
