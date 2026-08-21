@@ -121,6 +121,12 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         return configuration
     }
 
+    /// Hands a delivered URL to the model, answering whether it was one of ours.
+    @discardableResult
+    func open(_ url: URL) -> Bool {
+        model.open(url)
+    }
+
     func makeRootViewController() -> UIViewController {
 #if DEBUG
         if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
@@ -269,6 +275,26 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
 #endif
         if let response = connectionOptions.notificationResponse {
             appDelegate.openNotification(from: response)
+        }
+        open(connectionOptions.urlContexts)
+    }
+
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        open(URLContexts)
+    }
+
+    /// Where a tapped `threading://` invitation arrives.
+    ///
+    /// SwiftUI's `onOpenURL` never fires in this app: the scene is UIKit's and the SwiftUI tree
+    /// lives inside a hosting controller rather than in a `WindowGroup`, so the modifier has no
+    /// scene to observe. This is that delivery point, and it covers the cold launch too, where
+    /// the URL arrives with the scene's connection options rather than through the callback.
+    private func open(_ contexts: Set<UIOpenURLContext>) {
+        guard !contexts.isEmpty,
+              let appDelegate = UIApplication.shared.delegate as? ThreadingMobileAppDelegate
+        else { return }
+        for context in contexts where appDelegate.open(context.url) {
+            return
         }
     }
 }

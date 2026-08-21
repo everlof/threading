@@ -3,6 +3,33 @@ import SwiftUI
 import UIKit
 import VisionKit
 
+/// What this app will act on, whichever door the payload came through.
+///
+/// Three doors reach the accept path: the QR scanner, the paste field, and a `threading://` URL
+/// the operating system delivers because somebody tapped an invitation. `RemoteInvitation` in
+/// `ThreadingRemoteKit` is the only parser any of them use; this adds the one rule that is the
+/// application's rather than the wire's — a private door must be `https`, because pairing over
+/// plain HTTP would hand the bearer to the network the invitation was sent across.
+enum MobileInvitationRoute {
+    case hostedPairing(HostedPairingLink)
+    case connection(RemoteConnectionLink)
+
+    init?(payload: String) {
+        switch RemoteInvitation(payload: payload) {
+        case .hostedPairing(let hosted):
+            self = .hostedPairing(hosted)
+        case .connection(let link) where link.baseURL.scheme?.lowercased() == "https":
+            self = .connection(link)
+        default:
+            return nil
+        }
+    }
+
+    init?(url: URL) {
+        self.init(payload: url.absoluteString)
+    }
+}
+
 struct PairingView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.dismiss) private var dismiss
@@ -68,6 +95,14 @@ struct PairingView: View {
             .background(theme.ground.ignoresSafeArea())
         }
         .presentationDetents([.large])
+        // A tapped invitation opens this screen with its payload already in hand. It is shown in
+        // the field rather than accepted invisibly, so a failure has somewhere to be reported and
+        // the person can see what they are about to join.
+        .task(id: model.pendingInvitation) {
+            guard let pending = model.takePendingInvitation() else { return }
+            linkText = pending
+            pair(pending)
+        }
     }
 
     @ViewBuilder
@@ -224,21 +259,21 @@ struct PairingView: View {
     }
 
     private func pair(_ text: String) {
-        if let hostedLink = HostedPairingLink(string: text) {
-            beginPairing {
-                try await model.pair(hostedLink, displayName: UIDevice.current.name)
-            }
-            return
-        }
-        guard let link = RemoteConnectionLink(string: text),
-              link.baseURL.scheme?.lowercased() == "https" else {
+        guard let route = MobileInvitationRoute(payload: text) else {
             errorMessage = MobileL10n.string(
                 "That isn’t a valid secure Threading private link."
             )
             return
         }
-        beginPairing {
-            try await model.pair(link, displayName: UIDevice.current.name)
+        switch route {
+        case .hostedPairing(let hostedLink):
+            beginPairing {
+                try await model.pair(hostedLink, displayName: UIDevice.current.name)
+            }
+        case .connection(let link):
+            beginPairing {
+                try await model.pair(link, displayName: UIDevice.current.name)
+            }
         }
     }
 

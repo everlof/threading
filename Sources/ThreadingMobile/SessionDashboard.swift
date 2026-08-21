@@ -1745,7 +1745,10 @@ struct SharedSessionLinkView: View {
 
                     VStack(spacing: MobileDesign.Spacing.medium) {
                         ShareLink(item: sharedText) {
-                            actionLabel("Share link", systemImage: "square.and.arrow.up")
+                            actionLabel(
+                                MobileL10n.string("Share link"),
+                                systemImage: "square.and.arrow.up"
+                            )
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(theme.accentForeground)
@@ -1759,7 +1762,7 @@ struct SharedSessionLinkView: View {
                             copied = true
                         } label: {
                             actionLabel(
-                                copied ? "Copied" : "Copy link",
+                                MobileL10n.string(copied ? "Copied" : "Copy link"),
                                 systemImage: copied ? "checkmark" : "doc.on.doc"
                             )
                         }
@@ -1792,8 +1795,11 @@ struct SharedSessionLinkView: View {
         .presentationDetents([.medium, .large])
     }
 
+    /// Both actions, the same shape: full width, the dialog action height, one filled with the
+    /// accent and one with the theme's quiet control fill. The title arrives localized, because
+    /// a `MobileL10n` key has to be readable where it is written.
     private func actionLabel(_ title: String, systemImage: String) -> some View {
-        Label(MobileL10n.string(title), systemImage: systemImage)
+        Label(title, systemImage: systemImage)
             .font(.headline)
             .frame(maxWidth: .infinity)
             .frame(minHeight: MobileDesign.Size.dialogActionHeight)

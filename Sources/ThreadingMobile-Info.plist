@@ -3,22 +3,49 @@
 <plist version="1.0">
 <dict>
 	<!--
-		This file exists for one key. Every other Info.plist value for this target still comes
-		from GENERATE_INFOPLIST_FILE and the INFOPLIST_KEY_ build settings, which Xcode merges
-		into this file at build time; NSBonjourServices is an array, and the INFOPLIST_KEY_
-		mechanism carries strings and booleans only. It sits beside the target's folder rather
-		than inside it because a synchronized root group copies its own files into the bundle,
-		and Xcode 26 cannot read a project whose exception set is attached to a target's own
-		synchronized root group; the Mac target's exception list, which already names every
-		ThreadingMobile file, is the one mechanism that works for both.
+		This file exists for the keys that are arrays. Every other Info.plist value for this
+		target still comes from GENERATE_INFOPLIST_FILE and the INFOPLIST_KEY_ build settings,
+		which Xcode merges into this file at build time; the INFOPLIST_KEY_ mechanism carries
+		strings and booleans only. It sits beside the target's folder rather than inside it
+		because a synchronized root group copies its own files into the bundle, and Xcode 26
+		cannot read a project whose exception set is attached to a target's own synchronized root
+		group; the Mac target's exception list, which already names every ThreadingMobile file,
+		is the one mechanism that works for both.
 
-		Without it, browsing for the service fails silently on iOS 14 and later: no results, no
-		error, no prompt. MobileLocalNetworkPermissionTests asserts the built app carries it,
-		because "silently finds nothing" is not a symptom anybody debugs quickly.
+		Without NSBonjourServices, browsing for the service fails silently on iOS 14 and later:
+		no results, no error, no prompt. MobileLocalNetworkPermissionTests asserts the built app
+		carries it, because "silently finds nothing" is not a symptom anybody debugs quickly.
 	-->
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_threading._tcp</string>
+	</array>
+	<!--
+		The scheme an invitation is addressed to.
+
+		A one-chat invitation points at a private door on somebody's LAN or tailnet, with the
+		Mac's own certificate fingerprint in the fragment. Sent as the bare https URL it opened
+		in Safari, which can only offer the certificate interstitial: the pin that makes that
+		door trustworthy lives in this app and a browser has no way to learn it. `threading://`
+		is how the invitation reaches the app that holds the pin. `PAIR` was already the QR
+		payload's scheme (`HostedPairingLink`); registering it here is what makes a tap work as
+		well as a photograph, and `JOIN` carries the same https invitation, fragment and all.
+
+		Lower case: schemes are case-insensitive (RFC 3986 §3.1), so the upper-case QR payloads
+		still route here. MobileInvitationRouteTests asserts the built app carries it.
+	-->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>codes.threading.mobile.invitation</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>threading</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

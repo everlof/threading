@@ -14657,6 +14657,16 @@
         }
       }
     },
+    "Open in the Threading app. Works for someone on your Wi-Fi or tailnet.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna i Threading-appen. Fungerar för någon på ditt wifi eller ditt tailnet."
+          }
+        }
+      }
+    },
     "Open Sharing": {
       "localizations": {
         "sv": {
