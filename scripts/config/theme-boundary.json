@@ -137,6 +137,10 @@
   "confirmationGateDirectories": [
     "Sources/Threading/UI/Alerts"
   ],
+  "pointerClaimSeamPaths": [
+    "Sources/Threading/UI/Design/PointerClaims.swift"
+  ],
+  "pointerClaimRegistrar": "registerPointerClaims",
   "exceptions": [
     {
       "path": "Sources/Threading/App/AppDelegate.swift",
@@ -377,6 +381,18 @@
       "kind": "systemColor",
       "symbol": "secondaryLabelColor",
       "reason": "The accessory's label stands in the save panel's own label column, under Save As:, Tags: and Where:, which AppKit draws in secondaryLabelColor. Design.Text.secondary answers to the app theme, so the one row Threading contributes to a system panel would be the one row lit differently from the three above it."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/CoveredWindowCursor.swift",
+      "kind": "pointerClaim",
+      "symbol": "NSCursor.arrow",
+      "reason": "A surface covering a whole window switches the window's cursor rectangles off rather than claiming ground inside them, and disabling stops the next answer only — the arrow has to be set once on the way in."
+    },
+    {
+      "path": "Sources/Threading/UI/Design/CoveredWindowPointer.swift",
+      "kind": "pointerClaim",
+      "symbol": "NSCursor.arrow",
+      "reason": "The same window-level claim, applied as events are dispatched to a covered window."
     }
   ]
 }
