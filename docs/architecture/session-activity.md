@@ -778,6 +778,42 @@ is refused. It settles exactly like `Stop` — a visible session goes `idle`, an
 the unread mark. Not `limitReached`: nothing here says the account is spent, and a row claiming so
 sends the user to a usage dashboard to explain a login.
 
+**An interrupted turn is the same hole again, and Claude's is the fourth instance of it.** Measured
+on CLI 2.1.238 against this app's own session `a056a54c`: `UserPromptSubmit` fired, the user pressed
+Escape, and at 06:17:52.733Z the CLI appended one record and stopped —
+
+```json
+{"type":"user","uuid":"5ec9af64-…","interruptedMessageId":"msg_011CeFQXqQY5Z7Ur3FJfZckF",
+ "message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+```
+
+— and no `Stop` followed. The row was still drawing a spinner two hours later, for a conversation
+the user had stopped themselves. `.transcriptInterruptedMessageRecord` and
+`ClaudeTranscriptInterruption` close it, on `ClaudeTranscriptAPIError`'s newest-message walk and the
+generation match the refusal reader uses, settling exactly like `Stop`.
+
+It is deliberately **not** the same capability as Codex's `.transcriptInterruptedTurnRecord`,
+because the two records differ in the one way that matters to a late asynchronous read: Codex names
+the turn it aborted, so its reader can prove which turn the result belongs to, while Claude names
+only the assistant message it cut off — and names nothing at all when the interrupt beat the first
+token, measured on 2.1.222. So Claude's reader matches `turnGeneration` instead, and admits the
+marker sentence as well as `interruptedMessageId`: a reader insisting on the id declines every
+interrupt pressed before the model spoke, which is the interrupt a user is most likely to press.
+The cost of admitting the sentence is one shape it cannot tell apart — a user who types the marker
+verbatim as their own prompt — which ends that prompt's turn a beat early and leaves the session
+correctly idle.
+
+**Both of Claude's fallbacks are asked on the terminal-output quiet edge**, in one
+`scheduleClaudeBoundaryRefresh` rather than a timer per fact: the two readers answer off the same
+tail of the same file, for the same session, on the same burst. That is also the bug the fourth
+instance uncovered — the refusal fallback shipped wired to `noteReportedCodexTranscript`, behind a
+guard only Codex passes, so it had never run for a single Claude session. A fallback for a runtime
+that cannot reach its own entry point is worse than none, because the reader, the capability and
+the tests all pass while the hole stays open. The Claude schedulers hang off
+`terminalSession(_:didProduceOutputOf:)` beside Codex's, and both are gated on
+`reportsOwnActivity` and a turn actually being in flight, so a session sitting at its prompt does
+no work at all.
+
 - **Routing is by environment, not by file.** `MCPDefaults.portEnvironmentKey` and
   `sessionTokenEnvironmentKey` are exported by `routed(_:for:)` and read by the hook command,
   which is what lets one shared file attribute every session correctly. Verified that a hook

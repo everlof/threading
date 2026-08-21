@@ -47,7 +47,9 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("providerArchive", .providerArchive),
             ("transcriptInterruptedTurnRecord", .transcriptInterruptedTurnRecord),
             ("transcriptRefusedTurnRecord", .transcriptRefusedTurnRecord),
-            ("transcriptReplay", .transcriptReplay)
+            ("transcriptReplay", .transcriptReplay),
+            ("terminalUI", .terminalUI),
+            ("transcriptInterruptedMessageRecord", .transcriptInterruptedMessageRecord)
         ]
 
         var seen: [Int: String] = [:]
@@ -119,6 +121,7 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("permission mode", .transcriptPermissionModeRecord),
             ("usage-limit refusal", .transcriptUsageLimitRecord),
             ("interrupted turn", .transcriptInterruptedTurnRecord),
+            ("interrupted message", .transcriptInterruptedMessageRecord),
             ("turn refusal", .transcriptRefusedTurnRecord)
         ]
 
@@ -150,6 +153,24 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
                 kind.supports(.transcriptInterruptedTurnRecord),
                 kind == .codex,
                 "\(kind) claims the Codex interruption reader against expectation"
+            )
+        }
+    }
+
+    /// Claude records the same missing boundary in a record that names no turn, and its reader
+    /// matches the tracker's turn count instead. The two interruption flags must not both be
+    /// granted to one runtime: each names a record shape the other's reader cannot parse, so a
+    /// runtime holding both would have one of them scanning for a key its transcript never
+    /// contains.
+    func testTheTwoInterruptionReadersNeverClaimTheSameRuntime() {
+        XCTAssertTrue(AgentKind.claude.supports(.transcriptInterruptedMessageRecord))
+        XCTAssertTrue(AgentKind.codex.supports(.transcriptInterruptedTurnRecord))
+
+        for kind in AgentKind.allCases {
+            XCTAssertFalse(
+                kind.supports(.transcriptInterruptedTurnRecord)
+                    && kind.supports(.transcriptInterruptedMessageRecord),
+                "\(kind) claims two interruption record shapes"
             )
         }
     }

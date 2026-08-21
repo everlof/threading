@@ -511,6 +511,28 @@ final class SessionActivityTracker {
         return true
     }
 
+    /// Ends the active turn when the session's own transcript records the user interrupting it —
+    /// Claude's half of the boundary Codex reports above. See `ClaudeTranscriptInterruption`.
+    ///
+    /// It takes a turn generation rather than a turn id because Claude names no turn: its
+    /// `UserPromptSubmit` payload carries a session and a prompt and nothing to match a later
+    /// read against, so the count of turns begun is the identity — the same stand-in
+    /// `noteTurnRefused` uses, and for the same reason.
+    ///
+    /// The fallback contract is otherwise identical: it cannot latch an inferred session, cannot
+    /// end an idle one, and cannot end a turn other than the one it was read for. It settles
+    /// exactly like `Stop`, because an interrupted turn genuinely ended and the CLI is back at
+    /// its prompt.
+    @discardableResult
+    func noteTurnInterrupted(turn generation: Int) -> Bool {
+        guard reportsOwnActivity, turnInFlight, generation == turnGeneration else {
+            return false
+        }
+
+        finishReportedTurn(backgroundWork: [], cause: .turnInterrupted)
+        return true
+    }
+
     /// Ends the active turn when the session's own transcript records a request the provider
     /// refused for something other than the account's allowance — an expired login, a dropped
     /// connection. See `ClaudeTranscriptTurnRefusal`, which is where that record and the

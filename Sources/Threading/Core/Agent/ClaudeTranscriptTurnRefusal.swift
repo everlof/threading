@@ -103,6 +103,10 @@ enum ClaudeRefusalDefaults {
     /// How long an output burst must settle before the transcript is revalidated. The CLI paints
     /// its error and its prompt in several frames, and one read after they stop is the whole
     /// cost — the same beat `CodexInterruptionDefaults` keeps for the same reason.
+    ///
+    /// It is the beat for both of Claude's boundary reads: `scheduleClaudeBoundaryRefresh` asks
+    /// this reader and `ClaudeTranscriptInterruption` on one quiet edge, since they answer off the
+    /// same tail of the same file on the same burst.
     static let quietDelay: TimeInterval = 0.5
 
     /// One chunk of tail, like every other bounded transcript scan here. A boundary hidden behind
