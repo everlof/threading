@@ -221,6 +221,10 @@ final class RemoteSessionConnection: ObservableObject {
     private var helloDeadlineTask: Task<Void, Never>?
     private let helloDeadline: Duration
     private var reconnectAttempt = 0
+    private var reconnectSequence = 0
+    private var socketTrace: String?
+    private var socketStartedAt: UInt64?
+    private var socketAttempt = 1
     private var stopped = false
     private var connectionGeneration = 0
     private var pendingTerminalOutput = Data()
@@ -349,7 +353,15 @@ final class RemoteSessionConnection: ObservableObject {
         inputControl = nil
         inputControlEvents = []
         attentionRecipients = []
-        MobileDiagnostics.record(.socketConnecting, fields: destinationFields.merging([
+        socketTrace = MobileDiagnostics.connectivityTrace()
+        socketStartedAt = MobileDiagnostics.monotonicNow()
+        socketAttempt = reconnectSequence + 1
+        MobileDiagnostics.recordConnectivity(.socketConnecting, fields: socketFields(
+            phase: "hello"
+        ).merging([
+            .result: "started",
+            .attempt: String(socketAttempt),
+            .timeoutMS: MobileDiagnostics.milliseconds(helloDeadline),
             .protocolVersion: String(RemoteProtocol.current),
             .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
         ]) { current, _ in current })
@@ -461,10 +473,12 @@ final class RemoteSessionConnection: ObservableObject {
         conversationStore.cancelLoadingEarlier()
         if markEnded {
             phase = .ended(MobileL10n.string("Disconnected"))
-            MobileDiagnostics.record(.socketEnded, fields: [
-                .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
+            MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
+                phase: "session"
+            ).merging([
+                .result: "ended",
                 .reason: "user",
-            ])
+            ]) { current, _ in current })
         }
     }
 
@@ -1023,14 +1037,19 @@ final class RemoteSessionConnection: ObservableObject {
             updateTerminalGrid(cols: hello.cols, rows: hello.rows)
             cancelHelloDeadline()
             phase = .connected
-            reconnectAttempt = 0
 #if DEBUG
             MobileTerminalWirePerformanceProbe.helloReceived(session)
 #endif
-            MobileDiagnostics.record(.socketConnected, fields: destinationFields.merging([
+            MobileDiagnostics.recordConnectivity(.socketConnected, fields: socketFields(
+                phase: "hello"
+            ).merging([
+                .result: "succeeded",
+                .attempt: String(socketAttempt),
                 .capability: hello.capability,
                 .surface: hello.surface.rawValue,
             ]) { current, _ in current })
+            reconnectAttempt = 0
+            reconnectSequence = 0
             if let pendingViewport, capability == .interact,
                lastSentTerminalViewport == nil {
                 try? send(terminalViewportMessage(
@@ -1191,10 +1210,12 @@ final class RemoteSessionConnection: ObservableObject {
             default:
                 phase = .ended(MobileL10n.string("Session ended"))
             }
-            MobileDiagnostics.record(.socketEnded, fields: [
-                .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
-                .reason: ended?.reason ?? "server",
-            ])
+            MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
+                phase: "session"
+            ).merging([
+                .result: "ended",
+                .reason: MobileDiagnostics.machineToken(ended?.reason ?? "server"),
+            ]) { current, _ in current })
         case "error":
             let error = try? JSONDecoder().decode(RemoteErrorDTO.self, from: data)
             if error?.code == "invalidConversationPage" {
@@ -1270,8 +1291,11 @@ final class RemoteSessionConnection: ObservableObject {
         code: String? = nil,
         httpStatus: Int? = nil
     ) {
+        let failedPhase = phase == .connected ? "session" : "hello"
         phase = .failed(failure)
-        var fields = destinationFields
+        var fields = socketFields(phase: failedPhase)
+        fields[.result] = "failed"
+        fields[.attempt] = String(socketAttempt)
         fields[.code] = code ?? "connection.\(failure.cause.rawValue)"
         fields[.reason] = failure.cause.rawValue
         // Whether the identity check passed, refused, or never ran. A token, never a
@@ -1285,13 +1309,28 @@ final class RemoteSessionConnection: ObservableObject {
         // gone, something on the path that could not reach it, and something else answering on
         // that address entirely.
         if let httpStatus { fields[.status] = String(httpStatus) }
-        MobileDiagnostics.record(.socketFailed, level: .error, fields: fields)
+        if failure.cause == .helloTimeout {
+            fields[.timeoutMS] = MobileDiagnostics.milliseconds(helloDeadline)
+        }
+        MobileDiagnostics.recordConnectivity(.socketFailed, level: .error, fields: fields)
     }
 
     private func recordSocketFailure(_ error: Error) {
-        var fields = destinationFields
+        var fields = socketFields(phase: "action")
+        fields[.result] = "failed"
+        fields[.attempt] = String(socketAttempt)
         fields[.code] = MobileDiagnostics.errorCode(error)
-        MobileDiagnostics.record(.socketFailed, level: .error, fields: fields)
+        MobileDiagnostics.recordConnectivity(.socketFailed, level: .error, fields: fields)
+    }
+
+    private func socketFields(phase: String) -> [RemoteDiagnosticField: String] {
+        var fields = destinationFields
+        fields[.phase] = phase
+        if let socketTrace { fields[.trace] = socketTrace }
+        if let socketStartedAt {
+            fields[.durationMS] = MobileDiagnostics.elapsedMilliseconds(since: socketStartedAt)
+        }
+        return fields
     }
 
     /// Which session, which kind of address, and which address, as a hash.
@@ -1326,7 +1365,15 @@ final class RemoteSessionConnection: ObservableObject {
         receiveTask = nil
         let attempt = reconnectAttempt
         reconnectAttempt = min(reconnectAttempt + 1, 4)
+        reconnectSequence &+= 1
         let delay = min(pow(2.0, Double(attempt)), 8.0)
+        MobileDiagnostics.recordConnectivity(.socketReconnectScheduled, fields: socketFields(
+            phase: "backoff"
+        ).merging([
+            .result: "scheduled",
+            .attempt: String(reconnectSequence + 1),
+            .delayMS: MobileDiagnostics.milliseconds(delay),
+        ]) { current, _ in current })
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self,

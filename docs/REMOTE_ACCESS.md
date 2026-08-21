@@ -161,9 +161,18 @@ categories. Focused mode does not attempt to recognize questions drawn by a Clau
 TUI; only structured Native questions/permissions and explicit human requests can create the
 corresponding notifications.
 
-An owner pairing is stored as one logical Mac identity, not as one hostname. iOS attempts its
-durable hosted ICE/TURN credential first, then the private endpoints the Mac advertises. Owner
-responses carry the addresses each way in is currently answering on, tailnet included, plus an
+An owner pairing is stored as one logical Mac identity, not as one hostname. For the read-only
+catalogue request, iOS starts a constant-size race: its durable hosted ICE/TURN credential and at
+most four private-network lanes. LAN and VPN each keep one sequential lane; Tailscale gets up to
+two so its IPv4 and IPv6 doors can start together, with later tailnet names continuing in those
+lanes. The first valid `/api/me` response wins and cancels every other lane. A failed fast route
+does not suppress a slower success. One advertised door and its sticky port range always stay in
+one lane; a door that answers ends the rest of its port walk, and so does one whose address nothing
+was reachable at. The concurrency ceiling does not grow with endpoint or port count. Mutations deliberately keep
+the established sequential failover and one idempotency key; racing operations with side effects
+would make the transport optimization part of mutation semantics.
+
+Owner responses carry the addresses each way in is currently answering on, tailnet included, plus an
 explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still
 decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed
 by that policy, with no preference between the private-network kinds — which of this Mac's own
@@ -186,8 +195,9 @@ composition engine neither runs nor renders on iOS, so this surface does not adv
 replacement contract it cannot honor.
 
 Before the first catalogue arrives, the dashboard names only the operation happening now:
-checking saved connections, trying the currently named way in, or loading sessions after the Mac
-has answered. These values come from `RemoteAppModel.fetchMe` at the point each operation begins;
+checking saved connections, trying a way in, or loading sessions after the Mac has answered.
+These values come from `RemoteAppModel.fetchMe` at the point the bounded race begins and when its
+winner is known;
 there is no cosmetic timer that can claim a different step from the work the transport is doing.
 LabelMorph's traveling fade periodically crosses the unchanged current phrase, while Reduce Motion
 leaves it still. The navigation status names the same current route. The surface remains host-only
@@ -783,6 +793,16 @@ iOS and the browser keep a small seven-day journal of typed connection events on
 Every connect attempt ends in one of them: connected, ended, or failed with a stated reason, so a
 phone that never reached the Mac leaves a record rather than a silence. Each carries the kind of
 route it used and a hash of the address it aimed at, never the address itself.
+An iOS catalogue refresh also carries one trace from `hostRefreshStarted` through every bounded
+route preparation/request and its terminal refresh result. Route records name their phase,
+configured timeout, monotonic duration, attempt position, cancellation and winning transport.
+Hosted preparation adds coarse rendezvous/host-wait/offer/ICE/proxy stages without SDP, ICE
+candidates or service addresses. Pairing, sequential mutation failover, notification registration
+and local discovery resolution use the same bounded route records. Live session and dashboard
+event sockets use separate traces across hello, failure/end and the scheduled exponential
+reconnect delay; both own an explicit hello deadline rather than relying on URLSession to end a
+silent peer. Public report delivery records each 30-second HTTPS attempt and whether it was
+delivered, left idempotently queued, or terminally refused.
 They do not send it to the Mac by default. A paired interactive owner can open **Diagnostics** on
 iPhone, or use the control beside the Mac in the browser session list, and choose **Share
 diagnostics for 30 minutes**. The existing bounded history is sent first and new events follow
@@ -1340,6 +1360,14 @@ a second certificate for the same address.
   the remaining ports of that range, in the listener's own order, and only while nothing has
   answered. An HTTP status, an authentication refusal or a refused certificate ends that door
   immediately.
+- **A door is also over when its address definitively cannot be reached.** A name-resolution or
+  explicit no-route failure rules out every remaining port at that address, so `RemoteDoorWalk`
+  moves to the next door and records one bounded skip decision. A generic request timeout is not
+  such a verdict: URLSession does not say whether a port was filtered or a server accepted the
+  connection and stalled, and a listener may still occupy another port of the sticky range. The
+  read-only catalogue races network families independently, so preserving that port walk does
+  not put a viable Tailscale or VPN lane behind repeated LAN timeouts. A refusal also keeps
+  walking; finding a listener on another port is the walk's reason to exist.
 - **Local Network access.** `NSLocalNetworkUsageDescription` ships with the `lan` door because
   iOS prompts on the first unicast to a same-subnet private address, not only on Bonjour. A
   denial produces an ordinary no-route error, which the phone tells apart from an absent host by

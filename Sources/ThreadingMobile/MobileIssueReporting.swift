@@ -787,25 +787,73 @@ actor MobileIssueReportOutbox {
     private func deliver(
         _ submission: PublicIssueReportSubmissionDTO
     ) async throws -> PublicIssueReportReceiptDTO {
+        // Encoding is local preparation, not a network attempt. Complete it before emitting the
+        // started record so every started delivery has exactly one terminal connectivity record.
+        let body = try JSONEncoder().encode(submission)
+        let timeout: TimeInterval = 30
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let fields: [RemoteDiagnosticField: String] = [
+            .trace: submission.id.lowercased(),
+            .transport: "https",
+            .phase: "report.delivery",
+            .timeoutMS: MobileDiagnostics.milliseconds(timeout),
+        ]
+        MobileDiagnostics.recordConnectivity(
+            .issueReportSubmissionStarted,
+            fields: fields.merging([.result: "started"]) { _, new in new }
+        )
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        request.httpBody = try JSONEncoder().encode(submission)
+        request.timeoutInterval = timeout
+        request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(submission.id, forHTTPHeaderField: "Idempotency-Key")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MobileIssueReportError.unreadableResponse
+        var responseStatus: Int?
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw MobileIssueReportError.unreadableResponse
+            }
+            responseStatus = http.statusCode
+            guard (200...299).contains(http.statusCode) else {
+                throw MobileIssueReportError.serviceRejected(http.statusCode)
+            }
+            let receipt = try JSONDecoder().decode(PublicIssueReportReceiptDTO.self, from: data)
+            guard receipt.reportID == submission.id else {
+                throw MobileIssueReportError.unreadableResponse
+            }
+            MobileDiagnostics.recordConnectivity(
+                .issueReportSubmissionSucceeded,
+                fields: fields.merging([
+                    .result: "delivered",
+                    .status: String(http.statusCode),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
+            return receipt
+        } catch {
+            var terminalFields = fields.merging([
+                .result: "failed",
+                .code: MobileDiagnostics.errorCode(error),
+                .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+            ]) { _, new in new }
+            if case MobileIssueReportError.serviceRejected(let status) = error {
+                terminalFields[.status] = String(status)
+            } else if let responseStatus {
+                terminalFields[.status] = String(responseStatus)
+            }
+            let deferred = (error as? URLError) != nil
+                || (error as? MobileIssueReportError)?.shouldRemainQueued == true
+            MobileDiagnostics.recordConnectivity(
+                deferred ? .issueReportSubmissionDeferred : .issueReportSubmissionFailed,
+                level: deferred ? .warning : .error,
+                fields: terminalFields.merging([
+                    .result: deferred ? "queued" : "failed",
+                ]) { _, new in new }
+            )
+            throw error
         }
-        guard (200...299).contains(http.statusCode) else {
-            throw MobileIssueReportError.serviceRejected(http.statusCode)
-        }
-        let receipt = try JSONDecoder().decode(PublicIssueReportReceiptDTO.self, from: data)
-        guard receipt.reportID == submission.id else {
-            throw MobileIssueReportError.unreadableResponse
-        }
-        return receipt
     }
 
     private func prepareDirectory() throws {

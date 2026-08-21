@@ -40,6 +40,37 @@ iOS permission allowed
 The first missing transition identifies the owner: app permission, transport/auth, membership
 routing, provider credentials, Apple delivery, or presentation policy.
 
+Catalogue connectivity has the same reconstructable shape:
+
+```text
+hostRefreshStarted(trace)
+├─ ≤4 private lanes: request(s) → succeeded / failed / cancelled
+└─ hosted prepare: rendezvous → awaitingHost → offer → ICE → proxy
+                   then request → succeeded / failed / cancelled
+hostRefreshSucceeded(winning transport) / hostRefreshFailed
+```
+
+Only the read-only catalogue races: Hosted Direct runs beside at most four private-network lanes.
+LAN and VPN each use one lane; Tailscale may use two so IPv4 and IPv6 doors do not block each
+other. A door and its ten-port sticky range remain one sequential bounded walk inside a lane.
+Paired `hostRouteStarted` / `hostRouteEnded` records own each lifecycle;
+bounded `hostRouteProgress` records name the coarse hosted stages. Each route records `phase`,
+`attempt`/`total`, configured
+`timeoutMS`, monotonic `durationMS`, structural error/status, and terminal result. A walk that
+abandons the rest of a door adds one `hostRouteEnded` with `result: skipped`, the `reason` it
+ended (`door.answered` or `door.unreachable`), the failure code behind it, and in `detail` the number of
+attempts it stood in for — one record per door, never one per skipped port, so an early stop reads
+as a decision rather than as a gap in the attempt numbers. Only a response or a definitive
+DNS/routing failure ends a door; a generic request timeout remains scoped to its attempted port.
+A live session similarly carries one local trace through `socketConnecting`, `socketConnected` or
+`socketFailed`/`socketEnded`, and `socketReconnectScheduled` records the next attempt and bounded
+backoff delay. The dashboard event socket follows the same contract and has its own 15-second
+hello deadline, so an accepted TCP/WebSocket connection that never produces its authoritative
+first frame cannot disappear into an infinite wait. Pairing, sequential mutation and notification
+failover, local discovery resolution, hosted-credential provisioning, and report-outbox delivery
+also record their configured timeout and terminal outcome. No frame, payload, SDP, ICE candidate,
+report body, or network address is logged.
+
 ## Diagnostic contract
 
 `ThreadingRemoteKit` owns a versioned, append-only event schema used on every native surface.
@@ -82,11 +113,14 @@ event carries only a fixed stage, `posix`/`cocoa`/`other` domain, numeric error 
 count; it cannot represent a path or error description. macOS and iOS both log the first failure
 and its recovery, while a persistent failure is repeated at most once per minute per stage.
 
-iOS also has a local unified-log fallback at `codes.threading.mobile/diagnostics` for ordinary
-screen and persistence failures that may occur before a share-safe remote event exists. Those
-records contain only a fixed surface enum plus a fixed failure code or numeric error domain/code;
-localized descriptions, hosts, URLs, paths, titles, attachment names and credentials cannot be
-represented by the API.
+iOS also mirrors connectivity lifecycle events to the local unified-log category
+`codes.threading.mobile/diagnostics`, alongside its fallback for ordinary screen and persistence
+failures that may occur before a share-safe remote event exists. Connectivity lines contain only
+event, trace, pseudonymous peer, hashed origin, phase, transport, surface, result, structural
+code/status, duration, configured timeout, reconnect delay and bounded attempt position; fallback
+records contain a fixed surface enum plus a fixed failure code or numeric error domain/code.
+Localized descriptions, hosts, URLs, paths, titles, attachment names and credentials cannot be
+represented by either API.
 
 Client-to-Mac upload has a second trust boundary: only an interactive all-sessions owner bearer
 may call it; the declared source must match the shipping client header; batches are capped at 250
@@ -129,7 +163,7 @@ The protocol needs operation ids rather than relying on stable personal identifi
 |---|---|
 | Notification | Existing notification event id → APNs `apns-id` → opened event |
 | REST request | Add `X-Threading-Trace` request/response header |
-| WebSocket | Add optional connection trace to `hello`; reuse it for end/failure |
+| WebSocket | A local connection trace already joins hello/end/failure/reconnect; a future optional wire trace joins it to the Mac |
 | Permission | Existing permission request id plus WebSocket connection trace |
 | Invitation acceptance | Request trace becomes the first membership trace |
 | Hosted Firebase/FCM | Preserve the same trace through Cloud Function and FCM/APNs |
@@ -187,7 +221,8 @@ its report code. A guest can export its own report but cannot inspect another pa
 - Durable iOS journal and Diagnostics sheet with live status, checks and export.
 - Shake-to-report with screenshot preflight, attachment preview and manual Diagnostics fallback.
 - Off-by-default, typed additional-device-details manifest.
-- iOS notification, registration, host refresh and session-socket transitions.
+- iOS notification and registration transitions; fully traced host refresh route racing and
+  session socket hello/failure/end/reconnect lifecycles.
 - Durable Mac remote journal and one-click share-safe support report.
 - Browser privacy-bounded local journal plus explicit 30-minute iOS/browser forwarding into the
   paired Mac's share-safe timeline.
@@ -197,7 +232,7 @@ its report code. A guest can export its own report but cannot inspect another pa
 
 ### Phase 1 — cross-device traces
 
-- HTTP trace header, WebSocket connection trace and host timestamps.
+- HTTP trace header, WebSocket wire propagation and host timestamps.
 - Optional Mac Support Bundle with explicitly redacted owner-local `EventLog` records.
 - A small local timeline merger that explains gaps and clock offsets.
 - Unit/integration tests proving credentials and content cannot enter a report.

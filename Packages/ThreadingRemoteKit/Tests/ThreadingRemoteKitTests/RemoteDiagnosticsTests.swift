@@ -50,6 +50,9 @@ final class RemoteDiagnosticsTests: XCTestCase {
         XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(fields: [
             .origin: "mac.ts.net",
         ])))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(fields: [
+            .origin: "origin-192.168.1.42:8760",
+        ])))
     }
 
     /// `detail` carries the values behind a refusal, and stays inside the same machine alphabet
@@ -65,7 +68,56 @@ final class RemoteDiagnosticsTests: XCTestCase {
         ])))
     }
 
+    func testConnectivityLifecycleAcceptsOnlyNumericMeasurements() {
+        XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(
+            event: .hostRouteEnded,
+            fields: [
+                .trace: "trace-123",
+                .transport: "hosted",
+                .phase: "hosted.awaitingHost",
+                .result: "failed",
+                .durationMS: "15017",
+                .timeoutMS: "15000",
+                .attempt: "1",
+                .total: "2",
+            ]
+        )))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(
+            event: .hostRouteEnded,
+            fields: [.durationMS: "fifteen-seconds"]
+        )))
+    }
+
+    func testIOSDiscoveryEvidenceCanBeSharedWithThePairedHost() {
+        XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(
+            event: .hostDiscoveryMatched,
+            fields: [
+                .peer: "peer-a1b2c3d4e5f6",
+                .transport: "lan",
+                .phase: "resolve",
+                .result: "matched",
+                .origin: "origin-a1b2c3d4e5f6",
+            ]
+        )))
+    }
+
+    func testIOSReportDeliveryEvidenceCanBeSharedWithThePairedHost() {
+        XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(
+            event: .issueReportSubmissionDeferred,
+            fields: [
+                .trace: UUID().uuidString.lowercased(),
+                .transport: "https",
+                .phase: "report.delivery",
+                .result: "queued",
+                .code: "url.-1001",
+                .durationMS: "30004",
+                .timeoutMS: "30000",
+            ]
+        )))
+    }
+
     private func uploadRequest(
+        event: RemoteDiagnosticEvent = .socketFailed,
         fields: [RemoteDiagnosticField: String]
     ) -> RemoteDiagnosticUploadRequestDTO {
         let formatter = ISO8601DateFormatter()
@@ -76,7 +128,7 @@ final class RemoteDiagnosticsTests: XCTestCase {
                 timestamp: formatter.string(from: Date()),
                 source: .iOSClient,
                 level: .error,
-                event: .socketFailed,
+                event: event,
                 fields: Dictionary(uniqueKeysWithValues: fields.map { ($0.key.rawValue, $0.value) })
             )]
         )

@@ -5,6 +5,19 @@ import XCTest
 @MainActor
 final class MobileConnectionDiagnosticsTests: XCTestCase {
 
+    private enum RaceFixtureError: Error, Equatable {
+        case privateRoute
+        case hostedRoute
+    }
+
+    private actor CancellationFlag {
+        private(set) var wasCancelled = false
+
+        func markCancelled() {
+            wasCancelled = true
+        }
+    }
+
     override func setUp() {
         super.setUp()
         MobileConnectionStateLog.reset()
@@ -119,6 +132,114 @@ final class MobileConnectionDiagnosticsTests: XCTestCase {
 
         XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(hashed))
         XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(raw))
+    }
+
+    func testTheSharedPolicyAcceptsConnectivityLifecycleFields() {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let request = RemoteDiagnosticUploadRequestDTO(
+            source: .iOSClient,
+            records: [RemoteDiagnosticRecord(
+                timestamp: formatter.string(from: Date()),
+                source: .iOSClient,
+                level: .warning,
+                event: .hostRouteEnded,
+                fields: [
+                    RemoteDiagnosticField.trace.rawValue: UUID().uuidString.lowercased(),
+                    RemoteDiagnosticField.transport.rawValue: "hosted",
+                    RemoteDiagnosticField.phase.rawValue: "hosted.awaitingHost",
+                    RemoteDiagnosticField.result.rawValue: "failed",
+                    RemoteDiagnosticField.durationMS.rawValue: "15017",
+                    RemoteDiagnosticField.timeoutMS.rawValue: "15000",
+                    RemoteDiagnosticField.attempt.rawValue: "1",
+                    RemoteDiagnosticField.total.rawValue: "2",
+                    RemoteDiagnosticField.code.rawValue: "url.-1001",
+                ]
+            )]
+        )
+
+        XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(request))
+    }
+
+    func testTheSharedPolicyRefusesNonNumericConnectivityMeasurements() {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let request = RemoteDiagnosticUploadRequestDTO(
+            source: .iOSClient,
+            records: [RemoteDiagnosticRecord(
+                timestamp: formatter.string(from: Date()),
+                source: .iOSClient,
+                level: .warning,
+                event: .hostRouteEnded,
+                fields: [RemoteDiagnosticField.durationMS.rawValue: "fifteen-seconds"]
+            )]
+        )
+
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(request))
+    }
+
+    // MARK: - First-success route racing
+
+    func testTheFirstSuccessfulRouteWinsAndCancelsTheLoser() async throws {
+        let cancellation = CancellationFlag()
+        let winner: FirstSuccessfulTaskRace.Winner<String> = try await
+            FirstSuccessfulTaskRace.run([
+                .init(id: "private", failurePriority: 0) {
+                    try await Task.sleep(for: .milliseconds(20))
+                    return "lan"
+                },
+                .init(id: "hosted", failurePriority: 1) {
+                    try await withTaskCancellationHandler {
+                        try await Task.sleep(for: .seconds(5))
+                        return "hosted"
+                    } onCancel: {
+                        Task { await cancellation.markCancelled() }
+                    }
+                },
+            ])
+
+        XCTAssertEqual(winner.id, "private")
+        XCTAssertEqual(winner.value, "lan")
+        for _ in 0..<20 {
+            if await cancellation.wasCancelled { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let loserWasCancelled = await cancellation.wasCancelled
+        XCTAssertTrue(loserWasCancelled)
+    }
+
+    func testAnEarlyRouteFailureDoesNotSuppressASlowerSuccess() async throws {
+        let winner: FirstSuccessfulTaskRace.Winner<String> = try await
+            FirstSuccessfulTaskRace.run([
+                .init(id: "hosted", failurePriority: 1) {
+                    throw RaceFixtureError.hostedRoute
+                },
+                .init(id: "private", failurePriority: 0) {
+                    try await Task.sleep(for: .milliseconds(20))
+                    return "lan"
+                },
+            ])
+
+        XCTAssertEqual(winner.id, "private")
+        XCTAssertEqual(winner.value, "lan")
+    }
+
+    func testAllRouteFailuresChooseTheStablePreferredError() async {
+        do {
+            let _: FirstSuccessfulTaskRace.Winner<String> = try await
+                FirstSuccessfulTaskRace.run([
+                    .init(id: "hosted", failurePriority: 1) {
+                        throw RaceFixtureError.hostedRoute
+                    },
+                    .init(id: "private", failurePriority: 0) {
+                        try await Task.sleep(for: .milliseconds(20))
+                        throw RaceFixtureError.privateRoute
+                    },
+                ])
+            XCTFail("Every route should have failed.")
+        } catch {
+            XCTAssertEqual(error as? RaceFixtureError, .privateRoute)
+        }
     }
 
     private func record(origin: String) -> RemoteDiagnosticUploadRequestDTO {

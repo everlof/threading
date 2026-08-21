@@ -3,7 +3,7 @@ import Security
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 
-struct PairedRemoteHost: Codable, Hashable, Identifiable {
+struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     let id: String
     /// Stable Mac identity, separate from `id` because one Mac may have an owner pairing and
     /// several one-chat guest capabilities without either overwriting another in Keychain.
@@ -345,7 +345,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
 }
 
 /// One address the phone will try, and the door it belongs to.
-struct RemoteHostConnectionCandidate: Equatable {
+struct RemoteHostConnectionCandidate: Equatable, Sendable {
     let link: RemoteConnectionLink
     /// The Mac's semantic name for this door. It follows every fallback attempt so presentation
     /// can collapse a sticky-port walk back to one human route such as "This network".

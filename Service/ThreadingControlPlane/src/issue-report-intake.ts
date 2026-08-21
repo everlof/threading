@@ -51,10 +51,24 @@ const events = new Set([
   "hostPairingSucceeded",
   "hostPairingFailed",
   "hostRemoved",
+  "hostRefreshStarted",
   "hostRefreshSucceeded",
   "hostRefreshFailed",
+  "hostRouteStarted",
+  "hostRouteProgress",
+  "hostRouteEnded",
   "hostListenerStarted",
   "hostListenerFailed",
+  "hostDoorBound",
+  "hostDoorUnreachable",
+  "hostIdentityCreated",
+  "hostIdentityReset",
+  "hostIdentityRotated",
+  "hostDiscoveryRegistered",
+  "hostDiscoveryWithdrawn",
+  "hostDiscoveryFound",
+  "hostDiscoveryMatched",
+  "hostDiscoveryIgnored",
   "relayConnected",
   "relayFailed",
   "authenticationRefused",
@@ -62,6 +76,7 @@ const events = new Set([
   "socketConnected",
   "socketEnded",
   "socketFailed",
+  "socketReconnectScheduled",
   "permissionDecisionSent",
   "permissionDecisionReceived",
   "notificationAuthorization",
@@ -106,7 +121,15 @@ const diagnosticFields = new Set([
   "surface",
   "enabledKindCount",
   "recordCount",
+  "phase",
+  "durationMS",
+  "timeoutMS",
+  "delayMS",
+  "attempt",
+  "total",
   "reason",
+  "origin",
+  "detail",
 ]);
 const additionalDetailFields = new Set([
   "deviceModel",
@@ -149,6 +172,14 @@ const additionalDetailFields = new Set([
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const iso8601Pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
 const machineTokenPattern = /^[A-Za-z0-9._:-]+$/u;
+const unsignedIntegerPattern = /^\d+$/u;
+const peerPseudonymPattern = /^(?:peer|device)-[0-9a-f]{12}$/u;
+const sessionPseudonymPattern = /^session-[0-9a-f]{12}$/u;
+const originDigestPattern = /^origin-[0-9a-f]{12}$/u;
+const numericDiagnosticFields = new Set([
+  "enabledKindCount", "recordCount", "protocolVersion", "minimumProtocolVersion",
+  "durationMS", "timeoutMS", "delayMS", "attempt", "total",
+]);
 const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 
 interface NormalizedIssueReport {
@@ -387,6 +418,19 @@ function optionalStringDictionary(
     const fieldValue = safeText(source[key], `${name}.${key}`, 160);
     if (requireMachineTokens && !machineTokenPattern.test(fieldValue)) {
       invalid(`${name}.${key} is not a machine token`);
+    }
+    if (requireMachineTokens && numericDiagnosticFields.has(key)
+      && !unsignedIntegerPattern.test(fieldValue)) {
+      invalid(`${name}.${key} is not an unsigned integer`);
+    }
+    if (requireMachineTokens && key === "peer" && !peerPseudonymPattern.test(fieldValue)) {
+      invalid(`${name}.${key} is not pseudonymized`);
+    }
+    if (requireMachineTokens && key === "session" && !sessionPseudonymPattern.test(fieldValue)) {
+      invalid(`${name}.${key} is not pseudonymized`);
+    }
+    if (requireMachineTokens && key === "origin" && !originDigestPattern.test(fieldValue)) {
+      invalid(`${name}.${key} is not hashed`);
     }
     result[key] = fieldValue;
   }
