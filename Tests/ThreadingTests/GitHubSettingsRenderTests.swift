@@ -113,6 +113,12 @@ final class GitHubSettingsRenderTests: XCTestCase {
         view.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(view)
         NSLayoutConstraint.activate([
+            // The pane states its width. A detached fixture is a flexible layout root, so a
+            // frame alone lets Auto Layout widen the "pane" to whatever the page asked for,
+            // and `testTheNarrowPaneWrapsRatherThanOverflows` would then be comparing a page
+            // against a pane the page had chosen. See CLAUDE.md, "a detached fixture with a
+            // frame constrains nothing".
+            host.widthAnchor.constraint(equalToConstant: width),
             view.topAnchor.constraint(equalTo: host.topAnchor),
             view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             view.trailingAnchor.constraint(equalTo: host.trailingAnchor),

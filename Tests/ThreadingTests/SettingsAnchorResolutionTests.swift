@@ -28,12 +28,45 @@ final class SettingsAnchorResolutionTests: XCTestCase {
 
             for entry in page.entries {
                 XCTAssertNotNil(
-                    SettingsRowAnchor.find(title: entry.title, in: controller.view),
+                    SettingsRowAnchor.locate(title: entry.title, in: controller.view),
                     "\(page.id): no built row carries the anchor “\(entry.title)”"
                 )
             }
             withExtendedLifetime(host) {}
         }
+    }
+
+    /// The half of that contract a run of segments introduced: some rows are not on the page
+    /// until the page is asked for them.
+    ///
+    /// Remote Access shows one way in's rows and builds none of the others', so two catalogue
+    /// entries are behind a selection. `locate` has to move that selection, and `find` — which is
+    /// the honest question about the tree as it stands — has to keep saying no.
+    func testARowBehindASegmentIsNotFoundUntilThePageIsAskedForIt() throws {
+        let controller = RemoteAccessPreferencesViewController()
+        let host = fixture(holding: controller.view)
+        let title = L10n.string("Open in a browser on your tailnet")
+
+        XCTAssertEqual(controller.shownWayIn, .thisNetwork, "the page did not open where it used to")
+        XCTAssertNil(
+            SettingsRowAnchor.find(title: title, in: controller.view),
+            "the row was built for a way in nobody selected"
+        )
+
+        XCTAssertNotNil(
+            SettingsRowAnchor.locate(title: title, in: controller.view),
+            "asking the page for the row did not bring it on screen"
+        )
+        XCTAssertEqual(
+            controller.shownWayIn, .tailscale,
+            "the row appeared without its own way in being selected"
+        )
+
+        // A title nothing owns leaves the page exactly where it was, rather than on whichever
+        // segment the search happened to stop at.
+        XCTAssertNil(SettingsRowAnchor.locate(title: "Nothing on this page", in: controller.view))
+        XCTAssertEqual(controller.shownWayIn, .tailscale, "a failed lookup moved the selection")
+        withExtendedLifetime(host) {}
     }
 
     /// An anchor is the row's localized title; an empty title is not a destination and must

@@ -612,11 +612,20 @@ enum SettingsUI {
 
     /// Pins every wrapping line in a label column to the column's own width, with a floor.
     ///
+    /// The pin is what settles the tie: a wrapping label hugs at `.defaultLow`, which is the
+    /// priority the column itself claims the row's slack at, and a tie is not a layout.
+    ///
     /// The floor is the squeezed pane's half of the same problem. A row's trailing control keeps
     /// its width by contract, so in a 420-point pane the label column can be left with almost
-    /// nothing — and a subtitle pinned to *that* wraps one character per line, which is worse
-    /// than the overflow it replaced. So the pin is a preference and the floor is not: the words
-    /// stay readable and run past the column instead of down it.
+    /// nothing, and a subtitle pinned to *that* wraps one character per line for eleven lines,
+    /// which is worse than the truncation it replaced. So the pin is a preference and the floor
+    /// outranks it: the words stay readable, and the row's own required edges are still free to
+    /// break the floor rather than push a control out of its card.
+    ///
+    /// The floor is stated at `.defaultHigh` and is therefore *above* a control measure a page
+    /// declares as a preference. That is the intended order. A control that must keep its width
+    /// says so at `.required` and wins; a control whose 380 points are a wish yields them to the
+    /// sentence beside it, which is the trade a narrow pane should make.
     private static func fill(_ labels: NSStackView) {
         for view in labels.arrangedSubviews {
             guard let field = view as? NSTextField, field.cell?.wraps == true else { continue }
@@ -627,9 +636,6 @@ enum SettingsUI {
             let floor = field.widthAnchor.constraint(
                 greaterThanOrEqualToConstant: SettingsUIDefaults.minimumTextWidth
             )
-            // Above the pin, below the row's own edges: the words win against the column, and
-            // the card wins against the words. A floor stated as required would push a control
-            // out of the card it is in, which is the defect one layer up.
             floor.priority = .defaultHigh
             NSLayoutConstraint.activate([pin, floor])
         }

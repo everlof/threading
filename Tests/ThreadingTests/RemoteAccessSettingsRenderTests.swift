@@ -649,6 +649,60 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         )
     }
 
+    // MARK: - Sharing & Security
+
+    /// The section keeps its four rows, and each one keeps the whole of what it used to say.
+    ///
+    /// This is the rule the redesign is most able to break by accident: moving prose behind a
+    /// press is only honest while every sentence survives the move. So each row is held to both
+    /// halves — the short line still on the page, and the rest one press away and complete.
+    func testEverySharingRowKeepsItsSentencesWithTheLongHalfOnePressAway() throws {
+        let page = self.page(state: .lanBound)
+        let onPage = allLabels(in: page.view)
+            .filter { !isEffectivelyHidden($0) }
+            .map(\.stringValue)
+
+        let rows: [(title: String, page: String, help: String)] = [
+            (
+                "New shared chats",
+                "Collaborative lets everyone with reply access send.",
+                "You can switch a live chat at any time."
+            ),
+            (
+                "Reports from your phone",
+                "Shake to report, then Send to Mac, starts a chat here while you are away from it.",
+                "Its own workspace keeps that chat out of the checkout you left open."
+            ),
+            (
+                "Your own devices",
+                "The QR code is owner access.",
+                "A paired device can see and manage your chats"
+            ),
+            (
+                "Other people",
+                "Use Share Chat… from that chat’s ⋯ menu.",
+                "It grants only the selected chat"
+            )
+        ]
+
+        for row in rows {
+            XCTAssertTrue(
+                onPage.contains { $0.contains(row.page) },
+                "“\(row.title)” lost the line that stays on the page"
+            )
+            let button = try XCTUnwrap(help(in: page.view, titled: row.title), row.title)
+            XCTAssertTrue(
+                button.topic.spokenSummary.contains(row.help),
+                "“\(row.title)” lost the half that moved behind its “?”"
+            )
+            // The long half moved; it did not get printed twice.
+            XCTAssertFalse(
+                onPage.contains { $0.contains(row.help) },
+                "“\(row.title)” prints its explanation on the page as well as behind the press"
+            )
+        }
+    }
+
     // MARK: - The announcement, and what it buys
 
     func testTheAnnouncementLivesInsideTheNetworkPanel() throws {
@@ -1063,7 +1117,10 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         case serveNeedsHTTPS
         /// The network is there and nothing on it can reach this Mac.
         case unreachable
-        /// Announced, and the network can wake this Mac.
+        /// Announced, and the network can wake this Mac. Deliberately the same picture as
+        /// `everythingOn`: a bound LAN door *is* announced and wakeable, and the state is worth
+        /// a file of its own so the two announcement facts can be reviewed beside `cannotWake`
+        /// rather than hunted for in the happy path.
         case announcedAndCanWake
         /// Announced, and the setting that would let a proxy answer is off.
         case cannotWake

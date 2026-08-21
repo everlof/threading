@@ -146,6 +146,13 @@ final class SettingsRowLayoutTests: XCTestCase {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 200))
         container.addSubview(built)
         NSLayoutConstraint.activate([
+            // The pane's width, stated rather than framed. A detached fixture is a flexible
+            // layout root: Auto Layout resizes it to suit its subtree, so a 420-point *frame*
+            // with nothing pinning it is not a 420-point pane and a row that overflowed one
+            // would quietly widen the fixture instead of failing here. The helper above states
+            // it the same way; this case was written without it. See CLAUDE.md, "a detached
+            // fixture with a frame constrains nothing".
+            container.widthAnchor.constraint(equalToConstant: width),
             built.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             built.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             built.topAnchor.constraint(equalTo: container.topAnchor)

@@ -33,7 +33,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// The card under the run, rebuilt when the choice moves. Not on every update: a status line
     /// changes on every interface event, and a card rebuilt to change two strings is how a page
     /// starts flickering under a network that is settling.
-    private let waysInHost = NSView()
+    private let waysInHost = WaysInHostView()
     private var waysInCard: SettingsCard?
     private var waysIn: [RemoteAccessWayIn] = [.thisNetwork, .tailscale]
     private var selectedWayIn: RemoteAccessWayIn = .thisNetwork
@@ -260,11 +260,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             "settings.remote-access.input-control-default"
         )
         inputControlDefault.translatesAutoresizingMaskIntoConstraints = false
-        // The measure the run *wants*, one step under the floor a row's words keep. Required, it
-        // was 380 points of a 300-point row, and the sentence beside it was pinned to what was
-        // left: a subtitle one character wide, wrapping down the card for eleven lines. The
-        // content pane stops at 320 points, so that is a pane somebody can actually drag to.
-        // A truncated run of two choices is legible; a column of single letters is not.
+        // The measure the run *wants*, not a contract. Required, it was 380 points of a 300-point
+        // row, and the sentence beside it was pinned to what was left: a subtitle one character
+        // wide, wrapping down the card for eleven lines. The content pane stops at 320 points, so
+        // that is a pane somebody can actually drag to. A truncated run of two choices is
+        // legible; a column of single letters is not. This is where a squeeze is answered — a
+        // floor on the words instead would only push this control out of the card.
         let wide = inputControlDefault.widthAnchor.constraint(
             equalToConstant: SettingsUIDefaults.wideSegmentedControlWidth
         )
@@ -575,8 +576,28 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     /// The run of ways in, over the one panel it selects.
     private func waysInSection() -> NSView {
         waysInHost.translatesAutoresizingMaskIntoConstraints = false
+        // A search result naming a row on a way in nobody is looking at still has to arrive at
+        // it. See `SettingsRowRevealing`.
+        waysInHost.onReveal = { [weak self] title in self?.showWayIn(carrying: title) ?? false }
         rebuildWaysInCard()
         return waysInHost
+    }
+
+    /// Selects the way in whose panel carries `title`, for a reveal that could not find it.
+    ///
+    /// It answers by trying each segment and asking the page, rather than by holding a list of
+    /// which row belongs to which way in. A list would be a second statement of what
+    /// `waysInRows()` already builds, and a row moved from one panel to another would leave the
+    /// search pointing at the panel it came from with nothing to say it had.
+    private func showWayIn(carrying title: String) -> Bool {
+        let original = selectedWayIn
+        for wayIn in waysIn where wayIn != original {
+            select(wayIn)
+            view.layoutSubtreeIfNeeded()
+            if SettingsRowAnchor.find(title: title, in: view) != nil { return true }
+        }
+        select(original)
+        return false
     }
 
     /// Builds the card for whichever way in is selected.
@@ -1903,4 +1924,20 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         static let serveRemedy = "settings.remote-access.tailscale-serve-remedy"
     }
 
+}
+
+// MARK: - Ways In Host
+
+/// The view the ways-in card stands in, and the page's answer to a search result naming a row
+/// behind a segment nobody is on.
+///
+/// A bare `NSView` with one closure: it chooses no styling of its own, and the knowledge of what
+/// is on which segment stays with the controller that built them.
+private final class WaysInHostView: NSView, SettingsRowRevealing {
+
+    var onReveal: ((String) -> Bool)?
+
+    func prepareToReveal(title: String) -> Bool {
+        onReveal?(title) ?? false
+    }
 }
