@@ -76,8 +76,8 @@ struct ProjectTerminal: Codable, Identifiable {
   /// `"Terminal"` placeholder a record is born with.
   ///
   /// Not what to put on screen: the top two rungs of the ladder live here, but the two that
-  /// make an unnamed terminal legible — where it is and what it is running — need the project
-  /// it is shown under and its live process. Use `ProjectTerminalTitle.displayTitle(for:)`.
+  /// make an unnamed terminal legible — where it is and what it is running — need its owning
+  /// project and live process. Use `ProjectTerminalTitle.displayTitle(for:)`.
   var displayTitle: String {
     let custom = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let custom, !custom.isEmpty { return custom }

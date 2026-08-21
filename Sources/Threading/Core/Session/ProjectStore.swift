@@ -865,8 +865,9 @@ final class ProjectStore {
         return true
     }
 
-    /// Moves the terminal's sidebar placement and branch whenever OSC 7 or process fallback
-    /// reports a new working directory.
+    /// Records the shell's live location and branch whenever OSC 7 or process fallback reports
+    /// a new working directory. The terminal stays owned by the project where it was created;
+    /// changing directories changes runtime context, not sidebar ownership.
     func updateTerminalLocation(_ directory: String, for terminalID: TerminalID) {
         guard let location = locate(terminalID: terminalID) else { return }
         let normalized = URL(fileURLWithPath: directory)
@@ -883,8 +884,7 @@ final class ProjectStore {
         notifyChanged()
     }
 
-    /// Records a terminal-only override. Nil returns to the project at its current cwd, and
-    /// then the app theme.
+    /// Records a terminal-only override. Nil returns to its owning project, then the app theme.
     @discardableResult
     func setThemeID(
         _ themeID: TerminalThemeID?,
@@ -1444,19 +1444,6 @@ final class ProjectStore {
     func homeProject(forTerminalID terminalID: TerminalID) -> Project? {
         guard let location = locate(terminalID: terminalID) else { return nil }
         return projects[location.projectIndex]
-    }
-
-    /// The project under which the terminal is currently displayed, based on its cwd.
-    func displayProject(forTerminalID terminalID: TerminalID) -> Project? {
-        guard let location = locate(terminalID: terminalID) else { return nil }
-        let home = projects[location.projectIndex]
-        let terminal = home.terminals[location.terminalIndex]
-        let projectID = ProjectTerminalPlacement.projectID(
-            for: terminal,
-            homeProject: home,
-            projects: projects
-        )
-        return project(withID: projectID) ?? home
     }
 
     // MARK: - Private Methods

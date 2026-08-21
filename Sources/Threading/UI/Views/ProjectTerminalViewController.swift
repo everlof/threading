@@ -69,7 +69,7 @@ final class ProjectTerminalViewController: NSViewController {
         appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.applyTheme() }
         appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in self?.applyTheme() }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyTheme() }
-        // A cwd change may move this terminal under a differently themed project.
+        // Project mutations can change the owning project's inherited theme.
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in self?.applyTheme() }
     }
 

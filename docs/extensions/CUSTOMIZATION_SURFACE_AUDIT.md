@@ -31,6 +31,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
+| Work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
 | Account setup and reconnect | — | host-only | provider identity, isolated-home routing, child-process lifecycle, login verification, credential non-capture, native failure and installation fallback | Host-only |
@@ -52,6 +53,13 @@ would create a visual contract that cannot truthfully describe the process behin
 therefore keeps its identity, selection, foreground-command spinner and lifecycle actions
 host-owned; a future public row starts by publishing the typed terminal context rather than by
 leaking the AppKit cell.
+
+The macOS sidebar and iOS dashboard organization controls remain host-only navigation chrome.
+They arrange existing public or host-only rows without changing those rows' presentation
+contracts. Threading owns persisted project membership, chat-versus-terminal classification,
+stable order inside each type, direction persistence and the navigation destination; allowing a
+replacement control to contradict any of those facts would make the same terminal appear to have
+different ownership across surfaces.
 
 The sidebar workload analyzer is deliberately not a second extension component around the brand
 row. It is one presentation of an existing theme-owned slot: any installed theme may select the

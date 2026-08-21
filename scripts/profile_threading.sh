@@ -1539,6 +1539,7 @@ run_sidebar_stress() {
       "manual:20:250"
       "recentActivity:20:250"
       "name:20:250"
+      "type:20:250"
     )
     if [[ -n "${THREADING_SIDEBAR_STRESS_PROJECTS:-}" \
        || -n "${THREADING_SIDEBAR_STRESS_SESSIONS:-}" \

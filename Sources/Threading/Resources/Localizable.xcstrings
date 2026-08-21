@@ -18736,6 +18736,16 @@
         }
       }
     },
+    "Sort by Type": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sortera efter typ"
+          }
+        }
+      }
+    },
     "Sort by Order Added": {
       "extractionState": "stale",
       "localizations": {
@@ -18754,6 +18764,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sortera efter nylig aktivitet"
+          }
+        }
+      }
+    },
+    "Chats First": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chattar först"
+          }
+        }
+      }
+    },
+    "Terminals First": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminaler först"
           }
         }
       }

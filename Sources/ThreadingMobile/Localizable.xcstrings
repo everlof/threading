@@ -103,6 +103,9 @@
     "Terminals": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminaler" } } }
     },
+    "Terminals first": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminaler först" } } }
+    },
     "The link can watch this terminal’s output while its shell is running.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Länken kan se terminalens utdata medan skalet körs." } } }
     },
@@ -524,6 +527,9 @@
     },
     "Chats": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chattar" } } }
+    },
+    "Chats first": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Chattar först" } } }
     },
     "Open Threading → Settings → Remote Access to show its pairing code.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna Threading → Inställningar → Fjärråtkomst för att visa parkopplingskoden." } } }
@@ -1330,6 +1336,16 @@
         }
       }
     },
+    "By type": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Efter typ"
+          }
+        }
+      }
+    },
     "Can collaborate and approve requests": {
       "localizations": {
         "sv": {
@@ -1896,6 +1912,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Diagnostik"
+          }
+        }
+      }
+    },
+    "Direction": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riktning"
           }
         }
       }

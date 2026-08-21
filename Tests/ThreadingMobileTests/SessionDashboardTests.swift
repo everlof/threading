@@ -5,6 +5,18 @@ import XCTest
 final class SessionDashboardTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 2_000_000)
 
+    func testTypeDirectionNamesAndOrdersBothKinds() {
+        XCTAssertEqual(SessionTypeDirection.chatsFirst.contentTypes, [.chats, .terminals])
+        XCTAssertEqual(SessionTypeDirection.terminalsFirst.contentTypes, [.terminals, .chats])
+        XCTAssertEqual(SessionTypeDirection.chatsFirst.title, "Chats first")
+        XCTAssertEqual(SessionTypeDirection.terminalsFirst.title, "Terminals first")
+    }
+
+    func testDashboardOrganizationIncludesProjectRecentAndType() {
+        XCTAssertEqual(SessionOrganization.allCases, [.project, .recent, .type])
+        XCTAssertEqual(SessionOrganization.type.title, "By type")
+    }
+
     /// The age is one narrow unit, and never a signed quantity: `RelativeDateTimeFormatter`'s
     /// abbreviated Swedish wrote yesterday as `−1 d`, which is what a duration can never do.
     func testSwedishAgeIsOneNarrowUnitWithoutAMinusSign() {

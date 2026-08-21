@@ -243,12 +243,14 @@ Branches** — disabled while grouping is off — and **Compact Tree**), then ho
 - **Sort by Order Added** — the order sessions were created in; the default
 - **Sort by Recent Activity** — the most recently active session first
 - **Sort by Name** — alphabetical, case-insensitive
+- **Sort by Type** — chats and standalone terminals in separate stable groups
 
 Below the orders, the same menu offers that order's two directions, named for what the order
 actually sorts by rather than "ascending" and "descending": **Oldest First** or **Newest
 First** for Order Added, **Most Recent First** or **Least Recent First** for Recent Activity,
 **A to Z** or **Z to A** for Name. Picking a different order starts it at its own natural
-direction, so a reversal made about names is not inherited by a sort about dates.
+direction, and Type offers **Chats First** or **Terminals First**. A reversal made about names is
+not inherited by a sort about dates or row kinds.
 
 A pinned session carries a filled pin beside its title and leads the list under every order and
 either direction — pinning is a stronger statement than any sort, and reversing reverses the
@@ -1013,11 +1015,11 @@ scrollback for the app launch. Exit leaves a dormant row; select it and choose *
 to open a fresh shell in its last directory. Closing the row ends the process and removes its
 saved terminal record.
 
-As the shell changes directory, its row follows the most specific already-added project folder
-that contains that cwd in the same git worktree. It moves beneath that project's current branch
-heading too. Moving somewhere unrelated leaves it under the project where it was created. A
-terminal-specific theme wins first; otherwise it inherits from the project it is currently
-shown under, then from the app default.
+The row remains in the project where it was created, even if the shell changes directory into
+another added checkout. Its displayed directory, branch, execution context, and **Start Again**
+folder still follow the live cwd; project ownership and inherited settings do not. A
+terminal-specific theme wins first; otherwise it inherits from its owning project, then from the
+app default.
 
 ### Project scripts
 
@@ -2284,6 +2286,10 @@ Paired owner devices also see **standalone terminals** in the iPhone and browser
 one to attach to that project shell; if it is stopped, an owner may start it remotely. A terminal
 has no chat transcript, archive, workspace tools or AI permission cards, so its screen exposes
 only the terminal and terminal sharing actions.
+
+On iPhone, **… ▸ Organize ▸ By project** places terminals inside the project that owns them.
+Choose **By type** to gather chats and terminals across projects; its **Direction** section offers
+**Chats first** and **Terminals first**. The choice is saved on that iPhone.
 
 Use a standalone terminal row's **… > Share Terminal…** to give somebody access to that terminal
 alone. **View only** follows output from an already-running shell and cannot type, resize or start

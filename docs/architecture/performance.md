@@ -216,6 +216,12 @@ a dormant shell is the only polling path: the selected detail performs at most 3
 catalogue checks, cancels when the host or screen changes, and stops as soon as that terminal is
 available; view-only capabilities never enter it.
 
+The project organization groups terminal and chat value summaries by the same project name before
+constructing lazy row groups; a project with only terminals still gets one section. The type
+organization materializes the same two groups in one of two persisted directions rather than
+copying or eagerly interleaving their rows. Both paths remain O(catalogue) preparation and
+O(visible) row construction.
+
 The pre-catalogue connection card is invariant at one current-operation row. Its activity
 treatment keeps one two-second timer, plays one bounded 650 ms LabelMorph fade, and invalidates
 the timer when that row is replaced, unmounted, or subject to Reduce Motion. Route cardinality
@@ -2793,7 +2799,7 @@ row count, selection, and reveal assertions prevent a faster result from silentl
 expanded or addressable.
 
 `scripts/profile_threading.sh sidebar-stress` runs manual order at 500, 1,000, 2,000 and 5,000
-sessions, plus recent-activity and name order at 5,000, in fresh `xctest` processes.
+sessions, plus recent-activity, name and type order at 5,000, in fresh `xctest` processes.
 `THREADING_SIDEBAR_STRESS_ORDER`, `..._PROJECTS`, and `..._SESSIONS` narrow it to one point. The
 profiler's DerivedData lives inside that run's artifact directory: parallel developer builds cannot
 lock its build database, while the deterministic workloads in `full` reuse the same isolated

@@ -142,8 +142,7 @@ final class RemoteSessionMirrorRegistry {
             .flatMap(\.terminals)
             .filter { authorization.scope.covers($0.id) }
             .map { terminal in
-                let project = ProjectStore.shared.displayProject(forTerminalID: terminal.id)
-                    ?? ProjectStore.shared.homeProject(forTerminalID: terminal.id)
+                let project = ProjectStore.shared.homeProject(forTerminalID: terminal.id)
                 return terminalSummary(for: terminal, projectName: project?.name ?? "")
             }
             .sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
@@ -1895,8 +1894,7 @@ final class RemoteSessionMirrorRegistry {
                 guard let authorization = connection.authenticatedPeer?.authorization,
                       authorization.scope.covers(terminalID) else { continue }
                 let visible = terminal.map { candidate in
-                    let project = ProjectStore.shared.displayProject(forTerminalID: terminalID)
-                        ?? ProjectStore.shared.homeProject(forTerminalID: terminalID)
+                    let project = ProjectStore.shared.homeProject(forTerminalID: terminalID)
                     return terminalSummary(
                         for: candidate,
                         projectName: project?.name ?? ""

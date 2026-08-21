@@ -210,6 +210,7 @@ struct ProjectTerminalRowGroup: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
     let terminals: [RemoteProjectTerminalSummaryDTO]
+    var showsProjectName = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
@@ -240,10 +241,12 @@ struct ProjectTerminalRowGroup: View {
                                         .font(.body.weight(.semibold))
                                         .foregroundStyle(theme.label)
                                         .lineLimit(1)
-                                    Text(terminal.projectName)
-                                        .font(.caption)
-                                        .foregroundStyle(theme.secondaryLabel)
-                                        .lineLimit(1)
+                                    if showsProjectName {
+                                        Text(terminal.projectName)
+                                            .font(.caption)
+                                            .foregroundStyle(theme.secondaryLabel)
+                                            .lineLimit(1)
+                                    }
                                 }
                                 Spacer(minLength: MobileDesign.Spacing.small)
                                 Text(terminalStateLabel(terminal.state))

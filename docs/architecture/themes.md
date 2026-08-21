@@ -53,8 +53,8 @@ returns the global profile carrying a resolved theme.
 The assignments live on the records they theme (`AgentSession.themeID`,
 `ProjectTerminal.themeID`, `Project.themeID`) rather than in a side table, so each is deleted
 with the thing it applies to instead of outliving it and re-theming whatever reuses the
-identifier. A standalone terminal inherits from the project at its **current cwd**, so moving
-under another already-added project updates the palette with the sidebar placement.
+identifier. A standalone terminal inherits from the project that owns its durable record. A
+`cd` changes the shell's runtime context, not its palette or project identity.
 
 `ThemeColorKey` names the palette's twenty-one colours once, as key paths with a `displayName` and
 a snake-case `wireName`. The settings editor previously kept a `[String: NSColorWell]` and a

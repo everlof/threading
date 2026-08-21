@@ -79,18 +79,18 @@ final class CheckoutBranchFollowerTests: XCTestCase {
         XCTAssertEqual(store.terminal(withID: terminal.id)?.branch, "feature")
     }
 
-    func testTerminalCwdMovesItToTheMostSpecificKnownProject() throws {
+    func testTerminalCwdDoesNotChangeTheProjectThatOwnsIt() throws {
         let store = makeStore()
         let checkout = try makeCheckout(named: "app", branch: "main")
         let docs = try makeSubfolder(of: checkout, named: "docs")
         let home = try XCTUnwrap(store.addProject(folderURL: checkout))
-        let docsProject = try XCTUnwrap(store.addProject(folderURL: docs))
+        _ = try XCTUnwrap(store.addProject(folderURL: docs))
         let terminal = try XCTUnwrap(store.addTerminal(to: home.id))
 
         store.updateTerminalLocation(docs.path, for: terminal.id)
 
         XCTAssertEqual(store.homeProject(forTerminalID: terminal.id)?.id, home.id)
-        XCTAssertEqual(store.displayProject(forTerminalID: terminal.id)?.id, docsProject.id)
+        XCTAssertEqual(store.terminal(withID: terminal.id)?.currentDirectory, docs.path)
     }
 
     // MARK: - The Follower

@@ -36,14 +36,16 @@ enum MobileSnoozePresets {
     }
 }
 
-private enum SessionOrganization: String, CaseIterable {
+enum SessionOrganization: String, CaseIterable {
     case project
     case recent
+    case type
 
     var title: String {
         switch self {
         case .project: return MobileL10n.string("By project")
         case .recent: return MobileL10n.string("Most recent")
+        case .type: return MobileL10n.string("By type")
         }
     }
 
@@ -51,6 +53,38 @@ private enum SessionOrganization: String, CaseIterable {
         switch self {
         case .project: return "folder"
         case .recent: return "clock.arrow.circlepath"
+        case .type: return "square.grid.2x2"
+        }
+    }
+}
+
+enum DashboardContentType: String, Hashable {
+    case chats
+    case terminals
+}
+
+enum SessionTypeDirection: String, CaseIterable {
+    case chatsFirst
+    case terminalsFirst
+
+    var title: String {
+        switch self {
+        case .chatsFirst: return MobileL10n.string("Chats first")
+        case .terminalsFirst: return MobileL10n.string("Terminals first")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .chatsFirst: return "bubble.left.and.bubble.right"
+        case .terminalsFirst: return "terminal"
+        }
+    }
+
+    var contentTypes: [DashboardContentType] {
+        switch self {
+        case .chatsFirst: return [.chats, .terminals]
+        case .terminalsFirst: return [.terminals, .chats]
         }
     }
 }
@@ -405,6 +439,7 @@ private struct DashboardProjectSection {
     let projectName: String
     let title: String
     let sessions: [RemoteSessionSummaryDTO]
+    let terminals: [RemoteProjectTerminalSummaryDTO]
 }
 
 private enum DashboardSessionAction {
@@ -439,6 +474,8 @@ struct SessionDashboard: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("sessionDashboardOrganization") private var organizationRaw =
         SessionOrganization.project.rawValue
+    @AppStorage("sessionDashboardTypeDirection") private var typeDirectionRaw =
+        SessionTypeDirection.chatsFirst.rawValue
     @State private var searchText = ""
     @State private var isConfirmingForget = false
     @State private var themeError: String?
@@ -475,6 +512,10 @@ struct SessionDashboard: View {
 
     private var organization: SessionOrganization {
         SessionOrganization(rawValue: organizationRaw) ?? .project
+    }
+
+    private var typeDirection: SessionTypeDirection {
+        SessionTypeDirection(rawValue: typeDirectionRaw) ?? .chatsFirst
     }
 
     private var showsDemoBanner: Bool {
@@ -522,16 +563,23 @@ struct SessionDashboard: View {
         return filtered.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
     }
 
-    private var groupedSessions: [DashboardProjectSection] {
-        Dictionary(grouping: sessions, by: \.projectName)
-            .map {
+    private var groupedProjects: [DashboardProjectSection] {
+        let sessionsByProject = Dictionary(grouping: sessions, by: \.projectName)
+        let terminalsByProject = Dictionary(grouping: terminals, by: \.projectName)
+        return Set(sessionsByProject.keys).union(terminalsByProject.keys)
+            .map { name in
                 DashboardProjectSection(
-                    projectName: $0.key,
-                    title: $0.key.isEmpty ? MobileL10n.string("Other") : $0.key,
-                    sessions: $0.value
+                    projectName: name,
+                    title: name.isEmpty ? MobileL10n.string("Other") : name,
+                    sessions: sessionsByProject[name] ?? [],
+                    terminals: terminalsByProject[name] ?? []
                 )
             }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    private var projectContentTypes: [DashboardContentType] {
+        organization == .type ? typeDirection.contentTypes : [.chats, .terminals]
     }
 
     var body: some View {
@@ -559,37 +607,31 @@ struct SessionDashboard: View {
                 } else if sessions.isEmpty, terminals.isEmpty {
                     emptyCard
                 } else {
-                    if !terminals.isEmpty {
-                        ProjectTerminalRowGroup(terminals: terminals)
-                    }
-                    if projectName != nil, !sessions.isEmpty {
-                        SessionRowGroup(
-                            sessions: sessions,
-                            isArchived: showsArchived,
-                            showsActions: model.canManageSessions,
-                            pendingActionSessionID: pendingActionSessionID,
-                            action: perform
-                        )
+                    if projectName != nil {
+                        ForEach(projectContentTypes, id: \.self) { type in
+                            dashboardGroup(for: type, labelsType: organization == .type)
+                        }
                     } else if organization == .project {
-                        ForEach(groupedSessions, id: \.projectName) { project in
-                            ProjectSessionGroup(
+                        ForEach(groupedProjects, id: \.projectName) { project in
+                            ProjectWorkGroup(
                                 projectName: project.projectName,
                                 title: project.title,
                                 sessions: project.sessions,
+                                terminals: project.terminals,
+                                contentTypes: [.chats, .terminals],
                                 isArchived: showsArchived,
                                 showsActions: model.canManageSessions,
                                 pendingActionSessionID: pendingActionSessionID,
                                 action: perform
                             )
                         }
-                    } else if !sessions.isEmpty {
-                        SessionRowGroup(
-                            sessions: sessions,
-                            isArchived: showsArchived,
-                            showsActions: model.canManageSessions,
-                            pendingActionSessionID: pendingActionSessionID,
-                            action: perform
-                        )
+                    } else if organization == .type {
+                        ForEach(typeDirection.contentTypes, id: \.self) { type in
+                            dashboardGroup(for: type, labelsType: true)
+                        }
+                    } else {
+                        dashboardGroup(for: .chats, labelsType: false)
+                        dashboardGroup(for: .terminals, labelsType: false)
                     }
                 }
 
@@ -607,6 +649,39 @@ struct SessionDashboard: View {
             .padding(.top, MobileDesign.Spacing.large)
             .padding(.horizontal, MobileDesign.Spacing.large)
             .padding(.bottom, 36)
+        }
+    }
+
+    @ViewBuilder
+    private func dashboardGroup(for type: DashboardContentType, labelsType: Bool) -> some View {
+        switch type {
+        case .chats:
+            if !sessions.isEmpty {
+                if labelsType {
+                    SessionTypeRowGroup(
+                        sessions: sessions,
+                        isArchived: showsArchived,
+                        showsActions: model.canManageSessions,
+                        pendingActionSessionID: pendingActionSessionID,
+                        action: perform
+                    )
+                } else {
+                    SessionRowGroup(
+                        sessions: sessions,
+                        isArchived: showsArchived,
+                        showsActions: model.canManageSessions,
+                        pendingActionSessionID: pendingActionSessionID,
+                        action: perform
+                    )
+                }
+            }
+        case .terminals:
+            if !terminals.isEmpty {
+                ProjectTerminalRowGroup(
+                    terminals: terminals,
+                    showsProjectName: projectName == nil
+                )
+            }
         }
     }
 
@@ -868,6 +943,23 @@ struct SessionDashboard: View {
                                         ? "checkmark"
                                         : option.symbol
                                 )
+                            }
+                        }
+                    }
+
+                    if organization == .type {
+                        Section("Direction") {
+                            ForEach(SessionTypeDirection.allCases, id: \.rawValue) { option in
+                                Button {
+                                    typeDirectionRaw = option.rawValue
+                                } label: {
+                                    Label(
+                                        option.title,
+                                        systemImage: typeDirection == option
+                                            ? "checkmark"
+                                            : option.symbol
+                                    )
+                                }
                             }
                         }
                     }
@@ -1415,10 +1507,12 @@ private struct MobileConnectionProgressStepTitle: UIViewRepresentable {
     }
 }
 
-private struct ProjectSessionGroup: View {
+private struct ProjectWorkGroup: View {
     let projectName: String
     let title: String
     let sessions: [RemoteSessionSummaryDTO]
+    let terminals: [RemoteProjectTerminalSummaryDTO]
+    let contentTypes: [DashboardContentType]
     let isArchived: Bool
     let showsActions: Bool
     let pendingActionSessionID: String?
@@ -1448,6 +1542,44 @@ private struct ProjectSessionGroup: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Shows this project’s sessions")
+            ForEach(contentTypes, id: \.self) { type in
+                switch type {
+                case .chats:
+                    if !sessions.isEmpty {
+                        SessionRowGroup(
+                            sessions: sessions,
+                            isArchived: isArchived,
+                            showsActions: showsActions,
+                            pendingActionSessionID: pendingActionSessionID,
+                            action: action
+                        )
+                    }
+                case .terminals:
+                    if !terminals.isEmpty {
+                        ProjectTerminalRowGroup(
+                            terminals: terminals,
+                            showsProjectName: false
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct SessionTypeRowGroup: View {
+    let sessions: [RemoteSessionSummaryDTO]
+    let isArchived: Bool
+    let showsActions: Bool
+    let pendingActionSessionID: String?
+    let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+            Label(MobileL10n.string("Chats"), systemImage: "bubble.left.and.bubble.right")
+                .font(.headline)
+                .foregroundStyle(theme.label)
             SessionRowGroup(
                 sessions: sessions,
                 isArchived: isArchived,

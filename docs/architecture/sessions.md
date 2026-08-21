@@ -206,11 +206,17 @@ lower its transcript-derived park. The dependency gate rejects a controller-retu
 anywhere in Core, including one whose concrete return type Swift would infer.
 
 `ProjectTerminalViewController` accepts OSC 7 working-directory reports and also samples the
-shell process directory, because not every shell emits OSC 7. The cwd decides sidebar
-placement: among already-added projects in the same git worktree, the deepest project folder
-containing the cwd wins. An unrelated directory leaves the terminal in the project where it
-was created. This makes moving into an added monorepo package move the row beneath that package
-and its branch heading without inventing projects from arbitrary directories.
+shell process directory, because not every shell emits OSC 7. The cwd remains live runtime state:
+it drives the derived title, branch reading, execution directory and the folder used by **Start
+Again**. It does **not** decide ownership. A terminal stays under the project where it was created,
+even after `cd` enters another already-added checkout. Moving a shell is ordinary terminal work;
+moving its durable row, inherited settings and remote project identity in response made navigation
+change underneath the user without an explicit project action.
+
+The sidebar's **Sort by Type** order is the deliberate way to gather the two row kinds. Its
+directions are **Chats First** and **Terminals First**; direction changes the two stable groups,
+not the order within either group. Branch grouping remains the outer semantic structure, so a
+mixed branch heading applies the same type direction to its own children.
 
 ### What a terminal is called
 
@@ -252,10 +258,10 @@ Three seams keep the cost off the hot paths. The foreground group is read with `
 the pty, one syscall on the poll `ProjectTerminalViewController` was already running for the
 cwd; `ProcessUtility.processName` — which copies the kernel's argument area — is called only
 when that group *changes*. The project a row is named against is resolved once per tree build
-and carried on `TerminalNode`, because `ProjectTerminalPlacement` reads git metadata off disk
-for every project and a row that asked again would pay it per row, per reload. And rung 3 is
-**computed, not stored**: a `cd` moves the name with no write, and a dormant record cannot show
-the name of a command that stopped running two launches ago.
+and carried on `TerminalNode`; it is the same project that owns the terminal record, so a row
+does not need another store lookup. And rung 3 is **computed, not stored**: a `cd` moves the name
+with no write, and a dormant record cannot show the name of a command that stopped running two
+launches ago.
 
 **That foreground group is also the standalone terminal's working boundary.** The shell itself
 stays alive at its prompt, so `TerminalSession.isRunning` cannot distinguish `sleep 10` from an
@@ -1549,9 +1555,9 @@ resolved at build because presence is the decision — the same cost `moveToAcco
 already pays through `canMigrate` — and absent for runtimes without a reader). For Claude and
 Grok the two ids are the same string because Threading mints the id; Codex and OpenCode name
 themselves, and the Threading id is the one that survives `Continue with…` and account moves
-intact. A standalone terminal carries the same fold — its `TerminalID` and its checkout,
-the latter resolved on the click via `displayProject(forTerminalID:)` because that lookup
-shells out to git. Theme and Permission Mode stay top-level because
+intact. A standalone terminal carries the same fold — its `TerminalID` and the owning project's
+worktree path, resolved on the click so a project move cannot leave an already-open menu stale.
+Theme and Permission Mode stay top-level because
 they are reached for repeatedly; what folds behind **Session Options** is what is set once and
 left alone — Interface, Claude Remote Control, Mute Notifications, Attachments. Three details
 are load-bearing: the fold's members carry their own targets, because the builder's retarget
