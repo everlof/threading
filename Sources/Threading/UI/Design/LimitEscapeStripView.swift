@@ -434,6 +434,17 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
 
     @objc private func waitPressed() { onWaitForReset?() }
 
+    // MARK: - Pointer
+
+    /// The strip is an opaque plate over a surface that claims the pointer for itself —
+    /// `TerminalView` registers an I-beam over the whole of itself, and a transcript's text views
+    /// over theirs. Claiming nothing here is not falling back to the arrow, it is inheriting that
+    /// claim: the two answers would have offered to select text that is behind the strip. See the
+    /// design-system note of 2026-08-21.
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
     // MARK: - Accessibility
 
     /// A container rather than an element, like the scheduled strip beside it: the mark states

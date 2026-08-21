@@ -2626,6 +2626,12 @@ front-most rectangle is shown to win over one behind it. That precedence is **no
 an attempt to measure it in a scratch app failed to make its window key, and no measurement means
 no rule. Do not extend `CoveredWindowCursor` to the scrim on the assumption either way.
 
+*Evidence has since arrived from the app itself: the corner card's hand wins over the terminal's
+I-beam behind it, so a rectangle in front does win — see
+[2026-08-21](#2026-08-21--a-surface-in-front-owns-the-cursor-over-what-it-covers). That reopens the
+scrim's cursor rectangle as a real option; it does not make the change, and the counted claim above
+is still what a surface covering a whole window uses.*
+
 ## 2026-08-14 — a corner a theme states is not a corner every shape can turn
 
 Reported from a screenshot of the Component Gallery under Botanical: the theme menu's highlighted
@@ -2971,3 +2977,34 @@ the text yields: a themed button's frame reaches past the alignment rect the sta
 and at that optical inset (2pt here) the pointer is already over the button while the arithmetic
 still calls it text. And the run appearing or leaving has to `invalidateCursorRects(for:)` the
 field, because a *subview's* visibility invalidates nothing about its superview's rectangles.
+
+## 2026-08-21 — a surface in front owns the cursor over what it covers
+
+Reported an hour after the search field above, from the session pane's corner card: *"'62 files'
+has arrow cursor, but '5.8m tokens' has text positioning cursor."* Two rows of one card, a row
+apart, answering the pointer with different things.
+
+Same root as the search field, one level out. `GitStatusOverlayView` registered a pointing hand
+over the rows that open Git Review and **nothing** over the rest of itself — deliberately, so a
+card holding no Git sentence would not promise a click that does nothing. But cursor rectangles
+are a *window's* list, and claiming nothing is not the same as claiming the arrow: the card is
+opaque chrome floating over the session pane, `TerminalView.resetCursorRects` claims an I-beam
+over the whole of itself, and a native conversation's text views claim theirs. So every row the
+card did not speak for inherited the claim underneath it, and the usage and children rows — which
+are buttons — spent their lives offering to select text that is behind the card.
+
+**The precedence [2026-08-13](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it)
+could not measure has been running in production the whole time.** That note left open whether a
+front-most rectangle wins over one behind it, because a scratch app could not be made key. The
+card answers it from the other side: its hand over the Git rows has always won over the terminal's
+I-beam beneath them, in the same window, with the terminal's rectangle registered first. A view in
+front wins. (What is still unmeasured, and still not to be assumed, is the ordering of two
+rectangles registered by the *same* view — AppKit documents that as undefined, and both of today's
+fixes carve rather than layer for exactly that reason.)
+
+So the card claims its own silhouette: the acting region keeps the hand, and the up-to-four
+rectangles around it take the arrow. The line between the two is **what the row looks like**, not
+whether it acts — the Git rows are text that is pressable, which is what a hand says, and the rows
+below them are controls, which show what every other `ThemedButton` in the window shows. Any
+opaque surface floating over a terminal or a transcript inherits this rule: speak for every point
+you cover, or the view underneath will.
