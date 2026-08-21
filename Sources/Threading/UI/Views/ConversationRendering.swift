@@ -677,6 +677,14 @@ extension ConversationViewController {
         // measuring the new row. Reply growth will drive `viewDidLayout`, which refreshes the
         // arrow without putting another task in front of the anchor.
         guard autoScroll.mode != .anchored, !pendingScrollToBottom else { return }
+
+        // AppKit owns the position for the whole gesture, its momentum, and the elastic return.
+        // Preserve the following mode and remember one catch-up, but do not replace the native
+        // rubber-band offset with an exact-bottom write while the user's hand still owns it.
+        if autoScroll.isUserScrolling {
+            _ = autoScroll.claimFollowRequest()
+            return
+        }
         pendingScrollToBottom = true
 
         // After layout, or the scroll targets the table height from before this message. The
@@ -686,7 +694,7 @@ extension ConversationViewController {
             guard let self else { return }
             self.pendingScrollToBottom = false
 
-            if self.autoScroll.followsNewContent,
+            if self.autoScroll.claimFollowRequest(),
                let documentView = self.scrollView.documentView {
                 let overflow = documentView.bounds.height - self.scrollView.contentSize.height
                 documentView.scroll(NSPoint(x: 0, y: max(0, overflow)))

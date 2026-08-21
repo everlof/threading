@@ -898,11 +898,18 @@ so the pin fought the reader. Three modes: *following* (new content scrolls into
 reply streams in below; no blank space is reserved under short content, the clip view's own
 clamp does the work), and *free* (entered only by the user's hand). Gesture detection needs no
 generation counter here: AppKit routes only real gestures through `scrollWheel` (the
-`ThemedScrollView.onUserScroll` seam) and the live-scroll notifications (scroller drags), so
-our own `setBoundsOrigin` can never release the pin. A bounds change within
+`ThemedScrollView.onUserScroll` seam) and brackets gesture scrolls and scroller tracking with
+live-scroll notifications, so our own `setBoundsOrigin` can never release the pin. A bounds
+change within
 `gestureAttribution` of the last gesture event re-derives the mode — near the bottom re-pins,
 anywhere else frees — and momentum events keep refreshing the window, so a flick stays
-attributed to its end. A minimap jump frees; a finished replay lands at the bottom and follows.
+attributed to its end. **Following intent does not give Threading ownership of the position while
+AppKit is live-scrolling.** Streaming follow requests are reduced to one debt during the gesture,
+momentum and elastic return; only `didEndLiveScrollNotification` plus a clip origin back inside its
+constrained range releases the exact-bottom landing. Legacy wheel devices, which AppKit documents
+as not necessarily receiving the notification pair, use the same short attribution window as
+their end fallback. This preserves auto-follow without replacing the rubber band with a snap. A
+minimap jump frees; a finished replay lands at the bottom and follows.
 Whenever the viewport is away from the live end, the shared floating down-arrow is the explicit
 way back: it lands on AppKit's constrained terminal offset and enters *following* again. Streaming
 coalesces that control's visibility refresh with the existing follow pass, so a token does not

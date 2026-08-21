@@ -82,11 +82,41 @@ struct ConversationAutoScroll: Equatable {
 
     private(set) var mode: Mode = .following
 
+    /// The scroll view owns its position while the user's gesture, momentum, or elastic return
+    /// is in flight. Following remains the standing intent during that interval; only the
+    /// programmatic landing is deferred.
+    private(set) var isUserScrolling = false
+    private var hasDeferredFollow = false
+
     /// Whether appended or grown content should scroll into view.
     var followsNewContent: Bool { mode == .following }
 
     mutating func noteUserScrolled(nearBottom: Bool) {
         mode = nearBottom ? .following : .free
+    }
+
+    mutating func noteUserScrollBegan() {
+        isUserScrolling = true
+    }
+
+    /// Claims a requested programmatic landing. While AppKit owns a live scroll, remember the
+    /// request without writing the clip-view origin and canceling its rubber-band physics.
+    mutating func claimFollowRequest() -> Bool {
+        guard followsNewContent else { return false }
+        guard !isUserScrolling else {
+            hasDeferredFollow = true
+            return false
+        }
+        return true
+    }
+
+    /// Ends AppKit's ownership and reports whether content arrived while following was deferred.
+    /// Gesture-produced bounds changes have already decided `following` versus `free`, so content
+    /// growth during the gesture cannot itself release the standing follow intent here.
+    mutating func noteUserScrollEnded() -> Bool {
+        isUserScrolling = false
+        defer { hasDeferredFollow = false }
+        return followsNewContent && hasDeferredFollow
     }
 
     mutating func noteMessageSent() {
