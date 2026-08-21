@@ -108,7 +108,7 @@ struct RootView: View {
                 RemoteDiagnosticsView()
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "shared-link" {
-                SharedSessionLinkView(link: Self.sharedLinkDemo)
+                SharedSessionLinkDemoHost(link: Self.sharedLinkDemo)
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "session-settings",
                       let session = model.me?.sessions.first {
@@ -432,9 +432,15 @@ struct RootView: View {
         ),
     ]
 
+    /// A pinned invitation to a LAN door, which is what a real one is: the fixture used to hold
+    /// a fragment-less `threading.example` URL, so the share text it composed fell back to the
+    /// bare address and the demo exercised none of the routing.
     private static let sharedLinkDemo = SharedSessionLink(
         sessionTitle: "Remote access review",
-        url: URL(string: "https://threading.example/share/demo")!,
+        url: URL(
+            string: "https://192.168.1.181:8760/#demo-invitation."
+                + String(repeating: "A", count: 26)
+        )!,
         capability: "interact",
         canApprovePermissions: true,
         expiresAt: Date().addingTimeInterval(86_400)
@@ -525,6 +531,34 @@ struct RootView: View {
         }
     }
 }
+
+#if DEBUG
+/// The link-ready sheet as it is actually met: presented over the screen that made it.
+///
+/// Held as a bare root it filled the display, which is the one shape the real surface never
+/// takes — and the shape it does take, a detent that stops part way up the screen, is what
+/// clipped its closing line for the whole of its life. A fixture that cannot show that defect
+/// cannot show the fix either.
+private struct SharedSessionLinkDemoHost: View {
+    @Environment(\.remoteTheme) private var theme
+    @State private var isPresented = false
+
+    let link: SharedSessionLink
+
+    var body: some View {
+        theme.ground
+            .ignoresSafeArea()
+            .sheet(isPresented: $isPresented) {
+                SharedSessionLinkView(link: link)
+                    .mobileTheme(theme)
+            }
+            .task {
+                try? await Task.sleep(for: .milliseconds(250))
+                isPresented = true
+            }
+    }
+}
+#endif
 
 private struct WelcomeView: View {
     @EnvironmentObject private var model: RemoteAppModel

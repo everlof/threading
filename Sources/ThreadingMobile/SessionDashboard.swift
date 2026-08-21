@@ -1716,6 +1716,7 @@ struct SharedSessionLinkView: View {
     let link: SharedSessionLink
     @Environment(\.remoteTheme) private var theme
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var copied = false
 
     var body: some View {
@@ -1792,7 +1793,24 @@ struct SharedSessionLinkView: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents(detents)
+    }
+
+    /// How tall the sheet opens, decided before it is presented.
+    ///
+    /// A fixed `.medium` detent is half of what clipped the closing line: the content stood in a
+    /// sheet sized to half the screen whatever it contained, with no scroll view to reach the
+    /// rest, and the last view in a stack is the one compression finds. Half a screen fits this
+    /// content at the ordinary type sizes and cannot fit it at an accessibility one, so that
+    /// case opens at full height instead.
+    ///
+    /// Stated once rather than measured. `presentationDetents` is read when the sheet is
+    /// presented, so a content height taken from a `GeometryReader` in the content's own
+    /// background arrives a layout pass too late to move anything. Content longer than the
+    /// detent scrolls, which is the ordinary behaviour of a sheet and is not the defect that was
+    /// reported: nothing is cut off any more.
+    private var detents: Set<PresentationDetent> {
+        dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large]
     }
 
     /// Both actions, the same shape: full width, the dialog action height, one filled with the
