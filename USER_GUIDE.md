@@ -2570,9 +2570,9 @@ and beta limitations.
 ### Reporting a problem from your iPhone
 
 Shake the phone to open a report sheet: describe what happened, keep or drop the screenshot, then
-send it to Threading privately or share the files. On a paired owner device that can manage
-sessions, **Send to Mac** instead starts a chat on your Mac with the whole report, screenshot path
-included, as its opening prompt.
+send it to Threading privately or share one zip containing all selected report files. On a paired
+owner device that can manage sessions, **Send to Mac** instead starts a chat on your Mac with the
+whole report, including the selected screenshot preview, as its opening prompt.
 
 That chat is configured on the Mac, not on the phone. It comes up on the same agent, login, model,
 reasoning level, speed and permission mode as the chat you used most recently in that project, so

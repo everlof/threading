@@ -501,16 +501,27 @@ struct MobileIssueReportView: View {
                 .surface: includeScreenshot ? "screenshot" : "none",
             ])
 
-            var items = [try MobileDiagnostics.supportReport(additionalDetails: extra)]
-            if let note = try MobileDiagnostics.writeReporterNote(reporterNote) {
-                items.append(note)
+            let diagnosticsURL = try MobileDiagnostics.supportReport(additionalDetails: extra)
+            let reporterNoteURL = try MobileDiagnostics.writeReporterNote(reporterNote)
+            let screenshotURL: URL?
+            if includeScreenshot, let screenshot = request.screenshot {
+                screenshotURL = try MobileDiagnostics.writeScreenshot(screenshot)
+            } else {
+                screenshotURL = nil
             }
-            if includeScreenshot,
-               let screenshot = request.screenshot,
-               let image = try MobileDiagnostics.writeScreenshot(screenshot) {
-                items.append(image)
+            let preparedURLs = [diagnosticsURL, reporterNoteURL, screenshotURL].compactMap { $0 }
+            defer {
+                for url in preparedURLs {
+                    try? FileManager.default.removeItem(at: url)
+                }
             }
-            sharePayload = DiagnosticsSharePayload(items: items)
+
+            let archiveURL = try MobileIssueReportArchive.write(
+                diagnosticsURL: diagnosticsURL,
+                reporterNoteURL: reporterNoteURL,
+                screenshotURL: screenshotURL
+            )
+            sharePayload = DiagnosticsSharePayload(items: [archiveURL])
         } catch {
             MobileDiagnostics.logFailure(.issueReportExport, error: error)
             exportError = MobileL10n.string("The report files could not be prepared.")
