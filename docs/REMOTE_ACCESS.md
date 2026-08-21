@@ -508,6 +508,38 @@ instead of repeating the click. With the keyboard already up, or nothing trackin
 keeps its old meanings — the program's click and word selection respectively.
 `RemoteTerminalTapTests` pins all of it.
 
+**Selecting text had to survive the thing being selected.** SwiftTerm's iOS view cleared the
+selection on every line feed whenever the program tracked the mouse — which on the phone is
+whenever it can type, and which is exactly while an agent is printing the lines someone is
+trying to select. The Mac's view had already replaced that with the honest rule, and the fork's
+iOS view now shares it: a selection is dropped only when the buffer rows it names stop holding
+the same text, because a full scrollback recycled from the top or the alternate screen scrolled
+in place; output that merely appends beneath it leaves it alone. The gesture changed with it. A
+**long press selects the word under the finger directly**, with handles, and brings the edit
+menu up when the finger lifts — moving before lifting extends from that word, a press inside an
+existing selection keeps it — instead of a "Select" menu standing between the finger and the
+word. It never takes the keyboard: the old path called `becomeFirstResponder` because the
+pre-iOS 16 menu controller could not show without it, so a view-only phone, whose view refuses
+first responder, could not copy at all. The menu is `UIEditMenuInteraction` now, an interaction
+on the view rather than a responder-chain service, and it takes the system's own localized
+Copy / Select All / Paste when the system offers them. Over a tracking program the first tap is
+still that program's click and a double tap still asks for the keyboard; neither route moved.
+
+**The selection becomes part of the message, not only the pasteboard.** Beside Copy the menu
+offers **Add to message**, the fork's one host seam here (`extraSelectionMenuActions`). The
+selected text becomes a chip — "2 lines" and the first line of it — and the highlight is
+cleared as Copy clears it, because the buffer keeps moving under the range and the chip is what
+gets sent; the chip's × is the cancel. In the independent composer the chip rides with the
+draft and Send delivers both. Under a direct-input TUI the chip stands above the key bar with an
+insert control, as staged attachments do, and inserting types the lines at the TUI's cursor
+without Return. Both paths wrap the lines in bracketed paste when the program has turned it on
+(`RemoteTerminalSelectionQuote`, ThreadingRemoteKit), which is what keeps an agent's prompt from
+reading every line break as Return — Claude Code shows the block as one "[Pasted text]" token —
+and go in as typed otherwise, exactly as a paste would. A view-only phone is offered Copy but not
+the quote and not Paste, since nothing it sends arrives. `RemoteTerminalSelectionTests` and
+`RemoteTerminalSelectionQuoteTests` pin this; the `terminal-selection-quote` evidence capture
+shows the handles, the themed selection and the chip together.
+
 **The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
 a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the
 session off its own frame and put the rest behind a scrollbar, and only resizing the *Mac* ever

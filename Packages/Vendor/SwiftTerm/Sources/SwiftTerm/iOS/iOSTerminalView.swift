@@ -860,21 +860,103 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     ///  - pos: the location where this was triggered in the buffer, it used at a later point
     ///  to auto-select a word
     func showContextMenu (forRegion: CGRect, pos: Position) {
-        var items: [UIMenuItem] = []
-        
         lastLongSelect = pos
         lastLongSelectRegion = forRegion
 
-        //GAR: Declutter context menu
-        //items.append (UIMenuItem(title: "Reset", action: #selector(resetCmd)))
-        
-        // Configure the shared menu controller
+        if #available(iOS 16.0, *), let interaction = editMenuInteraction {
+            // The edit menu is an interaction on this view rather than a responder-chain
+            // service, so it needs no first responder: a view-only terminal, or one whose
+            // keystrokes belong to a composer, can offer Copy without taking the keyboard.
+            let configuration = UIEditMenuConfiguration(
+                identifier: nil,
+                sourcePoint: CGPoint (x: forRegion.midX, y: forRegion.minY))
+            interaction.presentEditMenu(with: configuration)
+            return
+        }
+
+        // Before iOS 16 the shared menu controller is the only menu there is, and it shows
+        // nothing unless this view is the first responder.
+        _ = becomeFirstResponder()
         let menuController = UIMenuController.shared
-        menuController.menuItems = items
-        
-        // Set the location of the menu in the view.
-        //let menuLocation = CGRect (origin: at, size: CGSize (width: cellDimension.width, height: cellDimension.height))
+        menuController.menuItems = []
         menuController.showMenu(from: self, rect: forRegion)
+    }
+
+    /// Hides whichever menu `showContextMenu` put up.
+    func hideContextMenu () {
+        if #available(iOS 16.0, *), let interaction = editMenuInteraction {
+            interaction.dismissMenu()
+        }
+        if UIMenuController.shared.isMenuVisible {
+            UIMenuController.shared.hideMenu()
+        }
+    }
+
+    /// Whether the terminal's own menu is on screen.
+    var isContextMenuVisible: Bool {
+        editMenuIsPresented || UIMenuController.shared.isMenuVisible
+    }
+
+    /// Actions a host adds to the edit menu while text is selected, given that text — for
+    /// example quoting it into a message. They are placed directly after Copy.
+    public var extraSelectionMenuActions: ((_ selectedText: String) -> [UIMenuElement])?
+
+    /// Whether the edit menu offers Paste. A host whose terminal cannot send anything
+    /// (a view-only mirror) turns it off rather than offering an action that does nothing.
+    public var allowsPasteFromEditMenu: Bool = true
+
+    /// The elements of the edit menu for the terminal's current state. `suggested` are the
+    /// system's own, localized Copy / Paste / Select All when it found them on the responder
+    /// chain; otherwise equivalent actions are built here so the menu never comes up empty.
+    public func editMenuElements (suggested: [UIMenuElement]) -> [UIMenuElement] {
+        let standard = suggested.flatMap { element -> [UIMenuElement] in
+            if let menu = element as? UIMenu, menu.identifier == .standardEdit {
+                return menu.children
+            }
+            return [element]
+        }
+        func standardCommand (_ action: Selector) -> UIMenuElement? {
+            standard.first { ($0 as? UICommand)?.action == action }
+        }
+
+        var elements: [UIMenuElement] = []
+        if selection.active {
+            elements.append (standardCommand (#selector(copy(_:))) ?? UIAction (
+                title: "Copy",
+                image: UIImage (systemName: "doc.on.doc")) { [weak self] _ in self?.copy (nil) })
+            if let extra = extraSelectionMenuActions {
+                elements.append (contentsOf: extra (selection.getSelectedText ()))
+            }
+        }
+        elements.append (standardCommand (#selector(selectAll(_:))) ?? UIAction (
+            title: "Select All",
+            image: UIImage (systemName: "selection.pin.in.out")) { [weak self] _ in self?.selectAll (nil) })
+        if allowsPasteFromEditMenu, UIPasteboard.general.hasStrings {
+            elements.append (standardCommand (#selector(paste(_:))) ?? UIAction (
+                title: "Paste",
+                image: UIImage (systemName: "doc.on.clipboard")) { [weak self] _ in self?.paste (nil) })
+        }
+        return elements
+    }
+
+    /// The edit-menu interaction, installed on iOS 16 and later. Stored untyped because a
+    /// stored property cannot carry an availability condition.
+    var editMenuInteractionStorage: AnyObject?
+    @available(iOS 16.0, *)
+    var editMenuInteraction: UIEditMenuInteraction? {
+        editMenuInteractionStorage as? UIEditMenuInteraction
+    }
+    var editMenuIsPresented = false
+    /// The menu most recently handed to the interaction, kept for tests that cannot watch it
+    /// appear.
+    private(set) var lastPresentedEditMenu: UIMenu?
+
+    func setupEditMenu () {
+        if #available(iOS 16.0, *) {
+            let interaction = UIEditMenuInteraction (delegate: self)
+            addInteraction (interaction)
+            editMenuInteractionStorage = interaction
+        }
     }
     
     // This is a position relative to the buffer
@@ -896,16 +978,67 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                        height: CGFloat (selection.end.row-selection.start.row+1)*cellDimension.height)
     }
     
+    /// Where a long press began selecting, while the finger is still down.
+    var longPressSelectionAnchor: Position?
+    let longPressFeedback = UISelectionFeedbackGenerator ()
+
+    /// A long press selects directly: the word under the finger takes the selection and its
+    /// handles at once, the way iOS treats any text that is not being edited, and the menu
+    /// comes up when the finger lifts. Moving the finger before lifting extends the selection
+    /// from that word. Over blank cells there is nothing to select, so the press offers the
+    /// menu alone — Select All, Paste — as it always did. A press that lands inside an existing
+    /// selection keeps it and brings its menu back. None of this takes first responder: a
+    /// gesture about text is not a request for the keyboard.
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
     {
-         if gestureRecognizer.state == .began {
-             let _ = self.becomeFirstResponder()
-             let tapLocation = gestureRecognizer.location(in: gestureRecognizer.view)
-             let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
-             
-             showContextMenu (forRegion: tapRegion,
-                              pos: calculateTapHit (gesture: gestureRecognizer).grid)
-          }
+        let hit = calculateTapHit (gesture: gestureRecognizer).grid
+        switch gestureRecognizer.state {
+        case .began:
+            hideContextMenu ()
+            longPressSelectionAnchor = nil
+            if selection.active, selectionContains (hit) {
+                break
+            }
+            selection.selectWordOrExpression (at: hit, in: terminal.displayBuffer)
+            let selectedSomething = !selection.getSelectedText ()
+                .trimmingCharacters (in: .whitespacesAndNewlines).isEmpty
+            guard selectedSomething else {
+                selection.selectNone ()
+                disableSelectionPanGesture ()
+                queuePendingDisplay ()
+                break
+            }
+            selection.selectionMode = .character
+            selection.pivot = selection.start
+            longPressSelectionAnchor = hit
+            enableSelectionPanGesture ()
+            longPressFeedback.selectionChanged ()
+            queuePendingDisplay ()
+        case .changed:
+            guard selection.active, longPressSelectionAnchor != nil else { break }
+            selection.pivotExtend (bufferPosition: hit)
+            queuePendingDisplay ()
+        case .ended:
+            longPressSelectionAnchor = nil
+            if selection.active {
+                showContextMenu (forRegion: makeContextMenuRegionForSelection (), pos: hit)
+            } else {
+                let tapLocation = gestureRecognizer.location (in: self)
+                showContextMenu (forRegion: makeContextMenuRegionForTap (point: tapLocation), pos: hit)
+            }
+        default:
+            longPressSelectionAnchor = nil
+        }
+    }
+
+    /// Whether `position` lies within the active selection, in buffer coordinates.
+    func selectionContains (_ position: Position) -> Bool {
+        guard selection.active else { return false }
+        let (first, last) = Position.compare (selection.start, selection.end) == .before
+            ? (selection.start, selection.end)
+            : (selection.end, selection.start)
+        return Position.compare (position, first) != .before
+            && Position.compare (position, last) != .after
     }
     
     /// This controls whether the backspace should send ^? or ^H, the default is ^?
@@ -1082,8 +1215,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             selection.selectNone()
             disableSelectionPanGesture()
         }
-        if UIMenuController.shared.isMenuVisible {
-            UIMenuController.shared.hideMenu()
+        if isContextMenuVisible {
+            hideContextMenu()
         } else {
             let location = gestureRecognizer.location(in: gestureRecognizer.view)
             let displayBuffer = terminal.displayBuffer
@@ -1424,6 +1557,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         singleTap.require(toFail: doubleTap)
         doubleTap.require(toFail: tripleTap)
+
+        setupEditMenu ()
     }
 
     func setupLinkReportingInteractions ()
@@ -1767,7 +1902,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// with custom behaviour (e.g. a cursor-drag mode) but still wants
     /// the existing menu as a fallback for release-without-movement.
     public func showStandardContextMenu(at point: CGPoint) {
-        _ = becomeFirstResponder()
         let region = makeContextMenuRegionForTap(point: point)
         let hit = calculateTapHit(point: point)
         showContextMenu(forRegion: region, pos: hit.grid)
@@ -1852,18 +1986,29 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return stripe
     }
 
+    /// The scrollback's `linesTop` when the selection was last made. While it is unchanged,
+    /// the buffer rows the selection names still hold the same text.
+    private var selectionLinesTop = 0
+
     open func scrolled(source terminal: Terminal, yDisp: Int) {
-        //XselectionView.notifyScrolled(source: terminal)
+        // Normal-buffer growth appends beneath existing ranges, so selection remains valid.
+        // A fixed alternate buffer scrolls its rows in place, while a full normal scrollback
+        // recycles from the top; both replace the cells the saved coordinates identified.
+        // The same rule as the Mac's: the phone used to drop the selection on every line feed
+        // whenever the program tracked the mouse, which is exactly while an agent is producing
+        // output — the moment someone is trying to select what it printed.
+        if selection.active,
+           !terminal.buffer.hasScrollback || terminal.buffer.linesTop != selectionLinesTop {
+            selection.selectNone()
+            disableSelectionPanGesture()
+        }
         updateScroller()
         terminalDelegate?.scrolled(source: self, position: scrollPosition)
     }
     
     open func linefeed(source: Terminal) {
-        // Preserve manual selection while output is streaming when mouse reporting is disabled.
-        if allowMouseReporting {
-            selection.selectNone()
-            disableSelectionPanGesture()
-        }
+        // A line feed that does not scroll or trim the buffer leaves an existing range valid.
+        // `scrolled(source:yDisp:)` owns the two cases that do invalidate its coordinates.
     }
     
     func updateScroller ()
@@ -3405,6 +3550,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     open func selectionChanged(source: Terminal) {
+        if selection.active {
+            selectionLinesTop = source.buffer.linesTop
+        }
         if pendingSelectionChanged {
             return
         }
@@ -3427,7 +3575,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 #endif
             
             if !self.selection.active {
-                UIMenuController.shared.hideMenu()
+                self.hideContextMenu()
                 self.selection.selectNone()
                 self.disableSelectionPanGesture()
             }
@@ -3765,4 +3913,39 @@ extension TerminalView: UIAccessibilityReadingContent {
 }
 #endif
 
+@available(iOS 16.0, *)
+extension TerminalView: UIEditMenuInteractionDelegate {
+    public func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        menuFor configuration: UIEditMenuConfiguration,
+        suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+        let menu = UIMenu (children: editMenuElements (suggested: suggestedActions))
+        lastPresentedEditMenu = menu
+        return menu
+    }
+
+    public func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        targetRectFor configuration: UIEditMenuConfiguration
+    ) -> CGRect {
+        lastLongSelectRegion
+    }
+
+    public func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        willPresentMenuFor configuration: UIEditMenuConfiguration,
+        animator: UIEditMenuInteractionAnimating
+    ) {
+        editMenuIsPresented = true
+    }
+
+    public func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        willDismissMenuFor configuration: UIEditMenuConfiguration,
+        animator: UIEditMenuInteractionAnimating
+    ) {
+        animator.addCompletion { [weak self] in self?.editMenuIsPresented = false }
+    }
+}
 #endif

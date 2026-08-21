@@ -32,6 +32,7 @@
 		A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61900010000000000000002 /* RemoteTerminalScrollTests.swift */; };
 		A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */; };
 		A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63600010000000000000002 /* RemoteTerminalTapTests.swift */; };
+		A64200010000000000000001 /* RemoteTerminalSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */; };
 		A63700010000000000000001 /* MobileNavigationTitleMorphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */; };
 		A63800010000000000000001 /* MobileIssueReportOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */; };
 		A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62100010000000000000002 /* MobileWorkingOrbTests.swift */; };
@@ -165,6 +166,7 @@
 		A61900010000000000000002 /* RemoteTerminalScrollTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalScrollTests.swift; sourceTree = "<group>"; };
 		A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardDismissalTests.swift; sourceTree = "<group>"; };
 		A63600010000000000000002 /* RemoteTerminalTapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalTapTests.swift; sourceTree = "<group>"; };
+		A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalSelectionTests.swift; sourceTree = "<group>"; };
 		A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileNavigationTitleMorphTests.swift; sourceTree = "<group>"; };
 		A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileIssueReportOutboxTests.swift; sourceTree = "<group>"; };
 		A62100010000000000000002 /* MobileWorkingOrbTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileWorkingOrbTests.swift; sourceTree = "<group>"; };
@@ -242,6 +244,7 @@
 				ThreadingMobile/SessionWorkspaceView.swift,
 				ThreadingMobile/TerminalKeyBar.swift,
 				ThreadingMobile/TerminalKeyboardEditorView.swift,
+				ThreadingMobile/TerminalSelectionQuoteTray.swift,
 				ThreadingMobile/TerminalViewRepresentable.swift,
 				ThreadingMobile/ThemedDialog.swift,
 				"ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings",
@@ -383,6 +386,7 @@
 				A61900010000000000000002 /* RemoteTerminalScrollTests.swift */,
 				A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */,
 				A63600010000000000000002 /* RemoteTerminalTapTests.swift */,
+				A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */,
 				A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */,
 				A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */,
 				A62100010000000000000002 /* MobileWorkingOrbTests.swift */,
@@ -970,6 +974,7 @@
 				A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */,
 				A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */,
 				A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */,
+				A64200010000000000000001 /* RemoteTerminalSelectionTests.swift in Sources */,
 				A63700010000000000000001 /* MobileNavigationTitleMorphTests.swift in Sources */,
 				A63800010000000000000001 /* MobileIssueReportOutboxTests.swift in Sources */,
 				A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */,

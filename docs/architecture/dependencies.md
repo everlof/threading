@@ -79,6 +79,15 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     enlarge cells without reflowing the Mac-owned grid, while an interactive phone still updates
     its PTY lease. Keep both hooks and the `resetFont` routing when re-syncing: one gates the
     renderer, the other gates the PTY.
+  - **iOS selection survives output, and the edit menu has a host seam.** The iOS view's
+    `scrolled`/`linefeed` pair follows the Mac's: a selection is dropped only when scrollback
+    recycles its rows or the alternate buffer scrolls in place, never on a line feed that merely
+    appends. A long press selects the word under the finger directly and the menu comes up on
+    lift, through `UIEditMenuInteraction` (iOS 16+, the shared menu controller before that),
+    without taking first responder. `extraSelectionMenuActions` lets the host add actions after
+    Copy and `allowsPasteFromEditMenu` lets a view-only host drop Paste; `selectionHandleColor`
+    is set by the host from the terminal theme's cursor colour. Keep both when re-syncing — see
+    [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
   - **iOS terminal font sizing is bounded at the host.** `RemoteTerminalView` converts a pinch
     into whole-point steps from 9 through 24 and persists only the final value on the device.
     That bounds a continuous gesture to at most fifteen renderer/grid updates instead of one per

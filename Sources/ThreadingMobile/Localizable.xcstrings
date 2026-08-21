@@ -5496,6 +5496,24 @@
     },
     "Terminal": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminal" } } }
+    },
+    "Add to message": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lägg till i meddelandet" } } }
+    },
+    "Insert into prompt": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Infoga i prompten" } } }
+    },
+    "Quoted terminal lines": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Citerade terminalrader" } } }
+    },
+    "Remove quoted lines": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ta bort citerade rader" } } }
+    },
+    "1 line": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 rad" } } }
+    },
+    "%lld lines": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld rader" } } }
     }
   },
   "version": "1.2"
