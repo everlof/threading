@@ -177,14 +177,11 @@ final class TerminalRenderOwner: Sendable {
     /// Feeds one parser batch while this owner retains all mutable terminal
     /// services. The caller can wake the frame driver before and after this
     /// transaction without retaining a view.
-    func feed (bytes: ArraySlice<UInt8>, allowMouseReporting: Bool) -> Bool? {
+    func feed (bytes: ArraySlice<UInt8>) -> Bool? {
         guard let session = currentSession() else { return nil }
         let terminal = session.terminal
         return terminal.terminalLock.withLock {
             session.search.invalidate()
-            if allowMouseReporting {
-                session.selection.active = false
-            }
             terminal.withManagedFeed {
                 terminal.feed(buffer: bytes)
             }
@@ -194,14 +191,11 @@ final class TerminalRenderOwner: Sendable {
 
     /// Feeds one borrowed parser batch. The parse finishes before this method
     /// returns, so the caller can release the source storage after the call.
-    func feed(borrowedBytes: Span<UInt8>, allowMouseReporting: Bool) -> Bool? {
+    func feed(borrowedBytes: Span<UInt8>) -> Bool? {
         guard let session = currentSession() else { return nil }
         let terminal = session.terminal
         return terminal.terminalLock.withLock {
             session.search.invalidate()
-            if allowMouseReporting {
-                session.selection.active = false
-            }
             terminal.withManagedFeed {
                 terminal.feedBorrowed(borrowedBytes)
             }
@@ -209,15 +203,12 @@ final class TerminalRenderOwner: Sendable {
         }
     }
 
-    /// Text variant of ``feed(bytes:allowMouseReporting:)``.
-    func feed (text: String, allowMouseReporting: Bool) -> Bool? {
+    /// Text variant of ``feed(bytes:)``.
+    func feed (text: String) -> Bool? {
         guard let session = currentSession() else { return nil }
         let terminal = session.terminal
         return terminal.terminalLock.withLock {
             session.search.invalidate()
-            if allowMouseReporting {
-                session.selection.active = false
-            }
             terminal.withManagedFeed {
                 terminal.feed(text: text)
             }
@@ -252,6 +243,59 @@ final class TerminalRenderOwner: Sendable {
         }
     }
 
+    func recentLogicalBufferText(
+        maximumUTF8Bytes: Int,
+        sinceAbsoluteRow: Int,
+        kind: Terminal.BufferKind
+    ) -> Terminal.RecentBufferText {
+        guard let terminal = currentSession()?.terminal else {
+            return Terminal.RecentBufferText(text: "", nextAbsoluteRow: 0)
+        }
+        return terminal.terminalLock.withLock {
+            terminal.getRecentLogicalBufferText(
+                maximumUTF8Bytes: maximumUTF8Bytes,
+                sinceAbsoluteRow: sinceAbsoluteRow,
+                kind: kind)
+        }
+    }
+
+    func changeHistorySize(_ newScrollback: Int?) {
+        guard let terminal = currentSession()?.terminal else { return }
+        terminal.terminalLock.withLock {
+            terminal.changeHistorySize(newScrollback)
+        }
+    }
+
+    func reportColorSchemeChange(dark: Bool) {
+        guard let terminal = currentSession()?.terminal else { return }
+        terminal.terminalLock.withLock {
+            terminal.reportColorSchemeChange(dark: dark)
+        }
+    }
+
+    func setTerminalFocus(_ focused: Bool) {
+        guard let terminal = currentSession()?.terminal else { return }
+        terminal.terminalLock.withLock {
+            terminal.setTerminalFocus(focused)
+        }
+    }
+
+    func encodedFunctionalKey(
+        _ key: TerminalFunctionalKey,
+        modifiers: KittyKeyboardModifiers,
+        eventType: KittyKeyboardEventType,
+        backspaceSendsControlH: Bool
+    ) -> [UInt8]? {
+        guard let terminal = currentSession()?.terminal else { return nil }
+        return terminal.terminalLock.withLock {
+            terminal.encodedFunctionalKey(
+                key,
+                modifiers: modifiers,
+                eventType: eventType,
+                backspaceSendsControlH: backspaceSendsControlH)
+        }
+    }
+
     func stateSnapshot() -> TerminalViewStateSnapshot {
         guard let terminal = currentSession()?.terminal else {
             return TerminalViewStateSnapshot(
@@ -262,6 +306,17 @@ final class TerminalRenderOwner: Sendable {
                 bidiArrowKeySwap: false,
                 cursorStyle: .blinkBlock,
                 ansi256PaletteStrategy: .base16Lab,
+                isAlternateBuffer: false,
+                cursorHidden: false,
+                mouseMode: .off,
+                mouseProtocol: .x10,
+                applicationCursor: false,
+                bracketedPasteMode: false,
+                backgroundColor: Color(red: 0, green: 0, blue: 0),
+                historySize: 0,
+                scrollTop: 0,
+                scrollBottom: 0,
+                userScrolling: false,
                 visibleRows: [])
         }
         return terminal.terminalLock.withLock {
@@ -273,6 +328,13 @@ final class TerminalRenderOwner: Sendable {
                         return nil
                     }
                     let line = buffer.lines[lineIndex]
+                    let cells = (0..<terminal.cols).map { column in
+                        let cell = line[column]
+                        return TerminalVisibleCellSnapshot(
+                            character: cell.getCharacter(),
+                            width: Int(cell.width),
+                            attribute: cell.attribute)
+                    }
                     let text = terminal.translateBufferLineToString(
                         buffer: buffer, line: lineIndex, start: 0, end: -1)
                         .replacingOccurrences(of: "\u{0}", with: " ")
@@ -281,9 +343,8 @@ final class TerminalRenderOwner: Sendable {
                         text: text,
                         isWrapped: line.isWrapped,
                         bidiState: line.bidiState,
-                        cellWidths: (0..<terminal.cols).map {
-                            Int(line[$0].width)
-                        })
+                        cellWidths: cells.map(\.width),
+                        cells: cells)
                 }
                 return TerminalViewStateSnapshot(
                     dimensions: TerminalDimensions(
@@ -294,6 +355,17 @@ final class TerminalRenderOwner: Sendable {
                     bidiArrowKeySwap: terminal.bidiArrowKeySwap,
                     cursorStyle: terminal.options.cursorStyle,
                     ansi256PaletteStrategy: terminal.ansi256PaletteStrategy,
+                    isAlternateBuffer: terminal.isCurrentBufferAlternate,
+                    cursorHidden: terminal.cursorHidden,
+                    mouseMode: terminal.mouseMode,
+                    mouseProtocol: terminal.mouseProtocol,
+                    applicationCursor: terminal.applicationCursor,
+                    bracketedPasteMode: terminal.bracketedPasteMode,
+                    backgroundColor: terminal.backgroundColor,
+                    historySize: terminal.options.scrollback,
+                    scrollTop: buffer.scrollTop,
+                    scrollBottom: buffer.scrollBottom,
+                    userScrolling: terminal.userScrolling,
                     visibleRows: visibleRows)
         }
     }
@@ -521,6 +593,13 @@ final class TerminalRenderOwner: Sendable {
         let blinkRows = Self.blinkRows(in: session.snapshot)
         mailbox.publishBlinkRows(blinkRows)
         update?.blinkRows = blinkRows
+#if os(macOS)
+        if request.viewState.detectsLowContrastText,
+           let context = session.snapshot.renderContext {
+            update?.lowContrastText = TerminalContrastDetector.detect(
+                snapshot: session.snapshot, context: context)
+        }
+#endif
 #if canImport(MetalKit)
         prepareMetalSnapshot(renderer: renderer, snapshot: session.snapshot)
 #endif

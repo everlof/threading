@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftTerm
 import ThreadingRemoteKit
 import UIKit
 
@@ -14,7 +15,7 @@ final class TerminalKeyBridge: ObservableObject {
     }
 
     var applicationCursorActive: Bool {
-        terminalView?.getTerminal().applicationCursor ?? false
+        terminalView?.terminalStateSnapshot().applicationCursor ?? false
     }
 
     func tap(_ modifier: RemoteTerminalLatchingModifier) {
@@ -302,11 +303,20 @@ struct TerminalKeyBar: View {
     }
 
     private func press(_ key: RemoteTerminalKeyDefinition) {
-        guard let bytes = RemoteTerminalKeyEncoder.bytes(
-            for: key.action,
-            latched: bridge.latch.heldModifiers,
-            applicationCursor: bridge.applicationCursorActive
-        ) else { return }
+        let bytes: [UInt8]?
+        if case .named(let namedKey, var modifiers) = key.action,
+           let terminalView = bridge.terminalView {
+            modifiers.formUnion(bridge.latch.heldModifiers)
+            bytes = terminalView.encodedFunctionalKey(
+                namedKey.swiftTermKey,
+                modifiers: modifiers.swiftTermModifiers)
+        } else {
+            bytes = RemoteTerminalKeyEncoder.bytes(
+                for: key.action,
+                latched: bridge.latch.heldModifiers,
+                applicationCursor: bridge.applicationCursorActive)
+        }
+        guard let bytes else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         connection.sendTerminalKey(String(decoding: bytes, as: UTF8.self))
         bridge.consumeArmed()
@@ -319,7 +329,7 @@ struct TerminalKeyBar: View {
             .frame(height: Metrics.keyHeight)
     }
 
-    private func latchInk(for phase: RemoteTerminalLatchState.Phase) -> Color {
+    private func latchInk(for phase: RemoteTerminalLatchState.Phase) -> SwiftUI.Color {
         switch phase {
         case .off: return theme.label
         case .armed: return theme.accent
@@ -327,7 +337,7 @@ struct TerminalKeyBar: View {
         }
     }
 
-    private func latchFill(for phase: RemoteTerminalLatchState.Phase) -> Color {
+    private func latchFill(for phase: RemoteTerminalLatchState.Phase) -> SwiftUI.Color {
         switch phase {
         case .off: return theme.controlResting
         case .armed: return theme.accentMuted
@@ -340,6 +350,48 @@ struct TerminalKeyBar: View {
         case .off: return MobileL10n.string("off")
         case .armed: return MobileL10n.string("armed for the next key")
         case .locked: return MobileL10n.string("locked")
+        }
+    }
+}
+
+private extension RemoteTerminalKeyModifiers {
+    var swiftTermModifiers: KittyKeyboardModifiers {
+        var result: KittyKeyboardModifiers = []
+        if contains(.shift) { result.insert(.shift) }
+        if contains(.alt) { result.insert(.alt) }
+        if contains(.control) { result.insert(.ctrl) }
+        return result
+    }
+}
+
+private extension RemoteTerminalNamedKey {
+    var swiftTermKey: TerminalFunctionalKey {
+        switch self {
+        case .escape: return .escape
+        case .tab: return .tab
+        case .enter: return .enter
+        case .backspace: return .backspace
+        case .forwardDelete: return .delete
+        case .up: return .up
+        case .down: return .down
+        case .left: return .left
+        case .right: return .right
+        case .home: return .home
+        case .end: return .end
+        case .pageUp: return .pageUp
+        case .pageDown: return .pageDown
+        case .f1: return .f1
+        case .f2: return .f2
+        case .f3: return .f3
+        case .f4: return .f4
+        case .f5: return .f5
+        case .f6: return .f6
+        case .f7: return .f7
+        case .f8: return .f8
+        case .f9: return .f9
+        case .f10: return .f10
+        case .f11: return .f11
+        case .f12: return .f12
         }
     }
 }

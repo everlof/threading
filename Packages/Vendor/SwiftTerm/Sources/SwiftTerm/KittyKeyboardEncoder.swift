@@ -11,6 +11,17 @@ enum KittyKey {
     case none
 }
 
+/// A non-text key exposed to clients that provide their own accessory-key UI.
+///
+/// These keys still need SwiftTerm's encoder because an application can change
+/// both cursor-key mode and the kitty keyboard protocol at runtime.
+public enum TerminalFunctionalKey: Sendable {
+    case escape, enter, tab, backspace, delete
+    case up, down, left, right
+    case home, end, pageUp, pageDown
+    case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
+}
+
 enum KittyFunctionalKey {
     case escape
     case enter
@@ -1107,6 +1118,63 @@ struct KittyKeyboardEncoder {
                 return codepoint
             }
             return nil
+        }
+    }
+}
+
+public extension Terminal {
+    /// Encodes a functional key using the terminal's live DECCKM and kitty
+    /// keyboard state rather than a second, potentially stale escape table.
+    func encodedFunctionalKey(
+        _ key: TerminalFunctionalKey,
+        modifiers: KittyKeyboardModifiers = [],
+        eventType: KittyKeyboardEventType = .press,
+        backspaceSendsControlH: Bool = false
+    ) -> [UInt8]? {
+        KittyKeyboardEncoder(
+            flags: keyboardEnhancementFlags,
+            applicationCursor: applicationCursor,
+            applicationKeypad: applicationKeypad,
+            backspaceSendsControlH: backspaceSendsControlH
+        ).encode(KittyKeyEvent(
+            key: .functional(key.kittyFunctionalKey),
+            modifiers: modifiers,
+            eventType: eventType,
+            text: nil,
+            shiftedKey: nil,
+            baseLayoutKey: nil
+        ))
+    }
+}
+
+private extension TerminalFunctionalKey {
+    var kittyFunctionalKey: KittyFunctionalKey {
+        switch self {
+        case .escape: return .escape
+        case .enter: return .enter
+        case .tab: return .tab
+        case .backspace: return .backspace
+        case .delete: return .delete
+        case .up: return .up
+        case .down: return .down
+        case .left: return .left
+        case .right: return .right
+        case .home: return .home
+        case .end: return .end
+        case .pageUp: return .pageUp
+        case .pageDown: return .pageDown
+        case .f1: return .f1
+        case .f2: return .f2
+        case .f3: return .f3
+        case .f4: return .f4
+        case .f5: return .f5
+        case .f6: return .f6
+        case .f7: return .f7
+        case .f8: return .f8
+        case .f9: return .f9
+        case .f10: return .f10
+        case .f11: return .f11
+        case .f12: return .f12
         }
     }
 }

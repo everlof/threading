@@ -34,14 +34,15 @@ final class RemoteTerminalSelectionTests: XCTestCase {
         let view = makeView()
         view.allowMouseReporting = true
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
         select(row: Fixture.selectedRow, in: view)
-        let selected = view.selection.getSelectedText()
+        let selected = view.selectedText
         XCTAssertEqual(selected, "\(Fixture.selectedWord) \(Fixture.selectedRow)")
 
         feedLines(Fixture.moreLines, into: view)
 
         XCTAssertTrue(view.hasActiveSelection, "output that only appends must not drop a selection")
-        XCTAssertEqual(view.selection.getSelectedText(), selected)
+        XCTAssertEqual(view.selectedText, selected)
     }
 
     func testASelectionIsDroppedOnceScrollbackRecyclesItsLines() {
@@ -66,7 +67,7 @@ final class RemoteTerminalSelectionTests: XCTestCase {
         longPress(view, .began, at: point(column: 1, row: 3, in: view))
 
         XCTAssertTrue(view.hasActiveSelection)
-        XCTAssertEqual(view.selection.getSelectedText(), Fixture.selectedWord)
+        XCTAssertEqual(view.selectedText, Fixture.selectedWord)
         XCTAssertFalse(view.isFirstResponder, "a gesture about text is not a request for the keyboard")
     }
 
@@ -84,7 +85,7 @@ final class RemoteTerminalSelectionTests: XCTestCase {
         longPress(view, .began, at: point(column: 1, row: 3, in: view))
         longPress(view, .changed, at: point(column: 6, row: 4, in: view))
 
-        XCTAssertEqual(view.selection.getSelectedText(), "line 3\nline 4")
+        XCTAssertEqual(view.selectedText, "line 3\nline 4")
     }
 
     func testALongPressInsideTheSelectionKeepsIt() {
@@ -92,11 +93,11 @@ final class RemoteTerminalSelectionTests: XCTestCase {
         longPress(view, .began, at: point(column: 1, row: 3, in: view))
         longPress(view, .changed, at: point(column: 6, row: 4, in: view))
         longPress(view, .ended, at: point(column: 6, row: 4, in: view))
-        let selected = view.selection.getSelectedText()
+        let selected = view.selectedText
 
         longPress(view, .began, at: point(column: 2, row: 4, in: view))
 
-        XCTAssertEqual(view.selection.getSelectedText(), selected)
+        XCTAssertEqual(view.selectedText, selected)
     }
 
     func testTheEditMenuOffersTheQuoteBesideCopyOnlyWhileTextIsSelected() {
@@ -191,6 +192,14 @@ final class RemoteTerminalSelectionTests: XCTestCase {
             view.feed(text: "line \(fedLines)\r\n")
             fedLines += 1
         }
+        settleTerminalCallbacks(for: view)
+    }
+
+    private func settleTerminalCallbacks(for view: RemoteTerminalView) {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
     }
 
     private func select(row: Int, in view: RemoteTerminalView) {

@@ -123,6 +123,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
      */
     public weak var terminalDelegate: TerminalViewDelegate?
 
+    /// Gives a subclass a chance to keep the emulator on an explicitly
+    /// managed grid when this view's frame changes.
+    open func shouldApplyFrameSizeChange(newCols: Int, newRows: Int) -> Bool {
+        true
+    }
+
+    /// Gives a subclass a chance to suppress frame-derived size reports while
+    /// another host owns the authoritative terminal grid.
+    open func shouldReportSizeChange(newCols: Int, newRows: Int) -> Bool {
+        true
+    }
+
     /// Controls how the Metal renderer builds GPU buffers each frame.
     ///
     /// The default is ``MetalBufferingMode/perRowPersistent``, which caches
@@ -149,6 +161,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public var allowMouseReporting: Bool = true {
         didSet {
             crossThreadState.withLock { $0.allowMouseReporting = allowMouseReporting }
+            guard allowMouseReporting != oldValue, terminal != nil else { return }
+            // A host that declines reports must get one-finger scrolling back
+            // even when the application still has mouse tracking enabled.
+            applyMouseMode(terminalStateSnapshot().mouseMode)
         }
     }
 
@@ -402,6 +418,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         configureFeedSender()
         setupProgressBar()
         setupGestures ()
+        setupEditMenu()
         setupLinkReportingInteractions()
         setupAccessoryView ()
         setupTextBlinking()
@@ -648,7 +665,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case #selector(copy(_:)):
             return withTerminal { _ in selection.active }
         case #selector(paste(_:)):
-            return true
+            return allowsPasteFromEditMenu
         case #selector(select(_:)):
             return withTerminal { _ in !selection.active }
         case #selector(selectAll(_:)):
@@ -667,21 +684,98 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     ///  - pos: the location where this was triggered in the buffer, it used at a later point
     ///  to auto-select a word
     func showContextMenu (forRegion: CGRect, pos: Position) {
-        let items: [UIMenuItem] = []
-        
         lastLongSelect = pos
         lastLongSelectRegion = forRegion
 
-        //GAR: Declutter context menu
-        //items.append (UIMenuItem(title: "Reset", action: #selector(resetCmd)))
-        
-        // Configure the shared menu controller
+        if #available(iOS 16.0, visionOS 1.0, *), let interaction = editMenuInteraction {
+            let configuration = UIEditMenuConfiguration(
+                identifier: nil,
+                sourcePoint: CGPoint(x: forRegion.midX, y: forRegion.minY))
+            interaction.presentEditMenu(with: configuration)
+            return
+        }
+
+        // UIMenuController requires a first responder on older systems.
+        _ = becomeFirstResponder()
         let menuController = UIMenuController.shared
-        menuController.menuItems = items
-        
-        // Set the location of the menu in the view.
-        //let menuLocation = CGRect (origin: at, size: CGSize (width: cellDimension.width, height: cellDimension.height))
+        menuController.menuItems = []
         menuController.showMenu(from: self, rect: forRegion)
+    }
+
+    func hideContextMenu() {
+        if #available(iOS 16.0, visionOS 1.0, *), let interaction = editMenuInteraction {
+            interaction.dismissMenu()
+        }
+        if UIMenuController.shared.isMenuVisible {
+            UIMenuController.shared.hideMenu()
+        }
+    }
+
+    var isContextMenuVisible: Bool {
+        editMenuIsPresented || UIMenuController.shared.isMenuVisible
+    }
+
+    /// Host-provided actions inserted after Copy for the current selection.
+    public var extraSelectionMenuActions: ((_ selectedText: String) -> [UIMenuElement])?
+
+    /// Set false for view-only terminals that cannot accept pasted input.
+    public var allowsPasteFromEditMenu = true
+
+    public func editMenuElements(suggested: [UIMenuElement]) -> [UIMenuElement] {
+        let standard = suggested.flatMap { element -> [UIMenuElement] in
+            if let menu = element as? UIMenu, menu.identifier == .standardEdit {
+                return menu.children
+            }
+            return [element]
+        }
+        func standardCommand(_ action: Selector) -> UIMenuElement? {
+            standard.first { ($0 as? UICommand)?.action == action }
+        }
+
+        let selectionState = withTerminal { _ in
+            (active: selection.active,
+             text: selection.active ? selection.getSelectedText() : "")
+        }
+        var elements: [UIMenuElement] = []
+        if selectionState.active {
+            elements.append(standardCommand(#selector(copy(_:))) ?? UIAction(
+                title: "Copy",
+                image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                    self?.copy(nil)
+                })
+            if let extraSelectionMenuActions {
+                elements.append(contentsOf: extraSelectionMenuActions(selectionState.text))
+            }
+        }
+        elements.append(standardCommand(#selector(selectAll(_:))) ?? UIAction(
+            title: "Select All",
+            image: UIImage(systemName: "selection.pin.in.out")) { [weak self] _ in
+                self?.selectAll(nil)
+            })
+        if allowsPasteFromEditMenu, UIPasteboard.general.hasStrings {
+            elements.append(standardCommand(#selector(paste(_:))) ?? UIAction(
+                title: "Paste",
+                image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+                    self?.paste(nil)
+                })
+        }
+        return elements
+    }
+
+    private var editMenuInteractionStorage: AnyObject?
+    @available(iOS 16.0, visionOS 1.0, *)
+    private var editMenuInteraction: UIEditMenuInteraction? {
+        editMenuInteractionStorage as? UIEditMenuInteraction
+    }
+    private var editMenuIsPresented = false
+    private(set) var lastPresentedEditMenu: UIMenu?
+
+    private func setupEditMenu() {
+        if #available(iOS 16.0, visionOS 1.0, *) {
+            let interaction = UIEditMenuInteraction(delegate: self)
+            addInteraction(interaction)
+            editMenuInteractionStorage = interaction
+        }
     }
     
     // This is a position relative to the buffer
@@ -705,16 +799,64 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
     
+    private var longPressSelectionAnchor: Position?
+    private let longPressFeedback = UISelectionFeedbackGenerator()
+
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
     {
-         if gestureRecognizer.state == .began {
-             let _ = self.becomeFirstResponder()
-             let tapLocation = gestureRecognizer.location(in: gestureRecognizer.view)
-             let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
-             
-             showContextMenu (forRegion: tapRegion,
-                              pos: calculateTapHit (gesture: gestureRecognizer).grid)
-          }
+        let hit = calculateTapHit(gesture: gestureRecognizer).grid
+        switch gestureRecognizer.state {
+        case .began:
+            hideContextMenu()
+            longPressSelectionAnchor = nil
+            let selectedSomething = withTerminal { terminal -> Bool in
+                if selectionContainsLocked(hit) { return true }
+                selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
+                guard !selection.getSelectedText()
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    selection.selectNone()
+                    return false
+                }
+                selection.selectionMode = .character
+                selection.pivot = selection.start
+                longPressSelectionAnchor = hit
+                return true
+            }
+            if selectedSomething {
+                enableSelectionPanGesture()
+                longPressFeedback.selectionChanged()
+            } else {
+                disableSelectionPanGesture()
+            }
+            frameDriver.markDirty()
+        case .changed:
+            guard longPressSelectionAnchor != nil else { return }
+            withTerminal { _ in
+                guard selection.active else { return }
+                selection.pivotExtend(bufferPosition: hit)
+            }
+            frameDriver.markDirty()
+        case .ended:
+            longPressSelectionAnchor = nil
+            if withTerminal({ _ in selection.active }) {
+                showContextMenu(forRegion: makeContextMenuRegionForSelection(), pos: hit)
+            } else {
+                let point = gestureRecognizer.location(in: self)
+                showContextMenu(forRegion: makeContextMenuRegionForTap(point: point), pos: hit)
+            }
+        default:
+            longPressSelectionAnchor = nil
+        }
+    }
+
+    private func selectionContainsLocked(_ position: Position) -> Bool {
+        terminal.terminalLock.preconditionLocked()
+        guard selection.active else { return false }
+        let ordered = Position.compare(selection.start, selection.end) == .before
+            ? (selection.start, selection.end)
+            : (selection.end, selection.start)
+        return Position.compare(position, ordered.0) != .before &&
+            Position.compare(position, ordered.1) != .after
     }
     
     /// This controls whether the backspace should send ^? or ^H, the default is ^?
@@ -802,8 +944,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     func sharedMouseEvent (gestureRecognizer: UIGestureRecognizer, release: Bool)
     {
+        sharedMouseEvent(at: gestureRecognizer.location(in: self), release: release)
+    }
+
+    func sharedMouseEvent(at point: CGPoint, release: Bool)
+    {
         withTerminal { terminal in
-            let hit = calculateTapHitLocked(point: gestureRecognizer.location(in: self))
+            let hit = calculateTapHitLocked(point: point)
             if let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) {
                 let buttonFlags = terminal.encodeButton(
                     button: 0,
@@ -816,6 +963,28 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         terminalAccessory?.controlModifier = false
         controlModifier = false
+    }
+
+    /// The size occupied by one terminal cell.
+    public var cellSize: CGSize {
+        CGSize(width: cellDimension.width, height: cellDimension.height)
+    }
+
+    /// Reports a complete primary-button click at a point and returns whether
+    /// the running application requested it.
+    @discardableResult
+    public func forwardTap(at point: CGPoint) -> Bool {
+        let routing = withTerminal { terminal in
+            (press: allowMouseReporting && terminal.mouseMode.sendButtonPress(),
+             release: terminal.mouseMode.sendButtonRelease())
+        }
+        guard routing.press else { return false }
+        sharedMouseEvent(at: point, release: false)
+        if routing.release {
+            sharedMouseEvent(at: point, release: true)
+        }
+        frameDriver.markDirty()
+        return true
     }
     
     // Returns offsets for the first and last visible terminal buffer lines.
@@ -872,66 +1041,78 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     @objc func singleTap (_ gestureRecognizer: UITapGestureRecognizer)
     {
-        if isFirstResponder {
-            guard gestureRecognizer.view != nil else { return }
+        guard gestureRecognizer.view != nil,
+              gestureRecognizer.state == .ended else { return }
 
-            if gestureRecognizer.state != .ended {
-                return
-            }
+        let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
+        if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive) {
+            terminalDelegate?.requestOpenLink(source: self, link: result.link,
+                                              params: result.params)
+            return
+        }
 
-            let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
-            if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive) {
-                terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
-                return
-            }
-
-            let action = tapAction(tapCount: 1, gestureRecognizer: gestureRecognizer)
-            if action == .forwardClick {
-                sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
-
-                if withTerminal({ $0.mouseMode.sendButtonRelease() }) {
-                    sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
-                }
-            } else if action == .dismissSelection {
-                withTerminal { _ in selection.selectNone() }
-                disableSelectionPanGesture()
-                frameDriver.markDirty()
-            } else {
-                let state = withTerminal { terminal -> (hadSelection: Bool, snapshot: SemanticPromptPointerSnapshot, cursor: Position) in
-                    let snapshot = SemanticPromptPointerSnapshot(
-                        selectionWasActive: selection.active,
-                        didDrag: false,
-                        clickCount: 1,
-                        pressWasSemanticEligible: true)
-                    let hadSelection = selection.active
-                    if selection.active {
-                        selection.selectNone()
-                    }
-                    let buffer = terminal.displayBuffer
-                    return (hadSelection, snapshot, Position(col: buffer.x, row: buffer.y + buffer.yBase))
-                }
-                if state.hadSelection { disableSelectionPanGesture() }
-                if UIMenuController.shared.isMenuVisible {
-                    UIMenuController.shared.hideMenu()
-                } else {
-                    let location = gestureRecognizer.location(in: gestureRecognizer.view)
-                    let tapLoc = calculateTapHit(gesture: gestureRecognizer).grid
-                    if abs(tapLoc.col - state.cursor.col) < 4 && abs(tapLoc.row - state.cursor.row) < 2 {
-                        showContextMenu (forRegion: makeContextMenuRegionForTap (point: location), pos: tapLoc)
-                    } else {
-                        _ = withTerminal { terminal in
-                            terminal.handleSemanticPromptClick(
-                                at: tapHit,
-                                modifiers: semanticPromptModifiers(for: gestureRecognizer),
-                                snapshot: state.snapshot)
-                        }
-                    }
-                }
+        // A tracking application owns the click even while the software
+        // keyboard is dismissed. Spending the first tap only on focus makes
+        // TUI affordances unreachable from a phone.
+        if !isFirstResponder,
+           tapAction(tapCount: 1, gestureRecognizer: gestureRecognizer) == .forwardClick {
+            sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
+            if withTerminal({ $0.mouseMode.sendButtonRelease() }) {
+                sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
             }
             frameDriver.markDirty()
-        } else {
-            let _ = becomeFirstResponder ()
+            return
         }
+
+        guard isFirstResponder else {
+            _ = becomeFirstResponder()
+            return
+        }
+
+        let action = tapAction(tapCount: 1, gestureRecognizer: gestureRecognizer)
+        if action == .forwardClick {
+            sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
+
+            if withTerminal({ $0.mouseMode.sendButtonRelease() }) {
+                sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
+            }
+        } else if action == .dismissSelection {
+            withTerminal { _ in selection.selectNone() }
+            disableSelectionPanGesture()
+            frameDriver.markDirty()
+        } else {
+            let state = withTerminal { terminal -> (hadSelection: Bool, snapshot: SemanticPromptPointerSnapshot, cursor: Position) in
+                let snapshot = SemanticPromptPointerSnapshot(
+                    selectionWasActive: selection.active,
+                    didDrag: false,
+                    clickCount: 1,
+                    pressWasSemanticEligible: true)
+                let hadSelection = selection.active
+                if selection.active {
+                    selection.selectNone()
+                }
+                let buffer = terminal.displayBuffer
+                return (hadSelection, snapshot, Position(col: buffer.x, row: buffer.y + buffer.yBase))
+            }
+            if state.hadSelection { disableSelectionPanGesture() }
+            if isContextMenuVisible {
+                hideContextMenu()
+            } else {
+                let location = gestureRecognizer.location(in: gestureRecognizer.view)
+                let tapLoc = calculateTapHit(gesture: gestureRecognizer).grid
+                if abs(tapLoc.col - state.cursor.col) < 4 && abs(tapLoc.row - state.cursor.row) < 2 {
+                    showContextMenu (forRegion: makeContextMenuRegionForTap (point: location), pos: tapLoc)
+                } else {
+                    _ = withTerminal { terminal in
+                        terminal.handleSemanticPromptClick(
+                            at: tapHit,
+                            modifiers: semanticPromptModifiers(for: gestureRecognizer),
+                            snapshot: state.snapshot)
+                    }
+                }
+            }
+        }
+        frameDriver.markDirty()
     }
     
     @objc func doubleTap (_ gestureRecognizer: UITapGestureRecognizer)
@@ -939,6 +1120,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         guard gestureRecognizer.view != nil else { return }
 
         if gestureRecognizer.state != .ended {
+            return
+        }
+
+        // A single tap belongs to an unfocused tracking application. Reserve
+        // the deliberate double tap as the way to bring the keyboard back.
+        if !isFirstResponder,
+           allowMouseReporting,
+           withTerminal({ $0.mouseMode.sendButtonPress() }) {
+            _ = becomeFirstResponder()
             return
         }
 
@@ -1049,36 +1239,56 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         imgView.tintColor = .white
     }
     
+    var wheelDragAccumulator: CGFloat = 0
+    var wheelBudget = WheelReportBudget()
+
+    /// A one-finger drag is this device's wheel for a mouse-tracking
+    /// application. Two fingers remain available for local scrollback.
     @objc func panMouseHandler (_ gestureRecognizer: UIPanGestureRecognizer){
-        guard gestureRecognizer.view != nil else { return }
-        let mouseMode = withTerminal { $0.mouseMode }
-        if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && mouseMode != .off {
-            switch gestureRecognizer.state {
-            case .began:
-                // send the initial tap
-                if mouseMode.sendButtonPress() {
-                    sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
-                }
-            case .ended, .cancelled:
-                if mouseMode.sendButtonRelease() {
-                    sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
-                }
-            case .changed:
-                if mouseMode.sendButtonTracking() {
-                    withTerminal { terminal in
-                        let hit = calculateTapHitLocked(point: gestureRecognizer.location(in: self))
-                        if let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) {
-                            let buttonFlags = terminal.encodeButton(button: 0,
-                                                                    release: false,
-                                                                    shift: false,
-                                                                    meta: false,
-                                                                    control: terminalAccessory?.controlModifier ?? controlModifier)
-                            terminal.sendMotion(buttonFlags: buttonFlags, x: grid.col, y: grid.row, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
-                        }
-                    }
-                }
-            default:
-                break
+        guard gestureRecognizer.view != nil,
+              allowMouseReporting,
+              !shiftBypassesMouseReporting(for: gestureRecognizer),
+              withTerminal({ $0.mouseMode != .off }) else { return }
+        switch gestureRecognizer.state {
+        case .began:
+            wheelDragAccumulator = 0
+        case .changed:
+            let travelled = gestureRecognizer.translation(in: self).y
+            gestureRecognizer.setTranslation(.zero, in: self)
+            forwardWheelDrag(distance: travelled, gestureRecognizer: gestureRecognizer)
+        default:
+            break
+        }
+    }
+
+    /// Reports whole-cell drag distance as bounded wheel presses.
+    public func forwardWheelDrag(distance: CGFloat,
+                                 gestureRecognizer: UIGestureRecognizer) {
+        let cellHeight = cellDimension.height
+        guard cellHeight > 0 else { return }
+
+        wheelDragAccumulator += distance
+        let lines = Int(wheelDragAccumulator / cellHeight)
+        guard lines != 0 else { return }
+        wheelDragAccumulator -= CGFloat(lines) * cellHeight
+
+        let reports = wheelBudget.grant(min(abs(lines), Int(WheelReportBudget.burst)))
+        guard reports > 0 else { return }
+
+        withTerminal { terminal in
+            let hit = calculateTapHitLocked(point: gestureRecognizer.location(in: self))
+            guard let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return }
+            let flags = terminal.encodeButton(button: lines > 0 ? 4 : 5,
+                                              release: false,
+                                              shift: false,
+                                              meta: false,
+                                              control: false)
+            for _ in 0..<reports {
+                terminal.sendEvent(buttonFlags: flags,
+                                   x: grid.col,
+                                   y: grid.row,
+                                   pixelX: hit.pixels.col,
+                                   pixelY: hit.pixels.row)
             }
         }
     }
@@ -1173,14 +1383,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
     
-    var panMouseGesture: UIPanGestureRecognizer?
+    public private(set) var panMouseGesture: UIPanGestureRecognizer?
     func enableMousePanGesture () {
         guard panMouseGesture == nil else {
             return
         }
         let gesture = UIPanGestureRecognizer (target: self, action: #selector(panMouseHandler))
+        gesture.maximumNumberOfTouches = 1
         addGestureRecognizer(gesture)
         panMouseGesture = gesture
+        panGestureRecognizer.minimumNumberOfTouches = 2
     }
     
     func disableMousePanGesture () {
@@ -1189,6 +1401,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         removeGestureRecognizer(gesture)
         panMouseGesture = nil
+        panGestureRecognizer.minimumNumberOfTouches = 1
     }
     
     var panSelectionGesture: UIPanGestureRecognizer?
@@ -1398,6 +1611,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     var _nativeFg, _nativeBg: TTColor!
+    var _nativeBoldFg: UIColor?
+
+    /// Rewrites 24-bit background colours on their way to the screen. The
+    /// value-only transformer is safe to use on SwiftTerm's render thread.
+    public var trueColorBackgroundTransform:
+        (any TerminalTrueColorBackgroundTransform)? {
+        didSet { colorsChanged() }
+    }
     var settingFg = false, settingBg = false
     func setNativeForegroundColorLocked (_ newValue: UIColor)
     {
@@ -1454,6 +1675,19 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             withTerminal { _ in
                 setNativeForegroundColorLocked(newValue)
             }
+        }
+    }
+
+    /// The colour for bold text that uses the default foreground, or nil to
+    /// use `nativeForegroundColor`. Explicit ANSI colours are unaffected.
+    public var nativeBoldForegroundColor: UIColor? {
+        get { _nativeBoldFg }
+        set {
+            guard _nativeBoldFg != newValue else { return }
+            _nativeBoldFg = newValue
+            resetCaches()
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
         }
     }
     
@@ -1584,6 +1818,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// switch back to upstream and drop the fork.
     public var hasActiveSelection: Bool {
         return selection?.active ?? false
+    }
+
+    /// The selected text, or nil when the selection is absent or empty.
+    public var selectedText: String? {
+        withTerminal { _ in
+            guard selection.active else { return nil }
+            let text = selection.getSelectedText()
+            return text.isEmpty ? nil : text
+        }
     }
 
     /// Programmatically sets the selection range to the given buffer
@@ -1720,14 +1963,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// line-feed event.
     @available(*, deprecated, message: "Use notifyUpdateChanges and TerminalViewDelegate.rangeChanged(source:startY:endY:) for display updates, or use a separate Terminal(delegate:) for each line-feed event.")
     nonisolated open func linefeed(source: Terminal) {
-        // Preserve manual selection while output is streaming when mouse reporting is disabled.
-        onMain { [weak self] in
-            guard let self, self.allowMouseReporting else { return }
-            self.withTerminal { _ in
-                guard self.selection.active else { return }
-                self.selection.selectNone()
-            }
-        }
+        // SelectionService adjusts registered selections when the buffer
+        // scrolls or trims, so ordinary output does not invalidate them.
     }
     
     func updateScroller ()
@@ -1750,6 +1987,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         updatingContentOffsetFromTerminal = true
         contentSize = CGSize (width: CGFloat (displayBuffer.cols) * cellDimension.width,
                               height: CGFloat (displayBuffer.lines.count) * cellDimension.height)
+        appliedContentOffsetY = contentOffset.y
         updatingContentOffsetFromTerminal = false
         // Let the gesture own contentOffset while the finger is physically down
         // (isTracking), and while frozen history coasts under momentum —
@@ -1778,6 +2016,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     var userScrolling = false
     private var updatingContentOffsetFromTerminal = false
+    /// The last vertical offset applied by the terminal itself. A settled
+    /// different value came from a finger or the host and must be mirrored.
+    private var appliedContentOffsetY: CGFloat = 0
     private var manualScrollOffsetWithinRow: CGFloat = 0
 
     private var contentOffsetTolerance: CGFloat {
@@ -1804,10 +2045,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     private func setContentOffsetFromTerminal(_ newContentOffset: CGPoint) {
         if abs(contentOffset.x - newContentOffset.x) <= contentOffsetTolerance &&
             abs(contentOffset.y - newContentOffset.y) <= contentOffsetTolerance {
+            appliedContentOffsetY = contentOffset.y
             return
         }
 
         updatingContentOffsetFromTerminal = true
+        appliedContentOffsetY = newContentOffset.y
         contentOffset = newContentOffset
         updatingContentOffsetFromTerminal = false
     }
@@ -1846,6 +2089,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         guard terminal != nil, !updatingContentOffsetFromTerminal, cellDimension.height > 0 else {
             return
         }
+        guard abs(contentOffset.y - appliedContentOffsetY) > contentOffsetTolerance else {
+            return
+        }
+        appliedContentOffsetY = contentOffset.y
 
         let maxContentOffset = maxContentOffsetY()
         let offsetY = min(max(contentOffset.y, 0), maxContentOffset)
@@ -1867,19 +2114,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        // Freeze auto-follow only while the finger is physically down
-        // (isTracking). Excluding the momentum coast is essential: after the
-        // finger lifts, deceleration keeps firing sync while streaming output
-        // extends the content and the bottom recedes ahead of the coasting
-        // offset — treating that "not at the bottom yet" reading as a manual
-        // scroll would re-freeze a view the user just flung to the bottom. This
-        // must key off isTracking, not isDragging: on device isDragging stays
-        // true through the entire coast, so it fails to exclude momentum. It also
-        // covers layout/system-driven offset changes (startup sizing, rotation,
-        // keyboard insets, buffer shrink), which are never a manual scroll.
-        guard isTracking else {
-            return
-        }
+        // The applied-offset marker distinguishes terminal-owned changes from
+        // a finger or host-restored viewport, including settled offsets.
 
         withTerminal { terminal in
             let displayBuffer = terminal.displayBuffer
@@ -1969,11 +2205,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 #endif
 
         lastLayoutBounds = currentBounds
+        // UIScrollView settles clamps and restored offsets during layout.
+        syncYDispFromContentOffset()
     }
 
     open override var contentOffset: CGPoint {
         didSet {
-            syncYDispFromContentOffset()
 #if canImport(MetalKit)
             if useMetalRenderer, metalView != nil {
                 frameDriver.markDirty()
@@ -3343,7 +3580,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             self.invalidateTerminalContents()
 
             if !self.withTerminal({ _ in self.selection.active }) {
-                UIMenuController.shared.hideMenu()
+                self.hideContextMenu()
                 self.withTerminal { _ in self.selection.selectNone() }
                 self.disableSelectionPanGesture()
             }
@@ -3362,11 +3599,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let mouseMode = source.mouseMode
         onMain { [weak self] in
             guard let self else { return }
-            if mouseMode != .off {
-                self.enableMousePanGesture()
-            } else {
-                self.disableMousePanGesture()
-            }
+            self.applyMouseMode(mouseMode)
+        }
+    }
+
+    private func applyMouseMode(_ mouseMode: Terminal.MouseMode) {
+        if allowMouseReporting && mouseMode != .off {
+            enableMousePanGesture()
+        } else {
+            disableMousePanGesture()
         }
     }
     
@@ -3732,6 +3973,44 @@ extension TerminalView: UIAccessibilityReadingContent {
             let end = Position(col: terminal.buffer.lines[startLine].count,
                                row: startLine + lines)
             return accessibilityAttributedDisplayTextLocked(start: start, end: end)
+        }
+    }
+}
+
+@available(iOS 16.0, visionOS 1.0, *)
+extension TerminalView: @MainActor UIEditMenuInteractionDelegate {
+    public func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        menuFor configuration: UIEditMenuConfiguration,
+        suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+        let menu = UIMenu(children: editMenuElements(suggested: suggestedActions))
+        lastPresentedEditMenu = menu
+        return menu
+    }
+
+    public func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        targetRectFor configuration: UIEditMenuConfiguration
+    ) -> CGRect {
+        lastLongSelectRegion
+    }
+
+    public func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        willPresentMenuFor configuration: UIEditMenuConfiguration,
+        animator: UIEditMenuInteractionAnimating
+    ) {
+        editMenuIsPresented = true
+    }
+
+    public func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        willDismissMenuFor configuration: UIEditMenuConfiguration,
+        animator: UIEditMenuInteractionAnimating
+    ) {
+        animator.addCompletion { [weak self] in
+            self?.editMenuIsPresented = false
         }
     }
 }

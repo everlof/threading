@@ -4123,6 +4123,14 @@ final class MetalTerminalRenderer {
            let resourceBundle = Bundle(url: url) {
             bundles.append(resourceBundle)
         }
+        // `swift test` places package resource bundles beside the `.xctest`
+        // bundle rather than inside it.
+        let siblingURL = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(bundleName)
+        if let resourceBundle = Bundle(url: siblingURL) {
+            bundles.append(resourceBundle)
+        }
         #endif
         bundles.append(Bundle(for: MetalTerminalRenderer.self))
         bundles.append(Bundle.main)

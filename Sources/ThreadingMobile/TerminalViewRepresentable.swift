@@ -323,6 +323,9 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     /// very first application apart from an applied nil, whose fallback colours count too.
     private(set) var appliedTheme: RemoteTerminalThemeDTO?
     private(set) var hasAppliedTheme = false
+#if DEBUG
+    private(set) var themeApplicationCount = 0
+#endif
     private var allowsKeyboardInput = true
     private var authoritativeColumns = 0
     private var authoritativeRows = 0
@@ -403,6 +406,9 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     func noteAppliedTheme(_ theme: RemoteTerminalThemeDTO?) {
         appliedTheme = theme
         hasAppliedTheme = true
+#if DEBUG
+        themeApplicationCount += 1
+#endif
     }
 
     func beginFontPinch() {
@@ -579,7 +585,7 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     /// which would discard the scrolling region the Mac's output relies on.
     private func applyAuthoritativeGrid() {
         guard authoritativeColumns > 0, authoritativeRows > 0 else { return }
-        let current = getTerminal().getDims()
+        let current = terminalDimensions
         guard current.cols != authoritativeColumns || current.rows != authoritativeRows else {
             return
         }

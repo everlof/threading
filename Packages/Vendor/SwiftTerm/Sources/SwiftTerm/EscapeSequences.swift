@@ -121,6 +121,8 @@ public struct EscapeSequences {
     public static let emacsBack: [UInt8] = [ 0x1b, 0x62]
     /// Emacs forward-word (meta-f)
     public static let emacsForward: [UInt8] = [ 0x1b, 0x66]
+    /// Emacs backward-kill-word (meta-DEL), what readline binds to `\e\C-?`
+    public static let emacsBackwardKillWord: [UInt8] = [ 0x1b, 0x7f]
 
     /// Control-left arrow
     public static let controlLeft: [UInt8] = [ 0x1b, 0x5b, 0x31, 0x3b, 0x35, 0x44 ]

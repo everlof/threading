@@ -146,6 +146,7 @@ class CaretView: NSView {
 
     func updateView() {
         setNeedsDisplay(bounds)
+        layer?.setNeedsDisplay()
     }
     
     override func draw(_ dirtyRect: NSRect) {

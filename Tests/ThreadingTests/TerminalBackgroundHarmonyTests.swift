@@ -6,6 +6,15 @@ private func hexColor(_ value: String) -> NSColor {
     NSColor(hex: value) ?? .black
 }
 
+private struct PinkBackgroundTransform: TerminalTrueColorBackgroundTransform {
+    let cacheIdentity: UInt64 = 1
+    static let color = hexColor("#FF2D55")
+
+    func transform(_ color: TerminalRenderedColor) -> TerminalRenderedColor {
+        TerminalRenderedColor(red: 0xff, green: 0x2d, blue: 0x55)
+    }
+}
+
 /// The harmoniser rewrites colours a *program* chose, which is the reason its guarantees are
 /// worth pinning rather than eyeballing: getting one of these wrong does not look like a bug in
 /// Threading, it looks like the agent CLI rendering badly.
@@ -13,6 +22,7 @@ private func hexColor(_ value: String) -> NSColor {
 /// The three that matter are lightness preservation (the program's own text stays as legible as
 /// it drew it), monotonic hue (distinct backgrounds stay distinct and in order), and a bounded
 /// ceiling (there is actually a limit, rather than a scaling that merely postpones the slab).
+@MainActor
 final class TerminalBackgroundHarmonyTests: XCTestCase {
 
     private var anchors: [CGFloat] { TerminalBackgroundHarmony.anchorHues(of: theme) }
@@ -228,12 +238,12 @@ final class TerminalBackgroundHarmonyTests: XCTestCase {
     func testTransformReachesBackgroundsAndNeverForegrounds() {
         let view = EmojiFixedTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         let raw = Attribute.Color.trueColor(red: 0x47, green: 0x08, blue: 0x02)
-        view.trueColorBackgroundTransform = { _ in .systemPink }
+        view.trueColorBackgroundTransform = PinkBackgroundTransform()
 
-        let background = view.mapColor(color: raw, isFg: false, isBold: false)
-        let foreground = view.mapColor(color: raw, isFg: true, isBold: false)
+        let background = view.resolvedColor(raw, isForeground: false)
+        let foreground = view.resolvedColor(raw, isForeground: true)
 
-        XCTAssertEqual(background.hexString, NSColor.systemPink.hexString,
+        XCTAssertEqual(background.hexString, PinkBackgroundTransform.color.hexString,
                        "the background was not transformed")
         XCTAssertEqual(foreground.hexString, hexColor("#470802").hexString,
                        "the transform leaked onto a foreground through the colour cache")
@@ -244,12 +254,12 @@ final class TerminalBackgroundHarmonyTests: XCTestCase {
         let view = EmojiFixedTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         let raw = Attribute.Color.trueColor(red: 0x47, green: 0x08, blue: 0x02)
 
-        view.trueColorBackgroundTransform = { _ in .systemPink }
-        XCTAssertEqual(view.mapColor(color: raw, isFg: false, isBold: false).hexString,
-                       NSColor.systemPink.hexString)
+        view.trueColorBackgroundTransform = PinkBackgroundTransform()
+        XCTAssertEqual(view.resolvedColor(raw, isForeground: false).hexString,
+                       PinkBackgroundTransform.color.hexString)
 
         view.trueColorBackgroundTransform = nil
-        XCTAssertEqual(view.mapColor(color: raw, isFg: false, isBold: false).hexString,
+        XCTAssertEqual(view.resolvedColor(raw, isForeground: false).hexString,
                        hexColor("#470802").hexString,
                        "a stale harmonised colour survived the hook being removed")
     }

@@ -253,6 +253,7 @@ final class TerminalSnapshot {
 
         let result = SnapshotNativeColors(
             effectiveForegroundColor: appearance.effectiveForegroundColor.nativeColor,
+            boldForegroundColor: appearance.boldForegroundColor.nativeColor,
             effectiveBackgroundColor: appearance.effectiveBackgroundColor.nativeColor,
             selectedTextBackgroundColor: appearance.selectedTextBackgroundColor.nativeColor,
             selectedTextForegroundColor: appearance.selectedTextForegroundColor.nativeColor,

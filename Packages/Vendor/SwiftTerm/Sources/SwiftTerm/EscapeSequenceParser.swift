@@ -479,7 +479,10 @@ final class EscapeSequenceParser {
         case 0x84: terminal.cmdIndex()
         case 0x85: terminal.cmdNextLine()
         case 0x88: terminal.cmdTabSet()
-        default:   terminal.log ("SwiftTerm: Unknown EXECUTE code")
+        default:
+            SwiftTermDiagnostics.emit(
+                .debug, .parserUnhandledExecute, facts: ["code": Int(code)])
+            terminal.log ("SwiftTerm: Unknown EXECUTE code")
         }
     }
 
@@ -563,6 +566,12 @@ final class EscapeSequenceParser {
         case 0x7d: terminal.csiCloseBrace(pars, collect)        // }
         case 0x7e: terminal.cmdDeleteColumns(pars, collect)     // ~
         default:
+            SwiftTermDiagnostics.emit(
+                .debug,
+                .parserUnhandledControlSequence,
+                facts: ["code": Int(code),
+                        "parameterCount": pars.count,
+                        "collectCount": collect.count])
             let ch = Character(UnicodeScalar(code))
             terminal.log ("SwiftTerm: Unknown CSI Code (collect=\(collect) code=\(ch) pars=\(pars))")
         }

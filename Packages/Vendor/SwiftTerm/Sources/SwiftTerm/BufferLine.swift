@@ -362,7 +362,10 @@ public final class BufferLine: CustomDebugStringConvertible {
             if index >= storage.count {
                 // All bugs I was aware of have been handled, but keep this message here to
                 // help future refactorings.
-                print("BufferLine: You passed an index out of range, adjusting to prevent crash, but you should debug")
+                SwiftTermDiagnostics.emit(
+                    .fault,
+                    .bufferBoundsCorrected,
+                    facts: ["index": index, "size": storage.count])
                 storage.setCell(value, at: storage.count - 1)
                 usedLength = storage.count
             } else {

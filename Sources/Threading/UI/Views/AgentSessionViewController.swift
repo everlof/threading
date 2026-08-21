@@ -129,10 +129,10 @@ final class AgentSessionViewController: NSViewController {
                 terminalSession?.effectiveWorkingDirectory()
             },
             text: { [weak terminalSession] since in
-                guard let terminal = terminalSession?.terminalView.getTerminal() else {
+                guard let terminalView = terminalSession?.terminalView else {
                     return .empty
                 }
-                let read = terminal.getRecentLogicalBufferText(
+                let read = terminalView.recentLogicalBufferText(
                     maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes,
                     sinceAbsoluteRow: since
                 )
@@ -559,8 +559,8 @@ final class AgentSessionViewController: NSViewController {
     private func startIfTerminalIsSized() {
         guard let plan = pendingLaunchPlan else { return }
 
-        let terminal = session.terminalView.getTerminal()
-        guard terminal.cols > 0, terminal.rows > 0 else {
+        let dimensions = session.terminalView.terminalDimensions
+        guard dimensions.cols > 0, dimensions.rows > 0 else {
             return  // Retried from the sizeChanged callback once layout settles.
         }
 

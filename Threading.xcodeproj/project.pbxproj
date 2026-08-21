@@ -204,6 +204,7 @@
 				"ThreadingMobile-Info.plist",
 				ThreadingMobile/ComposerAttachmentTray.swift,
 				ThreadingMobile/DemoExperience.swift,
+				ThreadingMobile/FirstSuccessfulTaskRace.swift,
 				ThreadingMobile/HostedRemoteConnectionManager.swift,
 				ThreadingMobile/Localizable.xcstrings,
 				ThreadingMobile/MobileAgentIdentity.swift,

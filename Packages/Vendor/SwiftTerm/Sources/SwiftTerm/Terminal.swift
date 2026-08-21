@@ -578,6 +578,10 @@ open class Terminal {
     /// the terminal, the content will be wrapped in "ESC [ 200 ~" to start, and "ESC [ 201 ~" to end.
     public private(set) var bracketedPasteMode: Bool = false
 
+    /// DECSET 2031: the application asked to be notified when the host's
+    /// colour scheme changes, using `CSI ? 997 ; 1|2 n`.
+    public private(set) var colorSchemeReportingEnabled: Bool = false
+
     /// Tracks DECSET/DECRST private mode 1007 (Alternate Scroll Mode, xterm's "alternateScroll" resource).
     /// When true and the alternate screen buffer is active without an application mouse-tracking mode enabled,
     /// hosts are expected to translate scroll wheel input into cursor up/down key sequences instead of scrolling,
@@ -720,7 +724,7 @@ open class Terminal {
     // The mouse coordinates can be encoded in a number of ways, and obey to historical
     // upgrades to the protocol, but also attempts at fixing limitations of the different
     // encodings.
-    enum MouseProtocolEncoding: Sendable {
+    public enum MouseProtocolEncoding: Sendable {
         // The default x10 mode is limited to coordinates up to 223.
         // (255-32).   The other modes solve this limitaion
         case x10
@@ -740,8 +744,8 @@ open class Terminal {
         case sgrPixel
     }
     
-    // The protocol encoding for the terminal
-    private var mouseProtocol: MouseProtocolEncoding = .x10
+    /// The active mouse coordinate encoding.
+    public private(set) var mouseProtocol: MouseProtocolEncoding = .x10
 
     // This is used to track if we are setting the colors, to prevent a
     // recursive invocation (nativeForegroundColor sets the terminal
@@ -1076,6 +1080,12 @@ open class Terminal {
             return
         }
         semanticNoteAlternateScreenSwitch()
+
+        // A full-screen program can sit over thousands of normal-buffer scrollback lines. While
+        // that alternate screen is active, window resizes update only what is visible and leave
+        // this buffer at its prior grid; otherwise every drag tick reflows hidden history. Pay
+        // that cost once, at the final grid, only when the normal buffer becomes visible again.
+        resizeNormalBufferToCurrentGridIfNeeded()
         normalBuffer.x = altBuffer.x
         normalBuffer.y = altBuffer.y
         
@@ -1105,6 +1115,16 @@ open class Terminal {
         _buffer = altBuffer
         clearKittyImages(in: altBuffer, isAlternateBuffer: true)
     }
+
+    private func resizeNormalBufferToCurrentGridIfNeeded() {
+        guard normalBuffer.cols != cols || normalBuffer.rows != rows else { return }
+
+        let oldCols = normalBuffer.cols
+        let dy = normalBuffer.savedY - normalBuffer.y
+        normalBuffer.resize(newCols: cols, newRows: rows)
+        normalBuffer.savedY = normalBuffer.y + dy
+        normalBuffer.setupTabStops(index: oldCols, tabStopWidth: tabStopWidth)
+    }
     
     func setupTabStops (index: Int = -1)
     {
@@ -1113,13 +1133,14 @@ open class Terminal {
     }
     
     func resizeBuffers(newColumns: Int, newRows: Int) {
-        // correct the savedY cursor to follow changes to y
-        let dy = normalBuffer.savedY - normalBuffer.y
-        normalBuffer.resize (newCols: newColumns, newRows: newRows)
-        normalBuffer.savedY = normalBuffer.y + dy
-        
+        if buffer !== altBuffer {
+            // Correct the savedY cursor to follow changes to y. When the alternate buffer is
+            // active, defer this potentially large normal-buffer reflow until it is visible.
+            let dy = normalBuffer.savedY - normalBuffer.y
+            normalBuffer.resize(newCols: newColumns, newRows: newRows)
+            normalBuffer.savedY = normalBuffer.y + dy
+        }
         altBuffer.resize (newCols: newColumns, newRows: newRows)
-
     }
     public func setup (isReset: Bool = false)
     {
@@ -1148,6 +1169,7 @@ open class Terminal {
         setInsertMode(false)
         setWraparound(true)
         bracketedPasteMode = false
+        colorSchemeReportingEnabled = false
         alternateScrollMode = true
 
         keyboardModeNormal = KeyboardModeState()
@@ -3182,6 +3204,13 @@ open class Terminal {
     func reportColor (oscCode: Int, color: Color) {
         sendResponse(cc.OSC, "\(oscCode);\(color.formatAsXcolor ())", cc.ST)
     }
+
+    /// Notifies a subscribed application that the host colour scheme changed.
+    /// The application can then query OSC 10/11/12 for the new palette.
+    public func reportColorSchemeChange(dark: Bool) {
+        guard colorSchemeReportingEnabled else { return }
+        sendResponse(cc.CSI, "?997;\(dark ? 1 : 2)n")
+    }
     
     // This handles both setting the foreground, but spill into background and cursor color
     // if more parameters are provided (ie, sending OSC 10 with #ffffff,#000000,#ff0000
@@ -4759,6 +4788,8 @@ open class Terminal {
                 res = bracketedPasteMode ? modeSet : modeReset
             case 2026:
                 res = synchronizedOutputActive ? modeSet : modeReset
+            case 2031:
+                res = colorSchemeReportingEnabled ? modeSet : modeReset
             case 2500: // box drawing mirroring (terminal-wg)
                 res = bidiBoxMirroring ? modeSet : modeReset
             case 2501: // autodetect paragraph direction (terminal-wg)
@@ -5597,6 +5628,8 @@ open class Terminal {
                 break
             case 2026: // synchronized output (https://github.com/contour-terminal/vt-extensions)
                 endSynchronizedOutput ()
+            case 2031: // colour-scheme change reports
+                colorSchemeReportingEnabled = false
             default:
                 log ("Unhandled DEC Private Mode Reset (DECRST) with \(par)")
                 break
@@ -5849,6 +5882,8 @@ open class Terminal {
                 bracketedPasteMode = true
             case 2026: // synchronized output (https://github.com/contour-terminal/vt-extensions)
                 beginSynchronizedOutput ()
+            case 2031: // colour-scheme change reports
+                colorSchemeReportingEnabled = true
             default:
                 log ("Unhandled DEC Private Mode Set (DECSET) with \(par)")
                 break;
@@ -7090,7 +7125,9 @@ open class Terminal {
         self._rows = newRows
         options.cols = newCols
         options.rows = newRows
-        normalBuffer.setupTabStops (index: oldCols, tabStopWidth: tabStopWidth)
+        if normalBuffer.cols == newCols {
+            normalBuffer.setupTabStops(index: oldCols, tabStopWidth: tabStopWidth)
+        }
         altBuffer.setupTabStops (index: oldCols, tabStopWidth: tabStopWidth)
         refresh (startRow: 0, endRow: self.rows - 1)
     }
@@ -7479,6 +7516,21 @@ open class Terminal {
         return l
     }
     
+    /// A bounded read of recent buffer text, with the position a follow-up read resumes from.
+    public struct RecentBufferText: Equatable, Sendable {
+        /// The recent complete logical lines, oldest first.
+        public let text: String
+        /// One past the newest row examined, counted from the first line the emulator ever
+        /// produced so the value survives scrollback trimming. Feed it back as
+        /// `sinceAbsoluteRow` to read only what has appeared since.
+        public let nextAbsoluteRow: Int
+
+        public init(text: String, nextAbsoluteRow: Int) {
+            self.text = text
+            self.nextAbsoluteRow = nextAbsoluteRow
+        }
+    }
+
     /// Specified the kind of buffer is being requested from the terminal
     public enum BufferKind: Sendable {
         /// The currently active buffer (can be either normal or alt)
@@ -7548,6 +7600,87 @@ open class Terminal {
             }
         }
         return result
+    }
+
+    /// Returns a UTF-8-bounded suffix of complete logical lines. Soft-wrapped
+    /// grid rows are joined, while real line breaks remain separators. An
+    /// incomplete oldest logical line is omitted instead of returned as a
+    /// misleading fragment.
+    public func getRecentLogicalBufferText(maximumUTF8Bytes: Int,
+                                           kind: BufferKind = .active) -> String
+    {
+        getRecentLogicalBufferText(
+            maximumUTF8Bytes: maximumUTF8Bytes,
+            sinceAbsoluteRow: 0,
+            kind: kind
+        ).text
+    }
+
+    /// The incremental form of `getRecentLogicalBufferText(maximumUTF8Bytes:kind:)`.
+    ///
+    /// The byte bound limits how much text is returned, but it cannot bound the number of rows
+    /// inspected: blank and short rows barely spend it. `sinceAbsoluteRow` supplies that bound.
+    /// The current screen is always read again because full-screen programs repaint it in place;
+    /// only stable scrollback rows are skipped.
+    ///
+    /// Absolute rows survive scrollback trimming. A cursor past the current buffer end is treated
+    /// as belonging to a buffer that was reset or switched, and the retained window is read again.
+    public func getRecentLogicalBufferText(
+        maximumUTF8Bytes: Int,
+        sinceAbsoluteRow: Int,
+        kind: BufferKind = .active
+    ) -> RecentBufferText {
+        let inspectedBuffer = bufferFromKind(kind: kind)
+        let endAbsoluteRow = inspectedBuffer.linesTop + inspectedBuffer.lines.count
+        guard maximumUTF8Bytes > 0, inspectedBuffer.lines.count > 0 else {
+            return RecentBufferText(text: "", nextAbsoluteRow: endAbsoluteRow)
+        }
+
+        let requested = sinceAbsoluteRow > endAbsoluteRow
+            ? inspectedBuffer.linesTop
+            : sinceAbsoluteRow
+        let floorAbsoluteRow = min(
+            max(requested, inspectedBuffer.linesTop),
+            inspectedBuffer.linesTop + inspectedBuffer.yBase
+        )
+        let floorRow = max(
+            0,
+            min(floorAbsoluteRow - inspectedBuffer.linesTop,
+                inspectedBuffer.lines.count - 1)
+        )
+
+        var logicalLinesNewestFirst: [[String]] = []
+        var currentRowsNewestFirst: [String] = []
+        var currentBytes = 0
+        var acceptedBytes = 0
+
+        for row in stride(from: inspectedBuffer.lines.count - 1, through: floorRow, by: -1) {
+            let bufferLine = inspectedBuffer.lines[row]
+            let text = bufferLine.translateToString(trimRight: true)
+            let bytes = text.utf8.count
+            let separatorBytes = logicalLinesNewestFirst.isEmpty ? 0 : 1
+            let remaining = maximumUTF8Bytes - acceptedBytes - separatorBytes
+
+            guard remaining >= 0,
+                  currentBytes <= remaining,
+                  bytes <= remaining - currentBytes else { break }
+
+            currentRowsNewestFirst.append(text)
+            currentBytes += bytes
+            guard !bufferLine.isWrapped else { continue }
+
+            logicalLinesNewestFirst.append(currentRowsNewestFirst)
+            acceptedBytes += separatorBytes + currentBytes
+            currentRowsNewestFirst.removeAll(keepingCapacity: true)
+            currentBytes = 0
+        }
+
+        return RecentBufferText(
+            text: logicalLinesNewestFirst.reversed().map { rowsNewestFirst in
+                rowsNewestFirst.reversed().joined()
+            }.joined(separator: "\n"),
+            nextAbsoluteRow: endAbsoluteRow
+        )
     }
     
     /// Returns the text between the specified range

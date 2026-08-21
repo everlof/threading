@@ -76,7 +76,7 @@ final class TerminalBellTests: XCTestCase {
         // Half two: our override answers, and it answers through the hook the session owns.
         var rang = 0
         view.onBell = { rang += 1 }
-        view.bell(source: view.getTerminal())
+        view.feed(text: "\u{7}")
         XCTAssertEqual(rang, 1, "a bell no longer reaches the hook that decides its sound")
     }
 

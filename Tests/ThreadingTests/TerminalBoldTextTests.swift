@@ -129,7 +129,7 @@ final class TerminalBoldTextTests: XCTestCase {
         let view = terminalView(with: theme)
 
         // "plain " is 6 cells, "bold" 4, " " 1, "red" 3, " " 1, then "boldred".
-        view.getTerminal().feed(
+        view.feed(
             text: "plain \u{1B}[1mbold\u{1B}[0m \u{1B}[31mred\u{1B}[0m \u{1B}[1;31mboldred\u{1B}[0m"
         )
 
@@ -150,7 +150,7 @@ final class TerminalBoldTextTests: XCTestCase {
         theme.boldForeground = theme.foreground
         let view = terminalView(with: theme)
 
-        view.getTerminal().feed(text: "plain \u{1B}[1mbold\u{1B}[0m")
+        view.feed(text: "plain \u{1B}[1mbold\u{1B}[0m")
 
         assertColour(of: view, atColumn: 0, is: theme.foreground, "plain text")
         assertColour(of: view, atColumn: 7, is: theme.foreground, "bold text")
@@ -163,7 +163,7 @@ final class TerminalBoldTextTests: XCTestCase {
     func testChangingTheBoldColourUnderALiveViewMovesTheAlreadyResolvedText() throws {
         let theme = distinctPalette
         let view = terminalView(with: theme)
-        view.getTerminal().feed(text: "plain \u{1B}[1mbold\u{1B}[0m")
+        view.feed(text: "plain \u{1B}[1mbold\u{1B}[0m")
         assertColour(of: view, atColumn: 7, is: theme.boldForeground, "bold text before the swap")
 
         view.nativeBoldForegroundColor = NSColor(hex: "#00C2FF")!
@@ -181,7 +181,7 @@ final class TerminalBoldTextTests: XCTestCase {
     func testClearingTheBoldColourReturnsBoldToTheForeground() throws {
         let theme = distinctPalette
         let view = terminalView(with: theme)
-        view.getTerminal().feed(text: "plain \u{1B}[1mbold\u{1B}[0m")
+        view.feed(text: "plain \u{1B}[1mbold\u{1B}[0m")
 
         view.nativeBoldForegroundColor = nil
 
@@ -274,10 +274,12 @@ final class TerminalBoldTextTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        guard let row = view.getTerminal().getLine(row: 0), column < row.count else {
+        let snapshot = view.terminalStateSnapshot()
+        guard let row = snapshot.visibleRows.first(where: { $0.row == 0 }),
+              column < row.cells.count else {
             return XCTFail("row 0 has no column \(column)", file: file, line: line)
         }
-        let drawn = view.resolvedForegroundColor(for: row[column].attribute)
+        let drawn = view.resolvedForegroundColor(for: row.cells[column].attribute)
         XCTAssertEqual(
             drawn.hexString, expected.hexString,
             "\(what) drew in \(drawn.hexString)",

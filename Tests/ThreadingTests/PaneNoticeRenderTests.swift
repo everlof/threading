@@ -321,7 +321,7 @@ final class PaneNoticeRenderTests: XCTestCase {
             terminal.installColors(TerminalTheme.systemLight.asSwiftTermColors())
             terminal.nativeForegroundColor = TerminalTheme.systemLight.foreground
             terminal.nativeBackgroundColor = TerminalTheme.systemLight.background
-            terminal.getTerminal().feed(
+            terminal.feed(
                 text: "\r\n$ \u{1b}[97m[last: 23s]\u{1b}[0m  "
                     + "\u{1b}[33mmaster\u{1b}[0m  "
                     + "\u{1b}[34m~/repo/AnotherTerminal\u{1b}[0m\r\n$ "

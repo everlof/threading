@@ -289,16 +289,25 @@ final class SnapshotTextBuilder {
                                       isBold: isBold, context: context)
         }
 
-        let key = UInt32(red) << 16 | UInt32(green) << 8 | UInt32(blue)
+        let rendered: TerminalRenderedColor
+        if !isFg, let transform = context.trueColorBackgroundTransform {
+            rendered = transform.transform(TerminalRenderedColor(
+                red: red, green: green, blue: blue))
+        } else {
+            rendered = TerminalRenderedColor(red: red, green: green, blue: blue)
+        }
+        let key = UInt32(rendered.red) << 16
+            | UInt32(rendered.green) << 8
+            | UInt32(rendered.blue)
         if let cached = trueColorCache[key] {
             return cached
         }
         if trueColorCache.count >= trueColorCacheCapacity {
             trueColorCache.removeAll(keepingCapacity: true)
         }
-        let value = TTColor.make(red: CGFloat(red) / 255,
-                                 green: CGFloat(green) / 255,
-                                 blue: CGFloat(blue) / 255,
+        let value = TTColor.make(red: CGFloat(rendered.red) / 255,
+                                 green: CGFloat(rendered.green) / 255,
+                                 blue: CGFloat(rendered.blue) / 255,
                                  alpha: 1)
         trueColorCache[key] = value
         return value
@@ -664,6 +673,9 @@ func mapColor (color: Attribute.Color, isFg: Bool, isBold: Bool,
 {
     switch color {
     case .defaultColor:
+        if isFg, isBold {
+            return context.boldForegroundColor
+        }
         return isFg ? context.effectiveForegroundColor : context.effectiveBackgroundColor
     case .defaultInvertedColor:
         return (isFg ? context.effectiveBackgroundColor : context.effectiveForegroundColor)
