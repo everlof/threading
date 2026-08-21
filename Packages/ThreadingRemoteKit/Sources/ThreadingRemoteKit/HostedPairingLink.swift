@@ -65,7 +65,10 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
               components.path.isEmpty,
               components.query == nil,
               let fragment = components.fragment,
-              let data = Data(base64URLEncoded: fragment),
+              let data = Data(
+                base64URLEncoded: fragment,
+                maximumBytes: Self.maximumEncodedBytes
+              ),
               data.count <= Self.maximumEncodedBytes,
               let payload = try? JSONDecoder().decode(Payload.self, from: data),
               payload.v == 1,
@@ -135,25 +138,5 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
 
     private static func isLoopback(_ host: String) -> Bool {
         host == "localhost" || host == "127.0.0.1" || host == "::1"
-    }
-}
-
-private extension Data {
-    init?(base64URLEncoded value: String) {
-        guard !value.isEmpty, value.utf8.count <= HostedPairingLink.maximumEncodedBytes else {
-            return nil
-        }
-        var base64 = value.replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        let remainder = base64.count % 4
-        if remainder != 0 { base64.append(String(repeating: "=", count: 4 - remainder)) }
-        self.init(base64Encoded: base64)
-    }
-
-    func base64URLEncodedString() -> String {
-        base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
     }
 }
