@@ -43,6 +43,7 @@
 		A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */; };
 		A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000002 /* RemoteHostTrustTests.swift */; };
 		A63100010000000000000101 /* MobileInvitationRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000102 /* MobileInvitationRouteTests.swift */; };
+		A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000202 /* ShareChatFlowTests.swift */; };
 		A63500010000000000000001 /* MobileSettingsIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63500010000000000000002 /* MobileSettingsIdentityTests.swift */; };
 		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
 		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
@@ -177,6 +178,7 @@
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A63100010000000000000002 /* RemoteHostTrustTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostTrustTests.swift; sourceTree = "<group>"; };
 		A63100010000000000000102 /* MobileInvitationRouteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileInvitationRouteTests.swift; sourceTree = "<group>"; };
+		A63100010000000000000202 /* ShareChatFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareChatFlowTests.swift; sourceTree = "<group>"; };
 		A63500010000000000000002 /* MobileSettingsIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSettingsIdentityTests.swift; sourceTree = "<group>"; };
 		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
 		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
@@ -370,6 +372,7 @@
 				B20000010000000000000004 /* NotificationDeepLinkTests.swift */,
 				A63100010000000000000002 /* RemoteHostTrustTests.swift */,
 				A63100010000000000000102 /* MobileInvitationRouteTests.swift */,
+				A63100010000000000000202 /* ShareChatFlowTests.swift */,
 				A63500010000000000000002 /* MobileSettingsIdentityTests.swift */,
 				A63200010000000000000002 /* RemoteHostCandidateTests.swift */,
 				A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */,
@@ -957,6 +960,7 @@
 				B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */,
 				A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */,
 				A63100010000000000000101 /* MobileInvitationRouteTests.swift in Sources */,
+				A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */,
 				A63500010000000000000001 /* MobileSettingsIdentityTests.swift in Sources */,
 				A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */,
 				A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */,

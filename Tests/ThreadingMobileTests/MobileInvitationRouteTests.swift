@@ -179,7 +179,6 @@ final class MobileInvitationRouteTests: XCTestCase {
             "Can view “%@”",
             "Can collaborate in “%@”",
             "Can collaborate in “%@” and approve requests",
-            "Choose what this person can do in this chat.",
         ] {
             let translated = swedish.localizedString(
                 forKey: key,

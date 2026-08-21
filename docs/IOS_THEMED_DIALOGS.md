@@ -63,6 +63,27 @@ on one outside `ThemedDialog.swift`, so there is still exactly one component for
 
 `systemImage` therefore decorates an alert's buttons only. An action sheet draws titles.
 
+### A confirmation asks one question. A chooser is a stage of its own sheet.
+
+The share-role chooser went through both halves above and belonged to neither. As a card it
+floated; as an action sheet it read as three bare words with nothing to say what any of them
+granted, and it dismissed itself to present a *second* sheet with the answer. Two presentations
+for one question.
+
+It is the first stage of the Share Chat sheet now (`ShareChatSheet.swift`): one presentation,
+themed rows inside the system's own bottom sheet, and the link-ready stage crossfading in when a
+row is tapped. The rule this leaves behind:
+
+- A prompt with **one question and two or three ways to answer it** is a confirmation. The
+  surface switch and the two destructive confirmations are that, and stay
+  `themedConfirmationDialog`.
+- A prompt whose options each need **a name, a glyph and a line explaining them**, or that leads
+  somewhere rather than ending, is a sheet stage. Build it as themed content — `ThemedRowGroup`
+  and `ThemedRowDivider` — inside a system sheet, and give the stages one chrome so the reader
+  never sees two presentations for one decision.
+
+Neither is a licence to reach for `.confirmationDialog` at a call site; the checker is unchanged.
+
 ### Extension rule
 
 **Extend `ThemedDialog` as soon as an application-owned dialog needs something it cannot
@@ -97,8 +118,8 @@ presentation binding is cleared, so a handler may read the selected session on t
 system action sheet does not work that way: it clears `isPresented` as part of dismissing and
 calls the button's handler afterwards, so a handler that reads the `@State` the binding nils out
 reads nothing and does its work on nobody. Build the actions from the item and let the closures
-capture it, the way `SessionDashboard.shareRoleActions(for:)` does. Three call sites depended on
-the old ordering and all three would have silently stopped working.
+capture it, the way `SessionDashboard.surfaceChangeActions(for:)` does. Three call sites depended
+on the old ordering and all three would have silently stopped working.
 
 ## Settings surfaces
 
@@ -197,7 +218,17 @@ Debug builds expose deterministic launch modes:
 ```bash
 THREADING_MOBILE_DEMO=themed-dialog-alert
 THREADING_MOBILE_DEMO=themed-dialog-confirmation
+THREADING_MOBILE_DEMO=share-chat-roles
+THREADING_MOBILE_DEMO=share-chat-blocked
+THREADING_MOBILE_DEMO=share-chat-link
+THREADING_MOBILE_DEMO=shared-link
 ```
+
+The confirmation fixture shows the surface switch, because that is what a confirmation still is
+here. The three `share-chat-*` fixtures are the two stages of the Share Chat sheet plus the
+chooser a dormant chat gets; `share-chat-link` reaches the link by choosing a grant rather than
+by being handed one, so what it photographs is the transition. `shared-link` is the link stage
+on its own, which is what a project terminal's share still presents.
 
 The confirmation fixture is captured in `display` mode. The app-owned capture renders the key
 window, and the system's action sheet is not in it; that is the same reason the keyboard states
