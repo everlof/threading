@@ -177,8 +177,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Standalone terminals",
-      "description": "The paired owner catalogue for project shells, visibly separated from chat rows before either kind opens its dedicated surface.",
-      "states": ["Terminal section", "Running shell", "Dormant shell", "Project identity"],
+      "description": "The paired owner catalogue for project shells, drawn as rows of the same list as chats and told apart by the terminal mark, before either kind opens its dedicated surface.",
+      "states": ["Terminal rows beside chats", "Running shell", "Dormant shell", "Project identity"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/standalone-terminal-dashboard-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}

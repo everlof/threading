@@ -5493,6 +5493,9 @@
     },
     "The code under a Mac is the identity this iPhone pins. It is the same code that Mac prints under This Mac’s Identity, so the two can be compared by eye.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Koden under en Mac är identiteten som denna iPhone fäster. Det är samma kod som den Mac-datorn visar under Den här Mac-datorns identitet, så att de två kan jämföras med ögat." } } }
+    },
+    "Terminal": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Terminal" } } }
     }
   },
   "version": "1.2"

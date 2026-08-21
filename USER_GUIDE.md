@@ -2282,14 +2282,17 @@ kept in the Mac login Keychain, so disabling Remote Access or restarting the app
 without silently making collaborators rejoin. Permission approval is an explicit right for that
 member and chat; it never grants another chat, Mac settings, or the ability to create shares.
 
-Paired owner devices also see **standalone terminals** in the iPhone and browser dashboard. Open
-one to attach to that project shell; if it is stopped, an owner may start it remotely. A terminal
-has no chat transcript, archive, workspace tools or AI permission cards, so its screen exposes
-only the terminal and terminal sharing actions.
+Paired owner devices also see **standalone terminals** in the iPhone and browser dashboard. On
+iPhone a terminal is a row in the same list as the chats, drawn the same way: where a chat's tile
+shows its agent's mark, a terminal's shows the terminal symbol, and a shell that is not running
+dims the way a disconnected chat does. Open one to attach to that project shell; if it is stopped,
+an owner may start it remotely. A terminal has no chat transcript, archive, workspace tools or AI
+permission cards, so its screen exposes only the terminal and terminal sharing actions.
 
-On iPhone, **… ▸ Organize ▸ By project** places terminals inside the project that owns them.
-Choose **By type** to gather chats and terminals across projects; its **Direction** section offers
-**Chats first** and **Terminals first**. The choice is saved on that iPhone.
+On iPhone, **… ▸ Organize ▸ By project** places terminals inside the project that owns them,
+after its chats. Choose **By type** to gather chats and terminals across projects under their own
+**Chats** and **Terminals** headings; its **Direction** section offers **Chats first** and
+**Terminals first**. The choice is saved on that iPhone.
 
 Use a standalone terminal row's **… > Share Terminal…** to give somebody access to that terminal
 alone. **View only** follows output from an already-running shell and cannot type, resize or start
