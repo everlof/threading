@@ -3,6 +3,18 @@ import CryptoKit
 import Foundation
 import ThreadingRemoteKit
 
+private enum RemoteTerminalHydrationDefaults {
+    /// PTY programs do not expose a resize-repaint acknowledgement. Once the first output after
+    /// SIGWINCH arrives, a short host-local quiet window closes that burst. Network pacing is
+    /// deliberately outside this decision: the ready frame is queued behind the bytes.
+    static let outputQuietDelay: Duration = .milliseconds(200)
+    /// A foreground program may choose not to repaint after SIGWINCH. Do not leave that terminal
+    /// hidden indefinitely when the host can already synthesize its authoritative screen.
+    static let firstOutputMaximumDelay: Duration = .seconds(1)
+    /// Continuous output still gets one bounded final seed and a visible terminal.
+    static let maximumDelay: Duration = .seconds(3)
+}
+
 /// Bridges a live session to its remote subscribers: taps the PTY byte stream, keeps a ring for
 /// late joiners, fans output out to every watcher, and routes remote input back in.
 ///
@@ -21,8 +33,23 @@ final class RemoteSessionMirrorRegistry {
     private var appearanceObservation: NSKeyValueObservation?
     private var terminalApplication: (any RemoteTerminalApplicationCapability)?
 
-    init(terminalApplication: (any RemoteTerminalApplicationCapability)? = nil) {
+    private let terminalHydrationOutputQuietDelay: Duration
+    private let terminalHydrationFirstOutputMaximumDelay: Duration
+    private let terminalHydrationMaximumDelay: Duration
+
+    init(
+        terminalApplication: (any RemoteTerminalApplicationCapability)? = nil,
+        terminalHydrationOutputQuietDelay: Duration =
+            RemoteTerminalHydrationDefaults.outputQuietDelay,
+        terminalHydrationFirstOutputMaximumDelay: Duration =
+            RemoteTerminalHydrationDefaults.firstOutputMaximumDelay,
+        terminalHydrationMaximumDelay: Duration = RemoteTerminalHydrationDefaults.maximumDelay
+    ) {
         self.terminalApplication = terminalApplication
+        self.terminalHydrationOutputQuietDelay = terminalHydrationOutputQuietDelay
+        self.terminalHydrationFirstOutputMaximumDelay =
+            terminalHydrationFirstOutputMaximumDelay
+        self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
         // A remote surface is a view of this app, so theme changes are live state rather than a
         // reconnect-only preference. Broadcast broadly and resolve per session: assignments can
         // change one terminal, while profile and app-theme changes can affect many.
@@ -98,6 +125,31 @@ final class RemoteSessionMirrorRegistry {
         var viewportRequests: [ObjectIdentifier: ViewportRequest] = [:]
     }
 
+    /// One socket's initial replay plus first phone-owned resize. The external terminal program
+    /// has no repaint-finished API, so the Mac observes its first post-SIGWINCH output burst,
+    /// takes one final authoritative screen seed, and then puts an ordered ready frame on this
+    /// socket. Holding this state on the host is what keeps Wi-Fi packet gaps out of presentation.
+    private final class TerminalHydrationTransaction {
+        let requestID: String
+        let sessionID: SessionID
+        let connection: RemoteConnection
+        var quietTask: Task<Void, Never>?
+        var firstOutputTask: Task<Void, Never>?
+        var maximumTask: Task<Void, Never>?
+
+        init(requestID: String, sessionID: SessionID, connection: RemoteConnection) {
+            self.requestID = requestID
+            self.sessionID = sessionID
+            self.connection = connection
+        }
+
+        func cancel() {
+            quietTask?.cancel()
+            firstOutputTask?.cancel()
+            maximumTask?.cancel()
+        }
+    }
+
     private var mirrors: [SessionID: Mirror] = [:]
     private var terminalMirrors: [TerminalID: ProjectTerminalMirror] = [:]
     private var terminalByConnection: [ObjectIdentifier: TerminalID] = [:]
@@ -115,6 +167,7 @@ final class RemoteSessionMirrorRegistry {
     private var themeEventSubscribers: [ObjectIdentifier: RemoteConnection] = [:]
     private var pendingConversationBroadcasts: [SessionID: DispatchWorkItem] = [:]
     private var latestWorkspaceActivity: [SessionID: RemoteWorkspaceChangedDTO] = [:]
+    private var terminalHydrations: [ObjectIdentifier: TerminalHydrationTransaction] = [:]
 
     // MARK: - REST
 
@@ -719,6 +772,9 @@ final class RemoteSessionMirrorRegistry {
             // output rolled it away. The statement is what is true now, so it has to be the
             // last word.
             connection.sendBinary(RemoteTerminalModeSeed.bytes(for: snapshot.modes))
+            if capability == .view {
+                connection.sendText(encode(RemoteTerminalReadyDTO()))
+            }
             return true
         }
 
@@ -747,6 +803,9 @@ final class RemoteSessionMirrorRegistry {
             // Stated even when the terminal has gone in the meantime: a client that attached to
             // a live session must not be left wearing whatever modes the tail happened to arm.
             connection.sendBinary(RemoteTerminalModeSeed.bytes(for: modes))
+            if capability == .view {
+                connection.sendText(self.encode(RemoteTerminalReadyDTO()))
+            }
         }
         return true
     }
@@ -858,6 +917,7 @@ final class RemoteSessionMirrorRegistry {
 
     func detach(_ connection: RemoteConnection) {
         let key = ObjectIdentifier(connection)
+        cancelTerminalHydration(for: key)
         themeEventSubscribers.removeValue(forKey: key)
         if let terminalID = terminalByConnection.removeValue(forKey: key) {
             releaseViewport(for: connection, terminalID: terminalID)
@@ -989,6 +1049,8 @@ final class RemoteSessionMirrorRegistry {
 
     /// Releases idle capture as well as subscribers when the master switch is turned off.
     func remoteAccessStopped() {
+        for transaction in terminalHydrations.values { transaction.cancel() }
+        terminalHydrations.removeAll()
         for sessionID in mirrors.keys where mirrors[sessionID]?.surface == .terminal {
             _ = terminalApplication?.setViewport(nil, for: sessionID)
             removeTap(sessionID: sessionID)
@@ -1068,7 +1130,8 @@ final class RemoteSessionMirrorRegistry {
         from connection: RemoteConnection,
         sessionID: SessionID,
         cols: Int,
-        rows: Int
+        rows: Int,
+        hydrationRequestID: String? = nil
     ) {
         guard let authorization = connection.authenticatedPeer?.authorization,
               canWrite(sessionID: sessionID, authorization: authorization),
@@ -1077,7 +1140,7 @@ final class RemoteSessionMirrorRegistry {
               mirrors[sessionID]?.surface == .terminal,
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let terminalApplication,
-              case .available = terminalApplication.state(for: sessionID) else {
+              case .available(let state) = terminalApplication.state(for: sessionID) else {
             return
         }
 
@@ -1085,7 +1148,21 @@ final class RemoteSessionMirrorRegistry {
             cols: cols,
             rows: rows
         )
+        let requestedGrid = Self.resolvedViewport(
+            of: mirrors[sessionID]?.viewportRequests.map {
+                (cols: $0.value.cols, rows: $0.value.rows)
+            } ?? []
+        ).map { RemoteTerminalGrid(cols: $0.cols, rows: $0.rows) }
+        let expectsResizeOutput = state.remoteViewport != requestedGrid
         applyViewport(for: sessionID)
+        if let hydrationRequestID {
+            beginTerminalHydration(
+                connection: connection,
+                sessionID: sessionID,
+                requestID: hydrationRequestID,
+                expectsResizeOutput: expectsResizeOutput
+            )
+        }
     }
 
     func releaseViewport(from connection: RemoteConnection, sessionID: SessionID) {
@@ -2130,6 +2207,7 @@ final class RemoteSessionMirrorRegistry {
             // same session id with its already-authenticated connection.
             connection.sendClose(code: RemoteWebSocket.CloseCode.goingAway, reason: "Session closed")
             let key = ObjectIdentifier(connection)
+            cancelTerminalHydration(for: key)
             sessionByConnection.removeValue(forKey: key)
             presenceIDs[key] = nil
         }
@@ -2160,6 +2238,80 @@ final class RemoteSessionMirrorRegistry {
 
     private func removeTap(terminalID: TerminalID) {
         _ = terminalApplication?.endCapture(for: terminalID)
+    }
+
+    private func beginTerminalHydration(
+        connection: RemoteConnection,
+        sessionID: SessionID,
+        requestID: String,
+        expectsResizeOutput: Bool
+    ) {
+        let key = ObjectIdentifier(connection)
+        terminalHydrations.removeValue(forKey: key)?.cancel()
+        let transaction = TerminalHydrationTransaction(
+            requestID: requestID,
+            sessionID: sessionID,
+            connection: connection
+        )
+        terminalHydrations[key] = transaction
+
+        guard expectsResizeOutput else {
+            completeTerminalHydration(for: key, requestID: requestID)
+            return
+        }
+
+        let firstOutputDelay = terminalHydrationFirstOutputMaximumDelay
+        transaction.firstOutputTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: firstOutputDelay)
+            guard !Task.isCancelled else { return }
+            self?.completeTerminalHydration(for: key, requestID: requestID)
+        }
+        let maximumDelay = terminalHydrationMaximumDelay
+        transaction.maximumTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: maximumDelay)
+            guard !Task.isCancelled else { return }
+            self?.completeTerminalHydration(for: key, requestID: requestID)
+        }
+    }
+
+    private func noteTerminalHydrationOutput(
+        for key: ObjectIdentifier,
+        sessionID: SessionID
+    ) {
+        guard let transaction = terminalHydrations[key],
+              transaction.sessionID == sessionID else { return }
+        transaction.firstOutputTask?.cancel()
+        transaction.firstOutputTask = nil
+        transaction.quietTask?.cancel()
+        let requestID = transaction.requestID
+        let quietDelay = terminalHydrationOutputQuietDelay
+        transaction.quietTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: quietDelay)
+            guard !Task.isCancelled else { return }
+            self?.completeTerminalHydration(for: key, requestID: requestID)
+        }
+    }
+
+    /// Sends a final screen seed and then the text boundary on the same connection queue. Wire
+    /// ordering makes the ready frame proof that every earlier binary frame is available to the
+    /// client parser; packet timing on Wi-Fi no longer participates in reveal timing.
+    private func completeTerminalHydration(for key: ObjectIdentifier, requestID: String) {
+        guard let transaction = terminalHydrations[key],
+              transaction.requestID == requestID else { return }
+        terminalHydrations[key] = nil
+        transaction.cancel()
+
+        if case .captured(let snapshot) = terminalApplication?.currentSnapshot(
+            for: transaction.sessionID
+        ) {
+            transaction.connection.sendBinary(snapshot.screenSeed)
+            transaction.connection.sendBinary(RemoteTerminalModeSeed.bytes(for: snapshot.modes))
+        }
+        transaction.connection.sendText(encode(RemoteTerminalReadyDTO(requestID: requestID)))
+    }
+
+    private func cancelTerminalHydration(for key: ObjectIdentifier) {
+        terminalHydrations.removeValue(forKey: key)?.cancel()
     }
 
     private func releaseViewport(for connection: RemoteConnection, sessionID: SessionID) {
@@ -2256,8 +2408,9 @@ final class RemoteSessionMirrorRegistry {
         guard var mirror = mirrors[sessionID] else { return }
         mirror.ring.append(data)
         mirrors[sessionID] = mirror
-        for connection in mirror.subscribers.values {
+        for (key, connection) in mirror.subscribers {
             connection.sendBinary(data)
+            noteTerminalHydrationOutput(for: key, sessionID: sessionID)
         }
     }
 

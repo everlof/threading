@@ -1532,4 +1532,18 @@ final class RemoteProtocolTests: XCTestCase {
         )
         XCTAssertTrue(RemoteWebSocketFeature.allCases.contains(.focusedInputControl))
     }
+
+    func testTerminalHydrationBoundaryKeepsItsViewportRequestIdentity() throws {
+        let ready = RemoteTerminalReadyDTO(requestID: "viewport-generation-1")
+        let decoded = try JSONDecoder().decode(
+            RemoteTerminalReadyDTO.self,
+            from: JSONEncoder().encode(ready)
+        )
+
+        XCTAssertEqual(decoded, ready)
+        XCTAssertEqual(decoded.type, "terminalReady")
+        XCTAssertTrue(
+            RemoteWebSocketFeature.allCases.contains(.terminalHydrationBoundary)
+        )
+    }
 }

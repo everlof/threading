@@ -373,6 +373,24 @@ runs both ways with no protocol bump: a client that omits the field — every ea
 the browser client — receives the whole ring byte for byte, and a host that predates the field
 ignores it and does the same.
 
+**A current host says when initial terminal presentation is complete.** Replay completion alone
+is not enough for an interactive phone: its first final-width viewport sends SIGWINCH, and Codex
+or Claude can repaint the entire application after an arbitrary scheduling gap. A host advertising
+`terminalHydrationBoundary` therefore accepts a request id on each `viewport` generation sent
+before reveal, observes the resulting PTY output on the Mac, and queues a final screen seed, mode
+seed and `terminalReady(requestID:)` after the local burst settles. WebSocket ordering makes that marker a
+proof about every earlier binary frame; network packet timing is not used as a repaint heuristic.
+The phone reveals only the marker matching its current viewport transaction, and if SwiftTerm has
+not mounted yet, the marker waits until its buffered output has been delivered to the renderer.
+A view-only terminal has no viewport lease and receives an untagged boundary after attach.
+
+PTY applications expose SIGWINCH but no portable "repaint finished" acknowledgement, so the host
+uses bounded local timing: 200 ms quiet after the first resize output, one second if the application
+does not repaint, and three seconds for continuous output, always followed by a fresh authoritative
+screen seed. The phone keeps a four-second failure escape. Compatibility remains additive: an
+older phone ignores the feature and marker; a current phone connected to an older host retains its
+one-second input-silence fallback.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients

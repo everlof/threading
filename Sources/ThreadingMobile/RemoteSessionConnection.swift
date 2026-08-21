@@ -32,10 +32,9 @@ private enum RemoteMobileConnectionDefaults {
     /// its fit for the same reason all along. The first grid of a lease still goes immediately,
     /// so entering a chat sizes the agent without waiting out a quiet window.
     static let viewportSettleDelay: Duration = .milliseconds(150)
-    /// Initial PTY replay and the resize repaint are one hydration transaction on the phone.
-    /// Codex emits that repaint as many small reads; exposing each read lets Core Animation draw
-    /// clear/reflow states between them. Keep the terminal mounted and parsing, but reveal it
-    /// only after the wire has gone quiet long enough to be one completed repaint.
+    /// Compatibility fallback for a host that predates the ordered terminal hydration boundary.
+    /// Initial replay and resize repair remain one presentation transaction, but only an older
+    /// host makes the phone infer its end from wire silence.
     static let terminalHydrationQuietDelay: Duration = .seconds(1)
     /// A chat that is already producing an unbounded stream must eventually become visible.
     static let terminalHydrationMaximumDelay: Duration = .seconds(4)
@@ -231,6 +230,8 @@ final class RemoteSessionConnection: ObservableObject {
     private var terminalHydrationQuietTask: Task<Void, Never>?
     private var terminalHydrationMaximumTask: Task<Void, Never>?
     private var hasReceivedTerminalHydrationOutput = false
+    private var terminalHydrationRequestID: String?
+    private var pendingTerminalReady: RemoteTerminalReadyDTO?
     private var pendingViewport: (cols: Int, rows: Int)?
     private var lastSentTerminalViewport: (cols: Int, rows: Int)?
     private let viewportSettleDelay: Duration
@@ -254,6 +255,10 @@ final class RemoteSessionConnection: ObservableObject {
             // fixtures enter through this same buffer instead of pretending to own a socket.
             noteTerminalHydrationOutput()
             onTerminalOutput(buffered)
+            if let ready = pendingTerminalReady {
+                pendingTerminalReady = nil
+                completeTerminalHydration(ifMatching: ready)
+            }
         }
     }
     var onTerminalGridChange: ((Int, Int) -> Void)? {
@@ -469,6 +474,8 @@ final class RemoteSessionConnection: ObservableObject {
         terminalHydrationMaximumTask?.cancel()
         terminalHydrationMaximumTask = nil
         hasReceivedTerminalHydrationOutput = false
+        terminalHydrationRequestID = nil
+        pendingTerminalReady = nil
         isTerminalHydrating = session.surface == .terminal
     }
 
@@ -491,6 +498,12 @@ final class RemoteSessionConnection: ObservableObject {
 
     private func scheduleTerminalHydrationCompletionIfReady() {
         guard isTerminalHydrating, hasReceivedTerminalHydrationOutput else { return }
+        // A capable host puts an ordered boundary behind its post-SIGWINCH output and final
+        // screen seed. Its own PTY timing decides stability; packet gaps must not restart a
+        // second client-side timer. The maximum task remains the escape for a broken boundary.
+        guard !serverFeatures.contains(
+            RemoteWebSocketFeature.terminalHydrationBoundary.rawValue
+        ) else { return }
         // An interactive terminal is not stable until its first phone-owned grid has reached
         // the Mac. A view-only connection never leases a viewport and can reveal its replay.
         guard capability != .interact || pendingViewport != nil else { return }
@@ -512,6 +525,17 @@ final class RemoteSessionConnection: ObservableObject {
 #if DEBUG
         MobileTerminalWirePerformanceProbe.terminalHydrationCompleted(session)
 #endif
+    }
+
+    private func completeTerminalHydration(ifMatching ready: RemoteTerminalReadyDTO) {
+        guard isTerminalHydrating else { return }
+        if capability == .interact {
+            guard let requestID = ready.requestID,
+                  requestID == terminalHydrationRequestID else { return }
+        } else {
+            guard ready.requestID == nil else { return }
+        }
+        completeTerminalHydration()
     }
 
     func sendTerminalInput(_ data: ArraySlice<UInt8>) {
@@ -549,7 +573,7 @@ final class RemoteSessionConnection: ObservableObject {
         pendingViewport = (cols, rows)
         guard phase == .connected, capability == .interact else { return }
         if isFirstGridOfLease {
-            try? send(RemoteClientMessage(type: "viewport", cols: cols, rows: rows))
+            try? send(terminalViewportMessage(cols: cols, rows: rows))
             return
         }
         viewportSettleTask?.cancel()
@@ -564,11 +588,34 @@ final class RemoteSessionConnection: ObservableObject {
         viewportSettleTask = nil
         guard !stopped, phase == .connected, capability == .interact,
               let pendingViewport else { return }
-        try? send(RemoteClientMessage(
-            type: "viewport",
+        try? send(terminalViewportMessage(
             cols: pendingViewport.cols,
             rows: pendingViewport.rows
         ))
+    }
+
+    private func terminalViewportMessage(cols: Int, rows: Int) -> RemoteClientMessage {
+        let requestID: String?
+        if isTerminalHydrating,
+           serverFeatures.contains(
+               RemoteWebSocketFeature.terminalHydrationBoundary.rawValue
+           ) {
+            // Every grid sent before reveal is a new presentation generation. A settled grid
+            // can supersede the immediate first lease while its repaint is still in flight;
+            // giving it a new id makes the earlier boundary harmless instead of revealing the
+            // newer resize half-painted.
+            let created = UUID().uuidString.lowercased()
+            terminalHydrationRequestID = created
+            requestID = created
+        } else {
+            requestID = nil
+        }
+        return RemoteClientMessage(
+            type: "viewport",
+            cols: cols,
+            rows: rows,
+            requestID: requestID
+        )
     }
 
     func releaseTerminalViewport() {
@@ -911,6 +958,10 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
 #if DEBUG
+    var terminalHydrationRequestIDForTesting: String? {
+        terminalHydrationRequestID
+    }
+
     /// Drives the UI half of a reconnect performance fixture after the initial conversation has
     /// fully mounted. The socket's transport/hydration cost has its own host-side benchmark; this
     /// boundary deliberately exercises the same published phase changes and authoritative store
@@ -982,8 +1033,7 @@ final class RemoteSessionConnection: ObservableObject {
             ]) { current, _ in current })
             if let pendingViewport, capability == .interact,
                lastSentTerminalViewport == nil {
-                try? send(RemoteClientMessage(
-                    type: "viewport",
+                try? send(terminalViewportMessage(
                     cols: pendingViewport.cols,
                     rows: pendingViewport.rows
                 ))
@@ -992,6 +1042,19 @@ final class RemoteSessionConnection: ObservableObject {
         case "resize":
             if let resize = try? JSONDecoder().decode(RemoteResizeDTO.self, from: data) {
                 updateTerminalGrid(cols: resize.cols, rows: resize.rows)
+            }
+        case "terminalReady":
+            guard let ready = try? JSONDecoder().decode(
+                RemoteTerminalReadyDTO.self,
+                from: data
+            ) else { return }
+            // Text and binary WebSocket messages are ordered, but SwiftTerm may not be mounted
+            // yet. Keep the boundary behind the buffered bytes in the renderer as well as on
+            // the socket or a fast host could reveal before the view parsed its final seed.
+            if onTerminalOutput == nil, !pendingTerminalOutput.isEmpty {
+                pendingTerminalReady = ready
+            } else {
+                completeTerminalHydration(ifMatching: ready)
             }
         case "theme":
             if let update = try? JSONDecoder().decode(RemoteThemeUpdateDTO.self, from: data) {
@@ -1056,8 +1119,7 @@ final class RemoteSessionConnection: ObservableObject {
                 inputControl = update
                 if gainedControl, let pendingViewport,
                    surface == .terminal, capability == .interact {
-                    try? send(RemoteClientMessage(
-                        type: "viewport",
+                    try? send(terminalViewportMessage(
                         cols: pendingViewport.cols,
                         rows: pendingViewport.rows
                     ))
@@ -1372,7 +1434,15 @@ final class RemoteSessionConnection: ObservableObject {
             : RemoteAppModel.demoTerminalTheme
         connection.terminalColumns = 48
         connection.terminalRows = 18
-        connection.serverFeatures = Set(RemoteWebSocketFeature.allCases.map(\.rawValue))
+        // This DEBUG-only snapshot fixture preloads bytes directly and has no demo script or
+        // remote host that can answer its first viewport with `terminalReady`. Advertising the
+        // ordered boundary here would promise a frame that can never arrive; the real in-app
+        // demo goes through `DemoSessionScript` and does advertise it.
+        connection.serverFeatures = Set(
+            RemoteWebSocketFeature.allCases
+                .filter { $0 != .terminalHydrationBoundary }
+                .map(\.rawValue)
+        )
         connection.supportsAtomicTerminalSubmission = true
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true

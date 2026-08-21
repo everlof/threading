@@ -719,7 +719,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         case "presence":
             handlePresence(connection, state: parsed.state)
         case "viewport":
-            handleViewport(connection, cols: parsed.cols, rows: parsed.rows)
+            handleViewport(
+                connection,
+                cols: parsed.cols,
+                rows: parsed.rows,
+                requestID: parsed.requestID
+            )
         case "viewportRelease":
             handleViewportRelease(connection)
         case "conversationPage":
@@ -2692,7 +2697,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
-    private func handleViewport(_ connection: RemoteConnection, cols: Int?, rows: Int?) {
+    private func handleViewport(
+        _ connection: RemoteConnection,
+        cols: Int?,
+        rows: Int?,
+        requestID rawRequestID: String?
+    ) {
         guard let authorization = connection.authorization,
               authorization.capability == .interact else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
@@ -2755,7 +2765,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     from: connection,
                     sessionID: sessionID,
                     cols: cols,
-                    rows: rows
+                    rows: rows,
+                    hydrationRequestID: rawRequestID.flatMap(
+                        RemoteInboundPolicy.normalizedMutationRequestID
+                    )
                 )
             }
         }

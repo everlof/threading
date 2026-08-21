@@ -2080,6 +2080,10 @@ public enum RemoteWebSocketFeature: String, Codable, CaseIterable, Sendable {
     case focusedInputControl
     /// Native conversation rows and prompt submissions carry structured references/comments.
     case conversationContextAttachments
+    /// The host closes initial terminal replay plus the first phone-owned resize with an
+    /// ordered ready frame. A client that sees this feature can reveal on that boundary rather
+    /// than guessing from network silence.
+    case terminalHydrationBoundary
     /// A composing client may hand the host file bytes and submit them beside its prompt.
     ///
     /// Advertised only when the connection could actually use it. Uploading is an owner-scope
@@ -2421,6 +2425,22 @@ public struct RemoteResizeDTO: Codable, Equatable, Sendable {
         self.type = "resize"
         self.cols = cols
         self.rows = rows
+    }
+}
+
+/// Closes one terminal attach transaction after every replay/repaint byte and a final screen
+/// seed have been queued for this client.
+///
+/// `requestID` is the id the client put on its current pre-reveal viewport generation. It prevents
+/// a delayed ready frame from an earlier grid from revealing a newer hydration transaction.
+/// View-only clients do not lease a grid and therefore receive a boundary without an id.
+public struct RemoteTerminalReadyDTO: Codable, Equatable, Sendable {
+    public let type: String        // "terminalReady"
+    public let requestID: String?
+
+    public init(requestID: String? = nil) {
+        self.type = "terminalReady"
+        self.requestID = requestID
     }
 }
 

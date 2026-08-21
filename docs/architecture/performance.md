@@ -326,16 +326,28 @@ valid but temporary clear/reflow states. A busy-host run also paused 695 ms betw
 replay and the SIGWINCH repair, which proved that the former 250 ms probe quiet period — and a
 first 500 ms reveal experiment — could both declare the surface stable too early.
 
-Initial terminal entry is now one presentation transaction. SwiftTerm mounts immediately and
-continues parsing every frame, so layout, viewport negotiation and emulator work do not wait, but
-the terminal stays behind the existing `Opening chat…` surface until the input stream has been
-quiet for one second. Four seconds is the bounded escape for a session that was already producing
-an unending stream; after reveal, live output is never delayed. The viewport sender also remembers
-the last grid it put on the wire, so the hello/update re-entrancy cannot send an identical first
-lease twice. On the same 2,400-row fixture, the corrected run received 155 frames and crossed 36
-display ticks internally, sent one 69×59 viewport instead of two, settled at 1.43 seconds, and
-revealed once at 2.49 seconds. The inspected recording shows only the loading state followed by
-the completed terminal — none of the intermediate checkpoints visible in the baseline recording.
+Initial terminal entry is one presentation transaction, but network silence is no longer its
+commit signal. A host that advertises `terminalHydrationBoundary` receives a request id on each
+viewport generation sent before reveal. After applying that grid, the Mac observes the first
+local PTY output burst caused by SIGWINCH, closes it after 200 ms of *host-local* quiet, then
+queues one authoritative screen seed, the current mode seed, and `terminalReady(requestID:)` on the same
+connection. SwiftTerm still mounts and parses every earlier frame behind `Opening chat…`; the
+matching ordered boundary reveals it. Wi-Fi packet gaps can delay the whole transaction but can
+no longer restart a second phone-side quiet timer or expose the resize repaint. The Mac closes a
+TUI that does not repaint after one second and continuous output after three; the phone retains a
+four-second escape for a capable host that never sends its boundary. Earlier hosts keep the
+conservative one-second client-silence behavior. The request id prevents a delayed boundary for
+an old grid from revealing a newer transaction, and a boundary received before SwiftTerm mounts
+waits behind the buffered binary frames before it can reveal.
+
+The same optimized 2,400-row real-PTY lab on 2026-08-21 measured three push/pop entries per
+provider. Codex revealed in 759 ms cold and 560/606 ms warm (606 ms median), versus the corrected
+2.49-second run above: about 1.88 seconds, or 76%, off the median entry. Claude revealed in 397 ms
+cold and 336/353 ms warm (353 ms median). Codex still consumed 155–157 binary frames because its
+fixture deliberately re-emits all history at the new width; feed work was only 40–64 ms and stayed
+behind the boundary. Frame-by-frame inspection of the simulator recording shows only the loader
+followed by one complete, stable terminal for both providers. The run artifacts are
+`/tmp/threading-profiles/20260821T100838Z-ios-terminal-wire-lab`.
 
 ### Scaling audit, 2026-08-08
 
