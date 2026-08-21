@@ -70,7 +70,7 @@ final class GitStatusCardPointerTests: XCTestCase {
     }
 
     private func cursor(in card: GitStatusOverlayView, at point: NSPoint) throws -> NSCursor {
-        let claims = card.cursorClaims().filter { $0.rect.contains(point) }
+        let claims = card.resolvedPointerClaims().filter { $0.rect.contains(point) }
         XCTAssertEqual(claims.count, 1, "exactly one claim answers a point on the card")
         return try XCTUnwrap(claims.first?.cursor)
     }
@@ -79,7 +79,7 @@ final class GitStatusCardPointerTests: XCTestCase {
 
     func testTheCardClaimsEveryPointItCoversSoNothingBehindItAnswersThePointer() throws {
         let card = card(withGitSentence: true)
-        let claims = card.cursorClaims()
+        let claims = card.resolvedPointerClaims()
 
         XCTAssertFalse(claims.isEmpty)
         for claim in claims {
@@ -129,8 +129,8 @@ final class GitStatusCardPointerTests: XCTestCase {
         let card = card(withGitSentence: false)
 
         XCTAssertNil(branchRow(in: card), "no branch, so no row that opens Git Review")
-        XCTAssertEqual(card.cursorClaims().count, 1)
-        XCTAssertEqual(card.cursorClaims().first?.rect, card.bounds)
-        XCTAssertEqual(card.cursorClaims().first?.cursor, NSCursor.arrow)
+        XCTAssertEqual(card.resolvedPointerClaims().count, 1)
+        XCTAssertEqual(card.resolvedPointerClaims().first?.rect, card.bounds)
+        XCTAssertEqual(card.resolvedPointerClaims().first?.cursor, NSCursor.arrow)
     }
 }

@@ -70,9 +70,8 @@ final class ShellDrawerDivider: BackdropOverlay {
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .resizeUpDown)
-    }
+    /// The whole band is the grip. See `PointerClaiming`.
+    override var restingPointer: NSCursor? { .resizeUpDown }
 
     override func mouseDragged(with event: NSEvent) {
         onDrag?(event.deltaY)

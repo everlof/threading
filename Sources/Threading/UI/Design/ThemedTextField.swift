@@ -11,7 +11,7 @@ import AppKit
 /// A label is deliberately *not* this. `NSTextField(labelWithString:)` draws no bezel and no
 /// background, so it is already nothing but text in a themed colour; the erosion this exists to
 /// stop is the bezel, not the type.
-class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
+class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, PointerClaiming {
 
     /// Whether the editable well is permanent or belongs only to interaction.
     ///
@@ -196,6 +196,35 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
     override func mouseExited(with event: NSEvent) {
         guard surfacePresentation == .onInteraction else { return }
         isHovered = false
+    }
+
+    // MARK: - Pointer
+
+    /// The room the caret's cursor may claim — the whole control for an ordinary field, and less
+    /// for one carrying controls inside its trailing edge.
+    var caretRect: NSRect { bounds }
+
+    /// `NSTextField` claims one I-beam rectangle over its **whole bounds** — measured: it ignores
+    /// the cell's drawing rect, so an inset that keeps the *text* clear of something does not keep
+    /// the *pointer* clear of it — and claims none at all once the field is neither editable nor
+    /// selectable. Restated here rather than clipped afterwards, so the field answers the same
+    /// question every other view answers, in one place a test can read. `SearchFieldPointerTests`
+    /// pins the AppKit behaviour this mirrors.
+    var pointerClaims: [PointerClaim] {
+        guard isEnabled, isEditable || isSelectable else { return [] }
+        return [PointerClaim(caretRect, .iBeam)]
+    }
+
+    /// A field is a drawn well, so what is not the caret's room is still the field's own plate.
+    var restingPointer: NSCursor? { .arrow }
+
+    override func resetCursorRects() {
+        registerPointerClaims()
+    }
+
+    override func layout() {
+        super.layout()
+        refreshPointerClaims()
     }
 
     // MARK: - Focus
@@ -638,7 +667,7 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
             : ThemedTextField.Layout.inset
         guard width != trailingControlsWidth else { return }
         trailingControlsWidth = width
-        window?.invalidateCursorRects(for: self)
+        refreshPointerClaims()
     }
 
     // MARK: - Pointer
@@ -657,38 +686,17 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
             .min()
     }
 
-    /// `rect` clipped to the query's own side of the trailing run — the whole of it while the
-    /// run holds nothing, and nothing where a control stands.
-    ///
-    /// The caret's cursor belongs to the words, not to the buttons riding inside the field.
-    /// `NSTextField` registers **one** I-beam rectangle over its entire bounds — measured: it
-    /// ignores the cell's drawing rect, so the inset that keeps the *text* clear of the controls
-    /// does not keep the *pointer* clear of them — and it registers none at all once the field
-    /// is neither editable nor selectable. So the pointer went on saying "type here" over
-    /// Settings' Ask AI and over the ✕ that every search field in the app carries.
-    ///
-    /// Carved rather than covered by an arrow rectangle laid on top: overlapping cursor
-    /// rectangles are documented as undefined, and which of two AppKit prefers is a precedence
-    /// this repository has already failed to measure once (see `CoveredWindowCursor`, and the
-    /// design-system note of 2026-08-13). With nothing registered over a button it keeps the
-    /// ordinary arrow, which is what every other `ThemedButton` in the window shows.
-    func textCursorRect(clipping rect: NSRect) -> NSRect {
-        guard let edge = trailingControlsLeadingEdge else { return rect }
-        let query = NSRect(
+    /// The caret's room stops where the trailing run begins: the words are what the I-beam is
+    /// for, and Ask AI and the ✕ are buttons. The field's own plate takes the arrow behind them,
+    /// and the buttons — themed controls — claim it for themselves as well.
+    override var caretRect: NSRect {
+        guard let edge = trailingControlsLeadingEdge else { return bounds }
+        return NSRect(
             x: bounds.minX,
             y: bounds.minY,
             width: max(0, edge - bounds.minX),
             height: bounds.height
         )
-        return rect.intersection(query)
-    }
-
-    /// AppKit's own I-beam arrives through here, which is what lets the clip above be the whole
-    /// fix: whatever the field would have claimed, it claims only over the query.
-    override func addCursorRect(_ rect: NSRect, cursor: NSCursor) {
-        let query = textCursorRect(clipping: rect)
-        guard !query.isEmpty else { return }
-        super.addCursorRect(query, cursor: cursor)
     }
 
     override var stringValue: String {

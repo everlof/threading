@@ -304,7 +304,7 @@ enum InspectorIndicator {
 // MARK: - Overlay View
 
 /// Draws the indicator and reports the pointer; every decision lives in `ElementInspector`.
-final class InspectorOverlayView: NSView {
+final class InspectorOverlayView: NSView, PointerClaiming {
 
     var onPointerMoved: ((NSPoint) -> Void)?
     var onMouseDown: ((NSPoint) -> Void)?
@@ -337,8 +337,11 @@ final class InspectorOverlayView: NSView {
         trackingArea = area
     }
 
+    /// Picking an element is aiming at it. See `PointerClaiming`.
+    var restingPointer: NSCursor? { .crosshair }
+
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .crosshair)
+        registerPointerClaims()
     }
 
     override func mouseMoved(with event: NSEvent) {

@@ -17,7 +17,7 @@ import AppKit
 ///
 /// One direction, like `ScheduledMessageStripView`: the store is the truth, this draws what it is
 /// handed, and both gestures are reported back as intentions.
-final class LimitEscapeStripView: NSView, ThemedComponent {
+final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
 
     // MARK: - Offer
 
@@ -436,13 +436,18 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
 
     // MARK: - Pointer
 
-    /// The strip is an opaque plate over a surface that claims the pointer for itself —
-    /// `TerminalView` registers an I-beam over the whole of itself, and a transcript's text views
-    /// over theirs. Claiming nothing here is not falling back to the arrow, it is inheriting that
-    /// claim: the two answers would have offered to select text that is behind the strip. See the
-    /// design-system note of 2026-08-21.
+    /// An opaque plate over a terminal or a transcript, both of which claim an I-beam over the
+    /// whole of themselves. Saying so is what stops the two answers offering to select text that
+    /// is behind the strip. See `PointerClaiming`.
+    var restingPointer: NSCursor? { .arrow }
+
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .arrow)
+        registerPointerClaims()
+    }
+
+    override func layout() {
+        super.layout()
+        refreshPointerClaims()
     }
 
     // MARK: - Accessibility

@@ -22,9 +22,34 @@ import AppKit
 /// No explicit `@MainActor`: `NSControl` already carries it from the SDK, and adding it again
 /// over-isolates the control's own properties relative to the plain `SettingsUI` helpers that
 /// build these.
-class ThemedControl: NSControl, ThemedComponent {
+class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
 
     private var themeRedraw: ThemeRedraw?
+
+    // MARK: - Pointer
+
+    /// A control is something drawn on a surface, so the arrow is what it holds — and holding it
+    /// is the point. Registering nothing would leave the control inheriting whatever is claimed
+    /// behind it, which over a terminal or a transcript is an I-beam offering to select text the
+    /// control is covering. A subclass that means something else says so: `.pointingHand` where
+    /// the thing pressed reads as text, `nil` where it is genuinely transparent. See
+    /// `PointerClaiming`.
+    var restingPointer: NSCursor? { .arrow }
+
+    /// Declared here rather than left to `PointerClaiming`'s default, and that is load-bearing:
+    /// a protocol-extension default becomes the witness for every subclass at once, so a
+    /// subclass's own `pointerClaims` would never be asked for. Stated on the class, the
+    /// override is an ordinary one.
+    var pointerClaims: [PointerClaim] { [] }
+
+    override func resetCursorRects() {
+        registerPointerClaims()
+    }
+
+    override func layout() {
+        super.layout()
+        refreshPointerClaims()
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

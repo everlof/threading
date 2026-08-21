@@ -1475,9 +1475,6 @@ final class GitStatusOverlayView: BackdropOverlay {
         }
         hasContent = true
         applyVisibility(animated: false)
-        // Which rows the card holds decides where the acting region ends, and a rebuild that
-        // leaves the card the same size moves nothing AppKit watches — see `cursorClaims`.
-        window?.invalidateCursorRects(for: self)
     }
 
     /// The vertical air a button row draws inside its own frame.
@@ -2236,56 +2233,16 @@ final class GitStatusOverlayView: BackdropOverlay {
         }
     }
 
-    /// What the card claims from the pointer: the acting rows' hand, and the arrow over
-    /// everything else it covers.
-    ///
     /// The pointing hand belongs to the rows that act, and to nothing else on the card. It used
     /// to cover the whole of it — including a card holding no Git sentence, where a click did
-    /// nothing at all and the cursor had already promised otherwise. **Claiming nothing is a
-    /// different answer from claiming the arrow**, which is what the rest of the card was doing:
-    /// cursor rectangles are a *window's* list, this card is opaque chrome floating over the
-    /// session pane, and what it covers has claims of its own — `TerminalView` registers an
-    /// I-beam over the whole of itself, a conversation's text views over theirs. So the usage
-    /// and children rows, which are buttons, answered the pointer with the terminal's promise of
-    /// text. That the Git rows never did is the same fact from the other side: a claim made in
-    /// front already wins over one behind it.
+    /// nothing at all and the cursor had already promised otherwise.
     ///
-    /// Carved rather than layered. Two rectangles overlapping *within one view* is the case
-    /// AppKit documents as undefined — see the design-system note of 2026-08-13 — so the acting
-    /// region is cut out of the card's claim instead of being drawn on top of it.
-    ///
-    /// One list rather than a run of `addCursorRect` calls, so a test can read what the card
-    /// claims without a window to register it into.
-    func cursorClaims() -> [(rect: NSRect, cursor: NSCursor)] {
-        let acting = gitRegion.map { bounds.intersection($0) } ?? .zero
-        guard !acting.isEmpty else { return [(bounds, .arrow)] }
-        return [(acting, NSCursor.pointingHand)] + surrounding(acting).map { ($0, NSCursor.arrow) }
-    }
-
-    /// `bounds` with `region` cut out of it — the up to four rectangles left around a rectangle
-    /// lying inside another.
-    private func surrounding(_ region: NSRect) -> [NSRect] {
-        [
-            NSRect(
-                x: bounds.minX, y: bounds.minY,
-                width: bounds.width, height: region.minY - bounds.minY
-            ),
-            NSRect(
-                x: bounds.minX, y: region.maxY,
-                width: bounds.width, height: bounds.maxY - region.maxY
-            ),
-            NSRect(
-                x: bounds.minX, y: region.minY,
-                width: region.minX - bounds.minX, height: region.height
-            ),
-            NSRect(
-                x: region.maxX, y: region.minY,
-                width: bounds.maxX - region.maxX, height: region.height
-            )
-        ].filter { $0.width > 0 && $0.height > 0 }
-    }
-
-    override func resetCursorRects() {
-        for claim in cursorClaims() { addCursorRect(claim.rect, cursor: claim.cursor) }
+    /// The rest of the card takes `BackdropOverlay`'s arrow, and taking it is the point: the rows
+    /// below this region are buttons, and while the card claimed nothing over them they answered
+    /// with the terminal's I-beam from behind. The line between the two is **what the row looks
+    /// like** rather than whether it acts — these two are text that is pressable, which is what a
+    /// hand says, and the rows under them are controls.
+    override var pointerClaims: [PointerClaim] {
+        gitRegion.map { [PointerClaim($0, .pointingHand)] } ?? []
     }
 }

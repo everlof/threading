@@ -6,9 +6,9 @@ import XCTest
 ///
 /// `NSTextField` registers one I-beam rectangle over its **whole** bounds, so the buttons riding
 /// inside the field's trailing edge — Settings' Ask AI, and the ✕ every search field carries —
-/// were answered with "type here" rather than with the arrow every other button shows. The
-/// field's own rectangle is therefore carved rather than covered, which the first test states as
-/// the platform fact it rests on and the second as the behaviour it buys.
+/// were answered with "type here" rather than with the arrow every other button shows. The field
+/// now declares the caret's room instead (`PointerClaiming`), which the first test states as the
+/// platform fact that behaviour replaces and the rest as what the declaration buys.
 @MainActor
 final class SearchFieldPointerTests: XCTestCase {
 
@@ -103,7 +103,10 @@ final class SearchFieldPointerTests: XCTestCase {
         XCTAssertFalse(action.isHidden)
         XCTAssertFalse(field.clearButton.isHidden)
 
-        let query = field.textCursorRect(clipping: field.bounds)
+        let query = try XCTUnwrap(
+            field.resolvedPointerClaims().first { $0.cursor === NSCursor.iBeam }?.rect,
+            "an editable field claims the caret's room"
+        )
         for button in [action, field.clearButton] as [NSView] {
             let frame = button.convert(button.bounds, to: field)
             XCTAssertFalse(
@@ -126,9 +129,10 @@ final class SearchFieldPointerTests: XCTestCase {
 
         XCTAssertTrue(field.clearButton.isHidden, "Nothing typed, so nothing to clear.")
         XCTAssertEqual(
-            field.textCursorRect(clipping: field.bounds), field.bounds,
+            field.caretRect, field.bounds,
             "With no control on offer the field is the field it always was."
         )
+        XCTAssertEqual(field.resolvedPointerClaims(), [PointerClaim(field.bounds, .iBeam)])
     }
 
     func testClearingTheQueryGivesTheRoomBackToTheCaret() {
@@ -137,12 +141,30 @@ final class SearchFieldPointerTests: XCTestCase {
         field.stringValue = Fixture.query
         field.layoutSubtreeIfNeeded()
 
-        let typed = field.textCursorRect(clipping: field.bounds)
-        XCTAssertLessThan(typed.maxX, field.bounds.maxX, "The ✕ is standing in the trailing edge.")
+        XCTAssertLessThan(
+            field.caretRect.maxX, field.bounds.maxX,
+            "The ✕ is standing in the trailing edge."
+        )
 
         field.clear()
         field.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(field.textCursorRect(clipping: field.bounds), field.bounds)
+        XCTAssertEqual(field.caretRect, field.bounds)
+    }
+
+    func testAFieldThatCannotBeTypedIntoClaimsNoCaretAtAll() {
+        let field = ThemedTextField(string: "read only")
+        field.frame = NSRect(x: 0, y: 0, width: Fixture.width, height: 26)
+        field.isEditable = false
+        field.isSelectable = false
+
+        XCTAssertNil(
+            field.resolvedPointerClaims().first { $0.cursor === NSCursor.iBeam },
+            "AppKit claims no I-beam for one of these, and neither do we — see the first test."
+        )
+        XCTAssertEqual(
+            field.resolvedPointerClaims(), [PointerClaim(field.bounds, .arrow)],
+            "It is still an opaque plate, so it still answers for what it covers."
+        )
     }
 }

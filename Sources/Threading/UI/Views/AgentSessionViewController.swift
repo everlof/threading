@@ -1253,13 +1253,6 @@ private final class RemoteViewportBannerView: BackdropOverlay {
         detailLabel.textColor = ink.secondary
     }
 
-    /// Opaque chrome over the terminal, which claims an I-beam over the whole of itself. A
-    /// banner claiming nothing inherits that claim rather than falling back to the arrow, and
-    /// offers to select text it is covering. See the design-system note of 2026-08-21.
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .arrow)
-    }
-
     func show(cols: Int, rows: Int) {
         titleLabel.stringValue = L10n.format(
             "Fit to iPhone · %lld×%lld",

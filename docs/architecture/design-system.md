@@ -123,6 +123,7 @@ Components so far:
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
 | `ThemedTableRowView` | The row a list is *selected* in, handed back from `rowViewForRow:`/`rowViewForItem:`. Fills with `Design.Surface.selection` — the accent held back far enough that the row's own label tiers still read over it, so a themed list needs no second set of inks — at the theme's control corner, inset a hair so two selected rows read as two. Under **System** it defers to `super`, keeping AppKit's own highlight. Not the sidebar's row: `SidebarHoverRowView` fills with the accent at full strength because the selected session is the window's subject, and draws its own capsule under every theme — System included — because that shape closes with the column the divider narrows. |
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. `frameGap(to:forInkGap:)` and `applyOpticalSpacing(in:precededBy:followedBy:inkGap:)` keep an authored gap between the rule and visible content on either axis: the adjacent `OpticalInsetProviding` control owns its invisible padding, while bare content keeps the full gap. |
+| `PointerClaiming` / `PointerClaim` | What a view tells the pointer, declared rather than registered. `restingPointer` is the cursor over everything the view covers — `.arrow` for opaque chrome, which `ThemedControl` and `BackdropOverlay` default to, and `nil` **only** for a view that is genuinely see-through and means what is behind it to answer. `pointerClaims` names the parts that differ, most specific first; they may overlap each other and are carved in one place, so AppKit's undefined case cannot be constructed. It exists because claiming nothing is not claiming the arrow: cursor rectangles are a *window's* list, and a view that registers none inherits the claim behind it — a terminal's I-beam, a text view's, an `NSTextField`'s over its own controls. Registration is `registerPointerClaims()`, invalidation is `refreshPointerClaims()` (the base classes call it from `layout()`, since AppKit re-asks only when the *view's* geometry moved), and `resolvedPointerClaims()` is what a test reads. `addCursorRect` and `NSCursor.…set()` are build-lint errors outside the seam. See the three 2026-08-21 notes below. |
 | `HoverTrackingView` / `HoverPopoverScheduler` | The pointer bridge and timing policy for hover-presented detail. A `ThemedControl` anchor reports its already-shared state through `onHoverChange`; a feature does not install a competing tracking area over it. The surface root reports crossing into the popover, while the scheduler owns dwell, crossing grace, and cancellation. |
 | `ThemedStatusProgressRing` | A compact semantic ring for bounded completed/pending/failed counts. It draws a neutral track plus positive and negative slices; adjacent text must name every non-zero bucket so hue is never the only signal. |
 | `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
@@ -3008,3 +3009,49 @@ whether it acts — the Git rows are text that is pressable, which is what a han
 below them are controls, which show what every other `ThemedButton` in the window shows. Any
 opaque surface floating over a terminal or a transcript inherits this rule: speak for every point
 you cover, or the view underneath will.
+
+
+## 2026-08-21 — the pointer got a boundary
+
+Two bugs in one morning, reported an hour apart, both of the same shape: a view that registered no
+cursor rectangle was not showing the arrow, it was showing whatever the view behind it claimed.
+The fixes were right and neither could stop the third one, because the rule they encoded —
+*speak for every point you cover* — lived in prose and in two `resetCursorRects` overrides.
+
+The inventory said the rule was already not holding. **Three** patterns answered one question:
+seventeen `resetCursorRects` overrides, each carving its own rectangle arithmetic (three of them
+subtracting rectangles by hand); one view setting the cursor imperatively from a `.cursorUpdate`
+tracking area, outside the window's list altogether; and `CoveredWindowCursor`, which is right for
+a surface covering a whole window and wrong for anything smaller.
+
+`PointerClaiming` makes the answer a value. A view declares `restingPointer` and `pointerClaims`;
+`registerPointerClaims()` is the only thing that touches AppKit. Three things that used to be
+copied or forgotten now happen once:
+
+- **Overlap is unconstructable.** Claims resolve specific-first, each carved against what is
+  already claimed, in a band decomposition — so a surface with a dozen markers stays countable
+  rather than splitting each piece against each hole. `PaneFoldDivider` had been trimming its band
+  around its corners by hand; `BrowserAnnotationOverlay` had been registering its crosshair *under*
+  its markers and trusting AppKit's undefined ordering to prefer the later one.
+- **The resting cursor is a decision somebody made.** `nil` is now a statement — the browser
+  annotation overlay says it while it is only watching, because a link's hand and the page's own
+  I-beam are the right answers through a transparent sheet — and everything else says what it
+  holds.
+- **Staleness has one answer.** `refreshPointerClaims()`, called from `layout()` by both base
+  classes, because AppKit re-asks a view only when the *view's* geometry moved: a card whose rows
+  changed inside an unchanged frame, or a field whose trailing controls appeared, otherwise keeps
+  registering yesterday's rectangles.
+
+`ThemedControl` and `BackdropOverlay` default to `.arrow`, which is where the class of bug
+actually dies: every control is correct the day it is written, including the ones nobody has
+audited. That default also settles a defect the
+[2026-08-13 note](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it) left open —
+`InWindowOverlayScrim` is a `ThemedControl`, so a scrim covering a split view's seam now answers
+for it, which that note could not do while the front-versus-behind precedence was unmeasured.
+
+The gate is the same ladder every other rule here climbed: `scripts/check_theme_boundaries.sh`
+fails a build that calls `addCursorRect` or `NSCursor.…set()` outside the seam, and a
+`resetCursorRects` override may be exactly `registerPointerClaims()` — a guard in front of it is a
+claim decided where nothing can read it. `CoveredWindowCursor` and `CoveredWindowPointer` keep
+named exceptions, since a window-level switch is a different mechanism and still the right one for
+a surface that has taken a whole window over.

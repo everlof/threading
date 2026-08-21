@@ -11,7 +11,7 @@ import AppKit
 /// travel, and this panel ends up in screenshots. The raw line is one deliberate right-click
 /// away (`Show Full Command`), per row and transient — a rebuild forgets the choice, which is
 /// the right memory for a secret.
-final class SessionInfoRowView: NSView {
+final class SessionInfoRowView: NSView, PointerClaiming {
 
     // MARK: - Types
 
@@ -293,10 +293,12 @@ final class SessionInfoRowView: NSView {
         return true
     }
 
+    /// A row that opens something is a line of text you press; one that only reports is still
+    /// an opaque row. See `PointerClaiming`.
+    var restingPointer: NSCursor? { action != nil ? .pointingHand : .arrow }
+
     override func resetCursorRects() {
-        super.resetCursorRects()
-        guard action != nil else { return }
-        addCursorRect(bounds, cursor: .pointingHand)
+        registerPointerClaims()
     }
 
     // MARK: - Hover

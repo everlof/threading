@@ -1406,19 +1406,15 @@ final class MediaInspectorCanvas: ThemedControl {
         )
     }
 
-    override func resetCursorRects() {
-        guard image != nil else { return }
-        let cursor: NSCursor
-        if isAnnotating {
-            cursor = .crosshair
-        } else if canPan {
-            cursor = .openHand
-        } else if #available(macOS 15.0, *) {
-            cursor = zoomMode == .fit ? .zoomIn : .zoomOut
-        } else {
-            cursor = .pointingHand
-        }
-        addCursorRect(bounds, cursor: cursor)
+    /// What the canvas is offering right now: place a mark, take hold of the picture, or step
+    /// the zoom. The arrow with nothing loaded — an empty canvas is still an opaque plate. See
+    /// `PointerClaiming`.
+    override var restingPointer: NSCursor? {
+        guard image != nil else { return .arrow }
+        if isAnnotating { return .crosshair }
+        if canPan { return .openHand }
+        if #available(macOS 15.0, *) { return zoomMode == .fit ? .zoomIn : .zoomOut }
+        return .pointingHand
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -1884,9 +1880,7 @@ private final class MediaInspectorThumbnail: ThemedControl {
         }
     }
 
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
+    override var restingPointer: NSCursor? { .pointingHand }
 
     override func accessibilityRole() -> NSAccessibility.Role? { .radioButton }
     override func accessibilityLabel() -> String? { item.title }
