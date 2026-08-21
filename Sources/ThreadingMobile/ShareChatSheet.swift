@@ -209,7 +209,10 @@ struct ShareChatSheetContent: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ShareChatSheetChrome(closeTitle: closeTitle) {
+        ShareChatSheetChrome(
+            closeTitle: closeTitle,
+            prefersFullHeight: !flow.stage.isChoosingRole
+        ) {
             Group {
                 switch flow.stage {
                 case .chooseRole:
@@ -246,25 +249,29 @@ struct ShareChatSheetContent: View {
 }
 
 /// The chrome both stages stand in: the theme's ground, one centred title, one trailing button,
-/// and one detent rule.
-///
-/// Stated once because the two stages are one sheet. Half a screen fits either at the ordinary
-/// type sizes and neither at an accessibility one, so that case opens at full height instead;
-/// content taller than the detent scrolls, which is the ordinary behaviour of a sheet.
+/// and one place that decides how tall the sheet opens.
 private struct ShareChatSheetChrome<Content: View>: View {
     @Environment(\.remoteTheme) private var theme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let closeTitle: String
+    let prefersFullHeight: Bool
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                content()
-                    .frame(maxWidth: .infinity)
-                    .padding(MobileDesign.Spacing.pane)
+            // The content stands in the middle of the height the sheet opened at, rather than
+            // at the top of it. A stage shorter than its sheet used to hang from the navigation
+            // bar with the rest of the screen empty under it, which reads as a page that failed
+            // to load; a stage taller than its sheet is unaffected and scrolls as before.
+            GeometryReader { proxy in
+                ScrollView {
+                    content()
+                        .frame(maxWidth: .infinity)
+                        .padding(MobileDesign.Spacing.pane)
+                        .frame(minHeight: proxy.size.height - proxy.safeAreaInsets.bottom)
+                }
             }
             .background(theme.ground)
             .navigationTitle("Share chat")
@@ -278,12 +285,35 @@ private struct ShareChatSheetChrome<Content: View>: View {
         .presentationDetents(detents)
     }
 
+    /// How tall the sheet opens, decided by what the stage has to say rather than measured.
+    ///
+    /// Both stages have a fixed shape, so their heights are known. The chooser is a name, a
+    /// question and three rows, and fits half a screen with room under it. The link stage is a
+    /// mark, three sentences, two full-width actions and a closing paragraph, and does not: at
+    /// the system's own default text size the paragraph's last line was cut by the fold, which
+    /// is the defect that line was already reported for once. It opens at full height instead.
+    /// Neither fits half a screen at an accessibility size.
+    ///
+    /// Stated rather than measured for the reason the link stage was already given: a content
+    /// height read back from a `GeometryReader` arrives a layout pass after the sheet has
+    /// chosen, so the first thing the reader sees is the wrong height either way.
     private var detents: Set<PresentationDetent> {
-        dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large]
+        dynamicTypeSize.isAccessibilitySize || prefersFullHeight
+            ? [.large]
+            : [.medium, .large]
     }
 }
 
-/// The mark, the name and the line under it that both stages open with.
+/// The name and the line under it that both stages open with, over a mark when the stage has
+/// one to draw.
+///
+/// The link stage does: its mark says which of the two invitations was minted, which is a fact
+/// and not decoration. The chooser has none, and had one for a while. It cost sixty points at
+/// the top of a sheet whose content already reached the bottom of the half-screen detent, so a
+/// chat that could not offer the first grant had the sentence saying why cut in half — the same
+/// defect, in a new place, that the closing line on the link stage was reported for. A generic
+/// person glyph over three rows that each already carry their own was the one thing on the stage
+/// saying nothing.
 private struct ShareChatStageHeader: View {
     private enum Metrics {
         static let markSize: CGFloat = 42
@@ -291,17 +321,19 @@ private struct ShareChatStageHeader: View {
 
     @Environment(\.remoteTheme) private var theme
 
-    let systemImage: String
+    var systemImage: String?
     let title: String
     let message: String
     var footnote: String?
 
     var body: some View {
         VStack(spacing: MobileDesign.Spacing.large) {
-            Image(systemName: systemImage)
-                .font(.system(size: Metrics.markSize, weight: .light))
-                .foregroundStyle(theme.accent)
-                .accessibilityHidden(true)
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: Metrics.markSize, weight: .light))
+                    .foregroundStyle(theme.accent)
+                    .accessibilityHidden(true)
+            }
 
             VStack(spacing: MobileDesign.Spacing.small) {
                 Text(title)
@@ -333,7 +365,6 @@ private struct ShareChatRoleStage: View {
     var body: some View {
         VStack(spacing: MobileDesign.Spacing.large) {
             ShareChatStageHeader(
-                systemImage: "person.badge.plus",
                 title: flow.chatTitle,
                 message: MobileL10n.string("Choose what this person can do.")
             )
@@ -556,7 +587,10 @@ struct SharedSessionLinkView: View {
     let link: SharedSessionLink
 
     var body: some View {
-        ShareChatSheetChrome(closeTitle: MobileL10n.string("Done")) {
+        ShareChatSheetChrome(
+            closeTitle: MobileL10n.string("Done"),
+            prefersFullHeight: true
+        ) {
             SharedSessionLinkStage(link: link)
         }
     }
