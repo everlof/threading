@@ -11,38 +11,15 @@ enum KittyKey {
     case none
 }
 
-/// A non-text key exposed to terminal clients that provide their own accessory-key chrome.
+/// A non-text key exposed to clients that provide their own accessory-key UI.
 ///
-/// Those controls still have to use the emulator's encoder: once a program enables the kitty
-/// keyboard protocol, a hard-coded legacy escape sequence is no longer a complete key event.
-/// Keep this surface to the keys an accessory bar can reasonably present rather than exposing
-/// SwiftTerm's complete internal functional-key model.
-public enum TerminalFunctionalKey {
-    case escape
-    case enter
-    case tab
-    case backspace
-    case delete
-    case up
-    case down
-    case left
-    case right
-    case home
-    case end
-    case pageUp
-    case pageDown
-    case f1
-    case f2
-    case f3
-    case f4
-    case f5
-    case f6
-    case f7
-    case f8
-    case f9
-    case f10
-    case f11
-    case f12
+/// These keys still need SwiftTerm's encoder because an application can change
+/// both cursor-key mode and the kitty keyboard protocol at runtime.
+public enum TerminalFunctionalKey: Sendable {
+    case escape, enter, tab, backspace, delete
+    case up, down, left, right
+    case home, end, pageUp, pageDown
+    case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
 }
 
 enum KittyFunctionalKey {
@@ -1146,12 +1123,8 @@ struct KittyKeyboardEncoder {
 }
 
 public extension Terminal {
-    /// Encodes one functional-key event with the same DECCKM and kitty-keyboard state used by
-    /// SwiftTerm's built-in hardware and software keyboard paths.
-    ///
-    /// Custom terminal chrome should call this rather than keeping a second escape-sequence
-    /// table. In particular, a client that owns a touch key can encode both its press and its
-    /// release when the program requested event reporting.
+    /// Encodes a functional key using the terminal's live DECCKM and kitty
+    /// keyboard state rather than a second, potentially stale escape table.
     func encodedFunctionalKey(
         _ key: TerminalFunctionalKey,
         modifiers: KittyKeyboardModifiers = [],

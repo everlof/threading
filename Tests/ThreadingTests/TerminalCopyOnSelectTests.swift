@@ -60,7 +60,7 @@ final class TerminalCopyOnSelectTests: XCTestCase {
     /// need a column ask for the first one (a couple of points in) or for the far edge, neither
     /// of which needs the cell width the fork keeps to itself.
     private func point(x: CGFloat, row: Int) -> NSPoint {
-        let cellHeight = view.frame.height / CGFloat(view.getTerminal().getDims().rows)
+        let cellHeight = view.frame.height / CGFloat(view.terminalDimensions.rows)
         // Half a cell down into the row, measured from the top the way the fork's hit test is.
         return NSPoint(x: x, y: view.frame.height - (CGFloat(row) + 0.5) * cellHeight)
     }
@@ -225,19 +225,20 @@ final class TerminalCopyOnSelectTests: XCTestCase {
         XCTAssertNil(view.selectedText)
     }
 
-    /// An alternate buffer has no scrollback: scrolling replaces every row in place rather than
-    /// appending stable history. That operation still invalidates a local selection.
-    func testScrollingTheAlternateBufferClearsTheSelection() {
+    /// SwiftTerm 2 keeps an alternate-buffer selection when the selected row survives the
+    /// scroll at a stable absolute position. The range still describes the text the user chose,
+    /// so clearing it here would discard a valid selection merely because another row moved.
+    func testScrollingTheAlternateBufferKeepsASurvivingSelection() {
         // 1049 restores whichever cursor position the alternate buffer last held. Home it so
         // the pointer fixture selects the row we just wrote rather than assuming that position.
         view.feed(text: "\u{1b}[?1049h\u{1b}[Hstable row")
         drag(row: Row.text)
         XCTAssertNotNil(view.selectedText)
 
-        let bottomRow = view.getTerminal().getDims().rows
+        let bottomRow = view.terminalDimensions.rows
         view.feed(text: "\u{1b}[\(bottomRow);1H\r\n")
 
-        XCTAssertNil(view.selectedText)
+        XCTAssertEqual(view.selectedText, "stable row")
     }
 
     // MARK: - Copy With Nothing Selected

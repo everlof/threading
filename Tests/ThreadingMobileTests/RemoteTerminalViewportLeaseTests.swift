@@ -299,19 +299,21 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             font: UIFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         )
         TerminalViewRepresentable.apply(Self.theme(background: "#101010"), to: view)
-        view.getTerminal().clearUpdateRange()
+        XCTAssertEqual(view.themeApplicationCount, 1)
 
         TerminalViewRepresentable.apply(Self.theme(background: "#101010"), to: view)
 
-        XCTAssertNil(
-            view.getTerminal().getUpdateRange(),
+        XCTAssertEqual(
+            view.themeApplicationCount,
+            1,
             "An unchanged theme must not invalidate a single row"
         )
 
         TerminalViewRepresentable.apply(Self.theme(background: "#202020"), to: view)
 
-        XCTAssertNotNil(
-            view.getTerminal().getUpdateRange(),
+        XCTAssertEqual(
+            view.themeApplicationCount,
+            2,
             "A changed theme still repaints"
         )
     }
@@ -323,11 +325,11 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             font: UIFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         )
         TerminalViewRepresentable.apply(nil, to: view)
-        view.getTerminal().clearUpdateRange()
+        XCTAssertEqual(view.themeApplicationCount, 1)
 
         TerminalViewRepresentable.apply(nil, to: view)
 
-        XCTAssertNil(view.getTerminal().getUpdateRange())
+        XCTAssertEqual(view.themeApplicationCount, 1)
     }
 
     // MARK: - Private Methods

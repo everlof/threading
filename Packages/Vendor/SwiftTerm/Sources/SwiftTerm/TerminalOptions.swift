@@ -10,7 +10,7 @@ import Foundation
 
 /// Configuration option for the desired cursor style, this style can also be overwritten by the application
 /// inside the terminal, and the UI control can choose to honor this request.
-public enum CursorStyle: CaseIterable {
+public enum CursorStyle: CaseIterable, Sendable {
     case blinkBlock
     case steadyBlock
     case blinkUnderline
@@ -59,6 +59,17 @@ public enum CursorStyle: CaseIterable {
     public static func from (string: String) -> CursorStyle? {
         return CursorStyle (tagName: string)
     }
+
+    var decscusrParameter: Int {
+        switch self {
+        case .blinkBlock: return 1
+        case .steadyBlock: return 2
+        case .blinkUnderline: return 3
+        case .steadyUnderline: return 4
+        case .blinkBar: return 5
+        case .steadyBar: return 6
+        }
+    }
 }
 
 /// Width to assign to individual (unpaired) Regional Indicator symbols (U+1F1E6–U+1F1FF).
@@ -74,7 +85,7 @@ public enum RegionalIndicatorWidth: Sendable {
 }
 
 /// Configuration options for the terminal at startup, these values are only read at startup
-public struct TerminalOptions {
+public struct TerminalOptions: Sendable {
     /// Desired number of columns at startup (default 80)
     public var cols: Int
     /// Desired number of rows at startup (default 25)
@@ -107,6 +118,9 @@ public struct TerminalOptions {
     /// Initial state for terminal-wg left and right arrow swapping. The default
     /// is false, so the host or terminal application must opt in.
     public var initialBidiArrowKeySwap: Bool
+    /// An ASCII-alphanumeric iTerm2 feature report. Nil disables reporting.
+    /// The host must include only features that the terminal and host implement together.
+    public var featureReport: String?
 
     /// Default options
     public static let `default` = TerminalOptions.init(cols: 80,
@@ -123,14 +137,16 @@ public struct TerminalOptions {
                                                        regionalIndicatorWidth: .wide,
                                                        initialBidiState: .default,
                                                        maximumBidiParagraphRows: 500,
-                                                       initialBidiArrowKeySwap: false)
+                                                       initialBidiArrowKeySwap: false,
+                                                       featureReport: nil)
 
   public init(cols: Int = Self.default.cols, rows: Int = Self.default.rows, convertEol: Bool = Self.default.convertEol, termName: String = Self.default.termName, cursorStyle: CursorStyle = Self.default.cursorStyle, screenReaderMode: Bool = Self.default.screenReaderMode, scrollback: Int = Self.default.scrollback, tabStopWidth: Int = Self.default.tabStopWidth,
               enableSixelReported: Bool = Self.default.enableSixelReported, kittyImageCacheLimitBytes: Int = Self.default.kittyImageCacheLimitBytes, ansi256PaletteStrategy: Ansi256PaletteStrategy = Self.default.ansi256PaletteStrategy,
               regionalIndicatorWidth: RegionalIndicatorWidth = Self.default.regionalIndicatorWidth,
               initialBidiState: BidiPresentationState = Self.default.initialBidiState,
               maximumBidiParagraphRows: Int = Self.default.maximumBidiParagraphRows,
-              initialBidiArrowKeySwap: Bool = Self.default.initialBidiArrowKeySwap) {
+              initialBidiArrowKeySwap: Bool = Self.default.initialBidiArrowKeySwap,
+              featureReport: String? = Self.default.featureReport) {
         self.cols = cols
         self.rows = rows
         self.convertEol = convertEol
@@ -146,5 +162,6 @@ public struct TerminalOptions {
         self.initialBidiState = initialBidiState
         self.maximumBidiParagraphRows = max(1, maximumBidiParagraphRows)
         self.initialBidiArrowKeySwap = initialBidiArrowKeySwap
+        self.featureReport = featureReport
     }
 }

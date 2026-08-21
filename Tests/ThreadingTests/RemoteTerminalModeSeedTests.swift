@@ -10,6 +10,7 @@ import SwiftTerm
 ///
 /// These assert on the byte stream, because the byte stream is the whole contract, and then run
 /// it through a second emulator, because reproducing the contract in a client is the point.
+@MainActor
 final class RemoteTerminalModeSeedTests: XCTestCase {
 
     // MARK: - Constants
@@ -44,25 +45,35 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
         )
     }
 
-    private func statement(for terminal: Terminal) -> Data {
-        RemoteTerminalModeSeed.bytes(for: RemoteTerminalModes(terminal))
+    private func makeSourceView() -> TerminalView {
+        TerminalView(
+            frame: .zero,
+            options: TerminalOptions(
+                cols: Fixture.cols,
+                rows: Fixture.rows,
+                scrollback: 100))
+    }
+
+    private func statement(for terminal: TerminalView) -> Data {
+        RemoteTerminalModeSeed.bytes(
+            for: RemoteTerminalModes(terminal.terminalStateSnapshot()))
     }
 
     // MARK: - Reading The Mac
 
     func testAnUntrackedTerminalReportsNoMouseContract() {
         XCTAssertEqual(
-            RemoteTerminalModes(makeTerminal()),
+            RemoteTerminalModes(makeSourceView().terminalStateSnapshot()),
             .plain,
             "a shell prompt asks for nothing, and the client must not be told otherwise"
         )
     }
 
     func testTheArmedModesAreReadOffTheEmulator() {
-        let terminal = makeTerminal()
+        let terminal = makeSourceView()
         terminal.feed(text: Fixture.agentArming + "\u{1b}[?1h\u{1b}[?2004h\u{1b}[>7u")
 
-        let modes = RemoteTerminalModes(terminal)
+        let modes = RemoteTerminalModes(terminal.terminalStateSnapshot())
 
         XCTAssertEqual(modes.mouseReporting?.tracking, .buttonEvent)
         XCTAssertEqual(modes.mouseReporting?.encoding, .sgr)
@@ -75,7 +86,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
     /// paste asks whether to bracket. Both were answered by a terminal that never saw the TUI
     /// start, so a late joiner sent the sequences a full-screen program had not asked for.
     func testTheOtherStickyModesReachAClientThatNeverSawTheProgramStart() {
-        let mac = makeTerminal()
+        let mac = makeSourceView()
         mac.feed(text: "\u{1b}[?1h\u{1b}[?2004h\u{1b}[>7u")
         let phone = makeTerminal()
 
@@ -91,7 +102,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
     }
 
     func testTheStatementTurnsTheOtherStickyModesBackOff() {
-        let mac = makeTerminal()
+        let mac = makeSourceView()
         let phone = makeTerminal()
         phone.feed(text: "\u{1b}[?1h\u{1b}[?2004h\u{1b}[>7u")
 
@@ -105,7 +116,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
     // MARK: - The Statement
 
     func testTheStatementArmsAClientThatNeverSawTheProgramStart() {
-        let mac = makeTerminal()
+        let mac = makeSourceView()
         mac.feed(text: Fixture.agentArming)
 
         // The phone: a terminal that has only ever seen the ring, which no longer holds the
@@ -120,7 +131,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
     }
 
     func testAnArmedClientReportsATapAsAnSgrClick() {
-        let mac = makeTerminal()
+        let mac = makeSourceView()
         mac.feed(text: Fixture.agentArming)
         let phone = makeTerminal()
         phone.feed(byteArray: [UInt8](statement(for: mac)))
@@ -153,7 +164,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
     /// exited to a shell leaves an arming sequence in the ring; without the resets the phone
     /// would keep reporting clicks, which a shell reads as pasted escape text.
     func testTheStatementDisarmsAClientTheRingLeftArmed() {
-        let mac = makeTerminal()
+        let mac = makeSourceView()
         let phone = makeTerminal()
         phone.feed(text: Fixture.agentArming)
         XCTAssertEqual(phone.mouseMode, .buttonEventTracking)
@@ -173,7 +184,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
         ]
 
         for mode in modes {
-            let mac = makeTerminal()
+            let mac = makeSourceView()
             mac.feed(text: mode.arming)
             let phone = makeTerminal()
 
@@ -187,7 +198,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
         let encodings = ["\u{1b}[?1005h", "\u{1b}[?1006h", "\u{1b}[?1015h", "\u{1b}[?1016h", ""]
 
         for encoding in encodings {
-            let mac = makeTerminal()
+            let mac = makeSourceView()
             // The tracking mode goes last: on this emulator resetting an encoding also stops
             // tracking, which is the ordering trap the statement itself has to avoid.
             mac.feed(text: encoding + "\u{1b}[?1002h")
@@ -197,7 +208,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
 
             XCTAssertEqual(
                 phone.mouseProtocol,
-                mac.mouseProtocol,
+                mac.terminalStateSnapshot().mouseProtocol,
                 "the encoding after \(encoding.debugDescription) did not survive"
             )
             XCTAssertEqual(
@@ -212,7 +223,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
     /// escape sequence. A statement that lands inside a half-parsed one would be eaten by it —
     /// silently, and silence here is exactly the bug the statement exists to fix.
     func testTheStatementIsReadableAfterATruncatedSequence() {
-        let mac = makeTerminal()
+        let mac = makeSourceView()
         mac.feed(text: Fixture.agentArming)
         let phone = makeTerminal()
         phone.feed(text: "\u{1b}[38;2;10")
@@ -226,7 +237,7 @@ final class RemoteTerminalModeSeedTests: XCTestCase {
     /// The tracking resets have to be finished before an encoding is chosen, and the encoding
     /// before the tracking is armed, or the statement disarms what it just said.
     func testTheStatementSetsTrackingLast() {
-        let mac = makeTerminal()
+        let mac = makeSourceView()
         mac.feed(text: Fixture.agentArming)
 
         let bytes = String(decoding: statement(for: mac), as: UTF8.self)

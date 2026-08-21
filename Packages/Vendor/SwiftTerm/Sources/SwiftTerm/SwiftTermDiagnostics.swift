@@ -9,12 +9,7 @@ import Foundation
 /// A bounded diagnostic emitted by SwiftTerm without exposing terminal contents.
 public struct SwiftTermDiagnosticEvent: Sendable {
     public enum Severity: Sendable {
-        case debug
-        case info
-        case notice
-        case warning
-        case error
-        case fault
+        case debug, info, notice, warning, error, fault
     }
 
     /// Stable machine-readable codes. Values are safe to publish in a diagnostic log.
@@ -53,43 +48,40 @@ public struct SwiftTermDiagnosticEvent: Sendable {
 
     public let severity: Severity
     public let code: Code
-
     /// Structural integer facts only (counts, dimensions, errno, or enum discriminators).
     public let facts: [String: Int]
-
     /// Number of identical-code events suppressed since the previous emitted event.
     public let suppressedCount: Int
 }
 
 /// Installs a host-owned logging sink while keeping SwiftTerm independent of any logging stack.
-///
-/// Diagnostics deliberately have no arbitrary string field: escape sequences, terminal titles,
-/// rendered lines, PTY bytes, paths, and errors may all contain credentials or user content and
-/// must never cross this boundary. Each code is rate-limited process-wide so hostile terminal
-/// output cannot create an unbounded logging surface.
+/// Events deliberately cannot carry terminal content and are rate-limited by code process-wide.
 public enum SwiftTermDiagnostics {
     public typealias Handler = @Sendable (SwiftTermDiagnosticEvent) -> Void
 
-    private static let lock = NSLock()
-    private static var handler: Handler?
-    private static var lastEmission: [SwiftTermDiagnosticEvent.Code: UInt64] = [:]
-    private static var suppressedCounts: [SwiftTermDiagnosticEvent.Code: Int] = [:]
+    private struct State: Sendable {
+        var handler: Handler?
+        var lastEmission: [SwiftTermDiagnosticEvent.Code: UInt64] = [:]
+        var suppressedCounts: [SwiftTermDiagnosticEvent.Code: Int] = [:]
+    }
+
+    private static let state = Locked(State())
     private static let minimumIntervalNanoseconds: UInt64 = 60_000_000_000
 
     public static func installHandler(_ newHandler: @escaping Handler) {
-        lock.lock()
-        handler = newHandler
-        lastEmission.removeAll(keepingCapacity: true)
-        suppressedCounts.removeAll(keepingCapacity: true)
-        lock.unlock()
+        state.withLock { state in
+            state.handler = newHandler
+            state.lastEmission.removeAll(keepingCapacity: true)
+            state.suppressedCounts.removeAll(keepingCapacity: true)
+        }
     }
 
     public static func removeHandler() {
-        lock.lock()
-        handler = nil
-        lastEmission.removeAll(keepingCapacity: true)
-        suppressedCounts.removeAll(keepingCapacity: true)
-        lock.unlock()
+        state.withLock { state in
+            state.handler = nil
+            state.lastEmission.removeAll(keepingCapacity: true)
+            state.suppressedCounts.removeAll(keepingCapacity: true)
+        }
     }
 
     static func emit(
@@ -98,29 +90,24 @@ public enum SwiftTermDiagnostics {
         facts: [String: Int] = [:]
     ) {
         let now = DispatchTime.now().uptimeNanoseconds
-        let installedHandler: Handler
-        let suppressedCount: Int
-
-        lock.lock()
-        guard let currentHandler = handler else {
-            lock.unlock()
-            return
+        let emission = state.withLock { state
+            -> (handler: Handler, suppressedCount: Int)? in
+            guard let handler = state.handler else { return nil }
+            if let previous = state.lastEmission[code],
+               now &- previous < minimumIntervalNanoseconds {
+                state.suppressedCounts[code, default: 0] += 1
+                return nil
+            }
+            let suppressedCount = state.suppressedCounts.removeValue(forKey: code) ?? 0
+            state.lastEmission[code] = now
+            return (handler, suppressedCount)
         }
-        if let previous = lastEmission[code], now &- previous < minimumIntervalNanoseconds {
-            suppressedCounts[code, default: 0] += 1
-            lock.unlock()
-            return
-        }
-        installedHandler = currentHandler
-        suppressedCount = suppressedCounts.removeValue(forKey: code) ?? 0
-        lastEmission[code] = now
-        lock.unlock()
+        guard let emission else { return }
 
-        installedHandler(SwiftTermDiagnosticEvent(
+        emission.handler(SwiftTermDiagnosticEvent(
             severity: severity,
             code: code,
             facts: facts,
-            suppressedCount: suppressedCount
-        ))
+            suppressedCount: emission.suppressedCount))
     }
 }

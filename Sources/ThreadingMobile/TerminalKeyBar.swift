@@ -18,13 +18,13 @@ final class TerminalKeyBridge: ObservableObject {
     }
 
     var applicationCursorActive: Bool {
-        terminalView?.getTerminal().applicationCursor ?? false
+        terminalView?.terminalStateSnapshot().applicationCursor ?? false
     }
 
     /// Whether the program on the Mac has asked for bracketed paste, as seeded into this
     /// phone's emulator at attach. Quoted lines go in as one paste when it has.
     var bracketedPasteActive: Bool {
-        terminalView?.getTerminal().bracketedPasteMode ?? false
+        terminalView?.terminalStateSnapshot().bracketedPasteMode ?? false
     }
 
     /// Encodes a complete touch-key activation with the live emulator's keyboard contract.
@@ -34,7 +34,7 @@ final class TerminalKeyBridge: ObservableObject {
     func encodedBytes(for action: RemoteTerminalKeyAction) -> [UInt8]? {
         let latched = modifiersForNextKey
         guard case .named(let key, let ownModifiers) = action,
-              let terminal = terminalView?.getTerminal() else {
+              let terminalView else {
             return RemoteTerminalKeyEncoder.bytes(
                 for: action,
                 latched: latched,
@@ -43,13 +43,13 @@ final class TerminalKeyBridge: ObservableObject {
         }
 
         let modifiers = ownModifiers.union(latched).kittyModifiers
-        guard var bytes = terminal.encodedFunctionalKey(
+        guard var bytes = terminalView.encodedFunctionalKey(
             key.kittyFunctionalKey,
             modifiers: modifiers,
             eventType: .press
         ) else { return nil }
-        if terminal.keyboardEnhancementFlags.contains(.reportEvents),
-           let release = terminal.encodedFunctionalKey(
+        if terminalView.terminalStateSnapshot().keyboardEnhancementFlags.contains(.reportEvents),
+           let release = terminalView.encodedFunctionalKey(
                key.kittyFunctionalKey,
                modifiers: modifiers,
                eventType: .release

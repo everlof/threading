@@ -98,7 +98,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             frame: Fixture.windowFrame,
             font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
         )
-        view.getTerminal().feed(text: "\u{1b}[?1h\u{1b}[>7u")
+        view.feed(text: "\u{1b}[?1h\u{1b}[>7u")
         let bridge = TerminalKeyBridge()
         bridge.terminalView = view
 
@@ -115,7 +115,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             frame: Fixture.windowFrame,
             font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
         )
-        view.getTerminal().feed(text: "\u{1b}[?1h")
+        view.feed(text: "\u{1b}[?1h")
         let bridge = TerminalKeyBridge()
         bridge.terminalView = view
 
