@@ -467,7 +467,366 @@ final class ThemedTabStripViewTests: XCTestCase {
         )
     }
 
+    // MARK: - Scroll Routing
+
+    /// The reported defect: a two-finger pan down the pane, with the pointer over the strip, was
+    /// answered by the strip — which has nothing above or below its one row to reveal, so it
+    /// rubber-banded — while the surface the reader was aiming at stood still.
+    func testAVerticalPanOverTheStripGoesToTheSurfaceBehindIt() throws {
+        let fixture = try scrollingHost(tabCount: 8)
+        let restingOffset = fixture.viewport.contentView.bounds.origin.x
+
+        fixture.viewport.scrollWheel(with: try pan(dx: 1, dy: -18, phase: .began))
+
+        XCTAssertEqual(
+            fixture.host.receivedGestureEvents, 1,
+            "the strip swallowed a gesture it has no range for"
+        )
+        XCTAssertEqual(
+            fixture.viewport.contentView.bounds.origin.x, restingOffset,
+            "the strip moved along its own axis for a gesture that was not about it"
+        )
+    }
+
+    /// The other half of the same decision: a pan *across* the strip is the strip's, and the
+    /// pane behind it must not move for it.
+    func testAHorizontalPanScrollsTheStripAndNotItsHost() throws {
+        let fixture = try scrollingHost(tabCount: 8)
+        var reachedTheStrip = 0
+        fixture.viewport.onUserScroll = { reachedTheStrip += 1 }
+
+        fixture.viewport.scrollWheel(with: try pan(dx: -22, dy: 2, phase: .began))
+
+        XCTAssertEqual(reachedTheStrip, 1, "a gesture along the strip's own axis escaped it")
+        XCTAssertEqual(
+            fixture.host.receivedGestureEvents, 0,
+            "the pane behind the strip scrolled for a gesture across the strip"
+        )
+    }
+
+    /// Routing is decided once, at the gesture's begin, and holds for the whole thing.
+    ///
+    /// Momentum arrives with the fingers already off the trackpad and the content moving under a
+    /// stationary pointer, so its deltas wobble and AppKit is free to re-target them. Deciding
+    /// per event lets a horizontally biased tail be taken back by the strip halfway through a
+    /// flick the reader aimed down the pane, which reads as hitting an invisible stop.
+    func testTheMomentumTailOfAVerticalPanStaysWithTheSurfaceBehind() throws {
+        let fixture = try scrollingHost(tabCount: 8)
+
+        fixture.viewport.scrollWheel(with: try pan(dx: 1, dy: -18, phase: .began))
+        fixture.viewport.scrollWheel(with: try pan(dx: 4, dy: -9, phase: .changed))
+        fixture.viewport.scrollWheel(with: try pan(dx: 0, dy: 0, phase: .ended))
+        fixture.viewport.scrollWheel(with: try pan(dx: 7, dy: -2, momentumPhase: .began))
+        fixture.viewport.scrollWheel(with: try pan(dx: 6, dy: -1, momentumPhase: .changed))
+        fixture.viewport.scrollWheel(with: try pan(dx: 0, dy: 0, momentumPhase: .ended))
+
+        XCTAssertEqual(
+            fixture.host.receivedGestureEvents, 6,
+            "the tail of a vertical flick was taken back by the strip when it turned diagonal"
+        )
+        XCTAssertEqual(
+            fixture.viewport.contentView.bounds.origin.x, 0,
+            "the strip scrolled itself on the momentum of somebody else's gesture"
+        )
+    }
+
+    /// And the gesture after it is decided afresh: the lock is per gesture, not a mode.
+    func testAHorizontalPanAfterAVerticalOneIsTheStripsAgain() throws {
+        let fixture = try scrollingHost(tabCount: 8)
+        fixture.viewport.scrollWheel(with: try pan(dx: 1, dy: -18, phase: .began))
+        fixture.viewport.scrollWheel(with: try pan(dx: 0, dy: 0, phase: .ended))
+        XCTAssertEqual(fixture.host.receivedGestureEvents, 2)
+
+        var reachedTheStrip = 0
+        fixture.viewport.onUserScroll = { reachedTheStrip += 1 }
+        fixture.viewport.scrollWheel(with: try pan(dx: -22, dy: 2, phase: .began))
+
+        XCTAssertEqual(reachedTheStrip, 1, "a new gesture inherited the last one's routing")
+        XCTAssertEqual(fixture.host.receivedGestureEvents, 2)
+    }
+
+    /// A wheel turns along the axis the strip does not have, so over the strip it did nothing at
+    /// all. Its ticks can only be asking for the one axis there is.
+    func testAPlainWheelScrollsTheStripAlongItsOneAxis() throws {
+        let fixture = try scrollingHost(tabCount: 12)
+        let clip = fixture.viewport.contentView
+        XCTAssertGreaterThan(
+            clip.documentRect.width, clip.bounds.width,
+            "fixture strip fits its host — there is nothing here to scroll"
+        )
+
+        fixture.viewport.scrollWheel(with: try wheel(ticks: -3))
+
+        XCTAssertEqual(
+            clip.bounds.origin.x,
+            3 * fixture.viewport.horizontalLineScroll,
+            accuracy: 0.5,
+            "a wheel tick over the strip moved it by something other than a line"
+        )
+        XCTAssertEqual(
+            fixture.host.receivedGestureEvents, 0,
+            "the wheel went past the strip to the pane behind it"
+        )
+    }
+
+    /// The sign is the one a horizontal event already carries, and the ends hold: a wheel turned
+    /// the other way at the resting position has nowhere to go and must not bounce.
+    func testTheWheelTurnsBothWaysAndStopsAtTheEnds() throws {
+        let fixture = try scrollingHost(tabCount: 12)
+        let clip = fixture.viewport.contentView
+
+        fixture.viewport.scrollWheel(with: try wheel(ticks: 3))
+        XCTAssertEqual(clip.bounds.origin.x, 0, "the strip scrolled past its own beginning")
+
+        fixture.viewport.scrollWheel(with: try wheel(ticks: -3))
+        let advanced = clip.bounds.origin.x
+        XCTAssertGreaterThan(advanced, 0)
+
+        fixture.viewport.scrollWheel(with: try wheel(ticks: 3))
+        XCTAssertEqual(
+            clip.bounds.origin.x, 0,
+            accuracy: 0.5,
+            "the wheel's two directions do not undo each other"
+        )
+        XCTAssertGreaterThan(advanced, 0)
+    }
+
+    /// Shift+wheel is AppKit's own translation, applied to the event before any view sees it, so
+    /// the strip must add none of its own: two flips would put the ticks back on the axis the
+    /// strip does not have, and the wheel would go dead again with a modifier held.
+    func testAShiftedWheelIsLeftToAppKitAndFlippedExactlyOnce() throws {
+        let shifted = try wheel(ticks: -3, modifiers: .maskShift)
+        XCTAssertEqual(
+            shifted.scrollingDeltaX, -3,
+            "AppKit stopped swapping a shifted wheel's axes in the event itself"
+        )
+        XCTAssertEqual(shifted.scrollingDeltaY, 0)
+        XCTAssertFalse(
+            HorizontalOnlyWheelMapping.mapsVerticalTicksToHorizontal(shifted),
+            "the strip translated an event AppKit had already translated"
+        )
+
+        let fixture = try scrollingHost(tabCount: 12)
+        fixture.viewport.scrollWheel(with: shifted)
+
+        XCTAssertEqual(
+            fixture.viewport.contentView.bounds.origin.x, 0,
+            "the strip moved a shifted wheel itself instead of leaving it to AppKit"
+        )
+        XCTAssertEqual(fixture.host.receivedGestureEvents, 0)
+    }
+
+    /// A trackpad names its own axis in the event and is routed, never translated. A precise
+    /// delta is the tell, and it is the one a Magic Mouse carries too.
+    func testPreciseDeltasAreNeverReadAsWheelTicks() throws {
+        let precise = try pan(dx: 0, dy: -30, phase: .began)
+        XCTAssertTrue(precise.hasPreciseScrollingDeltas)
+        XCTAssertFalse(HorizontalOnlyWheelMapping.mapsVerticalTicksToHorizontal(precise))
+
+        let fixture = try scrollingHost(tabCount: 12)
+        fixture.viewport.scrollWheel(with: precise)
+
+        XCTAssertEqual(
+            fixture.viewport.contentView.bounds.origin.x, 0,
+            "a trackpad pan was translated into a wheel and scrolled the strip sideways"
+        )
+        XCTAssertEqual(fixture.host.receivedGestureEvents, 1)
+    }
+
+    /// The whole matrix, stated where it can be read: the translation is a function of nothing
+    /// but the event's own properties, so it can be asserted exhaustively without a window —
+    /// which matters because AppKit ignores a synthesised `scrollWheel` outside a real event
+    /// stream, and `super`'s half of this can only ever be exercised by hand.
+    func testTheWheelDecisionIsExhaustiveOverTheEventsProperties() {
+        func maps(
+            phase: NSEvent.Phase = [],
+            momentumPhase: NSEvent.Phase = [],
+            precise: Bool = false,
+            modifiers: NSEvent.ModifierFlags = [],
+            deltaX: CGFloat = 0,
+            deltaY: CGFloat = -3
+        ) -> Bool {
+            HorizontalOnlyWheelMapping.mapsVerticalTicksToHorizontal(
+                phase: phase,
+                momentumPhase: momentumPhase,
+                hasPreciseScrollingDeltas: precise,
+                modifiers: modifiers,
+                scrollingDeltaX: deltaX,
+                scrollingDeltaY: deltaY
+            )
+        }
+
+        XCTAssertTrue(maps(), "a plain wheel tick is the whole case this exists for")
+        XCTAssertTrue(maps(deltaY: 3), "a wheel turned the other way is still a wheel")
+        XCTAssertTrue(
+            maps(modifiers: [.command, .option, .control]),
+            "only Shift means something to a scroll event's axes"
+        )
+
+        for phase in [NSEvent.Phase.began, .changed, .ended, .cancelled, .mayBegin, .stationary] {
+            XCTAssertFalse(maps(phase: phase), "a phased gesture is routed, not translated")
+        }
+        for momentum in [NSEvent.Phase.began, .changed, .ended] {
+            XCTAssertFalse(maps(momentumPhase: momentum), "momentum belongs to its own gesture")
+        }
+        XCTAssertFalse(maps(precise: true), "a precise delta already names its axis")
+        XCTAssertFalse(maps(modifiers: .shift), "AppKit has already flipped a shifted wheel")
+        XCTAssertFalse(maps(deltaY: 0), "a wheel that turned nowhere asks for nothing")
+        XCTAssertFalse(
+            maps(deltaX: -3, deltaY: -3),
+            "a tilt wheel already names the axis the strip has"
+        )
+        XCTAssertFalse(maps(deltaX: -3, deltaY: 0), "a horizontal wheel needs no help")
+    }
+
+    // MARK: - Scroll Fixtures
+
+    private struct ScrollFixture {
+        let strip: ThemedTabStripView
+        let host: GestureCountingScrollView
+        /// The strip's own viewport, found the way AppKit finds it: whatever is under the
+        /// pointer over a chip, walked up to the scroll view that would answer for it.
+        let viewport: ThemedScrollView
+    }
+
+    /// The strip inside something that scrolls, which is the arrangement all of this is about.
+    /// The host counts rather than scrolls, because a synthesised event moves no real
+    /// `NSScrollView`: what is being asserted is where the gesture was sent.
+    private func scrollingHost(tabCount: Int) throws -> ScrollFixture {
+        let tabs = items((0..<tabCount).map { ("Tab number \($0)", false) })
+        let strip = ThemedTabStripView(inkSource: .chrome)
+        strip.update(items: tabs)
+
+        let host = GestureCountingScrollView(frame: NSRect(x: 0, y: 0, width: 260, height: 400))
+        let page = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 1_200))
+        host.documentView = page
+        host.hasVerticalScroller = false
+        page.addSubview(strip)
+        NSLayoutConstraint.activate([
+            strip.leadingAnchor.constraint(equalTo: page.leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: page.trailingAnchor),
+            strip.topAnchor.constraint(equalTo: page.topAnchor)
+        ])
+
+        let window = NSWindow(
+            contentRect: host.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        self.window = window
+        let content = try XCTUnwrap(window.contentView)
+        content.addSubview(host)
+        content.layoutSubtreeIfNeeded()
+
+        let chip = try XCTUnwrap(strip.chipView(for: try XCTUnwrap(tabs.first).id))
+        let pointer = chip.convert(
+            NSPoint(x: chip.bounds.midX, y: chip.bounds.midY),
+            to: strip.superview
+        )
+        let hit = try XCTUnwrap(
+            strip.hitTest(pointer),
+            "nothing sits under a pointer over the strip's first chip"
+        )
+        let viewport = sequence(first: hit, next: { $0.superview })
+            .prefix { $0 !== strip }
+            .compactMap { $0 as? ThemedScrollView }
+            .first
+        return ScrollFixture(
+            strip: strip,
+            host: host,
+            viewport: try XCTUnwrap(
+                viewport,
+                "AppKit would deliver a scroll over a chip to a viewport inside the strip"
+            )
+        )
+    }
+
+    /// A trackpad pan: precise deltas and a phase for its whole life, which is what tells one
+    /// from a wheel. The flags are stated rather than inherited — a `CGEvent` built from a nil
+    /// source reads the modifiers the developer happens to be holding.
+    private func pan(
+        dx: Int32,
+        dy: Int32,
+        phase: NSEvent.Phase = [],
+        momentumPhase: NSEvent.Phase = [],
+        modifiers: CGEventFlags = []
+    ) throws -> NSEvent {
+        let event = try XCTUnwrap(CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: dy,
+            wheel2: dx,
+            wheel3: 0
+        ))
+        event.setIntegerValueField(
+            .scrollWheelEventScrollPhase,
+            value: ScrollFixtureCGPhase.scroll(phase)
+        )
+        event.setIntegerValueField(
+            .scrollWheelEventMomentumPhase,
+            value: ScrollFixtureCGPhase.momentum(momentumPhase)
+        )
+        event.flags = modifiers
+        return try XCTUnwrap(NSEvent(cgEvent: event))
+    }
+
+    /// A real wheel: line units, no phase at any point in its life, no precise deltas.
+    private func wheel(ticks: Int32, modifiers: CGEventFlags = []) throws -> NSEvent {
+        let event = try XCTUnwrap(CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .line,
+            wheelCount: 2,
+            wheel1: ticks,
+            wheel2: 0,
+            wheel3: 0
+        ))
+        event.flags = modifiers
+        return try XCTUnwrap(NSEvent(cgEvent: event))
+    }
+
     private func descendants(in root: NSView) -> [NSView] {
         root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+}
+
+// MARK: - Scroll Fixture Helpers
+
+/// `CGEvent`'s phase numbering is its own — `1, 2, 4, 8, 128` for
+/// began/changed/ended/cancelled/mayBegin, and `1, 2, 3` for momentum — and `NSEvent` translates
+/// it on the way in, to values that share none of those numbers. Stated once here so a fixture
+/// can ask for the phase it means rather than for a number that happens to arrive as one. There
+/// is no `CGEvent` spelling of `.stationary`; nothing needs one.
+private enum ScrollFixtureCGPhase {
+    static func scroll(_ phase: NSEvent.Phase) -> Int64 {
+        switch phase {
+        case .began: 1
+        case .changed: 2
+        case .ended: 4
+        case .cancelled: 8
+        case .mayBegin: 128
+        default: 0
+        }
+    }
+
+    static func momentum(_ phase: NSEvent.Phase) -> Int64 {
+        switch phase {
+        case .began: 1
+        case .changed: 2
+        case .ended: 3
+        default: 0
+        }
+    }
+}
+
+/// A host that counts what reached it rather than scrolling for it. A synthesised `NSEvent` has
+/// no window and `NSScrollView` ignores one outside a real event stream, so the assertable fact
+/// about a handed-off gesture is that it was handed off.
+private final class GestureCountingScrollView: ThemedScrollView {
+    private(set) var receivedGestureEvents = 0
+
+    override func scrollWheel(with event: NSEvent) {
+        receivedGestureEvents += 1
     }
 }
