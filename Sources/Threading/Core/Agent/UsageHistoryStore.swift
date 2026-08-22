@@ -103,7 +103,7 @@ final class UsageHistoryStore {
         pruneEvents(now: usage.observedAt)
         persist(samples: persistedSamples, resets: persistedResets)
         if !persistedSamples.isEmpty {
-            NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
+            NotificationCenter.default.post(UsageLimitHistoryDidChange())
         }
     }
 
@@ -144,7 +144,7 @@ final class UsageHistoryStore {
         guard !enriched.isEmpty else { return }
         samples[key] = prune((enriched + existing).sorted { $0.at < $1.at }, now: Date())
         persist(samples: enriched, resets: [])
-        NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
+        NotificationCenter.default.post(UsageLimitHistoryDidChange())
     }
 
     func snapshot(
@@ -174,7 +174,7 @@ final class UsageHistoryStore {
         samples = [:]
         resetEvents = []
         journalLoaded = true
-        NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
+        NotificationCenter.default.post(UsageLimitHistoryDidChange())
         return true
     }
 
@@ -222,7 +222,7 @@ final class UsageHistoryStore {
                 }
             }
         }
-        NotificationCenter.default.post(name: .usageLimitHistoryDidChange, object: self)
+        NotificationCenter.default.post(UsageLimitHistoryDidChange())
     }
 
     private func merge(_ prepared: PreparedJournal) {

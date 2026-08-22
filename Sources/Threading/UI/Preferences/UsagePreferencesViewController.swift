@@ -4,13 +4,41 @@ import AppKit
 /// capacity, provider-limit history, and transcript accounting. Neither filesystem scanning nor
 /// the 180-day journal is read on the main actor while the page is opening.
 final class UsagePreferencesViewController: NSViewController {
+    typealias AccountsProvider = @MainActor () -> [AgentAccount]
+    typealias ReadingProvider = @MainActor (AgentAccount) -> AccountUsageReading
+    typealias RefreshProvider = @MainActor (AgentAccount, Bool) -> Void
+
     private let appEvents = AppEventObservations()
     private let liveCapacity = AccountUsageFleetView()
     private let dashboard = UsageDashboardView()
+    private let accountsProvider: AccountsProvider
+    private let readingProvider: ReadingProvider
+    private let refreshProvider: RefreshProvider
+    private var accountsByID: [AccountID: AgentAccount] = [:]
     private var overviewProjection: UsageDashboardOverviewProjection?
     private var limitSeries: [UsageLimitDashboardSeries] = []
     private var overviewTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
+
+    init(
+        accountsProvider: @escaping AccountsProvider = {
+            AgentKind.allCases.flatMap { AgentAccountDiscovery.accounts(for: $0) }
+        },
+        readingProvider: @escaping ReadingProvider = {
+            AccountUsageService.shared.reading(for: $0)
+        },
+        refreshProvider: @escaping RefreshProvider = {
+            AccountUsageService.shared.refresh($0, force: $1)
+        }
+    ) {
+        self.accountsProvider = accountsProvider
+        self.readingProvider = readingProvider
+        self.refreshProvider = refreshProvider
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func loadView() {
         let rebuild = SettingsUI.button(
@@ -42,9 +70,8 @@ final class UsagePreferencesViewController: NSViewController {
                 isBuilding: TranscriptUsageService.shared.isBuilding
             )
         }
-        appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
-            self?.reloadLiveCapacity()
-            self?.loadLimitHistory(animated: true)
+        appEvents.observe(AccountUsageDidChange.self) { [weak self] event in
+            self?.usageChanged(event)
         }
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.reloadLiveCapacity()
@@ -129,20 +156,25 @@ final class UsagePreferencesViewController: NSViewController {
     private func refreshAuthoritativeLimits(force: Bool) {
         // Account discovery itself is the capability boundary. Today Claude and Codex expose
         // routable accounts; Grok/OpenCode do not, so no provider-name switch lives here.
-        let accounts = AgentKind.allCases.flatMap { AgentAccountDiscovery.accounts(for: $0) }
-        accounts.forEach { AccountUsageService.shared.refresh($0, force: force) }
+        accountsProvider().forEach { refreshProvider($0, force) }
     }
 
     private func reloadLiveCapacity() {
-        let accounts = AgentKind.allCases.flatMap { AgentAccountDiscovery.accounts(for: $0) }
+        let accounts = accountsProvider()
+        accountsByID = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
         liveCapacity.show(accounts.map {
             AccountUsageFleetItem(
                 account: $0,
-                reading: AccountUsageService.shared.reading(for: $0),
+                reading: readingProvider($0),
                 isCurrent: false,
                 allowsHandoff: false
             )
         })
+    }
+
+    private func usageChanged(_ event: AccountUsageDidChange) {
+        guard let account = accountsByID[event.accountID] else { return }
+        liveCapacity.update(reading: readingProvider(account), for: event.accountID)
     }
 
     @objc private func rebuildClicked() {

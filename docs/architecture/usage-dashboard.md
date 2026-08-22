@@ -48,6 +48,15 @@ is an `NSTableView` row, so opening five or five hundred discovered accounts con
 viewport. The viewport itself is height-bounded and hands scrolling to the Settings page at its
 content ends.
 
+That bound continues after open. `AccountUsageDidChange` already carries an `AccountID`, so both
+hosts replace only that identity's cached item and reload only its table row. Status counts update
+in O(1), and the next reset is maintained by an identity-indexed min-heap in O(log n); no event
+rediscovers or re-sorts the fleet. Limit history has its own `UsageLimitHistoryDidChange` signal,
+so a live-reading event does not restart the 90-day journal projection as collateral work.
+Opening the fleet may enqueue every account, but `AccountUsageService` admits at most four
+provider fetches at once. Scheduled identities share the existing single-flight receipt, and the
+queue advances by index rather than repeatedly removing its first element.
+
 The dashboard receives immutable report and limit-series values. It does not read transcripts,
 launch CLIs, call provider endpoints or perform journal I/O.
 
@@ -414,6 +423,11 @@ expiry and projected exhaustion. A series retains the full reset count and resto
 its summary even when its visible reset markers are sampled. `nil` reset-credit inventory remains
 distinct from authoritative zero throughout this value boundary.
 
+Live capacity has a separate account-cardinality gate: table cells are viewport-virtualized,
+provider work is capped at four concurrent reads, and a reading event is O(log n) in fleet size
+with one row invalidated. `AccountUsageFleetTests` exercises 120 accounts through all three parts:
+bounded cells, bounded fetch concurrency, and one identity read per event in both shipping hosts.
+
 Session projection has its own smaller gate. The report index is built once per scan off-main;
 each refresh visits only the selected parent and child identities. The service remembers at most
 32 recently requested sessions, Overview retains at most six model rows, the Session Status Card
@@ -508,7 +522,8 @@ still alive when the next file opened.
   dark/light, Cyberpunk, Neo Brutalism and Classic Player, with all five coverage rows, top-three
   plus Other chart bounds and virtualized breakdown assertions.
 - `AccountUsageFleetTests`: status truth without unlike-window averages, stable current-first
-  ordering, the bounded virtual viewport and the Option-click modifier contract.
+  ordering, the bounded virtual viewport and provider work pool, identity-scoped live updates in
+  both shipping hosts, and the Option-click modifier contract.
 - `UsageDashboardPerformanceTests`: default regression sizes and the opt-in stress contracts above.
 - `UsageDashboardProjectionTests`: range equality, capped breakdown conservation, nil-versus-zero
   banked-reset inventory, remote encoded-size/page ceilings and three matched 100k/250k/50k

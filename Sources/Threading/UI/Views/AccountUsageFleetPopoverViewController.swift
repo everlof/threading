@@ -20,6 +20,7 @@ final class AccountUsageFleetPopoverViewController: NSViewController {
         maximumHeight: Design.AccountUsageFleet.popoverMaximumHeight
     )
     private let appEvents = AppEventObservations()
+    private var accountsByID: [AccountID: AgentAccount] = [:]
 
     var onHandoff: ((AgentAccount) -> Void)?
 
@@ -64,15 +65,25 @@ final class AccountUsageFleetPopoverViewController: NSViewController {
         view = container
         view.setAccessibilityIdentifier("toolbar.all-account-usage-popover")
 
-        appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in self?.render() }
+        appEvents.observe(AccountUsageDidChange.self) { [weak self] event in
+            self?.usageChanged(event)
+        }
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in self?.reload() }
         reload()
     }
 
     private func reload() {
         let accounts = accountsProvider()
+        accountsByID = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
         render(accounts)
         accounts.forEach(refreshProvider)
+    }
+
+    private func usageChanged(_ event: AccountUsageDidChange) {
+        guard let account = accountsByID[event.accountID] else { return }
+        fleet.update(reading: readingProvider(account), for: event.accountID)
+        view.layoutSubtreeIfNeeded()
+        preferredContentSize = view.fittingSize
     }
 
     private func render(_ accounts: [AgentAccount]? = nil) {

@@ -101,6 +101,8 @@ enum AccountUsageReading: Equatable {
 @MainActor
 final class AccountUsageService {
 
+    typealias Fetcher = @Sendable (AgentAccount) async throws -> AccountUsage
+
     // MARK: - Properties
 
     static let shared = AccountUsageService()
@@ -117,7 +119,15 @@ final class AccountUsageService {
     }
 
     private var entries: [AccountID: Entry] = [:]
+    /// Scheduled and active work share this set, so another caller joins the one promised result
+    /// even when that account is waiting behind the global concurrency gate.
     private var inFlight: Set<AccountID> = []
+    private var activeRefreshes: Set<AccountID> = []
+    private var pendingAccounts: [AccountID: AgentAccount] = [:]
+    private var pendingOrder: [AccountID] = []
+    private var nextPendingIndex = 0
+    private let maximumConcurrentRefreshes: Int
+    private let fetcher: Fetcher
 
     /// Callers waiting for an account's reading to be as fresh as it is going to get.
     ///
@@ -138,7 +148,15 @@ final class AccountUsageService {
 
     // MARK: - Initialization
 
-    private init() {
+    init(
+        maximumConcurrentRefreshes: Int = UsageDefaults.maximumConcurrentRefreshes,
+        observesActivity: Bool = true,
+        fetcher: @escaping Fetcher = { try await AccountUsageService.fetchUsage(for: $0) }
+    ) {
+        self.maximumConcurrentRefreshes = max(1, maximumConcurrentRefreshes)
+        self.fetcher = fetcher
+
+        guard observesActivity else { return }
         // A turn ending is the freshest possible moment to ask — and the cheapest, because
         // every pacing rule above still applies: the floor, the endpoint's own notBefore,
         // and single-flight. An idle app stops generating turn boundaries and therefore
@@ -209,25 +227,48 @@ final class AccountUsageService {
 
         if let settled { settlementWaiters[id, default: []].append(settled) }
         inFlight.insert(id)
-        entries[id, default: Entry()].lastAttemptAt = now
-
-        Task.detached(priority: .utility) {
-            let result: Result<AccountUsage, UsageFetchError>
-            do {
-                result = .success(try await Self.fetchUsage(for: account))
-            } catch let error as UsageFetchError {
-                result = .failure(error)
-            } catch {
-                result = .failure(.network(error.localizedDescription))
-            }
-
-            await MainActor.run {
-                AccountUsageService.shared.finish(account: account, result: result)
-            }
-        }
+        pendingAccounts[id] = account
+        pendingOrder.append(id)
+        drainRefreshQueue()
     }
 
     // MARK: - Private Methods
+
+    /// Admits a bounded number of provider reads from the unbounded account queue.
+    ///
+    /// `pendingOrder` advances an index rather than removing its first element, keeping a fleet
+    /// open O(n) instead of making queue maintenance O(n²). It is compacted only after a complete
+    /// drain, when no queued identity can still refer to the old storage.
+    private func drainRefreshQueue() {
+        while activeRefreshes.count < maximumConcurrentRefreshes,
+              nextPendingIndex < pendingOrder.count {
+            let id = pendingOrder[nextPendingIndex]
+            nextPendingIndex += 1
+            guard let account = pendingAccounts.removeValue(forKey: id) else { continue }
+
+            activeRefreshes.insert(id)
+            entries[id, default: Entry()].lastAttemptAt = Date()
+            let fetcher = self.fetcher
+
+            Task.detached(priority: .utility) { [self] in
+                let result: Result<AccountUsage, UsageFetchError>
+                do {
+                    result = .success(try await fetcher(account))
+                } catch let error as UsageFetchError {
+                    result = .failure(error)
+                } catch {
+                    result = .failure(.network(error.localizedDescription))
+                }
+
+                await finish(account: account, result: result)
+            }
+        }
+
+        if nextPendingIndex == pendingOrder.count {
+            pendingOrder.removeAll(keepingCapacity: true)
+            nextPendingIndex = 0
+        }
+    }
 
     /// How long the current entry satisfies requests before another fetch runs. A local
     /// file re-reads cheaply and often; a network reading is held longer; `force` only
@@ -242,6 +283,7 @@ final class AccountUsageService {
 
     private func finish(account: AgentAccount, result: Result<AccountUsage, UsageFetchError>) {
         let accountID = account.id
+        activeRefreshes.remove(accountID)
         inFlight.remove(accountID)
 
         var entry = entries[accountID] ?? Entry()
@@ -283,6 +325,7 @@ final class AccountUsageService {
         // After the announcement, so a waiter reading the cache sees exactly what every other
         // observer has already been shown.
         for settled in settlementWaiters.removeValue(forKey: accountID) ?? [] { settled() }
+        drainRefreshQueue()
     }
 
     /// The transition out of `.working` is a turn boundary: tokens were just spent, so the
@@ -344,7 +387,9 @@ final class AccountUsageService {
         }
     }
 
-    private static func fetchUsage(for account: AgentAccount) async throws -> AccountUsage {
+    nonisolated private static func fetchUsage(
+        for account: AgentAccount
+    ) async throws -> AccountUsage {
         switch account.provider {
         case .claude: return try await ClaudeUsageFetcher.fetch(account: account)
         case .codex: return try await CodexUsageFetcher.fetch(account: account)

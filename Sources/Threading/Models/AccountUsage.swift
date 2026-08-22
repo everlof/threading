@@ -373,6 +373,13 @@ enum UsageDefaults {
     /// Floor between fetches for one account, however eagerly the UI asks.
     static let minimumRefreshSpacing: TimeInterval = 60
 
+    /// Provider reads admitted at once when an all-account surface opens.
+    ///
+    /// Account cardinality comes from the filesystem and is therefore untrusted. A fleet may
+    /// enqueue every enabled account, but it may never turn that count into the same number of
+    /// sockets, detached tasks, or Keychain reads at once.
+    static let maximumConcurrentRefreshes = 4
+
     /// Cadence of the timer that keeps the visible account's pill current. Each tick only
     /// refetches once `refreshInterval` has elapsed, so this stays cheap.
     static let refreshTimerInterval: TimeInterval = 60

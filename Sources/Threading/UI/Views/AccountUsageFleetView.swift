@@ -55,6 +55,20 @@ struct AccountUsageFleetSummary: Equatable {
         nextReset = resets.min()
     }
 
+    fileprivate init(
+        accountCount: Int,
+        readyCount: Int,
+        constrainedCount: Int,
+        unknownCount: Int,
+        nextReset: Date?
+    ) {
+        self.accountCount = accountCount
+        self.readyCount = readyCount
+        self.constrainedCount = constrainedCount
+        self.unknownCount = unknownCount
+        self.nextReset = nextReset
+    }
+
     var statusText: String {
         var parts: [String] = []
         if readyCount > 0 { parts.append(L10n.format("%d ready", readyCount)) }
@@ -63,6 +77,162 @@ struct AccountUsageFleetSummary: Equatable {
         }
         if unknownCount > 0 { parts.append(L10n.format("%d unknown", unknownCount)) }
         return parts.isEmpty ? L10n.string("No enabled accounts") : parts.joined(separator: " · ")
+    }
+}
+
+/// Identity-indexed aggregate state for live fleet updates.
+///
+/// Counts change in O(1), while the next reset lives in an indexed min-heap and changes in
+/// O(log n). A single account notification therefore cannot turn into another fleet-wide scan.
+private struct AccountUsageFleetSummaryIndex {
+    private enum Status { case ready, constrained, unknown }
+
+    private struct Contribution {
+        let status: Status
+        let nextReset: Date?
+    }
+
+    private struct ResetNode {
+        let accountID: AccountID
+        var date: Date
+    }
+
+    private var contributions: [AccountID: Contribution] = [:]
+    private var resetHeap: [ResetNode] = []
+    private var resetPositions: [AccountID: Int] = [:]
+    private(set) var readyCount = 0
+    private(set) var constrainedCount = 0
+    private(set) var unknownCount = 0
+
+    var summary: AccountUsageFleetSummary {
+        AccountUsageFleetSummary(
+            accountCount: contributions.count,
+            readyCount: readyCount,
+            constrainedCount: constrainedCount,
+            unknownCount: unknownCount,
+            nextReset: resetHeap.first?.date
+        )
+    }
+
+    mutating func rebuild(items: [AccountUsageFleetItem], now: Date) {
+        self = AccountUsageFleetSummaryIndex()
+        for item in items { update(item: item, now: now) }
+    }
+
+    mutating func update(item: AccountUsageFleetItem, now: Date) {
+        let id = item.account.id
+        if let previous = contributions[id] { remove(previous.status) }
+
+        let contribution = Self.contribution(for: item, now: now)
+        contributions[id] = contribution
+        add(contribution.status)
+        setReset(contribution.nextReset, for: id)
+    }
+
+    private static func contribution(
+        for item: AccountUsageFleetItem,
+        now: Date
+    ) -> Contribution {
+        guard let usage = item.reading.usage else {
+            return Contribution(status: .unknown, nextReset: nil)
+        }
+        let active = usage.allWindows.filter { !$0.isExpired(at: now) }
+        let known = active.compactMap(\.fraction)
+        let status: Status
+        if known.isEmpty {
+            status = .unknown
+        } else if known.contains(where: { $0 >= UsageDefaults.warningFraction }) {
+            status = .constrained
+        } else {
+            status = .ready
+        }
+        return Contribution(
+            status: status,
+            nextReset: active.compactMap(\.resetsAt).min()
+        )
+    }
+
+    private mutating func add(_ status: Status) {
+        switch status {
+        case .ready: readyCount += 1
+        case .constrained: constrainedCount += 1
+        case .unknown: unknownCount += 1
+        }
+    }
+
+    private mutating func remove(_ status: Status) {
+        switch status {
+        case .ready: readyCount -= 1
+        case .constrained: constrainedCount -= 1
+        case .unknown: unknownCount -= 1
+        }
+    }
+
+    private mutating func setReset(_ date: Date?, for accountID: AccountID) {
+        if let index = resetPositions[accountID] {
+            guard let date else {
+                removeReset(at: index)
+                return
+            }
+            let previous = resetHeap[index].date
+            resetHeap[index].date = date
+            if date < previous { siftUp(from: index) } else { siftDown(from: index) }
+        } else if let date {
+            resetHeap.append(ResetNode(accountID: accountID, date: date))
+            let index = resetHeap.index(before: resetHeap.endIndex)
+            resetPositions[accountID] = index
+            siftUp(from: index)
+        }
+    }
+
+    private mutating func removeReset(at index: Int) {
+        let removedID = resetHeap[index].accountID
+        let last = resetHeap.index(before: resetHeap.endIndex)
+        if index != last { swapNodes(index, last) }
+        resetHeap.removeLast()
+        resetPositions.removeValue(forKey: removedID)
+        guard index < resetHeap.count else { return }
+        let parent = (index - 1) / 2
+        if index > 0, isEarlier(resetHeap[index], than: resetHeap[parent]) {
+            siftUp(from: index)
+        } else {
+            siftDown(from: index)
+        }
+    }
+
+    private mutating func siftUp(from start: Int) {
+        var child = start
+        while child > 0 {
+            let parent = (child - 1) / 2
+            guard isEarlier(resetHeap[child], than: resetHeap[parent]) else { break }
+            swapNodes(child, parent)
+            child = parent
+        }
+    }
+
+    private mutating func siftDown(from start: Int) {
+        var parent = start
+        while true {
+            let left = parent * 2 + 1
+            guard left < resetHeap.count else { return }
+            let right = left + 1
+            let child = right < resetHeap.count
+                && isEarlier(resetHeap[right], than: resetHeap[left]) ? right : left
+            guard isEarlier(resetHeap[child], than: resetHeap[parent]) else { return }
+            swapNodes(parent, child)
+            parent = child
+        }
+    }
+
+    private func isEarlier(_ lhs: ResetNode, than rhs: ResetNode) -> Bool {
+        if lhs.date != rhs.date { return lhs.date < rhs.date }
+        return lhs.accountID.rawValue < rhs.accountID.rawValue
+    }
+
+    private mutating func swapNodes(_ lhs: Int, _ rhs: Int) {
+        resetHeap.swapAt(lhs, rhs)
+        resetPositions[resetHeap[lhs].accountID] = lhs
+        resetPositions[resetHeap[rhs].accountID] = rhs
     }
 }
 
@@ -82,6 +252,9 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         equalToConstant: Design.AccountUsageFleet.minimumViewportHeight
     )
     private var items: [AccountUsageFleetItem] = []
+    private var indexByAccountID: [AccountID: Int] = [:]
+    private var summaryIndex = AccountUsageFleetSummaryIndex()
+    private var estimatedContentHeight: CGFloat = 0
     private var now = Date()
 
     var onHandoff: ((AgentAccount) -> Void)?
@@ -92,9 +265,7 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         return table.rows(in: table.visibleRect).length
     }
     var viewportHeightForTesting: CGFloat { heightConstraint.constant }
-    var summaryForTesting: AccountUsageFleetSummary {
-        AccountUsageFleetSummary(items: items, now: now)
-    }
+    var summaryForTesting: AccountUsageFleetSummary { summaryIndex.summary }
     var orderedAccountIDsForTesting: [AccountID] { items.map(\.account.id) }
 
     init(maximumHeight: CGFloat = Design.AccountUsageFleet.settingsMaximumHeight) {
@@ -109,14 +280,55 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
     func show(_ newItems: [AccountUsageFleetItem], at now: Date = Date()) {
         self.now = now
         items = Self.stablyOrdered(newItems)
-        let summary = AccountUsageFleetSummary(items: items, now: now)
+        indexByAccountID = Dictionary(
+            uniqueKeysWithValues: items.enumerated().map { ($0.element.account.id, $0.offset) }
+        )
+        summaryIndex.rebuild(items: items, now: now)
+        estimatedContentHeight = items.reduce(CGFloat.zero) { partial, item in
+            partial + estimatedHeight(for: item) + Design.AccountUsageFleet.accountGap
+        }
+        applySummary()
+        table.reloadData()
+        applyViewportHeight()
+    }
+
+    /// Replaces one identity's reading without rediscovering, sorting, or rebuilding the fleet.
+    /// Returns false when the account is not part of this presentation generation.
+    @discardableResult
+    func update(reading: AccountUsageReading, for accountID: AccountID) -> Bool {
+        guard let index = indexByAccountID[accountID], items.indices.contains(index) else {
+            return false
+        }
+
+        let previous = items[index]
+        let updated = AccountUsageFleetItem(
+            account: previous.account,
+            reading: reading,
+            isCurrent: previous.isCurrent,
+            allowsHandoff: previous.allowsHandoff
+        )
+        items[index] = updated
+        summaryIndex.update(item: updated, now: now)
+        estimatedContentHeight += estimatedHeight(for: updated) - estimatedHeight(for: previous)
+        applySummary()
+        applyViewportHeight()
+
+        let rows = IndexSet(integer: index)
+        table.noteHeightOfRows(withIndexesChanged: rows)
+        table.reloadData(
+            forRowIndexes: rows,
+            columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns)
+        )
+        return true
+    }
+
+    private func applySummary() {
+        let summary = summaryIndex.summary
         summaryTitle.stringValue = L10n.format("All Accounts · %d", summary.accountCount)
         summaryStatus.stringValue = summary.statusText
         summaryReset.stringValue = summary.nextReset.map {
             L10n.format("Next reset in %@", UsageFormat.remaining(until: $0, from: now))
         } ?? ""
-        table.reloadData()
-        applyViewportHeight()
     }
 
     static func stablyOrdered(_ items: [AccountUsageFleetItem]) -> [AccountUsageFleetItem] {
@@ -216,11 +428,8 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
     }
 
     private func applyViewportHeight() {
-        let estimates = items.reduce(CGFloat.zero) { partial, item in
-            partial + estimatedHeight(for: item) + Design.AccountUsageFleet.accountGap
-        }
         heightConstraint.constant = min(
-            max(estimates, Design.AccountUsageFleet.minimumViewportHeight),
+            max(estimatedContentHeight, Design.AccountUsageFleet.minimumViewportHeight),
             maximumHeight
         )
     }

@@ -1,9 +1,34 @@
 import AppKit
 import XCTest
+import os
 @testable import Threading
 
 @MainActor
 final class AccountUsageFleetTests: XCTestCase {
+    private final class RefreshConcurrencyProbe: @unchecked Sendable {
+        private struct State {
+            var active = 0
+            var peak = 0
+            var started = 0
+        }
+
+        private let state = OSAllocatedUnfairLock(initialState: State())
+
+        var peak: Int { state.withLock { $0.peak } }
+        var started: Int { state.withLock { $0.started } }
+
+        func fetch(_ account: AgentAccount) async throws -> AccountUsage {
+            state.withLock { value in
+                value.active += 1
+                value.started += 1
+                value.peak = max(value.peak, value.active)
+            }
+            defer { state.withLock { $0.active -= 1 } }
+            try await Task.sleep(nanoseconds: 20_000_000)
+            throw UsageFetchError.noCredential("fixture")
+        }
+    }
+
     private struct RenderFixture {
         let name: String
         let theme: AppTheme
@@ -59,6 +84,104 @@ final class AccountUsageFleetTests: XCTestCase {
         fleet.frame = NSRect(x: 0, y: 0, width: 380, height: 320)
         fleet.layoutSubtreeIfNeeded()
         XCTAssertLessThan(fleet.visibleCellCountForTesting, fleet.itemCountForTesting)
+    }
+
+    func testOneReadingUpdatePreservesFleetOrderAndUpdatesOnlyItsAggregateContribution() {
+        let fleet = AccountUsageFleetView(maximumHeight: 260)
+        let initial = (0..<120).map { index in
+            item("account-\(index)", fraction: 0.20, resetsIn: 7_200 + Double(index))
+        }
+        fleet.show(initial, at: now)
+        let order = fleet.orderedAccountIDsForTesting
+        let target = initial[73]
+        let replacement = AccountUsageReading.current(AccountUsage(
+            windows: [AccountUsage.Window(
+                id: "5h",
+                label: "5-hour",
+                fraction: 0.94,
+                resetsAt: now.addingTimeInterval(300),
+                windowDuration: 5 * 3_600
+            )],
+            planLabel: "Pro",
+            observedAt: now,
+            source: .api
+        ))
+
+        XCTAssertTrue(fleet.update(reading: replacement, for: target.account.id))
+
+        XCTAssertEqual(fleet.orderedAccountIDsForTesting, order)
+        XCTAssertEqual(fleet.summaryForTesting.readyCount, 119)
+        XCTAssertEqual(fleet.summaryForTesting.constrainedCount, 1)
+        XCTAssertEqual(fleet.summaryForTesting.nextReset, now.addingTimeInterval(300))
+    }
+
+    func testAllAccountRefreshUsesABoundedProviderWorkPool() async {
+        let concurrency = 4
+        let probe = RefreshConcurrencyProbe()
+        let service = AccountUsageService(
+            maximumConcurrentRefreshes: concurrency,
+            observesActivity: false,
+            fetcher: { try await probe.fetch($0) }
+        )
+        let accounts = (0..<120).map { index in
+            AgentAccount(
+                provider: .claude,
+                handle: AccountHandle(storedName: "bounded-\(index)"),
+                configPath: "/tmp/bounded-\(index)",
+                displayName: "Account \(index)"
+            )
+        }
+        let settled = expectation(description: "every queued refresh settled")
+        settled.expectedFulfillmentCount = accounts.count
+
+        for account in accounts {
+            service.refresh(account, force: true) { settled.fulfill() }
+        }
+        await fulfillment(of: [settled], timeout: 10)
+
+        XCTAssertEqual(probe.started, accounts.count)
+        XCTAssertEqual(probe.peak, concurrency)
+    }
+
+    func testPopoverUsageEventReadsOnlyTheChangedIdentity() {
+        let accounts = fixtureAccounts(count: 120, prefix: "popover")
+        var reads: [AccountID] = []
+        let controller = AccountUsageFleetPopoverViewController(
+            currentAccountID: nil,
+            handoffAccountIDs: [],
+            accountsProvider: { accounts },
+            readingProvider: { account in
+                reads.append(account.id)
+                return .notFetched
+            },
+            refreshProvider: { _ in },
+            nowProvider: { self.now }
+        )
+        _ = controller.view
+        reads.removeAll()
+
+        NotificationCenter.default.post(AccountUsageDidChange(accountID: accounts[73].id))
+
+        XCTAssertEqual(reads, [accounts[73].id])
+    }
+
+    func testUsageSettingsEventReadsOnlyTheChangedIdentity() {
+        let accounts = fixtureAccounts(count: 120, prefix: "settings")
+        var reads: [AccountID] = []
+        let controller = UsagePreferencesViewController(
+            accountsProvider: { accounts },
+            readingProvider: { account in
+                reads.append(account.id)
+                return .notFetched
+            },
+            refreshProvider: { _, _ in }
+        )
+        _ = controller.view
+        reads.removeAll()
+
+        NotificationCenter.default.post(AccountUsageDidChange(accountID: accounts[41].id))
+
+        XCTAssertEqual(reads, [accounts[41].id])
     }
 
     func testOptionClickSelectsAllAccountsWithoutTakingOverControlClick() {
@@ -195,6 +318,17 @@ final class AccountUsageFleetTests: XCTestCase {
             isCurrent: isCurrent,
             allowsHandoff: false
         )
+    }
+
+    private func fixtureAccounts(count: Int, prefix: String) -> [AgentAccount] {
+        (0..<count).map { index in
+            AgentAccount(
+                provider: .claude,
+                handle: AccountHandle(storedName: "\(prefix)-\(index)"),
+                configPath: "/tmp/\(prefix)-\(index)",
+                displayName: "Account \(index)"
+            )
+        }
     }
 
     private var renderDirectory: URL {

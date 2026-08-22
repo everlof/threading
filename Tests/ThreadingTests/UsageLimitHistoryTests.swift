@@ -115,6 +115,41 @@ final class UsageLimitHistoryTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testRecordingHistoryPublishesTheTypedHistoryEvent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "usage-history-event-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = UsageHistoryStore(directory: directory)
+        let observations = AppEventObservations()
+        var deliveries = 0
+        observations.observe(UsageLimitHistoryDidChange.self) { _ in deliveries += 1 }
+        let account = AgentAccount(
+            provider: .codex,
+            handle: AccountHandle(storedName: "history-event"),
+            configPath: directory.path,
+            displayName: "History Event"
+        )
+        let usage = AccountUsage(
+            windows: [AccountUsage.Window(
+                id: "weekly",
+                label: "Weekly",
+                fraction: 0.42,
+                resetsAt: start.addingTimeInterval(week),
+                windowDuration: week
+            )],
+            planLabel: "Pro",
+            observedAt: start,
+            source: .api
+        )
+
+        store.record(usage, for: account)
+
+        XCTAssertEqual(deliveries, 1)
+    }
+
     private func sample(
         day: Double,
         fraction: Double,
