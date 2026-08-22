@@ -470,6 +470,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+#if DEBUG
+        if request.method == "POST", path == RemoteRouter.mobileDebugCaptureUploadPath {
+            handleMobileDebugCaptureUpload(request, respond: respond)
+            return
+        }
+#endif
+
         if request.method == "POST", path == RemoteRouter.invitationAcceptancePath {
             handleAcceptInvitation(request, respond: respond)
             return
@@ -750,6 +757,22 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             )
         case "conversationResync":
             handleConversationResync(connection)
+#if DEBUG
+        case "mobileDebugHello":
+            handleMobileDebugSignal(
+                connection,
+                routeKind: parsed.state,
+                screenshotPolicy: .latestIncident,
+                automatic: true
+            )
+        case "mobileDebugIncident":
+            handleMobileDebugSignal(
+                connection,
+                routeKind: parsed.state,
+                screenshotPolicy: .latestIncident,
+                automatic: false
+            )
+#endif
         default:
             break
         }
@@ -762,6 +785,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         DispatchQueue.main.async {
             self.services.mirrors.detach(connection)
         }
+#if DEBUG
+        services.mobileDebugCaptures.unregister(connection)
+#endif
     }
 
     // MARK: - REST
@@ -1140,6 +1166,79 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             RemoteDiagnosticUploadResponseDTO(acceptedRecords: upload.records.count)
         )))
     }
+
+#if DEBUG
+    private func handleMobileDebugCaptureUpload(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost,
+              request.header(RemoteRouter.clientHeader)?.lowercased() == "threading-ios",
+              request.body.count <= MobileDebugCaptureStore.maximumEncodedCaptureBytes,
+              let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+                request.header(RemoteRouter.deviceHeader)
+              ),
+              let upload = try? JSONDecoder().decode(
+                RemoteMobileDebugCaptureUploadRequestDTO.self,
+                from: request.body
+              ),
+              upload.capture.requestID == request.header(RemoteRouter.requestIDHeader) else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+
+        do {
+            let stored = try services.mobileDebugCaptures.accept(
+                upload.capture,
+                from: deviceID,
+                deviceName: nil
+            )
+            services.eventLog.recordRemoteEvent("iOS Debug evidence cached", [
+                "device": MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
+                "records": String(upload.capture.diagnostics.count),
+                "screenshot": upload.capture.screenshotJPEGBase64 == nil ? "none" : "included",
+            ])
+            respond(.respond(RemoteRouter.json(
+                RemoteMobileDebugCaptureUploadResponseDTO(
+                    captureID: stored.capture.captureID,
+                    storedAt: stored.storedAt
+                )
+            )))
+        } catch MobileDebugCaptureStore.StoreError.unsolicited {
+            respond(.respond(RemoteRouter.error(409, "Capture Not Requested")))
+        } catch {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+        }
+    }
+
+    private func handleMobileDebugSignal(
+        _ connection: RemoteConnection,
+        routeKind: String?,
+        screenshotPolicy: RemoteMobileDebugCaptureRequestDTO.ScreenshotPolicy,
+        automatic: Bool
+    ) {
+        guard routeKind == RemoteHostEndpointKind.lan,
+              connection.routedSessionID == RemoteRouter.themeEventsRouteID,
+              let peer = connection.authenticatedPeer,
+              peer.authorization.canManageHost,
+              authorizer?.isCurrent(peer.authorization) == true,
+              let deviceID = peer.deviceID else {
+            connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
+            return
+        }
+        services.mobileDebugCaptures.register(
+            connection,
+            deviceID: deviceID,
+            deviceName: peer.deviceName
+        )
+        _ = services.mobileDebugCaptures.requestCapture(
+            deviceID: deviceID,
+            screenshotPolicy: screenshotPolicy,
+            automatic: automatic
+        )
+    }
+#endif
 
     private static func diagnosticSource(
         forClientHeader header: String?
@@ -2607,6 +2706,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 terminalReplayBudget: replayBudget
             ) else { return }
             DispatchQueue.main.async {
+                guard self.authorizer?.isCurrent(authorization) == true else {
+                    connection.sendClose(code: 4003, reason: "Share revoked")
+                    return
+                }
                 self.services.mirrors.attachThemeEvents(connection)
             }
             return

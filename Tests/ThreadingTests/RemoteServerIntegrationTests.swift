@@ -2191,6 +2191,87 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
     }
 
+#if DEBUG
+    func testMobileDebugCaptureRouteRequiresOwnerIOSAndALiveRequest() throws {
+        let now = Date()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: now)
+        func makeBody(for requestID: String) throws -> Data {
+            let capture = RemoteMobileDebugCaptureDTO(
+                captureID: UUID().uuidString.lowercased(),
+                requestID: requestID,
+                capturedAt: timestamp,
+                appVersion: "1.0",
+                appBuild: "1",
+                operatingSystem: "iOS Test",
+                deviceModel: "iPhone-test",
+                applicationState: "active",
+                connectionState: "online",
+                activeEndpointKind: RemoteHostEndpointKind.lan,
+                pairedHostCount: 1,
+                visibleSessionCount: 1,
+                diagnostics: [RemoteDiagnosticRecord(
+                    timestamp: timestamp,
+                    source: .iOSClient,
+                    level: .info,
+                    event: .socketConnected,
+                    fields: ["transport": "websocket"]
+                )],
+                screenshotJPEGBase64: nil,
+                screenshotKind: nil
+            )
+            return try JSONEncoder().encode(
+                RemoteMobileDebugCaptureUploadRequestDTO(capture: capture)
+            )
+        }
+
+        let requestID = UUID().uuidString.lowercased()
+        let body = try makeBody(for: requestID)
+        let headers = [
+            "X-Threading-Client": "Threading-iOS",
+            "X-Threading-Request-ID": requestID,
+        ]
+
+        XCTAssertEqual(try XCTUnwrap(post(
+            RemoteRouter.mobileDebugCaptureUploadPath,
+            bearer: "goodtoken",
+            body: body,
+            headers: headers
+        )).status, 409, "an authenticated owner still needs a live, single-use request")
+
+        let webRequestID = UUID().uuidString.lowercased()
+        XCTAssertEqual(try XCTUnwrap(post(
+            RemoteRouter.mobileDebugCaptureUploadPath,
+            bearer: "goodtoken",
+            body: try makeBody(for: webRequestID),
+            headers: [
+                "X-Threading-Client": "Threading-Web",
+                "X-Threading-Request-ID": webRequestID,
+            ]
+        )).status, 403, "only the native iOS client may use this Debug route")
+
+        authority.set(
+            RemoteAuthorization(
+                shareID: "guest",
+                capability: .interact,
+                scope: .session(SessionID())
+            ),
+            forToken: "guesttoken"
+        )
+        let guestRequestID = UUID().uuidString.lowercased()
+        XCTAssertEqual(try XCTUnwrap(post(
+            RemoteRouter.mobileDebugCaptureUploadPath,
+            bearer: "guesttoken",
+            body: try makeBody(for: guestRequestID),
+            headers: [
+                "X-Threading-Client": "Threading-iOS",
+                "X-Threading-Request-ID": guestRequestID,
+            ]
+        )).status, 403, "a session guest cannot upload host Debug custody")
+    }
+#endif
+
     func testInvitationAcceptanceIsIdempotentForAnExistingBearer() throws {
         let request = try JSONEncoder().encode(
             RemoteAcceptInvitationRequestDTO(displayName: "Test iPhone")

@@ -166,7 +166,14 @@ struct JSONRPCResponse: Encodable, Sendable {
 /// Every session gets its own endpoint URL (see `MCPSessionRegistry`), so a call arrives
 /// already attributed to the session that made it.
 /// `listener` and `connectionsByID` are confined to `queue`; the handler is touched only after
-/// hopping to main, and the one cross-queue value (`port`) has its own lock.
+/// hopping to main, and the cross-queue values (`port`, `socketPath`) have their own locks.
+///
+/// **Two endpoints, one handler.** A loopback TCP port carries `--mcp-config`, because a CLI
+/// resolves that URL itself and cannot be handed a socket. A unix socket in an owner-only
+/// directory carries the hooks, because a hook command is *ours* and a socket path is the one
+/// address that survives a restart. Both accept the same requests through the same
+/// `MCPConnection`, which speaks HTTP over an `NWConnection` and neither knows nor cares which
+/// transport carried it. The TCP endpoint retires once the stdio shim replaces `--mcp-config`.
 final class MCPServer: @unchecked Sendable {
 
     static let toolsListChangedEvent = Data("""
@@ -179,7 +186,12 @@ final class MCPServer: @unchecked Sendable {
     // MARK: - Singleton
 
     static let shared = MCPServer()
-    private init() {
+
+    /// `configuredSocketPath` overrides the per-user rendezvous, which is how a test binds a
+    /// socket of its own — including one deliberately too long to bind, to prove that the TCP
+    /// listener still comes up beside it.
+    init(socketPath: String? = nil) {
+        configuredSocketPath = socketPath
         grantObserver = NotificationCenter.default.addObserver(
             forName: ControlGrantsDidChange.name,
             object: nil,
@@ -189,6 +201,12 @@ final class MCPServer: @unchecked Sendable {
             self?.queue.async { [weak self] in
                 self?.sendToolsListChanged(to: event.sessionID)
             }
+        }
+    }
+
+    deinit {
+        if let grantObserver {
+            NotificationCenter.default.removeObserver(grantObserver)
         }
     }
 
@@ -212,7 +230,22 @@ final class MCPServer: @unchecked Sendable {
 
     private let portStorage = OSAllocatedUnfairLock<UInt16?>(initialState: nil)
 
+    /// The unix rendezvous this server is bound to, or nil when it is not listening on one.
+    ///
+    /// Deliberately not the address hooks are written against — that is
+    /// `MCPBridgeLocation.socketPath`, which answers before anything binds. This says what the
+    /// listener actually got, which is a different question and only a test asks it.
+    var socketPath: String? {
+        socketPathStorage.withLock { $0 }
+    }
+
+    private let socketPathStorage = OSAllocatedUnfairLock<String?>(initialState: nil)
+
+    /// The path this server was asked to bind, or nil for the per-user default.
+    private let configuredSocketPath: String?
+
     private var listener: NWListener?
+    private var socketListener: NWListener?
     private var connectionsByID: [ObjectIdentifier: MCPConnection] = [:]
     private var eventStreamSessionByConnection: [ObjectIdentifier: SessionID] = [:]
     private var grantObserver: NSObjectProtocol? = nil
@@ -289,6 +322,11 @@ final class MCPServer: @unchecked Sendable {
             )
             finish()
         }
+
+        // Deliberately not tied to `completion`. The socket is the hooks' address and the hooks
+        // are written from a path, not from a bound listener, so a launch has nothing to wait
+        // for here — and a rendezvous that could not be bound must not hold up the window.
+        startSocketListener()
     }
 
     @MainActor
@@ -306,7 +344,84 @@ final class MCPServer: @unchecked Sendable {
             listener?.cancel()
             listener = nil
             portStorage.withLock { $0 = nil }
+
+            socketListener?.cancel()
+            socketListener = nil
+            // The file outlives the listener, so it is removed here rather than left for the
+            // next launch to trip over. A launch unlinks it again anyway, because a crash never
+            // reaches this line.
+            let boundPath = socketPathStorage.withLock { path -> String? in
+                let bound = path
+                path = nil
+                return bound
+            }
+            if let boundPath { unlinkStaleSocket(at: boundPath) }
         }
+    }
+
+    // MARK: - Unix Rendezvous
+
+    /// Binds the stable per-user socket beside the loopback port.
+    ///
+    /// Everything here degrades rather than fails. A path too long for `sun_path`, a directory
+    /// that cannot be created, a bind that is refused — each logs and returns, leaving the TCP
+    /// listener carrying the whole surface exactly as it did before this endpoint existed.
+    @MainActor
+    private func startSocketListener() {
+        guard socketListener == nil else { return }
+
+        let requested = configuredSocketPath ?? MCPBridgeLocation.socketPath
+        guard let path = MCPBridgeLocation.addressableSocketPath(requested) else { return }
+
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
+        guard MCPBridgeLocation.prepareDirectory(directory) else { return }
+
+        // A bind fails outright against a leftover file, and after a crash there is always one.
+        // Removing it is safe because `SingleInstanceLock` means the only process that could be
+        // listening on this path is this one.
+        unlinkStaleSocket(at: path)
+
+        do {
+            let parameters = NWParameters.tcp
+            parameters.requiredLocalEndpoint = .unix(path: path)
+            parameters.allowLocalEndpointReuse = true
+
+            let listener = try NWListener(using: parameters)
+            socketListener = listener
+
+            listener.stateUpdateHandler = { [weak self] state in
+                switch state {
+                case .ready:
+                    self?.socketPathStorage.withLock { $0 = path }
+                    ThreadingLogger.mcp.info("MCP server listening on its unix rendezvous")
+
+                case .failed(let error):
+                    ThreadingLogger.mcp.error(
+                        "MCP unix listener failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                    self?.socketPathStorage.withLock { $0 = nil }
+
+                default:
+                    break
+                }
+            }
+
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.accept(connection)
+            }
+
+            listener.start(queue: queue)
+        } catch {
+            ThreadingLogger.mcp.error(
+                "MCP unix listener could not start: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            socketListener = nil
+        }
+    }
+
+    private func unlinkStaleSocket(at path: String) {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        try? FileManager.default.removeItem(atPath: path)
     }
 
     // MARK: - Private Methods

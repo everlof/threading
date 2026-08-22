@@ -178,6 +178,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     var usageRenderedPointCountForTesting: Int { usageChart.renderedPointCount }
     var limitRenderedPointCountForTesting: Int { limitChart.renderedPointCount }
     var limitRenderedMarkerCountForTesting: Int { limitChart.renderedMarkerCount }
+    var limitChartXRangeForTesting: ClosedRange<Date>? { limitChart.resolvedXRangeForTesting }
     var usageChartCompositionForTesting: ThemedChartComposition { usageChart.composition }
     var limitChartCompositionForTesting: ThemedChartComposition { limitChart.composition }
     var breakdownVisibleSubviewCountForTesting: Int { breakdownTable.visibleCellCount }
@@ -217,6 +218,15 @@ final class UsageDashboardView: NSView, ThemedComponent {
     func selectTabForTesting(_ tab: DashboardTab) {
         tabControl.selectedIndex = tab.rawValue
         select(tab: tab, animated: false)
+    }
+
+    func selectLimitRangeForTesting(days: Int) {
+        guard let index = UsageDashboardProjectionDefaults.overviewRanges.firstIndex(of: days) else {
+            return
+        }
+        limitRangeControl.selectedIndex = index
+        selectedLimitDays = days
+        refreshLimits(animated: false)
     }
 
     private func setup() {
@@ -875,11 +885,14 @@ final class UsageDashboardView: NSView, ThemedComponent {
             ))
         }
 
+        // A future projection or the scheduled reset is part of the active window and may extend
+        // the plot. Banked-reset inventory is not: its next expiry can be weeks later than the
+        // selected history and already has a complete answer in the summary card below. Letting
+        // that date set the domain compresses the observed week into an unreadable sliver.
         let chartEnd = [
             now,
             selected.projection?.endpointAt,
-            selected.resetsAt,
-            selected.nextResetCreditExpiresAt
+            selected.resetsAt
         ].compactMap { $0 }.max() ?? now
         limitChart.setModel(ThemedChartModel(
             title: selected.title,

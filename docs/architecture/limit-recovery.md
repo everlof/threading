@@ -435,14 +435,15 @@ Everything above journals to `EventLog.Category.limitRecovery` in the same style
 this subsystem: the suggestion with its account, deciding window and reading; the absence of one;
 the dismissal; the press; and each of the three ways the press can end.
 
-### The strip
+### The recovery ribbon
 
-`LimitEscapeStripView` is the component (`UI/Design/`), drawn from the store and reporting both
-gestures back — the one-direction rule `ScheduledMessageStripView` states. It is deliberately not a
-`PaneNoticeView`: that band is a condition the *pane* found, spans it, and pushes its header apart
-from its content, while this is a condition of one conversation and belongs on that conversation's
-own column. It draws its own ground for `PaneNoticeView`'s other reason — in a terminal pane the
-surface behind it is the *terminal's* palette, which the app theme knows nothing about.
+`LimitEscapeStripView` is the specialized actionable pane ribbon (`UI/Design/`), drawn from the
+store and reporting both gestures back — the one-direction rule `ScheduledMessageStripView`
+states. It shares `PaneNoticeView`'s full-width ground, closing rule, height, inset and push-not-
+cover placement. It remains a separate component because its offer changes in place while work is
+in flight and because its two gestures are limit-recovery intentions rather than generic notice
+actions. It owns its ground for the same reason as `PaneNoticeView`: in a terminal pane the surface
+behind it is the *terminal's* palette, which the app theme knows nothing about.
 
 The condition and the action form one leading run; only dismissal sits at the opposite edge. The
 first layout let the sentence absorb every spare point while pinning the action beside dismissal,
@@ -450,12 +451,16 @@ so a wide terminal turned one choice into two islands hundreds of points apart. 
 the control text role and label ink rather than caption/secondary: it is the premise of the action,
 not metadata underneath it.
 
-Its hosts are the two composer areas. A rendered conversation puts it above the scheduled strip, on
-the prompt's column. A terminal session has no composer of its own — the box is inside the TUI — so
-`AgentSessionViewController` puts it at the bottom of the pane on the terminal's own margins, and
-the terminal gives up the rows rather than being drawn over: the lower edge is one of two
-constraints, swapped rather than both left active, so the PTY resizes exactly once as the offer
-arrives and once as it leaves.
+Its hosts put it directly below the pane header, spanning the whole pane, and the conversation or
+terminal begins below it. Each host swaps one of two content-top constraints as the offer arrives
+or leaves, so the ribbon never overlays content and the PTY resizes exactly once per transition.
+This placement is independent of the composer: a provider refusal normally exits the agent and
+hides the prompt, and the former composer-retained placement consequently left the recovery row
+floating deep inside the empty conversation.
+
+This is deliberately host-only extension surface. The host retains refusal detection, suggestion
+ranking, migration, scheduling, the in-flight state and dismissal; the native presentation uses
+the shared design-system ribbon vocabulary and exposes no extension replacement seam.
 
 ## The chooser is answered by label, never by position
 

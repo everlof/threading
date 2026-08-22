@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Threading
 
-/// The strip that offers a way past a spent usage limit.
+/// The pane ribbon that offers a way past a spent usage limit.
 ///
 /// What is pinned here is the contract a caller depends on — the press reaches the action, the ✕
 /// reaches the dismissal, a press already in flight cannot be pressed again — plus the two things
@@ -17,7 +17,7 @@ final class LimitEscapeStripTests: XCTestCase {
     // MARK: - Fixture
 
     private enum Fixture {
-        /// A composer column at a comfortable width, and one narrow enough that the strip has to
+        /// A pane at a comfortable width, and one narrow enough that the ribbon has to
         /// choose between its sentence and the button answering it.
         static let width: CGFloat = 620
         static let narrowWidth: CGFloat = 260
@@ -26,6 +26,10 @@ final class LimitEscapeStripTests: XCTestCase {
         static let accountName = "Daniel Block"
         static let reading = "5h 12% · 7d 40%"
         static let resetHint = "9:40pm (Europe/Rome)"
+
+        /// The ledger `CurfewReceiptWords.stripSentence` writes, handed over whole — this strip
+        /// never assembles one, which is why the fixture is a string rather than a state.
+        static let curfewLine = "Curfew since 04:00 · wrap-up sent 03:50 · interrupted 04:05 ×2"
 
         static var offer: LimitEscapeStripView.Offer {
             LimitEscapeStripView.Offer(
@@ -41,7 +45,7 @@ final class LimitEscapeStripTests: XCTestCase {
         super.tearDown()
     }
 
-    /// A host standing in for the composer's column: it states its size the way a split item
+    /// A host standing in for the pane: it states its size the way a split item
     /// does, rather than carrying a frame that constrains nothing, so a child measured in it is
     /// measured at a width it was actually asked to fit.
     @discardableResult
@@ -66,6 +70,15 @@ final class LimitEscapeStripTests: XCTestCase {
         try XCTUnwrap(
             strip.subviews.compactMap { $0 as? ThemedWarningMark }.first,
             "the strip carries no limit mark"
+        )
+    }
+
+    /// The conduct mark, which is an image view rather than a `ThemedWarningMark` — that
+    /// difference *is* the behaviour under test, so the helper finds it by what it is.
+    private func conductMark(in strip: LimitEscapeStripView) throws -> NSImageView {
+        try XCTUnwrap(
+            strip.subviews.compactMap { $0 as? NSImageView }.first,
+            "the strip carries no conduct mark"
         )
     }
 
@@ -426,7 +439,144 @@ final class LimitEscapeStripTests: XCTestCase {
         XCTAssertTrue(strip.dismissControl.acceptsFirstResponder)
     }
 
+    // MARK: - A Curfew
+
+    /// **The triangle stays the provider's.** `ThemedWarningMark` means "this was done to you and
+    /// you cannot answer it"; a curfew is a line the reader drew themselves and can end with the
+    /// button beside it, and wearing the triangle for that would teach them that the triangle is
+    /// sometimes negotiable.
+    func testACurfewWearsTheConductMarkAndNotTheProvidersTriangle() throws {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(.curfew(line: Fixture.curfewLine))
+        host(strip)
+
+        XCTAssertTrue(
+            try mark(in: strip).isHidden,
+            "the user's own bedtime borrowed the provider's warning triangle"
+        )
+        XCTAssertFalse(try conductMark(in: strip).isHidden)
+    }
+
+    /// The whole ledger, in the words its owner wrote — the strip states it and invents none of it.
+    func testACurfewSaysWhatItHasAlreadyDoneToTheSession() throws {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(.curfew(line: Fixture.curfewLine))
+        host(strip)
+
+        XCTAssertEqual(try sentence(in: strip).stringValue, Fixture.curfewLine)
+    }
+
+    /// A line that failed to arrive still says why nothing is being sent, rather than leaving an
+    /// unexplained plate over the conversation — the case this whole strip exists to prevent.
+    func testACurfewWithNoLineStillNamesTheStateItIsIn() throws {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(LimitEscapeStripView.Offer(source: .curfew))
+        host(strip)
+
+        XCTAssertEqual(try sentence(in: strip).stringValue, L10n.string("Under a curfew"))
+    }
+
+    /// One answer, and it ends the rule rather than making an exception to it. No wait, because
+    /// no window is coming back; **no ✕**, because a standing state has the lift — putting the
+    /// sentence away would hide the reason while leaving the hold exactly where it was.
+    func testACurfewOffersTheLiftAloneWithNoWaitAndNoWayToWaveItAway() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(.curfew(line: Fixture.curfewLine))
+        host(strip)
+
+        XCTAssertFalse(strip.continueControl.isHidden)
+        XCTAssertTrue(strip.continueControl.isEnabled)
+        XCTAssertEqual(strip.continueControl.title, L10n.string("Lift Curfew"))
+        XCTAssertTrue(strip.waitControl.isHidden, "a curfew has no window to wait for")
+        XCTAssertTrue(
+            strip.dismissControl.isHidden,
+            "a curfew that is holding the session right now can be dismissed out of sight"
+        )
+    }
+
+    /// The one button, third act. A curfew's press must not migrate the conversation to another
+    /// login and must not stand a *custom limit* down — those are different rules with different
+    /// lifetimes, and the strip is shared.
+    func testACurfewsButtonRoutesToTheLiftAndNowhereElse() {
+        let strip = LimitEscapeStripView()
+        var lifted = 0
+        var migrated = false
+        var continuedAnyway = false
+        strip.onLiftCurfew = { lifted += 1 }
+        strip.onContinue = { migrated = true }
+        strip.onContinueAnyway = { continuedAnyway = true }
+
+        strip.setOffer(.curfew(line: Fixture.curfewLine))
+        host(strip)
+
+        XCTAssertTrue(strip.continueControl.performPrimaryAction())
+
+        XCTAssertEqual(lifted, 1)
+        XCTAssertFalse(migrated, "a curfew's button moved the conversation to another account")
+        XCTAssertFalse(continuedAnyway, "a curfew's button stood down somebody's spending limit")
+    }
+
+    /// Read aloud, the row is the ledger and then the way out of it. A reader who cannot glance
+    /// at the strip is owed the answer as well as the state — the button carries no login to
+    /// announce it for them here.
+    func testACurfewsSpokenLabelCarriesItsLedgerAndItsAnswer() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(.curfew(line: Fixture.curfewLine))
+        host(strip)
+
+        let spoken = strip.accessibilityLabel() ?? ""
+        XCTAssertTrue(spoken.contains(Fixture.curfewLine), spoken)
+        XCTAssertTrue(spoken.contains(L10n.string("Lift Curfew")), spoken)
+        XCTAssertFalse(
+            spoken.contains(LimitEscapeStripStrings.waitToolTip),
+            "the spoken row offered a wait the drawn row does not have"
+        )
+    }
+
+    /// The mark is never a nameless element, whichever mark is showing: the shape carries the
+    /// meaning on screen and the label carries it for a reader who cannot see the shape.
+    func testTheConductMarkSaysWhatItMeans() throws {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(.curfew(line: Fixture.curfewLine))
+        host(strip)
+
+        XCTAssertEqual(
+            try conductMark(in: strip).accessibilityLabel(),
+            Fixture.curfewLine
+        )
+    }
+
+    /// The two states are one strip, so switching between them has to put every control back —
+    /// the ✕ a curfew removed included. A row that kept a curfew's missing dismissal would leave
+    /// the next provider refusal with no way out of it.
+    func testAProviderRefusalAfterACurfewGetsItsWayOutBack() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(.curfew(line: Fixture.curfewLine))
+        host(strip)
+        XCTAssertTrue(strip.dismissControl.isHidden)
+
+        strip.setOffer(Fixture.offer)
+
+        XCTAssertFalse(strip.dismissControl.isHidden)
+        XCTAssertFalse(try mark(in: strip).isHidden)
+        XCTAssertTrue(try conductMark(in: strip).isHidden)
+    }
+
     // MARK: - Layout
+
+    func testItUsesPaneRibbonGeometryRatherThanARoundedComposerCard() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(Fixture.offer)
+        host(strip)
+
+        XCTAssertEqual(strip.frame.height, PaneNoticeDefaults.bandHeight, accuracy: 0.5)
+        XCTAssertEqual(strip.layer?.cornerRadius ?? -1, 0, accuracy: 0.01)
+        XCTAssertEqual(
+            strip.subviews.compactMap { $0 as? SeparatorView }.count,
+            1,
+            "a pane ribbon needs one edge-to-edge closing rule"
+        )
+    }
 
     /// The sentence yields before the button does: a narrow pane truncates the explanation rather
     /// than squeezing the control that answers it off the row.
@@ -524,6 +674,26 @@ final class LimitEscapeStripTests: XCTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: strip), [])
     }
 
+    /// The same question asked of the state the *conduct* mark draws in. The mark's tint used to
+    /// be set once at construction, which is exactly the shape that survives a light/dark switch
+    /// and quietly fails an app-theme one — so it is inked from the sweep with everything else.
+    func testALiveThemeSwitchReachesAStandingCurfewStrip() throws {
+        AppThemePalette.set(.system)
+        let strip = LimitEscapeStripView()
+        strip.setOffer(.curfew(line: Fixture.curfewLine))
+        host(strip)
+
+        let before = strip.layer?.backgroundColor
+
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.cyberpunk.id))
+
+        XCTAssertNotEqual(before, strip.layer?.backgroundColor, "the plate kept its old ground")
+        XCTAssertEqual(try conductMark(in: strip).contentTintColor, Design.Text.secondary)
+        XCTAssertEqual(try sentence(in: strip).textColor, Design.Text.label)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: strip), [])
+    }
+
     /// A strip that could not be taken speaks in the status role rather than a colour of its own,
     /// so a theme that redefines "something is wrong" redefines this too.
     func testAProblemTakesTheStatusRoleRatherThanAColourOfItsOwn() throws {
@@ -544,15 +714,17 @@ final class LimitEscapeStripTests: XCTestCase {
     /// The rendered check: an offer drawn in both appearances puts ink on the plate. A strip that
     /// laid out correctly and drew nothing passes every assertion above.
     ///
-    /// Both shapes, because they are different layouts: the account offer fills the row, while a
-    /// wait-only refusal has to stand without the control the sentence was sized against.
+    /// Three shapes, because they are three different layouts: the account offer fills the row, a
+    /// wait-only refusal has to stand without the control the sentence was sized against, and a
+    /// curfew draws a different mark beside a much longer sentence with no ✕ closing the row.
     func testItDrawsInBothAppearances() throws {
         let offers = [
             Fixture.offer,
             LimitEscapeStripView.Offer(
                 offersWaitForReset: true,
                 resetHint: Fixture.resetHint
-            )
+            ),
+            .curfew(line: Fixture.curfewLine)
         ]
         for (appearance, offer) in [NSAppearance(named: .aqua), NSAppearance(named: .darkAqua)]
             .flatMap({ appearance in offers.map { (appearance, $0) } }) {

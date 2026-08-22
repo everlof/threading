@@ -66,6 +66,28 @@ final class AppDelegateTests: XCTestCase {
         )
     }
 
+    /// Launch Services decides whether a Dock icon can take a drag before the delegate sees it.
+    /// The handler below is therefore unreachable unless the built bundle declares both URL
+    /// classes it understands. Rank `None` is deliberately not absence: it means accept drops
+    /// without offering Threading as an app that opens every image or folder.
+    func testTheBundleAdvertisesTheDockIconInputsAsDropOnly() throws {
+        let declarations = try XCTUnwrap(
+            Bundle(for: AppDelegate.self).infoDictionary?["CFBundleDocumentTypes"]
+                as? [[String: Any]]
+        )
+        let dropDeclaration = try XCTUnwrap(declarations.first { declaration in
+            Set(declaration["LSItemContentTypes"] as? [String] ?? [])
+                == ["public.image", "public.folder"]
+        })
+
+        XCTAssertEqual(dropDeclaration["CFBundleTypeRole"] as? String, "Viewer")
+        XCTAssertEqual(
+            dropDeclaration["LSHandlerRank"] as? String,
+            "None",
+            "Dock drops must not make Threading an image or folder opener"
+        )
+    }
+
     func testClosingTheLastTestWindowDoesNotTerminateTheHostedRunner() {
         XCTAssertFalse(
             AppDelegate().applicationShouldTerminateAfterLastWindowClosed(NSApp)
@@ -194,6 +216,31 @@ final class AppDelegateTests: XCTestCase {
         UserDefaults.standard.set(false, forKey: "groupsSessionsByBranch")
         defer { UserDefaults.standard.removeObject(forKey: "groupsSessionsByBranch") }
         XCTAssertFalse(delegate.validateMenuItem(lone))
+    }
+
+    func testProjectMenuCarriesTheLiveRenameSessionShortcut() throws {
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        let previousHelpMenu = NSApp.helpMenu
+        defer {
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.helpMenu = previousHelpMenu
+        }
+
+        let delegate = AppDelegate()
+        delegate.setupMenuBar()
+
+        let projectMenu = try XCTUnwrap(
+            NSApp.mainMenu?.items.compactMap(\.submenu).first {
+                $0.title == MenuIdentifiers.projectMenu
+            }
+        )
+        let rename = try XCTUnwrap(projectMenu.item(withTitle: L10n.string("Rename Session…")))
+        let expected = ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.renameSession)
+        XCTAssertEqual(rename.representedObject as? String, AppCommands.ID.renameSession)
+        XCTAssertEqual(rename.keyEquivalent, expected?.key ?? "")
+        XCTAssertEqual(rename.keyEquivalentModifierMask, expected?.modifiers ?? [])
     }
 
     /// The global silence gate's third surface. It sits in the application menu rather than

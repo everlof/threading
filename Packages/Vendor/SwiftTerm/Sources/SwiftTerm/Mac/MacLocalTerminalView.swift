@@ -56,6 +56,7 @@ private final class LocalProcessTerminalViewProcessAdapter:
     private let crossThreadState: Locked<TerminalViewCrossThreadState>
     private let diagnosticsState: Locked<TerminalView.Diagnostics>
     private let outputHandler: LockedVoidCallback
+    private let outputBytesHandler: LockedBytesCallback
     private let windowSize = Locked(winsize())
     private let inputProcess = Locked(WeakLocalProcessInputReference())
     private let terminationHandler: @MainActor @Sendable (Int32?) -> Void
@@ -65,12 +66,14 @@ private final class LocalProcessTerminalViewProcessAdapter:
          crossThreadState: Locked<TerminalViewCrossThreadState>,
          diagnosticsState: Locked<TerminalView.Diagnostics>,
          outputHandler: LockedVoidCallback,
+         outputBytesHandler: LockedBytesCallback,
          terminationHandler: @escaping @MainActor @Sendable (Int32?) -> Void) {
         self.renderOwner = renderOwner
         self.frameSignal = frameSignal
         self.crossThreadState = crossThreadState
         self.diagnosticsState = diagnosticsState
         self.outputHandler = outputHandler
+        self.outputBytesHandler = outputBytesHandler
         self.terminationHandler = terminationHandler
     }
 
@@ -105,6 +108,7 @@ private final class LocalProcessTerminalViewProcessAdapter:
             diagnostics.batches += 1
         }
         outputHandler.call()
+        outputBytesHandler.call(slice: slice)
         frameSignal.markDirty()
     }
 
@@ -118,6 +122,9 @@ private final class LocalProcessTerminalViewProcessAdapter:
             diagnostics.batches += 1
         }
         outputHandler.call()
+        // The callback container copies only when a host installed an observer. The IO pipeline
+        // can therefore reuse its borrowed storage as soon as this delegate returns.
+        outputBytesHandler.call(borrowed: bytes)
         frameSignal.markDirty()
     }
 
@@ -155,6 +162,7 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     public internal(set) var process: LocalProcess!
     private var processAdapter: LocalProcessTerminalViewProcessAdapter!
     nonisolated private let processOutputHandler = LockedVoidCallback()
+    nonisolated private let processOutputBytesHandler = LockedBytesCallback()
 
     public override init (frame: CGRect)
     {
@@ -184,6 +192,7 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
             crossThreadState: crossThreadState,
             diagnosticsState: diagnosticsState,
             outputHandler: processOutputHandler,
+            outputBytesHandler: processOutputBytesHandler,
             terminationHandler: { [weak self] exitCode in
                 guard let self, let process = self.process else { return }
                 self.processTerminated(process, exitCode: exitCode)
@@ -212,6 +221,21 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     /// and must return quickly.
     public func setProcessOutputHandler(_ handler: (@Sendable () -> Void)?) {
         processOutputHandler.replace(with: handler)
+    }
+
+    /// Installs a notification carrying each owned PTY output batch after the terminal parsed it.
+    ///
+    /// Direct-delivery parsing runs on the process IO worker, so subclassing
+    /// ``dataReceived(slice:)`` no longer observes the production read path. Hosts that mirror,
+    /// record, or inspect raw output can use this explicit seam instead. The callback runs on
+    /// that same worker and must return promptly. Its byte array is independently owned and may
+    /// be retained or handed to another queue.
+    ///
+    /// No copy is made while the handler is `nil`.
+    public func setProcessOutputBytesHandler(
+        _ handler: (@Sendable ([UInt8]) -> Void)?
+    ) {
+        processOutputBytesHandler.replace(with: handler)
     }
     
     /**

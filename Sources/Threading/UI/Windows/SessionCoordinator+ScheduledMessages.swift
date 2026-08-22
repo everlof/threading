@@ -228,12 +228,19 @@ extension SessionCoordinator {
             return true
 
         case .waitUntilLifted(let reason):
+            // Journalled on the *edge*, never on the heartbeat. A held send is re-offered on
+            // every activity edge and every `CurfewDidChange`, so a line written each time this
+            // decided the same thing again would be the log of one quiet night filling with one
+            // sentence — and would bury the moment the hold actually began.
+            let wasAlreadyWaiting = message.state == .waiting(reason)
             ScheduledMessageStore.shared.relinquish(message.id, waitingBecause: reason)
             ScheduledMessageScheduler.shared.forgetWaiting(message.id)
-            environment.eventLog.record(.curfew, "Scheduled send held by the session's curfew", [
-                "session": sessionID.uuidString,
-                "reason": reason
-            ])
+            if !wasAlreadyWaiting {
+                environment.eventLog.record(.curfew, "Scheduled send held by the session's curfew", [
+                    "session": sessionID.uuidString,
+                    "reason": reason
+                ])
+            }
             return true
         }
     }
@@ -270,8 +277,14 @@ extension SessionCoordinator {
         // scheduled send would complete on the strength of "we pressed Return" — a fact about
         // our keystrokes, not about the message — and that gap costs more here than anywhere
         // else it exists: nobody is watching, and `complete` deletes the only durable copy.
+        // The provenance rides with the words: a curfew's wrap-up is the one row a held outbox
+        // still hands over, and the drain reads that off the item rather than re-deriving it.
         let prompt = handingOverImages(of: message, to: sessionID)
-        SessionMessageDelivery.deliver(prompt, to: sessionID) { [weak self] outcome in
+        SessionMessageDelivery.deliver(
+            prompt,
+            to: sessionID,
+            origin: message.purpose == .curfewWindDown ? .curfewWindDown : .user
+        ) { [weak self] outcome in
             guard let self else { return }
             switch outcome {
             case .sentNow, .queuedBehindTurn:
@@ -402,12 +415,20 @@ extension SessionCoordinator {
             ))
         }
 
+        // The end this start has been carrying since it was written, resolved against the clock
+        // and the settings in force *now* rather than the ones it was frozen under. A start that
+        // fired late may have a wall-clock end already behind it, and quiet hours may have been
+        // switched off in the meantime; both are journalled and armed as nothing, because a
+        // curfew that begins in the past would hold the session from its first breath.
+        armCurfew(plan.curfew, forSessionID: session.id)
+
         // Composed after the session exists rather than before it, because the pictures can only
         // be filed against a session that has a folder — and the paths that go into the opening
         // prompt have to be the ones that filing produced.
         var opening = NewChatOpeningMessage.compose(
             prompt: handingOverImages(of: message, to: session.id).text,
-            reusableMessage: environment.settings.newChatOpeningMessage
+            prefix: environment.settings.newChatOpeningPrefix,
+            suffix: environment.settings.newChatOpeningSuffix
         )
         if let managedPlan = plan.managedWorkspacePlan {
             opening = ManagedWorkspaceInstructions.append(
@@ -486,6 +507,11 @@ extension SessionCoordinator {
             "wokeTheAgent": wokeTheAgent ? "yes" : "no",
             "prompt": message.text
         ])
+        // The record leaves the store on `complete`, so the curfew's own ledger is where the
+        // wrap-up's fate survives — it is what the strip reads back the next morning.
+        if message.purpose == .curfewWindDown {
+            SessionCurfewCenter.shared.noteWindDownDelivered(sessionID: sessionID)
+        }
         ScheduledMessageNotifier.shared.report(.delivered(message, sessionID: sessionID))
     }
 
@@ -501,6 +527,12 @@ extension SessionCoordinator {
             "reason": reason,
             "prompt": message.text
         ])
+        if message.purpose == .curfewWindDown, let sessionID = message.target.sessionID {
+            SessionCurfewCenter.shared.noteWindDownFailed(
+                sessionID: sessionID,
+                reason: reason
+            )
+        }
         ScheduledMessageNotifier.shared.report(.failed(message, reason: reason))
     }
 }

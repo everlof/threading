@@ -19,7 +19,15 @@ is the feature.
 
 ### Decisions already made (do not reopen)
 
-- **Interrupt only, never terminate.** The user wants to come back and read the chat/terminal.
+- **Interrupt by default; stopping the agent is an opt-in escalation.** The default ladder never
+  terminates — the user wants to come back and read the chat/terminal. A Settings choice ("If it
+  keeps working after 3 interrupts: Notify me / Stop the agent") arms the escalation: on give-up
+  the engine calls `AgentRuntime.terminate(sessionID:)`, which deliberately **keeps the terminal
+  so its final output stays visible** (`AgentRuntime.swift:732`) — never `discard`. The row stays
+  in the sidebar, the pane keeps the conversation, and resuming reuses the existing
+  **Resume Session** affordance (`TerminalContainerViewController.showDormantState`, ~L1717–1747)
+  rather than growing a second one. A native conversation's timeline is persisted and replays, so
+  "see where it left off" is native behaviour there too.
 - **Margins: wind-down 10 min before, grace 5 min after**, both editable.
 - **Settings holds defaults + optional standing quiet hours** that every session inherits;
   session/project override with nil-means-inherit (the `LimitRecoveryResolution` pattern).
@@ -43,8 +51,10 @@ CLI, so a held session that starts a new turn after T+grace is interrupted again
 edge — but only when **nobody is watching** (`!NSApp.isActive || !tracker.isVisible`, the
 `ScheduledMessageNotifier` rule), never for a native composer-submitted turn, at most
 `maximumInterrupts = 3` with `reinterruptSpacing = 30 s`. After that the curfew **gives up**,
-records it, and posts one actionable `AttentionAlert` ("Kept working after 3 interrupts"). A turn
-started in front of the user is theirs.
+records it, and — by the Settings choice — either posts one actionable `AttentionAlert` ("Kept
+working after 3 interrupts", the default) or **stops the agent**: `AgentRuntime.terminate`, final
+screen kept, receipt `.stoppedAgent`, strip clause "stopped 04:12". A turn started in front of
+the user is theirs.
 
 **Escape is capability-gated.** New `AgentCapabilities.escapeInterruptsTerminalTurn` (Claude,
 Codex). It is typed only when `kind.supports(.escapeInterruptsTerminalTurn)` (no new `supportsX` property — the capability file reserves those for the original seven), `AgentRuntime.reportsOwnTurns(sessionID:)` is
@@ -187,7 +197,11 @@ Evaluation of one session at `now`:
 3. **Hold**: `now >= deadline`, no `.held` receipt → receipt `.held`, post `CurfewDidChange`.
 4. **Interrupt**: at `interruptAt` with a turn in flight → interrupt (native / gated Escape /
    nothing). Later turn starts while held → only if unwatched and not composer-submitted, spacing
-   honoured, count < 3; else `.gaveUp` + alert.
+   honoured, count < 3; else `.gaveUp` + alert — or, when `stopsAgentOnGiveUp`, the `stopAgent`
+   performer (default `AgentRuntime.shared.terminate(sessionID:)`), receipt `.stoppedAgent`, and
+   the alert says "Stopped after 3 interrupts" instead. The engine's trigger is carried as a
+   *reason* (curfew today; a custom-limit park later) so the ladder can be reused by an
+   account-rule `enforce` tier without retrofitting.
 5. Persist state in one `updateCurfewState` write; journal each receipt to `EventLog(.curfew)`.
 Then re-arm the timer at the nearest pending moment across sessions.
 
@@ -278,6 +292,10 @@ Section **"Quiet Hours & Curfews"** on the Usage Windows page
 5. **Quiet hours** — toggle, subtitle *"Every session is held between these times unless it is exempt."*
 6. **From** / **To** — `timePopUp(selecting:range:action:)` (L285-299) at 30-minute steps, enabled
    only while the toggle is on
+6b. **If it keeps working after 3 interrupts** — popup: "Notify me" (default) / "Stop the agent",
+   subtitle "Stopping keeps the conversation on screen; Resume Session brings it back." Stored as
+   `CurfewPreferences.stopsAgentOnGiveUp: Bool` (decoded with a default so stored records predating
+   it read as Notify)
 7. `detailRow(symbol: moon.zzz, title: "Tonight")` — the live sentence the popups produce:
    *"Wrap-up at 03:50 · held from 04:00 · a turn still running at 04:05 is interrupted · lifts 08:00."*
 
@@ -338,4 +356,8 @@ Critical path: 1 → 2 → 3 → {4, 5, 8, 12} → 6 → {7, 9, 10, 11} → 13. 
    participant holds input; the attempt is counted and journalled as "input held remotely".
 6. **`AttentionAlert` is `CaseIterable`** — the new case touches every switch (compiler lists them).
 7. **Follow-ups**: iPhone summary field + `curfew` route; project-specific quiet windows;
-   per-session wrap-up text.
+   per-session wrap-up text; `CustomLimitTier.enforce` — run this same ladder while one of the
+   user's own account rules holds (the "stop at 70% even if looping" case), reusing the engine's
+   reason seam; a `UserPromptSubmit` enforcement hook that blocks a loop's re-submission in-band
+   at zero spend (Claude-first, measured — a blocked prompt must not strand the tracker);
+   per-session ceilings stay with `usage-aware-accounts.md` §C.

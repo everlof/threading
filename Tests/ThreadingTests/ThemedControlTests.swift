@@ -2934,6 +2934,36 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
     }
 
+    func testMenuShortcutColumnMeasuresAndSpellsTheCompleteChord() {
+        let shortcut = KeyboardShortcut(
+            key: "\u{F702}",
+            modifiers: [.command, .control]
+        )
+        let entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(title: "Go Back", shortcut: shortcut))
+        ]
+
+        AppThemePalette.set(.system)
+        XCTAssertEqual(ThemedMenuMetrics.shortcutText(shortcut), "⌃⌘←")
+        XCTAssertEqual(
+            ThemedMenuMetrics.shortcutColumnWidth(entries),
+            ceil(shortcut.displayString.size(
+                withAttributes: [.font: ThemedMenuMetrics.titleFont]
+            ).width),
+            accuracy: 0.5
+        )
+
+        AppThemePalette.set(AppThemeStyles.win98)
+        XCTAssertEqual(
+            ThemedMenuMetrics.shortcutText(
+                KeyboardShortcut(key: "r", modifiers: .command)
+            ),
+            "Ctrl+R"
+        )
+        XCTAssertEqual(ThemedMenuMetrics.shortcutText(shortcut), "⌃⌘←")
+        AppThemePalette.set(.system)
+    }
+
     /// Every row's `7d` lands in the same column, including on rows that have no `5h`.
     ///
     /// The whole argument for `ThemedMenuMetric` is that a value inside a sentence is positioned
@@ -7562,6 +7592,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ImageAnnotationCountView",
                 "ImageCompareCanvas",
                 "ImageCompareView",
+                "LaunchFailureView",
                 "LimitEscapeStripView",
                 "MediaInspectorCanvas",
                 "MediaInspectorDocumentView",

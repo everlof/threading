@@ -118,6 +118,75 @@ final class SessionDashboardTests: XCTestCase {
         )
     }
 
+    func testAnAutomaticallyRetriedFailureSaysWhatWillHappenNext() {
+        XCTAssertEqual(
+            MobileDashboardChrome.connectionStatus(
+                phase: .offline(.transport("temporary route miss")),
+                connectionLabel: "LAN",
+                progress: .waitingToRetry(attempt: 1)
+            ),
+            MobileL10n.string("Trying again…")
+        )
+
+        let presentation = MobileConnectionProgressPresentation.resolve(
+            progress: .waitingToRetry(attempt: 1)
+        )
+        XCTAssertEqual(presentation.currentStep.id, .connection)
+        XCTAssertEqual(
+            presentation.currentStep.title,
+            MobileL10n.string("Connection interrupted. Trying again…")
+        )
+    }
+
+    /// A single recoverable miss is network movement, not a page-sized failure. Three complete
+    /// attempts are enough to say the Mac is unavailable for now and expose recovery actions.
+    func testRecoverableFailureNeedsRepeatedAttemptsBeforeFullRecovery() {
+        let failure = RemoteConnectionFailure.transport("temporary route miss")
+
+        XCTAssertFalse(MobileConnectionRecoveryPolicy.presentsFullRecovery(
+            for: failure,
+            attempt: MobileConnectionRecoveryPolicy.settledFailureAttempt - 1
+        ))
+        XCTAssertTrue(MobileConnectionRecoveryPolicy.presentsFullRecovery(
+            for: failure,
+            attempt: MobileConnectionRecoveryPolicy.settledFailureAttempt
+        ))
+    }
+
+    func testAnActionableFailureDoesNotWaitBehindAutomaticRetryChrome() {
+        XCTAssertTrue(MobileConnectionRecoveryPolicy.presentsFullRecovery(
+            for: .pinnedIdentityMismatch(),
+            attempt: 0
+        ))
+    }
+
+    func testADisclosedFailureStaysStableThroughTheNextAttemptUntilSuccess() {
+        let failure = RemoteConnectionFailure.transport("repeated route miss")
+        let disclosed = MobileConnectionRecoveryDisplay.updatedFailure(
+            current: nil,
+            phase: .offline(failure),
+            attempt: MobileConnectionRecoveryPolicy.settledFailureAttempt
+        )
+        XCTAssertEqual(disclosed, failure)
+
+        let whileRetrying = MobileConnectionRecoveryDisplay.updatedFailure(
+            current: disclosed,
+            phase: .connecting,
+            attempt: MobileConnectionRecoveryPolicy.settledFailureAttempt
+        )
+        XCTAssertEqual(
+            whileRetrying,
+            failure,
+            "the recovery card disappeared for the duration of one automatic retry"
+        )
+
+        XCTAssertNil(MobileConnectionRecoveryDisplay.updatedFailure(
+            current: whileRetrying,
+            phase: .online,
+            attempt: 0
+        ))
+    }
+
     func testConnectingNavigationStatusNamesTheRouteBeingTried() {
         XCTAssertEqual(
             MobileDashboardChrome.connectionStatus(
@@ -196,6 +265,7 @@ final class SessionDashboardTests: XCTestCase {
                     total: 3
                 ),
                 .loadingSessions(routeKind: RemoteHostEndpointKind.lan),
+                .waitingToRetry(attempt: 1),
             ]
         )
         for story in MobileConnectionProgressLabStory.allCases {

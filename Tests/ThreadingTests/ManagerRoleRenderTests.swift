@@ -83,11 +83,17 @@ final class ManagerRoleRenderTests: HostedStoreTestCase {
             [
                 .item(ThemedMenuItem(
                     title: L10n.string("New Chat…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.newSession
+                    ),
                     image: ThemedMenuIcon.symbol("bubble.left"),
                     onChoose: {}
                 )),
                 .item(ThemedMenuItem(
                     title: L10n.string("New Manager…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.newManager
+                    ),
                     image: ThemedMenuIcon.symbol("person.3"),
                     onChoose: {}
                 )),

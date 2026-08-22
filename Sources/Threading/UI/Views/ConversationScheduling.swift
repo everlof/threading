@@ -249,6 +249,117 @@ extension ConversationViewController {
         guard case .sessionFinished(let watchedSessionID) = message.trigger else { return nil }
         return projectedSession(for: watchedSessionID)?.displayTitle
     }
+
+    // MARK: - The Curfew Chip
+
+    /// Restates the footer's curfew chip from the resolution, and nothing else.
+    ///
+    /// **Present only while a curfew resolves**, whichever scope answered — the chat's own rule,
+    /// its checkout's, or the standing quiet hours every session follows. A conversation with no
+    /// curfew is the ordinary case and gets no chip, rather than a permanent slot saying so.
+    ///
+    /// The title is a glance and the tooltip is the ledger: "Until 04:00" is what somebody needs
+    /// while typing, and the whole ladder — the wrap-up, each interrupt, the honest clause where
+    /// Threading cannot tell whether the session is working — is what they need once they stop to
+    /// ask. Same sentence as the pane's own strip, from the same writer.
+    func refreshCurfewChip() {
+        guard isViewLoaded else { return }
+        let now = Date()
+        guard let curfew = CurfewResolution.answer(forSessionID: sessionID, now: now).curfew else {
+            curfewChip.isHidden = true
+            return
+        }
+
+        curfewChip.isHidden = false
+        curfewChip.configure(
+            symbolName: CurfewDefaults.symbol,
+            title: Self.curfewChipTitle(for: curfew, now: now)
+        )
+        // `configure` puts the title on the tooltip, so what the chip does not have room to say
+        // has to be said after it.
+        curfewChip.toolTip = CurfewReceiptWords.stripSentence(
+            curfew: curfew,
+            state: SessionCurfewCenter.shared.state(for: sessionID),
+            canTellWorking: SessionCurfewCenter.shared.canTellWorking(sessionID: sessionID),
+            now: now
+        )
+    }
+
+    /// Two tenses, the strip's own rule and its own words: a fence that has not closed yet and one
+    /// that has are different news, and the chip is read at a glance rather than as a ledger.
+    private static func curfewChipTitle(for curfew: ResolvedCurfew, now: Date) -> String {
+        let time = ScheduledTimePresets.time(curfew.deadline)
+        return now < curfew.deadline
+            ? L10n.format("Until %@", time)
+            : L10n.format("Curfew since %@", time)
+    }
+
+    /// The rows behind the chip — the same menu the sidebar fold and the draft view open, so the
+    /// question is answered identically wherever it is asked.
+    ///
+    /// Built fresh on every open, like the schedule menu beside it: a quiet-hours window switched
+    /// on since the last press, or a usage window that reset five minutes ago, must not still be
+    /// offered as it was.
+    func curfewMenuEntries() -> [ThemedMenuEntry] {
+        guard let session = currentSession else { return [] }
+        let now = Date()
+
+        // The account's cached reading, refreshed once for the whole menu rather than once per
+        // row — `scheduleMenuEntries`' rule, and the same reason: a menu is built in one run-loop
+        // pass and a usage fetch is a network round trip.
+        let account = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
+        )
+        if let account { AccountUsageService.shared.refresh(account) }
+
+        return CurfewMenu.entries(
+            now: now,
+            usage: account.flatMap { AccountUsageService.shared.usage(for: $0) },
+            metering: session.model,
+            quietHours: CurfewSettings.shared.preferences.quietHours,
+            resolved: CurfewResolution.answer(forSessionID: sessionID, now: now),
+            holds: CurfewHoldPolicy.isHeld(sessionID: sessionID, at: now)
+        ) { [weak self] choice in
+            self?.chooseCurfew(choice)
+        }
+    }
+
+    private func chooseCurfew(_ choice: CurfewMenu.Choice) {
+        switch choice {
+        case .at(let deadline):
+            SessionCurfewCenter.shared.setCurfew(.until(deadline), forSessionID: sessionID)
+        case .atQuietHours(let start):
+            // Resolved to a moment here rather than stored as a standing intention. The draft
+            // view keeps the *choice* because the session it belongs to does not exist yet and
+            // its start may be days away; this conversation is already running, so "when quiet
+            // hours next begin" has exactly one answer and it is the one the menu just named.
+            SessionCurfewCenter.shared.setCurfew(.until(start), forSessionID: sessionID)
+        case .exempt:
+            // Nil where nothing would have held this chat anyway: an exemption from a standing
+            // window that is switched off is a rule about nothing, and writing it would stop the
+            // session following the window the user turns on tomorrow. `chooseLimitRecovery`'s
+            // rule, which is why the field is optional rather than a plain flag.
+            let inherited = CurfewResolution.inherited(beyondSessionID: sessionID)
+            SessionCurfewCenter.shared.setCurfew(
+                inherited == nil ? nil : .exempt,
+                forSessionID: sessionID
+            )
+        case .inherit:
+            SessionCurfewCenter.shared.setCurfew(nil, forSessionID: sessionID)
+        case .lift:
+            SessionCurfewCenter.shared.lift(sessionID: sessionID)
+        case .custom:
+            ScheduleMomentPickerViewController.present(
+                over: self,
+                title: L10n.string("End this session"),
+                confirmTitle: L10n.string("Set Curfew")
+            ) { [weak self] date in
+                guard let self, let date else { return }
+                SessionCurfewCenter.shared.setCurfew(.until(date), forSessionID: self.sessionID)
+            }
+        }
+    }
 }
 
 // MARK: - Timing Sentences

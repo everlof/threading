@@ -3,6 +3,82 @@ import UIKit
 import XCTest
 @testable import ThreadingMobile
 
+final class MobileFloatingSurfaceTests: XCTestCase {
+    private struct ColorComponents: Equatable {
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        let alpha: CGFloat
+    }
+
+    func testFloatingChromeUsesItsDedicatedRoleInsteadOfTheTranslucentPanel() throws {
+        let palette = RemoteThemePalette(theme(colors: [
+            "ground": "#101820",
+            "panel": "#FFFFFF0D",
+            "elevated": "#263746",
+            "floating_surface": "#304A60",
+        ]))
+
+        XCTAssertEqual(
+            try components(of: palette.uiFloatingSurface),
+            try components(of: UIColor(remoteHex: "#304A60")!)
+        )
+    }
+
+    func testTranslucentFloatingChromeIsFlattenedOverTheThemeGround() throws {
+        let palette = RemoteThemePalette(theme(colors: [
+            "ground": "#000000",
+            "floating_surface": "#FFFFFF80",
+        ]))
+        let components = try components(of: palette.uiFloatingSurface)
+
+        XCTAssertEqual(components.red, 128.0 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(components.green, 128.0 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(components.blue, 128.0 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(components.alpha, 1, accuracy: 0.001)
+    }
+
+    func testAnOlderHostFallsBackToElevatedRatherThanPanel() throws {
+        let palette = RemoteThemePalette(theme(colors: [
+            "ground": "#101820",
+            "panel": "#FFFFFF0D",
+            "elevated": "#263746",
+        ]))
+
+        XCTAssertEqual(
+            try components(of: palette.uiFloatingSurface),
+            try components(of: UIColor(remoteHex: "#263746")!)
+        )
+    }
+
+    private func theme(colors: [String: String]) -> RemoteThemeDTO {
+        RemoteThemeDTO(
+            id: "floating-surface-test",
+            name: "Floating surface test",
+            mode: "dark",
+            colors: colors,
+            material: RemoteThemeDTO.Material(
+                panelRadius: 20,
+                controlRadius: 10,
+                borderWidth: 1
+            )
+        )
+    }
+
+    private func components(
+        of color: UIColor
+    ) throws -> ColorComponents {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            throw XCTSkip("The test colour did not resolve in sRGB")
+        }
+        return ColorComponents(red: red, green: green, blue: blue, alpha: alpha)
+    }
+}
+
 /// The one property iOS lets an authored theme reach on the system keyboard.
 ///
 /// There is no API for tinting keycaps, so `UIKeyboardAppearance` is the whole seam and the only
@@ -241,6 +317,55 @@ final class MobileMorphingTitleTests: XCTestCase {
         XCTAssertFalse(title.isAnimatingTravelingFadeForTesting)
     }
 
+    /// The dot moves because the centred phrase beside it changes width. The old-position copy
+    /// fades away while the real dot is initially invisible at its new position, so two
+    /// warning-coloured connection steps do not reveal that reflow as a teleport.
+    func testTheConnectionDotFadesAcrossLayoutWhenTheStatusChangesButItsColorDoesNot() throws {
+        let (window, dot) = mountedConnectionDot()
+        defer { window.isHidden = true }
+
+        dot.update(color: .systemOrange, status: "Checking connections", reducesMotion: false)
+        XCTAssertFalse(dot.isAnimatingTransitionForTesting)
+
+        let oldFrame = dot.convert(dot.bounds, to: window)
+        dot.update(color: .systemOrange, status: "Trying LAN", reducesMotion: false)
+
+        let transition = try XCTUnwrap(dot.transitionForTesting)
+        let opacity = try XCTUnwrap(
+            transition.animations?.compactMap { $0 as? CAKeyframeAnimation }
+                .first { $0.keyPath == "opacity" }
+        )
+        let values = try XCTUnwrap(opacity.values as? [NSNumber])
+        XCTAssertEqual(values.map(\.floatValue), [0, 0, 1])
+        XCTAssertEqual(
+            transition.duration,
+            MobileDesign.Motion.connectionStatusMorphDuration,
+            accuracy: 0.001
+        )
+
+        let departing = try XCTUnwrap(dot.departingIndicatorForTesting)
+        XCTAssertEqual(departing.frame, oldFrame)
+        let departure = try XCTUnwrap(
+            departing.layer.animation(
+                forKey: "threading.connection-status-indicator.departing"
+            ) as? CABasicAnimation
+        )
+        XCTAssertEqual(departure.fromValue as? Float, 1)
+        XCTAssertEqual(departure.toValue as? Float, 0)
+    }
+
+    func testReduceMotionLandsAConnectionDotChangeWithoutAFade() {
+        let (window, dot) = mountedConnectionDot()
+        defer { window.isHidden = true }
+
+        dot.update(color: .systemOrange, status: "Checking connections", reducesMotion: false)
+        dot.update(color: .systemGreen, status: "Connected", reducesMotion: true)
+
+        XCTAssertFalse(dot.isAnimatingTransitionForTesting)
+        XCTAssertNil(dot.departingIndicatorForTesting)
+        XCTAssertEqual(dot.layer.backgroundColor, UIColor.systemGreen.cgColor)
+    }
+
     func testAConnectionProgressFadeDoesNotChangeItsWords() {
         let (window, title) = mountedTitle()
         defer { window.isHidden = true }
@@ -319,6 +444,24 @@ final class MobileMorphingTitleTests: XCTestCase {
         window.makeKeyAndVisible()
         window.layoutIfNeeded()
         return (window, title)
+    }
+
+    private func mountedConnectionDot() -> (UIWindow, MobileConnectionStatusIndicatorView) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        let dot = MobileConnectionStatusIndicatorView(
+            frame: CGRect(
+                x: 100,
+                y: 100,
+                width: MobileDesign.Size.navigationStatusIndicator,
+                height: MobileDesign.Size.navigationStatusIndicator
+            )
+        )
+        controller.view.addSubview(dot)
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        return (window, dot)
     }
 
     private func configure(

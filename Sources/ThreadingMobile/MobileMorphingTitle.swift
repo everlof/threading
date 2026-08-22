@@ -97,8 +97,17 @@ final class MobileMorphingTitleLabel: UIView {
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            // LabelMorph's glyph rasters extend past their typographic boxes so overhanging ink
+            // remains intact. This wrapper clips navigation chrome, so the overflow has to live
+            // inside our bounds instead of losing the first and last tile at the edges.
+            label.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: MorphingLabel.glyphRasterOverflow
+            ),
+            label.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -MorphingLabel.glyphRasterOverflow
+            ),
             label.topAnchor.constraint(equalTo: topAnchor),
             label.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
@@ -117,7 +126,11 @@ final class MobileMorphingTitleLabel: UIView {
     }
 
     override var intrinsicContentSize: CGSize {
-        label.intrinsicContentSize
+        let content = label.intrinsicContentSize
+        return CGSize(
+            width: content.width + MorphingLabel.glyphRasterOverflow * 2,
+            height: content.height
+        )
     }
 
     func configure(

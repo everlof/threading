@@ -302,6 +302,27 @@
       }
     },
     {
+      "id": "limit-recovery-ribbon",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Limit recovery ribbon",
+      "description": "The real native conversation after a provider refusal has ended the agent and hidden its reply composer, proving the recovery state remains a pane-width top ribbon rather than floating in the exited composer's retained layout.",
+      "states": ["Agent exited", "Reply composer hidden", "Wait for Reset available"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["900×600-point native conversation pane"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/LimitRecoveryRibbonRenderTests.swift",
+        "test": "ThreadingTests/LimitRecoveryRibbonRenderTests/testRendersExitedConversationRibbonAcrossRepresentativeThemes"
+      },
+      "capture": {
+        "glob": "limit-recovery-ribbon-*.png"
+      }
+    },
+    {
       "id": "settings-navigation",
       "kind": "surface",
       "status": "implemented",

@@ -2901,6 +2901,7 @@ final class BrowserViewController: NSViewController {
         entries.append(.separator)
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Find in Page"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.find),
             image: BrowserChromeBar.image(
                 "magnifyingglass",
                 accessibility: L10n.string("Find in Page")
@@ -2930,6 +2931,9 @@ final class BrowserViewController: NSViewController {
             entries.append(.item(ThemedMenuItem(
                 title: L10n.string("Save as Baseline…"),
                 subtitle: L10n.string("Keep this page as what correct looks like"),
+                shortcut: ShortcutOverrideStore.shared.shortcut(
+                    forID: AppCommands.ID.saveBaseline
+                ),
                 image: BrowserChromeBar.image(
                     "checkmark.seal",
                     accessibility: L10n.string("Save as Baseline")

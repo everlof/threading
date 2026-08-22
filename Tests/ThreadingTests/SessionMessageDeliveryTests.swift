@@ -111,6 +111,7 @@ final class SessionMessageDeliveryTests: XCTestCase {
         var acceptance: AppMessageAcceptance
         var steerAnswer: AppMessageSteerResult
         var accepted: [ConversationPrompt] = []
+        var acceptedOrigins: [ConversationOutbox.Item.Origin] = []
         var steered: [ConversationPrompt] = []
 
         init(
@@ -123,8 +124,12 @@ final class SessionMessageDeliveryTests: XCTestCase {
             self.steerAnswer = steerAnswer
         }
 
-        func acceptAppMessage(_ prompt: ConversationPrompt) -> AppMessageAcceptance {
+        func acceptAppMessage(
+            _ prompt: ConversationPrompt,
+            origin: ConversationOutbox.Item.Origin
+        ) -> AppMessageAcceptance {
             accepted.append(prompt)
+            acceptedOrigins.append(origin)
             return acceptance
         }
 

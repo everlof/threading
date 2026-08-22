@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Embedded into the executable with -sectcreate __TEXT __info_plist rather than shipped
+	     beside it, matching the other helpers: a command-line tool in Contents/Helpers is one
+	     file, and a loose plist next to it would be one more thing to sign and keep in step. -->
+	<key>CFBundleIdentifier</key>
+	<string>codes.threading.mcp-bridge</string>
+	<key>CFBundleName</key>
+	<string>threading-mcp-bridge</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+</dict>
+</plist>

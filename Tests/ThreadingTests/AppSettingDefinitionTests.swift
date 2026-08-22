@@ -100,7 +100,9 @@ final class AppSettingDefinitionTests: XCTestCase {
             .sessionRestorePolicy: .init(key: "sessionRestorePolicy", valueType: .string),
             .sessionRestoreWindowDays: .init(key: "sessionRestoreWindowDays", valueType: .integer),
             .sessionRestoreLimit: .init(key: "sessionRestoreLimit", valueType: .integer),
-            .newChatOpeningMessage: .init(key: "newChatOpeningMessage", valueType: .string),
+            .newChatOpeningPrefix: .init(key: "newChatOpeningPrefix", valueType: .string),
+            // The suffix shipped first and keeps its original key.
+            .newChatOpeningSuffix: .init(key: "newChatOpeningMessage", valueType: .string),
             .legacyClosingConfirmation: .init(
                 key: "confirmsBeforeClosingRunningSession",
                 valueType: .boolean
@@ -206,6 +208,10 @@ final class AppSettingDefinitionTests: XCTestCase {
             ),
             .remoteAccessListenerPort: .init(
                 key: "remoteAccessListenerPort",
+                valueType: .integer
+            ),
+            .remoteViewportLeaseGraceSeconds: .init(
+                key: "remoteViewportLeaseGraceSeconds",
                 valueType: .integer
             ),
             .remoteAccessDoors: .init(
@@ -370,7 +376,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 75)
+        XCTAssertEqual(authoredRows.count, 76)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -397,7 +403,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             "New sessions use", "Name sessions after the agent's own title",
             "Group sessions by branch", "Compact tree", "Follow the checkout's branch",
             "Discover project icons", "Discover account avatars", "Claude sessions start in",
-            "Codex sessions start in", "Add to every new chat",
+            "Codex sessions start in", "Before the task you write",
+            "After the task you write",
             "Include files outside the project",
             "Keep the page as it was before each agent action",
             "Reopen the last session at launch", "Bring back at launch",

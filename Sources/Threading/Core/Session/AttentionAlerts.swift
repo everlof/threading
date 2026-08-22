@@ -23,14 +23,29 @@ enum AttentionAlert: String, Equatable, CaseIterable {
     /// native conversation reports `idle` off screen too — the transcript is its record.
     case finished
 
+    /// A session went on starting turns after every interrupt its curfew had to give.
+    ///
+    /// The quietest of the four in frequency and the loudest in meaning: it is the only one that
+    /// says Threading tried something and it did not work. Posted by
+    /// `postCurfewGaveUp(sessionID:interrupts:stopped:)` rather than by an activity edge, because
+    /// nothing about the session's *state* changed — what ran out was the ladder.
+    case curfew
+
     /// The notification's second line, and the only description of each alert — the settings
     /// row that switches a kind off says the same sentence the banner would have said, so the
     /// toggle can be matched to the thing it silences.
+    ///
+    /// The curfew's real banner names how many interrupts were spent, which is a number this
+    /// case cannot carry; the poster supplies that line. What is stated here is the same sentence
+    /// with the shipped budget in it, so the settings row still quotes what the user would read
+    /// rather than a paraphrase of it.
     var body: String {
         switch self {
         case .blocked: return L10n.string("Waiting for your approval to continue")
         case .unread: return L10n.string("Finished and waiting for you")
         case .finished: return L10n.string("Finished its turn")
+        case .curfew:
+            return CurfewReceiptWords.gaveUpAlertBody(count: CurfewDefaults.maximumInterrupts)
         }
     }
 
@@ -40,6 +55,7 @@ enum AttentionAlert: String, Equatable, CaseIterable {
         case .blocked: return L10n.string("Blocked on an approval")
         case .unread: return L10n.string("Finished while you were elsewhere")
         case .finished: return L10n.string("Finished a turn in the background")
+        case .curfew: return L10n.string("Kept working after its curfew")
         }
     }
 
@@ -313,6 +329,34 @@ final class AttentionAlertCenter: NSObject {
         return true
     }
 
+    /// Tells the user a curfew tried everything it had and the session is still working.
+    ///
+    /// Its own entrance rather than an activity edge, because nothing about the session's state
+    /// moved: what ran out was the ladder. Gated exactly like `post(_:for:)` — the master switch,
+    /// this kind's own toggle, the session's mute and its snooze — so the one alert that fires at
+    /// four in the morning obeys every switch the other three do.
+    ///
+    /// The body carries the count, which is the difference between a loop that shrugged off one
+    /// interrupt and one that shrugged off three, and says plainly whether the agent was stopped.
+    /// Clicking it opens the session, where the strip offers Lift.
+    func postCurfewGaveUp(sessionID: SessionID, interrupts: Int, stopped: Bool) {
+        guard isStarted, wants(.curfew, for: sessionID) else { return }
+
+        let body = stopped
+            ? L10n.format("Stopped after %lld interrupts", Int64(interrupts))
+            : CurfewReceiptWords.gaveUpAlertBody(count: interrupts)
+        post(.curfew, for: sessionID, body: body)
+    }
+
+    /// Takes the give-up notification back when the curfew that produced it is lifted.
+    ///
+    /// Narrowed to that alert on purpose: a session may have picked up an ordinary blocked or
+    /// unread banner since, and lifting a curfew says nothing about those.
+    func withdrawCurfewAlert(sessionID: SessionID) {
+        guard isStarted, delivered[sessionID] == .curfew else { return }
+        withdraw(sessionID: sessionID)
+    }
+
     // MARK: - Which Sound An Alert Carries
 
     /// The sound one event carries on one session, or nil for a silent banner.
@@ -420,14 +464,17 @@ final class AttentionAlertCenter: NSObject {
             && !SessionSnoozeCenter.shared.isSnoozed(sessionID)
     }
 
-    private func post(_ alert: AttentionAlert, for sessionID: SessionID) {
+    /// `body` overrides the alert's own sentence for the one case that cannot carry its detail —
+    /// see `postCurfewGaveUp(sessionID:interrupts:stopped:)`. Every other caller omits it and
+    /// gets what the settings row promised.
+    private func post(_ alert: AttentionAlert, for sessionID: SessionID, body: String? = nil) {
         let content = UNMutableNotificationContent()
         let session = ProjectStore.shared.session(withID: sessionID)
         let project = ProjectStore.shared.project(forSessionID: sessionID)
 
         content.title = session?.displayTitle ?? "Threading session"
         if let project { content.subtitle = project.name }
-        content.body = alert.body
+        content.body = body ?? alert.body
         // Whether this kind sounds and which sound it is are one question now, asked of the
         // chain: the built-in answers say `blocked` sounds and the other two do not, which is
         // the ranking the sidebar's filled-versus-hollow marks already draw. Nothing visual

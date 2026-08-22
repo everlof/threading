@@ -301,7 +301,8 @@ enum SettingsPages {
             group: agentsGroup,
             searchTerms: terms(
                 "rate limit", "5-hour window", "session limit", "reset", "schedule",
-                "poke", "weekly limit", "working hours", "workday"
+                "poke", "weekly limit", "working hours", "workday",
+                "curfew", "quiet hours", "wind-down", "wrap-up", "interrupt", "stop the agent"
             ),
             // The schedule and the two policies. The per-account rows and the poke ledger are
             // dynamic.

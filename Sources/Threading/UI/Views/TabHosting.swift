@@ -154,6 +154,7 @@ extension TabHosting {
         return [
             .item(ThemedMenuItem(
                 title: L10n.string("Close Tab"),
+                shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.closeTab),
                 image: ThemedMenuIcon.symbol("xmark"),
                 onChoose: { [weak self] in _ = self?.closeTab(id: id, for: sessionID) }
             )),

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Deliberately empty, and that is the decision this file records.
+
+	     com.apple.security.app-sandbox is ABSENT. The bridge's whole job is to connect to a
+	     unix socket under ~/Library/Application Support/Threading, which a sandboxed process
+	     cannot reach without a container-relative grant that does not exist for that path — and
+	     Threading itself is unsandboxed for the same class of reason (PTY operations). A
+	     sandboxed bridge would fail to connect on every launch and be indistinguishable from an
+	     app that was closed, which is precisely the state it exists to avoid.
+
+	     The containment that does apply is the socket's own: the rendezvous lives in a 0700
+	     directory, so only this user's processes can reach it at all, and the per-session token
+	     in the path decides which session a message routes to. Neither is weakened by anything
+	     here. Contrast Targets/ExtensionHelper, which runs code we did not write and is
+	     sandboxed hard; the bridge runs only its own code and carries no capability an ordinary
+	     process of this user does not already have.
+
+	     Hardened runtime is on (ENABLE_HARDENED_RUNTIME = YES) with no exceptions: the bridge
+	     loads no plug-ins, allocates no JIT pages, and disables no library validation. -->
+</dict>
+</plist>

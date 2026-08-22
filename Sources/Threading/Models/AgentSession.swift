@@ -462,6 +462,14 @@ struct AgentSession: Codable, Identifiable {
   /// Exit code from the most recent run, if it has ended.
   var lastExitCode: Int32?
 
+  /// The last launch that died on the way up, or nil if the last one worked.
+  ///
+  /// Cleared by a launch that survives its own start rather than by one that begins, so the
+  /// pane keeps saying what went wrong while the retry is still deciding whether it agrees.
+  /// A record here is what makes `Resume Session` stop promising a conversation back when the
+  /// last attempt to fetch it failed — see `SessionLaunchFailure`.
+  var lastLaunchFailure: SessionLaunchFailure?
+
   /// Which agent login this session belongs to. `.standard` means the provider's default.
   ///
   /// Conversations are stored per account, so this must be stable across resumes: the same
@@ -784,6 +792,7 @@ struct AgentSession: Codable, Identifiable {
     self.resumeState = ResumeState.initial(for: configuration.kind)
     self.hasLaunched = false
     self.lastExitCode = nil
+    self.lastLaunchFailure = nil
     self.accountHandle = accountHandle
     self.model = model
     self.fastMode = nil
@@ -814,6 +823,7 @@ struct AgentSession: Codable, Identifiable {
     case agentTitle = "terminalTitle"
     case agentTitleSource
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
+    case lastLaunchFailure
     case fastMode, remoteControl, permissionMode, archived, providerArchiveState, pinned, nativeUI
     case snoozedAt, snoozedUntil, hadTurnInFlightWhenSnoozed, wake
     case forkParent
@@ -852,6 +862,10 @@ struct AgentSession: Codable, Identifiable {
     )
     hasLaunched = try container.decodeIfPresent(Bool.self, forKey: .hasLaunched) ?? false
     lastExitCode = try container.decodeIfPresent(Int32.self, forKey: .lastExitCode)
+    lastLaunchFailure = try container.decodeIfPresent(
+      SessionLaunchFailure.self,
+      forKey: .lastLaunchFailure
+    )
     accountHandle = AccountHandle(
       storedName: try container.decodeIfPresent(String.self, forKey: .accountHandle)
     )
@@ -1190,6 +1204,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(resumeState.transcriptID, forKey: .agentSessionID)
     try container.encode(hasLaunched, forKey: .hasLaunched)
     try container.encodeIfPresent(lastExitCode, forKey: .lastExitCode)
+    try container.encodeIfPresent(lastLaunchFailure, forKey: .lastLaunchFailure)
     try container.encodeIfPresent(accountHandle.persistedSessionName, forKey: .accountHandle)
     try container.encodeIfPresent(model, forKey: .model)
     try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)

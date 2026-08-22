@@ -74,9 +74,15 @@ enum SoundEvent: String, CaseIterable, Sendable {
     /// three of the five alert events have an `AttentionAlert` case, and two — the requested
     /// update and the scheduled message — post through paths of their own with no case to hang
     /// a property on.
+    ///
+    /// A curfew that gave up routes through `alertBlocked` rather than earning a stored key of
+    /// its own. The two are the same *kind* of event — a session standing still until the user
+    /// decides something — and this is the one alert that sounds by default, which is the right
+    /// answer for both. A key here is a wire format the per-event page would then have to grow a
+    /// row for; sharing one costs the user nothing but the ability to quiet these two apart.
     init(_ alert: AttentionAlert) {
         switch alert {
-        case .blocked: self = .alertBlocked
+        case .blocked, .curfew: self = .alertBlocked
         case .unread: self = .alertUnread
         case .finished: self = .alertFinished
         }

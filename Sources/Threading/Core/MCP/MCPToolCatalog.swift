@@ -249,6 +249,13 @@ enum MCPToolCatalog {
       rendered reports. Threading keeps the document as an Attachment and previews it with a \
       real browser engine, so scripts run and CDN libraries load.
 
+      Use video_frames the moment a path to a .mov or .mp4 appears in the conversation — a \
+      screen recording, a simulator capture. It decodes the frames for you and returns a \
+      contact sheet you can read, with the timestamp of every cell and the clip's duration, \
+      size and frame rate. Do not shell out to ffmpeg for this, and never ask the user to \
+      describe a recording they just handed you. Read it twice when the detail is small: once \
+      whole to find the moment, then again with from/to and crop to see it.
+
       Neither replaces talking to the user. Show the artefact, then say what it means — the \
       panel carries the picture, your reply carries the point.
       """
@@ -504,14 +511,33 @@ enum MCPToolCatalog {
     summary: "Let agents read which Settings pages exist, to point you at the right one.",
     symbol: "gearshape",
     tools: [],
-    instruction: """
+    instruction: settingsInstruction
+  )
+
+  /// The Debug-only iOS evidence tools sit in this group, so their sequencing is stated here
+  /// rather than in the decision prefix. A checkup is something the user asks for in words, so a
+  /// missed route costs one clarifying turn — and the prefix has no room for it: the shipping
+  /// sentences already spend all but a dozen of the 512 characters an MCP client is guaranteed
+  /// to read.
+  private static let settingsInstruction: String = {
+    var text = """
       list_settings returns the catalogue of Threading's Settings pages — each page's \
       stable id, its sidebar group, and its own vocabulary. When the user asks where a \
       Threading preference lives, read the catalogue and name the page rather than \
       guessing. It describes Threading's Settings only, never the agent CLI's own \
       configuration files.
       """
-  )
+#if DEBUG
+    text += """
+
+
+      For an iOS usage checkup, call inspect_ios_debug, and say whether the evidence you \
+      report is fresh or cached. When more than one Debug phone is paired, \
+      list_ios_debug_devices names their ids and you ask which one to inspect.
+      """
+#endif
+    return text
+  }()
 
   private static let authoredNotifications = MCPToolGroup(
     id: "notifications",

@@ -42,6 +42,7 @@ extension HostedStoreTestCase {
     /// app's shared settings. Diagnostics alone stay UUID-scoped and are owned until teardown.
     @MainActor
     func makeMainWindowController(
+        initialFramePlan: MainWindowInitialFramePlan = .restoreSavedFrame,
         file _: StaticString = #filePath,
         line _: UInt = #line
     ) -> MainWindowController {
@@ -54,7 +55,10 @@ extension HostedStoreTestCase {
             settings: AppSettings.shared,
             eventLog: EventLog(directory: directory.appendingPathComponent("Logs"))
         )
-        let controller = MainWindowController(environment: environment)
+        let controller = MainWindowController(
+            environment: environment,
+            initialFramePlan: initialFramePlan
+        )
         retainMainWindowFixture(
             MainWindowTestFixtureOwner(controller: controller, directory: directory)
         )
