@@ -186,11 +186,12 @@ struct MCPBridgeInvocation: Equatable, Sendable {
 
 // MARK: - MCP Bridge Decision
 
-/// The three facts that decide whether a launch may address the tool channel through the bridge.
+/// The complete transport snapshot for one launch.
 ///
-/// Gathered into one value so the decision is injectable: a test can force the setting on, name
-/// a helper that is not there, or name a socket path too long to bind, without touching the
-/// developer's own defaults or bundle.
+/// Gathered into one value so every renderer sees the same answer and the registry remains pure:
+/// a test can force the setting on, name a helper that is not there, name a socket path too long
+/// to bind, or remove the HTTP listener without touching process defaults, the bundle, or the
+/// shared server.
 struct MCPBridgeDecision: Sendable {
 
     /// The hidden opt-in. Off ships HTTP, exactly as before the bridge existed.
@@ -202,19 +203,37 @@ struct MCPBridgeDecision: Sendable {
     /// The rendezvous, already through `addressableSocketPath` — nil when it cannot be bound.
     let socketPath: String?
 
-    /// What this launch of this app would decide right now.
-    ///
-    /// The setting is read straight from the descriptor rather than through `AppSettings.shared`,
-    /// which is `@MainActor` while the launch files are written from wherever a launch is being
-    /// assembled. It is the same key, the same absence semantics and the same defaults domain.
-    static var current: MCPBridgeDecision {
+    /// The loopback fallback available to this same launch.
+    let httpPort: UInt16?
+
+    init(
+        isEnabled: Bool,
+        helperURL: URL,
+        socketPath: String?,
+        httpPort: UInt16? = nil
+    ) {
+        self.isEnabled = isEnabled
+        self.helperURL = helperURL
+        self.socketPath = socketPath
+        self.httpPort = httpPort
+    }
+
+    /// Production composition. Every dependency is named by the caller; reusable registry code
+    /// never recovers settings, bundle state, or a server singleton on demand.
+    @MainActor
+    static func live(
+        settings: AppSettings,
+        server: MCPServer,
+        bundle: Bundle
+    ) -> MCPBridgeDecision {
         MCPBridgeDecision(
-            isEnabled: AppSettingDefinitions.usesMCPStdioBridge.read(from: .standard) ?? false,
-            helperURL: MCPBridgeLocation.helperURL(),
+            isEnabled: settings.usesMCPStdioBridge,
+            helperURL: MCPBridgeLocation.helperURL(in: bundle),
             // Startup does not release session restoration until both listener outcomes are
             // known. A path that merely *could* bind is not a route; only the listener's
             // published path may select the durable bridge.
-            socketPath: MCPServer.shared.socketPath
+            socketPath: server.socketPath,
+            httpPort: server.port
         )
     }
 }

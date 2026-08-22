@@ -143,7 +143,7 @@ struct RemoteAccessServerServices {
     let snoozeCenter: SessionSnoozeCenter
     let attachments: SessionAttachmentStore
     let extensions: ExtensionManager
-    let mobileDiagnosticsCaptures: MobileDiagnosticsCaptureStore = .shared
+    let mobileDiagnosticsCaptures: MobileDiagnosticsCaptureStore
     let usageDashboard: RemoteUsageDashboardLoader
     let usageLimit: RemoteUsageLimitLoader
 }

@@ -118,7 +118,10 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
         MCPServer.shared.start { listenerReady.fulfill() }
         wait(for: [listenerReady], timeout: 3)
 
-        let endpoint = try XCTUnwrap(MCPSessionRegistry.endpointURL(for: sessionID))
+        let endpoint = try XCTUnwrap(MCPSessionRegistry.endpointURL(
+            for: sessionID,
+            port: MCPServer.shared.port
+        ))
         let token = MCPSessionRegistry.token(for: sessionID)
         let lifecycleBase = "http://\(MCPDefaults.host):\(try XCTUnwrap(MCPServer.shared.port))"
             + "\(MCPDefaults.lifecyclePathPrefix)\(token)"

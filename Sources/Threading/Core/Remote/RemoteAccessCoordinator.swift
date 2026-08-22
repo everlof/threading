@@ -272,6 +272,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             snoozeCenter: .shared,
             attachments: .shared,
             extensions: .shared,
+            mobileDiagnosticsCaptures: .shared,
             usageDashboard: { offset, count in
                 let now = Date()
                 transcriptUsage.refresh()

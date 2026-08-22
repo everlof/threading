@@ -83,11 +83,14 @@ setting with no `presentations`, so `remotePolicy` resolves to `.hidden`: it pro
 row and does not cross to the phone's mirror. `defaults write codes.threading
 mcpStdioBridgeEnabled -bool true` turns it on for the next session launch, and a test injects it.
 
-**One decision, three transports.** `MCPSessionRegistry.binding(for:)` answers `.stdio` or
-`.http` once per launch, and Claude's config file, Codex's per-run overrides and ACP's
-`mcpServers` array are all rendered from that answer. Without a single owner the three could
-disagree about whether a session has a bridge, which is the kind of defect that shows up as one
-runtime silently losing its tools.
+**One explicit decision, three transports.** The main-actor launch boundary snapshots the
+injected `AppSettings`, helper bundle, bound unix path and TCP port into one
+`MCPBridgeDecision`. `MCPSessionRegistry.binding(for:decision:)` is pure with respect to process
+state: it has no default decision and does not recover `UserDefaults.standard` or
+`MCPServer.shared`. Claude's config file, Codex's per-run overrides and ACP's injected binding are
+all rendered from that snapshot. Without a single owner the three could disagree about whether a
+session has a bridge, which is the kind of defect that shows up as one runtime silently losing
+its tools while tests pass against a different defaults domain.
 
 **Three conditions have to hold, and each failure is a fallback rather than an error.**
 `bridgeInvocation` returns nil — leaving the launch on HTTP exactly as before the bridge existed

@@ -168,7 +168,7 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
             MCPServer.shared.port == nil,
             "the shared listener is up in this process, so 'no port' cannot be observed"
         )
-        XCTAssertNil(MCPSessionRegistry.endpointURL(for: sessionID))
+        XCTAssertNil(MCPSessionRegistry.endpointURL(for: sessionID, port: nil))
 
         let path = try XCTUnwrap(MCPSessionRegistry.writeConfiguration(
             for: sessionID,

@@ -984,6 +984,14 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             }
             return try AgentLauncher.streamPlan(for: current, in: project)
         }
+        let mcpBinding = {
+            let decision = MCPBridgeDecision.live(
+                settings: AppSettings.shared,
+                server: MCPServer.shared,
+                bundle: Bundle.main
+            )
+            return MCPSessionRegistry.binding(for: sessionID, decision: decision)
+        }
 
         switch agentSession.kind {
         case .claude:
@@ -1049,6 +1057,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 sessionID: sessionID,
                 workingDirectory: agentSession.workingDirectory(in: project),
                 profile: .grok,
+                mcpBinding: mcpBinding(),
                 plan: plan
             )
         case .cursor:
@@ -1060,6 +1069,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 sessionID: sessionID,
                 workingDirectory: agentSession.workingDirectory(in: project),
                 profile: .cursor,
+                mcpBinding: mcpBinding(),
                 plan: plan
             )
         case .openCode:

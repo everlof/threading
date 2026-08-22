@@ -559,11 +559,15 @@ enum AgentLauncher {
         prompt: String,
         in folder: String
     ) -> AgentLaunchPlan? {
+        let mcpDecision = liveMCPDecision()
         guard let command = settingsResearchCommand(
             kind: kind,
             prompt: prompt,
-            mcpConfigPath: MCPSessionRegistry.writeConfiguration(for: sessionID),
-            binding: MCPSessionRegistry.binding(for: sessionID)
+            mcpConfigPath: MCPSessionRegistry.writeConfiguration(
+                for: sessionID,
+                decision: mcpDecision
+            ),
+            binding: MCPSessionRegistry.binding(for: sessionID, decision: mcpDecision)
         ) else { return nil }
 
         return launchPlan(command: command, in: folder, resumeState: .unavailable)
@@ -737,10 +741,14 @@ enum AgentLauncher {
         // handed an empty allowlist.
         let enabledTools = MCPToolCatalog.toolNames(for: session.id)
         guard !enabledTools.isEmpty else { return }
+        let mcpDecision = liveMCPDecision()
 
         switch session.kind {
         case .claude:
-            guard let configPath = MCPSessionRegistry.writeConfiguration(for: session.id) else {
+            guard let configPath = MCPSessionRegistry.writeConfiguration(
+                for: session.id,
+                decision: mcpDecision
+            ) else {
                 return
             }
 
@@ -748,7 +756,10 @@ enum AgentLauncher {
             command.append(flag: "--allowedTools", value: MCPDefaults.allowedToolsPattern)
 
         case .codex:
-            guard let binding = MCPSessionRegistry.binding(for: session.id) else {
+            guard let binding = MCPSessionRegistry.binding(
+                for: session.id,
+                decision: mcpDecision
+            ) else {
                 return
             }
 
@@ -778,6 +789,15 @@ enum AgentLauncher {
             break
 
         }
+    }
+
+    /// Resolves one explicit transport snapshot at the launch composition boundary.
+    private static func liveMCPDecision() -> MCPBridgeDecision {
+        MCPBridgeDecision.live(
+            settings: .shared,
+            server: .shared,
+            bundle: .main
+        )
     }
 
     /// Names the MCP server's address under `mcp_servers.<name>`, in whichever of Codex's two

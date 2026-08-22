@@ -154,11 +154,11 @@ struct AgentToolDependencies {
   let sessionCommands: AgentSessionCommandService
   let extensionAuthoring: ExtensionAuthoringCommandService
   let browserStorage: BrowserStorageCommandService
-  let settingsCatalogue: SettingsCatalogueService = SettingsCatalogueService()
+  let settingsCatalogue: SettingsCatalogueService
   /// The typed session control plane — scope and refusal rules for every cross-session
   /// operation, whoever the caller is. Handlers own wording only.
   let control: WorkspaceControlPlane
-  let mobileDiagnosticsInspection = MobileDiagnosticsInspectionService(captures: .shared)
+  let mobileDiagnosticsInspection: MobileDiagnosticsInspectionService
   /// The project's durable visual baselines. Injected rather than reached for as a singleton from
   /// the handler, so a test drives its own directory instead of the developer's.
   let baselines: BrowserBaselineStore
@@ -189,7 +189,9 @@ struct AgentToolDependencies {
       }
     ),
     browserStorage: BrowserStorageCommandService(),
+    settingsCatalogue: SettingsCatalogueService(),
     control: .live,
+    mobileDiagnosticsInspection: MobileDiagnosticsInspectionService(captures: .shared),
     baselines: .shared
   )
 }

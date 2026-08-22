@@ -132,8 +132,8 @@ enum MCPSessionRegistry {
     /// CLI expects the same URL inside a JSON file, which `writeConfiguration` creates below.
     /// Returns nil when the server is not listening, which leaves the launch to proceed
     /// without MCP rather than failing outright.
-    static func endpointURL(for sessionID: SessionID) -> String? {
-        guard let port = MCPServer.shared.port else { return nil }
+    static func endpointURL(for sessionID: SessionID, port: UInt16?) -> String? {
+        guard let port else { return nil }
 
         return "http://\(MCPDefaults.host):\(port)\(MCPDefaults.pathPrefix)\(token(for: sessionID))"
     }
@@ -152,7 +152,7 @@ enum MCPSessionRegistry {
     /// of those three answers without touching the developer's defaults or bundle.
     static func bridgeInvocation(
         for sessionID: SessionID,
-        decision: MCPBridgeDecision = .current
+        decision: MCPBridgeDecision
     ) -> MCPBridgeInvocation? {
         guard decision.isEnabled else { return nil }
 
@@ -198,12 +198,12 @@ enum MCPSessionRegistry {
     /// the bridge is unavailable *and* the listener has none.
     static func binding(
         for sessionID: SessionID,
-        decision: MCPBridgeDecision = .current
+        decision: MCPBridgeDecision
     ) -> MCPServerBinding? {
         if let invocation = bridgeInvocation(for: sessionID, decision: decision) {
             return .stdio(invocation)
         }
-        guard let url = endpointURL(for: sessionID) else { return nil }
+        guard let url = endpointURL(for: sessionID, port: decision.httpPort) else { return nil }
         return .http(url: url)
     }
 
@@ -218,7 +218,7 @@ enum MCPSessionRegistry {
     /// failing outright.
     static func writeConfiguration(
         for sessionID: SessionID,
-        decision: MCPBridgeDecision = .current
+        decision: MCPBridgeDecision
     ) -> String? {
         guard let binding = binding(for: sessionID, decision: decision) else { return nil }
 

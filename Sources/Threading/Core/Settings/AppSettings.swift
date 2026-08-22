@@ -861,9 +861,8 @@ final class AppSettings {
     /// the fallback while it settles. `defaults write codes.threading mcpStdioBridgeEnabled
     /// -bool true` turns it on for the next launch of a session.
     ///
-    /// `MCPBridgeDecision.current` reads the same key off the main actor, because launch files
-    /// are written from wherever a launch is being assembled. This accessor is for the app's own
-    /// main-actor code and for tests.
+    /// `MCPBridgeDecision.live(settings:server:bundle:)` snapshots this accessor together with
+    /// the two listener outcomes at the main-actor launch composition boundary.
     var usesMCPStdioBridge: Bool {
         get { AppSettingDefinitions.usesMCPStdioBridge.read(from: defaults) ?? false }
         set {

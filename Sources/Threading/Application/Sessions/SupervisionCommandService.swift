@@ -77,7 +77,15 @@ extension SupervisionToolProviding {
 /// `SessionCoordinator` reached through `SupervisionActionRegistry`.
 @MainActor
 final class SupervisionCommandService {
-    static let shared = SupervisionCommandService()
+    static let shared = SupervisionCommandService(
+        projects: .shared,
+        control: .live,
+        grants: .shared,
+        subscriptions: .shared,
+        usage: .shared,
+        transcriptUsage: .shared,
+        actions: .shared
+    )
 
     private let projects: ProjectStore
     private let control: WorkspaceControlPlane
@@ -88,13 +96,13 @@ final class SupervisionCommandService {
     private let actions: SupervisionActionRegistry
 
     init(
-        projects: ProjectStore = .shared,
-        control: WorkspaceControlPlane = .live,
-        grants: ControlGrantStore = .shared,
-        subscriptions: SupervisionSubscriptionCenter = .shared,
-        usage: AccountUsageService = .shared,
-        transcriptUsage: TranscriptUsageService = .shared,
-        actions: SupervisionActionRegistry = .shared
+        projects: ProjectStore,
+        control: WorkspaceControlPlane,
+        grants: ControlGrantStore,
+        subscriptions: SupervisionSubscriptionCenter,
+        usage: AccountUsageService,
+        transcriptUsage: TranscriptUsageService,
+        actions: SupervisionActionRegistry
     ) {
         self.projects = projects
         self.control = control

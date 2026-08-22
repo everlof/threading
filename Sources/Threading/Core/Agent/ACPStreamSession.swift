@@ -42,6 +42,7 @@ final class ACPStreamSession:
     private let workingDirectory: String
     private let profile: ACPProviderProfile
     private let handshakeTimeout: TimeInterval
+    private let mcpBinding: MCPServerBinding?
     private let plan: () throws -> AgentLaunchPlan
 
     private var process: AgentChildProcess?
@@ -90,12 +91,14 @@ final class ACPStreamSession:
         workingDirectory: String,
         profile: ACPProviderProfile,
         handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
+        mcpBinding: MCPServerBinding? = nil,
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
         self.profile = profile
         self.handshakeTimeout = handshakeTimeout
+        self.mcpBinding = mcpBinding
         self.plan = plan
     }
 
@@ -356,8 +359,8 @@ final class ACPStreamSession:
     /// transport and a URL on another.
     private func mcpServers() -> [[String: Any]] {
         guard !MCPToolCatalog.toolNames(for: sessionID).isEmpty,
-              let binding = MCPSessionRegistry.binding(for: sessionID) else { return [] }
-        return [binding.acpServerObject(named: MCPDefaults.serverName)]
+              let mcpBinding else { return [] }
+        return [mcpBinding.acpServerObject(named: MCPDefaults.serverName)]
     }
 
     private func sendPendingPromptIfReady() {

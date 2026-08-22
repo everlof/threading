@@ -55,6 +55,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             snoozeCenter: live.snoozeCenter,
             attachments: live.attachments,
             extensions: live.extensions,
+            mobileDiagnosticsCaptures: live.mobileDiagnosticsCaptures,
             usageDashboard: live.usageDashboard,
             usageLimit: live.usageLimit
         ), identityProvider: identity.store)
