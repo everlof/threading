@@ -136,3 +136,114 @@ final class LockedVoidCallback: Sendable {
         storage.call()
     }
 }
+
+private final class BytesCallback: Sendable {
+    let body: @Sendable ([UInt8]) -> Void
+
+    init(_ body: @escaping @Sendable ([UInt8]) -> Void) {
+        self.body = body
+    }
+
+    func call(slice bytes: ArraySlice<UInt8>) {
+        body(Array(bytes))
+    }
+
+    func call(borrowed bytes: Span<UInt8>) {
+        body(bytes.copiedBytes())
+    }
+}
+
+private protocol BytesCallbackStorage: Sendable {
+    func replace(with callback: BytesCallback?)
+    func call(slice bytes: ArraySlice<UInt8>)
+    func call(borrowed bytes: Span<UInt8>)
+}
+
+private final class NSLockedBytesCallbackStorage: BytesCallbackStorage, @unchecked Sendable {
+    private let lock = NSLock()
+    private var callback: BytesCallback?
+
+    init(_ callback: BytesCallback? = nil) {
+        self.callback = callback
+    }
+
+    func replace(with callback: BytesCallback?) {
+        lock.lock()
+        self.callback = callback
+        lock.unlock()
+    }
+
+    func call(slice bytes: ArraySlice<UInt8>) {
+        current()?.call(slice: bytes)
+    }
+
+    func call(borrowed bytes: Span<UInt8>) {
+        current()?.call(borrowed: bytes)
+    }
+
+    private func current() -> BytesCallback? {
+        lock.lock()
+        defer { lock.unlock() }
+        return callback
+    }
+}
+
+#if canImport(Synchronization)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
+private final class MutexBytesCallbackStorage: BytesCallbackStorage, Sendable {
+    private let callback: Mutex<BytesCallback?>
+
+    init(_ callback: BytesCallback? = nil) {
+        self.callback = Mutex(callback)
+    }
+
+    func replace(with callback: BytesCallback?) {
+        self.callback.withLock { $0 = callback }
+    }
+
+    func call(slice bytes: ArraySlice<UInt8>) {
+        callback.withLock { $0 }?.call(slice: bytes)
+    }
+
+    func call(borrowed bytes: Span<UInt8>) {
+        callback.withLock { $0 }?.call(borrowed: bytes)
+    }
+}
+#endif
+
+/// Stores a replaceable owned-byte callback without ever returning its function value through
+/// ``Locked.withLock(_:)``.
+///
+/// The stable `BytesCallback` reference is load-bearing. Repeatedly returning a raw function from
+/// a generic synchronized container can wrap its stored representation in another reabstraction
+/// thunk on each read in Swift 6.2 builds, eventually overflowing the reader thread's
+/// stack. Both storage implementations copy a stable reference under their lock, release the lock,
+/// and only then copy and deliver the bytes. A nil callback therefore still makes no byte copy.
+final class LockedBytesCallback: Sendable {
+    private let storage: any BytesCallbackStorage
+
+    init(_ body: (@Sendable ([UInt8]) -> Void)? = nil) {
+        let callback = body.map(BytesCallback.init)
+#if canImport(Synchronization)
+        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
+            storage = MutexBytesCallbackStorage(callback)
+        } else {
+            storage = NSLockedBytesCallbackStorage(callback)
+        }
+#else
+        storage = NSLockedBytesCallbackStorage(callback)
+#endif
+    }
+
+    func replace(with body: (@Sendable ([UInt8]) -> Void)?) {
+        storage.replace(with: body.map(BytesCallback.init))
+    }
+
+    func call(slice bytes: ArraySlice<UInt8>) {
+        storage.call(slice: bytes)
+    }
+
+    func call(borrowed bytes: Span<UInt8>) {
+        storage.call(borrowed: bytes)
+    }
+}

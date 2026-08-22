@@ -111,6 +111,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     DispatchIO callbacks cannot leak old bytes into the replacement terminal. Deinitialization
     closes the PTY, cancels the monitor and gives the child to an independent waiter so it cannot
     remain a zombie.
+  - **Raw-output observers use stable callback references.** Direct-delivery parsing invokes the
+    host's byte observer on the SwiftTerm reader thread, after parsing and before the borrowed PTY
+    buffer can be reused. The observer is held by `LockedBytesCallback`, which snapshots a stable
+    callback object under its lock and invokes it after unlocking; it is never returned as a raw
+    function through generic `Locked<Value>.withLock`. Under Swift 6.2, repeatedly
+    reading a function through that generic inout seam can layer reabstraction thunks until the
+    reader stack overflows. A nil observer performs no byte copy, while an installed observer gets
+    an independently owned array that it may hand to another queue.
   - **Mouse-wheel coordinates are viewport-relative.** Full-screen clients such as Claude enable
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets

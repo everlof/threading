@@ -4238,7 +4238,13 @@ extension TerminalView {
             terminal.resize (cols: cols, rows: rows)
             terminal.softReset()
         }
-        terminalDelegate?.sizeChanged(source: self, newCols: cols, newRows: rows)
+        // A subclass can install an authoritative emulator grid that belongs to another host.
+        // That renderer-only resize must not masquerade as a locally measured viewport change.
+        // Evaluate the hook here, while the resize still knows its origin; a later delegate hop
+        // may run after ownership has changed.
+        if shouldReportSizeChange(newCols: cols, newRows: rows) {
+            terminalDelegate?.sizeChanged(source: self, newCols: cols, newRows: rows)
+        }
         updateScroller()
     }
 
