@@ -115,6 +115,9 @@ enum MobileDesign {
         /// Dims a mark whose session has no live surface, standing in for the tertiary tint that
         /// dims the symbols beside it.
         static let dormantMark: Double = 0.55
+        /// Dims an action the surface is offering but cannot perform yet: a dialog button, or a
+        /// share grant a dormant chat has nothing to grant.
+        static let disabledAction: Double = 0.42
     }
 
     enum Typography {

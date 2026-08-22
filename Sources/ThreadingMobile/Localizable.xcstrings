@@ -1001,16 +1001,6 @@
     "Typing indicators": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skrivindikatorer" } } }
     },
-    " Start the chat first to create a view-only link.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": " Starta chatten först för att skapa en länk med endast visningsåtkomst."
-          }
-        }
-      }
-    },
     "%@   Loading usage…": {
       "localizations": {
         "sv": {
@@ -1513,36 +1503,6 @@
         }
       }
     },
-    "Can collaborate and approve requests": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kan samarbeta och godkänna begäranden"
-          }
-        }
-      }
-    },
-    "Can collaborate in this chat": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kan samarbeta i den här chatten"
-          }
-        }
-      }
-    },
-    "Can view this chat": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kan visa den här chatten"
-          }
-        }
-      }
-    },
     "Cancel": {
       "localizations": {
         "sv": {
@@ -1619,16 +1579,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Välj Mac"
-          }
-        }
-      }
-    },
-    "Choose what this person can do in this chat.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Välj vad den här personen kan göra i chatten."
           }
         }
       }
@@ -5702,6 +5652,106 @@
     },
     "%lld lines": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld rader" } } }
+    },
+    "Open in the Threading app. Works for someone on your Wi-Fi or tailnet.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna i Threading-appen. Fungerar för någon på ditt wifi eller ditt tailnet."
+          }
+        }
+      }
+    },
+    "Also answers requests for you.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svarar även på begäranden åt dig."
+          }
+        }
+      }
+    },
+    "Can collaborate in “%@” and approve requests": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan samarbeta i “%@” och godkänna begäranden"
+          }
+        }
+      }
+    },
+    "Can collaborate in “%@”": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan samarbeta i “%@”"
+          }
+        }
+      }
+    },
+    "Can view “%@”": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan visa “%@”"
+          }
+        }
+      }
+    },
+    "Choose what this person can do.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj vad den här personen kan göra."
+          }
+        }
+      }
+    },
+    "Couldn’t create link": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kunde inte skapa länk"
+          }
+        }
+      }
+    },
+    "Reads the chat, writes nothing.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser chatten, skriver inget."
+          }
+        }
+      }
+    },
+    "Start the chat first to share it view-only.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starta chatten först för att dela den med endast visning."
+          }
+        }
+      }
+    },
+    "Writes messages and steers the agent.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skriver meddelanden och styr agenten."
+          }
+        }
+      }
     }
   },
   "version": "1.2"

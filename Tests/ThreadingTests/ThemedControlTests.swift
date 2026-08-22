@@ -485,6 +485,115 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertNotEqual(cyber, swiss, "the run kept the palette it was built under")
     }
 
+    // MARK: - Segment State Marks
+
+    private func makeMarkedRun(
+        _ marks: [ThemedSegmentedControl.SegmentMark?] = [.ready, .attention, .idle],
+        selectedIndex: Int = 0
+    ) -> ThemedSegmentedControl {
+        let control = ThemedSegmentedControl(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
+        control.configure(
+            titles: ["All", "Agent", "You"],
+            marks: marks,
+            selectedIndex: selectedIndex
+        )
+        control.layoutSubtreeIfNeeded()
+        return control
+    }
+
+    /// A run shows one panel and hides the rest, so a choice you are *not* on has to be able to
+    /// say where it stands. The mark is that sentence, in one glyph.
+    func testASegmentCarriesItsOwnStateAndSpeaksIt() throws {
+        let control = makeMarkedRun()
+
+        XCTAssertEqual(control.marks, [.ready, .attention, .idle])
+        XCTAssertEqual(
+            try XCTUnwrap(control.segment(at: 1)).accessibilityHelp(),
+            ThemedSegmentedControl.SegmentMark.attention.spokenName,
+            "the mark is visible and unspoken, which is colour-only status by another name"
+        )
+        // The title stays the title: a mark folded into it would be read as part of the name of
+        // the choice, and a run of three would announce three states nobody asked about.
+        XCTAssertEqual(try XCTUnwrap(control.segment(at: 1)).accessibilityTitle(), "Agent")
+    }
+
+    /// A run configured without marks is the run that existed before marks did.
+    func testARunWithNothingToReportIsDrawnAsItWasBeforeMarksExisted() throws {
+        let plain = makeMarkedRun([])
+        XCTAssertEqual(plain.marks, [nil, nil, nil], "a short mark run was not padded to the titles")
+
+        let marked = makeMarkedRun()
+        XCTAssertNotEqual(
+            try renderedPNG(of: plain),
+            try renderedPNG(of: marked),
+            "the marks are not visible on the run"
+        )
+    }
+
+    /// Marks move every time the network does; titles are a compile-time set. Repainting one
+    /// must not rebuild the other, or a settling network makes the run flicker.
+    func testMarksRepaintWithoutRebuildingTheRun() throws {
+        let control = makeMarkedRun()
+        let segments = (0..<3).map { control.segment(at: $0) }
+        let before = try renderedPNG(of: control)
+
+        control.setMarks([.idle, .ready, .ready])
+
+        XCTAssertEqual(control.marks, [.idle, .ready, .ready])
+        for (index, segment) in segments.enumerated() {
+            XCTAssertTrue(
+                control.segment(at: index) === segment,
+                "segment \(index) was rebuilt to change a glyph"
+            )
+        }
+        XCTAssertNotEqual(before, try renderedPNG(of: control), "the new marks were not drawn")
+    }
+
+    /// Two states that differ only in tone still differ on screen, and they differ by glyph as
+    /// well as by colour — the run has to survive Differentiate Without Colour.
+    func testTwoStatesAreToldApartByMoreThanTheirColour() throws {
+        XCTAssertNotEqual(
+            ThemedSegmentedControl.SegmentMark.ready.glyph,
+            ThemedSegmentedControl.SegmentMark.attention.glyph
+        )
+        XCTAssertNotEqual(
+            ThemedSegmentedControl.SegmentMark.attention.glyph,
+            ThemedSegmentedControl.SegmentMark.idle.glyph
+        )
+        XCTAssertNotEqual(
+            try renderedPNG(of: makeMarkedRun([.ready, nil, nil])),
+            try renderedPNG(of: makeMarkedRun([.attention, nil, nil])),
+            "two different states drew the same run"
+        )
+    }
+
+    /// The mark is a fact about the way in, not about which segment you are on — so it keeps its
+    /// own ink under the selection plate rather than taking the selected foreground.
+    func testAMarkKeepsItsOwnInkUnderTheSelectionPlate() throws {
+        let unselected = try renderedPNG(of: makeMarkedRun([.attention, nil, nil], selectedIndex: 1))
+        let selected = try renderedPNG(of: makeMarkedRun([.attention, nil, nil], selectedIndex: 0))
+        XCTAssertNotEqual(unselected, selected, "the fixture did not change the selection")
+
+        let plain = try renderedPNG(of: makeMarkedRun([], selectedIndex: 0))
+        XCTAssertNotEqual(
+            selected, plain,
+            "the mark disappeared into the selected segment's foreground"
+        )
+    }
+
+    /// The tints are `Design.Status` roles, so a live switch repaints them with everything else.
+    func testAMarkFollowsALiveThemeSwitch() throws {
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let control = makeMarkedRun([.ready, nil, nil], selectedIndex: 2)
+        let cyber = try renderedPNG(of: control)
+
+        AppThemePalette.set(AppThemeStyles.swissMinimalist)
+        AppThemeRefresh.repaint(control)
+        let swiss = try renderedPNG(of: control)
+
+        XCTAssertNotEqual(cyber, swiss, "the mark kept the palette it was built under")
+    }
+
     // MARK: - Pop-Up Drop-in Behaviour
 
     /// `ThemedPopUp` replaces `NSPopUpButton` at call sites that add titled items and read the
@@ -4084,17 +4193,21 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
         controller.view.layoutSubtreeIfNeeded()
 
-        let ids = Set(
-            ([controller.view] + descendants(in: controller.view))
-                .compactMap { $0.accessibilityIdentifier() }
-        )
+        func identifiers() -> Set<String> {
+            Set(
+                ([controller.view] + descendants(in: controller.view))
+                    .compactMap { $0.accessibilityIdentifier() }
+            )
+        }
+
+        let ids = identifiers()
         XCTAssertTrue(ids.contains("settings.remote-access.page"))
         XCTAssertTrue(ids.contains("settings.remote-access.enabled"))
         XCTAssertTrue(ids.contains(
-            RemoteAccessPreferencesViewController.Identifier.doorToggle(.thisNetwork)
+            RemoteAccessPreferencesViewController.Identifier.waysInControl
         ))
         XCTAssertTrue(ids.contains(
-            RemoteAccessPreferencesViewController.Identifier.doorToggle(.tailscale)
+            RemoteAccessPreferencesViewController.Identifier.doorToggle(.thisNetwork)
         ))
         XCTAssertTrue(ids.contains(
             RemoteAccessPreferencesViewController.Identifier.status(.thisNetwork)
@@ -4103,6 +4216,15 @@ final class ThemedControlTests: HostedStoreTestCase {
         XCTAssertTrue(ids.contains("settings.remote-access.input-control-default"))
         XCTAssertTrue(ids.contains("settings.remote-access.status"))
         XCTAssertTrue(ids.contains("settings.remote-access.pair"))
+
+        // The ways in are a run of segments now, so the tailnet's switch is one selection away
+        // rather than another card down the page. Both routes still have to exist.
+        let remote = try XCTUnwrap(controller as? RemoteAccessPreferencesViewController)
+        remote.select(.tailscale)
+        controller.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(identifiers().contains(
+            RemoteAccessPreferencesViewController.Identifier.doorToggle(.tailscale)
+        ))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
     }
 
@@ -7584,6 +7706,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "FileActivityMapView",
                 "GlyphView",
                 "HostedServiceSignInButton",
+                "HelpPopoverButton",
                 "HoverPopoverScheduler",
                 "HoverTrackingView",
                 "ImageAnnotationRailView",

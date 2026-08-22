@@ -10,7 +10,8 @@ table under [Subsystems](#subsystems) says which one.
 
 ## Project Overview
 
-Threading is a native macOS app for organizing coding-agent sessions, built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+**.
+Threading is a native macOS app for organizing coding-agent sessions, built with **Swift** and **AppKit**, using **SwiftTerm** for terminal emulation. Targets **macOS 13+ on Apple silicon** — the app is
+`arm64` only; see [`releasing.md`](docs/architecture/releasing.md#apple-silicon-only).
 
 A single window pairs a project sidebar with the selected session's terminal. Each session
 hosts a Claude Code, Codex, Grok, or OpenCode process inside a project folder, with a shell available under it

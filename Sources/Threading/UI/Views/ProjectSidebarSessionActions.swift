@@ -504,6 +504,25 @@ enum ShareSheetDefaults {
     static let accessoryWidth: CGFloat = PermissionDiffDefaults.width
 }
 
+/// What an invitation says when it leaves this Mac.
+///
+/// Both copy actions here and the iPhone's own share sheet compose through
+/// `RemoteInvitationShare`, so the recipient reads the same message whichever end minted the
+/// link. All three used to write `url.absoluteString` and nothing else, which handed somebody a
+/// bare `https://192.168.1.181:8760/#…`: no way to know it wanted the Threading app, no way to
+/// know it wanted their network, and a certificate interstitial waiting if they tapped it in a
+/// browser. The app link goes first because it is the one that works; the https line stays as a
+/// carrier for the messaging clients that will not make a custom scheme tappable.
+enum ShareInvitationText {
+    static var guidance: String {
+        L10n.string("Open in the Threading app. Works for someone on your Wi-Fi or tailnet.")
+    }
+
+    static func pasteboard(for shareURL: URL) -> String {
+        RemoteInvitationShare.text(shareURL: shareURL, guidance: guidance)
+    }
+}
+
 /// The Share Chat sheet, built without being run.
 ///
 /// Separated from the menu handler for the reason `ConfirmationRequest` gives for keeping copy
@@ -536,7 +555,10 @@ enum ShareChatSheet {
         ) {
         case .success(let created):
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(created.url.absoluteString, forType: .string)
+            NSPasteboard.general.setString(
+                ShareInvitationText.pasteboard(for: created.url),
+                forType: .string
+            )
         case .failure(let error):
             let unavailable = ThemedAlert()
             unavailable.messageText = L10n.string("This chat cannot be shared yet")
@@ -691,7 +713,10 @@ enum ShareTerminalSheet {
         ) {
         case .success(let created):
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(created.url.absoluteString, forType: .string)
+            NSPasteboard.general.setString(
+                ShareInvitationText.pasteboard(for: created.url),
+                forType: .string
+            )
         case .failure(let error):
             let unavailable = ThemedAlert()
             unavailable.messageText = L10n.string("This terminal cannot be shared yet")

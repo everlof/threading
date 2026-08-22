@@ -720,6 +720,42 @@ Pairing and sharing are deliberately different actions:
   folder is only the shell's starting directory, not a security boundary. A terminal capability
   can never approve an AI permission request, discover chats or other terminals, manage the host,
   or create another share.
+- **An invitation is addressed to the app, because only the app holds the pin.** The link points
+  at a private door on a LAN address or a tailnet name and carries this Mac's fingerprint in its
+  fragment, so the guest's phone can pin the certificate before its first request. Sent as the
+  bare `https` URL that was unreachable in practice: tapping it opened Safari, and Safari can only
+  offer the certificate interstitial, because the pin lives in the app and no browser can learn
+  it. The owner met exactly that.
+
+  `threading://` is registered by the iPhone app (`CFBundleURLTypes` in
+  `Sources/ThreadingMobile-Info.plist`) and carries two payloads. `THREADING://PAIR#…` is the
+  hosted rendezvous credential the QR code already used; `threading://join#…` is a one-chat
+  invitation, the base64url of the whole `https` URL including its fragment. `RemoteInvitation`
+  in `ThreadingRemoteKit` is the only parser for any of them, so the scanner, the paste field and
+  a tapped link cannot drift apart, and `MobileInvitationRoute` adds the application's own rule
+  that a door must be `https`. The scene delegate is the delivery point, including the cold
+  launch: SwiftUI's `onOpenURL` never fires in this app, because the scene is UIKit's and the
+  SwiftUI tree lives in a hosting controller rather than a `WindowGroup`.
+
+  What is shared is composed once, by `RemoteInvitationShare`, for the Mac's two copy actions and
+  the iPhone's share sheet alike: a sentence naming the app and the network, then the
+  `threading://` line, then the `https` line. **The `https` line stays** because a custom scheme
+  is not reliably tappable everywhere a link travels. `NSDataDetector(types: .link)` does match
+  `threading://join#…` on iOS 26 — measured, on both macOS 26.5 and the iOS 26.5 simulator
+  runtime, and Messages drives that same detector — but third-party clients (WhatsApp, Telegram,
+  Slack) are documented not to linkify custom schemes, Messages leaves links from an unknown
+  sender inert until you reply once, and a message carrying two URLs gets no rich preview either
+  way. A Universal Link is not the alternative here: the entitlement takes a fully qualified
+  domain, the association file is fetched by an Apple CDN that cannot reach a LAN address, and
+  Apple has stated that universal links do not support custom ports. A public `https` redirector
+  is the only established way to make one tap work in every client, and that is a service
+  decision rather than a code change.
+
+  **Follow-up, not built:** the Mac-served page at
+  `Sources/Threading/Resources/RemoteClient/index.html` is what a browser reaches when somebody
+  taps the `https` line and accepts the interstitial. Its first screen could say that this chat
+  opens in the Threading app and offer the `threading://` link when the user agent is iOS, which
+  would turn the fallback into a bridge.
 - **A guest cannot be somebody with only a browser any more.** That worked because the Cloudflare
   Quick Tunnel gave Threading a public origin; removing the relay removes the origin, and this is a
   real capability loss rather than a tidy-up. The browser client is unchanged and still speaks the

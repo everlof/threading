@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Builds a distributable Threading.app: Developer ID signed, hardened, timestamped, notarized
-# and stapled, plus the zip Sparkle serves.
+# and stapled, arm64 only, plus the zip Sparkle serves.
 #
 # Why an archive/export rather than `xcodebuild build -configuration Release`:
 # Xcode's automatic signing only issues *development* certificates for a build action. Pinning
@@ -22,6 +22,9 @@
 #                                      # the app shows it as the sidebar badge (BuildChannelBadge)
 #   THREADING_SKIP_RELEASE_CHECKS=1 scripts/release.sh
 #                                      # explicit emergency escape hatch for the quality gate
+#   THREADING_DERIVED_DATA=<dir> scripts/release.sh
+#                                      # build in a chosen DerivedData rather than Xcode's default —
+#                                      # a scratch clone or a CI runner with a seeded package cache
 #
 # --notarize uses the `mjukis-notary` credential profile, which already exists on the release
 # machine because claudex ships with it — same Apple ID, same team. Override with NOTARY_PROFILE.
@@ -38,12 +41,21 @@ readonly SCHEME="Threading"
 readonly PROJECT="Threading.xcodeproj"
 readonly TEAM_ID="SMQ3E8Y57T"
 readonly NOTARY_PROFILE="${NOTARY_PROFILE:-mjukis-notary}"
+# Threading ships for Apple silicon only. The project builds its own targets arm64-only; this is
+# the slice the archive's prebuilt embedded frameworks are thinned to, and the one every exported
+# binary is checked against. See docs/architecture/releasing.md, "Apple silicon only".
+readonly ARCHITECTURE="arm64"
 
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly BUILD_DIR="$ROOT/build/release"
 readonly ARCHIVE="$BUILD_DIR/$SCHEME.xcarchive"
 readonly EXPORT_DIR="$BUILD_DIR/export"
 readonly APP="$EXPORT_DIR/$SCHEME.app"
+
+derived_data_args=()
+if [[ -n "${THREADING_DERIVED_DATA:-}" ]]; then
+    derived_data_args+=(-derivedDataPath "$THREADING_DERIVED_DATA")
+fi
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
@@ -150,6 +162,10 @@ else
 fi
 
 # MARK: - Archive
+#
+# ARCHS on the command line as well as in the project: Swift packages built inside the workspace
+# do not read the project's ARCHS, so without this every package compiles an x86_64 slice the
+# link then discards — 139 compiles per archive when it was measured.
 
 say "Archiving $SCHEME ($CHANNEL)"
 rm -rf "$BUILD_DIR"
@@ -160,12 +176,23 @@ run_xcodebuild "archive" "$BUILD_DIR/archive.log" archive \
     -configuration Release \
     -destination 'generic/platform=macOS' \
     -allowProvisioningUpdates \
+    ${derived_data_args[@]+"${derived_data_args[@]}"} \
+    ARCHS="$ARCHITECTURE" \
     MARKETING_VERSION="$VERSION" \
     CURRENT_PROJECT_VERSION="$VERSION" \
     THREADING_CHANNEL="$CHANNEL" \
     -archivePath "$ARCHIVE"
 
 [[ -d "$ARCHIVE" ]] || fail "the archive was not produced"
+
+# MARK: - Thin
+#
+# Before export, not after: the export re-signs every nested binary with the Developer ID identity,
+# so the seals thinning breaks are replaced for free. Thinning the exported app instead would mean
+# re-signing Sparkle's five nested bundles inside-out by hand.
+
+say "Thinning embedded binaries to $ARCHITECTURE"
+"$ROOT/scripts/thin_app_architectures.sh" "$ARCHIVE/Products/Applications/$SCHEME.app" "$ARCHITECTURE"
 
 # MARK: - Export
 
@@ -204,7 +231,10 @@ while IFS= read -r binary; do
     file "$binary" | grep -q "Mach-O" || continue
     name="$(basename "$binary")"
     details="$(codesign -dvvv "$binary" 2>&1)"
+    architectures="$(lipo -archs "$binary")"
 
+    [[ "$architectures" == "$ARCHITECTURE" ]] \
+        || { echo "  ✗ $name carries $architectures, not $ARCHITECTURE alone"; problems=1; }
     grep -q "Authority=Developer ID Application" <<<"$details" \
         || { echo "  ✗ $name is not Developer ID signed"; problems=1; }
     grep -q "flags=.*runtime" <<<"$details" \
@@ -221,7 +251,7 @@ while IFS= read -r binary; do
     echo "  ✓ $name"
 done < <(find "$APP" -type f -perm +111)
 
-[[ $problems -eq 0 ]] || fail "the export is not notarizable — see above"
+[[ $problems -eq 0 ]] || fail "the export is not shippable — see above"
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
 "$ROOT/scripts/check_bundled_scc.sh" "$APP/Contents/Helpers/scc"
 

@@ -490,6 +490,29 @@ if rg -n --pcre2 '^(?!\s*//).*NSSound\.beep\(\)' \
   failed=1
 fi
 
+# A settings destination is pinned into its pane in exactly one place.
+#
+# The Settings shell and the page fixtures each stated the same five constraints, and they
+# drifted: the render tests pinned a page to a bare view's four edges and photographed answers
+# beside their questions, while the shell centred the same page under a cap in a window and the
+# app drew them in a ragged strip against the trailing edge. Nobody could see the difference,
+# because the difference was two lists of constraints in two files.
+#
+# So `SettingsUI.install(page:in:top:)` owns the arrangement and the cap, and anything else that
+# wants a settings page in a pane calls it. Naming `SettingsUIDefaults.pageWidth` outside that
+# file is how a second copy starts.
+#
+# Comment lines are skipped: the note explaining the priorities in `install` quotes the constraint
+# it replaced, and a rule that made that unwriteable would erase why the seam exists.
+if rg -n --pcre2 '^(?!\s*//).*SettingsUIDefaults\.pageWidth' \
+  "${repository_directory}/Sources/Threading" \
+  --glob '*.swift' \
+  --glob '!**/UI/Preferences/SettingsComponents.swift'; then
+  echo "architecture-boundary: install a settings page with SettingsUI.install(page:in:top:) —" >&2
+  echo "  a second copy of the canvas cap is how the app and its render fixtures drifted apart" >&2
+  failed=1
+fi
+
 if (( failed )); then
   exit 1
 fi

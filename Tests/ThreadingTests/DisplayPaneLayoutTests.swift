@@ -732,6 +732,15 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
     func testTheToggleStaysWhileTheGlobalDocumentTakesTheRow() throws {
         let pane = DisplayPaneController()
         pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 700)
+        // The pane's width, stated rather than framed. A detached view is a flexible layout
+        // root, so Auto Layout resizes it to suit its subtree: with only the frame, a row that
+        // preferred more than 420 points widened the "pane" and put the corner at 490 inside a
+        // 420-point fixture. That is not the question this test is asking. See CLAUDE.md,
+        // "a detached fixture with a frame constrains nothing".
+        NSLayoutConstraint.activate([
+            pane.view.widthAnchor.constraint(equalToConstant: 420),
+            pane.view.heightAnchor.constraint(equalToConstant: 700)
+        ])
         let sessionID = SessionID()
         pane.showSession(sessionID)
         pane.showCurrentTheme()

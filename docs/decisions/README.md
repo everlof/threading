@@ -45,6 +45,7 @@ idea that comes back every six months.
 | [DOM source attribution](dom-source-attribution.md) — click an element in the browser, get `Component` and `file:line` | **Reject** a bundled framework provider; **wait for demand** on reading what a page already publishes |
 | [A named Cloudflare Tunnel](named-cloudflare-tunnel.md) — a stable hostname for the owner's phone instead of a per-launch Quick Tunnel one | **Reject**: it buys address stability, which a sticky port already buys, by putting a third party that terminates TLS on the owner's daily route and asking every user for a domain |
 | [Compressing the terminal mirror's wire](compressed-terminal-mirror.md) — deflate the mirror's binary frames for cellular joins | **Wait for demand**: bytes stopped being the scarce resource once the replay was bounded; reopen on a measured non-LAN join dominated by transfer |
+| [Bundle-size levers](bundle-size-levers.md) — how small `Threading.app` can be on disk and as a download, and which levers are worth it | **Done**: ship `arm64` only (now in `releasing.md`); **reject** on-demand resources and further stripping; **wait for evidence** on `-Osize`; **wait for demand** on a slimmer WebRTC and Sparkle deltas |
 
 ## Measurements these records rest on
 

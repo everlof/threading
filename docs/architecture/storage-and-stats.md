@@ -268,12 +268,19 @@ Hovering a project row opens a compact, cached summary of two different question
   read from Git and scoped to the project folder.
 
 The app no longer depends on a user-installed executable or a Finder-launched process's `PATH`.
-`ThirdParty/scc/scc` is a pinned universal arm64/x86_64 build reproduced from the two official
-3.7.0 Darwin release archives by `scripts/update_bundled_scc.sh`. Xcode embeds and re-signs it;
-CI and release verify both architectures and the exact version. Its MIT license is part of the
+`ThirdParty/scc/scc` is the official 3.7.0 arm64 release executable, byte for byte, installed by
+`scripts/update_bundled_scc.sh` (Threading ships for Apple silicon only — see
+[`releasing.md`](releasing.md#apple-silicon-only)). Xcode embeds and re-signs it; CI and release
+verify the architecture and the exact version. Its MIT license is part of the
 verified legal-notice bundle. The app invokes it from the project directory with `--no-min-gen`,
 so minified and generated bundles do not dominate the bar while scc's normal `.gitignore`,
-`.ignore`, and `.sccignore` handling keeps ignored dependencies out.
+`.ignore`, and `.sccignore` handling keeps ignored dependencies out. It also passes
+`--exclude-dir .claude/worktrees`: [Claude Code creates](https://code.claude.com/docs/en/worktrees)
+`--worktree`, isolated-subagent and desktop worktrees there by default, and each is a complete
+nested checkout. Claude recommends adding that path to `.gitignore`, but the reading must be right
+before every repository adopts the rule; a local `.git/info/exclude` entry can also hide it from
+Git status and is not an ignore source scc reads. The exclusion names that worktree root exactly
+rather than hiding the rest of `.claude`, which may contain real project configuration.
 
 `ProjectStatsService` gives code composition and Git activity separate persisted caches,
 utility queues, in-flight sets, and freshness clocks. A large bounded history query therefore

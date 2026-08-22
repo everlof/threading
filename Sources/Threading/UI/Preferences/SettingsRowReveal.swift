@@ -35,6 +35,37 @@ enum SettingsRowAnchor {
         return firstView(withIdentifier: identifier, in: root)
     }
 
+    /// The row `title` names, bringing it onto the page first if a surface owns it but is not
+    /// currently showing it.
+    ///
+    /// `find` answers about the tree as it stands, which is the honest question for a test about
+    /// tagging. This is the question a *reveal* is asking, and the two stopped being the same
+    /// question when a page grew a run of segments: Remote Access shows one way in's rows and the
+    /// other choices' rows do not exist, while the catalogue still promises every switch on the
+    /// page. Without this, a search result for the tailnet's browser option opened the page and
+    /// did nothing else.
+    ///
+    /// Bounded and rare: it runs once per click, and each surface answers by trying its own
+    /// small fixed set of panels.
+    static func locate(title: String, in root: NSView) -> NSView? {
+        if let found = find(title: title, in: root) { return found }
+        for surface in revealingSurfaces(in: root)
+        where surface.prepareToReveal(title: title) {
+            root.layoutSubtreeIfNeeded()
+            if let found = find(title: title, in: root) { return found }
+        }
+        return nil
+    }
+
+    private static func revealingSurfaces(in root: NSView) -> [SettingsRowRevealing] {
+        var found: [SettingsRowRevealing] = []
+        if let surface = root as? SettingsRowRevealing { found.append(surface) }
+        for child in root.subviews {
+            found.append(contentsOf: revealingSurfaces(in: child))
+        }
+        return found
+    }
+
     private static func firstView(
         withIdentifier identifier: NSUserInterfaceItemIdentifier,
         in root: NSView
@@ -47,6 +78,25 @@ enum SettingsRowAnchor {
         }
         return nil
     }
+}
+
+// MARK: - Surfaces That Hide Their Own Rows
+
+/// A view that owns settings rows it is not currently showing.
+///
+/// The ways-in run on Remote Access is the first and, so far, the only one: three choices share a
+/// card, the selected choice's rows are built and the other two choices' rows do not exist. That
+/// is the point of the run, and it is also a promise the settings catalogue keeps making about
+/// rows the reveal can no longer see. So the surface is asked to bring one on screen before
+/// `SettingsRowAnchor.locate(title:in:)` gives up.
+///
+/// An implementation answers by *trying*, not by holding a second list of the titles it owns: a
+/// list would be one more thing to drift from the rows themselves, which is the failure this
+/// whole file exists to prevent.
+@MainActor
+protocol SettingsRowRevealing: NSView {
+    /// Brings the row `title` names onto the page. Returns whether anything changed.
+    func prepareToReveal(title: String) -> Bool
 }
 
 // MARK: - Reveal
@@ -66,7 +116,7 @@ enum SettingsRowReveal {
         // The page was installed this turn; without a layout pass every frame below is zero.
         pageRoot.layoutSubtreeIfNeeded()
 
-        guard let row = SettingsRowAnchor.find(title: title, in: pageRoot),
+        guard let row = SettingsRowAnchor.locate(title: title, in: pageRoot),
               let scrollView = enclosingScrollView(of: row),
               let documentView = scrollView.documentView else { return }
 

@@ -182,6 +182,12 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var storageIssue: String? = nil
     @Published private(set) var notificationOpenRequest: RemoteNotificationOpenRequest?
     @Published var isPairing = false
+    /// An invitation the operating system delivered, held until the pairing screen takes it.
+    ///
+    /// A tapped `threading://` link can arrive before that screen exists — including on a cold
+    /// launch, where the URL comes with the scene's connection options — so the payload waits
+    /// here rather than being handed to a view that is not on screen yet.
+    @Published private(set) var pendingInvitation: String?
     @Published var navigationPath: [MobileNavigationRoute] = [] {
         didSet {
             guard !isEphemeralTerminalWireFixture else { return }
@@ -461,6 +467,26 @@ final class RemoteAppModel: ObservableObject {
 
     var canReadUsage: Bool {
         me?.features?.contains(RemoteRESTFeature.usageDashboard.rawValue) == true
+    }
+
+    /// Routes a URL the operating system handed this app.
+    ///
+    /// Answers whether the URL was Threading's, so a scene that was given several can stop at
+    /// the first one that meant something and leave the rest alone. It opens the pairing screen
+    /// rather than accepting silently: accepting an invitation creates a durable membership on
+    /// somebody else's Mac, which is not something a tap should do without showing its work.
+    @discardableResult
+    func open(_ url: URL) -> Bool {
+        guard MobileInvitationRoute(url: url) != nil else { return false }
+        pendingInvitation = url.absoluteString
+        isPairing = true
+        return true
+    }
+
+    /// Hands over a waiting invitation exactly once.
+    func takePendingInvitation() -> String? {
+        defer { pendingInvitation = nil }
+        return pendingInvitation
     }
 
     func pair(_ invitationLink: RemoteConnectionLink, displayName: String) async throws {

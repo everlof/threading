@@ -286,8 +286,11 @@ PYTHON
 
 # MARK: - Build and install
 
-# ONLY_ACTIVE_ARCH: this build is for one machine, so it does not need the second slice a release
-# does. CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO: Xcode adds get-task-allow to a locally built Release
+# ARCHS: Threading is arm64-only (docs/architecture/releasing.md, "Apple silicon only"). Saying so
+# on the command line reaches the Swift packages too, which do not read the project's ARCHS and
+# would otherwise compile a second slice the link discards. (ONLY_ACTIVE_ARCH was tried first and
+# did nothing: a generic destination has no active architecture.)
+# CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO: Xcode adds get-task-allow to a locally built Release
 # — release.sh's header says so — and an app you leave running all day should not be one any
 # process running as you can attach a debugger to and read the memory of.
 build_the_checkout() {
@@ -302,7 +305,7 @@ build_the_checkout() {
         -configuration Release \
         -destination 'generic/platform=macOS' \
         -derivedDataPath "$DERIVED" \
-        ONLY_ACTIVE_ARCH=YES \
+        ARCHS=arm64 \
         CODE_SIGN_STYLE=Manual \
         CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
         PROVISIONING_PROFILE_SPECIFIER="" \
