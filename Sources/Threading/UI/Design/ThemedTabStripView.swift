@@ -221,6 +221,11 @@ final class ThemedTabStripView: NSView {
         scrollView.hasVerticalScroller = false
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.horizontalScrollElasticity = .allowed
+        // The strip has one axis and no vertical range at any width, so vertical belongs to
+        // whatever it sits in — a two-finger pan down the pane used to be eaten here, bouncing a
+        // band that had nothing above or below it to reveal — and a mouse wheel, which turns
+        // along the axis the strip does not have, can only be asking for the one it does.
+        scrollView.axis = .horizontalOnly
         scrollView.documentView = stack
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)

@@ -2479,6 +2479,51 @@ struct NestedScrollGestureRouter {
     }
 }
 
+/// Whether one scroll event over a horizontal-only viewport is a plain mouse wheel, whose
+/// vertical ticks can only be naming the one axis such a viewport has.
+///
+/// A wheel turns along the axis a tab strip does not have, so over a strip it did nothing at
+/// all — the reported defect. Reading its ticks as the strip's own is the translation AppKit
+/// already performs for Shift, which is also why a shifted event is declined here: the axes are
+/// swapped **in the event**, before any view sees it, so a shifted wheel arrives carrying
+/// `scrollingDeltaX` and translating it again would put it back on the axis the strip lacks.
+///
+/// The decision is a function of nothing but the event's own properties, so the whole matrix can
+/// be asserted without a window to deliver an event into — which matters here because AppKit
+/// ignores a synthesised `scrollWheel` outside a real event stream.
+enum HorizontalOnlyWheelMapping {
+
+    static func mapsVerticalTicksToHorizontal(
+        phase: NSEvent.Phase,
+        momentumPhase: NSEvent.Phase,
+        hasPreciseScrollingDeltas: Bool,
+        modifiers: NSEvent.ModifierFlags,
+        scrollingDeltaX: CGFloat,
+        scrollingDeltaY: CGFloat
+    ) -> Bool {
+        // A trackpad gesture carries a phase for its whole life, momentum included, and is
+        // *routed* by the axis it began on rather than translated — see
+        // `NestedScrollGestureRouter`. Only an unphased, coarse wheel is a wheel.
+        guard phase.isEmpty, momentumPhase.isEmpty else { return false }
+        guard !hasPreciseScrollingDeltas else { return false }
+        guard !modifiers.contains(.shift) else { return false }
+        // A tilt wheel already names the axis the strip has; only ticks that name the axis it
+        // does not have are worth translating.
+        return scrollingDeltaY != 0 && scrollingDeltaX == 0
+    }
+
+    static func mapsVerticalTicksToHorizontal(_ event: NSEvent) -> Bool {
+        mapsVerticalTicksToHorizontal(
+            phase: event.phase,
+            momentumPhase: event.momentumPhase,
+            hasPreciseScrollingDeltas: event.hasPreciseScrollingDeltas,
+            modifiers: event.modifierFlags,
+            scrollingDeltaX: event.scrollingDeltaX,
+            scrollingDeltaY: event.scrollingDeltaY
+        )
+    }
+}
+
 class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
 
     enum SurfaceRole {
@@ -2510,6 +2555,44 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         /// has nothing left to give in that direction: the Usage breakdown, whose table is
         /// virtualized and therefore cannot simply grow to fit its rows.
         case atContentEnds
+    }
+
+    /// Which axes a viewport actually has, and so which gestures are its own to answer.
+    ///
+    /// `.horizontalOnly` is a strip — a run of tabs — with no vertical range whatsoever. Two
+    /// answers change. A vertical-dominant gesture is never this viewport's, so
+    /// `verticalScrollHandoff` reads as `.always` however it was left; and a plain mouse wheel,
+    /// which turns along the axis this viewport does *not* have, is read as naming the axis it
+    /// does, because over a strip that is the only thing it can mean.
+    ///
+    /// The Markdown code block and the wide document table are horizontal-only in shape too, and
+    /// deliberately stay on `verticalScrollHandoff = .always` instead of taking this: they sit
+    /// inside a page that scrolls, so a wheel over them belongs to that page rather than to their
+    /// one axis. This case is for a strip with nothing of its own behind it — a pane header's.
+    enum ScrollAxis {
+        /// The ordinary document: both axes are this viewport's own. The default.
+        case both
+        /// A horizontal run with no vertical range at all.
+        case horizontalOnly
+    }
+
+    var axis: ScrollAxis = .both {
+        didSet {
+            guard axis != oldValue else { return }
+            // The rubber band is a complaint on its own, separately from the routing: a gesture
+            // this viewport *does* keep — a horizontal pan with a little vertical in it —
+            // reaches `super`, and a vertical bounce on a band with nothing above or below it to
+            // reveal reads as a defect rather than as an affordance.
+            if axis == .horizontalOnly { verticalScrollElasticity = .none }
+            handsOverCurrentGesture = false
+        }
+    }
+
+    /// `.horizontalOnly` has no vertical range for a policy to be about. Computed rather than
+    /// assigned from `axis`'s `didSet`, so the two properties cannot be set in an order that
+    /// silently loses one of them.
+    private var effectiveVerticalScrollHandoff: VerticalScrollHandoff {
+        axis == .horizontalOnly ? .always : verticalScrollHandoff
     }
 
     var verticalScrollHandoff: VerticalScrollHandoff = .never {
@@ -2631,7 +2714,20 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        guard verticalScrollHandoff != .never else {
+        // Before any routing: over a strip, a wheel's ticks *are* the strip's axis. Decided from
+        // the event alone, so it can never be mistaken for the trackpad gestures below — those
+        // are phased for their whole life and are routed rather than translated.
+        if axis == .horizontalOnly,
+           HorizontalOnlyWheelMapping.mapsVerticalTicksToHorizontal(event) {
+            nestedGestureRouter.reset()
+            handsOverCurrentGesture = false
+            onUserScroll?()
+            scrollAlongHorizontalAxis(byLines: event.scrollingDeltaY)
+            return
+        }
+
+        let handoff = effectiveVerticalScrollHandoff
+        guard handoff != .never else {
             nestedGestureRouter.reset()
             handsOverCurrentGesture = false
             onUserScroll?()
@@ -2652,15 +2748,15 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
             || event.momentumPhase.contains(.cancelled)
         defer { if endsGesture { handsOverCurrentGesture = false } }
 
-        guard isVertical, let ancestorScrollView else {
+        guard isVertical else {
             onUserScroll?()
             super.scrollWheel(with: event)
             return
         }
 
-        if verticalScrollHandoff == .always || handsOverCurrentGesture {
+        if handoff == .always || handsOverCurrentGesture {
             handsOverCurrentGesture = true
-            ancestorScrollView.scrollWheel(with: event)
+            handOffVerticalGesture(event)
             return
         }
 
@@ -2674,7 +2770,43 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         super.scrollWheel(with: event)
         guard contentView.bounds.origin == before else { return }
         handsOverCurrentGesture = true
-        ancestorScrollView.scrollWheel(with: event)
+        handOffVerticalGesture(event)
+    }
+
+    /// Where a gesture this viewport has given away actually goes.
+    ///
+    /// The enclosing scroll view when there is one, and otherwise **up the responder chain**
+    /// rather than into `super`. A tab strip in a pane header has no scrolling ancestor at all,
+    /// and `NSScrollView` answers a gesture it has no range for by rubber-banding rather than by
+    /// declining it — so handing such a gesture back to `super` is exactly the swallowed scroll
+    /// and the pointless bounce this policy exists to remove.
+    private func handOffVerticalGesture(_ event: NSEvent) {
+        if let ancestorScrollView {
+            ancestorScrollView.scrollWheel(with: event)
+        } else {
+            nextResponder?.scrollWheel(with: event)
+        }
+    }
+
+    /// Moves the one axis a horizontal-only viewport has, by a wheel's line delta.
+    ///
+    /// Performed here rather than by handing `super` a rewritten event, because then the step and
+    /// the clamp are this component's to state: `horizontalLineScroll` is the same step AppKit
+    /// gives a line-unit event, and the sign is the one a horizontal event already carries — a
+    /// positive delta scrolls toward the content's beginning, so the offset moves against it.
+    /// Doing it directly is also what makes the behaviour assertable: AppKit ignores a
+    /// synthesised `scrollWheel` outside a real event stream.
+    private func scrollAlongHorizontalAxis(byLines lines: CGFloat) {
+        let clip = contentView
+        let document = clip.documentRect
+        let furthest = max(document.maxX - clip.bounds.width, document.minX)
+        let target = min(
+            max(clip.bounds.origin.x - lines * horizontalLineScroll, document.minX),
+            furthest
+        )
+        guard target != clip.bounds.origin.x else { return }
+        clip.scroll(to: NSPoint(x: target, y: clip.bounds.origin.y))
+        reflectScrolledClipView(clip)
     }
 
     private var ancestorScrollView: NSScrollView? {

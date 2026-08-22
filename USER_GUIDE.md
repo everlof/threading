@@ -2723,6 +2723,11 @@ order is the same one the agent sees, and it survives a relaunch. **⌘⇧[** an
 **⌘1**–**⌘9** jump to a tab by its place in it. The same gestures and menu, with the same
 commands, work on the shell drawer's tabs.
 
+**More tabs than fit scroll rather than shrink**, and the strip only answers what is meant for
+it. Swipe sideways over the tabs to move along them; a mouse wheel does the same, since sideways
+is the only direction the strip has. Swipe *down* over the tabs and the pane behind them scrolls,
+as it would anywhere else. The strip does not catch a gesture it has nothing to do with.
+
 **Charts are drawn by Threading, not by the agent.** Ask any agent to compare something —
 "chart the cold-start numbers before and after", "rank the slowest tests", "break the turn cost
 down by part" — and it sends the values; the app draws them in your theme, with its own scale,
