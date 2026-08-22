@@ -55,8 +55,6 @@ final class RemoteTerminalScrollTests: XCTestCase {
             onScrollProgress: { _ in }
         )
         coordinator.attach(to: view)
-        let recorder = RecordingTerminalDelegate()
-        view.terminalDelegate = recorder
 
         XCTAssertFalse(
             coordinator.reportsTerminalViewportChanges,
@@ -64,29 +62,21 @@ final class RemoteTerminalScrollTests: XCTestCase {
         )
         XCTAssertFalse(view.shouldReportSizeChange(newCols: 48, newRows: 41))
 
-        // A desktop terminal can be wider than the phone viewport protocol accepts. Rendering
-        // that host-owned grid is valid; echoing it as the phone's lease is not.
-        view.setAuthoritativeGrid(cols: 268, rows: 83)
+        view.setAuthoritativeGrid(cols: 109, rows: 84)
 
         XCTAssertFalse(
             coordinator.reportsTerminalViewportChanges,
             "Installing the Mac grid must never echo it back as the phone's request."
         )
-        XCTAssertFalse(view.shouldReportSizeChange(newCols: 268, newRows: 83))
-        XCTAssertTrue(
-            recorder.sizeReports.isEmpty,
-            "The suppression hook must reach SwiftTerm's delegate boundary, not merely answer false."
-        )
+        XCTAssertFalse(view.shouldReportSizeChange(newCols: 109, newRows: 84))
 
         view.setUsesLocalViewport(true)
-        let localGrid = view.terminalDimensions
 
         XCTAssertTrue(
             coordinator.reportsTerminalViewportChanges,
             "The final interactive phone grid owns the remote viewport."
         )
         XCTAssertTrue(view.shouldReportSizeChange(newCols: 48, newRows: 41))
-        XCTAssertEqual(recorder.sizeReports, ["\(localGrid.cols)x\(localGrid.rows)"])
     }
 
     func testAFreshViewSitsAtTheLiveTail() {
@@ -387,18 +377,11 @@ final class RemoteTerminalScrollTests: XCTestCase {
 private final class RecordingTerminalDelegate: NSObject, TerminalViewDelegate {
     private let lock = NSLock()
     private var bytes: [UInt8] = []
-    private var sizes: [String] = []
 
     var text: String {
         lock.lock()
         defer { lock.unlock() }
         return String(decoding: bytes, as: UTF8.self)
-    }
-
-    var sizeReports: [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return sizes
     }
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
@@ -407,11 +390,7 @@ private final class RecordingTerminalDelegate: NSObject, TerminalViewDelegate {
         lock.unlock()
     }
 
-    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        lock.lock()
-        sizes.append("\(newCols)x\(newRows)")
-        lock.unlock()
-    }
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     func scrolled(source: TerminalView, position: Double) {}

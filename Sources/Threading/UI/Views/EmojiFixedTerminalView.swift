@@ -48,8 +48,8 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     ///
     /// Kept separate from `onOutput` on purpose: `SessionActivityTracker` only ever needs the
     /// count, and most sessions have no remote subscriber, so the byte hook is nil and costs
-    /// nothing. SwiftTerm owns the worker-thread bytes before this is delivered on the main
-    /// thread, so a consumer can hand them off without touching the PTY read buffer.
+    /// nothing. This runs on the main thread inside SwiftTerm's synchronous read hop — a
+    /// consumer must copy and hand off, never block, or it stalls the PTY read loop.
     var onOutputBytes: ((ArraySlice<UInt8>) -> Void)?
 
     /// Called when the process rings the terminal bell, which agents use to signal that
@@ -214,7 +214,6 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        installProcessOutputObserver()
         // SwiftTerm 2 defaults to an overlay indicator. Threading's terminal chrome owns a
         // persistent themed track, so retain the pre-2.0 geometry explicitly at the host edge.
         scrollerStyle = .legacy
@@ -222,20 +221,6 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         configureForEmojiRendering()
         setupContextMenu()
         registerForDraggedTypes([.fileURL, .png, .tiff, SessionReferencePasteboard.type])
-    }
-
-    /// SwiftTerm 2 parses a local process through a private direct-delivery adapter. The public
-    /// `dataReceived` method remains for compatibility, but overriding it no longer observes the
-    /// actual PTY read path. Use the owned-byte seam and restore Threading's main-actor hooks in
-    /// the same order they had before direct delivery.
-    private func installProcessOutputObserver() {
-        setProcessOutputBytesHandler { [weak self] bytes in
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.onOutput?(bytes.count)
-                self.onOutputBytes?(bytes[...])
-            }
-        }
     }
 
     // MARK: - Dropped Files
@@ -404,7 +389,6 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        installProcessOutputObserver()
         configureForEmojiRendering()
         setupContextMenu()
     }
@@ -422,6 +406,12 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     }
 
     // MARK: - Activity Observation
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        super.dataReceived(slice: slice)
+        onOutput?(slice.count)
+        onOutputBytes?(slice)
+    }
 
     /// The bell, minus SwiftTerm's beep.
     ///
