@@ -172,6 +172,26 @@ was reachable at. The concurrency ceiling does not grow with endpoint or port co
 the established sequential failover and one idempotency key; racing operations with side effects
 would make the transport optimization part of mutation semantics.
 
+**Attempts are ordered by what each one is evidence about, in three waves.** The first wave is one
+address per route — the leading address of each admitted kind, in the policy's own deterministic
+order. The second is the Mac's other addresses on a route already represented. The third is the
+sticky-port range, and it is carried by one address per route rather than by each of them, because
+ten ports answer "which port did this Mac's listener take" and that answer does not change between
+two addresses of the same Mac. A discovered address leads its route and carries its range, since it
+is where the Mac is now. This is the 2026-08-21 defect: a Mac advertising two `lan` addresses
+produced twenty attempts before any other route was tried once, and the phone reached the tailnet
+address that was working at attempt 22 of 23, ninety seconds in.
+
+**The read-only walk has a ceiling.** `RemoteRouteWalkBudget` gives a route's own address four
+seconds, a guessed port two, and the whole walk twelve — after which the caller is answered with
+the ordinary named transport failure while the walk keeps its remaining candidates. A success that
+lands after the ceiling is adopted exactly as a timely one would have been, which is what makes
+twelve seconds safe to set: nothing is abandoned, only stopped being waited on. A walk of exactly
+one candidate has no ceiling and keeps the ordinary request timeout, because there is no other
+route to get on with. Mutations keep their sequential failover and their longer per-attempt
+timeout; they gain the wave ordering but no ceiling, since abandoning an operation with side
+effects is not the same trade as abandoning a read.
+
 Owner responses carry the addresses each way in is currently answering on, tailnet included, plus an
 explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still
 decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed
@@ -196,6 +216,10 @@ replacement contract it cannot honor.
 
 Before the first catalogue arrives, the dashboard names only the operation happening now:
 checking saved connections, trying a way in, or loading sessions after the Mac has answered.
+The session screen borrows the same vocabulary once a walk has run past its first failure: it says
+"Opening chat…" while the walk is still young, and names the route it is on — "Trying Tailscale" —
+once something has failed, because from there the wait is long enough that a bare spinner reads as
+a frozen app. That is what the 2026-08-21 reporter was looking at for ninety seconds.
 These values come from `RemoteAppModel.fetchMe` at the point the bounded race begins and when its
 winner is known;
 there is no cosmetic timer that can claim a different step from the work the transport is doing.

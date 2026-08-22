@@ -28,6 +28,9 @@ enum RemoteDeviceIdentity {
 enum RemoteClientDefaults {
     static let requestTimeoutSeconds: TimeInterval = 20
     static let resourceTimeoutSeconds: TimeInterval = 30
+    /// A support report carries a bounded journal and may carry a screenshot preview, so its
+    /// upload is given longer than a control-plane request before the whole transfer is abandoned.
+    static let reportResourceTimeoutSeconds: TimeInterval = 60
     /// How far down a Foundation error chain the local-network diagnosis will look. Underlying
     /// errors nest, and an unbounded walk over attacker- or framework-controlled `userInfo` is
     /// not a bound.
@@ -446,6 +449,39 @@ struct RemoteClient {
             delegateQueue: nil
         )
     }()
+
+    /// The session support-report delivery uses, and the reason it is not `URLSession.shared`.
+    ///
+    /// `URLSession.shared` is the one session in this app that cannot be given a delegate, so the
+    /// report intake was the single network path with no server-trust hook: nothing could decide
+    /// what to do about the certificate it was offered, and nothing recorded what was decided. In
+    /// the 2026-08-21 report that is exactly the hole — 250 deliveries, every one of them
+    /// `url.-1200`, and no verdict anywhere in the journal saying whether an identity check had
+    /// passed, refused, or never run. Sharing the one pinning delegate answers that question on
+    /// this path too, and it is the same object rather than a second one so a pin learned
+    /// anywhere is in force here as well.
+    ///
+    /// The intake is a public host today and stock evaluation is what `notPinned` falls through
+    /// to, so this changes no accept/refuse outcome by itself. What it changes is that the outcome
+    /// is now the app's, and observable.
+    private static let reportSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        // The outbox owns retry and its own backoff. Waiting inside URLSession would turn a
+        // deliverable report into an indefinite suspension with no queued record to show for it.
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForResource = RemoteClientDefaults.reportResourceTimeoutSeconds
+        return URLSession(
+            configuration: configuration,
+            delegate: pinningDelegate,
+            delegateQueue: nil
+        )
+    }()
+
+    /// Delivers one support report. The caller owns the request, the retry policy and the records.
+    static func deliverIssueReport(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try await reportSession.data(for: request)
+    }
 
     func fetchMe(timeout: TimeInterval? = nil) async throws -> RemoteMeDTO {
         var request = request(url: link.meURL)
@@ -921,6 +957,7 @@ struct RemoteClient {
     /// object rather than two that happen to be configured alike.
     static var requestSessionDelegate: URLSessionDelegate? { session.delegate }
     static var socketSessionDelegate: URLSessionDelegate? { socketSession.delegate }
+    static var reportSessionDelegate: URLSessionDelegate? { reportSession.delegate }
 
     private func request(url: URL) -> URLRequest {
         var request = URLRequest(url: url)

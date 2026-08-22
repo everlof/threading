@@ -32,6 +32,23 @@ final class RemoteHostTrustTests: XCTestCase {
         XCTAssertTrue(request as AnyObject === RemoteClient.pinningDelegate)
     }
 
+    /// Support-report delivery went out over `URLSession.shared`, which is the one session in this
+    /// app that cannot be given a delegate at all. So the report intake was the single network
+    /// path with no server-trust hook: nothing could decide what to do about the certificate it
+    /// was offered, and nothing recorded what was decided. The 2026-08-21 journal is 250
+    /// deliveries, every one `url.-1200`, with no verdict anywhere to say whether an identity
+    /// check had passed, refused, or never run.
+    func testTheReportSessionSharesTheSameOnePinningDelegate() {
+        let report = RemoteClient.reportSessionDelegate
+
+        XCTAssertNotNil(report, "a session with no delegate cannot pin at all")
+        XCTAssertTrue(report as AnyObject === RemoteClient.pinningDelegate)
+        XCTAssertTrue(
+            report as AnyObject === RemoteClient.requestSessionDelegate as AnyObject,
+            "one object, so a pin learned anywhere is in force on this path too"
+        )
+    }
+
     // MARK: - Where a pin comes from
 
     func testAScannedCodePinsTheAddressItWasScannedFrom() throws {

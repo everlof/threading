@@ -4475,6 +4475,26 @@
         }
       }
     },
+    "This build has no report service configured. The report is saved securely on this device; use Share report to send it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den h\u00e4r versionen har ingen rapporttj\u00e4nst konfigurerad. Rapporten \u00e4r s\u00e4kert sparad p\u00e5 enheten. Anv\u00e4nd Dela rapport f\u00f6r att skicka den."
+          }
+        }
+      }
+    },
+    "This build has no report service configured, so the report was kept on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den h\u00e4r versionen har ingen rapporttj\u00e4nst konfigurerad, s\u00e5 rapporten sparades p\u00e5 enheten."
+          }
+        }
+      }
+    },
     "Threading couldn’t reach the report service. The report is saved securely on this device and will be retried when the app is active.": {
       "localizations": {
         "sv": {
