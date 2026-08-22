@@ -215,6 +215,64 @@ final class RemoteTerminalScrollTests: XCTestCase {
         XCTAssertTrue(recorder.text.contains("<65;"), "expected wheel-down reports, got \(recorder.text)")
     }
 
+    /// Codex uses the alternate screen without enabling mouse tracking. That buffer deliberately
+    /// has no scrollback, so letting UIScrollView own the finger only drags its current screen
+    /// into blank space. xterm Alternate Scroll Mode instead translates the wheel to cursor keys,
+    /// which asks Codex to repaint the older conversation itself.
+    func testAlternateScreenWithoutMouseTrackingTurnsAFingerDragIntoCursorKeys() {
+        let view = makeView(feeding: Fixture.shortRun)
+        let recorder = RecordingTerminalDelegate()
+        view.terminalDelegate = recorder
+        view.feed(text: "\u{1b}[?1049h")
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertTrue(view.terminalStateSnapshot().isAlternateBuffer)
+        XCTAssertEqual(view.terminalStateSnapshot().mouseMode, .off)
+        XCTAssertNotNil(view.panMouseGesture)
+        XCTAssertEqual(view.panGestureRecognizer.minimumNumberOfTouches, 2)
+
+        view.forwardWheelDrag(
+            distance: Fixture.dragDistance,
+            gestureRecognizer: UIPanGestureRecognizer()
+        )
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertTrue(
+            recorder.text.contains("\u{1b}[A"),
+            "expected cursor-up input for alternate scroll, got \(recorder.text.debugDescription)"
+        )
+        XCTAssertFalse(recorder.text.contains("<64;"), "cursor scrolling is not a mouse report")
+    }
+
+    func testLeavingTheAlternateScreenReturnsOneFingerToLocalScrollback() {
+        let view = makeView(feeding: Fixture.shortRun)
+        view.feed(text: "\u{1b}[?1049h")
+        settleTerminalCallbacks(for: view)
+        XCTAssertNotNil(view.panMouseGesture)
+
+        view.feed(text: "\u{1b}[?1049l")
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertNil(view.panMouseGesture)
+        XCTAssertEqual(view.panGestureRecognizer.minimumNumberOfTouches, 1)
+    }
+
+    func testResetAlternateScrollModeSuppressesCursorKeyTranslation() {
+        let view = makeView(feeding: Fixture.shortRun)
+        let recorder = RecordingTerminalDelegate()
+        view.terminalDelegate = recorder
+        view.feed(text: "\u{1b}[?1049h\u{1b}[?1007l")
+        settleTerminalCallbacks(for: view)
+
+        view.forwardWheelDrag(
+            distance: Fixture.dragDistance,
+            gestureRecognizer: UIPanGestureRecognizer()
+        )
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertTrue(recorder.text.isEmpty)
+    }
+
     /// The application's gesture and the scroll view's own both live on this view, and two pan
     /// recognizers on one view do not both get to recognise. The touch count is what tells them
     /// apart, so the local scrollback stays reachable with two fingers.
