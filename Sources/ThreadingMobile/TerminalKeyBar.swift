@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftTerm
 import ThreadingRemoteKit
-import PhotosUI
 import UIKit
 
 /// The latch state shared between the key bar, which shows and toggles it, and the terminal
@@ -328,8 +327,10 @@ struct TerminalKeyBar: View {
     let customize: () -> Void
     let showsAttachmentKey: Bool
     let canAttach: Bool
-    @Binding var attachmentPhotoItems: [PhotosPickerItem]
-    let attachmentSelectionLimit: Int
+    /// Menu items only request presentation: a `PhotosPicker` placed inside a `Menu` is torn
+    /// down with the menu before its sheet can present, so the owner attaches
+    /// `.photosPicker`/`.fileImporter` to its own stable hierarchy instead.
+    let chooseAttachmentPhotos: () -> Void
     let chooseAttachmentFiles: () -> Void
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var theme
@@ -394,11 +395,7 @@ struct TerminalKeyBar: View {
 
     private var attachmentButton: some View {
         Menu {
-            PhotosPicker(
-                selection: $attachmentPhotoItems,
-                maxSelectionCount: attachmentSelectionLimit,
-                matching: .any(of: [.images, .videos])
-            ) {
+            Button(action: chooseAttachmentPhotos) {
                 Label(
                     MobileL10n.string("Photo Library"),
                     systemImage: "photo.on.rectangle"

@@ -761,6 +761,7 @@ struct TerminalRemoteView: View {
     @State private var directAttachmentItems: [ComposerAttachmentItem] = []
     @State private var directAttachmentNotice: String?
     @State private var directAttachmentPhotoItems: [PhotosPickerItem] = []
+    @State private var isPickingDirectAttachmentPhotos = false
     @State private var isImportingDirectAttachmentFiles = false
     @State private var pendingDirectAttachmentInsertionID: String?
     @State private var selectionQuotes: [RemoteTerminalSelectionQuote] = []
@@ -837,8 +838,9 @@ struct TerminalRemoteView: View {
                     && connection.supportsTerminalAttachmentInsertion,
                 canAttach: directAttachmentTray?.canAcceptMore == true
                     || isDirectAttachmentEvidence,
-                attachmentPhotoItems: $directAttachmentPhotoItems,
-                attachmentSelectionLimit: remainingDirectAttachmentSlots,
+                chooseAttachmentPhotos: {
+                    isPickingDirectAttachmentPhotos = true
+                },
                 chooseAttachmentFiles: {
                     isImportingDirectAttachmentFiles = true
                 }
@@ -872,6 +874,12 @@ struct TerminalRemoteView: View {
         .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
             handleDirectAttachmentInsertion(feedback)
         }
+        .photosPicker(
+            isPresented: $isPickingDirectAttachmentPhotos,
+            selection: $directAttachmentPhotoItems,
+            maxSelectionCount: remainingDirectAttachmentSlots,
+            matching: .any(of: [.images, .videos])
+        )
         .fileImporter(
             isPresented: $isImportingDirectAttachmentFiles,
             allowedContentTypes: ComposerAttachmentSources.documentTypes,
@@ -1241,6 +1249,7 @@ private struct TerminalLineComposer: View {
     @State private var attachmentTray: ComposerAttachmentTray?
     @State private var attachmentItems: [ComposerAttachmentItem] = []
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var isPickingPhotos = false
     @State private var isImportingFiles = false
     @FocusState private var draftIsFocused: Bool
 
@@ -1269,11 +1278,11 @@ private struct TerminalLineComposer: View {
 
             HStack(alignment: .center, spacing: MobileDesign.Spacing.small) {
                 Menu {
-                    PhotosPicker(
-                        selection: $photoItems,
-                        maxSelectionCount: remainingAttachmentSlots,
-                        matching: .any(of: [.images, .videos])
-                    ) {
+                    // A PhotosPicker inside a Menu is torn down with the menu before its sheet
+                    // can present; the item requests presentation and .photosPicker below shows it.
+                    Button {
+                        isPickingPhotos = true
+                    } label: {
                         Label(MobileL10n.string("Photo Library"), systemImage: "photo.on.rectangle")
                     }
                     Button {
@@ -1337,6 +1346,12 @@ private struct TerminalLineComposer: View {
         .onChange(of: photoItems) { _, items in
             Task { await loadPhotos(items) }
         }
+        .photosPicker(
+            isPresented: $isPickingPhotos,
+            selection: $photoItems,
+            maxSelectionCount: remainingAttachmentSlots,
+            matching: .any(of: [.images, .videos])
+        )
         .fileImporter(
             isPresented: $isImportingFiles,
             allowedContentTypes: ComposerAttachmentSources.documentTypes,
