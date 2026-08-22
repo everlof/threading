@@ -784,7 +784,9 @@ struct SemanticSceneHierarchyIndex {
 /// fields are captured when the canvas exposes its children; geometry remains live across layout.
 @MainActor
 private final class SemanticSceneAccessibilityMark: NSAccessibilityElement {
-    private weak var owner: SemanticSceneView?
+    /// AppKit's accessibility overrides are imported nonisolated even though it invokes them on
+    /// the main thread. The owner is UI state and is only dereferenced inside `assumeIsolated`.
+    nonisolated(unsafe) private weak var owner: SemanticSceneView?
     private let index: Int
 
     init(owner: SemanticSceneView, index: Int) {
@@ -808,12 +810,16 @@ private final class SemanticSceneAccessibilityMark: NSAccessibilityElement {
     }
 
     override nonisolated func accessibilityFrame() -> NSRect {
+        let owner = owner
+        let index = index
         MainActor.assumeIsolated {
             owner?.accessibilityFrame(at: index) ?? .zero
         }
     }
 
     override nonisolated func accessibilityPerformPress() -> Bool {
+        let owner = owner
+        let index = index
         MainActor.assumeIsolated {
             owner?.accessibilityActivate(at: index) ?? false
         }

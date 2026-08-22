@@ -97,9 +97,9 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTAssertEqual(picker.accessibilityTitle(), "Grouping")
     picker.chooseItem(at: 0)
 
-    let sceneItem = try XCTUnwrap(sceneItem(withID: "build-products", in: host))
-    XCTAssertEqual(sceneItem.accessibilityRole(), .button)
-    XCTAssertTrue(sceneItem.accessibilityPerformPress())
+    let activatedSceneItem = try XCTUnwrap(sceneItem(withID: "build-products", in: host))
+    XCTAssertEqual(activatedSceneItem.accessibilityRole(), .button)
+    XCTAssertTrue(activatedSceneItem.accessibilityPerformPress())
     let selectedSceneItem = try XCTUnwrap(sceneItem(withID: "artifact-root", in: host))
     XCTAssertTrue(selectedSceneItem.isAccessibilitySelected())
 
