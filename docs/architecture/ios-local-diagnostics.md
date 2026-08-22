@@ -122,6 +122,14 @@ Publication is an atomic write followed by a decode/equality check. Startup load
 and bounded. The store retains at most 8 captures per device and 40 total; each encoded capture
 is at most 900 KiB. Tool reads are memory-only after startup.
 
+The store that owns a request nonce also owns its complete manual-request lifecycle. A fresh tool
+request installs one continuation and receives exactly one terminal result: published capture,
+disabled consent, disconnected phone, timeout, caller cancellation, or validated-storage failure.
+There is no main-actor polling loop. Terminal results are remembered for a bounded minute-long,
+64-entry window so disable/disconnect/cancellation cannot race just ahead of continuation
+registration. Timeout and cancellation synchronously revoke the nonce, making any later upload
+unsolicited instead of silently caching evidence after the caller stopped waiting.
+
 “LAN” is an availability rule, not proof that both radios use the same physical access point. A
 VPN or private route can be indistinguishable at this layer, and an authenticated client supplies
 its selected endpoint kind. Pairing, current owner authorization, the pinned TLS channel,
@@ -152,6 +160,8 @@ remains agent-owned.
 
 Both Release products contain the DTOs, event names, route, settings and tool identities. Tests
 hold the switches off by default, exercise disable/re-enable on a live registered connection,
-reject the route while the Mac is off, and enforce the owner/iOS/LAN/single-use request boundary.
-UI evidence covers the two opt-in settings surfaces. A physical-device check remains the final
-proof that the installed phone and Mac can exchange a fresh capture over their chosen LAN route.
+reject the route while the Mac is off, enforce the owner/iOS/LAN/single-use request boundary, and
+prove capture, timeout, disable, disconnect and service teardown each resolve a manual inspection
+exactly once. UI evidence covers the two opt-in settings surfaces. A physical-device check remains
+the final proof that the installed phone and Mac can exchange a fresh capture over their chosen
+LAN route.

@@ -33,10 +33,28 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
     static let maximumEncodedCaptureBytes = 900 * 1024
     static let requestLifetime: TimeInterval = 30
     static let automaticRequestInterval: TimeInterval = 60
+    private static let maximumRememberedOutcomes = 64
+    private static let rememberedOutcomeLifetime: TimeInterval = 60
 
     private struct PendingRequest {
         let deviceID: String
         let expiresAt: Date
+        let automatic: Bool
+    }
+
+    private struct ManualRequest {
+        let deviceID: String
+    }
+
+    private struct CaptureWaiter {
+        let token: UUID
+        let continuation: CheckedContinuation<CaptureWaitOutcome, Never>
+        var timeoutTask: Task<Void, Never>?
+    }
+
+    private struct RememberedOutcome {
+        let outcome: CaptureWaitOutcome
+        let recordedAt: Date
     }
 
     private struct ConnectionRecord {
@@ -50,14 +68,26 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
         var captures: [MobileDiagnosticsStoredCapture]
         var connections: [String: ConnectionRecord] = [:]
         var pending: [String: PendingRequest] = [:]
+        var manualRequests: [String: ManualRequest] = [:]
+        var waiters: [String: CaptureWaiter] = [:]
+        var rememberedOutcomes: [String: RememberedOutcome] = [:]
         var lastAutomaticRequest: [String: Date] = [:]
     }
 
-    enum StoreError: Error, Equatable {
+    enum StoreError: Error, Equatable, Sendable {
         case disabled
         case unsolicited
         case invalid
         case persistence
+    }
+
+    enum CaptureWaitOutcome: Equatable, Sendable {
+        case captured(MobileDiagnosticsStoredCapture)
+        case disabled
+        case disconnected
+        case timedOut
+        case cancelled
+        case failed(StoreError)
     }
 
     private let directory: URL
@@ -95,6 +125,14 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
         if let settingsObserver {
             NotificationCenter.default.removeObserver(settingsObserver)
         }
+        let waiters = lock.withLock { state -> [CaptureWaiter] in
+            let waiters = Array(state.waiters.values)
+            state.waiters.removeAll()
+            state.manualRequests.removeAll()
+            state.pending.removeAll()
+            return waiters
+        }
+        Self.resume(waiters, with: .cancelled)
     }
 
     var isEnabled: Bool {
@@ -116,27 +154,44 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
     }
 
     func unregister(_ connection: RemoteConnection) {
-        lock.withLock { state in
+        let waiters = lock.withLock { state -> [CaptureWaiter] in
             let removedDevices = Set(state.connections.compactMap { deviceID, record in
                 record.connection === connection ? deviceID : nil
             })
             state.connections = state.connections.filter {
                 $0.value.connection !== connection
             }
+            let manualRequestIDs = state.manualRequests.compactMap { requestID, request in
+                removedDevices.contains(request.deviceID) ? requestID : nil
+            }
+            let waiters = Self.terminateManualRequests(
+                manualRequestIDs,
+                outcome: .disconnected,
+                state: &state
+            )
             state.pending = state.pending.filter { !removedDevices.contains($0.value.deviceID) }
+            return waiters
         }
+        Self.resume(waiters, with: .disconnected)
     }
 
     func setEnabled(_ enabled: Bool) {
-        let connectedDeviceIDs: [String] = lock.withLock { state in
-            guard state.isEnabled != enabled else { return [] }
+        let transition: (connectedDeviceIDs: [String], waiters: [CaptureWaiter]) = lock.withLock {
+            state in
+            guard state.isEnabled != enabled else { return ([], []) }
             state.isEnabled = enabled
             state.consentGeneration &+= 1
+            let waiters = enabled ? [] : Self.terminateManualRequests(
+                Array(state.manualRequests.keys),
+                outcome: .disabled,
+                state: &state
+            )
             state.pending.removeAll()
             state.lastAutomaticRequest.removeAll()
-            return enabled ? Array(state.connections.keys) : []
+            return (enabled ? Array(state.connections.keys) : [], waiters)
         }
-        for deviceID in connectedDeviceIDs {
+        Self.resume(transition.waiters, with: .disabled)
+        for deviceID in transition.connectedDeviceIDs {
             _ = requestCapture(
                 deviceID: deviceID,
                 screenshotPolicy: .latestIncident,
@@ -154,7 +209,11 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
     ) -> String? {
         let result: (RemoteConnection, RemoteMobileDiagnosticsCaptureRequestDTO)? = lock.withLock {
             state in
-            state.pending = state.pending.filter { $0.value.expiresAt > now }
+            // Manual callers own an explicit timeout and must receive its terminal result.
+            // Expired fire-and-forget requests can be forgotten immediately.
+            state.pending = state.pending.filter {
+                $0.value.expiresAt > now || !$0.value.automatic
+            }
             guard state.isEnabled, let live = state.connections[deviceID] else { return nil }
             if automatic,
                let last = state.lastAutomaticRequest[deviceID],
@@ -165,8 +224,14 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
             let requestID = UUID().uuidString.lowercased()
             state.pending[requestID] = PendingRequest(
                 deviceID: deviceID,
-                expiresAt: now.addingTimeInterval(Self.requestLifetime)
+                expiresAt: now.addingTimeInterval(Self.requestLifetime),
+                automatic: automatic
             )
+            if !automatic {
+                state.manualRequests[requestID] = ManualRequest(
+                    deviceID: deviceID
+                )
+            }
             return (
                 live.connection,
                 RemoteMobileDiagnosticsCaptureRequestDTO(
@@ -180,6 +245,83 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
         return result.1.requestID
     }
 
+    /// Awaits the terminal state of one manually requested capture without polling.
+    ///
+    /// The nonce-owning store is the only layer that can distinguish a capture from consent
+    /// revocation, disconnect, timeout, cancellation, or persistence failure. Remembering a
+    /// bounded terminal result closes the race where one of those events happens just before the
+    /// caller installs its continuation.
+    func waitForCapture(
+        requestID: String,
+        timeout: Duration
+    ) async -> CaptureWaitOutcome {
+        let token = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                let immediate = lock.withLock { state -> CaptureWaitOutcome? in
+                    Self.pruneRememberedOutcomes(state: &state, now: Date())
+                    if let remembered = state.rememberedOutcomes.removeValue(
+                        forKey: requestID
+                    ) {
+                        return remembered.outcome
+                    }
+                    if let stored = state.captures.first(where: {
+                        $0.capture.requestID == requestID
+                    }) {
+                        state.manualRequests.removeValue(forKey: requestID)
+                        state.pending.removeValue(forKey: requestID)
+                        state.rememberedOutcomes.removeValue(forKey: requestID)
+                        return .captured(stored)
+                    }
+                    guard state.manualRequests[requestID] != nil else {
+                        return state.isEnabled ? .cancelled : .disabled
+                    }
+                    guard state.waiters[requestID] == nil else {
+                        return .failed(.unsolicited)
+                    }
+                    state.waiters[requestID] = CaptureWaiter(
+                        token: token,
+                        continuation: continuation,
+                        timeoutTask: nil
+                    )
+                    return nil
+                }
+                if let immediate {
+                    continuation.resume(returning: immediate)
+                    return
+                }
+
+                let timeoutTask = Task { [weak self] in
+                    do {
+                        try await Task.sleep(for: timeout)
+                    } catch {
+                        return
+                    }
+                    self?.finishManualRequest(
+                        requestID: requestID,
+                        outcome: .timedOut,
+                        rememberWithoutWaiter: false
+                    )
+                }
+                let waiterAlreadyFinished = lock.withLock { state -> Bool in
+                    guard var waiter = state.waiters[requestID], waiter.token == token else {
+                        return true
+                    }
+                    waiter.timeoutTask = timeoutTask
+                    state.waiters[requestID] = waiter
+                    return false
+                }
+                if waiterAlreadyFinished { timeoutTask.cancel() }
+            }
+        } onCancel: {
+            self.finishManualRequest(
+                requestID: requestID,
+                outcome: .cancelled,
+                rememberWithoutWaiter: true
+            )
+        }
+    }
+
     func accept(
         _ capture: RemoteMobileDiagnosticsCaptureDTO,
         from deviceID: String,
@@ -190,19 +332,26 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
         guard Self.accepts(capture, now: now) else { throw StoreError.invalid }
 
         let authorization = lock.withLock {
-            state -> (requested: Bool, deviceName: String, consentGeneration: UInt64) in
-            guard state.isEnabled else { return (false, "", state.consentGeneration) }
-            state.pending = state.pending.filter { $0.value.expiresAt > now }
-            guard let pending = state.pending.removeValue(forKey: capture.requestID),
+            state -> (
+                requested: Bool,
+                deviceName: String,
+                consentGeneration: UInt64,
+                isManual: Bool
+            ) in
+            guard state.isEnabled else { return (false, "", state.consentGeneration, false) }
+            guard let pending = state.pending[capture.requestID],
                   pending.deviceID == deviceID,
                   pending.expiresAt > now else {
-                return (false, "", state.consentGeneration)
+                return (false, "", state.consentGeneration, false)
             }
+            state.pending.removeValue(forKey: capture.requestID)
+            let isManual = state.manualRequests[capture.requestID] != nil
             return (
                 true,
                 state.connections[deviceID]?.deviceName
                     ?? Self.normalizedDeviceName(deviceName),
-                state.consentGeneration
+                state.consentGeneration,
+                isManual
             )
         }
         guard authorization.requested else {
@@ -216,8 +365,27 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
             storedAt: Self.timestamp(now),
             capture: capture
         )
-        let data = try JSONEncoder().encode(stored)
-        guard data.count <= Self.maximumEncodedCaptureBytes else { throw StoreError.invalid }
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(stored)
+        } catch {
+            if authorization.isManual {
+                finishManualRequest(
+                    requestID: capture.requestID,
+                    outcome: .failed(.persistence)
+                )
+            }
+            throw StoreError.persistence
+        }
+        guard data.count <= Self.maximumEncodedCaptureBytes else {
+            if authorization.isManual {
+                finishManualRequest(
+                    requestID: capture.requestID,
+                    outcome: .failed(.invalid)
+                )
+            }
+            throw StoreError.invalid
+        }
         let destination = directory.appendingPathComponent("\(capture.captureID).json")
         do {
             try FileManager.default.createDirectory(
@@ -231,6 +399,12 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
             )
             guard verified == stored else { throw StoreError.persistence }
         } catch {
+            if authorization.isManual {
+                finishManualRequest(
+                    requestID: capture.requestID,
+                    outcome: .failed(.persistence)
+                )
+            }
             throw StoreError.persistence
         }
 
@@ -265,11 +439,21 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
         }
         guard let removed else {
             try? FileManager.default.removeItem(at: destination)
+            if authorization.isManual {
+                finishManualRequest(requestID: capture.requestID, outcome: .disabled)
+            }
             throw StoreError.disabled
         }
         for captureID in Set(removed) {
             try? FileManager.default.removeItem(
                 at: directory.appendingPathComponent("\(captureID).json")
+            )
+        }
+        if authorization.isManual {
+            finishManualRequest(
+                requestID: capture.requestID,
+                outcome: .captured(stored),
+                rememberWithoutWaiter: false
             )
         }
         return stored
@@ -297,12 +481,6 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
         lock.withLock { state in
             if let deviceID { return state.captures.first { $0.deviceID == deviceID } }
             return state.captures.first
-        }
-    }
-
-    func capture(requestID: String) -> MobileDiagnosticsStoredCapture? {
-        lock.withLock { state in
-            state.captures.first { $0.capture.requestID == requestID }
         }
     }
 
@@ -400,5 +578,78 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
+    }
+
+    private func finishManualRequest(
+        requestID: String,
+        outcome: CaptureWaitOutcome,
+        rememberWithoutWaiter: Bool = true
+    ) {
+        let waiter = lock.withLock { state -> CaptureWaiter? in
+            let wasManual = state.manualRequests.removeValue(forKey: requestID) != nil
+            state.pending.removeValue(forKey: requestID)
+            if let waiter = state.waiters.removeValue(forKey: requestID) {
+                state.rememberedOutcomes.removeValue(forKey: requestID)
+                return waiter
+            }
+            if rememberWithoutWaiter, wasManual {
+                state.rememberedOutcomes[requestID] = RememberedOutcome(
+                    outcome: outcome,
+                    recordedAt: Date()
+                )
+                Self.pruneRememberedOutcomes(state: &state, now: Date())
+            }
+            return nil
+        }
+        guard let waiter else { return }
+        waiter.timeoutTask?.cancel()
+        waiter.continuation.resume(returning: outcome)
+    }
+
+    private static func terminateManualRequests(
+        _ requestIDs: [String],
+        outcome: CaptureWaitOutcome,
+        state: inout State
+    ) -> [CaptureWaiter] {
+        var waiters: [CaptureWaiter] = []
+        let now = Date()
+        for requestID in requestIDs {
+            guard state.manualRequests.removeValue(forKey: requestID) != nil else { continue }
+            state.pending.removeValue(forKey: requestID)
+            if let waiter = state.waiters.removeValue(forKey: requestID) {
+                waiters.append(waiter)
+            } else {
+                state.rememberedOutcomes[requestID] = RememberedOutcome(
+                    outcome: outcome,
+                    recordedAt: now
+                )
+            }
+        }
+        pruneRememberedOutcomes(state: &state, now: now)
+        return waiters
+    }
+
+    private static func resume(
+        _ waiters: [CaptureWaiter],
+        with outcome: CaptureWaitOutcome
+    ) {
+        for waiter in waiters {
+            waiter.timeoutTask?.cancel()
+            waiter.continuation.resume(returning: outcome)
+        }
+    }
+
+    private static func pruneRememberedOutcomes(state: inout State, now: Date) {
+        state.rememberedOutcomes = state.rememberedOutcomes.filter {
+            now.timeIntervalSince($0.value.recordedAt) <= rememberedOutcomeLifetime
+        }
+        let excess = state.rememberedOutcomes.count - maximumRememberedOutcomes
+        guard excess > 0 else { return }
+        let oldest = state.rememberedOutcomes.sorted {
+            $0.value.recordedAt < $1.value.recordedAt
+        }.prefix(excess)
+        for (requestID, _) in oldest {
+            state.rememberedOutcomes.removeValue(forKey: requestID)
+        }
     }
 }

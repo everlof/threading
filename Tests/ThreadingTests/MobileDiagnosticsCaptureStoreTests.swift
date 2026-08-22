@@ -144,6 +144,203 @@ final class MobileDiagnosticsCaptureStoreTests: XCTestCase {
         ))
     }
 
+    func testManualRequestWaitsForPublishedCaptureWithoutPolling() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MobileDiagnosticsCaptureStore(
+            directory: directory,
+            isEnabled: true,
+            observesSettings: false
+        )
+        let (connection, deviceID) = registeredConnection(in: store, label: "capture-wait")
+        _ = connection
+        let requestID = try XCTUnwrap(store.requestCapture(
+            deviceID: deviceID,
+            screenshotPolicy: .none,
+            automatic: false
+        ))
+        let evidence = capture(now: Date(), requestID: requestID)
+
+        async let outcome = store.waitForCapture(
+            requestID: requestID,
+            timeout: .seconds(1)
+        )
+        let stored = try store.accept(evidence, from: deviceID, deviceName: "Test iPhone")
+
+        let waitedOutcome = await outcome
+        XCTAssertEqual(waitedOutcome, .captured(stored))
+        XCTAssertThrowsError(try store.accept(
+            evidence,
+            from: deviceID,
+            deviceName: "Test iPhone"
+        )) { error in
+            XCTAssertEqual(error as? MobileDiagnosticsCaptureStore.StoreError, .unsolicited)
+        }
+    }
+
+    func testManualRequestTimeoutRevokesNonceBeforeLateCapture() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MobileDiagnosticsCaptureStore(
+            directory: directory,
+            isEnabled: true,
+            observesSettings: false
+        )
+        let (connection, deviceID) = registeredConnection(in: store, label: "capture-timeout")
+        _ = connection
+        let requestID = try XCTUnwrap(store.requestCapture(
+            deviceID: deviceID,
+            screenshotPolicy: .none,
+            automatic: false
+        ))
+
+        let outcome = await store.waitForCapture(
+            requestID: requestID,
+            timeout: .milliseconds(20)
+        )
+
+        XCTAssertEqual(outcome, .timedOut)
+        XCTAssertThrowsError(try store.accept(
+            capture(now: Date(), requestID: requestID),
+            from: deviceID,
+            deviceName: "Test iPhone"
+        )) { error in
+            XCTAssertEqual(error as? MobileDiagnosticsCaptureStore.StoreError, .unsolicited)
+        }
+    }
+
+    func testCancellingManualWaitRevokesNonceBeforeLateCapture() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MobileDiagnosticsCaptureStore(
+            directory: directory,
+            isEnabled: true,
+            observesSettings: false
+        )
+        let (connection, deviceID) = registeredConnection(in: store, label: "capture-cancel")
+        _ = connection
+        let requestID = try XCTUnwrap(store.requestCapture(
+            deviceID: deviceID,
+            screenshotPolicy: .none,
+            automatic: false
+        ))
+        let waiter = Task {
+            await store.waitForCapture(requestID: requestID, timeout: .seconds(1))
+        }
+
+        waiter.cancel()
+        let outcome = await waiter.value
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertThrowsError(try store.accept(
+            capture(now: Date(), requestID: requestID),
+            from: deviceID,
+            deviceName: "Test iPhone"
+        )) { error in
+            XCTAssertEqual(error as? MobileDiagnosticsCaptureStore.StoreError, .unsolicited)
+        }
+    }
+
+    func testCrossDeviceAttemptDoesNotConsumeMatchingDeviceNonce() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MobileDiagnosticsCaptureStore(
+            directory: directory,
+            isEnabled: true,
+            observesSettings: false
+        )
+        let (connection, deviceID) = registeredConnection(in: store, label: "capture-device")
+        _ = connection
+        let requestID = try XCTUnwrap(store.requestCapture(
+            deviceID: deviceID,
+            screenshotPolicy: .none,
+            automatic: false
+        ))
+        let evidence = capture(now: Date(), requestID: requestID)
+
+        XCTAssertThrowsError(try store.accept(
+            evidence,
+            from: UUID().uuidString.lowercased(),
+            deviceName: "Other iPhone"
+        )) { error in
+            XCTAssertEqual(error as? MobileDiagnosticsCaptureStore.StoreError, .unsolicited)
+        }
+        XCTAssertNoThrow(try store.accept(
+            evidence,
+            from: deviceID,
+            deviceName: "Test iPhone"
+        ))
+    }
+
+    func testDisableAndDisconnectResolveManualRequestsAcrossRegistrationRace() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MobileDiagnosticsCaptureStore(
+            directory: directory,
+            isEnabled: true,
+            observesSettings: false
+        )
+        let (connection, deviceID) = registeredConnection(in: store, label: "capture-terminal")
+        let disabledRequestID = try XCTUnwrap(store.requestCapture(
+            deviceID: deviceID,
+            screenshotPolicy: .none,
+            automatic: false
+        ))
+
+        store.setEnabled(false)
+        let disabledOutcome = await store.waitForCapture(
+            requestID: disabledRequestID,
+            timeout: .seconds(1)
+        )
+        XCTAssertEqual(disabledOutcome, .disabled)
+
+        store.setEnabled(true)
+        let disconnectedRequestID = try XCTUnwrap(store.requestCapture(
+            deviceID: deviceID,
+            screenshotPolicy: .none,
+            automatic: false
+        ))
+        store.unregister(connection)
+        let disconnectedOutcome = await store.waitForCapture(
+            requestID: disconnectedRequestID,
+            timeout: .seconds(1)
+        )
+        XCTAssertEqual(disconnectedOutcome, .disconnected)
+    }
+
+    @MainActor
+    func testInspectionCompletionSurvivesServiceDeinitExactlyOnce() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MobileDiagnosticsCaptureStore(
+            directory: directory,
+            isEnabled: true,
+            observesSettings: false
+        )
+        let (connection, _) = registeredConnection(in: store, label: "inspection-cancel")
+        _ = connection
+        var service: MobileDiagnosticsInspectionService? = MobileDiagnosticsInspectionService(
+            captures: store,
+            waitTimeout: .seconds(1)
+        )
+        let completed = expectation(description: "inspection completion")
+        var completionCount = 0
+        service?.inspect(IOSDiagnosticsInspectionArguments()) { _ in
+            completionCount += 1
+            completed.fulfill()
+        }
+
+        service = nil
+        await fulfillment(of: [completed], timeout: 1)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(completionCount, 1)
+    }
+
     private func capture(
         now: Date,
         requestID: String = UUID().uuidString.lowercased(),
@@ -180,6 +377,20 @@ final class MobileDiagnosticsCaptureStoreTests: XCTestCase {
             screenshotJPEGBase64: screenshot?.base64EncodedString(),
             screenshotKind: screenshotKind
         )
+    }
+
+    private func registeredConnection(
+        in store: MobileDiagnosticsCaptureStore,
+        label: String
+    ) -> (RemoteConnection, String) {
+        let connection = RemoteConnection(
+            connection: NWConnection(host: "127.0.0.1", port: 9, using: .tcp),
+            queue: DispatchQueue(label: "mobile-diagnostics-\(label)"),
+            delegate: MobileDiagnosticsConnectionDelegate()
+        )
+        let deviceID = UUID().uuidString.lowercased()
+        store.register(connection, deviceID: deviceID, deviceName: "Test iPhone")
+        return (connection, deviceID)
     }
 }
 

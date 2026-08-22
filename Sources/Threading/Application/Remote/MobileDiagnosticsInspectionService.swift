@@ -25,13 +25,23 @@ extension MobileDiagnosticsToolProviding {
 @MainActor
 final class MobileDiagnosticsInspectionService {
     private let captures: MobileDiagnosticsCaptureStore
+    private let waitTimeout: Duration
+    private var requestTasks: [String: Task<Void, Never>] = [:]
 
-    init(captures: MobileDiagnosticsCaptureStore) {
+    init(
+        captures: MobileDiagnosticsCaptureStore,
+        waitTimeout: Duration = .seconds(8)
+    ) {
         self.captures = captures
+        self.waitTimeout = waitTimeout
+    }
+
+    deinit {
+        for task in requestTasks.values { task.cancel() }
     }
 
     func listDevices() -> MCPToolResult {
-        guard captures.isEnabled else { return disabledResult() }
+        guard captures.isEnabled else { return Self.disabledResult() }
         let devices = captures.deviceSummaries()
         guard !devices.isEmpty else {
             return .success(
@@ -53,7 +63,7 @@ final class MobileDiagnosticsInspectionService {
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
         guard captures.isEnabled else {
-            completion(disabledResult())
+            completion(Self.disabledResult())
             return
         }
         let devices = captures.deviceSummaries()
@@ -104,7 +114,7 @@ final class MobileDiagnosticsInspectionService {
                 completion(.failure("This iPhone has no cached diagnostic evidence yet."))
                 return
             }
-            completion(result(cached, freshness: "cached"))
+            completion(Self.result(cached, freshness: "cached"))
             return
         }
 
@@ -119,44 +129,64 @@ final class MobileDiagnosticsInspectionService {
                 ))
                 return
             }
-            completion(result(cached, freshness: "cached; phone offline"))
+            completion(Self.result(cached, freshness: "cached; phone offline"))
             return
         }
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            for _ in 0..<40 {
-                try? await Task.sleep(for: .milliseconds(200))
-                guard self.captures.isEnabled else {
-                    completion(self.disabledResult())
-                    return
-                }
-                if let fresh = self.captures.capture(requestID: requestID) {
-                    completion(self.result(fresh, freshness: "fresh"))
-                    return
-                }
+        let captures = captures
+        let waitTimeout = waitTimeout
+        let selectedDeviceID = selected.deviceID
+        let task = Task { @MainActor [weak self] in
+            defer { self?.requestTasks.removeValue(forKey: requestID) }
+            let outcome = await captures.waitForCapture(
+                requestID: requestID,
+                timeout: waitTimeout
+            )
+            let output: MCPToolResult
+            switch outcome {
+            case .captured(let fresh):
+                output = Self.result(fresh, freshness: "fresh")
+            case .disabled:
+                output = Self.disabledResult()
+            case .disconnected:
+                output = Self.cachedFallback(
+                    captures: captures,
+                    deviceID: selectedDeviceID,
+                    freshness: "cached; phone disconnected before answering",
+                    failure: "The iPhone disconnected before returning diagnostic evidence."
+                )
+            case .timedOut:
+                output = Self.cachedFallback(
+                    captures: captures,
+                    deviceID: selectedDeviceID,
+                    freshness: "cached; connected phone did not answer within 8 seconds",
+                    failure: "The connected iPhone did not return diagnostic evidence within "
+                        + "8 seconds."
+                )
+            case .cancelled:
+                output = .failure("The iOS diagnostic inspection was cancelled.")
+            case .failed(let error):
+                output = Self.cachedFallback(
+                    captures: captures,
+                    deviceID: selectedDeviceID,
+                    freshness: "cached; fresh evidence could not be stored",
+                    failure: "The iPhone returned diagnostic evidence, but the Mac could not "
+                        + "safely store it (\(error))."
+                )
             }
-            if let cached = self.captures.latestCapture(deviceID: selected.deviceID) {
-                completion(self.result(
-                    cached,
-                    freshness: "cached; connected phone did not answer within 8 seconds"
-                ))
-            } else {
-                completion(.failure(
-                    "The connected iPhone did not return diagnostic evidence within 8 seconds."
-                ))
-            }
+            completion(output)
         }
+        requestTasks[requestID] = task
     }
 
-    private func disabledResult() -> MCPToolResult {
+    private static func disabledResult() -> MCPToolResult {
         .failure(
             "Local diagnostics is off on this Mac. Enable Settings > Advanced > Local "
                 + "Diagnostics, then enable it independently on the paired iPhone."
         )
     }
 
-    private func result(
+    private static func result(
         _ stored: MobileDiagnosticsStoredCapture,
         freshness: String
     ) -> MCPToolResult {
@@ -189,6 +219,18 @@ final class MobileDiagnosticsInspectionService {
                 + "text are represented in these diagnostics."
         )
         return .diagnosticEvidence(lines.joined(separator: "\n"), jpegData: screenshot)
+    }
+
+    private static func cachedFallback(
+        captures: MobileDiagnosticsCaptureStore,
+        deviceID: String,
+        freshness: String,
+        failure: String
+    ) -> MCPToolResult {
+        guard let cached = captures.latestCapture(deviceID: deviceID) else {
+            return .failure(failure)
+        }
+        return result(cached, freshness: freshness)
     }
 
     private static func age(_ timestamp: String) -> String {
