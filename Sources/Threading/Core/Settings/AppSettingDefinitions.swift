@@ -59,6 +59,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessTailscaleEnabled
     case remoteAccessTailscaleServeEnabled
     case remoteAccessListenerPort
+    case remoteViewportLeaseGraceSeconds
     case remoteAccessDoors
     case remoteAccessAdvertisedHostname
     case remoteAccessDiscoveryEnabled
@@ -408,6 +409,19 @@ extension TypedAppSettingValidation where Value == Int {
         Self(erased: .integerRange(range)) { value, absenceValue in
             if value <= 0 { return absenceValue }
             return min(max(value, range.lowerBound), range.upperBound)
+        }
+    }
+
+    /// A range that clamps and honours its own floor.
+    ///
+    /// `range(_:)` folds any `value <= 0` to the absence value, which is right for a count where
+    /// zero is a way of saying "unset" and wrong for a duration where zero is a decision: it
+    /// makes "off" unreachable through the key, because writing `0` silently restores the
+    /// default. This factory clamps into the stated range and does nothing else, so a floor of
+    /// zero means zero.
+    static func clampingRange(_ range: ClosedRange<Int>) -> Self {
+        Self(erased: .integerRange(range)) { value, _ in
+            min(max(value, range.lowerBound), range.upperBound)
         }
     }
 
@@ -1028,6 +1042,24 @@ enum AppSettingDefinitions {
             RemoteAccessDefaults.minimumListenerPort...RemoteAccessDefaults.maximumListenerPort
         )
     )
+    /// How long a released remote viewport lease keeps holding its grid.
+    ///
+    /// Behavioural rather than presented: no `presentations`, so `remotePolicy` resolves to
+    /// `.hidden` and this produces no Settings row and does not cross to the phone's mirror. It
+    /// is reachable by `defaults write` for somebody who needs a different window, and by a test.
+    ///
+    /// The range clamps rather than refuses, because the nearest allowed delay is what a person
+    /// typing a number meant — a port is the case where the number *is* the meaning, and a delay
+    /// is not. Zero is inside the range and is the kill switch: release immediately.
+    static let remoteViewportLeaseGraceSeconds = AppSettingDescriptor<Int>(
+        identity: .remoteViewportLeaseGraceSeconds,
+        persistenceKey: "remoteViewportLeaseGraceSeconds",
+        absence: .registered(RemoteAccessDefaults.viewportLeaseGraceSeconds),
+        validation: .clampingRange(
+            RemoteAccessDefaults.minimumViewportLeaseGraceSeconds ...
+                RemoteAccessDefaults.maximumViewportLeaseGraceSeconds
+        )
+    )
     /// Which routable doors get a listener.
     ///
     /// `lan` by default now that the listener presents a pinned TLS identity: the door is
@@ -1210,6 +1242,7 @@ enum AppSettingDefinitions {
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
         .init(remoteAccessDoorMigration),
         .init(remoteAccessListenerPort),
+        .init(remoteViewportLeaseGraceSeconds),
         // In catalogue order: the ways in, then the browser convenience under the tailnet one.
         // `SettingsPages` projects its rows from this list, and a search result that lands on a
         // row above the one it names is how that projection goes wrong.

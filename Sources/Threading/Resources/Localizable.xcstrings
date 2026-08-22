@@ -12977,6 +12977,7 @@
         }
       }
     },
+    "Mac size returns shortly after the remote view closes": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Mac-storleken återställs kort efter att fjärrvisningen stängs"}}}},
     "Mac size returns when the remote view closes": {
       "extractionState": "stale",
       "localizations": {

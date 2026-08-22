@@ -210,6 +210,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "remoteAccessListenerPort",
                 valueType: .integer
             ),
+            .remoteViewportLeaseGraceSeconds: .init(
+                key: "remoteViewportLeaseGraceSeconds",
+                valueType: .integer
+            ),
             .remoteAccessDoors: .init(
                 key: "remoteAccessDoors",
                 valueType: .stringArray

@@ -1353,7 +1353,7 @@ private final class RemoteViewportBannerView: BackdropOverlay {
     private let icon = NSImageView()
     private let titleLabel = NSTextField(labelWithString: L10n.string("Fit to iPhone"))
     private let detailLabel = NSTextField(
-        labelWithString: L10n.string("Mac size returns when the remote view closes")
+        labelWithString: L10n.string("Mac size returns shortly after the remote view closes")
     )
 
     override init(frame frameRect: NSRect) {

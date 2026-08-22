@@ -1068,6 +1068,20 @@ final class AppSettings {
         }
     }
 
+    /// Read at release time rather than cached, so a `defaults write` takes effect without a
+    /// relaunch. `0` is a legal value and means "release immediately", which is the behaviour
+    /// the grace replaced; the range clamps rather than refuses, because the nearest allowed
+    /// delay is what somebody typing a number meant.
+    var remoteViewportLeaseGraceSeconds: Int {
+        get {
+            AppSettingDefinitions.remoteViewportLeaseGraceSeconds.read(from: defaults)
+                ?? RemoteAccessDefaults.viewportLeaseGraceSeconds
+        }
+        set {
+            AppSettingDefinitions.remoteViewportLeaseGraceSeconds.write(newValue, to: defaults)
+        }
+    }
+
     /// The routable doors that get a listener.
     ///
     /// `lan` is the shipped default: the listener presents this Mac's pinned identity, so the
