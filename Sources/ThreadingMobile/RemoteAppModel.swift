@@ -737,15 +737,19 @@ final class RemoteAppModel: ObservableObject {
             phase = .connecting
             connectionProgress = .preparingRoutes
         }
+        // What the walk is about to try, asked here only for its size: a host with one way in has
+        // no ceiling, because there is no other route to get on with. Bounded by the advertised
+        // endpoint list and the one sticky range, so this is a few dozen URL constructions.
+        let plannedCandidateCount = host.candidates(
+            preferring: discoveredAddresses[host.id]
+        ).count
         do {
             // The walk has a ceiling, and a walk that reaches it stops being something to make a
             // person wait for rather than being abandoned. If a slower route answers afterwards
             // it is adopted exactly as a timely one would have been.
             let connection = try await RemoteRouteWalkDeadline.run(
                 ceiling: RemoteRouteWalkBudget.ceiling(
-                    forCandidateCount: host.candidates(
-                        preferring: discoveredAddresses[host.id]
-                    ).count
+                    forCandidateCount: plannedCandidateCount
                 ),
                 walk: { [weak self] in
                     guard let self else { throw CancellationError() }
