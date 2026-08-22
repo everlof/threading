@@ -58,6 +58,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     public alongside `mouseMode` so a mirrored session can *state* both to a second renderer —
     see [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md), where the ring cannot be relied on to carry
     the arming sequence.
+  - **The accessory-key encoder seam is ours.** `Terminal.encodedFunctionalKey` exposes the same
+    DECCKM- and kitty-aware functional-key encoder used by SwiftTerm's own keyboard paths. The
+    app's customizable touch caps know both touch-down and touch-up, so when a TUI requests event
+    types they send the negotiated press and release rather than a hard-coded legacy press. Keep
+    this narrow seam instead of exporting the encoder's event model or duplicating its function-
+    key tables in app chrome.
   - **The PTY seam is ours.** Local processes launch through `forkpty`; a `posix_spawn`-based
     wrapper cannot establish the child as the PTY's controlling terminal. The launch publishes
     the exact child PID synchronously, before its exit source is activated, and reaps that PID
@@ -79,6 +85,15 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     enlarge cells without reflowing the Mac-owned grid, while an interactive phone still updates
     its PTY lease. Keep both hooks and the `resetFont` routing when re-syncing: one gates the
     renderer, the other gates the PTY.
+  - **iOS selection survives output, and the edit menu has a host seam.** The iOS view's
+    `scrolled`/`linefeed` pair follows the Mac's: a selection is dropped only when scrollback
+    recycles its rows or the alternate buffer scrolls in place, never on a line feed that merely
+    appends. A long press selects the word under the finger directly and the menu comes up on
+    lift, through `UIEditMenuInteraction` (iOS 16+, the shared menu controller before that),
+    without taking first responder. `extraSelectionMenuActions` lets the host add actions after
+    Copy and `allowsPasteFromEditMenu` lets a view-only host drop Paste; `selectionHandleColor`
+    is set by the host from the terminal theme's cursor colour. Keep both when re-syncing — see
+    [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
   - **iOS terminal font sizing is bounded at the host.** `RemoteTerminalView` converts a pinch
     into whole-point steps from 9 through 24 and persists only the final value on the device.
     That bounds a continuous gesture to at most fifteen renderer/grid updates instead of one per
@@ -88,11 +103,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - **Main-queue output is bounded.** PTY reads pause once pending terminal data reaches the
     4 MiB high-water mark and resume below 1 MiB. The kernel PTY buffer then supplies
     normal producer backpressure instead of an unbounded queue growing behind a busy AppKit
-    thread. One completed `DispatchIO` read starts one successor; partial callbacks do not fork
-    additional read chains. Reads and queued chunks carry a launch generation; starting the next
-    process clears the previous generation so late DispatchIO callbacks cannot leak old bytes
-    into the replacement terminal. Deinitialization closes the PTY, cancels the monitor and gives
-    the child to an independent waiter so it cannot remain a zombie.
+    thread. `DispatchIO` may split one 128 KiB read into roughly one callback per KiB; adjacent
+    fragments already waiting at the main-queue drain are delivered as one bounded parser call,
+    while an isolated interactive fragment is delivered immediately. One completed read starts
+    one successor; partial callbacks do not fork additional read chains. Reads and queued chunks
+    carry a launch generation; starting the next process clears the previous generation so late
+    DispatchIO callbacks cannot leak old bytes into the replacement terminal. Deinitialization
+    closes the PTY, cancels the monitor and gives the child to an independent waiter so it cannot
+    remain a zombie.
   - **Mouse-wheel coordinates are viewport-relative.** Full-screen clients such as Claude enable
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets

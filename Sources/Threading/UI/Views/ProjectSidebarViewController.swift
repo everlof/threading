@@ -2933,7 +2933,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 with: terminal,
                 running: ProjectTerminalRuntime.shared.isRunning(terminalID: terminal.id),
                 busy: ProjectTerminalRuntime.shared.isBusy(terminalID: terminal.id),
-                projectRoot: terminalNode.displayProjectFolderPath
+                projectRoot: terminalNode.projectFolderPath
             )
             cell.onAction = { [weak self] terminalID, anchor in
                 self?.showTerminalActions(for: terminalID, from: anchor)
@@ -3173,11 +3173,11 @@ extension ProjectSidebarViewController {
                 onChoose: pinnedAction(row) { $0.renameClicked() }
             )),
             // The same fold the chat rows carry, holding the two facts a terminal can state:
-            // the id that names it to Threading, and the checkout it is standing in. Captured
+            // the id that names it to Threading, and the project that owns it. Captured
             // by id, not row-resolved — an id does not move when the tree reloads under the
             // open menu. The worktree is resolved on the click rather than at build, because
-            // `displayProject` costs git calls and the theme entry beside this one already
-            // answers *its* tier with the same cwd-derived project.
+            // from the store on the click so a project move or rename cannot leave stale data in
+            // a menu that was already open.
             .item(ThemedMenuItem(title: L10n.string("Copy"), submenu: [
                 .item(ThemedMenuItem(
                     title: L10n.string("Threading ID"),
@@ -3189,7 +3189,7 @@ extension ProjectSidebarViewController {
                     title: L10n.string("Worktree Path"),
                     onChoose: { [weak self] in
                         guard let project = self?.projectStore
-                            .displayProject(forTerminalID: terminalID) else { return }
+                            .homeProject(forTerminalID: terminalID) else { return }
                         Self.copyToPasteboard(project.folderPath)
                     }
                 ))

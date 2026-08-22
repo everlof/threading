@@ -2236,8 +2236,13 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// The pointing hand belongs to the rows that act, and to nothing else on the card. It used
     /// to cover the whole of it — including a card holding no Git sentence, where a click did
     /// nothing at all and the cursor had already promised otherwise.
-    override func resetCursorRects() {
-        guard let region = gitRegion else { return }
-        addCursorRect(region, cursor: .pointingHand)
+    ///
+    /// The rest of the card takes `BackdropOverlay`'s arrow, and taking it is the point: the rows
+    /// below this region are buttons, and while the card claimed nothing over them they answered
+    /// with the terminal's I-beam from behind. The line between the two is **what the row looks
+    /// like** rather than whether it acts — these two are text that is pressable, which is what a
+    /// hand says, and the rows under them are controls.
+    override var pointerClaims: [PointerClaim] {
+        gitRegion.map { [PointerClaim($0, .pointingHand)] } ?? []
     }
 }

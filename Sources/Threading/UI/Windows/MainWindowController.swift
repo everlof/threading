@@ -378,7 +378,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return environment.projectStore.project(forSessionID: currentSessionID)?.id
         }
         if let currentTerminalID {
-            return environment.projectStore.displayProject(forTerminalID: currentTerminalID)?.id
+            return environment.projectStore.homeProject(forTerminalID: currentTerminalID)?.id
         }
         return containerViewController.currentComposerProjectID
     }

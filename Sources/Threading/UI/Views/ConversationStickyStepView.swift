@@ -17,7 +17,7 @@ import AppKit
 /// It shows the *model's* subject rather than whatever a customized tool row drew, so an extension
 /// that restyles a row and the header naming it can differ. That is deliberate: the header is
 /// navigation, and navigation reads the timeline.
-final class ConversationStickyStepView: NSView {
+final class ConversationStickyStepView: NSView, PointerClaiming {
 
     // MARK: - Metrics
 
@@ -198,13 +198,19 @@ final class ConversationStickyStepView: NSView {
         trackingAreas.forEach(removeTrackingArea)
         addTrackingArea(NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect, .cursorUpdate],
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
             owner: self
         ))
     }
 
-    override func cursorUpdate(with event: NSEvent) {
-        NSCursor.pointingHand.set()
+    /// The header is a line of the transcript you can press, so the hand — and stating it is
+    /// what keeps the transcript's own I-beam from reaching a strip that is not text any more.
+    /// It used to set the cursor by hand from a `.cursorUpdate` tracking area, which is a second
+    /// mechanism answering the same question. See `PointerClaiming`.
+    var restingPointer: NSCursor? { .pointingHand }
+
+    override func resetCursorRects() {
+        registerPointerClaims()
     }
 
     /// Hover answers in ink rather than in a plate: the strip already sits on the transcript's

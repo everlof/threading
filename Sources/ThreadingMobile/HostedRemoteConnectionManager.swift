@@ -26,7 +26,10 @@ actor HostedRemoteConnectionManager {
     private var active: Active?
     private var pending: Pending?
 
-    func link(for host: PairedRemoteHost) async throws -> RemoteConnectionLink? {
+    func link(
+        for host: PairedRemoteHost,
+        trace: String? = nil
+    ) async throws -> RemoteConnectionLink? {
         guard host.isOwnerDevice,
               let serviceURL = host.hostedServiceURL,
               let credential = host.hostedCredential,
@@ -46,6 +49,8 @@ actor HostedRemoteConnectionManager {
         }
 
         pending?.task.cancel()
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
         let task = Task {
             let rendezvousCredential = try credential.credential.withValue {
                 try PeerRendezvousCredential($0)
@@ -54,7 +59,21 @@ actor HostedRemoteConnectionManager {
                 endpoint: endpoint.rendezvousEndpoint,
                 hostID: credential.hostID,
                 deviceID: credential.deviceID,
-                credential: rendezvousCredential
+                credential: rendezvousCredential,
+                progress: { phase in
+                    guard let trace else { return }
+                    MobileDiagnostics.recordConnectivity(.hostRouteProgress, fields: [
+                        .trace: trace,
+                        .peer: peer,
+                        .transport: RemoteHostEndpointKind.hosted,
+                        .phase: "hosted.\(phase.rawValue)",
+                        .result: "stage",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                        .timeoutMS: MobileDiagnostics.milliseconds(
+                            PeerTransportBounds.negotiationTimeout
+                        ),
+                    ])
+                }
             )
         }
         let pending = Pending(id: UUID(), key: key, task: task)

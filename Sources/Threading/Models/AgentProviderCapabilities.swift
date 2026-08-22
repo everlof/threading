@@ -190,10 +190,12 @@ struct AgentCapabilities: OptionSet {
   /// losing Undo or being misrepresented as the destructive delete they also expose.
   static let providerArchive = Self(rawValue: 1 << 24)
 
-  /// A terminal interruption is written as a structured transcript record but omits the
-  /// lifecycle hook that ordinarily closes a reported turn. Codex only: 0.147.0 appends
-  /// `event_msg / turn_aborted / reason: interrupted` and returns to its prompt without firing
-  /// `Stop`. Claude, Grok and OpenCode have no measured equivalent that this reader can consume.
+  /// A terminal interruption is written as a structured transcript record that **names the turn
+  /// it aborted**, while the lifecycle hook that ordinarily closes a reported turn is omitted.
+  /// Codex only: 0.147.0 appends `event_msg / turn_aborted / reason: interrupted` and returns to
+  /// its prompt without firing `Stop`. Claude records the same missing boundary without a turn
+  /// identity, which is `transcriptInterruptedMessageRecord` and a different reader; Grok and
+  /// OpenCode have no measured equivalent at all.
   static let transcriptInterruptedTurnRecord = Self(rawValue: 1 << 25)
 
   /// A turn the provider refused outright — an expired login, a dropped connection — is written
@@ -234,6 +236,40 @@ struct AgentCapabilities: OptionSet {
   /// for a runtime without it, and `AgentLauncher.plan(for:in:)` refuses to build a terminal
   /// command line for one.
   static let terminalUI = Self(rawValue: 1 << 28)
+
+  /// A terminal interruption is written into the conversation as an ordinary user record naming
+  /// the assistant message it cut off, and the lifecycle hook that ends a reported turn is
+  /// omitted. Claude only: measured on 2.1.238, where Escape appended
+  /// `{"type":"user","interruptedMessageId":"msg_…","message":{"content":[{"type":"text",
+  /// "text":"[Request interrupted by user]"}]}}` and fired no `Stop`, leaving the session
+  /// `working` for hours.
+  ///
+  /// Deliberately distinct from `transcriptInterruptedTurnRecord`, which is the same fact carried
+  /// by a record that names a *turn*. The difference is not cosmetic: a turn id lets a late read
+  /// prove which turn it belongs to, and a record without one has to be matched against the
+  /// tracker's own count of turns begun instead. One flag for both would hand each reader a
+  /// transcript it cannot parse and an identity it cannot check.
+  static let transcriptInterruptedMessageRecord = Self(rawValue: 1 << 29)
+
+  /// Escape, typed into the runtime's own TUI, ends a turn it is running and returns it to the
+  /// prompt with the conversation intact.
+  ///
+  /// This is what a curfew's last resort rests on. At T + grace a turn still in flight is stopped
+  /// by typing `TerminalDefaults.interruptSequence` — the only key Threading presses on a
+  /// sleeping user's behalf — and a runtime without this flag is given the hold alone: Threading
+  /// stops spending the session itself and says so, rather than sending a keystroke whose effect
+  /// on that CLI nobody has watched.
+  ///
+  /// Claude Code and Codex, on the strength of what each writes down when it happens.
+  /// `transcriptInterruptedMessageRecord` cites Claude 2.1.238, where Escape appended
+  /// `[Request interrupted by user]` and fired no `Stop`; `transcriptInterruptedTurnRecord` cites
+  /// Codex 0.147.0 returning to its prompt with `turn_aborted / reason: interrupted`. Those are
+  /// readings of the *record*, and this flag also claims the *keystroke* — so it owes the
+  /// measurement `curfew.md`'s Verification section names, against the currently installed CLIs
+  /// and including the confirmation that a second Escape never reaches an idle prompt. Recorded
+  /// here as owed rather than assumed, which is the standard every other row on this matrix was
+  /// granted by.
+  static let escapeInterruptsTerminalTurn = Self(rawValue: 1 << 30)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -294,14 +330,14 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptModelRecord, .transcriptPermissionModeRecord, .transcriptUsageIndex,
         .liveFastModeControl, .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch,
         .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
-        .transcriptReplay
+        .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn
       ]
     case .codex:
       return [
         .resume, .accounts, .nativeUI, .terminalUI, .permissionModes, .threadingBridge,
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
-        .transcriptInterruptedTurnRecord, .transcriptReplay
+        .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn
       ]
     case .grok:
       return [

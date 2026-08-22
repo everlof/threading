@@ -48,6 +48,13 @@ final class ThemedAlert {
     var accessoryView: NSView?
     var initialFirstResponder: NSResponder?
 
+    /// Gives an input-bearing alert a chance to keep the sheet open when an affirmative cannot
+    /// be answered yet. The validation UI stays in the accessory that owns the fields; the alert
+    /// owns the dismissal boundary, so a feature never has to close and reopen a modal merely to
+    /// explain one invalid value. Cancel remains an ordinary choice unless the caller explicitly
+    /// says otherwise.
+    var shouldChooseButton: ((Int) -> Bool)?
+
     private(set) var buttons: [Button] = []
     private(set) var suppressionButton: SuppressionButton?
     var showsSuppressionButton = false {
@@ -169,6 +176,7 @@ final class ThemedAlert {
     func makeContentView() -> NSView {
         prepareDefaultButtonIfNeeded()
         return ThemedAlertContentView(alert: self) { [weak self] index in
+            guard self?.shouldChooseButton?(index) ?? true else { return }
             self?.finish(with: Self.response(forButtonAt: index))
         }
     }
@@ -311,6 +319,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         static let minimumContentWidth: CGFloat = 360
         static let maximumTextWidth: CGFloat = 500
         static let iconSize: CGFloat = 30
+        static let minimumCopyWidth = minimumContentWidth - iconSize - Design.Spacing.inset
         static let checkboxHeight: CGFloat = Design.Size.chipHeight
     }
 
@@ -323,6 +332,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
     private var buttonControls: [ThemedButton] = []
     private var checkbox: ThemedCheckbox?
     private var requesterMessageWell: ThemedAlertRequesterMessageWellView?
+    private weak var copyStack: NSStackView?
     private weak var sectionStack: NSStackView?
     private var modernStackTopConstraint: NSLayoutConstraint?
     private var requesterStackTopConstraint: NSLayoutConstraint?
@@ -370,15 +380,44 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
 
     override var wantsUpdateLayer: Bool { false }
 
+    override func layout() {
+        super.layout()
+        guard copyStack != nil, bounds.width > 1 else { return }
+        // The copy stack's width is partly answered by these labels' intrinsic widths. Reading
+        // that frame here and feeding it straight back through preferredMaxLayoutWidth creates
+        // a layout ratchet: under some themes the stack moves by a fraction on every pass until
+        // AppKit aborts the window's constraint cycle. The alert's own width is independently
+        // fixed by its panel (or gallery host), so derive the copy column from that stable box.
+        let requesterInsets: CGFloat = usesClassicRequester ? 8 : 0
+        let measuredWidth = min(
+            Layout.maximumTextWidth,
+            max(
+                1,
+                bounds.width
+                    - (2 * Design.Spacing.large)
+                    - Layout.iconSize
+                    - Design.Spacing.inset
+                    - requesterInsets
+            )
+        )
+        guard abs(messageLabel.preferredMaxLayoutWidth - measuredWidth) > 0.5 else { return }
+        titleLabel.preferredMaxLayoutWidth = measuredWidth
+        messageLabel.preferredMaxLayoutWidth = measuredWidth
+    }
+
     private func setup() {
         titleLabel.applyFont(usesClassicRequester ? .controlRegular : .heading)
         titleLabel.isHidden = usesClassicRequester
         titleLabel.maximumNumberOfLines = 0
-        titleLabel.preferredMaxLayoutWidth = Layout.maximumTextWidth
+        // Fitting size is queried before the copy stack has bounds. Start at the narrowest real
+        // copy column so an accessory that establishes the alert width cannot make the labels
+        // measure at 500pt and then clip when compressed to the 360pt dialog.
+        let requesterInsets: CGFloat = usesClassicRequester ? 8 : 0
+        titleLabel.preferredMaxLayoutWidth = Layout.minimumCopyWidth - requesterInsets
 
         messageLabel.applyFont(usesClassicRequester ? .controlRegular : .body)
         messageLabel.maximumNumberOfLines = 0
-        messageLabel.preferredMaxLayoutWidth = Layout.maximumTextWidth
+        messageLabel.preferredMaxLayoutWidth = Layout.minimumCopyWidth - requesterInsets
         messageLabel.isHidden = alert.informativeText.isEmpty
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
@@ -394,6 +433,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         copy.alignment = .leading
         copy.spacing = Design.Spacing.small
         copy.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        copyStack = copy
 
         let heading = NSStackView(views: [iconView, copy])
         heading.orientation = .horizontal

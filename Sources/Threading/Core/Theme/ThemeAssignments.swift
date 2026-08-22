@@ -90,8 +90,8 @@ enum ThemeAssignments {
         return profile
     }
 
-    /// A standalone terminal follows the project at its current cwd, then the app, unless it
-    /// carries its own override.
+    /// A standalone terminal follows its owning project, then the app, unless it carries its
+    /// own override.
     static func theme(forTerminal terminalID: TerminalID) -> TerminalTheme {
         guard let assignment = resolution(forTerminal: terminalID) else {
             return palette(withID: defaultTheme.id)
@@ -109,7 +109,7 @@ enum ThemeAssignments {
         let store = ProjectStore.shared
         return ThemeResolution.resolve(
             session: canonicalID(store.terminal(withID: terminalID)?.themeID),
-            project: canonicalID(store.displayProject(forTerminalID: terminalID)?.themeID),
+            project: canonicalID(store.homeProject(forTerminalID: terminalID)?.themeID),
             global: canonicalID(defaultTheme.id),
             available: availableIDs
         )
@@ -152,7 +152,7 @@ enum ThemeAssignments {
         let store = ProjectStore.shared
         let resolved = ThemeResolution.resolve(
             session: nil,
-            project: canonicalID(store.displayProject(forTerminalID: terminalID)?.themeID),
+            project: canonicalID(store.homeProject(forTerminalID: terminalID)?.themeID),
             global: canonicalID(defaultTheme.id),
             available: availableIDs
         )

@@ -124,9 +124,31 @@ protocol InkSourced {
 /// opaque app-chrome card above the backdrop instead resolves the whole card through
 /// `ThemedFloatingSurfaceChrome`; it must not mix chrome ink with a terminal-derived fill.
 @MainActor
-class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced {
+class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced, PointerClaiming {
 
     private let appEvents = AppEventObservations()
+
+    // MARK: - Pointer
+
+    /// An overlay floats on a surface that answers the pointer for itself — a terminal claims an
+    /// I-beam over the whole of itself, and a transcript's text views over theirs. So the card
+    /// that covers part of it says what it is: opaque chrome, and the arrow. A subclass drawn as
+    /// a grip says `.resizeUpDown` instead, and one that is genuinely see-through says `nil`.
+    /// See `PointerClaiming`.
+    var restingPointer: NSCursor? { .arrow }
+
+    /// Declared on the class for `ThemedControl`'s reason: a protocol-extension default is the
+    /// witness for the whole hierarchy, and a subclass's own claims would go unread.
+    var pointerClaims: [PointerClaim] { [] }
+
+    override func resetCursorRects() {
+        registerPointerClaims()
+    }
+
+    override func layout() {
+        super.layout()
+        refreshPointerClaims()
+    }
 
     /// Always the backdrop: a passive overlay exists only to sit on it.
     let inkSource: InkSource = .backdrop

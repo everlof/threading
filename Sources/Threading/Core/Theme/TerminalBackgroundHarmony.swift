@@ -1,4 +1,5 @@
 import AppKit
+import SwiftTerm
 
 /// Brings the 24-bit backgrounds a CLI paints into the terminal palette's own register.
 ///
@@ -96,16 +97,44 @@ enum TerminalBackgroundHarmony {
 
     /// The transform for one palette, with the palette's hues measured once.
     ///
-    /// Returns a closure because this is installed on `TerminalView.trueColorBackgroundTransform`
-    /// and runs from the draw path — SwiftTerm caches per colour, so each distinct background a
-    /// program emits costs one pass, but the anchor list must not be rebuilt inside it.
-    static func transform(for theme: TerminalTheme) -> (NSColor) -> NSColor {
-        let anchors = anchorHues(of: theme)
-        let stated = statedColours(of: theme)
+    /// A value-only transform safe to run on SwiftTerm's renderer thread.
+    struct Transform: TerminalTrueColorBackgroundTransform {
+        let anchors: [CGFloat]
+        let stated: Set<UInt32>
+        let cacheIdentity: UInt64
 
-        return { incoming in
-            harmonize(incoming, anchors: anchors, stated: stated)
+        init(theme: TerminalTheme) {
+            anchors = anchorHues(of: theme)
+            stated = statedColours(of: theme)
+            cacheIdentity = TerminalBackgroundHarmony.cacheIdentity(
+                anchors: anchors,
+                stated: stated)
         }
+
+        func transform(_ color: TerminalRenderedColor) -> TerminalRenderedColor {
+            TerminalBackgroundHarmony.harmonize(color, anchors: anchors, stated: stated)
+        }
+    }
+
+    /// The transform for one palette, with the palette's hues measured once on the main actor.
+    /// SwiftTerm then applies only value math on its renderer thread and caches each result.
+    static func transform(for theme: TerminalTheme) -> Transform {
+        Transform(theme: theme)
+    }
+
+    private static func cacheIdentity(anchors: [CGFloat], stated: Set<UInt32>) -> UInt64 {
+        var value: UInt64 = 14_695_981_039_346_656_037
+        func append(_ component: UInt64) {
+            value ^= component
+            value &*= 1_099_511_628_211
+        }
+        for color in stated.sorted() {
+            append(UInt64(color))
+        }
+        for anchor in anchors {
+            append(Double(anchor).bitPattern)
+        }
+        return value
     }
 
     /// Every colour the palette states, packed to 8-bit RGB.
@@ -191,6 +220,98 @@ enum TerminalBackgroundHarmony {
         return NSColor.oklab(
             Oklab(lightness: value.lightness, chroma: chroma, hue: hue * .pi / 180)
         )
+    }
+
+    private static func harmonize(
+        _ incoming: TerminalRenderedColor,
+        anchors: [CGFloat],
+        stated: Set<UInt32>
+    ) -> TerminalRenderedColor {
+        let packed = UInt32(incoming.red) << 16
+            | UInt32(incoming.green) << 8
+            | UInt32(incoming.blue)
+        guard !stated.contains(packed) else { return incoming }
+
+        let value = oklab(incoming)
+        guard value.chroma > Recipe.chromaKnee else { return incoming }
+
+        let degrees = value.hue * 180 / .pi
+        let hue = attracted(degrees, to: anchors, strength: attractionStrength(value.chroma))
+        return renderedColor(Oklab(
+            lightness: value.lightness,
+            chroma: compressed(value.chroma),
+            hue: hue * .pi / 180))
+    }
+
+    private static func oklab(_ color: TerminalRenderedColor) -> Oklab {
+        func linear(_ component: CGFloat) -> CGFloat {
+            component <= 0.04045
+                ? component / 12.92
+                : pow((component + 0.055) / 1.055, 2.4)
+        }
+
+        let red = linear(CGFloat(color.red) / 255)
+        let green = linear(CGFloat(color.green) / 255)
+        let blue = linear(CGFloat(color.blue) / 255)
+        let long = cbrt(0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue)
+        let medium = cbrt(0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue)
+        let short = cbrt(0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue)
+
+        return Oklab(
+            lightness: 0.2104542553 * long + 0.7936177850 * medium - 0.0040720468 * short,
+            a: 1.9779984951 * long - 2.4285922050 * medium + 0.4505937099 * short,
+            b: 0.0259040371 * long + 0.7827717662 * medium - 0.8086757660 * short)
+    }
+
+    private static func renderedColor(_ value: Oklab) -> TerminalRenderedColor {
+        func components(_ value: Oklab) -> (red: CGFloat, green: CGFloat, blue: CGFloat) {
+            let long = pow(value.lightness + 0.3963377774 * value.a + 0.2158037573 * value.b, 3)
+            let medium = pow(value.lightness - 0.1055613458 * value.a - 0.0638541728 * value.b, 3)
+            let short = pow(value.lightness - 0.0894841775 * value.a - 1.2914855480 * value.b, 3)
+            return (
+                4.0767416621 * long - 3.3077115913 * medium + 0.2309699292 * short,
+                -1.2684380046 * long + 2.6097574011 * medium - 0.3413193965 * short,
+                -0.0041960863 * long - 0.7034186147 * medium + 1.7076147010 * short)
+        }
+
+        func fits(_ value: Oklab) -> Bool {
+            let (red, green, blue) = components(value)
+            let slack: CGFloat = -0.0005
+            return [red, green, blue].allSatisfy { $0 >= slack && $0 <= 1 - slack }
+        }
+
+        var scaled = value
+        if !fits(value) {
+            var low: CGFloat = 0
+            var high: CGFloat = 1
+            for _ in 0..<PerceptualColor.gamutSearchSteps {
+                let middle = (low + high) / 2
+                let candidate = Oklab(
+                    lightness: value.lightness,
+                    a: value.a * middle,
+                    b: value.b * middle)
+                if fits(candidate) {
+                    low = middle
+                } else {
+                    high = middle
+                }
+            }
+            scaled = Oklab(
+                lightness: value.lightness,
+                a: value.a * low,
+                b: value.b * low)
+        }
+
+        func byte(_ component: CGFloat) -> UInt8 {
+            let clamped = min(max(component, 0), 1)
+            let encoded = clamped <= 0.0031308
+                ? clamped * 12.92
+                : 1.055 * pow(clamped, 1 / 2.4) - 0.055
+            return UInt8(min(max((encoded * 255).rounded(), 0), 255))
+        }
+
+        let (red, green, blue) = components(scaled)
+        return TerminalRenderedColor(red: byte(red), green: byte(green), blue: byte(blue))
     }
 
     /// The soft clip: identity below the knee, asymptotic to the ceiling above it.

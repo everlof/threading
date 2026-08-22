@@ -4,9 +4,10 @@ import Foundation
 ///
 /// `RemoteScreenSeed` reproduces the *picture* a running terminal is showing. It cannot reproduce
 /// the *modes* the program set, and those are what decide how the client behaves: whether a tap
-/// is a click, whether an arrow is SS3 or CSI, whether a paste is delimited. A full-screen
-/// program arms them once, with private-mode sequences it emits at startup, and every renderer
-/// that saw them follows from then on. A phone attaching an hour later sees only the ring, whose
+/// is a click, whether an arrow is SS3 or CSI, whether keys report releases, whether a paste is
+/// delimited. A full-screen program arms them once, with private-mode sequences it emits at
+/// startup, and every renderer that saw them follows from then on. A phone attaching an hour
+/// later sees only the ring, whose
 /// 512 KB window rolled those sequences away long ago — so its emulator sat at
 /// `mouseMode == .off` and swallowed every tap, which is why "click to go to bottom" answered the
 /// Mac and nothing on the phone.
@@ -73,6 +74,9 @@ enum RemoteTerminalModeSeed {
 
         out += statement(Switched.applicationCursorKeys, on: modes.applicationCursorKeys)
         out += statement(Switched.bracketedPaste, on: modes.bracketedPaste)
+        // Mode 1 replaces the kitty flags rather than adding to them. Zero matters: replayed
+        // history may have armed enhanced reporting for a program that has since exited.
+        out += "\u{1b}[=\(modes.keyboardEnhancementFlags);1u"
         return Data(out.utf8)
     }
 

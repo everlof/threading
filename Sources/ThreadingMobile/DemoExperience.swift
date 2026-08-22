@@ -101,6 +101,7 @@ final class DemoSessionScript {
                 RemoteWebSocketFeature.submitAcknowledgement.rawValue,
                 RemoteWebSocketFeature.conversationContextAttachments.rawValue,
                 RemoteWebSocketFeature.atomicTerminalSubmission.rawValue,
+                RemoteWebSocketFeature.terminalHydrationBoundary.rawValue,
             ]
         ))
         if session.surface == .terminal {
@@ -131,6 +132,7 @@ final class DemoSessionScript {
         case "viewport":
             if let cols = message.cols, let rows = message.rows {
                 deliver(RemoteResizeDTO(cols: cols, rows: rows))
+                deliver(RemoteTerminalReadyDTO(requestID: message.requestID))
             }
         case "conversationResync":
             deliverSnapshot()

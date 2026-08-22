@@ -1410,14 +1410,26 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             "remote-project-terminal-\(UUID().uuidString)",
             isDirectory: true
         )
+        let otherDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-project-terminal-other-\(UUID().uuidString)",
+            isDirectory: true
+        )
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: otherDirectory,
+            withIntermediateDirectories: true
+        )
         let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let otherProject = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: otherDirectory))
         let terminal = try XCTUnwrap(ProjectStore.shared.addTerminal(to: project.id))
+        ProjectStore.shared.updateTerminalLocation(otherDirectory.path, for: terminal.id)
         defer {
             ProjectTerminalRuntime.shared.discard(terminalID: terminal.id)
             _ = ProjectStore.shared.removeTerminal(id: terminal.id)
             _ = ProjectStore.shared.removeProject(id: project.id)
+            _ = ProjectStore.shared.removeProject(id: otherProject.id)
             try? FileManager.default.removeItem(at: temporary)
+            try? FileManager.default.removeItem(at: otherDirectory)
         }
 
         let ownerMe = try JSONDecoder().decode(
@@ -1427,6 +1439,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(ownerMe.terminals?.filter { $0.id == terminal.id.uuidString }.count, 1)
         XCTAssertFalse(ownerMe.sessions.contains { $0.id == terminal.id.uuidString })
         let summary = try XCTUnwrap(ownerMe.terminals?.first { $0.id == terminal.id.uuidString })
+        XCTAssertEqual(summary.projectName, project.name)
         XCTAssertEqual(summary.state, "dormant")
         XCTAssertFalse(summary.isAvailable)
 

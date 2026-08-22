@@ -22,6 +22,7 @@ extension SessionCoordinator {
         guard let message = ScheduledMessageStore.shared.claim(id) else { return }
         guard !standAsideForUnresetWindow(message) else { return }
         guard !standAsideForCustomLimit(message) else { return }
+        guard !standAsideForCurfew(message) else { return }
 
         switch message.target {
         case .session(let sessionID):
@@ -175,6 +176,66 @@ extension SessionCoordinator {
             "resetsAt": ISO8601DateFormatter().string(from: resetsAt)
         ])
         return true
+    }
+
+    // MARK: - A Clock The User Set
+
+    /// Stands a send aside because the target session is past its own curfew.
+    ///
+    /// The curfew's hold and a custom limit's are the same promise about different things: a
+    /// limit says *this account has spent enough*, a curfew says *this conversation is finished
+    /// for tonight*. So this asks after `standAsideForCustomLimit` rather than instead of it, and
+    /// a send held by both is held for the reason the account gives — that one is the wider fact,
+    /// and re-arming to a reset says something true about the money either way.
+    ///
+    /// Three answers, and `CurfewStandAside` owns which:
+    ///
+    /// - A **wrap-up** goes. It is the message that buys an interrupted agent the one turn it
+    ///   needs to commit and write its handoff, and holding it would be the hold defeating the
+    ///   thing it exists to make survivable.
+    /// - A **standing quiet-hours** hold ends at a moment the app can name, so the send is
+    ///   re-armed for it rather than left waiting — and **without counting a rearm**, because
+    ///   the rearm budget bounds how many times a slipping *usage window* may defer a message,
+    ///   and a night of quiet hours must not spend it.
+    /// - Anything else waits until the user lifts it, and says so in the curfew's own sentence.
+    ///
+    /// **No `noteWaiting`.** `ScheduledMessageScheduler.canAttemptNow` fails a `waiting` record
+    /// once it has been patient for `waitingRetryWindow` — the right rule for a target that
+    /// stayed busy, and the wrong one here twice over: a curfew is not a surface being slow, and
+    /// the sentence the user would find in the morning ("Its session stayed busy") would name
+    /// something that never happened. A record held by a curfew is therefore kept *out* of
+    /// `waitingSince` entirely, and any patience it accrued on an earlier busy attempt is
+    /// forgotten as the hold takes over. The scheduler re-offers it on `CurfewDidChange`.
+    private func standAsideForCurfew(_ message: ScheduledMessage) -> Bool {
+        guard let sessionID = message.target.sessionID else { return false }
+
+        let hold = CurfewHoldPolicy.hold(sessionID: sessionID, in: environment.projectStore)
+        switch CurfewStandAside.decide(message: message, hold: hold, now: Date()) {
+        case .deliver:
+            return false
+
+        case .rescheduleTo(let endsAt):
+            ScheduledMessageStore.shared.replace(
+                message.id,
+                with: message.rescheduled(to: endsAt)
+            )
+            ScheduledMessageStore.shared.relinquish(message.id)
+            ScheduledMessageScheduler.shared.forgetWaiting(message.id)
+            environment.eventLog.record(.curfew, "Scheduled send held by the session's curfew", [
+                "session": sessionID.uuidString,
+                "until": ISO8601DateFormatter().string(from: endsAt)
+            ])
+            return true
+
+        case .waitUntilLifted(let reason):
+            ScheduledMessageStore.shared.relinquish(message.id, waitingBecause: reason)
+            ScheduledMessageScheduler.shared.forgetWaiting(message.id)
+            environment.eventLog.record(.curfew, "Scheduled send held by the session's curfew", [
+                "session": sessionID.uuidString,
+                "reason": reason
+            ])
+            return true
+        }
     }
 
     private func accountFor(_ target: ScheduledMessage.Target) -> AgentAccount? {

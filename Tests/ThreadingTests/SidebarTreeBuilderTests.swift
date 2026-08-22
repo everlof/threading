@@ -68,6 +68,10 @@ final class SidebarTreeBuilderTests: XCTestCase {
         }
     }
 
+    private func sidebarKeys(in nodes: [NSObject]) -> [SidebarNodeKey] {
+        nodes.compactMap { ($0 as? any SidebarOutlineNode)?.sidebarKey }
+    }
+
     private func terminal(_ path: String, branch: String?) -> ProjectTerminal {
         var terminal = ProjectTerminal(currentDirectory: path)
         terminal.branch = branch
@@ -462,6 +466,24 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertEqual(branch.terminalNodes.map(\.terminalID), [shell.id])
     }
 
+    func testTerminalStaysInItsOwningProjectWhenItsCwdMatchesAnotherProject() throws {
+        var home = project("home", sessions: [])
+        let other = project("other", sessions: [])
+        let shell = terminal(other.folderPath, branch: nil)
+        home.terminals = [shell]
+
+        let roots = SidebarTreeBuilder.rootNodes(from: [home, other])
+        let homeNode = try XCTUnwrap(
+            roots.compactMap { $0 as? ProjectNode }.first { $0.projectID == home.id }
+        )
+        let otherNode = try XCTUnwrap(
+            roots.compactMap { $0 as? ProjectNode }.first { $0.projectID == other.id }
+        )
+
+        XCTAssertEqual(homeNode.terminalNodes.map(\.terminalID), [shell.id])
+        XCTAssertTrue(otherNode.terminalNodes.isEmpty)
+    }
+
     // MARK: - Side chats
 
     func testASideChatNestsUnderItsParent() throws {
@@ -657,6 +679,79 @@ final class SidebarTreeBuilderTests: XCTestCase {
             XCTAssertEqual(
                 node.sessionNodes.map(\.sessionID),
                 [apple.id, banana.id, cherry.id]
+            )
+        }
+    }
+
+    func testTypeOrderPutsChatsFirstWithoutReorderingRowsWithinAType() throws {
+        try withDefault(SidebarSessionOrder.type.rawValue, forKey: "sidebarSessionOrder") {
+            try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
+                try withDefault(false, forKey: "groupsSessionsByBranch") {
+                    let first = session("first")
+                    let second = session("second")
+                    let firstTerminal = terminal("/tmp/first", branch: nil)
+                    let secondTerminal = terminal("/tmp/second", branch: nil)
+                    let roots = SidebarTreeBuilder.rootNodes(
+                        from: [project(
+                            "p",
+                            sessions: [first, second],
+                            terminals: [firstTerminal, secondTerminal]
+                        )]
+                    )
+                    let node = try XCTUnwrap(roots.first as? ProjectNode)
+
+                    XCTAssertEqual(
+                        sidebarKeys(in: node.childNodes),
+                        [
+                            .session(first.id), .session(second.id),
+                            .terminal(firstTerminal.id), .terminal(secondTerminal.id),
+                        ]
+                    )
+                }
+            }
+        }
+    }
+
+    func testReversedTypeOrderPutsTerminalsFirstWithoutReorderingRowsWithinAType() throws {
+        try withReversedOrder(.type) {
+            try withDefault(false, forKey: "groupsSessionsByBranch") {
+                let first = session("first")
+                let second = session("second")
+                let firstTerminal = terminal("/tmp/first", branch: nil)
+                let secondTerminal = terminal("/tmp/second", branch: nil)
+                let roots = SidebarTreeBuilder.rootNodes(
+                    from: [project(
+                        "p",
+                        sessions: [first, second],
+                        terminals: [firstTerminal, secondTerminal]
+                    )]
+                )
+                let node = try XCTUnwrap(roots.first as? ProjectNode)
+
+                XCTAssertEqual(
+                    sidebarKeys(in: node.childNodes),
+                    [
+                        .terminal(firstTerminal.id), .terminal(secondTerminal.id),
+                        .session(first.id), .session(second.id),
+                    ]
+                )
+            }
+        }
+    }
+
+    func testReversedTypeOrderAlsoPutsTerminalsFirstInsideABranchGroup() throws {
+        try withReversedOrder(.type) {
+            let chat = session("chat", branch: "feature")
+            let shell = terminal("/tmp/feature", branch: "feature")
+            let roots = SidebarTreeBuilder.rootNodes(
+                from: [project("p", sessions: [chat], terminals: [shell])]
+            )
+            let projectNode = try XCTUnwrap(roots.first as? ProjectNode)
+            let branch = try XCTUnwrap(projectNode.childNodes.first as? BranchGroupNode)
+
+            XCTAssertEqual(
+                sidebarKeys(in: branch.childNodes),
+                [.terminal(shell.id), .session(chat.id)]
             )
         }
     }

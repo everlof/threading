@@ -216,6 +216,10 @@ the canonical policy for both humans and agents.
 - System chrome is contained behind a named wrapper and a narrow, documented policy exception.
 - Colours come from semantic `Design` roles, and theme colours never become unrecorded layer
   `CGColor`s.
+- A view says what it tells the pointer by declaring `PointerClaiming`; `addCursorRect` and
+  `NSCursor.…set()` are lint errors outside that seam. Claiming nothing is not claiming the
+  arrow — cursor rectangles are a *window's* list, so a view that registers none inherits the
+  I-beam of whatever is behind it.
 - A new component includes behavior, accessibility, live-theme-switch and rendered-state tests.
 
 `scripts/check_theme_boundaries.sh` is an error-producing build lint. Do not silence it with a

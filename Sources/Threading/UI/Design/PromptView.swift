@@ -1661,9 +1661,9 @@ private final class PromptAttachmentThumbnail: ThemedControl {
         )
     }
 
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
+    /// A thumbnail in the tray is a picture you press, not a control's plate. See
+    /// `PointerClaiming`.
+    override var restingPointer: NSCursor? { .pointingHand }
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }

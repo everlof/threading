@@ -216,6 +216,17 @@ final class CustomLimitSettings {
             && limit.thresholds.count <= Limits.thresholds
             && limit.thresholds.allSatisfy { $0 > 0 && $0 <= CustomLimitDefaults.boundThreshold }
             && (limit.name?.utf8.count ?? 0) <= Limits.nameBytes
+            && Self.hasWellFormedSpan(limit)
+    }
+
+    private static func hasWellFormedSpan(_ limit: CustomLimit) -> Bool {
+        guard limit.metric == .syntheticWindow else { return true }
+        // Nil predates the implemented synthetic metric and remains a forward-compatible,
+        // visibly unsupported record. A present span, however, must stay inside the evaluator's
+        // bounded history shape.
+        guard let span = limit.trailingSpan else { return true }
+        return span >= CustomLimitDefaults.minimumSyntheticWindowSpan
+            && span <= CustomLimitDefaults.maximumSyntheticWindowSpan
     }
 
     private enum Limits {

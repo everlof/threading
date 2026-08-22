@@ -298,4 +298,137 @@ final class ScheduledTimePresetsTests: XCTestCase {
             ).isEmpty
         )
     }
+
+    // MARK: - Curfew Wall Clock
+
+    func testThreeHoursAheadIsRoundedToATimeWorthOffering() {
+        let calendar = calendar()
+        let now = date(2026, 8, 10, 12, 3, in: calendar)
+
+        let presets = ScheduledTimePresets.curfewWallClock(now: now, calendar: calendar)
+
+        guard let three = preset(presets, PresetDefaults.curfewInThreeHoursID) else {
+            return XCTFail("Three hours ahead is always offerable")
+        }
+        XCTAssertEqual(calendar.component(.hour, from: three.date), 15)
+        XCTAssertEqual(calendar.component(.minute, from: three.date), 5)
+        XCTAssertEqual(
+            calendar.component(.minute, from: three.date) % PresetDefaults.roundingMinutes,
+            0,
+            "A menu offering to end a session at 15:03 is reporting a computation"
+        )
+        XCTAssertEqual(
+            three.detail,
+            ScheduledTimePresets.time(three.date),
+            "Its title does not say when, so the reading has to sit beside it"
+        )
+    }
+
+    func testTonightIsOfferedDuringTheDayAndSaysWhen() {
+        let calendar = calendar()
+        let now = date(2026, 8, 10, 14, 30, in: calendar)
+
+        let presets = ScheduledTimePresets.curfewWallClock(now: now, calendar: calendar)
+
+        guard let tonight = preset(presets, PresetDefaults.curfewTonightID) else {
+            return XCTFail("Tonight should be offered from the afternoon")
+        }
+        XCTAssertEqual(calendar.component(.hour, from: tonight.date), PresetDefaults.curfewEveningHour)
+        XCTAssertEqual(calendar.component(.day, from: tonight.date), 10, "Tonight is today's evening")
+        XCTAssertNil(tonight.detail, "The title already says the time")
+    }
+
+    /// Past 23:00 the offer would mean tomorrow night, which is a day away from what the word
+    /// says. It goes rather than quietly meaning something else.
+    func testTonightIsSuppressedOnceItHasPassed() {
+        let calendar = calendar()
+        let now = date(2026, 8, 10, 23, 30, in: calendar)
+
+        let presets = ScheduledTimePresets.curfewWallClock(now: now, calendar: calendar)
+
+        XCTAssertNil(preset(presets, PresetDefaults.curfewTonightID))
+        XCTAssertNotNil(
+            preset(presets, PresetDefaults.curfewInAnHourID),
+            "The short leashes are still offerable at midnight"
+        )
+    }
+
+    func testEveryCurfewPresetIsInTheFuture() {
+        let calendar = calendar()
+        let now = date(2026, 8, 10, 22, 58, in: calendar)
+
+        for preset in ScheduledTimePresets.curfewWallClock(now: now, calendar: calendar) {
+            XCTAssertGreaterThan(preset.date, now, "\(preset.id) is offering a moment already gone")
+        }
+    }
+
+    // MARK: - Curfew Usage Resets
+
+    /// The padding a *send* wants points the wrong way for an end: a minute past the boundary is
+    /// a curfew that lets the session start spending the fresh window.
+    func testACurfewResetLandsOnTheBoundaryItself() {
+        let now = Date(timeIntervalSince1970: 1_775_000_000)
+        let resetsAt = now.addingTimeInterval(3_600)
+        let usage = usage(windows: [
+            window(id: UsageDefaults.fiveHourWindowID, resetsIn: 3_600, from: now, duration: 18_000)
+        ])
+
+        let presets = ScheduledTimePresets.curfewUsageResets(usage: usage, metering: nil, now: now)
+
+        XCTAssertEqual(presets.count, 1)
+        XCTAssertEqual(presets.first?.date, resetsAt)
+        XCTAssertNotEqual(
+            presets.first?.date,
+            resetsAt.addingTimeInterval(PresetDefaults.resetPadding),
+            "The send's padding has no business on an end"
+        )
+        XCTAssertEqual(
+            presets.first?.id,
+            "\(PresetDefaults.curfewResetIDPrefix)\(UsageDefaults.fiveHourWindowID)"
+        )
+        XCTAssertNotNil(presets.first?.detail, "The reading is the whole reason to offer this")
+    }
+
+    /// The two lists must offer the *same* windows under different verbs — a scoped window that
+    /// appeared in one menu and not the other would read as a missing limit rather than two rules.
+    func testTheCurfewResetsOfferTheSameWindowsAsTheSendResets() {
+        let now = Date(timeIntervalSince1970: 1_775_000_000)
+        let usage = usage(
+            windows: [
+                window(id: UsageDefaults.fiveHourWindowID, resetsIn: 3_600, from: now, duration: 18_000),
+                window(id: UsageDefaults.weeklyWindowID, resetsIn: nil, from: now, duration: 604_800),
+            ],
+            modelWindows: [
+                window(id: "fable-weekly", resetsIn: 90_000, from: now, duration: 604_800, scope: "Fable")
+            ]
+        )
+
+        let sends = ScheduledTimePresets.usageResets(
+            usage: usage,
+            metering: "claude-fable-5",
+            now: now
+        )
+        let ends = ScheduledTimePresets.curfewUsageResets(
+            usage: usage,
+            metering: "claude-fable-5",
+            now: now
+        )
+
+        XCTAssertEqual(
+            ends.map(\.anchor.usageWindowID),
+            sends.map(\.anchor.usageWindowID)
+        )
+        XCTAssertEqual(ends.map(\.detail), sends.map(\.detail))
+        XCTAssertEqual(ends.count, 2)
+    }
+
+    func testNoUsageReadingOffersNoCurfewResetsEither() {
+        XCTAssertTrue(
+            ScheduledTimePresets.curfewUsageResets(
+                usage: nil,
+                metering: nil,
+                now: Date(timeIntervalSince1970: 1_775_000_000)
+            ).isEmpty
+        )
+    }
 }

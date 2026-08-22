@@ -152,6 +152,13 @@ enum ControlRefusal: Error, Equatable, Sendable {
     /// sentence, because the whole point of the case is that this is not the provider refusing:
     /// a caller told "spent" would report a quota problem the user does not have.
     case targetHeldByOwnLimit(reason: String)
+    /// The user set a **curfew** on this session and it has passed. Carries the curfew's own
+    /// sentence, for `targetHeldByOwnLimit`'s reason and one more of its own: this refusal is
+    /// about a single conversation's clock rather than an account's spend, so a caller told
+    /// "limit" would go looking at usage that is fine, and might reasonably try the same message
+    /// on a sibling session that shares the account and is not under a curfew at all — which is
+    /// the correct thing to do here and the wrong thing to do for a limit.
+    case targetHeldByCurfew(reason: String)
     /// The surface was there and still did not take it (mid-launch, a remote participant
     /// holds input authority, the transport just exited).
     case deliveryFailed

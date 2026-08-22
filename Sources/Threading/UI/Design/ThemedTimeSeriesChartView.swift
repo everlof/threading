@@ -994,13 +994,17 @@ class ThemedTimeSeriesChartView: ThemedControl {
 
     /// Axis ticks and category names.
     ///
-    /// `secondary`, not `tertiary`: measured against a light ground, tertiary label text comes
-    /// out at 3.03:1, and an axis is not decoration — it is the only thing that says what the
-    /// marks beside it mean. The chart's own numbers are stronger again; see `barValueColor`.
+    /// Starts from `secondary`, not `tertiary`: an axis is not decoration — it is the only thing
+    /// that says what the marks beside it mean. AppKit's light `secondaryLabelColor` currently
+    /// resolves to only 3.10:1 on white, so keep the theme's hue and move it just far enough to
+    /// clear the rendered 3.5 floor. The small margin survives colour-space and 8-bit rounding.
+    /// The chart's own numbers are stronger again; see `barValueColor`.
     private var axisTextColor: NSColor {
         Design.Chart.style == .spectrum
             ? Design.Surface.accent.withAlphaComponent(0.62)
             : Design.Text.secondary
+                .composited(over: plotBackground)
+                .legible(on: plotBackground, ratio: 3.6)
     }
 
     /// A bar's printed value, which is the content of the chart rather than its chrome and is
@@ -1912,9 +1916,21 @@ class ThemedTimeSeriesChartView: ThemedControl {
     /// and for the same reason: what a tooltip clipped is not something an assertion about
     /// drawing would have caught, but it is exactly what these two functions decide.
 
-    static let tooltipDrawingOptions: NSString.DrawingOptions = [
-        .usesLineFragmentOrigin, .usesFontLeading
-    ]
+    /// **`.usesFontLeading` is deliberately absent**, and it is the whole of the second clipped
+    /// tooltip.
+    ///
+    /// The option is honoured by `boundingRect` and by drawing into a *flipped* context, and
+    /// ignored by drawing into an unflipped one — which is every ordinary `NSView`, this chart
+    /// included. Measured here, SF 11pt: the same four-line reading is 13pt per line to
+    /// `boundingRect` and 14pt per line to `draw(with:options:)` on this view, so a five-fragment
+    /// box was measured at 65pt, drawn at 70pt, and lost its last line to the five points of
+    /// difference. Nothing about the box's *size* looked wrong, which is why the arithmetic had
+    /// already been checked twice against `tooltipRect`.
+    ///
+    /// Without the option both passes use the same line height in either context, so the measure
+    /// and the draw agree by construction rather than by coincidence — which is the only property
+    /// worth having here. A tooltip line is a point airier as a result.
+    static let tooltipDrawingOptions: NSString.DrawingOptions = [.usesLineFragmentOrigin]
 
     static var tooltipAttributes: [NSAttributedString.Key: Any] {
         [.font: Design.Typography.detail(), .foregroundColor: Design.Text.label]
@@ -1928,8 +1944,10 @@ class ThemedTimeSeriesChartView: ThemedControl {
     /// is by definition no wider than the widest one, and laying the same text out at exactly
     /// that width reproduces the same fragments. The second pass cannot change the height.
     ///
-    /// The clipped tooltip this was checked against was the right size all along — see
-    /// `tooltipRect`, which is where it actually went wrong.
+    /// The *first* clipped tooltip this was checked against was the right size all along — see
+    /// `tooltipRect`, which is where that one went wrong. The second was not: see
+    /// `tooltipDrawingOptions`, which is what the box is measured with and what the text is
+    /// drawn with, and had to be an options set the two passes could not read differently.
     static func tooltipSize(for string: NSAttributedString) -> NSSize {
         let measured = string.boundingRect(
             with: NSSize(

@@ -84,93 +84,147 @@ public final class PeerHostedDeviceTunnel: @unchecked Sendable {
     }
 }
 
+/// Coarse, content-free stages for diagnosing a hosted connection without logging SDP, ICE
+/// candidates, service addresses, credentials, or peer identifiers.
+public enum PeerHostedDeviceConnectionPhase: String, Sendable {
+    case rendezvous
+    case awaitingHost
+    case offer
+    case ice
+    case proxy
+}
+
+/// Owns whatever half-built transport exists when the parent connection task is cancelled.
+/// Registration is actor-serialized with cancellation so a transport created at the boundary
+/// cannot escape either side of the race.
+private actor PeerHostedDeviceConnectionCancellation {
+    private var isCancelled = false
+    private var transport: WebRTCPeerTransport?
+
+    func register(_ transport: WebRTCPeerTransport) throws {
+        guard !isCancelled else { throw CancellationError() }
+        self.transport = transport
+    }
+
+    func cancel(socket: PeerRendezvousWebSocket) async {
+        isCancelled = true
+        let transport = self.transport
+        self.transport = nil
+        await socket.close()
+        await transport?.close()
+    }
+}
+
 public enum PeerHostedDeviceConnector {
     public static func connect(
         endpoint: PeerRendezvousServiceEndpoint,
         hostID: String,
         deviceID: String,
-        credential: PeerRendezvousCredential
+        credential: PeerRendezvousCredential,
+        progress: (@Sendable (PeerHostedDeviceConnectionPhase) -> Void)? = nil
     ) async throws -> PeerHostedDeviceTunnel {
+        progress?(.rendezvous)
         let socket = try PeerRendezvousWebSocket(url: endpoint.deviceURL, credential: credential)
-        try await socket.connect()
-        do {
-            try await socket.send(
-                PeerRendezvousEnvelope(
-                    kind: .deviceConnect,
-                    hostID: hostID,
-                    deviceID: deviceID
-                )
-            )
-            let ready = try await socket.receive(timeout: PeerTransportBounds.negotiationTimeout)
-            try throwIfFailure(ready)
-            guard ready.kind == .ready, let sessionID = ready.sessionID,
-                  let iceServers = ready.iceServers else {
-                throw PeerRendezvousError.invalidEnvelope
-            }
-
-            let configuration = try PeerTransportConfiguration(iceServers: iceServers)
-            let transport = try WebRTCPeerTransport(
-                role: .offerer,
-                configuration: configuration
-            )
-            let offer = try await transport.makeTrickleOffer()
-            try await socket.send(
-                PeerRendezvousEnvelope(
-                    kind: .offer,
-                    sessionID: sessionID,
-                    description: offer
-                )
-            )
-
-            let localTask = signalingTask(transport: transport) {
-                try await forwardLocalCandidates(
-                    transport: transport,
-                    socket: socket,
-                    sessionID: sessionID
-                )
-            }
-            let remoteTask = signalingTask(transport: transport) {
-                try await receiveDeviceSignals(
-                    transport: transport,
-                    socket: socket,
-                    sessionID: sessionID
-                )
-            }
-            let maintenance = finishSignaling(
-                socket: socket,
-                transport: transport,
-                sessionID: sessionID,
-                localTask: localTask,
-                remoteTask: remoteTask
-            )
-
+        let cancellation = PeerHostedDeviceConnectionCancellation()
+        return try await withTaskCancellationHandler {
+            try await socket.connect()
             do {
-                try await transport.waitUntilOpen()
-                let multiplexer = PeerTunnelMultiplexer(role: .client, transport: transport)
-                let proxy = PeerTunnelLocalProxy(multiplexer: multiplexer)
-                let origin = try await proxy.start()
-                return PeerHostedDeviceTunnel(
-                    origin: origin,
-                    sessionID: sessionID,
-                    initialRoute: await transport.selectedRoute(),
-                    proxy: proxy,
+                try await socket.send(
+                    PeerRendezvousEnvelope(
+                        kind: .deviceConnect,
+                        hostID: hostID,
+                        deviceID: deviceID
+                    )
+                )
+                progress?(.awaitingHost)
+                let ready = try await socket.receive(
+                    timeout: PeerTransportBounds.negotiationTimeout
+                )
+                try throwIfFailure(ready)
+                guard ready.kind == .ready, let sessionID = ready.sessionID,
+                      let iceServers = ready.iceServers else {
+                    throw PeerRendezvousError.invalidEnvelope
+                }
+
+                progress?(.offer)
+                let configuration = try PeerTransportConfiguration(iceServers: iceServers)
+                let transport = try WebRTCPeerTransport(
+                    role: .offerer,
+                    configuration: configuration
+                )
+                do {
+                    try await cancellation.register(transport)
+                } catch {
+                    await transport.close()
+                    throw error
+                }
+                let offer = try await transport.makeTrickleOffer()
+                try await socket.send(
+                    PeerRendezvousEnvelope(
+                        kind: .offer,
+                        sessionID: sessionID,
+                        description: offer
+                    )
+                )
+
+                let localTask = signalingTask(transport: transport) {
+                    try await forwardLocalCandidates(
+                        transport: transport,
+                        socket: socket,
+                        sessionID: sessionID
+                    )
+                }
+                let remoteTask = signalingTask(transport: transport) {
+                    try await receiveDeviceSignals(
+                        transport: transport,
+                        socket: socket,
+                        sessionID: sessionID
+                    )
+                }
+                let maintenance = finishSignaling(
                     socket: socket,
                     transport: transport,
-                    localCandidateTask: localTask,
-                    remoteSignalTask: remoteTask,
-                    maintenanceTask: maintenance
+                    sessionID: sessionID,
+                    localTask: localTask,
+                    remoteTask: remoteTask
                 )
+
+                do {
+                    progress?(.ice)
+                    try await transport.waitUntilOpen()
+                    let multiplexer = PeerTunnelMultiplexer(role: .client, transport: transport)
+                    let proxy = PeerTunnelLocalProxy(multiplexer: multiplexer)
+                    progress?(.proxy)
+                    let origin = try await proxy.start()
+                    try Task.checkCancellation()
+                    return PeerHostedDeviceTunnel(
+                        origin: origin,
+                        sessionID: sessionID,
+                        initialRoute: await transport.selectedRoute(),
+                        proxy: proxy,
+                        socket: socket,
+                        transport: transport,
+                        localCandidateTask: localTask,
+                        remoteSignalTask: remoteTask,
+                        maintenanceTask: maintenance
+                    )
+                } catch {
+                    localTask.cancel()
+                    remoteTask.cancel()
+                    maintenance.cancel()
+                    await socket.close()
+                    await transport.close()
+                    throw error
+                }
             } catch {
-                localTask.cancel()
-                remoteTask.cancel()
-                maintenance.cancel()
                 await socket.close()
-                await transport.close()
                 throw error
             }
-        } catch {
-            await socket.close()
-            throw error
+        } onCancel: {
+            // URLSessionWebSocketTask.receive and WebRTC's checked continuations do not make
+            // cancellation ownership obvious. Explicitly closing both owned layers makes a
+            // losing route race terminal promptly in every negotiation stage.
+            Task { await cancellation.cancel(socket: socket) }
         }
     }
 }

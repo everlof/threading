@@ -8,11 +8,12 @@ import SwiftTerm
 extension RemoteTerminalModes {
 
     /// The sticky modes a live emulator is holding right now.
-    init(_ terminal: Terminal) {
+    init(_ terminal: TerminalViewStateSnapshot) {
         self.init(
             mouseReporting: RemoteTerminalMouseReporting(terminal),
             applicationCursorKeys: terminal.applicationCursor,
-            bracketedPaste: terminal.bracketedPasteMode
+            bracketedPaste: terminal.bracketedPasteMode,
+            keyboardEnhancementFlags: terminal.keyboardEnhancementFlags.rawValue
         )
     }
 }
@@ -20,7 +21,7 @@ extension RemoteTerminalModes {
 extension RemoteTerminalMouseReporting {
 
     /// The mouse contract a live emulator is holding, or `nil` when nothing tracks the mouse.
-    init?(_ terminal: Terminal) {
+    init?(_ terminal: TerminalViewStateSnapshot) {
         let tracking: Tracking
         switch terminal.mouseMode {
         case .off: return nil

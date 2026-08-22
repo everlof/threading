@@ -103,7 +103,7 @@ Components so far:
 | `ThemedButton` | A drop-in `NSButton`: bordered, plain, or prominent — `emphasis` names those three as primary/secondary/tertiary, `buttonStyle.primaryTreatment` decides whether a primary is filled, outlined, or a classic raised default action, and `shortcut` draws the chord it answers to on its own face. Ordinary actions centre their icon/title unit; a menu cell opts into leading content alignment and fills its host column, so the hover and hit target describe the whole cell while the ink keeps a stable edge. `showsSubmenuIndicator` reserves a real trailing chevron column for a hover/detail destination, so long titles truncate before the cue instead of taking it with them. `buttonStyle.titleRendering: pixel_5x6` selects the clean-room one-bit display alphabet for supported titles; a title containing any unsupported localized character stays whole and falls back to the scalable font. |
 | `ThemedActionPopoverViewController` | A bounded rich preview followed by a short menu-like command list. It takes structured action/separator entries, makes every action a full-cell `ThemedButton`, and applies `SeparatorView`'s visible-ink spacing. The caller constructs the optional preview only from the hover scheduler's presentation callback, never while mounting the anchor list. |
 | `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. `SurfacePresentation.persistent` is the ordinary standing well; `.onInteraction` keeps the same text inset, frame and hit target while drawing no plate at rest, raises `controlHover` under the pointer, and restores the ordinary well and focus ring for editing — the browser address bar's content-first grammar. `Design.Size.fieldHeight`, its own step: it borrowed `chipHeight` for as long as a field was "a chip you can type in", and a chip holds a word at rest where a field holds a caret. With a 2pt rule on each side, 26 left twenty points inside for a 13pt face — about three points of air — and the text read as wedged against the border. The two fields placed by frame rather than by intrinsic size (`TextPromptDefaults.fieldHeight`, `SidebarDefaults.renameFieldHeight`) restate the same token. **The cell is put on `wraps = false`, `isScrollable = true` in `setup()`**, which AppKit gives only through the `NSTextField(string:)` factory that `cellClass` rules out: a cell built by `init(frame:)` wraps, and a wrapping cell grows its *field editor* rather than scrolling it — 128pt of editor inside the `fieldHeight` well, unclipped by the control, so a sentence longer than the row drew its earlier lines through the field's own top border and over the row above. Settings' opening message shipped that way; multi-line editing is `ThemedTextView`, not a taller field. |
-| `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
+| `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. Its trailing run rides *inside* the field: the ✕ every search field owes its reader, and an optional owner-installed action in front of it (Settings' Ask AI), both acting on what was typed the way the magnifier does. The query yields room for whatever is visible there, and so does the pointer — the field's I-beam stops where the run begins, since `NSTextField`'s own claim is its whole bounds and would otherwise promise text over a button. See the [2026-08-21 note](#2026-08-21--the-carets-cursor-claims-the-whole-field-buttons-and-all). |
 | `PanelListView` | The display panel's list vocabulary: a scrolling stack of full-width rows under quiet section headings, with wrapped notes for a section that has no rows. Extracted after the Info and Sharing panes each built the same scroll–clip–stack by hand with silently different insets, which is how one pane's headings stopped lining up with anything above them. The geometry is stated once — content ink at `Spacing.inset`, on the pane header's own column — and `rowSpacing` is the one density decision a pane keeps. A heading never carries the count of its rows: the rows make the count apparent, a decision the Sharing pane made first and the component keeps panes from re-deciding apart. |
 | `SearchMatchLabel` | The other half of a search field: a line of text that says which of its own words the query accounts for. **Two signals, always both** — the matched run takes its role's `emphasized` weight *and* `Design.Surface.searchMatch`, an accent held at `Opacity.searchMatchGround` behind it. Weight alone vanishes in a list where several rows matched; a tint alone is the first thing Differentiate Without Colour takes away. It is a component rather than a call to `NSTextField.label(attributed:)` because an attributed string freezes its fonts and inks and `AppThemeRefresh`'s sweep re-resolves a *recorded role*, which it cannot reach inside — so this rebuilds on `AppThemeDidChange`, the same wiring `ThemedTextField`'s placeholder carries. `SearchTextMatch` is where "a query landed here" is decided, and filters may read its `comparisonOptions` so a result cannot be admitted by a more forgiving spelling than the mark uses. Its second rule is the one to know: **a token containing the whole line marks all of it**, which is what makes a row showing eight characters of a session id answer honestly to a pasted thirty-six-character one. |
 | `SearchResultRowView` | One destination a search turned up, with where it lives: a `SearchMatchLabel` title over a quiet caption path line — the settings sidebar's "Alert sound / Notifications" under the General row. A component of its own rather than a taller `ThemedTabItemView`: a tab names a *place* and holds one line forever, while a result names a thing the reader just asked for and owes them the path to it; what the two share (hover plate, press, keyboard activation, focus ring, ink source) they share through `BackdropThemedControl`. The host hands it the leading inset of the rows above so results align with the page row's title ink. Choosing one reports page **and** row, because the row is the answer — the settings sidebar routes that through `SettingsRowReveal`, which scrolls the built page to the anchored row (`SettingsRowAnchor`, the tag `SettingsUI` puts on every titled row) and stands the wash below on it. |
@@ -123,6 +123,7 @@ Components so far:
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
 | `ThemedTableRowView` | The row a list is *selected* in, handed back from `rowViewForRow:`/`rowViewForItem:`. Fills with `Design.Surface.selection` — the accent held back far enough that the row's own label tiers still read over it, so a themed list needs no second set of inks — at the theme's control corner, inset a hair so two selected rows read as two. Under **System** it defers to `super`, keeping AppKit's own highlight. Not the sidebar's row: `SidebarHoverRowView` fills with the accent at full strength because the selected session is the window's subject, and draws its own capsule under every theme — System included — because that shape closes with the column the divider narrows. |
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. `frameGap(to:forInkGap:)` and `applyOpticalSpacing(in:precededBy:followedBy:inkGap:)` keep an authored gap between the rule and visible content on either axis: the adjacent `OpticalInsetProviding` control owns its invisible padding, while bare content keeps the full gap. |
+| `PointerClaiming` / `PointerClaim` | What a view tells the pointer, declared rather than registered. `restingPointer` is the cursor over everything the view covers — `.arrow` for opaque chrome, which `ThemedControl` and `BackdropOverlay` default to, and `nil` **only** for a view that is genuinely see-through and means what is behind it to answer. `pointerClaims` names the parts that differ, most specific first; they may overlap each other and are carved in one place, so AppKit's undefined case cannot be constructed. It exists because claiming nothing is not claiming the arrow: cursor rectangles are a *window's* list, and a view that registers none inherits the claim behind it — a terminal's I-beam, a text view's, an `NSTextField`'s over its own controls. Registration is `registerPointerClaims()`, invalidation is `refreshPointerClaims()` (the base classes call it from `layout()`, since AppKit re-asks only when the *view's* geometry moved), and `resolvedPointerClaims()` is what a test reads. `addCursorRect` and `NSCursor.…set()` are build-lint errors outside the seam. See the three 2026-08-21 notes below. |
 | `HoverTrackingView` / `HoverPopoverScheduler` | The pointer bridge and timing policy for hover-presented detail. A `ThemedControl` anchor reports its already-shared state through `onHoverChange`; a feature does not install a competing tracking area over it. The surface root reports crossing into the popover, while the scheduler owns dwell, crossing grace, and cancellation. |
 | `ThemedStatusProgressRing` | A compact semantic ring for bounded completed/pending/failed counts. It draws a neutral track plus positive and negative slices; adjacent text must name every non-zero bucket so hue is never the only signal. |
 | `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
@@ -2626,6 +2627,12 @@ front-most rectangle is shown to win over one behind it. That precedence is **no
 an attempt to measure it in a scratch app failed to make its window key, and no measurement means
 no rule. Do not extend `CoveredWindowCursor` to the scrim on the assumption either way.
 
+*Evidence has since arrived from the app itself: the corner card's hand wins over the terminal's
+I-beam behind it, so a rectangle in front does win — see
+[2026-08-21](#2026-08-21--a-surface-in-front-owns-the-cursor-over-what-it-covers). That reopens the
+scrim's cursor rectangle as a real option; it does not make the change, and the counted claim above
+is still what a surface covering a whole window uses.*
+
 ## 2026-08-14 — a corner a theme states is not a corner every shape can turn
 
 Reported from a screenshot of the Component Gallery under Botanical: the theme menu's highlighted
@@ -2942,3 +2949,109 @@ test: the descendant hit test is the mechanism that exposed the gap, so asking i
 repeat the fault. A press routed through from inside is swallowed and left inert; the genuinely
 uncovered strip above the surface remains the ordinary click-outside route. The rule belongs to
 `InWindowOverlay`, so the media and comparison inspectors share it.
+
+## 2026-08-21 — the caret's cursor claims the whole field, buttons and all
+
+Reported from Settings, pointing at the search field's own controls: *"shouldn't this be an arrow
+pointer when hovering these?"* — Ask AI and the ✕ beside it, both answering the pointer with an
+I-beam that promised text where a button stood.
+
+Nothing about the buttons was wrong, and the field's insets were not the answer either.
+`ThemedSearchField` already yields room at its trailing edge so a long query truncates before it
+runs under the run of controls, and both `drawingRect(forBounds:)` and the field editor's frame
+respect it. **Cursor rectangles do not go through either.** Measured on a scratch field with an
+inset cell: `NSTextField` registers exactly one rectangle, the I-beam, over its **whole bounds** —
+the cell's drawing rect is not consulted — and registers none at all once the field is neither
+editable nor selectable. A subview that registers nothing is inside that rectangle, not outside
+it, so every search field in the app had this: the ✕ is on all of them.
+
+The field's own claim is therefore **carved** rather than covered by an arrow rectangle laid on
+top. Overlapping cursor rectangles are documented as undefined, and which of two AppKit prefers is
+the precedence [2026-08-13](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it)
+already failed to measure; a fix that depends on it would be a guess. AppKit's rectangle arrives
+through `addCursorRect(_:cursor:)`, so clipping there is the whole change — whatever the field
+would have claimed, it claims only over the query — and a button with nothing registered over it
+keeps the ordinary arrow every other `ThemedButton` in the window shows.
+
+Two details are load-bearing. The edge is read from the controls' **frames**, not from the inset
+the text yields: a themed button's frame reaches past the alignment rect the stack lays it out by,
+and at that optical inset (2pt here) the pointer is already over the button while the arithmetic
+still calls it text. And the run appearing or leaving has to `invalidateCursorRects(for:)` the
+field, because a *subview's* visibility invalidates nothing about its superview's rectangles.
+
+## 2026-08-21 — a surface in front owns the cursor over what it covers
+
+Reported an hour after the search field above, from the session pane's corner card: *"'62 files'
+has arrow cursor, but '5.8m tokens' has text positioning cursor."* Two rows of one card, a row
+apart, answering the pointer with different things.
+
+Same root as the search field, one level out. `GitStatusOverlayView` registered a pointing hand
+over the rows that open Git Review and **nothing** over the rest of itself — deliberately, so a
+card holding no Git sentence would not promise a click that does nothing. But cursor rectangles
+are a *window's* list, and claiming nothing is not the same as claiming the arrow: the card is
+opaque chrome floating over the session pane, `TerminalView.resetCursorRects` claims an I-beam
+over the whole of itself, and a native conversation's text views claim theirs. So every row the
+card did not speak for inherited the claim underneath it, and the usage and children rows — which
+are buttons — spent their lives offering to select text that is behind the card.
+
+**The precedence [2026-08-13](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it)
+could not measure has been running in production the whole time.** That note left open whether a
+front-most rectangle wins over one behind it, because a scratch app could not be made key. The
+card answers it from the other side: its hand over the Git rows has always won over the terminal's
+I-beam beneath them, in the same window, with the terminal's rectangle registered first. A view in
+front wins. (What is still unmeasured, and still not to be assumed, is the ordering of two
+rectangles registered by the *same* view — AppKit documents that as undefined, and both of today's
+fixes carve rather than layer for exactly that reason.)
+
+So the card claims its own silhouette: the acting region keeps the hand, and the up-to-four
+rectangles around it take the arrow. The line between the two is **what the row looks like**, not
+whether it acts — the Git rows are text that is pressable, which is what a hand says, and the rows
+below them are controls, which show what every other `ThemedButton` in the window shows. Any
+opaque surface floating over a terminal or a transcript inherits this rule: speak for every point
+you cover, or the view underneath will.
+
+
+## 2026-08-21 — the pointer got a boundary
+
+Two bugs in one morning, reported an hour apart, both of the same shape: a view that registered no
+cursor rectangle was not showing the arrow, it was showing whatever the view behind it claimed.
+The fixes were right and neither could stop the third one, because the rule they encoded —
+*speak for every point you cover* — lived in prose and in two `resetCursorRects` overrides.
+
+The inventory said the rule was already not holding. **Three** patterns answered one question:
+seventeen `resetCursorRects` overrides, each carving its own rectangle arithmetic (three of them
+subtracting rectangles by hand); one view setting the cursor imperatively from a `.cursorUpdate`
+tracking area, outside the window's list altogether; and `CoveredWindowCursor`, which is right for
+a surface covering a whole window and wrong for anything smaller.
+
+`PointerClaiming` makes the answer a value. A view declares `restingPointer` and `pointerClaims`;
+`registerPointerClaims()` is the only thing that touches AppKit. Three things that used to be
+copied or forgotten now happen once:
+
+- **Overlap is unconstructable.** Claims resolve specific-first, each carved against what is
+  already claimed, in a band decomposition — so a surface with a dozen markers stays countable
+  rather than splitting each piece against each hole. `PaneFoldDivider` had been trimming its band
+  around its corners by hand; `BrowserAnnotationOverlay` had been registering its crosshair *under*
+  its markers and trusting AppKit's undefined ordering to prefer the later one.
+- **The resting cursor is a decision somebody made.** `nil` is now a statement — the browser
+  annotation overlay says it while it is only watching, because a link's hand and the page's own
+  I-beam are the right answers through a transparent sheet — and everything else says what it
+  holds.
+- **Staleness has one answer.** `refreshPointerClaims()`, called from `layout()` by both base
+  classes, because AppKit re-asks a view only when the *view's* geometry moved: a card whose rows
+  changed inside an unchanged frame, or a field whose trailing controls appeared, otherwise keeps
+  registering yesterday's rectangles.
+
+`ThemedControl` and `BackdropOverlay` default to `.arrow`, which is where the class of bug
+actually dies: every control is correct the day it is written, including the ones nobody has
+audited. That default also settles a defect the
+[2026-08-13 note](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it) left open —
+`InWindowOverlayScrim` is a `ThemedControl`, so a scrim covering a split view's seam now answers
+for it, which that note could not do while the front-versus-behind precedence was unmeasured.
+
+The gate is the same ladder every other rule here climbed: `scripts/check_theme_boundaries.sh`
+fails a build that calls `addCursorRect` or `NSCursor.…set()` outside the seam, and a
+`resetCursorRects` override may be exactly `registerPointerClaims()` — a guard in front of it is a
+claim decided where nothing can read it. `CoveredWindowCursor` and `CoveredWindowPointer` keep
+named exceptions, since a window-level switch is a different mechanism and still the right one for
+a surface that has taken a whole window over.

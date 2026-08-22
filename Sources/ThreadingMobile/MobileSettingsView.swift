@@ -80,6 +80,15 @@ struct MobileSettingsView: View {
                         ) {
                             showsNotifications = true
                         }
+
+                        ThemedRowDivider()
+                        SettingsNavigationRow(
+                            symbol: "speedometer",
+                            title: "Advanced",
+                            detail: "Connection reuse and metrics"
+                        ) {
+                            AdvancedConnectionSettingsView()
+                        }
                     }
 
                     settingsSection("Support") {

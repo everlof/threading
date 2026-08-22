@@ -475,13 +475,13 @@ final class SidebarOutlineUpdateTests: XCTestCase {
     }
 
     /// The surviving object keeps the row; the rebuild still owns what the row *says*. A heading
-    /// whose repository was renamed, and a terminal whose folder moved it under another checkout,
-    /// are both content on the node rather than in the store.
+    /// whose repository was renamed, and a terminal whose owning project moved folders, are both
+    /// content on the node rather than row identity.
     func testASurvivingRowTakesTheRebuiltContent() {
         let terminalID = TerminalID()
         let presentedTerminal = TerminalNode(
             terminalID: terminalID,
-            displayProjectFolderPath: "/repos/one"
+            projectFolderPath: "/repos/one"
         )
         let presentedHeading = RepoGroupNode(identity: "/repos/one.git", name: "One")
         let presentedProject = project(ProjectID(), children: [presentedTerminal])
@@ -489,7 +489,7 @@ final class SidebarOutlineUpdateTests: XCTestCase {
 
         let rebuiltTerminal = TerminalNode(
             terminalID: terminalID,
-            displayProjectFolderPath: "/repos/two"
+            projectFolderPath: "/repos/two"
         )
         let rebuiltHeading = RepoGroupNode(identity: "/repos/one.git", name: "Renamed")
         let rebuiltProject = project(presentedProject.projectID, children: [rebuiltTerminal])
@@ -501,7 +501,7 @@ final class SidebarOutlineUpdateTests: XCTestCase {
         XCTAssertEqual(presentedHeading.name, "Renamed")
         XCTAssertIdentical(presentedHeading.projectNodes.first, presentedProject)
         XCTAssertIdentical(presentedProject.terminalNodes.first, presentedTerminal)
-        XCTAssertEqual(presentedTerminal.displayProjectFolderPath, "/repos/two")
+        XCTAssertEqual(presentedTerminal.projectFolderPath, "/repos/two")
     }
 
     /// A session that moved from the project into a branch heading is the same row in a new

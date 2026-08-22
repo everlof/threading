@@ -36,14 +36,16 @@ enum MobileSnoozePresets {
     }
 }
 
-private enum SessionOrganization: String, CaseIterable {
+enum SessionOrganization: String, CaseIterable {
     case project
     case recent
+    case type
 
     var title: String {
         switch self {
         case .project: return MobileL10n.string("By project")
         case .recent: return MobileL10n.string("Most recent")
+        case .type: return MobileL10n.string("By type")
         }
     }
 
@@ -51,6 +53,86 @@ private enum SessionOrganization: String, CaseIterable {
         switch self {
         case .project: return "folder"
         case .recent: return "clock.arrow.circlepath"
+        case .type: return "square.grid.2x2"
+        }
+    }
+}
+
+enum DashboardContentType: String, Hashable {
+    case chats
+    case terminals
+
+    /// The heading over a plate that holds only this kind, when the list is arranged by type.
+    var title: String {
+        switch self {
+        case .chats: return MobileL10n.string("Chats")
+        case .terminals: return MobileL10n.string("Terminals")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .chats: return "bubble.left.and.bubble.right"
+        case .terminals: return MobileTerminalMark.symbolName
+        }
+    }
+}
+
+/// One row of the dashboard list, whichever kind it is.
+///
+/// Chats and terminals stand in one list the way they do in the Mac sidebar, told apart by their
+/// mark rather than by separate plates and a heading over one of them. The dashboard builds the
+/// list as values in the order the arrangement asks for, and the plate draws each row lazily.
+enum DashboardRowItem: Identifiable, Equatable {
+    case chat(RemoteSessionSummaryDTO)
+    case terminal(RemoteProjectTerminalSummaryDTO)
+
+    /// Distinct across kinds: a chat and a terminal never share a row identity even if the Mac
+    /// ever handed both the same UUID.
+    var id: String {
+        switch self {
+        case .chat(let session): return "chat:\(session.id)"
+        case .terminal(let terminal): return "terminal:\(terminal.id)"
+        }
+    }
+
+    /// The rows of a plate, each kind in its own run, runs in the order given.
+    static func rows(
+        sessions: [RemoteSessionSummaryDTO],
+        terminals: [RemoteProjectTerminalSummaryDTO],
+        order: [DashboardContentType]
+    ) -> [DashboardRowItem] {
+        order.flatMap { type -> [DashboardRowItem] in
+            switch type {
+            case .chats: return sessions.map(DashboardRowItem.chat)
+            case .terminals: return terminals.map(DashboardRowItem.terminal)
+            }
+        }
+    }
+}
+
+enum SessionTypeDirection: String, CaseIterable {
+    case chatsFirst
+    case terminalsFirst
+
+    var title: String {
+        switch self {
+        case .chatsFirst: return MobileL10n.string("Chats first")
+        case .terminalsFirst: return MobileL10n.string("Terminals first")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .chatsFirst: return "bubble.left.and.bubble.right"
+        case .terminalsFirst: return "terminal"
+        }
+    }
+
+    var contentTypes: [DashboardContentType] {
+        switch self {
+        case .chatsFirst: return [.chats, .terminals]
+        case .terminalsFirst: return [.terminals, .chats]
         }
     }
 }
@@ -405,6 +487,7 @@ private struct DashboardProjectSection {
     let projectName: String
     let title: String
     let sessions: [RemoteSessionSummaryDTO]
+    let terminals: [RemoteProjectTerminalSummaryDTO]
 }
 
 private enum DashboardSessionAction {
@@ -440,6 +523,8 @@ struct SessionDashboard: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("sessionDashboardOrganization") private var organizationRaw =
         SessionOrganization.project.rawValue
+    @AppStorage("sessionDashboardTypeDirection") private var typeDirectionRaw =
+        SessionTypeDirection.chatsFirst.rawValue
     @State private var searchText = ""
     @State private var isConfirmingForget = false
     @State private var themeError: String?
@@ -475,6 +560,10 @@ struct SessionDashboard: View {
 
     private var organization: SessionOrganization {
         SessionOrganization(rawValue: organizationRaw) ?? .project
+    }
+
+    private var typeDirection: SessionTypeDirection {
+        SessionTypeDirection(rawValue: typeDirectionRaw) ?? .chatsFirst
     }
 
     private var showsDemoBanner: Bool {
@@ -522,13 +611,16 @@ struct SessionDashboard: View {
         return filtered.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
     }
 
-    private var groupedSessions: [DashboardProjectSection] {
-        Dictionary(grouping: sessions, by: \.projectName)
-            .map {
+    private var groupedProjects: [DashboardProjectSection] {
+        let sessionsByProject = Dictionary(grouping: sessions, by: \.projectName)
+        let terminalsByProject = Dictionary(grouping: terminals, by: \.projectName)
+        return Set(sessionsByProject.keys).union(terminalsByProject.keys)
+            .map { name in
                 DashboardProjectSection(
-                    projectName: $0.key,
-                    title: $0.key.isEmpty ? MobileL10n.string("Other") : $0.key,
-                    sessions: $0.value
+                    projectName: name,
+                    title: name.isEmpty ? MobileL10n.string("Other") : name,
+                    sessions: sessionsByProject[name] ?? [],
+                    terminals: terminalsByProject[name] ?? []
                 )
             }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
@@ -558,39 +650,40 @@ struct SessionDashboard: View {
                     }
                 } else if sessions.isEmpty, terminals.isEmpty {
                     emptyCard
+                } else if organization == .type {
+                    // By type is the one arrangement that separates the kinds, so it is the one
+                    // that names them: a plate per kind, each under its heading, in the chosen
+                    // direction. Every other arrangement stands chats and terminals in one list.
+                    ForEach(typeDirection.contentTypes, id: \.self) { type in
+                        typeGroup(for: type)
+                    }
+                } else if projectName == nil, organization == .project {
+                    ForEach(groupedProjects, id: \.projectName) { project in
+                        ProjectWorkGroup(
+                            projectName: project.projectName,
+                            title: project.title,
+                            sessions: project.sessions,
+                            terminals: project.terminals,
+                            isArchived: showsArchived,
+                            showsActions: model.canManageSessions,
+                            pendingActionSessionID: pendingActionSessionID,
+                            action: perform
+                        )
+                    }
                 } else {
-                    if !terminals.isEmpty {
-                        ProjectTerminalRowGroup(terminals: terminals)
-                    }
-                    if projectName != nil, !sessions.isEmpty {
-                        SessionRowGroup(
+                    // One list, a project's chats and then its terminals — the Mac's order.
+                    DashboardRowGroup(
+                        rows: DashboardRowItem.rows(
                             sessions: sessions,
-                            isArchived: showsArchived,
-                            showsActions: model.canManageSessions,
-                            pendingActionSessionID: pendingActionSessionID,
-                            action: perform
-                        )
-                    } else if organization == .project {
-                        ForEach(groupedSessions, id: \.projectName) { project in
-                            ProjectSessionGroup(
-                                projectName: project.projectName,
-                                title: project.title,
-                                sessions: project.sessions,
-                                isArchived: showsArchived,
-                                showsActions: model.canManageSessions,
-                                pendingActionSessionID: pendingActionSessionID,
-                                action: perform
-                            )
-                        }
-                    } else if !sessions.isEmpty {
-                        SessionRowGroup(
-                            sessions: sessions,
-                            isArchived: showsArchived,
-                            showsActions: model.canManageSessions,
-                            pendingActionSessionID: pendingActionSessionID,
-                            action: perform
-                        )
-                    }
+                            terminals: terminals,
+                            order: [.chats, .terminals]
+                        ),
+                        showsProjectName: projectName == nil,
+                        isArchived: showsArchived,
+                        showsActions: model.canManageSessions,
+                        pendingActionSessionID: pendingActionSessionID,
+                        action: perform
+                    )
                 }
 
                 // Connection recovery owns the page until this Mac has answered. Asking about
@@ -607,6 +700,28 @@ struct SessionDashboard: View {
             .padding(.top, MobileDesign.Spacing.large)
             .padding(.horizontal, MobileDesign.Spacing.large)
             .padding(.bottom, 36)
+        }
+    }
+
+    /// One kind's plate under its heading, for the by-type arrangement. Nothing is drawn for a
+    /// kind with no rows: a heading over an empty plate would announce an absence.
+    @ViewBuilder
+    private func typeGroup(for type: DashboardContentType) -> some View {
+        let rows = DashboardRowItem.rows(sessions: sessions, terminals: terminals, order: [type])
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                Label(type.title, systemImage: type.symbol)
+                    .font(.headline)
+                    .foregroundStyle(theme.label)
+                DashboardRowGroup(
+                    rows: rows,
+                    showsProjectName: projectName == nil,
+                    isArchived: showsArchived,
+                    showsActions: model.canManageSessions,
+                    pendingActionSessionID: pendingActionSessionID,
+                    action: perform
+                )
+            }
         }
     }
 
@@ -827,6 +942,23 @@ struct SessionDashboard: View {
                                         ? "checkmark"
                                         : option.symbol
                                 )
+                            }
+                        }
+                    }
+
+                    if organization == .type {
+                        Section("Direction") {
+                            ForEach(SessionTypeDirection.allCases, id: \.rawValue) { option in
+                                Button {
+                                    typeDirectionRaw = option.rawValue
+                                } label: {
+                                    Label(
+                                        option.title,
+                                        systemImage: typeDirection == option
+                                            ? "checkmark"
+                                            : option.symbol
+                                    )
+                                }
                             }
                         }
                     }
@@ -1368,10 +1500,15 @@ private struct MobileConnectionProgressStepTitle: UIViewRepresentable {
     }
 }
 
-private struct ProjectSessionGroup: View {
+/// A project's heading and, under it, its chats and terminals on one plate — the Mac sidebar's
+/// arrangement, where a project's terminals stand in the same list as its chats and are told
+/// apart by their mark. A "Terminals" heading used to sit over the terminals alone, so one kind
+/// was labelled inside the project and the other was not.
+private struct ProjectWorkGroup: View {
     let projectName: String
     let title: String
     let sessions: [RemoteSessionSummaryDTO]
+    let terminals: [RemoteProjectTerminalSummaryDTO]
     let isArchived: Bool
     let showsActions: Bool
     let pendingActionSessionID: String?
@@ -1401,8 +1538,13 @@ private struct ProjectSessionGroup: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Shows this project’s sessions")
-            SessionRowGroup(
-                sessions: sessions,
+            DashboardRowGroup(
+                rows: DashboardRowItem.rows(
+                    sessions: sessions,
+                    terminals: terminals,
+                    order: [.chats, .terminals]
+                ),
+                showsProjectName: false,
                 isArchived: isArchived,
                 showsActions: showsActions,
                 pendingActionSessionID: pendingActionSessionID,
@@ -1412,41 +1554,53 @@ private struct ProjectSessionGroup: View {
     }
 }
 
-/// A project's chats — or, in the flat list, all of them — on one plate.
+/// The dashboard's rows — a project's, one kind's, or every one on the Mac — on one plate.
 ///
 /// Every chat used to be its own card: a border, a corner radius and eight points of air per row,
 /// which is a stack of panels rather than a list, and on a phone five of them filled the screen.
 /// The rows now sit on one `ThemedRowGroup` and are told apart by a hairline, the way iOS's own
 /// grouped tables are; the rule starts where the row's text starts, so it reads as belonging to
-/// the words rather than to the card, and runs to the card's trailing edge.
+/// the words rather than to the card, and runs to the card's trailing edge. Chats and terminals
+/// share the plate and the hairline, because they share the row.
 ///
-/// The rows are built lazily inside the plate. A project holds a handful of chats, but the flat
-/// list holds every chat on the Mac, and that list was lazy before it had a plate; the plate does
-/// not take that away.
-private struct SessionRowGroup: View {
-    let sessions: [RemoteSessionSummaryDTO]
+/// The rows are built lazily inside the plate. A project holds a handful of rows, but the flat
+/// list holds every chat and terminal on the Mac, and that list was lazy before it had a plate;
+/// the plate does not take that away. An empty list draws no plate.
+private struct DashboardRowGroup: View {
+    let rows: [DashboardRowItem]
+    let showsProjectName: Bool
     let isArchived: Bool
     let showsActions: Bool
     let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
 
     var body: some View {
-        ThemedRowGroup {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(sessions.enumerated()), id: \.element.id) { offset, session in
-                    if offset > 0 {
-                        ThemedRowDivider(
-                            leadingInset: SessionRow.textLeadingEdge,
-                            trailingInset: 0
-                        )
+        if !rows.isEmpty {
+            ThemedRowGroup {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { offset, row in
+                        if offset > 0 {
+                            ThemedRowDivider(
+                                leadingInset: DashboardRowMetrics.textLeadingEdge,
+                                trailingInset: 0
+                            )
+                        }
+                        switch row {
+                        case .chat(let session):
+                            SessionListItem(
+                                session: session,
+                                isArchived: isArchived,
+                                showsActions: showsActions,
+                                pendingActionSessionID: pendingActionSessionID,
+                                action: action
+                            )
+                        case .terminal(let terminal):
+                            TerminalListItem(
+                                terminal: terminal,
+                                showsProjectName: showsProjectName
+                            )
+                        }
                     }
-                    SessionListItem(
-                        session: session,
-                        isArchived: isArchived,
-                        showsActions: showsActions,
-                        pendingActionSessionID: pendingActionSessionID,
-                        action: action
-                    )
                 }
             }
         }
@@ -1519,23 +1673,42 @@ private struct SessionListItem: View {
     /// white or black platter under an authored theme, the slab this app keeps off its screens.
     /// So the preview restates the panel the row came from, at the width it was drawn at.
     private var liftedRow: some View {
-        SessionRow(session: session, showsChevron: false)
+        SessionRow(session: session)
             .frame(width: rowWidth)
             .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
     }
 
-    @ViewBuilder
     private var sessionRow: some View {
+        let row: AnyView
         if isArchived {
-            SessionRow(session: session, showsChevron: false)
+            row = AnyView(SessionRow(session: session))
         } else {
-            Button(action: openSession) {
-                SessionRow(session: session, showsChevron: false)
+            row = AnyView(Button(action: openSession) {
+                SessionRow(session: session)
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(.isLink)
-            .accessibilityRemoveTraits(.isButton)
+            .accessibilityRemoveTraits(.isButton))
         }
+        return AnyView(
+            row
+                .swipeActions(edge: .trailing, allowsFullSwipe: !isArchived) {
+                    if isArchived {
+                        Button {
+                            action(.restore, session)
+                        } label: {
+                            Label("Restore", systemImage: "arrow.uturn.backward")
+                        }
+                        .tint(theme.accent)
+                    } else if showsActions {
+                        Button(role: .destructive) {
+                            action(.archive, session)
+                        } label: {
+                            Label("Archive", systemImage: "archivebox")
+                        }
+                    }
+                }
+        )
     }
 
     private func openSession() {
@@ -1654,6 +1827,230 @@ enum MobileSessionAgeFormat {
     }
 }
 
+// MARK: - Dashboard Row
+
+enum DashboardRowMetrics {
+    /// Where a row's text begins: the leading inset, the mark and the gap after it. The hairline
+    /// between two rows starts here, so it underlines the words rather than the tile — and it is
+    /// the same edge for a chat and a terminal, because they are the same row.
+    static let textLeadingEdge = MobileDesign.Spacing.medium
+        + MobileDesign.Size.rowMark
+        + MobileDesign.Spacing.medium
+}
+
+/// The one shape every row in the dashboard list has: a mark, a one-line title over a caption of
+/// glyphs and words, and a trailing column.
+///
+/// A chat and a terminal are built from this rather than each drawing its own row. The terminal
+/// row used to be a separate view — a circle tile with an accent glyph, a `body`-weight semibold
+/// title beside the chats' `subheadline` medium, sixteen points of inset beside their twelve, a
+/// spelled state word and a disclosure chevron that no chat row had. Down one list that read as
+/// two products: the titles sat at two different x positions and two different ink weights, and
+/// one kind of row promised a push the other kind did not. The Mac sidebar draws both kinds
+/// through one row vocabulary; sharing the shape here is what keeps the phone from drifting
+/// back.
+///
+/// **No chevron, on either kind.** Every row on the plate opens something, so a disclosure arrow
+/// would say the same thing on every line; the Mac's rows do not carry one either. A chevron
+/// belongs to a row that navigates *away* from a list of peers — the project heading above.
+///
+/// **Two lines, always.** The title takes one line and the mark does not set the height, so the
+/// list is scannable and every row is the same height. The full title is one tap away.
+///
+/// **No plate.** The row sits on the plate its group paints, so its background is clear and its
+/// whole rectangle is still the tap: without a fill of its own, the air between the caption and
+/// the trailing column would otherwise fall through to nothing.
+private struct DashboardRow<Mark: View, Caption: View, Trailing: View>: View {
+    let title: String
+    @ViewBuilder let mark: () -> Mark
+    @ViewBuilder let caption: () -> Caption
+    @ViewBuilder let trailing: () -> Trailing
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.medium) {
+            mark()
+
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+                MobileMorphingTitle(
+                    title: title,
+                    textStyle: .subheadline,
+                    weight: .medium,
+                    textColor: theme.uiLabel,
+                    groundColor: theme.uiPanel,
+                    alignment: .left
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: MobileDesign.Spacing.tight) {
+                    caption()
+                }
+                .font(.caption2)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: MobileDesign.Spacing.tight)
+
+            HStack(spacing: MobileDesign.Spacing.tight) {
+                trailing()
+            }
+        }
+        .padding(.horizontal, MobileDesign.Spacing.medium)
+        .padding(.vertical, MobileDesign.Spacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+/// The caption's first glyph on every row: the laptop, green when the thing is running on the Mac
+/// and slashed when it is not. Green means connected and the slash means not; the glyph is the
+/// state, so it speaks the whole state for VoiceOver rather than hiding.
+private struct DashboardAvailabilityGlyph: View {
+    let isAvailable: Bool
+    let label: String
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Image(systemName: isAvailable ? "laptopcomputer" : "laptopcomputer.slash")
+            .foregroundStyle(isAvailable ? theme.positive : theme.secondaryLabel)
+            .accessibilityLabel(label)
+    }
+}
+
+/// The trailing column's working mark. Matches the Mac sidebar's compact working spinner: the
+/// orb remains available for the conversation title, but a list status mark should be quiet and
+/// scannable rather than a second, more expressive animation. Hidden from VoiceOver because the
+/// availability glyph already says "Working".
+private struct DashboardWorkingIndicator: View {
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Group {
+            if ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil {
+                Circle()
+                    .trim(from: 0, to: 0.72)
+                    .stroke(theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(theme.accent)
+            }
+        }
+        .frame(
+            width: MobileDesign.Size.rowWorkingOrb,
+            height: MobileDesign.Size.rowWorkingOrb
+        )
+        .accessibilityHidden(true)
+    }
+}
+
+/// The trailing column's age, set the way `MobileSessionAgeFormat` sets it.
+private struct DashboardAge: View {
+    let date: Date
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Text(MobileSessionAgeFormat.string(since: date))
+            .font(.caption2)
+            .foregroundStyle(theme.tertiaryLabel)
+            .fixedSize()
+    }
+}
+
+// MARK: - Terminal Row
+
+/// What a terminal row shows for the state the wire sends, resolved once so the row and its tests
+/// read the same answer.
+///
+/// The state is shown the way a chat's is, not spelled: the laptop glyph says running or not, the
+/// tile dims for a shell that is not running, and a busy shell shows the working mark in the
+/// trailing column. The words "Ready" and "Stopped" that used to sit in that column said what the
+/// glyph beside them already said; they survive as the whole state for VoiceOver.
+struct MobileTerminalRowPresentation: Equatable {
+    /// Foreground work in a running shell: the trailing column shows the working mark.
+    let isWorking: Bool
+    /// Not running on the Mac: the tile dims and the laptop is slashed.
+    let isDimmed: Bool
+    /// The whole state in words, for VoiceOver.
+    let availabilityLabel: String
+
+    static func resolve(state: String, isAvailable: Bool) -> Self {
+        let isWorking = isAvailable && state == "working"
+        let label: String
+        if isWorking {
+            label = MobileL10n.string("Working")
+        } else if isAvailable {
+            label = MobileL10n.string("Ready")
+        } else {
+            label = MobileL10n.string("Stopped")
+        }
+        return Self(isWorking: isWorking, isDimmed: !isAvailable, availabilityLabel: label)
+    }
+}
+
+/// One standalone terminal in the dashboard list: the same row as a chat, with the terminal mark
+/// where a chat shows its runtime's, and its project's name in the caption when the list spans
+/// projects. It has no login, no surface choice and no last-active time of its own, so its caption
+/// and trailing column carry only what it has.
+private struct TerminalRow: View {
+    let terminal: RemoteProjectTerminalSummaryDTO
+    let showsProjectName: Bool
+    @Environment(\.remoteTheme) private var theme
+
+    private var presentation: MobileTerminalRowPresentation {
+        .resolve(state: terminal.state, isAvailable: terminal.isAvailable)
+    }
+
+    var body: some View {
+        DashboardRow(title: terminal.title) {
+            MobileTerminalMark(isDimmed: presentation.isDimmed)
+        } caption: {
+            DashboardAvailabilityGlyph(
+                isAvailable: !presentation.isDimmed,
+                label: presentation.availabilityLabel
+            )
+            if showsProjectName {
+                Text(terminal.projectName)
+                    .foregroundStyle(theme.secondaryLabel)
+            }
+        } trailing: {
+            if presentation.isWorking {
+                DashboardWorkingIndicator()
+            }
+        }
+    }
+}
+
+/// The terminal row as a tap. A terminal transition cannot manufacture intermediate widths, so the
+/// push is immediate — the same answer `MobileSessionNavigationTransition` gives a chat on its
+/// terminal surface.
+private struct TerminalListItem: View {
+    let terminal: RemoteProjectTerminalSummaryDTO
+    let showsProjectName: Bool
+    @EnvironmentObject private var model: RemoteAppModel
+
+    var body: some View {
+        Button(action: openTerminal) {
+            TerminalRow(terminal: terminal, showsProjectName: showsProjectName)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isLink)
+        .accessibilityRemoveTraits(.isButton)
+        .accessibilityHint(MobileL10n.string("Opens this terminal on your Mac"))
+    }
+
+    private func openTerminal() {
+        guard model.navigationPath.last != .terminal(terminal.id) else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            model.navigationPath.append(.terminal(terminal.id))
+        }
+    }
+}
+
+// MARK: - Session Row
+
 /// One chat in the dashboard list.
 ///
 /// **The tile identifies the runtime, not the surface.** Every row used to draw `terminal`, because
@@ -1661,16 +2058,8 @@ enum MobileSessionAgeFormat {
 /// agent's own TUI mirrored from the Mac — so a list of Claude and Codex chats looked like a list of
 /// shells, and said nothing about which provider or which login each one was on. It now carries the
 /// same two facts the Mac sidebar carries, the same way: the provider's mark, with an alternate
-/// account's chip on its corner. `MobileAgentIdentity` holds that vocabulary.
-///
-/// **It is two lines high, and stays two lines high.** A three-line title plus a 46-point tile put
-/// rows between 74 and 110 points, which is a card, not a list row: five chats filled the screen.
-/// The title takes one line and the tile no longer sets the height, so the list is scannable and
-/// every row is the same height. The full title is one tap away in the session's own screen.
-///
-/// **It draws no plate.** The row sits on the plate its group paints (`SessionRowGroup`), so its
-/// background is clear and its whole rectangle is still the tap: without a fill of its own, the
-/// air between the caption and the age would otherwise fall through to nothing.
+/// account's chip on its corner. `MobileAgentIdentity` holds that vocabulary. The row's shape —
+/// two lines, no plate, no chevron — is `DashboardRow`'s, shared with the terminal row.
 ///
 /// **State is shown, not spelled.** The caption used to read "Working", "Connected",
 /// "Disconnected" beside a laptop that was already green or slashed, so every row said its state
@@ -1683,17 +2072,10 @@ enum MobileSessionAgeFormat {
 /// laptop carries the whole state for VoiceOver, so nothing a sighted reader sees is unsaid.
 private struct SessionRow: View {
     let session: RemoteSessionSummaryDTO
-    var showsChevron = true
     @Environment(\.remoteTheme) private var theme
 
-    /// Where the row's text begins: the leading inset, the mark and the gap after it. The hairline
-    /// between two rows starts here, so it underlines the words rather than the tile.
-    static let textLeadingEdge = MobileDesign.Spacing.medium
-        + MobileDesign.Size.rowMark
-        + MobileDesign.Spacing.medium
-
     var body: some View {
-        HStack(spacing: MobileDesign.Spacing.medium) {
+        DashboardRow(title: session.title) {
             MobileSessionMark(
                 agentKind: session.agentKind,
                 account: session.account,
@@ -1716,75 +2098,37 @@ private struct SessionRow: View {
                         )
                 }
             }
-
-            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
-                MobileMorphingTitle(
-                    title: session.title,
-                    textStyle: .subheadline,
-                    weight: .medium,
-                    textColor: theme.uiLabel,
-                    groundColor: theme.uiPanel,
-                    alignment: .left
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: MobileDesign.Spacing.tight) {
-                    // Green means connected and the slash means not; the glyph is the state now,
-                    // so it speaks the whole state for VoiceOver rather than hiding.
-                    Image(systemName: session.isAvailable
-                        ? "laptopcomputer"
-                        : "laptopcomputer.slash")
-                        .foregroundStyle(stateStyle)
-                        .accessibilityLabel(availabilityLabel)
-                    // The surface is a glyph and the runtime is the mark, because spelling both in
-                    // words cost about ninety points and truncated the one fact the row gained: the
-                    // line read "Connected · Claude Code UI · Ver…" while the tile was already
-                    // showing Claude's mark. `terminal` here means a terminal — the runtime's own
-                    // TUI, mirrored from the Mac — and the mark beside it says whose.
-                    Image(systemName: session.surface == .conversation
-                        ? "text.bubble"
-                        : "terminal")
-                        .foregroundStyle(theme.tertiaryLabel)
-                        .accessibilityLabel(surfaceLabel)
-                    if let metaText {
-                        metaText
-                    }
-                }
-                .font(.caption2)
-                .lineLimit(1)
+        } caption: {
+            DashboardAvailabilityGlyph(
+                isAvailable: session.isAvailable && !session.isArchived,
+                label: availabilityLabel
+            )
+            // The surface is a glyph and the runtime is the mark, because spelling both in
+            // words cost about ninety points and truncated the one fact the row gained: the
+            // line read "Connected · Claude Code UI · Ver…" while the tile was already
+            // showing Claude's mark. `terminal` here means a terminal — the runtime's own
+            // TUI, mirrored from the Mac — and the mark beside it says whose.
+            Image(systemName: session.surface == .conversation
+                ? "text.bubble"
+                : MobileTerminalMark.symbolName)
+                .foregroundStyle(theme.tertiaryLabel)
+                .accessibilityLabel(surfaceLabel)
+            if let metaText {
+                metaText
             }
-
-            Spacer(minLength: MobileDesign.Spacing.tight)
-
-            HStack(spacing: MobileDesign.Spacing.tight) {
-                if session.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.caption2)
-                        .foregroundStyle(theme.accent)
-                        .accessibilityLabel("Pinned")
-                }
-                if isWorking {
-                    // The laptop already says "Working" to VoiceOver; the orb is the picture of it.
-                    MobileWorkingOrb(diameter: MobileDesign.Size.rowWorkingOrb, theme: theme)
-                        .accessibilityHidden(true)
-                } else if let lastActiveAt = session.lastActiveAt {
-                    Text(MobileSessionAgeFormat.string(
-                        since: Date(timeIntervalSince1970: lastActiveAt)
-                    ))
-                        .font(.caption2)
-                        .foregroundStyle(theme.tertiaryLabel)
-                        .fixedSize()
-                }
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(theme.tertiaryLabel)
-                }
+        } trailing: {
+            if session.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.caption2)
+                    .foregroundStyle(theme.accent)
+                    .accessibilityLabel("Pinned")
+            }
+            if isWorking {
+                DashboardWorkingIndicator()
+            } else if let lastActiveAt = session.lastActiveAt {
+                DashboardAge(date: Date(timeIntervalSince1970: lastActiveAt))
             }
         }
-        .padding(.horizontal, MobileDesign.Spacing.medium)
-        .padding(.vertical, MobileDesign.Spacing.small)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
     }
 
     /// Mid-turn on a live surface. The Mac reports activity only for a session it is running, but
@@ -1809,10 +2153,6 @@ private struct SessionRow: View {
             // localization-ignore: punctuation between already-localized metadata fragments
             line + Text(verbatim: " · ").foregroundStyle(theme.secondaryLabel) + part
         }
-    }
-
-    private var stateStyle: Color {
-        session.isAvailable && !session.isArchived ? theme.positive : theme.secondaryLabel
     }
 
     private var stateLabel: String {

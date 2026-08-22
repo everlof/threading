@@ -449,6 +449,9 @@ final class BrowserBaselineOverlayHandle: ThemedControl {
     var onScrub: ((CGFloat) -> Void)?
     var onDismiss: (() -> Void)?
 
+    /// The handle is the scrub, all of it. See `PointerClaiming`.
+    override var restingPointer: NSCursor? { .resizeLeftRight }
+
     /// The nudge one arrow key makes, as a fraction of the overlay's width. `ImageCompareView`'s
     /// step, so the two scrubbing surfaces in the app move by the same amount.
     private var step: CGFloat { ImageCompareDefaults.keyboardStep }
@@ -481,11 +484,6 @@ final class BrowserBaselineOverlayHandle: ThemedControl {
     override func performPrimaryAction() -> Bool {
         onScrub?(0.5)
         return true
-    }
-
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        addCursorRect(bounds, cursor: .resizeLeftRight)
     }
 
     override func mouseDown(with event: NSEvent) {

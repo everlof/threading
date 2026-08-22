@@ -1532,4 +1532,52 @@ final class RemoteProtocolTests: XCTestCase {
         )
         XCTAssertTrue(RemoteWebSocketFeature.allCases.contains(.focusedInputControl))
     }
+
+    func testTerminalAttachmentInsertionCarriesStagedUploadIDs() throws {
+        let insertion = RemoteClientMessage(
+            type: "terminalAttachmentInsert",
+            text: "",
+            requestID: "insert-files-1",
+            attachmentUploadIDs: ["upload-image", "upload-document"]
+        )
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteClientMessage.self,
+                from: JSONEncoder().encode(insertion)
+            ),
+            insertion
+        )
+        XCTAssertTrue(
+            RemoteWebSocketFeature.allCases.contains(.terminalAttachmentInsertion)
+        )
+    }
+
+    func testTerminalHydrationBoundaryKeepsItsViewportRequestIdentity() throws {
+        let ready = RemoteTerminalReadyDTO(requestID: "viewport-generation-1")
+        let decoded = try JSONDecoder().decode(
+            RemoteTerminalReadyDTO.self,
+            from: JSONEncoder().encode(ready)
+        )
+
+        XCTAssertEqual(decoded, ready)
+        XCTAssertEqual(decoded.type, "terminalReady")
+        XCTAssertTrue(
+            RemoteWebSocketFeature.allCases.contains(.terminalHydrationBoundary)
+        )
+    }
+
+    func testSessionConnectionParkingIsNegotiatedAndAcknowledged() throws {
+        let parked = RemoteSessionParkedDTO()
+        let decoded = try JSONDecoder().decode(
+            RemoteSessionParkedDTO.self,
+            from: JSONEncoder().encode(parked)
+        )
+
+        XCTAssertEqual(decoded, parked)
+        XCTAssertEqual(decoded.type, "sessionParked")
+        XCTAssertTrue(
+            RemoteWebSocketFeature.allCases.contains(.sessionConnectionParking)
+        )
+    }
 }

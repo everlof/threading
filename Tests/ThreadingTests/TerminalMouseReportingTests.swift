@@ -10,6 +10,8 @@ import SwiftTerm
 /// is the whole contract here, which is why these assert on exact byte strings.
 final class TerminalMouseReportingTests: XCTestCase {
 
+    private var hostWindows: [NSWindow] = []
+
     // MARK: - Harness
 
     /// Captures what the terminal sends upstream.
@@ -111,14 +113,27 @@ final class TerminalMouseReportingTests: XCTestCase {
     @MainActor
     private func makeWheelView(tracking: Bool = true) -> (TerminalView, ViewRecorder) {
         let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 480, height: 240))
+        let window = NSWindow(
+            contentRect: view.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: true
+        )
+        window.contentView = view
+        hostWindows.append(window)
         let recorder = ViewRecorder()
         view.terminalDelegate = recorder
         if tracking {
-            view.getTerminal().feed(text: "\u{1b}[?1000h\u{1b}[?1006h")
-            XCTAssertEqual(view.getTerminal().mouseMode, .vt200)
+            view.feed(text: "\u{1b}[?1000h\u{1b}[?1006h")
+            XCTAssertEqual(view.terminalStateSnapshot().mouseMode, .vt200)
         }
         recorder.written.removeAll()
         return (view, recorder)
+    }
+
+    @MainActor
+    private func settleTerminalInput() {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
     }
 
     /// A wheel event as AppKit delivers one: classic notches, or a trackpad's precise points.
@@ -151,6 +166,7 @@ final class TerminalMouseReportingTests: XCTestCase {
         let (view, recorder) = makeWheelView()
 
         view.scrollWheel(with: try scroll(notches: 10))
+        settleTerminalInput()
 
         XCTAssertEqual(recorder.wheelReports, 1)
         XCTAssertTrue(String(decoding: recorder.written, as: UTF8.self).hasPrefix("\u{1b}[<64;"),
@@ -168,6 +184,7 @@ final class TerminalMouseReportingTests: XCTestCase {
         for _ in 0..<40 {
             view.scrollWheel(with: try scroll(points: -180))
         }
+        settleTerminalInput()
 
         // Six is the burst; the refill over a loop this short is a fraction of one report.
         XCTAssertLessThanOrEqual(recorder.wheelReports, 8,
@@ -180,10 +197,12 @@ final class TerminalMouseReportingTests: XCTestCase {
     func testTheBudgetRefillsSoTheNextGestureStillScrolls() throws {
         let (view, recorder) = makeWheelView()
         for _ in 0..<40 { view.scrollWheel(with: try scroll(points: -180)) }
+        settleTerminalInput()
         let spent = recorder.wheelReports
 
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         view.scrollWheel(with: try scroll(points: -180))
+        settleTerminalInput()
 
         XCTAssertGreaterThan(recorder.wheelReports, spent, "200ms buys reports back")
     }

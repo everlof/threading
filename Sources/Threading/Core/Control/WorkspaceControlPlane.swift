@@ -52,6 +52,16 @@ final class WorkspaceControlPlane {
         /// refusal matrix be a table test rather than a fixture with a preferences suite in it.
         var heldByOwnLimit: (SessionID) -> String? = { _ in nil }
 
+        /// Whether the **session's own curfew** has passed, and the sentence that says so. Nil is
+        /// the ordinary answer.
+        ///
+        /// Separate from `heldByOwnLimit` rather than folded into one "held" closure, because the
+        /// two are answered by different records and mean different things to the caller: a limit
+        /// is about an account, a curfew is about one conversation's clock. A plane that could
+        /// only say "held" would make the sibling session on the same account look equally
+        /// unreachable when it is not.
+        var heldByCurfew: (SessionID) -> String? = { _ in nil }
+
         /// Stored grants only. The plane adds the implicit regular-session grants itself so an
         /// absent or unreadable store reproduces slice one's behavior exactly and never grants
         /// more authority by failing open.
@@ -121,6 +131,7 @@ final class WorkspaceControlPlane {
                 guard hold.isHolding else { return nil }
                 return CustomLimitReceipt.holdReason(hold)
             },
+            heldByCurfew: { CurfewHoldPolicy.holdReason(sessionID: $0) },
             grants: {
                 // The Tools switch is a true global master: grants remain durable and visible,
                 // but the plane ignores them on every admission while Supervision is off.
@@ -297,6 +308,15 @@ final class WorkspaceControlPlane {
         // cannot learn whether a session outside its scope has a limit on it.
         if let held = dependencies.heldByOwnLimit(targetID) {
             return completion(.refused(.targetHeldByOwnLimit(reason: held)))
+        }
+
+        // The target's own curfew, asked immediately after and in the same place: a message from
+        // one agent to another is Threading-initiated spend on a conversation the user has
+        // finished with for tonight. The account's answer comes first because it is the wider
+        // fact — a caller told about the curfew while the account is also spent would try a
+        // sibling session and be refused again.
+        if let held = dependencies.heldByCurfew(targetID) {
+            return completion(.refused(.targetHeldByCurfew(reason: held)))
         }
 
         // The budget bounds what is delivered, header included — a cap applied before the
@@ -544,6 +564,11 @@ final class WorkspaceControlPlane {
         if let held = dependencies.heldByOwnLimit(targetID) {
             return .targetHeldByOwnLimit(reason: held)
         }
+        // Waking a dormant session past its curfew is the plainest case of the app spending
+        // something the user finished with: nothing about the resume was their idea.
+        if let held = dependencies.heldByCurfew(targetID) {
+            return .targetHeldByCurfew(reason: held)
+        }
         return ceilingRefusal(for: actor, operation: .resumeSession, target: target)
     }
 
@@ -573,6 +598,12 @@ final class WorkspaceControlPlane {
         }
         if let held = dependencies.heldByOwnLimit(managerID) {
             return .targetHeldByOwnLimit(reason: held)
+        }
+        // The **manager's** curfew, not the child's — the child does not exist yet. A session
+        // whose own night is over may not answer it by starting a second session to keep
+        // working, which is exactly the loop a curfew is there to end.
+        if let held = dependencies.heldByCurfew(managerID) {
+            return .targetHeldByCurfew(reason: held)
         }
         return grant.ceiling.flatMap { dependencies.ceilingRefusal($0, manager) }
             .map(ControlRefusal.ceilingReached(reason:))

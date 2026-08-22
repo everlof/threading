@@ -70,6 +70,11 @@ struct RootView: View {
                     CollaborationSettingsView()
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "advanced-connection-settings" {
+                NavigationStack {
+                    AdvancedConnectionSettingsView(pool: .evidenceFixture())
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "notification-settings" {
                 NotificationSettingsView()
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
@@ -344,6 +349,8 @@ struct RootView: View {
         "terminal-collaboration",
         "terminal-ansi",
         "terminal-scrollback",
+        "terminal-attachments",
+        "terminal-selection",
         "terminal-codex-tui",
         "terminal-claude-tui",
     ]

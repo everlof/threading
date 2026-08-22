@@ -802,17 +802,17 @@ enum MCPToolCatalog {
 
     if toolNames.contains(MCPBuiltInTool.browserNavigate.rawValue) {
       sentences.append(
-        "Threading's Browser: discover browser_navigate and browser_snapshot."
+        "Threading's Browser: browser_navigate, browser_snapshot."
       )
     }
     if toolNames.contains(MCPBuiltInTool.watchSession.rawValue) {
       sentences.append(
-        "For another chat/session, discover list_sessions, send_to_session, and watch_session."
+        "For another chat/session: list_sessions, send_to_session, watch_session."
       )
     }
     if toolNames.contains(MCPBuiltInTool.respondToPermission.rawValue) {
       sentences.append(
-        "For child permission, discover respond_to_permission; inspect first."
+        "Child permission: respond_to_permission; inspect first."
       )
     }
     if toolNames.contains(MCPBuiltInTool.displayImage.rawValue) {
@@ -822,12 +822,17 @@ enum MCPToolCatalog {
     }
     if toolNames.contains(MCPBuiltInTool.archiveSession.rawValue) {
       sentences.append(
-        "For close/archive/finish, call archive_session after work; it runs after your reply."
+        "For close/archive/finish: call archive_session after your reply."
+      )
+    }
+    if toolNames.contains(MCPBuiltInTool.setSessionName.rawValue) {
+      sentences.append(
+        "For rename/re-title, discover and call set_session_name."
       )
     }
     if toolNames.contains(MCPBuiltInTool.listReclaimableStorage.rawValue) {
       sentences.append(
-        "On ENOSPC, call list_reclaimable_storage; never delete build output directly."
+        "On ENOSPC, call list_reclaimable_storage; never delete build output."
       )
     }
 

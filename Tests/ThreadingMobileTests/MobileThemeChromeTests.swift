@@ -107,7 +107,7 @@ final class MobileMorphingTitleTests: XCTestCase {
         XCTAssertFalse(title.isAnimatingTitleForTesting)
     }
 
-    func testAConnectionStatusScrollsAsOneLineUnderTheTravelingFade() {
+    func testAConnectionStatusScrollsAsOneLineUnderTheSharedPulse() {
         let (window, title) = mountedTitle()
         defer { window.isHidden = true }
 
@@ -128,6 +128,95 @@ final class MobileMorphingTitleTests: XCTestCase {
         XCTAssertEqual(title.stringValue, "David's MacBook Pro")
         XCTAssertTrue(title.isAnimatingLineScrollForTesting)
         XCTAssertTrue(title.isAnimatingTravelingFadeForTesting)
+    }
+
+    /// The reported transition is interrupted almost immediately: dashboard status gives way
+    /// to "Opening chat…", then the live socket supplies the Mac name. The former five-pulse
+    /// traveling wave left the final `Book Pro` bright while the first half flickered. One pulse
+    /// beginning everywhere at once keeps even that interrupted handoff one visual line.
+    func testAnInterruptedConnectionStatusUsesOneSynchronizedPulse() throws {
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+
+        configure(
+            title,
+            text: "Connected · LAN",
+            reducesMotion: false,
+            role: .connectionStatus
+        )
+        window.layoutIfNeeded()
+        configure(
+            title,
+            text: "Opening chat…",
+            reducesMotion: false,
+            role: .connectionStatus
+        )
+        configure(
+            title,
+            text: "David’s MacBook Pro",
+            reducesMotion: false,
+            role: .connectionStatus
+        )
+
+        let fades = animations(
+            in: title.layer,
+            key: "morph.fade.traveling",
+            as: CAKeyframeAnimation.self
+        )
+        XCTAssertFalse(fades.isEmpty)
+        let firstStart = try XCTUnwrap(fades.map(\.beginTime).min())
+        let lastStart = try XCTUnwrap(fades.map(\.beginTime).max())
+        XCTAssertEqual(lastStart - firstStart, 0, accuracy: 0.001)
+
+        let values = try XCTUnwrap(fades.first?.values as? [NSNumber])
+        XCTAssertEqual(values.count, 3, "a breath has one trough, not a flicker train")
+        XCTAssertEqual(values[0].floatValue, 1, accuracy: 0.001)
+        XCTAssertEqual(values[1].floatValue, 0.66, accuracy: 0.001)
+        XCTAssertEqual(values[2].floatValue, 1, accuracy: 0.001)
+        XCTAssertEqual(
+            try XCTUnwrap(fades.first).duration,
+            MobileDesign.Motion.connectionStatusMorphDuration,
+            accuracy: 0.001
+        )
+    }
+
+    func testAConnectionStatusScrollClearsTheCompleteCaptionLine() throws {
+        let (window, title) = mountedTitle()
+        defer { window.isHidden = true }
+
+        configure(
+            title,
+            text: "Opening chat…",
+            reducesMotion: false,
+            role: .connectionStatus,
+            textStyle: .caption2,
+            weight: .regular
+        )
+        window.layoutIfNeeded()
+        configure(
+            title,
+            text: "David’s MacBook Pro",
+            reducesMotion: false,
+            role: .connectionStatus,
+            textStyle: .caption2,
+            weight: .regular
+        )
+
+        let incomingMoves = animations(
+            in: title.layer,
+            key: "morph.line.in.translation",
+            as: CABasicAnimation.self
+        )
+        let move = try XCTUnwrap(incomingMoves.first)
+        let offset = try XCTUnwrap(move.fromValue as? NSValue).cgSizeValue.height
+        let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .caption2)
+            .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.regular]])
+        let font = UIFont(descriptor: descriptor, size: 0)
+        XCTAssertGreaterThanOrEqual(
+            abs(offset),
+            font.lineHeight,
+            "the incoming line started inside the old line instead of beyond it"
+        )
     }
 
     func testReduceMotionLandsAConnectionStatusWithoutEitherAnimation() {
@@ -158,14 +247,14 @@ final class MobileMorphingTitleTests: XCTestCase {
 
         configure(
             title,
-            text: "Trying This network",
+            text: "Trying LAN",
             reducesMotion: true,
             role: .connectionProgress
         )
         window.layoutIfNeeded()
         title.playFade()
 
-        XCTAssertEqual(title.stringValue, "Trying This network")
+        XCTAssertEqual(title.stringValue, "Trying LAN")
         XCTAssertTrue(title.isAnimatingTravelingFadeForTesting)
         XCTAssertFalse(title.isAnimatingLineScrollForTesting)
 
@@ -236,18 +325,31 @@ final class MobileMorphingTitleTests: XCTestCase {
         _ title: MobileMorphingTitleLabel,
         text: String,
         reducesMotion: Bool,
-        role: MobileMorphingTextRole = .chatName
+        role: MobileMorphingTextRole = .chatName,
+        textStyle: UIFont.TextStyle = .headline,
+        weight: UIFont.Weight = .semibold
     ) {
         title.configure(
             title: text,
-            textStyle: .headline,
-            weight: .semibold,
+            textStyle: textStyle,
+            weight: weight,
             textColor: .label,
             groundColor: .systemBackground,
             alignment: .center,
             reducesMotion: reducesMotion,
             role: role
         )
+    }
+
+    private func animations<Animation: CAAnimation>(
+        in layer: CALayer,
+        key: String,
+        as type: Animation.Type
+    ) -> [Animation] {
+        let own = (layer.animation(forKey: key) as? Animation).map { [$0] } ?? []
+        return own + (layer.sublayers ?? []).flatMap {
+            animations(in: $0, key: key, as: type)
+        }
     }
 
     private func shapeLayers(in layer: CALayer) -> [CAShapeLayer] {

@@ -96,6 +96,55 @@ enum MobileAgentMarkAssets {
     static let codex = "AgentIconCodex"
 }
 
+// MARK: - Mobile Mark Tile
+
+/// The tile every dashboard row leads with: a rounded square in the control's resting colour,
+/// holding the one glyph that says what the row is.
+///
+/// A chat's tile carries its runtime's mark and a terminal's carries the terminal symbol, and
+/// they are the same tile — same size, same corner, same ground, same dimming when the thing is
+/// not running on the Mac. The terminal row used to draw a circle of its own with an accent-tinted
+/// glyph, which put two tile shapes and two ink weights down one list; the Mac sidebar gives both
+/// kinds of row one icon slot, and so does this.
+struct MobileMarkTile<Glyph: View>: View {
+    var isDimmed = false
+    @ViewBuilder let glyph: () -> Glyph
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: MobileDesign.Size.rowMarkRadius, style: .continuous)
+                .fill(theme.controlResting)
+            glyph()
+        }
+        .frame(width: MobileDesign.Size.rowMark, height: MobileDesign.Size.rowMark)
+        .opacity(isDimmed ? MobileDesign.Opacity.dormantMark : 1)
+    }
+}
+
+// MARK: - Mobile Terminal Mark
+
+/// The tile of a standalone terminal: the `terminal` symbol, drawn the way a symbol mark is drawn
+/// for a runtime we have no brand image for, because a plain shell is exactly what that symbol is
+/// reserved for (see `MobileAgentIdentity`). The Mac's terminal row leads with the same symbol.
+struct MobileTerminalMark: View {
+    var isDimmed = false
+    @Environment(\.remoteTheme) private var theme
+
+    /// Read by value models as well as views (the by-type heading names its kind with it).
+    nonisolated static let symbolName = "terminal"
+
+    var body: some View {
+        MobileMarkTile(isDimmed: isDimmed) {
+            Image(systemName: Self.symbolName)
+                .font(.system(size: MobileDesign.Size.rowMarkGlyph, weight: .medium))
+                .foregroundStyle(theme.secondaryLabel)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(MobileL10n.string("Terminal"))
+    }
+}
+
 // MARK: - Mobile Session Mark
 
 /// The tile that identifies a chat: its runtime's mark, with an alternate account's chip on the
@@ -115,13 +164,9 @@ struct MobileSessionMark: View {
     private var identity: MobileAgentIdentity { .resolve(agentKind) }
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: MobileDesign.Size.rowMarkRadius, style: .continuous)
-                .fill(theme.controlResting)
+        MobileMarkTile(isDimmed: isDimmed) {
             mark
         }
-        .frame(width: MobileDesign.Size.rowMark, height: MobileDesign.Size.rowMark)
-        .opacity(isDimmed ? MobileDesign.Opacity.dormantMark : 1)
         .overlay(alignment: .bottomTrailing) {
             if let account {
                 MobileAccountChip(account: account)

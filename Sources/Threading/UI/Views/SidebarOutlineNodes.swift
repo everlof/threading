@@ -77,7 +77,7 @@ final class ProjectNode: NSObject {
     /// (selection, row refresh) go through this so they need not care about grouping.
     var sessionNodes: [SessionNode] = []
 
-    /// Standalone terminals currently positioned in this project by their cwd.
+    /// Standalone terminals owned by this project.
     var terminalNodes: [TerminalNode] = []
 
     /// What the outline actually shows under the project: a `BranchGroupNode` where a
@@ -163,18 +163,13 @@ extension SessionNode: SidebarOutlineNode {
 final class TerminalNode: NSObject {
     let terminalID: TerminalID
 
-    /// The folder of the project this row is *shown* under, carried on the node because the
-    /// row's name is stated relative to it. Placement is resolved once here for the whole tree
-    /// and reads git metadata off disk for every project; a row that asked again would repeat
-    /// that per row, per reload.
-    ///
-    /// A `var` because the row it belongs to outlives the rebuild that renamed it: a terminal
-    /// whose cwd moved it under another checkout keeps its row and takes the new folder.
-    private(set) var displayProjectFolderPath: String
+    /// The owning project's folder, carried on the node because the row's name is stated
+    /// relative to it. A `var` because the row may outlive a rebuild that moved the project.
+    private(set) var projectFolderPath: String
 
-    init(terminalID: TerminalID, displayProjectFolderPath: String) {
+    init(terminalID: TerminalID, projectFolderPath: String) {
         self.terminalID = terminalID
-        self.displayProjectFolderPath = displayProjectFolderPath
+        self.projectFolderPath = projectFolderPath
     }
 }
 
@@ -191,7 +186,7 @@ extension TerminalNode: SidebarOutlineNode {
         substituting: SidebarNodeSubstitution
     ) {
         guard let rebuilt = rebuilt as? TerminalNode else { return }
-        displayProjectFolderPath = rebuilt.displayProjectFolderPath
+        projectFolderPath = rebuilt.projectFolderPath
     }
 }
 
@@ -257,10 +252,16 @@ final class BranchGroupNode: NSObject {
     var terminalNodes: [TerminalNode] = [] {
         didSet { outlineChildren = nil }
     }
+    var terminalsFirst = false {
+        didSet { outlineChildren = nil }
+    }
     private var outlineChildren: NSArray?
 
     var childNodes: [NSObject] {
-        sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
+        if terminalsFirst {
+            return terminalNodes.map { $0 as NSObject } + sessionNodes.map { $0 as NSObject }
+        }
+        return sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
     }
 
     init(branch: String, projectID: ProjectID) {
@@ -279,9 +280,7 @@ extension BranchGroupNode: SidebarOutlineNode {
 
     private var materializedOutlineChildren: NSArray {
         if let outlineChildren { return outlineChildren }
-        let projected = NSArray(
-            array: sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
-        )
+        let projected = NSArray(array: childNodes)
         outlineChildren = projected
         return projected
     }
@@ -296,6 +295,7 @@ extension BranchGroupNode: SidebarOutlineNode {
         branch = rebuilt.branch
         sessionNodes = rebuilt.sessionNodes.map(substituting.callAsFunction)
         terminalNodes = rebuilt.terminalNodes.map(substituting.callAsFunction)
+        terminalsFirst = rebuilt.terminalsFirst
     }
 }
 
@@ -346,15 +346,13 @@ enum SidebarTreeBuilder {
         var roots: [NSObject] = []
         var groupsByIdentity: [String: RepoGroupNode] = [:]
 
-        let terminalsByDisplayProject = terminalsByDisplayProject(from: arranged)
-
         for (project, identity) in zip(arranged, identities) {
             // Standalone terminals are not sessions and cannot be snoozed, so they stay in the
             // ordinary attention view and never leak into the dedicated Snoozed scope.
             let node = makeProjectNode(
                 from: project,
                 terminals: visibility == .attention
-                    ? terminalsByDisplayProject[project.id] ?? []
+                    ? project.terminals
                     : [],
                 order: order,
                 isReversed: isReversed,
@@ -405,31 +403,13 @@ enum SidebarTreeBuilder {
         visibility: SidebarSessionVisibility = .attention
     ) -> ProjectNode? {
         guard let project = projects.first(where: { $0.id == projectID }) else { return nil }
-        let terminals = terminalsByDisplayProject(from: projects)[projectID] ?? []
         return makeProjectNode(
             from: project,
-            terminals: visibility == .attention ? terminals : [],
+            terminals: visibility == .attention ? project.terminals : [],
             order: AppSettings.sidebarSessionOrder,
             isReversed: AppSettings.sidebarSessionOrderIsReversed,
             visibility: visibility
         )
-    }
-
-    private static func terminalsByDisplayProject(
-        from projects: [Project]
-    ) -> [ProjectID: [ProjectTerminal]] {
-        var result: [ProjectID: [ProjectTerminal]] = [:]
-        for homeProject in projects {
-            for terminal in homeProject.terminals {
-                let displayProjectID = ProjectTerminalPlacement.projectID(
-                    for: terminal,
-                    homeProject: homeProject,
-                    projects: projects
-                )
-                result[displayProjectID, default: []].append(terminal)
-            }
-        }
-        return result
     }
 
     private static func makeProjectNode(
@@ -451,7 +431,7 @@ enum SidebarTreeBuilder {
         )
         node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
         node.terminalNodes = terminals.map {
-            TerminalNode(terminalID: $0.id, displayProjectFolderPath: project.folderPath)
+            TerminalNode(terminalID: $0.id, projectFolderPath: project.folderPath)
         }
 
         // Side chats hang off the session they were forked from, so only what remains
@@ -462,7 +442,9 @@ enum SidebarTreeBuilder {
             sessions: top.sessions,
             sessionNodes: top.nodes,
             terminals: terminals,
-            terminalNodes: node.terminalNodes
+            terminalNodes: node.terminalNodes,
+            order: order,
+            isReversed: isReversed
         )
         return node
     }
@@ -487,12 +469,13 @@ enum SidebarTreeBuilder {
             return visibility == .snoozed ? isSnoozed : !isSnoozed
         }
 
-        if order == .manual {
+        if order == .manual || order == .type {
+            let reversesSessions = order == .manual && isReversed
             let pinnedCount = active.reduce(into: 0) { count, session in
                 if session.isPinned { count += 1 }
             }
             guard pinnedCount > 0 else {
-                return isReversed ? Array(active.reversed()) : active
+                return reversesSessions ? Array(active.reversed()) : active
             }
 
             var pinned: [AgentSession] = []
@@ -506,7 +489,7 @@ enum SidebarTreeBuilder {
                     unpinned.append(session)
                 }
             }
-            if isReversed {
+            if reversesSessions {
                 pinned.reverse()
                 unpinned.reverse()
             }
@@ -542,6 +525,10 @@ enum SidebarTreeBuilder {
                     let isEarlier = comparison == .orderedAscending
                     return isReversed ? !isEarlier : isEarlier
                 }
+            case .type:
+                // Handled by the linear path above. Type orders terminal and session groups;
+                // it does not reverse the rows within either group.
+                break
             }
 
             // This tie-break stays forward under a reversed derived order, because it stops
@@ -578,7 +565,7 @@ enum SidebarTreeBuilder {
         return []
     }
 
-    /// The rows that must be open for a standalone terminal's cwd-positioned row to exist.
+    /// The rows that must be open for a standalone terminal's project-owned row to exist.
     static func ancestors(of terminalID: TerminalID, in roots: [NSObject]) -> [NSObject] {
         func path(from node: NSObject) -> [NSObject]? {
             if let terminal = node as? TerminalNode, terminal.terminalID == terminalID { return [] }
@@ -678,9 +665,15 @@ enum SidebarTreeBuilder {
         sessions: [AgentSession],
         sessionNodes: [SessionNode],
         terminals: [ProjectTerminal],
-        terminalNodes: [TerminalNode]
+        terminalNodes: [TerminalNode],
+        order: SidebarSessionOrder,
+        isReversed: Bool
     ) -> [NSObject] {
+        let terminalsFirst = order == .type && isReversed
         guard AppSettings.groupsSessionsByBranch else {
+            if terminalsFirst {
+                return terminalNodes.map { $0 as NSObject } + sessionNodes.map { $0 as NSObject }
+            }
             return sessionNodes.map { $0 as NSObject } + terminalNodes.map { $0 as NSObject }
         }
 
@@ -702,40 +695,50 @@ enum SidebarTreeBuilder {
         var children: [NSObject] = []
         var groupsByBranch: [String: BranchGroupNode] = [:]
 
-        for (session, sessionNode) in zip(sessions, sessionNodes) {
+        func append(_ session: AgentSession, node: SessionNode) {
             guard let branch = session.branch,
                   groupsLoneBranches || itemCounts[branch, default: 0] > 1 else {
-                children.append(sessionNode)
-                continue
+                children.append(node)
+                return
             }
 
             if let group = groupsByBranch[branch] {
-                group.sessionNodes.append(sessionNode)
-                continue
+                group.sessionNodes.append(node)
+                return
             }
 
             let group = BranchGroupNode(branch: branch, projectID: projectID)
-            group.sessionNodes.append(sessionNode)
+            group.terminalsFirst = terminalsFirst
+            group.sessionNodes.append(node)
             groupsByBranch[branch] = group
             children.append(group)
         }
 
-        for (terminal, terminalNode) in zip(terminals, terminalNodes) {
+        func append(_ terminal: ProjectTerminal, node: TerminalNode) {
             guard let branch = terminal.branch,
                   groupsLoneBranches || itemCounts[branch, default: 0] > 1 else {
-                children.append(terminalNode)
-                continue
+                children.append(node)
+                return
             }
 
             if let group = groupsByBranch[branch] {
-                group.terminalNodes.append(terminalNode)
-                continue
+                group.terminalNodes.append(node)
+                return
             }
 
             let group = BranchGroupNode(branch: branch, projectID: projectID)
-            group.terminalNodes.append(terminalNode)
+            group.terminalsFirst = terminalsFirst
+            group.terminalNodes.append(node)
             groupsByBranch[branch] = group
             children.append(group)
+        }
+
+        if terminalsFirst {
+            for (terminal, node) in zip(terminals, terminalNodes) { append(terminal, node: node) }
+            for (session, node) in zip(sessions, sessionNodes) { append(session, node: node) }
+        } else {
+            for (session, node) in zip(sessions, sessionNodes) { append(session, node: node) }
+            for (terminal, node) in zip(terminals, terminalNodes) { append(terminal, node: node) }
         }
 
         return children

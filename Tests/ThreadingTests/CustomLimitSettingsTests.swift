@@ -217,4 +217,29 @@ final class CustomLimitSettingsTests: XCTestCase {
             )
         )
     }
+
+    /// A custom rolling window is bounded on disk as well as in the editor. The editor keeps the
+    /// ordinary path cheap; validating the stored record keeps a hand-edited preference from
+    /// bypassing the same history-work boundary after relaunch.
+    func testASyntheticWindowCannotOutgrowTheBoundedHistoryShape() {
+        let valid = CustomLimit.syntheticWindow(
+            windowID: UsageDefaults.weeklyWindowID,
+            budget: 0.2,
+            span: CustomLimitDefaults.maximumSyntheticWindowSpan
+        )
+        let tooLong = CustomLimit.syntheticWindow(
+            windowID: UsageDefaults.weeklyWindowID,
+            budget: 0.2,
+            span: CustomLimitDefaults.maximumSyntheticWindowSpan + 3_600
+        )
+        let tooShort = CustomLimit.syntheticWindow(
+            windowID: UsageDefaults.weeklyWindowID,
+            budget: 0.2,
+            span: CustomLimitDefaults.minimumSyntheticWindowSpan / 2
+        )
+
+        XCTAssertTrue(CustomLimitSettings.isWellFormed(valid))
+        XCTAssertFalse(CustomLimitSettings.isWellFormed(tooLong))
+        XCTAssertFalse(CustomLimitSettings.isWellFormed(tooShort))
+    }
 }
