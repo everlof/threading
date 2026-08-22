@@ -12,8 +12,16 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     case hostPairingSucceeded
     case hostPairingFailed
     case hostRemoved
+    /// One catalogue refresh began. `trace` joins its route attempts and final result.
+    case hostRefreshStarted
     case hostRefreshSucceeded
     case hostRefreshFailed
+    /// One bounded way into a host began or ended. These are lifecycle records rather than
+    /// request logs: at most the fixed route/port candidate set is represented.
+    case hostRouteStarted
+    /// One coarse, bounded stage inside an already-started route attempt.
+    case hostRouteProgress
+    case hostRouteEnded
     case hostListenerStarted
     case hostListenerFailed
     /// One door of the host's listener set started answering on its addresses.
@@ -55,6 +63,8 @@ public enum RemoteDiagnosticEvent: String, Codable, Sendable {
     case socketConnected
     case socketEnded
     case socketFailed
+    /// A failed live socket scheduled one bounded exponential retry.
+    case socketReconnectScheduled
     case permissionDecisionSent
     case permissionDecisionReceived
     case notificationAuthorization
@@ -116,13 +126,22 @@ public enum RemoteDiagnosticField: String, CaseIterable, Sendable {
     case surface
     case enabledKindCount
     case recordCount
+    /// A fixed stage name such as `refresh`, `prepare`, `request`, `hello`, or `backoff`.
+    case phase
+    /// Whole milliseconds derived from a monotonic clock.
+    case durationMS
+    case timeoutMS
+    case delayMS
+    /// One-based position in a bounded attempt set, and that set's fixed upper bound.
+    case attempt
+    case total
     case reason
     /// A truncated hash of the address a client aimed at, or that a host advertised.
     ///
     /// It exists so "wrong address" and "right address, host down" stop looking identical in a
     /// support report, and it is a hash because the address itself is a routable location of
-    /// someone's machine. Both hosts pseudonymise it the way they pseudonymise a session id,
-    /// under the `origin-` prefix this file's value check requires.
+    /// someone's machine. Both hosts pseudonymise it the way they pseudonymise a session id;
+    /// the boundary requires `origin-` followed by exactly twelve lowercase hex digits.
     case origin
     /// A bounded machine token qualifying `code` or `reason`, such as the values a refused
     /// request carried. Never prose, a path, or anything a person or an agent wrote.
@@ -321,20 +340,29 @@ public enum RemoteDiagnosticUploadPolicy {
         }
 
         switch RemoteDiagnosticField(rawValue: key) {
-        case .enabledKindCount, .recordCount, .protocolVersion, .minimumProtocolVersion:
+        case .enabledKindCount, .recordCount, .protocolVersion, .minimumProtocolVersion,
+             .durationMS, .timeoutMS, .delayMS, .attempt, .total:
             return value.allSatisfy(\.isNumber)
         case .peer:
-            return value.hasPrefix("peer-") || value.hasPrefix("device-")
+            return isPseudonym(value, prefixes: ["peer-", "device-"])
         case .session:
-            return value.hasPrefix("session-")
-        // The prefix is what makes an address unrepresentable here: a client cannot pass a host
-        // name or an IP through this field without first hashing it into the agreed shape.
+            return isPseudonym(value, prefixes: ["session-"])
+        // Exact shape, not only a prefix: `origin-192.168.1.42` must never be mistaken for the
+        // truncated SHA-256 value every shipping producer emits.
         case .origin:
-            return value.hasPrefix("origin-")
+            return isPseudonym(value, prefixes: ["origin-"])
         case .none:
             return false
         default:
             return true
+        }
+    }
+
+    private static func isPseudonym(_ value: String, prefixes: [String]) -> Bool {
+        guard let prefix = prefixes.first(where: { value.hasPrefix($0) }) else { return false }
+        let digest = value.utf8.dropFirst(prefix.utf8.count)
+        return digest.count == 12 && digest.allSatisfy { byte in
+            (byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102)
         }
     }
 
@@ -349,8 +377,10 @@ public enum RemoteDiagnosticUploadPolicy {
             switch event {
             case .appLaunched,
                  .hostPairingStarted, .hostPairingSucceeded, .hostPairingFailed,
-                 .hostRefreshSucceeded, .hostRefreshFailed,
+                 .hostRefreshStarted, .hostRefreshSucceeded, .hostRefreshFailed,
+                 .hostRouteStarted, .hostRouteProgress, .hostRouteEnded,
                  .socketConnecting, .socketConnected, .socketEnded, .socketFailed,
+                 .socketReconnectScheduled,
                  .diagnosticSharingStarted, .diagnosticSharingStopped:
                 return true
             default:
@@ -360,8 +390,11 @@ public enum RemoteDiagnosticUploadPolicy {
             switch event {
             case .appLaunched, .appBecameActive,
                  .hostPairingStarted, .hostPairingSucceeded, .hostPairingFailed, .hostRemoved,
-                 .hostRefreshSucceeded, .hostRefreshFailed,
+                 .hostRefreshStarted, .hostRefreshSucceeded, .hostRefreshFailed,
+                 .hostRouteStarted, .hostRouteProgress, .hostRouteEnded,
+                 .hostDiscoveryFound, .hostDiscoveryMatched, .hostDiscoveryIgnored,
                  .socketConnecting, .socketConnected, .socketEnded, .socketFailed,
+                 .socketReconnectScheduled,
                  .permissionDecisionSent,
                  .notificationAuthorization,
                  .apnsRegistrationSucceeded, .apnsRegistrationFailed,
@@ -370,6 +403,8 @@ public enum RemoteDiagnosticUploadPolicy {
                  .notificationReceived, .notificationSuppressed, .notificationPresented,
                  .notificationOpened,
                  .issueReportOpened, .issueReportExported,
+                 .issueReportSubmissionStarted, .issueReportSubmissionSucceeded,
+                 .issueReportSubmissionDeferred, .issueReportSubmissionFailed,
                  .diagnosticSharingStarted, .diagnosticSharingStopped:
                 return true
             default:

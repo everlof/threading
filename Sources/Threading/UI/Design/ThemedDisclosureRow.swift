@@ -151,9 +151,8 @@ final class ThemedDisclosureRow: ThemedControl {
     }
 
     /// A pointing hand, so the row reads as clickable before it is clicked.
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
+    /// The whole row is the press, and it is set in text — so the hand. See `PointerClaiming`.
+    override var restingPointer: NSCursor? { .pointingHand }
 
     // MARK: - Drawing
 

@@ -51,6 +51,19 @@ Containment includes API shape, not only where construction happens. `ChipView` 
 A provider returning `NSMenu`, or a callback exposing `NSMenuItem`, is still a theme-boundary
 violation even if the system object is ultimately displayed beside a themed view.
 
+**The pointer is part of the boundary too, and it is the one answer a view gives by default
+whether it means to or not.** Cursor rectangles are a *window's* list, so a view that registers
+none does not fall back to the arrow — it inherits whatever is registered behind it, which over a
+terminal, a transcript, or inside a text field is an I-beam offering to select text the view is
+covering. A view therefore *declares* what it tells the pointer: `PointerClaiming`'s
+`restingPointer` (the cursor over everything it covers, `nil` only where the view is genuinely
+see-through) and `pointerClaims` (the parts that answer differently). `ThemedControl` and
+`BackdropOverlay` default to the arrow, so a control is correct the day it is written.
+`addCursorRect` and `NSCursor.…set()` are checker errors outside
+`UI/Design/PointerClaims.swift`, and a `resetCursorRects` override may be exactly
+`registerPointerClaims()` and nothing else — a claim decided inside that method is a claim no
+reviewer and no test can read.
+
 `UI/Design/` is not an exception zone. Composite components such as `PromptView` use the same
 lower-level themed controls and surfaces as feature code. Only the exact file implementing an
 AppKit boundary may receive a source-checker exception, and each exception names one symbol and

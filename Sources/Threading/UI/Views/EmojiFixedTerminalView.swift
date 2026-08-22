@@ -113,7 +113,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// Mirrors the routing condition in the fork's `MacTerminalView.scrollWheel`: the wheel
     /// goes to the process when it tracks the mouse and option is not held.
     override func scrollWheel(with event: NSEvent) {
-        let forwards = allowMouseReporting && getTerminal().mouseMode != .off
+        let forwards = allowMouseReporting && terminalStateSnapshot().mouseMode != .off
             && !event.modifierFlags.contains(.option)
         if forwards, !(acceptsLocalInput?() ?? true) {
             onLocalInputBlocked?()
@@ -178,7 +178,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     }
 
     private var shouldSuppressLocalMouseReporting: Bool {
-        allowMouseReporting && getTerminal().mouseMode != .off
+        allowMouseReporting && terminalStateSnapshot().mouseMode != .off
             && !(acceptsLocalInput?() ?? true)
     }
 
@@ -191,7 +191,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// is when its repaints are ours. Jitter inside one cell reports nothing and repaints
     /// nothing, so counting it costs a slightly wider quiet window and nothing else.
     private var forwardsMotion: Bool {
-        allowMouseReporting && getTerminal().mouseMode.sendMotionEvent()
+        allowMouseReporting && terminalStateSnapshot().mouseMode.sendMotionEvent()
     }
 
     // MARK: - Copy on Select
@@ -214,6 +214,9 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        // SwiftTerm 2 defaults to an overlay indicator. Threading's terminal chrome owns a
+        // persistent themed track, so retain the pre-2.0 geometry explicitly at the host edge.
+        scrollerStyle = .legacy
         installScroller(ThemedScroller(frame: .zero, inkSource: .backdrop))
         configureForEmojiRendering()
         setupContextMenu()
@@ -354,7 +357,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     func setRemoteGrid(cols: Int, rows: Int) {
         guard cols > 0, rows > 0 else { return }
         if remoteGrid == nil {
-            let current = getTerminal().getDims()
+            let current = terminalDimensions
             localGridBeforeRemoteControl = (current.cols, current.rows)
             deferredLocalGrid = nil
         }
@@ -379,7 +382,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// reason at all.
     private func applyRemoteGrid() {
         guard let remoteGrid else { return }
-        let current = getTerminal().getDims()
+        let current = terminalDimensions
         guard current.cols != remoteGrid.cols || current.rows != remoteGrid.rows else { return }
         resize(cols: remoteGrid.cols, rows: remoteGrid.rows)
     }

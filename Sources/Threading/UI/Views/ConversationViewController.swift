@@ -591,6 +591,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             guard let self, event.sessionID == self.sessionID else { return }
             self.refreshLimitEscapeStrip()
         }
+        // A curfew engaging or being lifted is the one thing that moves the queue's hold without
+        // anything else changing: no usage reading moved, no suggestion arrived. Without this,
+        // a lifted curfew would leave the messages behind it sitting until the next turn ended.
+        //
+        // The strip's own curfew line is not read here yet — `refreshLimitEscapeStrip` has no
+        // curfew source until the strip gains one, and this call site is where its refresh goes.
+        appEvents.observe(CurfewDidChange.self) { [weak self] event in
+            guard let self, event.sessionID == self.sessionID else { return }
+            self.flushOutboxIfReady()
+        }
         refreshLimitEscapeStrip()
     }
 

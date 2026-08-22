@@ -117,15 +117,22 @@ final class BrowserAnnotationOverlay: ThemedControl {
         return self
     }
 
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        guard isAnnotating else { return }
-        addCursorRect(bounds, cursor: .crosshair)
-        for marker in markers {
-            addCursorRect(
+    /// **Nothing at rest while the overlay is only watching.** It is a transparent sheet over a
+    /// live web page, and the page's own answers — a link's hand, an I-beam over its text, a
+    /// field's caret — are the right ones there. `nil` is the statement that this view is not
+    /// opaque; see `PointerClaiming`. While a mark can be placed the sheet does own the pointer,
+    /// and says crosshair.
+    override var restingPointer: NSCursor? { isAnnotating ? .crosshair : nil }
+
+    /// The marks that can be picked up, claimed before the crosshair behind them — the order that
+    /// used to be left to AppKit, which documents overlapping rectangles as undefined.
+    override var pointerClaims: [PointerClaim] {
+        guard isAnnotating else { return [] }
+        return markers.map { marker in
+            PointerClaim(
                 markerRect(for: marker)
                     .insetBy(dx: -Layout.markerHitInset, dy: -Layout.markerHitInset),
-                cursor: .pointingHand
+                .pointingHand
             )
         }
     }

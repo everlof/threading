@@ -89,6 +89,14 @@ extension ConversationViewController {
         // on its own. What the user types and sends by hand still goes: the keyboard is the one
         // thing a limit of theirs deliberately does not stop, and the strip says so.
         guard !CustomLimitParkPolicy.isParked(sessionID: sessionID) else { return }
+        // The session's own curfew holds the queue the same way, with one exception it has to
+        // make for itself: the wrap-up. Read off the item that is about to be handed over rather
+        // than off the queue as a whole, because the exemption belongs to one message and the
+        // ones behind it stay held — and peeked rather than taken, so a refusal never has to
+        // rewrite a row's state to put it back.
+        if CurfewHoldPolicy.isHeld(sessionID: sessionID) {
+            guard outbox.nextPending?.origin == .curfewWindDown else { return }
+        }
         guard let item = outbox.handOverNext() else { return }
 
         refreshOutboxRail()

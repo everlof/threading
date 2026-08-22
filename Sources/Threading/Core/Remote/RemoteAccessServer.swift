@@ -695,7 +695,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 requestID: parsed.requestID
             )
         case "terminalSubmit":
-            handleTerminalSubmit(connection, text: parsed.text, requestID: parsed.requestID)
+            handleTerminalSubmit(
+                connection,
+                text: parsed.text,
+                attachmentUploadIDs: parsed.attachmentUploadIDs,
+                requestID: parsed.requestID
+            )
+        case "terminalAttachmentInsert":
+            handleTerminalAttachmentInsert(
+                connection,
+                attachmentUploadIDs: parsed.attachmentUploadIDs,
+                requestID: parsed.requestID
+            )
         case "attentionRequest":
             handleAttentionRequest(
                 connection,
@@ -718,8 +729,17 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             )
         case "presence":
             handlePresence(connection, state: parsed.state)
+        case "sessionPark":
+            handleSessionPark(connection)
+        case "sessionResume":
+            handleSessionResume(connection)
         case "viewport":
-            handleViewport(connection, cols: parsed.cols, rows: parsed.rows)
+            handleViewport(
+                connection,
+                cols: parsed.cols,
+                rows: parsed.rows,
+                requestID: parsed.requestID
+            )
         case "viewportRelease":
             handleViewportRelease(connection)
         case "conversationPage":
@@ -2692,7 +2712,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
-    private func handleViewport(_ connection: RemoteConnection, cols: Int?, rows: Int?) {
+    private func handleViewport(
+        _ connection: RemoteConnection,
+        cols: Int?,
+        rows: Int?,
+        requestID rawRequestID: String?
+    ) {
         guard let authorization = connection.authorization,
               authorization.capability == .interact else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
@@ -2755,7 +2780,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     from: connection,
                     sessionID: sessionID,
                     cols: cols,
-                    rows: rows
+                    rows: rows,
+                    hydrationRequestID: rawRequestID.flatMap(
+                        RemoteInboundPolicy.normalizedMutationRequestID
+                    )
                 )
             }
         }
@@ -2847,6 +2875,61 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
+    /// Removes a phone from every live-session side effect without paying for a new TLS and
+    /// WebSocket handshake if it returns shortly. Standalone project terminals are excluded:
+    /// they are shells rather than push/pop chat destinations and have no session route to
+    /// re-authorize on resume.
+    private func handleSessionPark(_ connection: RemoteConnection) {
+        guard let authorization = connection.authorization,
+              let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed),
+              authorization.scope.covers(sessionID) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidSessionParking")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendClose(code: 4003, reason: "Share revoked")
+                return
+            }
+            if !self.services.mirrors.park(connection, sessionID: sessionID) {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "invalidSessionParking")))
+            }
+        }
+    }
+
+    /// Rejoins the same authorized route. `attach` is intentionally the one resume path: its
+    /// hello, bounded replay/snapshot and collaboration state are the authoritative state after
+    /// time away, and avoid inventing a second partial synchronization protocol for warm sockets.
+    private func handleSessionResume(_ connection: RemoteConnection) {
+        guard let authorization = connection.authorization,
+              let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed),
+              authorization.scope.covers(sessionID) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidSessionParking")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendClose(code: 4003, reason: "Share revoked")
+                return
+            }
+            guard !self.services.mirrors.isAttached(connection, to: sessionID) else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "invalidSessionParking")))
+                return
+            }
+            guard self.services.mirrors.attach(
+                connection,
+                to: sessionID,
+                authorization: authorization
+            ) else {
+                connection.sendText(self.encode(RemoteEndedDTO(reason: "sessionClosed")))
+                connection.sendClose(code: 4004, reason: "Session not available")
+                return
+            }
+        }
+    }
+
     private func handleConversationPage(
         _ connection: RemoteConnection,
         beforeRowID: String?,
@@ -2926,7 +3009,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         // A refusal ends the submission rather than sending the words alone. Somebody who
         // attached a picture and pressed send meant to send the picture; a prompt that silently
         // lost it and went anyway cannot be taken back.
-        var stagedPaths: [String] = []
+        let stagedPaths: [String]
         if let attachmentUploadIDs, !attachmentUploadIDs.isEmpty {
             guard let deviceID = device, authorization.principal == .ownerDevice,
                   authorization.scope == .allSessions,
@@ -2947,6 +3030,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             stagedPaths = claimed.map(\.path)
+        } else {
+            stagedPaths = []
         }
 
         let claimedIDs = stagedPaths.isEmpty ? [] : (attachmentUploadIDs ?? [])
@@ -2994,6 +3079,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleTerminalSubmit(
         _ connection: RemoteConnection,
         text: String?,
+        attachmentUploadIDs: [String]?,
         requestID rawRequestID: String?
     ) {
         guard let authorization = connection.authorization,
@@ -3001,7 +3087,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
-        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        guard let text,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || attachmentUploadIDs?.isEmpty == false,
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed) else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidTerminalSubmission")))
@@ -3019,13 +3107,39 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         let device = connection.deviceID
+        let stagedPaths: [String]
+        if let attachmentUploadIDs, !attachmentUploadIDs.isEmpty {
+            guard let deviceID = device,
+                  authorization.principal == .ownerDevice,
+                  authorization.scope == .allSessions,
+                  attachmentUploadIDs.count
+                      <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
+                  let claimed = attachmentUploads.claim(
+                      ids: attachmentUploadIDs,
+                      sessionID: sessionID.uuidString,
+                      deviceID: deviceID
+                  ) else {
+                connection.sendText(encode(RemoteErrorDTO(code: "unknownAttachmentUpload")))
+                connection.sendText(encode(RemotePromptSubmissionResultDTO(
+                    requestID: requestID,
+                    status: .rejected
+                )))
+                return
+            }
+            stagedPaths = claimed.map(\.path)
+        } else {
+            stagedPaths = []
+        }
+        let claimedIDs = stagedPaths.isEmpty ? [] : (attachmentUploadIDs ?? [])
         DispatchQueue.main.async {
             guard self.authorizer?.isCurrent(authorization) == true else {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                self.resolveClaim(claimedIDs, accepted: false)
                 return
             }
             let status = self.services.mirrors.submitTerminalLine(
                 text,
+                stagedAttachmentPaths: stagedPaths,
                 to: sessionID,
                 device: device,
                 authorization: authorization,
@@ -3035,6 +3149,72 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 requestID: requestID,
                 status: status
             )))
+            self.resolveClaim(claimedIDs, accepted: status == .accepted)
+        }
+    }
+
+    private func handleTerminalAttachmentInsert(
+        _ connection: RemoteConnection,
+        attachmentUploadIDs: [String]?,
+        requestID rawRequestID: String?
+    ) {
+        guard let authorization = connection.authorization,
+              authorization.capability == .interact else {
+            connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
+            return
+        }
+        guard let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed),
+              let attachmentUploadIDs,
+              !attachmentUploadIDs.isEmpty,
+              attachmentUploadIDs.count
+                <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession else {
+            connection.sendText(encode(RemoteErrorDTO(
+                code: "invalidTerminalAttachmentInsertion"
+            )))
+            return
+        }
+        guard let requestID = rawRequestID.flatMap(
+            RemoteInboundPolicy.normalizedMutationRequestID
+        ) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidRequestID")))
+            return
+        }
+        guard let deviceID = connection.deviceID,
+              authorization.principal == .ownerDevice,
+              authorization.scope == .allSessions,
+              let claimed = attachmentUploads.claim(
+                  ids: attachmentUploadIDs,
+                  sessionID: sessionID.uuidString,
+                  deviceID: deviceID
+              ) else {
+            connection.sendText(encode(RemoteErrorDTO(code: "unknownAttachmentUpload")))
+            connection.sendText(encode(RemotePromptSubmissionResultDTO(
+                requestID: requestID,
+                status: .rejected
+            )))
+            return
+        }
+
+        let stagedPaths = claimed.map(\.path)
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                self.resolveClaim(attachmentUploadIDs, accepted: false)
+                return
+            }
+            let status = self.services.mirrors.insertTerminalAttachments(
+                stagedPaths: stagedPaths,
+                into: sessionID,
+                device: connection.deviceID,
+                authorization: authorization,
+                requestID: requestID
+            )
+            connection.sendText(self.encode(RemotePromptSubmissionResultDTO(
+                requestID: requestID,
+                status: status
+            )))
+            self.resolveClaim(attachmentUploadIDs, accepted: status == .accepted)
         }
     }
 

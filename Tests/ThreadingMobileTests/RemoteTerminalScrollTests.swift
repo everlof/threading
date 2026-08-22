@@ -9,7 +9,9 @@ import XCTest
 /// could finish it. The emulator has always had the seam for this — `Terminal.userScrolling`
 /// holds `yDisp` above the live tail, and the Mac view has used it all along — so these cover
 /// the iOS half now driving it.
+@MainActor
 final class RemoteTerminalScrollTests: XCTestCase {
+    private var hostWindows: [UIWindow] = []
 
     // MARK: - Constants
 
@@ -95,9 +97,10 @@ final class RemoteTerminalScrollTests: XCTestCase {
         for line in 0..<Fixture.followUpLines {
             view.feed(text: "later \(line)\r\n")
         }
+        settleTerminalCallbacks(for: view)
 
         XCTAssertEqual(view.contentOffset.y, 0, accuracy: Fixture.offsetTolerance)
-        XCTAssertEqual(view.getTerminal().buffer.yDisp, 0)
+        XCTAssertEqual(view.terminalStateSnapshot().viewportRow, 0)
         XCTAssertEqual(visibleTopLine(of: view), topLine)
     }
 
@@ -105,10 +108,13 @@ final class RemoteTerminalScrollTests: XCTestCase {
         let view = makeView(feeding: Fixture.lines)
         let before = view.contentOffset.y
         // The second visible row becomes the first one when the buffer scrolls by a line.
-        let secondLine = view.getTerminal().getLine(row: 1)?.translateToString(trimRight: true)
+        let secondLine = view.terminalStateSnapshot().visibleRows
+            .first(where: { $0.row == 1 })?.text
+            .trimmingCharacters(in: .whitespaces)
         XCTAssertNotNil(secondLine)
 
         view.feed(text: "one more\r\n")
+        settleTerminalCallbacks(for: view)
 
         XCTAssertGreaterThan(view.contentOffset.y, before)
         XCTAssertEqual(view.scrollPosition, 1, accuracy: 0.001)
@@ -125,9 +131,10 @@ final class RemoteTerminalScrollTests: XCTestCase {
         view.setNeedsLayout()
         view.layoutIfNeeded()
 
-        XCTAssertEqual(view.getTerminal().buffer.yDisp, 0)
+        XCTAssertEqual(view.terminalStateSnapshot().viewportRow, 0)
 
         view.feed(text: "later\r\n")
+        settleTerminalCallbacks(for: view)
 
         XCTAssertEqual(view.contentOffset.y, 0, accuracy: Fixture.offsetTolerance)
     }
@@ -138,10 +145,12 @@ final class RemoteTerminalScrollTests: XCTestCase {
         view.scroll(toPosition: 0)
 
         view.send(txt: "hello")
+        settleTerminalCallbacks(for: view)
 
         XCTAssertEqual(view.contentOffset.y, tail, accuracy: Fixture.offsetTolerance)
 
         view.feed(text: "later\r\n")
+        settleTerminalCallbacks(for: view)
 
         XCTAssertGreaterThan(view.contentOffset.y, tail)
     }
@@ -159,6 +168,7 @@ final class RemoteTerminalScrollTests: XCTestCase {
         for line in 0..<Fixture.followUpLines {
             view.feed(text: "trimming \(line)\r\n")
         }
+        settleTerminalCallbacks(for: view)
 
         XCTAssertEqual(visibleTopLine(of: view), held)
         XCTAssertLessThan(view.contentOffset.y, offset)
@@ -172,9 +182,11 @@ final class RemoteTerminalScrollTests: XCTestCase {
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
         view.feed(text: Fixture.enableSGRMouseTracking)
-        XCTAssertNotEqual(view.getTerminal().mouseMode, .off)
+        settleTerminalCallbacks(for: view)
+        XCTAssertNotEqual(view.terminalStateSnapshot().mouseMode, .off)
 
         view.forwardWheelDrag(distance: Fixture.dragDistance, gestureRecognizer: UIPanGestureRecognizer())
+        settleTerminalCallbacks(for: view)
 
         XCTAssertTrue(recorder.text.contains("<64;"), "expected wheel-up reports, got \(recorder.text)")
         XCTAssertFalse(recorder.text.contains("<0;"), "a drag is not a button press: \(recorder.text)")
@@ -185,8 +197,10 @@ final class RemoteTerminalScrollTests: XCTestCase {
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         view.forwardWheelDrag(distance: -Fixture.dragDistance, gestureRecognizer: UIPanGestureRecognizer())
+        settleTerminalCallbacks(for: view)
 
         XCTAssertTrue(recorder.text.contains("<65;"), "expected wheel-down reports, got \(recorder.text)")
     }
@@ -200,11 +214,13 @@ final class RemoteTerminalScrollTests: XCTestCase {
         XCTAssertEqual(view.panGestureRecognizer.minimumNumberOfTouches, 1)
 
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         XCTAssertNotNil(view.panMouseGesture)
         XCTAssertEqual(view.panGestureRecognizer.minimumNumberOfTouches, 2)
 
         view.feed(text: Fixture.disableMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         XCTAssertNil(view.panMouseGesture)
         XCTAssertEqual(view.panGestureRecognizer.minimumNumberOfTouches, 1)
@@ -217,10 +233,12 @@ final class RemoteTerminalScrollTests: XCTestCase {
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         for _ in 0..<10 {
             view.forwardWheelDrag(distance: Fixture.dragDistance, gestureRecognizer: UIPanGestureRecognizer())
         }
+        settleTerminalCallbacks(for: view)
 
         let reports = recorder.text.components(separatedBy: "<64;").count - 1
         XCTAssertGreaterThan(reports, 0)
@@ -279,7 +297,7 @@ final class RemoteTerminalScrollTests: XCTestCase {
 
         view.applyPreferredFontSize(20)
 
-        let dimensions = view.getTerminal().getDims()
+        let dimensions = view.terminalDimensions
         XCTAssertEqual(dimensions.cols, 109)
         XCTAssertEqual(dimensions.rows, 84)
         XCTAssertEqual(view.font.pointSize, 20)
@@ -292,11 +310,11 @@ final class RemoteTerminalScrollTests: XCTestCase {
         let view = makeFontView(fontSize: 13)
         view.setAuthoritativeGrid(cols: 109, rows: 84)
         view.setUsesLocalViewport(true)
-        let before = view.getTerminal().getDims()
+        let before = view.terminalDimensions
 
         view.applyPreferredFontSize(20)
 
-        let after = view.getTerminal().getDims()
+        let after = view.terminalDimensions
         XCTAssertLessThan(after.cols, before.cols)
         XCTAssertLessThan(after.rows, before.rows)
     }
@@ -330,15 +348,28 @@ final class RemoteTerminalScrollTests: XCTestCase {
             frame: Fixture.frame,
             font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
         )
+        let window = UIWindow(frame: Fixture.frame)
+        window.addSubview(view)
+        hostWindows.append(window)
         for line in 0..<lines {
             view.feed(text: "line \(line)\r\n")
         }
+        settleTerminalCallbacks(for: view)
         return view
+    }
+
+    private func settleTerminalCallbacks(for view: RemoteTerminalView) {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
     }
 
     /// `Terminal.getLine` is viewport-relative, so row 0 is whatever the person is looking at.
     private func visibleTopLine(of view: RemoteTerminalView) -> String? {
-        view.getTerminal().getLine(row: 0)?.translateToString(trimRight: true)
+        view.terminalStateSnapshot().visibleRows
+            .first(where: { $0.row == 0 })?.text
+            .trimmingCharacters(in: .whitespaces)
     }
 }
 
@@ -353,19 +384,19 @@ private final class RecordingTerminalDelegate: NSObject, TerminalViewDelegate {
         return String(decoding: bytes, as: UTF8.self)
     }
 
-    nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
+    func send(source: TerminalView, data: ArraySlice<UInt8>) {
         lock.lock()
         bytes.append(contentsOf: data)
         lock.unlock()
     }
 
-    nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
-    nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
-    nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-    nonisolated func scrolled(source: TerminalView, position: Double) {}
-    nonisolated func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
-    nonisolated func bell(source: TerminalView) {}
-    nonisolated func clipboardCopy(source: TerminalView, content: Data) {}
-    nonisolated func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
-    nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
+    func setTerminalTitle(source: TerminalView, title: String) {}
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    func scrolled(source: TerminalView, position: Double) {}
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    func bell(source: TerminalView) {}
+    func clipboardCopy(source: TerminalView, content: Data) {}
+    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }

@@ -263,10 +263,9 @@ final class ThemedImagePreview: ThemedControl {
         )
     }
 
-    override func resetCursorRects() {
-        guard canInspect else { return }
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
+    /// The hand only while the picture opens into something; the arrow otherwise, because a
+    /// preview is still an opaque plate over whatever is behind it. See `PointerClaiming`.
+    override var restingPointer: NSCursor? { canInspect ? .pointingHand : .arrow }
 
     // MARK: - Accessibility
 

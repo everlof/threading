@@ -116,10 +116,14 @@ final class RemoteAppModel: ObservableObject {
     private(set) var isEphemeralTerminalWireFixture = false
     private var themeEventsTask: URLSessionWebSocketTask?
     private var themeEventsReceiveTask: Task<Void, Never>?
+    private var themeEventsHelloDeadlineTask: Task<Void, Never>?
     private var themeEventsHostID: String?
     private var themeEventsGeneration = 0
     private var themeEventsRecoveryTask: Task<Void, Never>?
     private var themeEventsRecoveryAttempt = 0
+    private var themeEventsDidReceiveHello = false
+    private var themeEventsStartedAt: UInt64?
+    private var themeEventsDiagnosticFields: [RemoteDiagnosticField: String] = [:]
     private var sessionsChangedRefreshTask: Task<Void, Never>?
     private var sessionsChangedRefreshGeneration = 0
     private var pendingSessionDeltas: [String: RemoteSessionsChangedDTO] = [:]
@@ -137,6 +141,7 @@ final class RemoteAppModel: ObservableObject {
     private static let hostedProvisioningRetryDelay: TimeInterval = 5 * 60
     private static let sessionsChangedCoalescingDelay = Duration.milliseconds(350)
     private static let sessionDeltaCoalescingDelay = Duration.milliseconds(50)
+    private static let themeEventsHelloDeadline = Duration.seconds(15)
     private static let maximumThemeEventsRecoveryDelay: TimeInterval = 60
 
     init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
@@ -343,8 +348,36 @@ final class RemoteAppModel: ObservableObject {
     }
 
     func pair(_ invitationLink: RemoteConnectionLink, displayName: String) async throws {
+        try await acceptPairing(
+            invitationLink,
+            displayName: displayName,
+            trace: MobileDiagnostics.connectivityTrace(),
+            transport: PairedRemoteHost.endpointKind(for: invitationLink.baseURL)
+        )
+    }
+
+    private func acceptPairing(
+        _ invitationLink: RemoteConnectionLink,
+        displayName: String,
+        trace: String,
+        transport: String,
+        recordsStart: Bool = true
+    ) async throws {
         phase = .connecting
-        MobileDiagnostics.record(.hostPairingStarted)
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let pairingFields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .transport: transport,
+            .origin: MobileDiagnostics.originDigest(invitationLink.baseURL),
+            .phase: "pairing.accept",
+            .timeoutMS: MobileDiagnostics.milliseconds(RemoteClient.defaultRequestTimeout),
+        ]
+        if recordsStart {
+            MobileDiagnostics.recordConnectivity(
+                .hostPairingStarted,
+                fields: pairingFields.merging([.result: "started"]) { _, new in new }
+            )
+        }
         // The scanned code is the out-of-band half of the trust story, so it is in force before
         // the very first request rather than after the Mac has answered one.
         RemoteHostTrust.register(link: invitationLink)
@@ -356,11 +389,17 @@ final class RemoteAppModel: ObservableObject {
             let verdict = invitationLink.baseURL.host.flatMap {
                 RemoteClient.pinningDelegate.verdict(forHost: $0)
             }
-            var fields: [RemoteDiagnosticField: String] = [
+            var fields = pairingFields.merging([
+                .result: "failed",
                 .code: MobileDiagnostics.errorCode(error),
-            ]
+                .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+            ]) { _, new in new }
             if let verdict { fields[.detail] = RemoteHostTrust.token(for: verdict) }
-            MobileDiagnostics.record(.hostPairingFailed, level: .error, fields: fields)
+            MobileDiagnostics.recordConnectivity(
+                .hostPairingFailed,
+                level: .error,
+                fields: fields
+            )
             // A refused pin arrives as a cancelled request, which reads as "cancelled" and
             // explains nothing. The pairing screen gets the sentence that names it instead.
             let failure = RemoteConnectionFailure.transport(
@@ -381,6 +420,15 @@ final class RemoteAppModel: ObservableObject {
             // which refuses the Mac's own certificate.
             pinnedFingerprintCode: invitationLink.pinnedFingerprintCode
         ) else {
+            MobileDiagnostics.recordConnectivity(
+                .hostPairingFailed,
+                level: .error,
+                fields: pairingFields.merging([
+                    .result: "failed",
+                    .code: MobileDiagnostics.errorCode(RemoteClientError.invalidResponse),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
             throw RemoteClientError.invalidResponse
         }
         let me = acceptance.me
@@ -395,13 +443,43 @@ final class RemoteAppModel: ObservableObject {
         var hostedCredential = hosts.first(where: { $0.id == id })?.hostedCredential
         if me.share.scope == "all",
            me.features?.contains(RemoteRESTFeature.hostedPeerTransport.rawValue) == true {
+            let provisioningStartedAt = MobileDiagnostics.monotonicNow()
+            let provisioningFields = pairingFields.merging([
+                .peer: MobileDiagnostics.pseudonym(id, prefix: "peer"),
+                .phase: "pairing.provisionHosted",
+                .timeoutMS: MobileDiagnostics.milliseconds(RemoteClient.defaultRequestTimeout),
+            ]) { _, new in new }
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteStarted,
+                fields: provisioningFields.merging([.result: "started"]) { _, new in new }
+            )
             do {
                 let issued = try await RemoteClient(link: link).issueHostedDeviceCredential()
                 (hostedServiceURL, hostedCredential) = try Self.validateHostedCredential(
                     issued,
                     expectedHostID: hostID
                 )
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    fields: provisioningFields.merging([
+                        .result: "succeeded",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(
+                            since: provisioningStartedAt
+                        ),
+                    ]) { _, new in new }
+                )
             } catch {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: .warning,
+                    fields: provisioningFields.merging([
+                        .result: "failed",
+                        .code: MobileDiagnostics.errorCode(error),
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(
+                            since: provisioningStartedAt
+                        ),
+                    ]) { _, new in new }
+                )
                 // Pairing and the private routes this Mac advertised remain valid. The Mac will
                 // advertise the feature again so a later refresh can retry provisioning.
                 hostedProvisioningRetryAfter[id] = Date().addingTimeInterval(
@@ -442,6 +520,15 @@ final class RemoteAppModel: ObservableObject {
             hosts = previousHosts
             storageIssue = error.localizedDescription
             phase = .offline(.transport(error.localizedDescription))
+            MobileDiagnostics.recordConnectivity(
+                .hostPairingFailed,
+                level: .error,
+                fields: pairingFields.merging([
+                    .result: "failed",
+                    .code: MobileDiagnostics.errorCode(error),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
             throw error
         }
         invalidateRefreshes()
@@ -451,42 +538,105 @@ final class RemoteAppModel: ObservableObject {
         phase = .online
         isPairing = false
         ensureThemeEvents(for: host)
-        MobileDiagnostics.record(.hostPairingSucceeded, fields: [
+        MobileDiagnostics.recordConnectivity(.hostPairingSucceeded, fields: pairingFields.merging([
+            .result: "succeeded",
+            .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
             .peer: MobileDiagnostics.pseudonym(id, prefix: "peer"),
             .capability: me.share.capability,
-        ])
+        ]) { _, new in new })
     }
 
     func pair(_ hostedLink: HostedPairingLink, displayName: String) async throws {
         guard !hostedLink.isExpired else { throw PeerControlPlaneError.invalidCredential }
         phase = .connecting
-        MobileDiagnostics.record(.hostPairingStarted, fields: [.transport: "hosted"])
         let endpoint = try PeerControlPlaneServiceEndpoint(hostedLink.serviceURL)
         let credential = try PeerRendezvousCredential(hostedLink.rendezvousCredential)
+        let trace = MobileDiagnostics.connectivityTrace()
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let pairingFields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .transport: RemoteHostEndpointKind.hosted,
+            .phase: "pairing.prepare",
+            .timeoutMS: MobileDiagnostics.milliseconds(PeerTransportBounds.negotiationTimeout),
+        ]
+        MobileDiagnostics.recordConnectivity(
+            .hostPairingStarted,
+            fields: pairingFields.merging([.result: "started"]) { _, new in new }
+        )
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteStarted,
+            fields: pairingFields.merging([.result: "started"]) { _, new in new }
+        )
         let tunnel: PeerHostedDeviceTunnel
         do {
             tunnel = try await PeerHostedDeviceConnector.connect(
                 endpoint: endpoint.rendezvousEndpoint,
                 hostID: hostedLink.hostID,
                 deviceID: hostedLink.deviceID,
-                credential: credential
+                credential: credential,
+                progress: { phase in
+                    MobileDiagnostics.recordConnectivity(.hostRouteProgress, fields: [
+                        .trace: trace,
+                        .transport: RemoteHostEndpointKind.hosted,
+                        .phase: "pairing.hosted.\(phase.rawValue)",
+                        .result: "stage",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                        .timeoutMS: MobileDiagnostics.milliseconds(
+                            PeerTransportBounds.negotiationTimeout
+                        ),
+                    ])
+                }
             )
         } catch {
-            MobileDiagnostics.record(
+            let terminalFields = pairingFields.merging([
+                .result: error is CancellationError ? "cancelled" : "failed",
+                .code: error is CancellationError
+                    ? "swift.cancelled"
+                    : MobileDiagnostics.errorCode(error),
+                .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+            ]) { _, new in new }
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                level: error is CancellationError ? .info : .warning,
+                fields: terminalFields
+            )
+            MobileDiagnostics.recordConnectivity(
                 .hostPairingFailed,
                 level: .error,
-                fields: [.code: MobileDiagnostics.errorCode(error), .transport: "hosted"]
+                fields: terminalFields
             )
             throw error
         }
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteEnded,
+            fields: pairingFields.merging([
+                .result: "succeeded",
+                .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+            ]) { _, new in new }
+        )
         defer { tunnel.stop() }
         guard let loopbackLink = RemoteConnectionLink(
             baseURL: tunnel.origin,
             token: hostedLink.bootstrapToken
         ) else {
+            MobileDiagnostics.recordConnectivity(
+                .hostPairingFailed,
+                level: .error,
+                fields: pairingFields.merging([
+                    .result: "failed",
+                    .code: MobileDiagnostics.errorCode(RemoteClientError.invalidResponse),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
             throw RemoteClientError.invalidResponse
         }
-        try await pair(loopbackLink, displayName: displayName)
+        try await acceptPairing(
+            loopbackLink,
+            displayName: displayName,
+            trace: trace,
+            transport: RemoteHostEndpointKind.hosted,
+            recordsStart: false
+        )
         // `pair` stores the durable hosted credential through this temporary tunnel. Move the
         // live app socket onto that durable route before the temporary pairing tunnel closes.
         disconnectThemeEvents()
@@ -541,6 +691,17 @@ final class RemoteAppModel: ObservableObject {
             return
         }
         let hostID = host.id
+        let refreshTrace = MobileDiagnostics.connectivityTrace()
+        let refreshStartedAt = MobileDiagnostics.monotonicNow()
+        let refreshBaseFields: [RemoteDiagnosticField: String] = [
+            .trace: refreshTrace,
+            .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
+            .phase: "refresh",
+        ]
+        MobileDiagnostics.recordConnectivity(
+            .hostRefreshStarted,
+            fields: refreshBaseFields.merging([.result: "started"]) { current, _ in current }
+        )
         catalogueRefreshInFlightGeneration = generation
         defer {
             if catalogueRefreshInFlightGeneration == generation {
@@ -549,34 +710,46 @@ final class RemoteAppModel: ObservableObject {
             }
         }
         let wasOnline = phase == .online && me != nil
-        let wasOffline: Bool
-        if case .offline = phase {
-            wasOffline = true
-        } else {
-            wasOffline = false
-        }
         if !wasOnline {
             phase = .connecting
             connectionProgress = .preparingRoutes
         }
         do {
-            let connection = try await fetchMe(from: host, reportsProgress: !wasOnline)
+            let connection = try await fetchMe(
+                from: host,
+                reportsProgress: !wasOnline,
+                trace: refreshTrace
+            )
             let response = connection.response
             let successfulLink = connection.link
-            guard activeHostID == hostID, refreshGeneration == generation else { return }
+            guard activeHostID == hostID, refreshGeneration == generation else {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRefreshFailed,
+                    level: .warning,
+                    fields: refreshBaseFields.merging([
+                        .result: "discarded",
+                        .code: "refresh.generationChanged",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(
+                            since: refreshStartedAt
+                        ),
+                    ]) { current, _ in current }
+                )
+                return
+            }
             me = response
             phase = .online
             restoreRouteIfPossible(hostID: hostID, response: response)
-            if !wasOnline {
-                MobileDiagnostics.record(.hostRefreshSucceeded, fields: [
-                    .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
-                    .transport: connection.isHosted
-                        ? "hosted"
-                        : PairedRemoteHost.endpointKind(for: successfulLink.baseURL),
+            MobileDiagnostics.recordConnectivity(
+                .hostRefreshSucceeded,
+                fields: refreshBaseFields.merging([
+                    .result: "succeeded",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
+                    .transport: connection.kind,
+                    .origin: MobileDiagnostics.originDigest(successfulLink.baseURL),
                     .protocolVersion: String(response.serverProtocol.version),
                     .minimumProtocolVersion: String(response.serverProtocol.minimumSupported),
-                ])
-            }
+                ]) { current, _ in current }
+            )
             if isEphemeralTerminalWireFixture {
                 // Keep the loopback door exact and in memory. The real server still supplies
                 // the catalogue and event stream; its advertised Mac routes and identity are
@@ -626,31 +799,53 @@ final class RemoteAppModel: ObservableObject {
                     hostID: hostID,
                     response: response,
                     successfulLink: successfulLink,
-                    generation: generation
+                    generation: generation,
+                    trace: refreshTrace
                 )
             }
         } catch is CancellationError {
+            MobileDiagnostics.recordConnectivity(
+                .hostRefreshFailed,
+                level: .warning,
+                fields: refreshBaseFields.merging([
+                    .result: "cancelled",
+                    .code: "swift.cancelled",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
+                ]) { current, _ in current }
+            )
             return
         } catch {
-            guard activeHostID == hostID, refreshGeneration == generation else { return }
+            guard activeHostID == hostID, refreshGeneration == generation else {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRefreshFailed,
+                    level: .warning,
+                    fields: refreshBaseFields.merging([
+                        .result: "discarded",
+                        .code: "refresh.generationChanged",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(
+                            since: refreshStartedAt
+                        ),
+                    ]) { current, _ in current }
+                )
+                return
+            }
             forgetDiscovered(hostID: hostID)
             let failure = connectionFailure(for: host, error: error)
             phase = .offline(failure)
             scheduleThemeEventsRecovery(for: hostID)
-            if !wasOffline {
-                var fields: [RemoteDiagnosticField: String] = [
-                    .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
-                    .code: MobileDiagnostics.errorCode(RemoteConnectionAttempt.underlying(error)),
-                    .reason: failure.cause.rawValue,
-                ]
-                // A token, never a fingerprint: a report says whether the identity check passed,
-                // refused or never ran, which is the difference between "the Mac is off" and
-                // "something else is answering at the Mac's address".
-                if let verdict = RemoteHostTrust.verdictToken(for: host) {
-                    fields[.detail] = verdict
-                }
-                MobileDiagnostics.record(.hostRefreshFailed, level: .error, fields: fields)
+            var fields = refreshBaseFields.merging([
+                .result: "failed",
+                .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
+                .code: MobileDiagnostics.errorCode(RemoteConnectionAttempt.underlying(error)),
+                .reason: failure.cause.rawValue,
+            ]) { current, _ in current }
+            // A token, never a fingerprint: a report says whether the identity check passed,
+            // refused or never ran, which is the difference between "the Mac is off" and
+            // "something else is answering at the Mac's address".
+            if let verdict = RemoteHostTrust.verdictToken(for: host) {
+                fields[.detail] = verdict
             }
+            MobileDiagnostics.recordConnectivity(.hostRefreshFailed, level: .error, fields: fields)
         }
     }
 
@@ -1116,9 +1311,11 @@ final class RemoteAppModel: ObservableObject {
             return
         }
         RemoteHostTrust.register(discoveredHost: host, at: resolution.baseURL)
-        MobileDiagnostics.record(.hostDiscoveryMatched, fields: [
+        MobileDiagnostics.recordConnectivity(.hostDiscoveryMatched, fields: [
             .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
             .transport: RemoteHostEndpointKind.lan,
+            .phase: "resolve",
+            .result: "matched",
             .origin: MobileDiagnostics.originDigest(resolution.baseURL),
         ])
     }
@@ -1146,7 +1343,7 @@ final class RemoteAppModel: ObservableObject {
 
     // MARK: - Live app-theme events
 
-    private struct ConnectionCandidate {
+    struct ConnectionCandidate: Sendable {
         let link: RemoteConnectionLink
         let isHosted: Bool
         /// The product name of the way in this attempt belongs to. Port-walk attempts keep the
@@ -1156,58 +1353,166 @@ final class RemoteAppModel: ObservableObject {
         /// abandoned once that door has answered. Nil for the hosted route, which is one
         /// rendezvous rather than an address with ports on it.
         let doorID: String?
+        /// Original position in the complete candidate list. Lanes retain it so concurrent
+        /// diagnostics still reconstruct the host's full route plan rather than four local lists.
+        let diagnosticAttempt: Int?
+        let diagnosticTotal: Int?
+
+        init(
+            link: RemoteConnectionLink,
+            isHosted: Bool,
+            kind: String,
+            doorID: String?,
+            diagnosticAttempt: Int? = nil,
+            diagnosticTotal: Int? = nil
+        ) {
+            self.link = link
+            self.isHosted = isHosted
+            self.kind = kind
+            self.doorID = doorID
+            self.diagnosticAttempt = diagnosticAttempt
+            self.diagnosticTotal = diagnosticTotal
+        }
     }
 
-    private struct SuccessfulConnection {
+    private struct SuccessfulConnection: Sendable {
         let response: RemoteMeDTO
         let link: RemoteConnectionLink
         let isHosted: Bool
+        let kind: String
     }
 
     private func fetchMe(
         from host: PairedRemoteHost,
-        reportsProgress: Bool
+        reportsProgress: Bool,
+        trace: String
     ) async throws -> SuccessfulConnection {
         let expectedRouteCount = max(host.connectionOptionLabels.count, 1)
-        var currentRouteKind: String?
-        var currentRouteNumber = 0
+        let remoteCandidates = host.candidates(preferring: discoveredAddresses[host.id])
+        let diagnosticPositions = Dictionary(uniqueKeysWithValues: remoteCandidates.enumerated().map {
+            ($0.element.link, $0.offset + 1)
+        })
+        let localCandidateLanes = PrivateNetworkRouteRacePlan.lanes(remoteCandidates).map { lane in
+            lane.map {
+                ConnectionCandidate(
+                    link: $0.link,
+                    isHosted: false,
+                    kind: $0.kind,
+                    doorID: $0.doorID,
+                    diagnosticAttempt: diagnosticPositions[$0.link],
+                    diagnosticTotal: remoteCandidates.count
+                )
+            }
+        }
+        let localCandidates = localCandidateLanes.flatMap { $0 }
+        let hasHostedRoute = host.isOwnerDevice
+            && host.hostedServiceURL != nil
+            && host.hostedCredential != nil
 
-        func beginRoute(_ kind: String) {
-            guard reportsProgress else { return }
-            guard kind != currentRouteKind else { return }
-            let previous = currentRouteKind
-            currentRouteKind = kind
-            currentRouteNumber += 1
+        if reportsProgress, let firstKind = localCandidates.first?.kind
+            ?? (hasHostedRoute ? RemoteHostEndpointKind.hosted : nil) {
             connectionProgress = .tryingRoute(
-                kind: kind,
-                previousKind: previous,
-                number: currentRouteNumber,
-                total: max(expectedRouteCount, currentRouteNumber)
+                kind: firstKind,
+                previousKind: nil,
+                number: 1,
+                total: expectedRouteCount
             )
         }
 
-        let prepared = await connectionCandidates(for: host, routeWillBegin: beginRoute)
-        var lastError: Error = prepared.error ?? RemoteClientError.invalidResponse
-        // A door that has answered is done, whatever it answered. The remaining attempts on it
-        // are the sticky port range, and knocking on nine more ports after the Mac has refused a
-        // bearer, named a protocol version, or presented the wrong certificate finds nothing.
-        var answeredDoors: Set<String> = []
-        for (index, candidate) in prepared.candidates.enumerated() {
-            if let doorID = candidate.doorID, answeredDoors.contains(doorID) { continue }
-            beginRoute(candidate.kind)
-            do {
-                let timeout: TimeInterval? = prepared.candidates.count > 1
-                    && index < prepared.candidates.count - 1
-                    ? 4 : nil
-                let response = try await RemoteClient(link: candidate.link).fetchMe(timeout: timeout)
-                if reportsProgress {
-                    connectionProgress = .loadingSessions(routeKind: candidate.kind)
-                }
-                return SuccessfulConnection(
-                    response: response,
-                    link: candidate.link,
-                    isHosted: candidate.isHosted
+        var attempts: [FirstSuccessfulTaskRace.Attempt<SuccessfulConnection>] = []
+        for (index, lane) in localCandidateLanes.enumerated() {
+            attempts.append(.init(
+                id: "private.\(index)",
+                failurePriority: index
+            ) { @MainActor [weak self] in
+                guard let self else { throw CancellationError() }
+                return try await self.fetchMeSequentially(candidates: lane, trace: trace)
+            })
+        }
+        if hasHostedRoute {
+            attempts.append(.init(id: "hosted", failurePriority: 1) { @MainActor [weak self] in
+                guard let self else { throw CancellationError() }
+                return try await self.fetchMeHosted(
+                    from: host,
+                    trace: trace,
+                    racesPrivateRoute: !localCandidates.isEmpty
                 )
+            })
+        }
+
+        do {
+            let winner = try await withTaskCancellationHandler {
+                try await FirstSuccessfulTaskRace.run(
+                    attempts,
+                    winnerSelected: { @MainActor [weak self] winnerID in
+                        guard winnerID != "hosted" else { return }
+                        // The hosted manager coalesces its negotiation in an unstructured task.
+                        // Stop that owner before the structured race waits for its losing child.
+                        await self?.hostedConnectionFailed(hostID: host.id)
+                    }
+                )
+            } onCancel: { [weak self] in
+                // Structured child cancellation does not propagate into the manager's shared,
+                // unstructured negotiation. Explicitly close it so switching Macs or starting a
+                // newer refresh never waits for an irrelevant hosted timeout.
+                Task { @MainActor in
+                    await self?.hostedConnectionFailed(hostID: host.id)
+                }
+            }
+            if reportsProgress {
+                connectionProgress = .loadingSessions(routeKind: winner.value.kind)
+            }
+            return winner.value
+        } catch FirstSuccessfulTaskRace.RaceError.noAttempts {
+            throw RemoteClientError.invalidResponse
+        }
+    }
+
+    /// Walks one bounded race lane in its established order. A sticky LAN port range stays in one
+    /// lane and stops as soon as its door has answered or proved unreachable.
+    private func fetchMeSequentially(
+        candidates: [ConnectionCandidate],
+        trace: String
+    ) async throws -> SuccessfulConnection {
+        try await Self.walk(candidates, trace: trace, phase: "request") { index, candidate in
+            let timeout = candidates.count > 1 && index < candidates.count - 1
+                ? 4
+                : RemoteClient.defaultRequestTimeout
+            return try await self.fetchMe(
+                candidate: candidate,
+                trace: trace,
+                attempt: candidate.diagnosticAttempt ?? index + 1,
+                total: candidate.diagnosticTotal ?? candidates.count,
+                timeout: timeout
+            )
+        }
+    }
+
+    /// The walk itself: candidates in order, first success wins, and a door is abandoned as soon
+    /// as it has answered or proved unreachable.
+    ///
+    /// The attempt is a closure so the walk can be driven by scripted outcomes. DNS, routing,
+    /// timeout and response failures otherwise depend on network state that a test fixture cannot
+    /// reproduce deterministically.
+    ///
+    /// A door that has answered is done, whatever it answered, and so is a door the network or
+    /// resolver definitively cannot reach. The remaining attempts on either are the sticky port
+    /// range: another port cannot change an authenticated response, pin mismatch, DNS failure or
+    /// explicit no-route error. A generic request timeout does not close the door because it
+    /// carries no connection-phase evidence about the address or its other ports.
+    static func walk<Value>(
+        _ candidates: [ConnectionCandidate],
+        trace: String,
+        phase: String,
+        peer: String? = nil,
+        attempt: (Int, ConnectionCandidate) async throws -> Value
+    ) async throws -> Value {
+        var lastError: Error = RemoteClientError.invalidResponse
+        var closedDoors: Set<String> = []
+        for (index, candidate) in candidates.enumerated() {
+            if let doorID = candidate.doorID, closedDoors.contains(doorID) { continue }
+            do {
+                return try await attempt(index, candidate)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -1215,24 +1520,200 @@ final class RemoteAppModel: ObservableObject {
                     underlying: error,
                     host: candidate.link.baseURL.host
                 )
-                if let doorID = candidate.doorID,
-                   Self.doorHasAnswered(error, host: candidate.link.baseURL.host) {
-                    answeredDoors.insert(doorID)
-                }
-                if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
+                closeDoor(
+                    for: error,
+                    candidates: candidates,
+                    index: index,
+                    closedDoors: &closedDoors,
+                    trace: trace,
+                    phase: phase,
+                    peer: peer
+                )
             }
         }
         throw lastError
     }
 
-    /// Whether a failure means something was there, rather than nothing being there.
+    /// Ends the rest of one door's port walk when its failure ruled the address out, and says so
+    /// once rather than once per port.
     ///
-    /// An HTTP status and a refused certificate both came from a server; a refused or timed-out
-    /// connection did not. Only the second is a reason to try the next port of the range.
-    private static func doorHasAnswered(_ error: Error, host: String?) -> Bool {
-        if error is RemoteClientError { return true }
-        guard let host else { return false }
-        return RemoteClient.pinningDelegate.verdict(forHost: host) == .rejectedFingerprintMismatch
+    /// The record exists because the skip is otherwise invisible: a support report would show
+    /// attempt 2 failing and attempt 12 starting with nothing between them to say why. One
+    /// bounded record per door names the reason, the failure behind it and how many attempts it
+    /// stood in for — never one per skipped port, which would put the cardinality back.
+    static func closeDoor(
+        for error: Error,
+        candidates: [ConnectionCandidate],
+        index: Int,
+        closedDoors: inout Set<String>,
+        trace: String,
+        phase: String,
+        peer: String? = nil
+    ) {
+        let candidate = candidates[index]
+        guard let doorID = candidate.doorID else { return }
+        let host = candidate.link.baseURL.host
+        guard let ending = RemoteDoorWalk.ending(
+            for: error,
+            trustVerdict: host.flatMap { RemoteClient.pinningDelegate.verdict(forHost: $0) }
+        ) else { return }
+        closedDoors.insert(doorID)
+        let skippedCandidates = candidates[(index + 1)...].filter { $0.doorID == doorID }
+        let skipped = skippedCandidates.count
+        guard skipped > 0 else { return }
+        var fields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .transport: candidate.kind,
+            .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
+            .phase: phase,
+            .kind: "candidate",
+            .result: "skipped",
+            .reason: ending.rawValue,
+            .code: MobileDiagnostics.errorCode(RemoteConnectionAttempt.underlying(error)),
+            .attempt: String(skippedCandidates.first?.diagnosticAttempt ?? index + 2),
+            .total: String(candidate.diagnosticTotal ?? candidates.count),
+            .detail: String(skipped),
+        ]
+        if let peer { fields[.peer] = peer }
+        MobileDiagnostics.recordConnectivity(.hostRouteEnded, fields: fields)
+    }
+
+    private func fetchMeHosted(
+        from host: PairedRemoteHost,
+        trace: String,
+        racesPrivateRoute: Bool
+    ) async throws -> SuccessfulConnection {
+        let preparedAt = MobileDiagnostics.monotonicNow()
+        let baseFields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
+            .transport: RemoteHostEndpointKind.hosted,
+            .phase: "prepare",
+            .timeoutMS: MobileDiagnostics.milliseconds(PeerTransportBounds.negotiationTimeout),
+        ]
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteStarted,
+            fields: baseFields.merging([.result: "started"]) { current, _ in current }
+        )
+        let link: RemoteConnectionLink
+        do {
+            guard let prepared = try await hostedConnections.link(for: host, trace: trace) else {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: .warning,
+                    fields: baseFields.merging([
+                        .result: "unavailable",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: preparedAt),
+                        .code: "hosted.unavailable",
+                    ]) { current, _ in current }
+                )
+                throw RemoteClientError.invalidResponse
+            }
+            link = prepared
+        } catch {
+            let cancelled = error is CancellationError || Task.isCancelled
+            if !(error is RemoteClientError) {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: cancelled ? .info : .warning,
+                    fields: baseFields.merging([
+                        .result: cancelled ? "cancelled" : "failed",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: preparedAt),
+                        .code: cancelled ? "swift.cancelled" : MobileDiagnostics.errorCode(error),
+                    ]) { current, _ in current }
+                )
+            }
+            await hostedConnectionFailed(hostID: host.id)
+            if cancelled { throw CancellationError() }
+            throw error
+        }
+        if activeHostID == host.id {
+            activeHostedHostID = host.id
+            activeHostedLink = link
+        }
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteEnded,
+            fields: baseFields.merging([
+                .result: "succeeded",
+                .durationMS: MobileDiagnostics.elapsedMilliseconds(since: preparedAt),
+            ]) { current, _ in current }
+        )
+        let timeout = racesPrivateRoute ? 4 : RemoteClient.defaultRequestTimeout
+        do {
+            return try await fetchMe(
+                candidate: ConnectionCandidate(
+                    link: link,
+                    isHosted: true,
+                    kind: RemoteHostEndpointKind.hosted,
+                    doorID: nil
+                ),
+                trace: trace,
+                attempt: 1,
+                total: 1,
+                timeout: timeout
+            )
+        } catch {
+            await hostedConnectionFailed(hostID: host.id)
+            throw error
+        }
+    }
+
+    private func fetchMe(
+        candidate: ConnectionCandidate,
+        trace: String,
+        attempt: Int,
+        total: Int,
+        timeout: TimeInterval
+    ) async throws -> SuccessfulConnection {
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let baseFields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .transport: candidate.kind,
+            .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
+            .phase: "request",
+            .kind: candidate.doorID == nil ? "hosted" : "candidate",
+            .attempt: String(attempt),
+            .total: String(total),
+            .timeoutMS: MobileDiagnostics.milliseconds(timeout),
+        ]
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteStarted,
+            fields: baseFields.merging([.result: "started"]) { current, _ in current }
+        )
+        do {
+            let response = try await RemoteClient(link: candidate.link).fetchMe(timeout: timeout)
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                fields: baseFields.merging([
+                    .result: "succeeded",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { current, _ in current }
+            )
+            return SuccessfulConnection(
+                response: response,
+                link: candidate.link,
+                isHosted: candidate.isHosted,
+                kind: candidate.kind
+            )
+        } catch {
+            let cancelled = error is CancellationError || Task.isCancelled
+            var fields = baseFields.merging([
+                .result: cancelled ? "cancelled" : "failed",
+                .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                .code: cancelled ? "swift.cancelled" : MobileDiagnostics.errorCode(error),
+            ]) { current, _ in current }
+            if let remote = error as? RemoteClientError,
+               case .server(let status) = remote {
+                fields[.status] = String(status)
+            }
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                level: cancelled ? .info : .warning,
+                fields: fields
+            )
+            if cancelled { throw CancellationError() }
+            throw error
+        }
     }
 
     /// Tries every policy-approved endpoint with one request id. A timeout after the Mac has
@@ -1246,20 +1727,61 @@ final class RemoteAppModel: ObservableObject {
             throw CancellationError()
         }
         let requestID = UUID().uuidString.lowercased()
-        let prepared = await connectionCandidates(for: host)
+        let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
+        let preparedAt = MobileDiagnostics.monotonicNow()
+        let preparationFields: [RemoteDiagnosticField: String] = [
+            .trace: requestID,
+            .peer: peer,
+            .phase: "mutation.prepare",
+            .result: "started",
+        ]
+        MobileDiagnostics.recordConnectivity(.hostRouteStarted, fields: preparationFields)
+        let prepared = await connectionCandidates(for: host, trace: requestID)
+        var preparedFields = preparationFields
+        preparedFields[.result] = prepared.candidates.isEmpty ? "failed" : "succeeded"
+        preparedFields[.durationMS] = MobileDiagnostics.elapsedMilliseconds(since: preparedAt)
+        if let error = prepared.error {
+            preparedFields[.code] = MobileDiagnostics.errorCode(error)
+        }
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteEnded,
+            level: prepared.candidates.isEmpty ? .warning : .info,
+            fields: preparedFields
+        )
         var lastError: Error = prepared.error ?? RemoteClientError.invalidResponse
-        var answeredDoors: Set<String> = []
+        var closedDoors: Set<String> = []
         for (index, candidate) in prepared.candidates.enumerated() {
-            if let doorID = candidate.doorID, answeredDoors.contains(doorID) { continue }
+            if let doorID = candidate.doorID, closedDoors.contains(doorID) { continue }
+            let timeout = prepared.candidates.count > 1
+                && index < prepared.candidates.count - 1
+                ? 8
+                : RemoteClient.defaultRequestTimeout
+            let startedAt = MobileDiagnostics.monotonicNow()
+            let routeFields: [RemoteDiagnosticField: String] = [
+                .trace: requestID,
+                .peer: peer,
+                .transport: candidate.kind,
+                .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
+                .phase: "mutation.request",
+                .result: "started",
+                .attempt: String(index + 1),
+                .total: String(prepared.candidates.count),
+                .timeoutMS: MobileDiagnostics.milliseconds(timeout),
+            ]
+            MobileDiagnostics.recordConnectivity(.hostRouteStarted, fields: routeFields)
             do {
-                let timeout: TimeInterval? = prepared.candidates.count > 1
-                    && index < prepared.candidates.count - 1
-                    ? 8 : nil
                 let response = try await operation(
                     RemoteClient(link: candidate.link, requestTimeout: timeout),
                     requestID
                 )
                 guard activeHostID == hostID else { throw CancellationError() }
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    fields: routeFields.merging([
+                        .result: "succeeded",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    ]) { _, new in new }
+                )
                 invalidateRefreshes()
                 if let index = hosts.firstIndex(where: { $0.id == hostID }),
                    (candidate.isHosted
@@ -1275,26 +1797,69 @@ final class RemoteAppModel: ObservableObject {
                 }
                 return response
             } catch is CancellationError {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    fields: routeFields.merging([
+                        .result: "cancelled",
+                        .code: "swift.cancelled",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    ]) { _, new in new }
+                )
                 throw CancellationError()
             } catch let error as RemoteClientError {
+                var failedFields = routeFields.merging([
+                    .result: "failed",
+                    .code: MobileDiagnostics.errorCode(error),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+                if case .server(let status) = error {
+                    failedFields[.status] = String(status)
+                }
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: .warning,
+                    fields: failedFields
+                )
                 // HTTP answers are authoritative. Failover is for transport loss, not for
                 // bypassing an authorization or compatibility decision made by the Mac. A
                 // gateway failure can belong to the route in front of it, and the same request
                 // id keeps trying the next route safe even if the Mac did receive it.
                 if case .server(let status) = error, [502, 503, 504].contains(status) {
                     lastError = error
-                    if let doorID = candidate.doorID { answeredDoors.insert(doorID) }
+                    Self.closeDoor(
+                        for: error,
+                        candidates: prepared.candidates,
+                        index: index,
+                        closedDoors: &closedDoors,
+                        trace: requestID,
+                        phase: "mutation.request",
+                        peer: peer
+                    )
                     if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
                     continue
                 }
                 if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
                 throw error
             } catch {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: .warning,
+                    fields: routeFields.merging([
+                        .result: "failed",
+                        .code: MobileDiagnostics.errorCode(error),
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    ]) { _, new in new }
+                )
                 lastError = error
-                if let doorID = candidate.doorID,
-                   Self.doorHasAnswered(error, host: candidate.link.baseURL.host) {
-                    answeredDoors.insert(doorID)
-                }
+                Self.closeDoor(
+                    for: error,
+                    candidates: prepared.candidates,
+                    index: index,
+                    closedDoors: &closedDoors,
+                    trace: requestID,
+                    phase: "mutation.request",
+                    peer: peer
+                )
                 if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
             }
         }
@@ -1303,7 +1868,8 @@ final class RemoteAppModel: ObservableObject {
 
     private func connectionCandidates(
         for host: PairedRemoteHost,
-        routeWillBegin: ((String) -> Void)? = nil
+        routeWillBegin: ((String) -> Void)? = nil,
+        trace: String? = nil
     ) async -> (candidates: [ConnectionCandidate], error: Error?) {
         var candidates: [ConnectionCandidate] = []
         var preparationError: Error?
@@ -1311,7 +1877,7 @@ final class RemoteAppModel: ObservableObject {
             if host.hostedServiceURL != nil, host.hostedCredential != nil {
                 routeWillBegin?(RemoteHostEndpointKind.hosted)
             }
-            if let hostedLink = try await hostedConnections.link(for: host) {
+            if let hostedLink = try await hostedConnections.link(for: host, trace: trace) {
                 candidates.append(
                     ConnectionCandidate(
                         link: hostedLink,
@@ -1355,7 +1921,8 @@ final class RemoteAppModel: ObservableObject {
         hostID: String,
         response: RemoteMeDTO,
         successfulLink: RemoteConnectionLink,
-        generation: Int
+        generation: Int,
+        trace: String
     ) async {
         guard activeHostID == hostID, refreshGeneration == generation,
               let index = hosts.firstIndex(where: { $0.id == hostID }),
@@ -1382,6 +1949,19 @@ final class RemoteAppModel: ObservableObject {
             <= Self.hostedCredentialRenewalLeadTime
         guard needsCredential,
               hostedProvisioningRetryAfter[hostID, default: .distantPast] <= Date() else { return }
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let fields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
+            .transport: PairedRemoteHost.endpointKind(for: successfulLink.baseURL),
+            .origin: MobileDiagnostics.originDigest(successfulLink.baseURL),
+            .phase: "refresh.provisionHosted",
+            .timeoutMS: MobileDiagnostics.milliseconds(RemoteClient.defaultRequestTimeout),
+        ]
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteStarted,
+            fields: fields.merging([.result: "started"]) { _, new in new }
+        )
         do {
             let issued = try await RemoteClient(link: successfulLink).issueHostedDeviceCredential()
             let (serviceURL, credential) = try Self.validateHostedCredential(
@@ -1389,7 +1969,18 @@ final class RemoteAppModel: ObservableObject {
                 expectedHostID: hosts[index].hostID ?? hostID
             )
             guard activeHostID == hostID, refreshGeneration == generation,
-                  let currentIndex = hosts.firstIndex(where: { $0.id == hostID }) else { return }
+                  let currentIndex = hosts.firstIndex(where: { $0.id == hostID }) else {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: .warning,
+                    fields: fields.merging([
+                        .result: "discarded",
+                        .code: "refresh.generationChanged",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    ]) { _, new in new }
+                )
+                return
+            }
             let changed = hosts[currentIndex].hostedServiceURL != serviceURL
                 || hosts[currentIndex].hostedCredential != credential
             hosts[currentIndex].hostedServiceURL = serviceURL
@@ -1400,9 +1991,33 @@ final class RemoteAppModel: ObservableObject {
                 disconnectThemeEvents()
                 await hostedConnectionFailed(hostID: hostID)
             }
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                fields: fields.merging([
+                    .result: "succeeded",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
         } catch is CancellationError {
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                fields: fields.merging([
+                    .result: "cancelled",
+                    .code: "swift.cancelled",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
             return
         } catch {
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteEnded,
+                level: .warning,
+                fields: fields.merging([
+                    .result: "failed",
+                    .code: MobileDiagnostics.errorCode(error),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+            )
             hostedProvisioningRetryAfter[hostID] = Date().addingTimeInterval(
                 Self.hostedProvisioningRetryDelay
             )
@@ -1464,7 +2079,30 @@ final class RemoteAppModel: ObservableObject {
 
         let link = activeHostedHostID == host.id ? activeHostedLink ?? host.link : host.link
         let client = RemoteClient(link: link)
-        guard let task = try? client.eventsWebSocketTask() else {
+        let trace = MobileDiagnostics.connectivityTrace()
+        themeEventsStartedAt = MobileDiagnostics.monotonicNow()
+        themeEventsDiagnosticFields = [
+            .trace: trace,
+            .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
+            .transport: PairedRemoteHost.endpointKind(for: link.baseURL),
+            .origin: MobileDiagnostics.originDigest(link.baseURL),
+            .surface: "events",
+        ]
+        let task: URLSessionWebSocketTask
+        do {
+            task = try client.eventsWebSocketTask()
+        } catch {
+            MobileDiagnostics.recordConnectivity(
+                .socketFailed,
+                level: .error,
+                fields: themeEventFields(phase: "events.hello").merging([
+                    .result: "failed",
+                    .code: MobileDiagnostics.errorCode(error),
+                    .timeoutMS: MobileDiagnostics.milliseconds(
+                        Self.themeEventsHelloDeadline
+                    ),
+                ]) { _, new in new }
+            )
             scheduleThemeEventsRecovery(for: host.id)
             return
         }
@@ -1474,7 +2112,19 @@ final class RemoteAppModel: ObservableObject {
         let generation = themeEventsGeneration
         themeEventsHostID = host.id
         themeEventsTask = task
+        themeEventsDidReceiveHello = false
+        MobileDiagnostics.recordConnectivity(
+            .socketConnecting,
+            fields: themeEventFields(phase: "events.hello").merging([
+                .result: "started",
+                .attempt: String(themeEventsRecoveryAttempt + 1),
+                .timeoutMS: MobileDiagnostics.milliseconds(Self.themeEventsHelloDeadline),
+                .protocolVersion: String(RemoteProtocol.current),
+                .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
+            ]) { _, new in new }
+        )
         task.resume()
+        armThemeEventsHelloDeadline(hostID: host.id, generation: generation)
 
         let auth = RemoteClientMessage(
             type: "auth",
@@ -1514,6 +2164,17 @@ final class RemoteAppModel: ObservableObject {
                 }
                 // The server sends an authoritative appTheme frame immediately after auth. Any
                 // well-formed event proves this socket is authenticated and clears backoff.
+                if !themeEventsDidReceiveHello {
+                    themeEventsDidReceiveHello = true
+                    cancelThemeEventsHelloDeadline()
+                    MobileDiagnostics.recordConnectivity(
+                        .socketConnected,
+                        fields: themeEventFields(phase: "events.hello").merging([
+                            .result: "succeeded",
+                            .attempt: String(themeEventsRecoveryAttempt + 1),
+                        ]) { _, new in new }
+                    )
+                }
                 themeEventsRecoveryAttempt = 0
                 switch envelope.type {
                 case "appTheme":
@@ -1550,9 +2211,37 @@ final class RemoteAppModel: ObservableObject {
                     continue
                 }
             }
+            if !Task.isCancelled,
+               themeEventsGeneration == generation,
+               themeEventsTask === task {
+                cancelThemeEventsHelloDeadline()
+                MobileDiagnostics.recordConnectivity(
+                    .socketEnded,
+                    fields: themeEventFields(
+                        phase: themeEventsDidReceiveHello ? "events.session" : "events.hello"
+                    ).merging([
+                        .result: "ended",
+                        .reason: "remoteClose",
+                    ]) { _, new in new }
+                )
+            }
         } catch is CancellationError {
             return
-        } catch {}
+        } catch {
+            if themeEventsGeneration == generation, themeEventsTask === task {
+                cancelThemeEventsHelloDeadline()
+                MobileDiagnostics.recordConnectivity(
+                    .socketFailed,
+                    level: .error,
+                    fields: themeEventFields(
+                        phase: themeEventsDidReceiveHello ? "events.session" : "events.hello"
+                    ).merging([
+                        .result: "failed",
+                        .code: MobileDiagnostics.errorCode(error),
+                    ]) { _, new in new }
+                )
+            }
+        }
         if themeEventsGeneration == generation, themeEventsTask === task {
             themeEventsTask = nil
             themeEventsReceiveTask = nil
@@ -1562,7 +2251,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     private func disconnectThemeEvents() {
-        clearThemeEventSocket()
+        clearThemeEventSocket(reason: "owner")
         themeEventsRecoveryTask?.cancel()
         themeEventsRecoveryTask = nil
         themeEventsRecoveryAttempt = 0
@@ -1572,13 +2261,29 @@ final class RemoteAppModel: ObservableObject {
         discardPendingSessionDeltas()
     }
 
-    private func clearThemeEventSocket() {
+    private func clearThemeEventSocket(reason: String = "replaced") {
+        let hadTask = themeEventsTask != nil
+        if hadTask, !themeEventsDiagnosticFields.isEmpty {
+            MobileDiagnostics.recordConnectivity(
+                .socketEnded,
+                fields: themeEventFields(
+                    phase: themeEventsDidReceiveHello ? "events.session" : "events.hello"
+                ).merging([
+                    .result: "ended",
+                    .reason: reason,
+                ]) { _, new in new }
+            )
+        }
         themeEventsGeneration &+= 1
+        cancelThemeEventsHelloDeadline()
         themeEventsReceiveTask?.cancel()
         themeEventsReceiveTask = nil
         themeEventsTask?.cancel(with: .goingAway, reason: nil)
         themeEventsTask = nil
         themeEventsHostID = nil
+        themeEventsDidReceiveHello = false
+        themeEventsStartedAt = nil
+        themeEventsDiagnosticFields = [:]
     }
 
     private func scheduleThemeEventsRecovery(for hostID: String) {
@@ -1590,6 +2295,16 @@ final class RemoteAppModel: ObservableObject {
             Self.maximumThemeEventsRecoveryDelay
         )
         themeEventsRecoveryAttempt &+= 1
+        if !themeEventsDiagnosticFields.isEmpty {
+            MobileDiagnostics.recordConnectivity(
+                .socketReconnectScheduled,
+                fields: themeEventFields(phase: "events.backoff").merging([
+                    .result: "scheduled",
+                    .attempt: String(themeEventsRecoveryAttempt + 1),
+                    .delayMS: MobileDiagnostics.milliseconds(delay),
+                ]) { _, new in new }
+            )
+        }
         themeEventsRecoveryTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(delay))
@@ -1608,6 +2323,58 @@ final class RemoteAppModel: ObservableObject {
         if activeHostID == hostID, themeEventsTask == nil {
             scheduleThemeEventsRecovery(for: hostID)
         }
+    }
+
+    private func armThemeEventsHelloDeadline(hostID: String, generation: Int) {
+        cancelThemeEventsHelloDeadline()
+        themeEventsHelloDeadlineTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.themeEventsHelloDeadline)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.themeEventsHelloDeadlineExpired(hostID: hostID, generation: generation)
+        }
+    }
+
+    private func cancelThemeEventsHelloDeadline() {
+        themeEventsHelloDeadlineTask?.cancel()
+        themeEventsHelloDeadlineTask = nil
+    }
+
+    private func themeEventsHelloDeadlineExpired(hostID: String, generation: Int) {
+        guard themeEventsGeneration == generation, themeEventsTask != nil,
+              !themeEventsDidReceiveHello else { return }
+        themeEventsHelloDeadlineTask = nil
+        MobileDiagnostics.recordConnectivity(
+            .socketFailed,
+            level: .error,
+            fields: themeEventFields(phase: "events.hello").merging([
+                .result: "failed",
+                .reason: RemoteConnectionFailure.Cause.helloTimeout.rawValue,
+                .code: "connection.helloTimeout",
+                .timeoutMS: MobileDiagnostics.milliseconds(Self.themeEventsHelloDeadline),
+            ]) { _, new in new }
+        )
+        themeEventsGeneration &+= 1
+        themeEventsReceiveTask?.cancel()
+        themeEventsReceiveTask = nil
+        themeEventsTask?.cancel(with: .goingAway, reason: nil)
+        themeEventsTask = nil
+        themeEventsHostID = nil
+        scheduleThemeEventsRecovery(for: hostID)
+    }
+
+    private func themeEventFields(phase: String) -> [RemoteDiagnosticField: String] {
+        var fields = themeEventsDiagnosticFields
+        fields[.phase] = phase
+        if let themeEventsStartedAt {
+            fields[.durationMS] = MobileDiagnostics.elapsedMilliseconds(
+                since: themeEventsStartedAt
+            )
+        }
+        return fields
     }
 
     private func scheduleSessionsChangedRefresh(for hostID: String) {

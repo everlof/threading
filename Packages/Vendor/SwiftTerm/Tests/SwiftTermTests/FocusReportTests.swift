@@ -1,8 +1,8 @@
 //
 //  FocusReportTests.swift
 //
-//  DECSET 1004 focus reporting: enabling arms future focus transitions without
-//  manufacturing one, then real focus changes report as they happen.
+//  DECSET 1004 focus reporting: enabling reports the current focus state
+//  immediately (xterm behavior), then focus changes report as they happen.
 //
 import Foundation
 import Testing
@@ -24,10 +24,10 @@ final class FocusReportTests: TerminalDelegate {
         Terminal(delegate: self, options: TerminalOptions(cols: 80, rows: 25))
     }
 
-    @Test func enablingFocusReportingWaitsForARealTransition() {
+    @Test func enablingFocusReportingSendsCurrentState() {
         let terminal = makeTerminal()
         terminal.feed(text: "\u{1b}[?1004h")
-        #expect(sent.isEmpty, "enabling the mode is not itself a focus transition")
+        #expect(sentString == "\u{1b}[I", "enable while focused reports focus-in immediately")
 
         sent.removeAll()
         terminal.setTerminalFocus(false)
@@ -38,15 +38,12 @@ final class FocusReportTests: TerminalDelegate {
         #expect(sentString == "\u{1b}[I")
     }
 
-    @Test func enablingWhileUnfocusedWaitsForTheNextTransition() {
+    @Test func enablingWhileUnfocusedReportsFocusOut() {
         let terminal = makeTerminal()
         terminal.setTerminalFocus(false)
         sent.removeAll()
         terminal.feed(text: "\u{1b}[?1004h")
-        #expect(sent.isEmpty, "enabling the mode is not itself a focus transition")
-
-        terminal.setTerminalFocus(true)
-        #expect(sentString == "\u{1b}[I")
+        #expect(sentString == "\u{1b}[O", "enable while unfocused reports focus-out immediately")
     }
 
     @Test func focusChangesAreSilentWhenReportingDisabled() {

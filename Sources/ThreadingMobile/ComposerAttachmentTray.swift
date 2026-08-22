@@ -355,7 +355,6 @@ final class ComposerAttachmentStripView: UIView {
     // MARK: - Private Methods
 
     private func setup() {
-        translatesAutoresizingMaskIntoConstraints = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.alwaysBounceHorizontal = true

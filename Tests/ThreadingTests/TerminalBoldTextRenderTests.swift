@@ -139,7 +139,7 @@ final class TerminalBoldTextRenderTests: XCTestCase {
         view.nativeForegroundColor = palette.foreground
         view.nativeBoldForegroundColor = palette.boldForeground
         view.nativeBackgroundColor = palette.background
-        view.getTerminal().feed(text: Sheet.sample)
+        view.feed(text: Sheet.sample)
 
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)

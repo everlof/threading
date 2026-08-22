@@ -104,6 +104,12 @@ final class ScheduledMessageScheduler {
             self?.evaluate()
             self?.evaluateCompletion(of: event.sessionID)
         }
+        // A send held by a session's curfew is waiting on nothing the clock or an activity edge
+        // announces: it is released when the user lifts the curfew, or when a standing quiet
+        // window closes. Without this the message would sit until the next unrelated tick.
+        observations.observe(CurfewDidChange.self) { [weak self] _ in
+            self?.evaluate()
+        }
         observations.observe(NSApplication.didBecomeActiveNotification) { [weak self] in
             self?.evaluate()
         }

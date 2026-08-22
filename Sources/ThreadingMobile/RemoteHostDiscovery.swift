@@ -281,8 +281,10 @@ final class RemoteHostDiscovery {
             guard tracked[name] != service.advertisement else { continue }
             remember(name, service.advertisement)
 
-            MobileDiagnostics.record(.hostDiscoveryFound, fields: [
+            MobileDiagnostics.recordConnectivity(.hostDiscoveryFound, fields: [
                 .peer: MobileDiagnostics.pseudonym(service.advertisement.hostID, prefix: "peer"),
+                .phase: "browse",
+                .result: "found",
                 .protocolVersion: String(service.advertisement.protocolVersion),
             ])
 
@@ -292,11 +294,13 @@ final class RemoteHostDiscovery {
             ) else {
                 // Somebody else's Mac, or this phone's own Mac before it was paired. Either way
                 // there is nothing to learn: pairing is the QR code and only the QR code.
-                MobileDiagnostics.record(.hostDiscoveryIgnored, fields: [
+                MobileDiagnostics.recordConnectivity(.hostDiscoveryIgnored, fields: [
                     .peer: MobileDiagnostics.pseudonym(
                         service.advertisement.hostID,
                         prefix: "peer"
                     ),
+                    .phase: "browse",
+                    .result: "ignored",
                 ])
                 continue
             }
@@ -332,15 +336,53 @@ final class RemoteHostDiscovery {
         let connection = NWConnection(to: service.endpoint, using: .tcp)
         let hostRecordID = host.id
         let finished = RemoteDiscoveryOnce()
+        let trace = MobileDiagnostics.connectivityTrace()
+        let startedAt = MobileDiagnostics.monotonicNow()
+        let diagnosticFields: [RemoteDiagnosticField: String] = [
+            .trace: trace,
+            .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
+            .transport: RemoteHostEndpointKind.lan,
+            .phase: "discovery.resolve",
+            .timeoutMS: MobileDiagnostics.milliseconds(RemoteDiscoveryLimits.resolveTimeout),
+        ]
+        MobileDiagnostics.recordConnectivity(
+            .hostRouteStarted,
+            fields: diagnosticFields.merging([.result: "started"]) { _, new in new }
+        )
 
-        @Sendable func finish(_ endpoint: NWEndpoint?) {
+        @Sendable func finish(
+            _ endpoint: NWEndpoint?,
+            result: String,
+            code: String? = nil
+        ) {
             guard finished.take() else { return }
             connection.stateUpdateHandler = nil
             connection.cancel()
             Task { @MainActor [weak self] in
                 self?.resolving.remove(name)
-                guard let self, let endpoint,
-                      let url = Self.baseURL(for: endpoint) else { return }
+                var fields = diagnosticFields.merging([
+                    .result: result,
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+                if let code { fields[.code] = code }
+                guard let endpoint, let url = Self.baseURL(for: endpoint) else {
+                    fields[.result] = "failed"
+                    if fields[.code] == nil {
+                        fields[.code] = endpoint == nil
+                            ? "discovery.noEndpoint"
+                            : "discovery.invalidEndpoint"
+                    }
+                    MobileDiagnostics.recordConnectivity(
+                        .hostRouteEnded,
+                        level: .warning,
+                        fields: fields
+                    )
+                    return
+                }
+                fields[.result] = "succeeded"
+                fields[.origin] = MobileDiagnostics.originDigest(url)
+                MobileDiagnostics.recordConnectivity(.hostRouteEnded, fields: fields)
+                guard let self else { return }
                 self.onResolved?(Resolution(hostRecordID: hostRecordID, baseURL: url))
             }
         }
@@ -348,16 +390,18 @@ final class RemoteHostDiscovery {
         connection.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                finish(connection.currentPath?.remoteEndpoint)
-            case .failed, .cancelled:
-                finish(nil)
+                finish(connection.currentPath?.remoteEndpoint, result: "succeeded")
+            case .failed:
+                finish(nil, result: "failed", code: "nw.failed")
+            case .cancelled:
+                finish(nil, result: "cancelled", code: "nw.cancelled")
             default:
                 break
             }
         }
         connection.start(queue: queue)
         queue.asyncAfter(deadline: .now() + RemoteDiscoveryLimits.resolveTimeout) {
-            finish(nil)
+            finish(nil, result: "failed", code: "nw.timeout")
         }
     }
 

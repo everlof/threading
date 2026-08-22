@@ -27,6 +27,8 @@ struct Policy: Decodable {
     let systemColors: Set<String>
     let confirmationResponses: Set<String>
     let confirmationGateDirectories: [String]
+    let pointerClaimSeamPaths: [String]
+    let pointerClaimRegistrar: String
     let exceptions: [Exception]
 
     func permits(path: String, kind: String, symbol: String) -> Bool {
@@ -126,6 +128,7 @@ final class BoundaryVisitor: SyntaxVisitor {
             }
             checkImplementationType(type: type, node: returnType)
         }
+        checkPointerClaimContract(node)
         return .visitChildren
     }
 
@@ -138,6 +141,8 @@ final class BoundaryVisitor: SyntaxVisitor {
                 firstArgumentLabel: arguments.first?.label?.text,
                 node: node
             )
+            // `addCursorRect(…)` on implicit self is a plain reference rather than a member.
+            checkPointerRegistration(memberName: reference.baseName.text, base: "", node: node)
         } else if let member = node.calledExpression.as(MemberAccessExprSyntax.self) {
             let memberName = member.declName.baseName.text
             let base = member.base?.trimmedDescription ?? ""
@@ -160,6 +165,8 @@ final class BoundaryVisitor: SyntaxVisitor {
                 // `AppKit.NSButton(...)`.
                 checkConstruction(writtenName: memberName, firstArgumentLabel: arguments.first?.label?.text, node: node)
             }
+
+            checkPointerRegistration(memberName: memberName, base: base, node: node)
 
             let factoryOwner = aliases[baseName] ?? baseName
             let factory = "\(factoryOwner).\(memberName)"
@@ -447,6 +454,57 @@ final class BoundaryVisitor: SyntaxVisitor {
         return parts.contains(Substring(name))
     }
 
+    /// The pointer is answered by declaring `PointerClaiming`, not by registering rectangles or
+    /// by setting a cursor from an event.
+    ///
+    /// Both banned calls are how the two 2026-08-21 bugs were written: a rectangle registered in
+    /// one place says nothing about what the *rest* of a view claims, so the parts nobody thought
+    /// about inherited whatever was behind them. A claim is a value, and a value can be reviewed,
+    /// carved against its neighbours, and asserted in a test.
+    private func checkPointerRegistration(
+        memberName: String,
+        base: String,
+        node: some SyntaxProtocol
+    ) {
+        guard !isPointerClaimSeam else { return }
+        if memberName == "addCursorRect" {
+            report(
+                node: node,
+                kind: "pointerClaim",
+                symbol: memberName,
+                message: "addCursorRect registers one rectangle and says nothing about the rest "
+                    + "of the view; declare PointerClaiming's restingPointer/pointerClaims"
+            )
+        }
+        if memberName == "set", base.hasPrefix("NSCursor.") {
+            report(
+                node: node,
+                kind: "pointerClaim",
+                symbol: base,
+                message: "\(base).set() answers the pointer from an event, outside the window's "
+                    + "own list; declare PointerClaiming's restingPointer/pointerClaims"
+            )
+        }
+    }
+
+    /// A `resetCursorRects` override is allowed only as the one line that hands over to the seam.
+    private func checkPointerClaimContract(_ node: FunctionDeclSyntax) {
+        guard !isPointerClaimSeam, node.name.text == "resetCursorRects" else { return }
+        let body = node.body?.statements.map(\.trimmedDescription) ?? []
+        guard body != ["\(policy.pointerClaimRegistrar)()"] else { return }
+        report(
+            node: node,
+            kind: "pointerClaim",
+            symbol: "resetCursorRects",
+            message: "resetCursorRects must be exactly `\(policy.pointerClaimRegistrar)()`; "
+                + "what the view claims belongs in restingPointer/pointerClaims"
+        )
+    }
+
+    private var isPointerClaimSeam: Bool {
+        policy.pointerClaimSeamPaths.contains(relativePath)
+    }
+
     private func report(
         node: some SyntaxProtocol,
         kind: String,
@@ -533,7 +591,15 @@ func verifyChecker(_ policy: Policy) {
         // the visitor still reaches the member access inside one.
         ("switch response { case .alertThirdButtonReturn: break; default: break }",
          "confirmationResponse"),
-        ("let accepted = response == ThemedAlert.firstButtonResponse", "confirmationResponse")
+        ("let accepted = response == ThemedAlert.firstButtonResponse", "confirmationResponse"),
+        ("addCursorRect(bounds, cursor: .arrow)", "pointerClaim"),
+        ("NSCursor.pointingHand.set()", "pointerClaim"),
+        ("override func resetCursorRects() { addCursorRect(bounds, cursor: .iBeam) }",
+         "pointerClaim"),
+        // The one-line hand-over is the whole allowance: a guard in front of it is a claim
+        // decided here rather than declared.
+        ("override func resetCursorRects() { guard isEnabled else { return }\n"
+            + "registerPointerClaims() }", "pointerClaim")
     ]
 
     for (source, expectedKind) in violations {
@@ -548,7 +614,9 @@ func verifyChecker(_ policy: Policy) {
         "let button = ThemedButton()",
         "let container = NSView()",
         // An OK-only alert states something; it asks nothing, so it is not a confirmation.
-        "let finished = response == .OK"
+        "let finished = response == .OK",
+        "override var restingPointer: NSCursor? { .pointingHand }",
+        "override func resetCursorRects() { registerPointerClaims() }"
     ]
     for source in allowed {
         let found = lint(source: source, path: path, policy: policy)

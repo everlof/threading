@@ -112,8 +112,11 @@ The prefix is a routing layer, not a miniature copy of the catalogue. It always 
 that Threading tools may load lazily and that it must discover a matching tool before claiming an
 in-app action is unavailable. It conditionally names only exceptional triggers whose miss is
 costly or hard to recover from: cross-chat control (list, message, steer, wait, or inspect status),
-Threading's own Browser, visual output, the user's explicit request to close this chat, and safe
-disk-full recovery. The Browser route names `browser_navigate` and `browser_snapshot` because a
+Threading's own Browser, visual output, the user's explicit request to rename or close this chat,
+and safe disk-full recovery. A rename/re-title request names `set_session_name`: two observed
+Codex sessions otherwise answered that they could not rename the chat without ever discovering
+or calling the advertised tool, leaving the first-prompt title unchanged on both Mac and iPhone.
+The Browser route names `browser_navigate` and `browser_snapshot` because a
 generic browser integration can also be installed in the agent host; the word "browser" alone is
 not enough to select Threading's session-scoped surface. `browser_navigate` creates the session tab
 when none exists, so an empty panel is not a failed capability probe. A disabled group contributes
@@ -478,6 +481,22 @@ name, and a compressed ranking prints no number next to a bar thinner than
 quantity at all. Empty strings are dropped too — one series needs no key, so `series.title` is
 routinely `""`, and joining it opened every single-series tooltip with a blank line.
 
+**The tooltip is measured with the options it is drawn with, and `.usesFontLeading` is not among
+them.** The box was clipping its last line for the second time. The first was placement — the box
+flipped away from the far edge and nothing pulled it back from the near one — and the arithmetic
+was checked against that twice more before the second report was believed. It was not the size
+either, in the sense of a rounding error: `boundingRect` honours `.usesFontLeading` and drawing
+into an *unflipped* context ignores it, which is every ordinary `NSView` and this chart. Measured
+at SF 11pt, the same reading is 13 points per line to the measurement and 14 to the draw, so a
+five-fragment box was 65 points tall and laid out 70. Dropping the option makes both passes agree
+in either context — by construction rather than by coincidence, which is the only property worth
+having when one number decides what the other one clips.
+
+No assertion about `boundingRect` could have seen this, because the two calls that disagreed with
+the screen agreed with each other. `ChartTooltipGeometryTests` therefore draws the string into an
+unflipped bitmap with room to spare and reads `NSStringDrawingContext.totalBounds` — what the text
+*wanted*, rather than what the rectangle allowed.
+
 Three more rules here were arrived at by rendering the fixtures and looking at them, and every
 assertion passed while each was wrong. A chart whose view is left on its autoresizing mask keeps
 the zero frame it was built with and draws a perfect title over an empty rectangle. A bar's own
@@ -529,6 +548,33 @@ exists so one chart cannot become a row nobody can scroll past; the panel is whe
 virtualized row's answer) and `boundedHeight` (the pane's) agree up to the ceiling and diverge
 above it, which is the one place the panel and the transcript are allowed to differ.
 
+**A value axis is stretched, not stretched *thin*.** Taking the pane is right until the plot has
+stopped being a picture: a panel dragged narrow drew 700 points of column over 120 points of plot,
+bars reduced to threads with nowhere under them to write the names of the categories they measure.
+`ChartCardView.applyPlotCeiling` caps the plot at `Design.Chart.maximumPlotAspect` — two, because
+a chart *is* allowed to be portrait in a tall pane; the cap is for what happens past that — and
+the pane's fill drops to a preference below it, since a required foot outranks any ceiling.
+
+The ceiling is a **constant**, refreshed from the card's own `layout()`, and never a multiple of
+`widthAnchor`. A constraint tying two dimensions together can be satisfied from either end, so the
+first version left the solver free to widen the *pane* instead of shortening the chart — and it
+did, holding an 82-point panel open at 307. Nothing in the card relates a height to a width, which
+is what makes it impossible for a chart to decide how narrow its pane may be.
+
+**Nor may a title decide it.** The same panel would not be dragged below 854 points with the
+reported chart open, because a split item is positioned at its holding priority (260) while an
+`NSTextField` resists compression at 750: a sentence held inside the card by a required `<=` was
+simply the pane's floor, and a pane minimum in a split window is the window's own. The title
+truncates and states itself in full on the pointer, at `Design.Priority.belowFittingSize` — one
+token now, since the panel's caption, its placeholder, its tab strip and the session inspector's
+path had each been fixed for this separately.
+
+**And only the string can promise the ellipsis.** With the resistance lowered, the render showed
+the title clipped mid-glyph rather than truncated: an attributed label carries its own paragraph
+style, and it outranks the field's `lineBreakMode`, so a card set to truncate in the way every
+caller expresses it was still clipping. The line-break mode goes in the attributed string
+(`ChartCardView.truncating`), and what the render found is now an assertion.
+
 The width axis has the same failure mode and its own bound: `Design.Chart.barGroupExtent` caps a
 bar group at `maximumBarThickness` per bar, so a two-category comparison across a wide pane draws
 bars rather than a pair of 300-point slabs. A bar's thickness carries no reading — only its length
@@ -549,8 +595,21 @@ persists.
 which series, how many values, how many categories — because the caller is a model holding the
 data and can fix its own call; a silently truncated chart is a wrong picture with no warning. The
 mark cap is on the *product* of series and categories and sits well below the two per-axis caps
-multiplied together, or it would never refuse anything. The tab keeps the values, so `Copy Chart
-Data` hands back a TSV: a picture of numbers you cannot get the numbers out of is a dead end.
+multiplied together, or it would never refuse anything. The tab keeps the values, so the numbers
+can be handed back as a TSV: a picture of numbers you cannot get the numbers out of is a dead end.
+
+**A content view that fills the pane carries its own controls.** Those two actions — the picture
+and the numbers behind it — are buttons in `ChartPaneViewController`'s own footer rather than
+items in the panel's `⋯` menu, where every other content kind keeps them. `hostedView` is added
+last so that it layers over the image and web surfaces, and it runs from under the header to the
+foot of the pane, so for a chart the `⋯` sat beneath an opaque ground: the copy the panel offered
+could not be clicked at all. `makeContentEntries` now returns nothing for a chart and says why.
+
+The picture is `cacheDisplay`ed from the live card rather than re-rendered from the spec, on the
+ground and with the air a pane gives it. A second renderer would be a second chart — differing in
+the theme, the width and which category names were thinned to fit, which is exactly what a picture
+is taken to preserve — and a card is transparent, so without the ground it pastes as dark axis ink
+onto whatever the document underneath happens to be.
 
 `display_scene` is the generic non-HTML visualization bridge, and after `display_chart` it is for
 geometry the caller *already has* rather than for measured values. Its value is the same bounded

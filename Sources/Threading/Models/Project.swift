@@ -118,6 +118,17 @@ struct Project: Codable, Identifiable {
   /// See `LimitRecoveryResolution`.
   var limitRecoveryPolicy: LimitRecoveryPolicy?
 
+  /// Whether this checkout's chats are exempt from the standing quiet hours. Nil inherits the
+  /// Settings answer; a chat with an answer of its own overrides it either way. See
+  /// `CurfewResolution`.
+  ///
+  /// **Only `.exempt` or nothing is ever written here.** `.until` is a wall-clock moment, and
+  /// one stored on a checkout would keep ending chats created weeks later at a time nobody
+  /// chose — `ProjectStore.setCurfewRule(_:forProjectID:)` refuses it. A record carrying one
+  /// anyway decodes rather than costing the checkout, and the chain falls through it to the
+  /// standing window.
+  var curfewRule: CurfewRule?
+
   /// Whether this is the scratchpad — the one folder Threading owns itself, for chats that are
   /// about no project. There is at most one, and it is the store's business to keep it that
   /// way; see `ProjectStore.scratchpadProject`.
@@ -142,12 +153,14 @@ struct Project: Codable, Identifiable {
     self.notificationsMuted = nil
     self.soundOverrides = nil
     self.limitRecoveryPolicy = nil
+    self.curfewRule = nil
     self.isScratchpad = nil
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, folderPath, sessions, terminals, isExpanded, createdAt, icon, themeID, themeName
     case notificationsMuted, soundOverrides, limitRecoveryPolicy, isScratchpad
+    case curfewRule
   }
 
   init(from decoder: Decoder) throws {
@@ -192,6 +205,13 @@ struct Project: Codable, Identifiable {
       String.self,
       forKey: .limitRecoveryPolicy
     ).flatMap(LimitRecoveryPolicy.init(rawValue:))
+    // Through the stored form, leniently, for the reason `AgentSession` states: a rule kind
+    // this build has never heard of reads as "never chose" instead of costing the checkout and
+    // every session inside it.
+    curfewRule = try container.decodeIfPresent(
+      CurfewRule.Stored.self,
+      forKey: .curfewRule
+    ).flatMap(CurfewRule.init(stored:))
     // Normalised on the way in: a stored `false` and an absent key mean the same thing, and
     // letting both exist would give the sidebar two encodings of "ordinary checkout" to match.
     isScratchpad = try container.decodeIfPresent(Bool.self, forKey: .isScratchpad) == true
@@ -213,6 +233,7 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
     try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
+    try container.encodeIfPresent(curfewRule, forKey: .curfewRule)
     try container.encodeIfPresent(isScratchpad, forKey: .isScratchpad)
   }
 

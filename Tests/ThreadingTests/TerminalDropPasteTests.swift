@@ -69,7 +69,10 @@ final class TerminalDropPasteTests: XCTestCase {
     /// both do, for the whole life of their TUI.
     private func enableBracketedPaste() {
         view.feed(text: "\u{1b}[?2004h")
-        XCTAssertTrue(view.getTerminal().bracketedPasteMode, "2004 should turn bracketed paste on")
+        XCTAssertTrue(
+            view.terminalStateSnapshot().bracketedPasteMode,
+            "2004 should turn bracketed paste on"
+        )
         recorder.written.removeAll()
     }
 
@@ -113,7 +116,7 @@ final class TerminalDropPasteTests: XCTestCase {
     /// A plain shell that never asked for bracketed paste gets the path and nothing else, which
     /// is what it got before any of this.
     func testProgramThatDidNotAskGetsThePathAlone() {
-        XCTAssertFalse(view.getTerminal().bracketedPasteMode)
+        XCTAssertFalse(view.terminalStateSnapshot().bracketedPasteMode)
         pasteboard.writeObjects([URL(fileURLWithPath: "/tmp/shot.png") as NSURL])
 
         XCTAssertTrue(view.accept(pasteboard))

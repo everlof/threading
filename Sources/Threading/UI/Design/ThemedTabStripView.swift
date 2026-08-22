@@ -203,7 +203,7 @@ final class ThemedTabStripView: NSView {
         // strip is the last thing in that pane still making it. It shows as a panel whose smallest
         // width moves with the name of the page open in it.
         setContentCompressionResistancePriority(
-            .init(NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1),
+            Design.Priority.belowFittingSize,
             for: .horizontal
         )
 

@@ -39,9 +39,9 @@ struct RemoteTerminalMouseReporting: Equatable, Sendable {
 ///
 /// Each of these is armed once, by an escape sequence the program emits when it starts, and each
 /// decides how the *client* behaves from then on: whether a tap is a click, whether an arrow is
-/// SS3 or CSI, whether a paste is bracketed. A phone attaching later sees only what the ring
-/// still holds, and a TUI's opening sequences are long gone by then — so they are carried as
-/// state and restated to every joining client.
+/// SS3 or CSI, whether a key needs an explicit release, whether a paste is bracketed. A phone
+/// attaching later sees only what the ring still holds, and a TUI's opening sequences are long
+/// gone by then — so they are carried as state and restated to every joining client.
 struct RemoteTerminalModes: Equatable, Sendable {
     /// `nil` when nothing on the PTY is tracking the mouse.
     let mouseReporting: RemoteTerminalMouseReporting?
@@ -49,12 +49,28 @@ struct RemoteTerminalModes: Equatable, Sendable {
     let applicationCursorKeys: Bool
     /// A paste the program wants delimited, so a multi-line one is not run line by line.
     let bracketedPaste: Bool
+    /// Kitty keyboard-protocol flags. These decide the encoding and whether a touch key owes a
+    /// release event after its press; zero is the classic terminal keyboard contract.
+    let keyboardEnhancementFlags: Int
+
+    init(
+        mouseReporting: RemoteTerminalMouseReporting?,
+        applicationCursorKeys: Bool,
+        bracketedPaste: Bool,
+        keyboardEnhancementFlags: Int = 0
+    ) {
+        self.mouseReporting = mouseReporting
+        self.applicationCursorKeys = applicationCursorKeys
+        self.bracketedPaste = bracketedPaste
+        self.keyboardEnhancementFlags = keyboardEnhancementFlags
+    }
 
     /// What a terminal holds when no program has asked for anything.
     static let plain = RemoteTerminalModes(
         mouseReporting: nil,
         applicationCursorKeys: false,
-        bracketedPaste: false
+        bracketedPaste: false,
+        keyboardEnhancementFlags: 0
     )
 }
 

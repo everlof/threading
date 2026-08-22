@@ -92,6 +92,14 @@ reshuffling it is a line move.
 - [Skin and Chrome Imports](skin-and-chrome-imports.md) — translate established declarative theme
   formats into Threading's existing theme and window-chrome model. Recorded for future
   evaluation; no format support committed.
+- [Durable sessions](durable-sessions.md) — stop a restart from killing every running turn, by
+  first making a session's bridge outlive one app launch (durable tokens, a unix socket, an MCP
+  stdio shim) and then moving PTY ownership into a small always-on host. **Low priority and
+  nothing scheduled.** Part one is small, ships alone and fixes degradation today; part two is
+  gated on it having shipped and settled, because until the bridge is reconnectable durability
+  only buys a live process nothing can address. Carries one slice that depends on neither: a
+  grace period on the remote viewport lease, so a phone re-entering a chat stops reflowing the
+  agent.
 
 ### Shipped — pointers remain
 

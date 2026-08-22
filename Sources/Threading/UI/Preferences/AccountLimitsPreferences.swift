@@ -78,6 +78,12 @@ final class AccountLimitsSectionController {
         rebuild()
     }
 
+    /// The semantic menu tree without presenting it, so a behavior test can hold the custom
+    /// routes to the same window-scoped list the Add button ships.
+    func templateEntriesForTesting(account: AgentAccount?) -> [ThemedMenuEntry] {
+        templates(for: account.map(Scope.account) ?? .allAccounts)
+    }
+
     // MARK: - Building
 
     private func rebuild() {
@@ -327,7 +333,6 @@ final class AccountLimitsSectionController {
                     }
                 ))
             }
-            entries.append(.separator)
             entries.append(.item(ThemedMenuItem(
                 title: AccountLimitsStrings.everyStep(
                     CustomLimitReceipt.percent(CustomLimitDefaults.tenPercentStep)
@@ -342,6 +347,7 @@ final class AccountLimitsSectionController {
                     )
                 }
             )))
+            entries.append(customValuesEntry(window: window, scope: scope))
 
             // The two templates that *act*, kept under their own headers so the list never reads
             // as one ladder of percentages with different consequences hidden in it.
@@ -385,6 +391,43 @@ final class AccountLimitsSectionController {
 
             return .item(ThemedMenuItem(title: window.name, submenu: entries))
         }
+    }
+
+    private func customValuesEntry(
+        window: (id: String, name: String),
+        scope: Scope
+    ) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: AccountLimitsStrings.customValuesMenu,
+            help: AccountLimitsStrings.customValuesHelp,
+            submenu: AccountLimitCustomTemplate.allCases.map {
+                customEntry($0, window: window, scope: scope)
+            }
+        ))
+    }
+
+    private func customEntry(
+        _ template: AccountLimitCustomTemplate,
+        window: (id: String, name: String),
+        scope: Scope
+    ) -> ThemedMenuEntry {
+        .item(ThemedMenuItem(
+            title: template.menuTitle,
+            help: template.menuHelp,
+            onChoose: { [weak self] in
+                self?.addCustom(template, window: window, to: scope)
+            }
+        ))
+    }
+
+    private func addCustom(
+        _ template: AccountLimitCustomTemplate,
+        window: (id: String, name: String),
+        to scope: Scope
+    ) {
+        guard let values = IntegerPromptAlert.ask(template.prompt(windowName: window.name)),
+              let rule = template.rule(windowID: window.id, values: values) else { return }
+        add(rule, to: scope)
     }
 
     /// The windows a scope can draw a line on, deduplicated by identifier and in reading order.
@@ -475,6 +518,159 @@ final class AccountLimitsSectionController {
         NotificationCenter.default.post(CustomLimitsDidChange())
         rebuild()
         onChange?()
+    }
+}
+
+// MARK: - Custom Templates
+
+/// The five places a preset percentage can be replaced by the person's own whole number.
+///
+/// This stays a semantic value rather than five modal closures in the menu builder: the prompt,
+/// its validation range, and the exact stored rule are one decision that behavior tests can read
+/// without running a modal.
+enum AccountLimitCustomTemplate: CaseIterable {
+    case alert
+    case repeatingAlert
+    case cap
+    case syntheticWindow
+    case reserveShare
+
+    private static let percentageRange = 1...99
+
+    var menuTitle: String {
+        switch self {
+        case .alert: return AccountLimitsStrings.customAlertMenu
+        case .repeatingAlert: return AccountLimitsStrings.customRepeatingAlertMenu
+        case .cap: return AccountLimitsStrings.customCapMenu
+        case .syntheticWindow: return AccountLimitsStrings.customSyntheticWindowMenu
+        case .reserveShare: return AccountLimitsStrings.customReserveShareMenu
+        }
+    }
+
+    var menuHelp: String? {
+        switch self {
+        case .reserveShare: return AccountLimitsStrings.customReserveShareHelp
+        default: return nil
+        }
+    }
+
+    func prompt(windowName: String) -> IntegerPromptRequest {
+        switch self {
+        case .alert:
+            return IntegerPromptRequest(
+                title: AccountLimitsStrings.customAlertTitle,
+                message: AccountLimitsStrings.customAlertMessage(windowName),
+                confirmTitle: AccountLimitsStrings.addAlert,
+                fields: [percentageField(
+                    title: AccountLimitsStrings.notifyAt,
+                    accessibilityLabel: AccountLimitsStrings.notifyAtAccessibility,
+                    current: 50
+                )],
+                helperText: AccountLimitsStrings.percentageHelper
+            )
+
+        case .repeatingAlert:
+            return IntegerPromptRequest(
+                title: AccountLimitsStrings.customRepeatingAlertTitle,
+                message: AccountLimitsStrings.customRepeatingAlertMessage(windowName),
+                confirmTitle: AccountLimitsStrings.addAlert,
+                fields: [percentageField(
+                    title: AccountLimitsStrings.every,
+                    accessibilityLabel: AccountLimitsStrings.everyAccessibility,
+                    current: 10
+                )],
+                helperText: AccountLimitsStrings.percentageHelper
+            )
+
+        case .cap:
+            return IntegerPromptRequest(
+                title: AccountLimitsStrings.customCapTitle,
+                message: AccountLimitsStrings.customCapMessage(windowName),
+                confirmTitle: AccountLimitsStrings.addLimit,
+                fields: [percentageField(
+                    title: AccountLimitsStrings.keepUnderLabel,
+                    accessibilityLabel: AccountLimitsStrings.keepUnderAccessibility,
+                    current: 80
+                )],
+                helperText: AccountLimitsStrings.percentageHelper
+            )
+
+        case .syntheticWindow:
+            return IntegerPromptRequest(
+                title: AccountLimitsStrings.customSyntheticWindowTitle,
+                message: AccountLimitsStrings.customSyntheticWindowMessage(windowName),
+                confirmTitle: AccountLimitsStrings.addWindow,
+                fields: [
+                    percentageField(
+                        title: AccountLimitsStrings.budget,
+                        accessibilityLabel: AccountLimitsStrings.budgetAccessibility,
+                        current: 15
+                    ),
+                    IntegerPromptFieldRequest(
+                        title: AccountLimitsStrings.window,
+                        accessibilityLabel: AccountLimitsStrings.windowHoursAccessibility,
+                        suffix: AccountLimitsStrings.hours,
+                        current: 5,
+                        range: CustomLimitDefaults.syntheticWindowHourRange
+                    )
+                ],
+                helperText: AccountLimitsStrings.syntheticWindowHelper
+            )
+
+        case .reserveShare:
+            return IntegerPromptRequest(
+                title: AccountLimitsStrings.customReserveShareTitle,
+                message: AccountLimitsStrings.customReserveShareMessage(windowName),
+                confirmTitle: AccountLimitsStrings.addReserve,
+                fields: [percentageField(
+                    title: AccountLimitsStrings.alwaysLeave,
+                    accessibilityLabel: AccountLimitsStrings.alwaysLeaveAccessibility,
+                    current: 50
+                )],
+                helperText: AccountLimitsStrings.percentageHelper
+            )
+        }
+    }
+
+    func rule(windowID: String, values: [Int]) -> CustomLimit? {
+        guard let percentage = values.first,
+              Self.percentageRange.contains(percentage) else { return nil }
+        let fraction = Double(percentage) / 100
+
+        switch self {
+        case .alert:
+            return .alert(windowID: windowID, at: fraction)
+        case .repeatingAlert:
+            return .everyStep(windowID: windowID, step: fraction)
+        case .cap:
+            return .cap(windowID: windowID, at: fraction)
+        case .syntheticWindow:
+            guard values.indices.contains(1),
+                  CustomLimitDefaults.syntheticWindowHourRange.contains(values[1]) else {
+                return nil
+            }
+            return .syntheticWindow(
+                windowID: windowID,
+                budget: fraction,
+                span: TimeInterval(values[1] * 3_600)
+            )
+        case .reserveShare:
+            return .paceShare(windowID: windowID, share: 1 - fraction)
+        }
+    }
+
+    private func percentageField(
+        title: String,
+        accessibilityLabel: String,
+        current: Int
+    ) -> IntegerPromptFieldRequest {
+        IntegerPromptFieldRequest(
+            title: title,
+            accessibilityLabel: accessibilityLabel,
+            suffix: AccountLimitsStrings.percentSuffix,
+            current: current,
+            range: Self.percentageRange
+        )
     }
 }
 
@@ -579,6 +775,81 @@ enum AccountLimitsStrings {
 
     static func reserveShare(_ percent: String) -> String {
         L10n.format("Always leave them %@", percent)
+    }
+
+    static var customAlertMenu: String { L10n.string("Custom alert…") }
+    static var customValuesMenu: String { L10n.string("Custom values…") }
+    static var customValuesHelp: String {
+        L10n.string("Enter exact percentages for alerts, spending limits, rolling windows, or reserved usage.")
+    }
+    static var customRepeatingAlertMenu: String { L10n.string("Custom repeating alert…") }
+    static var customCapMenu: String { L10n.string("Custom spending limit…") }
+    static var customSyntheticWindowMenu: String { L10n.string("Custom shorter window…") }
+    static var customReserveShareMenu: String { L10n.string("Custom reserved share…") }
+    static var customReserveShareHelp: String {
+        L10n.string("Leaves this share of what the clock has released unused; Threading may use the rest.")
+    }
+
+    static var customAlertTitle: String { L10n.string("Custom usage alert") }
+    static func customAlertMessage(_ window: String) -> String {
+        L10n.format(
+            "Choose the point in the %@ window when Threading should notify you.",
+            window
+        )
+    }
+    static var customRepeatingAlertTitle: String { L10n.string("Custom repeating alert") }
+    static func customRepeatingAlertMessage(_ window: String) -> String {
+        L10n.format("Choose how often the %@ window should notify you as it fills.", window)
+    }
+    static var customCapTitle: String { L10n.string("Custom spending limit") }
+    static func customCapMessage(_ window: String) -> String {
+        L10n.format(
+            "Threading will hold back work it starts on its own after the %@ window reaches this line. Turns you send still go through.",
+            window
+        )
+    }
+    static var customSyntheticWindowTitle: String { L10n.string("Custom shorter window") }
+    static func customSyntheticWindowMessage(_ window: String) -> String {
+        L10n.format(
+            "Choose how much of the %@ window Threading may spend inside one rolling window.",
+            window
+        )
+    }
+    static var customReserveShareTitle: String { L10n.string("Custom reserved share") }
+    static func customReserveShareMessage(_ window: String) -> String {
+        L10n.format(
+            "Reserve this share of %@ usage for the owner; Threading may use the rest.",
+            window
+        )
+    }
+
+    static var addAlert: String { L10n.string("Add Alert") }
+    static var addLimit: String { L10n.string("Add Limit") }
+    static var addWindow: String { L10n.string("Add Window") }
+    static var addReserve: String { L10n.string("Add Reserve") }
+    static var notifyAt: String { L10n.string("Notify at") }
+    static var notifyAtAccessibility: String { L10n.string("Notify at percentage") }
+    static var every: String { L10n.string("Every") }
+    static var everyAccessibility: String { L10n.string("Repeat every percentage") }
+    static var keepUnderLabel: String { L10n.string("Keep under") }
+    static var keepUnderAccessibility: String { L10n.string("Keep usage under percentage") }
+    static var budget: String { L10n.string("Budget") }
+    static var budgetAccessibility: String { L10n.string("Rolling-window budget percentage") }
+    static var window: String { L10n.string("Window") }
+    static var windowHoursAccessibility: String { L10n.string("Rolling-window length in hours") }
+    static var alwaysLeave: String { L10n.string("Always leave") }
+    static var alwaysLeaveAccessibility: String { L10n.string("Reserved percentage") }
+    static var percentSuffix: String { L10n.string("%") }
+    static var hours: String { L10n.string("hours") }
+    static var percentageHelper: String {
+        L10n.string("Enter a whole percentage from 1% to 99%.")
+    }
+    static var syntheticWindowHelper: String {
+        L10n.format(
+            "Whole numbers only: 1%%–99%% across a rolling window of %1$lld–%2$lld hours.",
+            CustomLimitDefaults.minimumSyntheticWindowHours,
+            CustomLimitDefaults.maximumSyntheticWindowHours
+        )
     }
 
     /// What a closed fold says about a login.

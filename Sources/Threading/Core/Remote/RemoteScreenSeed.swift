@@ -26,7 +26,8 @@ import SwiftTerm
 /// streamed is aimed at, and resetting them would misplace everything that arrives after the
 /// seed in order to tidy what came before it.
 ///
-/// A pure function over a `Terminal`, so the byte stream is unit-tested directly.
+/// A pure function over a copied terminal snapshot, so the byte stream is unit-tested directly
+/// without exposing SwiftTerm's mutable parser storage.
 enum RemoteScreenSeed {
 
     // MARK: - Constants
@@ -75,12 +76,12 @@ enum RemoteScreenSeed {
     // MARK: - Public Methods
 
     /// The repaint for `terminal`'s visible screen, ready to be replayed into a fresh client.
-    static func repaint(of terminal: Terminal) -> Data {
+    static func repaint(of terminal: TerminalViewStateSnapshot) -> Data {
         var out = ""
 
         // The client starts on the normal buffer. A session already running an alt-screen TUI
         // needs that switch replayed first or its repaint lands in the wrong buffer.
-        if terminal.isCurrentBufferAlternate {
+        if terminal.isAlternateBuffer {
             out += Sequence.enterAlternateBuffer
         }
         // Designate ASCII into G0 before writing a single glyph. A seed can follow an arbitrary
@@ -93,16 +94,15 @@ enum RemoteScreenSeed {
         // seed. Rows are rendered assuming they begin on default attributes, so say so.
         out += Sequence.selectAsciiG0 + Sequence.clearScreen + Sequence.resetAttributes
 
-        for row in 0..<terminal.rows {
+        for (row, line) in terminal.visibleRows.enumerated() {
             if row > 0 {
                 out += Sequence.rowSeparator
             }
-            guard let line = terminal.getLine(row: row) else { continue }
-            out += render(line, cols: terminal.cols)
+            out += render(line.cells, cols: terminal.dimensions.cols)
         }
 
-        let cursor = terminal.getCursorLocation()
-        out += cursorPosition(column: cursor.x, row: cursor.y)
+        let cursor = terminal.cursor
+        out += cursorPosition(column: cursor.col, row: cursor.row)
         if !terminal.cursorHidden {
             return Data(out.utf8)
         }
@@ -116,8 +116,8 @@ enum RemoteScreenSeed {
     /// Every row starts and ends on default attributes — `repaint` resets before the first one
     /// and this resets after any row that set something — so a plain row costs no escape bytes
     /// at all and a coloured run cannot bleed into the row below.
-    private static func render(_ line: BufferLine, cols: Int) -> String {
-        let end = min(line.getTrimmedLength(), min(line.count, cols))
+    private static func render(_ line: [TerminalVisibleCellSnapshot], cols: Int) -> String {
+        let end = min(trimmedLength(of: line), min(line.count, cols))
         guard end > 0 else { return "" }
 
         var out = ""
@@ -149,8 +149,8 @@ enum RemoteScreenSeed {
 
     /// The character to send for a cell: a blank cell holds `code == 0`, which is a NUL scalar
     /// rather than a space, and a client would drop it without advancing the cursor.
-    private static func printable(_ cell: CharData) -> Character {
-        let character = cell.getCharacter()
+    private static func printable(_ cell: TerminalVisibleCellSnapshot) -> Character {
+        let character = cell.character
         if character.unicodeScalars.first?.value == 0 {
             return Sequence.blankCell
         }
@@ -159,8 +159,20 @@ enum RemoteScreenSeed {
 
     /// How many cells a glyph owns. A double-width glyph is stored with a blank placeholder in
     /// the following cell; sending that placeholder as a space would shift the rest of the row.
-    private static func advance(past cell: CharData) -> Int {
-        max(Int(cell.width), singleCellAdvance)
+    private static func advance(past cell: TerminalVisibleCellSnapshot) -> Int {
+        max(cell.width, singleCellAdvance)
+    }
+
+    private static func trimmedLength(of line: [TerminalVisibleCellSnapshot]) -> Int {
+        var end = line.count
+        while end > 0 {
+            let cell = line[end - 1]
+            if cell.character.unicodeScalars.first?.value != 0, cell.character != " " {
+                break
+            }
+            end -= 1
+        }
+        return end
     }
 
     private static func cursorPosition(column: Int, row: Int) -> String {

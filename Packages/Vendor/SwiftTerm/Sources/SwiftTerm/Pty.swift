@@ -99,6 +99,20 @@ public class PseudoTerminalHelpers {
             return nil
         }
         if pid == 0 {
+            // A GUI or test host may install signal handlers before launching a terminal.
+            // The forked child inherits those dispositions, and a SIGTERM sent immediately
+            // after `startProcess` can otherwise be consumed before exec resets caught signals.
+            // Ignored dispositions even survive exec. A terminal child must begin with the
+            // ordinary process defaults rather than its embedding application's handlers.
+            _ = signal(SIGHUP, SIG_DFL)
+            _ = signal(SIGINT, SIG_DFL)
+            _ = signal(SIGQUIT, SIG_DFL)
+            _ = signal(SIGTERM, SIG_DFL)
+            _ = signal(SIGPIPE, SIG_DFL)
+            _ = signal(SIGTSTP, SIG_DFL)
+            _ = signal(SIGTTIN, SIG_DFL)
+            _ = signal(SIGTTOU, SIG_DFL)
+
             if let cCurrentDirectory {
                 _ = chdir(cCurrentDirectory)
             }

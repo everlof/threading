@@ -11,7 +11,7 @@ import AppKit
 /// A label is deliberately *not* this. `NSTextField(labelWithString:)` draws no bezel and no
 /// background, so it is already nothing but text in a themed colour; the erosion this exists to
 /// stop is the bezel, not the type.
-class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
+class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, PointerClaiming {
 
     /// Whether the editable well is permanent or belongs only to interaction.
     ///
@@ -196,6 +196,35 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary {
     override func mouseExited(with event: NSEvent) {
         guard surfacePresentation == .onInteraction else { return }
         isHovered = false
+    }
+
+    // MARK: - Pointer
+
+    /// The room the caret's cursor may claim — the whole control for an ordinary field, and less
+    /// for one carrying controls inside its trailing edge.
+    var caretRect: NSRect { bounds }
+
+    /// `NSTextField` claims one I-beam rectangle over its **whole bounds** — measured: it ignores
+    /// the cell's drawing rect, so an inset that keeps the *text* clear of something does not keep
+    /// the *pointer* clear of it — and claims none at all once the field is neither editable nor
+    /// selectable. Restated here rather than clipped afterwards, so the field answers the same
+    /// question every other view answers, in one place a test can read. `SearchFieldPointerTests`
+    /// pins the AppKit behaviour this mirrors.
+    var pointerClaims: [PointerClaim] {
+        guard isEnabled, isEditable || isSelectable else { return [] }
+        return [PointerClaim(caretRect, .iBeam)]
+    }
+
+    /// A field is a drawn well, so what is not the caret's room is still the field's own plate.
+    var restingPointer: NSCursor? { .arrow }
+
+    override func resetCursorRects() {
+        registerPointerClaims()
+    }
+
+    override func layout() {
+        super.layout()
+        refreshPointerClaims()
     }
 
     // MARK: - Focus
@@ -513,6 +542,11 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     /// Holds the trailing run on the query's own optical centre; see `textInkCenterOffset`.
     private var trailingControlsCentering: NSLayoutConstraint?
 
+    /// The room the run last asked for. Kept only to notice when it changes shape — a control
+    /// appearing or leaving moves the edge the pointer's I-beam stops at, and nothing about a
+    /// *subview's* visibility invalidates this view's own cursor rectangles.
+    private var trailingControlsWidth: CGFloat = 0
+
     private lazy var trailingControls: NSStackView = {
         trailingControlsBuilt = true
         let stack = NSStackView(views: [clearButton])
@@ -631,6 +665,38 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
         trailingContentInset = width > 0
             ? Layout.actionEdgeGap + width + Layout.actionTextGap
             : ThemedTextField.Layout.inset
+        guard width != trailingControlsWidth else { return }
+        trailingControlsWidth = width
+        refreshPointerClaims()
+    }
+
+    // MARK: - Pointer
+
+    /// Where the trailing run begins, in this field's own coordinates — nil while it holds
+    /// nothing visible.
+    ///
+    /// Read from the controls' **frames** rather than derived from the room the text yields: a
+    /// themed button's frame reaches past the alignment rect the stack lays it out by, so the
+    /// two answers differ by an optical inset, and it is the frame the pointer meets.
+    private var trailingControlsLeadingEdge: CGFloat? {
+        guard trailingControlsBuilt else { return nil }
+        return trailingControls.arrangedSubviews
+            .filter { !$0.isHidden }
+            .map { $0.convert($0.bounds, to: self).minX }
+            .min()
+    }
+
+    /// The caret's room stops where the trailing run begins: the words are what the I-beam is
+    /// for, and Ask AI and the ✕ are buttons. The field's own plate takes the arrow behind them,
+    /// and the buttons — themed controls — claim it for themselves as well.
+    override var caretRect: NSRect {
+        guard let edge = trailingControlsLeadingEdge else { return bounds }
+        return NSRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: max(0, edge - bounds.minX),
+            height: bounds.height
+        )
     }
 
     override var stringValue: String {

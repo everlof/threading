@@ -49,7 +49,8 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("transcriptRefusedTurnRecord", .transcriptRefusedTurnRecord),
             ("transcriptReplay", .transcriptReplay),
             ("terminalUI", .terminalUI),
-            ("transcriptInterruptedMessageRecord", .transcriptInterruptedMessageRecord)
+            ("transcriptInterruptedMessageRecord", .transcriptInterruptedMessageRecord),
+            ("escapeInterruptsTerminalTurn", .escapeInterruptsTerminalTurn)
         ]
 
         var seen: [Int: String] = [:]
@@ -171,6 +172,33 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
                 kind.supports(.transcriptInterruptedTurnRecord)
                     && kind.supports(.transcriptInterruptedMessageRecord),
                 "\(kind) claims two interruption record shapes"
+            )
+        }
+    }
+
+    /// Escape is the one key Threading presses on a sleeping user's behalf, so the runtimes it
+    /// is pressed into are named by a measurement rather than assumed from "it is a TUI".
+    /// Claude Code and Codex both return to their prompt on it and write down that they did.
+    /// Grok, OpenCode and Cursor have no measured answer, and a curfew gives them its hold alone
+    /// rather than a keystroke whose effect nobody has watched.
+    func testOnlyMeasuredRuntimesAreEverTypedAnEscape() {
+        XCTAssertTrue(AgentKind.claude.supports(.escapeInterruptsTerminalTurn))
+        XCTAssertTrue(AgentKind.codex.supports(.escapeInterruptsTerminalTurn))
+        XCTAssertFalse(AgentKind.grok.supports(.escapeInterruptsTerminalTurn))
+        XCTAssertFalse(AgentKind.openCode.supports(.escapeInterruptsTerminalTurn))
+        XCTAssertFalse(AgentKind.cursor.supports(.escapeInterruptsTerminalTurn))
+    }
+
+    /// A keystroke needs somewhere to land. Cursor is why this is asserted rather than assumed:
+    /// it hosts a conversation Threading renders natively and has no terminal surface here at
+    /// all, so a runtime claiming the Escape without `terminalUI` would be describing a PTY that
+    /// never exists — and the curfew's terminal branch would be unreachable code pretending to
+    /// be a policy.
+    func testEscapeInterruptImpliesATerminalToTypeItInto() {
+        for kind in AgentKind.allCases where kind.supports(.escapeInterruptsTerminalTurn) {
+            XCTAssertTrue(
+                kind.supports(.terminalUI),
+                "\(kind) is typed an Escape with no terminal to type it into"
             )
         }
     }

@@ -980,6 +980,85 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Records when one conversation stops being spent. Nil returns it to following its
+    /// checkout, and the standing quiet hours beyond that — the same three scopes as the mute
+    /// and the limit recovery above, and optional for the same reason.
+    ///
+    /// **A moved deadline clears the state in the same write.** The deadline is the curfew
+    /// instance's identity: a new one owes its wrap-up again, announces its hold again and
+    /// starts its interrupt budget at zero, so leaving the old receipts beneath it would read
+    /// as a curfew that had already done everything it was going to do. Clearing the rule does
+    /// the same, because the receipts describe a fence that no longer stands. Both happen here
+    /// rather than in the engine so that the two facts reach SQLite as one write and a crash
+    /// between them cannot leave a deadline describing somebody else's receipts.
+    ///
+    /// Arming the fence is all this stores. Acting on it — the wrap-up, the hold, the
+    /// interrupt — is `SessionCurfewCenter`'s, because it needs a live session to act on.
+    @discardableResult
+    func setCurfewRule(
+        _ rule: CurfewRule?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        let standing = projects[location.projectIndex].sessions[location.sessionIndex].curfewRule
+        guard standing != rule else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].curfewRule = rule
+        if rule == nil || standing?.deadline != rule?.deadline {
+            projects[location.projectIndex].sessions[location.sessionIndex].curfewState = nil
+        }
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+        notifyChanged()
+        return .applied
+    }
+
+    /// The same for a whole checkout, which can exempt its chats and cannot end them.
+    ///
+    /// `.until` is refused rather than stored: it names a wall-clock moment, and one written
+    /// here would keep ending chats created weeks later at a time nobody chose. The scope that
+    /// names a moment is the conversation; the scope that names a standing window is Settings.
+    @discardableResult
+    func setCurfewRule(
+        _ rule: CurfewRule?,
+        forProjectID projectID: ProjectID
+    ) -> ProjectMutationResult {
+        guard let index = index(ofProject: projectID) else { return .targetNotFound }
+        if case .until = rule { return .unsupportedValue }
+        guard projects[index].curfewRule != rule else { return .unchanged }
+        projects[index].curfewRule = rule
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+        notifyChanged()
+        return .applied
+    }
+
+    /// Writes what one session's curfew has already done — and nothing else.
+    ///
+    /// Separate from the rule above because they have different authors: the rule is the user's
+    /// answer, and this is the engine's record of what followed from it. Handed over whole, the
+    /// way `setSoundOverrides` is, so a caller reads the current state, records the one receipt
+    /// it means and passes the result back.
+    @discardableResult
+    func updateCurfewState(
+        _ state: SessionCurfewState?,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].curfewState
+            != state else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].curfewState = state
+        guard save() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
+        notifyChanged()
+        return .applied
+    }
+
     /// Records which sounds one conversation overrides. Nil clears the record's whole say, so it
     /// follows its project — and the app beyond that — again.
     ///

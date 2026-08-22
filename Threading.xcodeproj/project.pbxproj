@@ -32,12 +32,15 @@
 		A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61900010000000000000002 /* RemoteTerminalScrollTests.swift */; };
 		A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */; };
 		A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63600010000000000000002 /* RemoteTerminalTapTests.swift */; };
+		A64200010000000000000001 /* RemoteTerminalSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */; };
 		A63700010000000000000001 /* MobileNavigationTitleMorphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */; };
+		A63800010000000000000001 /* MobileIssueReportOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */; };
 		A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62100010000000000000002 /* MobileWorkingOrbTests.swift */; };
 		A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */; };
 		A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62300010000000000000002 /* MobileAgentIdentityTests.swift */; };
 		A69900010000000000000001 /* RemoteTerminalViewportLeaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A69900010000000000000002 /* RemoteTerminalViewportLeaseTests.swift */; };
 		A70000010000000000000001 /* MobileTerminalWireFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */; };
+		A70100010000000000000001 /* MobileSessionConnectionPoolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70100010000000000000002 /* MobileSessionConnectionPoolTests.swift */; };
 		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
 		A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61700010000000000000002 /* RemoteConnectionFailureTests.swift */; };
 		A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */; };
@@ -164,7 +167,9 @@
 		A61900010000000000000002 /* RemoteTerminalScrollTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalScrollTests.swift; sourceTree = "<group>"; };
 		A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardDismissalTests.swift; sourceTree = "<group>"; };
 		A63600010000000000000002 /* RemoteTerminalTapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalTapTests.swift; sourceTree = "<group>"; };
+		A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalSelectionTests.swift; sourceTree = "<group>"; };
 		A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileNavigationTitleMorphTests.swift; sourceTree = "<group>"; };
+		A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileIssueReportOutboxTests.swift; sourceTree = "<group>"; };
 		A62100010000000000000002 /* MobileWorkingOrbTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileWorkingOrbTests.swift; sourceTree = "<group>"; };
 		A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionNavigationTransitionTests.swift; sourceTree = "<group>"; };
 		A62300010000000000000002 /* MobileAgentIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAgentIdentityTests.swift; sourceTree = "<group>"; };
@@ -180,6 +185,7 @@
 		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
 		A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostDiscoveryTests.swift; sourceTree = "<group>"; };
 		A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileTerminalWireFixtureTests.swift; sourceTree = "<group>"; };
+		A70100010000000000000002 /* MobileSessionConnectionPoolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionConnectionPoolTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70000010000000000000001 /* Sources/Threading/Resources/Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
@@ -198,17 +204,23 @@
 			membershipExceptions = (
 				Threading/Resources/Info.plist,
 				"ThreadingMobile-Info.plist",
+				ThreadingMobile/AdvancedConnectionSettingsView.swift,
 				ThreadingMobile/ComposerAttachmentTray.swift,
 				ThreadingMobile/DemoExperience.swift,
+				ThreadingMobile/FirstSuccessfulTaskRace.swift,
 				ThreadingMobile/HostedRemoteConnectionManager.swift,
 				ThreadingMobile/Localizable.xcstrings,
 				ThreadingMobile/MobileAgentIdentity.swift,
+				ThreadingMobile/MobileIssueReportArchive.swift,
 				ThreadingMobile/MobileIssueReporting.swift,
 				ThreadingMobile/MobileLoadingPlaceholder.swift,
 				ThreadingMobile/MobileMorphingTitle.swift,
+				ThreadingMobile/MobileSessionConnectionPool.swift,
 				ThreadingMobile/MobileSessionContinuityStore.swift,
+				ThreadingMobile/MobileSessionSettingsView.swift,
 				ThreadingMobile/MobileSettingsChrome.swift,
 				ThreadingMobile/MobileSettingsView.swift,
+				ThreadingMobile/MobileTerminalFontSize.swift,
 				ThreadingMobile/MobileTerminalKeyboardStore.swift,
 				ThreadingMobile/MobileTerminalWireFixture.swift,
 				ThreadingMobile/MobileTerminalWirePerformanceProbe.swift,
@@ -216,6 +228,7 @@
 				ThreadingMobile/MobileWorkingOrbView.swift,
 				ThreadingMobile/MobileWorkspaceActivity.swift,
 				ThreadingMobile/PairingView.swift,
+				ThreadingMobile/ProjectTerminalDetailView.swift,
 				ThreadingMobile/RemoteAppModel.swift,
 				ThreadingMobile/RemoteAttachmentsView.swift,
 				ThreadingMobile/RemoteBrowserFollowView.swift,
@@ -240,6 +253,7 @@
 				ThreadingMobile/SessionWorkspaceView.swift,
 				ThreadingMobile/TerminalKeyBar.swift,
 				ThreadingMobile/TerminalKeyboardEditorView.swift,
+				ThreadingMobile/TerminalSelectionQuoteTray.swift,
 				ThreadingMobile/TerminalViewRepresentable.swift,
 				ThreadingMobile/ThemedDialog.swift,
 				"ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings",
@@ -381,12 +395,15 @@
 				A61900010000000000000002 /* RemoteTerminalScrollTests.swift */,
 				A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */,
 				A63600010000000000000002 /* RemoteTerminalTapTests.swift */,
+				A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */,
 				A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */,
+				A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */,
 				A62100010000000000000002 /* MobileWorkingOrbTests.swift */,
 				A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */,
 				A62300010000000000000002 /* MobileAgentIdentityTests.swift */,
 				A69900010000000000000002 /* RemoteTerminalViewportLeaseTests.swift */,
 				A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */,
+				A70100010000000000000002 /* MobileSessionConnectionPoolTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -967,12 +984,15 @@
 				A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */,
 				A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */,
 				A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */,
+				A64200010000000000000001 /* RemoteTerminalSelectionTests.swift in Sources */,
 				A63700010000000000000001 /* MobileNavigationTitleMorphTests.swift in Sources */,
+				A63800010000000000000001 /* MobileIssueReportOutboxTests.swift in Sources */,
 				A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */,
 				A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */,
 				A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */,
 				A69900010000000000000001 /* RemoteTerminalViewportLeaseTests.swift in Sources */,
 				A70000010000000000000001 /* MobileTerminalWireFixtureTests.swift in Sources */,
+				A70100010000000000000001 /* MobileSessionConnectionPoolTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

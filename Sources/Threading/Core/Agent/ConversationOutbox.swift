@@ -27,9 +27,27 @@ struct ConversationOutbox: Equatable, Sendable {
 
     /// One message waiting its turn.
     struct Item: Equatable, Sendable, Identifiable {
+
+        /// Who put this in the queue.
+        ///
+        /// Everything here is the user's until a curfew has something to say. A curfew's
+        /// wrap-up is the one item a held outbox still hands over: the hold is there to stop
+        /// the session spending itself, and this message is what buys back the single turn an
+        /// interrupted agent needs to commit what is safe and write its handoff note. Draining
+        /// anything else while held would be the hold not holding.
+        ///
+        /// Carried on the item rather than kept in a queue beside this one, because order is
+        /// what this type is for: a wrap-up in a separate lane could not be reordered, edited or
+        /// removed like the row the user sees, and would arrive out of the sequence they wrote.
+        enum Origin: Equatable, Sendable {
+            case user
+            case curfewWindDown
+        }
+
         let id: ConversationMessageID
         var prompt: ConversationPrompt
         var state: MessageLifecycleState
+        var origin: Origin = .user
 
         /// What the row shows. Empty prose with staged context still reads as something, because
         /// `ConversationPrompt.visibleText` supplies the sentence a person would have typed.
@@ -51,6 +69,16 @@ struct ConversationOutbox: Equatable, Sendable {
     /// the queue's own gestures are concerned.
     var pending: [Item] { items.filter { $0.state.isPending } }
 
+    /// The item `handOverNext()` would take, without taking it.
+    ///
+    /// A held session's drain has to read the next item's `origin` *before* deciding whether it
+    /// may hand anything over, and `handOverNext()` marks what it returns. Peeking through
+    /// `pending.first` would build the whole filtered array to look at one element; more to the
+    /// point, a decision that has to un-hand-over what it just took is a decision with a window
+    /// in it — a reclaim would put the message back at the front of the queue with its state
+    /// rewritten, which is indistinguishable in the rail from a transport refusing it.
+    var nextPending: Item? { items.first { $0.state.isPending } }
+
     /// Whether another message may be written. A refusal is stated rather than silently dropping
     /// the oldest: a queue that quietly forgets what somebody typed is worse than one that says
     /// it is full.
@@ -70,11 +98,17 @@ struct ConversationOutbox: Equatable, Sendable {
     ///
     /// Nil means the queue is full. Empty prompts are refused here rather than at the composer,
     /// so no caller can put an unsendable row in front of the user.
+    ///
+    /// `origin` defaults to the user because that is who almost always typed it; the drain reads
+    /// it back off the item to decide what a held session may still hand over.
     @discardableResult
-    mutating func append(_ prompt: ConversationPrompt) -> ConversationMessageID? {
+    mutating func append(
+        _ prompt: ConversationPrompt,
+        origin: Item.Origin = .user
+    ) -> ConversationMessageID? {
         guard acceptsMore, !prompt.isEmpty else { return nil }
         let id = ConversationMessageID()
-        items.append(Item(id: id, prompt: prompt, state: .queued))
+        items.append(Item(id: id, prompt: prompt, state: .queued, origin: origin))
         return id
     }
 

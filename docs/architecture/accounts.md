@@ -1037,6 +1037,17 @@ arrives — which is the honest state, and visibly so. Naming a window with no r
 `UsageDefaults.label(forWindowID:)` exists for: there is no `Window` to take a `label` from until
 one lands, and the identifier is a key — a key on screen reads as a leak.
 
+The primary menu keeps its fast presets and one compact `Custom values…` submenu exposes the five
+exact routes: one-time alert, repeating step, fixed cap, synthetic rolling window, and reserved
+pace share. This keeps the full preset menu inside the compact Settings height while making the
+exact actions one predictable level deeper. The shared `IntegerPromptAlert` validates whole
+numbers before `ThemedAlert` dismisses, retaining the typed value and replacing its standing range
+hint with a correction when needed. Percentages are 1…99; the reserve prompt stores the complement
+as the pace allowance, so “leave 37%” becomes a 63% share of what elapsed time has released. A
+custom synthetic window takes both budget and hours, bounded to 1…168 hours at the prompt and
+stored-record validation boundaries; with ten rules per account and quarter-hour history, both
+cardinalities of the evaluation remain bounded.
+
 Two defects the render caught and no assertion would have, both now asserted directly:
 
 - the cards sat at about a third of the pane while every assertion about the section's width

@@ -102,6 +102,29 @@ enum Design {
         static let group = Spacing.large
     }
 
+    // MARK: - Layout Priority
+
+    /// The layout priorities this app names rather than spells, because each of them is a rule
+    /// about *meaning* that a bare number hides.
+    enum Priority {
+
+        /// For content that has already said it may be shortened — a truncating label, a strip
+        /// that scrolls — so that saying it is enough to make it true.
+        ///
+        /// `fittingSize` resolves at `.fittingSizeCompression` (50), and an ordinary view's
+        /// resistance is 750: held inside its container by a required `<=`, such content is
+        /// still a **measurement** there, whatever its line-break mode or its scrolling says.
+        /// Its text becomes the smallest width its pane is allowed to be — and a pane minimum in
+        /// a split window is the *window's* minimum. The display panel's floor has moved with a
+        /// placeholder sentence, a file name, the widest tab title and a chart title in turn,
+        /// each found the same way: a window whose smallest size depends on what is open in it.
+        /// Below the fitting-size pass the content shortens instead of pushing, and the tooltip
+        /// or the accessibility value carries the rest.
+        static let belowFittingSize = NSLayoutConstraint.Priority(
+            NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1
+        )
+    }
+
     // MARK: - Radius
 
     @MainActor
@@ -948,6 +971,16 @@ enum Design {
         /// two-thousand-point row in a conversation, which is a scroll, not a chart.
         static let minimumCardHeight: CGFloat = 160
         static let maximumCardHeight: CGFloat = 720
+        /// The tallest a plot may stand for its own width before the height stops being
+        /// resolution and starts being stretch.
+        ///
+        /// Two, rather than square, because a chart *is* allowed to be portrait: a pane is a
+        /// tall rectangle and a column chart read in one is the ordinary case, not the odd one.
+        /// The cap is there for what happens past that — a panel dragged narrow was drawing 700
+        /// points of column over 120 points of plot, bars reduced to threads with no room under
+        /// them for the names of the categories they measure. At two-to-one the extra height has
+        /// stopped adding anything a reader gets to use, so the chart leaves it to the pane.
+        static let maximumPlotAspect: CGFloat = 2
         static let rankingRowHeight: CGFloat = 32
         static let legendHeight: CGFloat = 16
         static let legendSwatch: CGFloat = 8

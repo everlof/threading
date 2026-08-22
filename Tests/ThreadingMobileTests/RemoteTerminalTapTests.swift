@@ -32,12 +32,14 @@ final class RemoteTerminalTapTests: XCTestCase {
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         XCTAssertTrue(
             view.forwardTap(
                 at: point(column: Fixture.tappedColumn, row: Fixture.tappedRow, in: view)
             )
         )
+        settleTerminalCallbacks(for: view)
 
         // Cb 0 is the left button; 1 is the middle one, which is what this used to send.
         XCTAssertTrue(
@@ -53,8 +55,10 @@ final class RemoteTerminalTapTests: XCTestCase {
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         view.forwardTap(at: point(column: Fixture.tappedColumn, row: Fixture.tappedRow, in: view))
+        settleTerminalCallbacks(for: view)
 
         XCTAssertTrue(
             recorder.text.contains("<0;\(Fixture.tappedColumn + 1);\(Fixture.tappedRow + 1)m"),
@@ -68,6 +72,7 @@ final class RemoteTerminalTapTests: XCTestCase {
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
         _ = view.resignFirstResponder()
         XCTAssertFalse(view.isFirstResponder)
 
@@ -108,6 +113,7 @@ final class RemoteTerminalTapTests: XCTestCase {
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
         _ = view.resignFirstResponder()
         XCTAssertFalse(view.isFirstResponder)
 
@@ -120,22 +126,21 @@ final class RemoteTerminalTapTests: XCTestCase {
         )
     }
 
-    /// With the keyboard already up there is nothing left for a double tap to ask, so it stays
-    /// what it always was over a tracking program: that program's click.
-    func testADoubleTapWhileTypingIsStillTheProgramsClick() {
+    /// With the keyboard already up, SwiftTerm 2 keeps double tap as the local
+    /// word-selection gesture even when the program tracks single clicks.
+    func testADoubleTapWhileTypingSelectsTextLocally() {
         let (window, view) = makeFocusedView()
         defer { window.isHidden = true }
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         doubleTap(view, at: point(column: Fixture.tappedColumn, row: Fixture.tappedRow, in: view))
 
         XCTAssertTrue(view.isFirstResponder)
-        XCTAssertTrue(
-            recorder.text.contains("<0;\(Fixture.tappedColumn + 1);\(Fixture.tappedRow + 1)M"),
-            "expected the program's left click, got \(recorder.text)"
-        )
+        XCTAssertTrue(recorder.text.isEmpty)
+        XCTAssertTrue(view.hasActiveSelection)
     }
 
     /// A phone that will not forward reports — view-only, or typing into a draft — must not have
@@ -147,6 +152,7 @@ final class RemoteTerminalTapTests: XCTestCase {
         view.allowMouseReporting = false
 
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         XCTAssertNil(view.panMouseGesture, "the program must not be given this phone's finger")
         XCTAssertEqual(view.panGestureRecognizer.minimumNumberOfTouches, 1)
@@ -157,6 +163,7 @@ final class RemoteTerminalTapTests: XCTestCase {
         let view = makeView()
         view.allowMouseReporting = false
         view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
 
         view.allowMouseReporting = true
 
@@ -227,6 +234,7 @@ final class RemoteTerminalTapTests: XCTestCase {
         for line in 0..<Fixture.lines {
             view.feed(text: "line \(line)\r\n")
         }
+        settleTerminalCallbacks(for: view)
         return view
     }
 
@@ -256,11 +264,20 @@ final class RemoteTerminalTapTests: XCTestCase {
     private func tap(_ view: RemoteTerminalView, at point: CGPoint) {
         let recognizer = EndedTap(at: point, on: view)
         view.perform(Selector(("singleTap:")), with: recognizer)
+        settleTerminalCallbacks(for: view)
     }
 
     private func doubleTap(_ view: RemoteTerminalView, at point: CGPoint) {
         let recognizer = EndedTap(at: point, on: view)
         view.perform(Selector(("doubleTap:")), with: recognizer)
+        settleTerminalCallbacks(for: view)
+    }
+
+    private func settleTerminalCallbacks(for view: RemoteTerminalView) {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
     }
 }
 
@@ -294,19 +311,19 @@ private final class RecordingTerminalDelegate: NSObject, TerminalViewDelegate {
         return String(decoding: bytes, as: UTF8.self)
     }
 
-    nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
+    func send(source: TerminalView, data: ArraySlice<UInt8>) {
         lock.lock()
         bytes.append(contentsOf: data)
         lock.unlock()
     }
 
-    nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
-    nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
-    nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-    nonisolated func scrolled(source: TerminalView, position: Double) {}
-    nonisolated func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
-    nonisolated func bell(source: TerminalView) {}
-    nonisolated func clipboardCopy(source: TerminalView, content: Data) {}
-    nonisolated func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
-    nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
+    func setTerminalTitle(source: TerminalView, title: String) {}
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    func scrolled(source: TerminalView, position: Double) {}
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+    func bell(source: TerminalView) {}
+    func clipboardCopy(source: TerminalView, content: Data) {}
+    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }

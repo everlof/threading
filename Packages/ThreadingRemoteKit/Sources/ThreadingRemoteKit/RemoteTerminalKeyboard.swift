@@ -310,9 +310,10 @@ public struct RemoteTerminalLatchState: Equatable, Sendable {
     public var isIdle: Bool { control == .off && alt == .off }
 }
 
-/// Spells keys as bytes. All sequence knowledge lives here, including the two details the
-/// original fixed bar ignored: DECCKM (application cursor mode changes what an unmodified
-/// arrow/home/end sends) and xterm's `;N` modifier parameter.
+/// Spells keys with the classic terminal keyboard contract, including DECCKM (application cursor
+/// mode changes what an unmodified arrow/home/end sends) and xterm's `;N` modifier parameter.
+/// Live terminal views use their emulator's negotiated encoder; this remains the portable model
+/// and the fallback for clients that do not own an emulator instance.
 public enum RemoteTerminalKeyEncoder {
     private static let escapeByte: UInt8 = 0x1b
 

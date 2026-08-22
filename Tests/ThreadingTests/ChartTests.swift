@@ -407,6 +407,203 @@ final class ChartTests: XCTestCase {
         XCTAssertGreaterThan(card.frame.height, 100)
     }
 
+    /// **A title is a sentence, not a measurement.** Reported from the running app with a
+    /// screenshot: the panel would not be dragged narrower than the title of the chart open in
+    /// it, and the title was exactly as wide as the pane.
+    ///
+    /// A split item is positioned by a constraint at its holding priority — 260 for this panel —
+    /// while an `NSTextField` resists compression at 750, so a label held inside the card by a
+    /// required `<=` simply outranked the drag. Measured on the reported chart: an 854pt floor
+    /// under a panel whose own chrome is 82. The title now ends in an ellipsis, with the whole of
+    /// it on the pointer.
+    ///
+    /// Asserted as *the same floor either way* rather than against a number, because the number
+    /// is the pane's own business — it is the chart's two copy controls and the panel's chrome —
+    /// while the defect was that it moved with what an agent happened to write.
+    func testALongTitleIsNotHowNarrowThePaneMayBe() throws {
+        let sentence = "One watch instance costs ~0.9 CPU cores, and most of it is pushing "
+            + "pixels — not simulating"
+        let floor = DisplayPaneDefaults.slimmestWidth
+
+        let (wordy, card) = try pane(
+            titled(sentence),
+            width: floor,
+            height: 640,
+            widthHeldAt: DisplayPaneDefaults.holdingPriority
+        )
+        let (brief, _) = try pane(
+            titled("Cost"),
+            width: floor,
+            height: 640,
+            widthHeldAt: DisplayPaneDefaults.holdingPriority
+        )
+
+        XCTAssertEqual(
+            wordy.frame.width, brief.frame.width, accuracy: 1,
+            "the pane stopped at the width of the title rather than at its own floor"
+        )
+        XCTAssertLessThan(
+            wordy.frame.width, 120,
+            "a chart tab may cost the pane its own controls, and nothing else"
+        )
+        XCTAssertLessThanOrEqual(card.frame.width, wordy.frame.width)
+        // The same width is what the *window* is charged: a pane minimum in a split window is the
+        // window's own minimum, and `fittingSize` resolves below an ordinary label's resistance
+        // rather than above it.
+        XCTAssertEqual(wordy.fittingSize.width, brief.fittingSize.width, accuracy: 1)
+
+        // And it gives way with an ellipsis rather than by clipping mid-glyph. Found by looking
+        // at the render: only the *string* can make that promise, because attributed content
+        // carries its own paragraph style and it outranks the field's line-break mode.
+        let title = try XCTUnwrap(labels(in: wordy).first { $0.stringValue == sentence })
+        let paragraph = title.attributedStringValue.attribute(
+            .paragraphStyle,
+            at: 0,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        XCTAssertEqual(paragraph?.lineBreakMode, .byTruncatingTail)
+    }
+
+    private func labels(in view: NSView) -> [NSTextField] {
+        var found: [NSTextField] = []
+        if let label = view as? NSTextField { found.append(label) }
+        for subview in view.subviews { found.append(contentsOf: labels(in: subview)) }
+        return found
+    }
+
+    /// The reported chart, retitled: two categories, one series, a sentence at the top.
+    private func titled(_ title: String) -> ChartSpec {
+        ChartSpec(
+            title: title,
+            summary: nil,
+            kind: .bar,
+            categories: ["display on", "display off"],
+            series: [ChartSpec.Series(
+                name: "WebContent", values: [37.6, 30.1], details: nil, emphasis: nil
+            )],
+            stacked: false,
+            valueFormat: .percent,
+            unit: nil,
+            maximumValue: nil
+        )
+    }
+
+    /// A tall, narrow pane is not a reason to draw a tall, narrow chart.
+    ///
+    /// The height of a column chart is its value axis and more of it does resolve the values
+    /// better — up to the point where the plot has stopped being a picture. Dragged narrow, the
+    /// panel drew 700 points of column over 120 points of plot: bars reduced to threads, with no
+    /// room under them for the names of the categories they measure.
+    func testATallNarrowPaneGetsBackTheHeightTheChartCannotUse() throws {
+        let (host, card) = try pane(comparison(), width: 260, height: 900)
+        let plot = card.chartForTesting
+
+        XCTAssertLessThanOrEqual(
+            plot.frame.height,
+            plot.frame.width * Design.Chart.maximumPlotAspect + 1,
+            "the plot is standing taller than its own width allows"
+        )
+        // What it gave back is ground under the chart, which is the same answer a ranking gives —
+        // and it is still a chart, not a sliver: the floor under it holds.
+        XCTAssertGreaterThan(host.frame.height - card.frame.height, 200)
+        XCTAssertGreaterThanOrEqual(plot.frame.height, Design.Chart.minimumCardHeight)
+    }
+
+    /// The cap is about the *value* axis, so the one chart whose height is its categories is
+    /// exempt: a ranking in a narrow pane keeps every row rather than compressing thirty of them
+    /// into a proportion nobody reads. Same exception, same reason, as `boundedHeight(for:)`.
+    func testANarrowPaneStillGivesARankingEveryOneOfItsRows() throws {
+        let spec = ranking(rows: 30)
+        let (_, card) = try pane(spec, width: 260, height: 1_400)
+
+        XCTAssertEqual(
+            card.frame.height,
+            try XCTUnwrap(ChartCardView.boundedHeight(for: spec)),
+            accuracy: 1
+        )
+    }
+
+    // MARK: - Taking the chart with you
+
+    /// A chart the reader opened is a chart they want to put in a message, and until now the
+    /// only route out of the panel was a screenshot.
+    ///
+    /// Drawn from the live card rather than re-rendered, so the picture is the theme, the width
+    /// and the thinned axis labels they are actually looking at. Written to a pasteboard of this
+    /// test's own: a hosted test shares the developer's session, and the general pasteboard is
+    /// theirs.
+    func testTheChartCanBeTakenAsAPicture() throws {
+        let (_, card) = try pane(comparison(), width: 520, height: 620)
+        let controller = try XCTUnwrap(panes.last)
+        let board = scratchPasteboard()
+
+        XCTAssertTrue(controller.copyPicture(to: board))
+
+        let pasted = try XCTUnwrap(
+            board.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage
+        )
+        // The card, with the air a pane gives it on every side.
+        let padding = Design.Spacing.inset * 2
+        XCTAssertEqual(pasted.size.width, card.frame.width + padding, accuracy: 1)
+        XCTAssertEqual(pasted.size.height, card.frame.height + padding, accuracy: 1)
+        XCTAssertTrue(
+            isOpaque(pasted),
+            "a transparent picture is chart ink on whatever the document underneath happens to be"
+        )
+    }
+
+    /// The numbers stay one press away too — and they had to move to reach the reader at all.
+    ///
+    /// They were in the panel's own `⋯` menu, which for a chart tab sits *underneath* the hosted
+    /// content: the panel adds that view last, it runs to the foot of the pane, and a chart's
+    /// ground is opaque. The action existed and no pointer could reach it.
+    func testTheNumbersAreOnTheChartRatherThanUnderTheCoveredMenu() throws {
+        _ = try pane(comparison(), width: 520, height: 620)
+        let controller = try XCTUnwrap(panes.last)
+        let board = scratchPasteboard()
+
+        XCTAssertTrue(controller.copyNumbers(to: board))
+
+        let pasted = try XCTUnwrap(board.string(forType: .string))
+        XCTAssertEqual(pasted, comparison().tabSeparatedValues)
+    }
+
+    /// Both actions are on the pane itself, where a pointer can reach them.
+    func testBothWaysOutAreOfferedOnThePane() throws {
+        let (host, _) = try pane(comparison(), width: 520, height: 620)
+
+        let names = iconButtons(in: host).compactMap { $0.accessibilityTitle() }
+
+        XCTAssertTrue(names.contains(L10n.string("Copy the chart as a picture")), "\(names)")
+        XCTAssertTrue(names.contains(L10n.string("Copy the numbers behind the chart")), "\(names)")
+    }
+
+    private func scratchPasteboard() -> NSPasteboard {
+        let board = NSPasteboard(name: NSPasteboard.Name("threading.chart.tests"))
+        board.clearContents()
+        return board
+    }
+
+    /// Whether every pixel of the picture is fully opaque, sampled at its corners and centre.
+    private func isOpaque(_ image: NSImage) -> Bool {
+        guard let rep = image.representations.first as? NSBitmapImageRep else { return false }
+        let points = [
+            (0, 0),
+            (rep.pixelsWide - 1, 0),
+            (0, rep.pixelsHigh - 1),
+            (rep.pixelsWide - 1, rep.pixelsHigh - 1),
+            (rep.pixelsWide / 2, rep.pixelsHigh / 2)
+        ]
+        return points.allSatisfy { rep.colorAt(x: $0.0, y: $0.1)?.alphaComponent == 1 }
+    }
+
+    private func iconButtons(in view: NSView) -> [ThemedIconButton] {
+        var found: [ThemedIconButton] = []
+        if let button = view as? ThemedIconButton { found.append(button) }
+        for subview in view.subviews { found.append(contentsOf: iconButtons(in: subview)) }
+        return found
+    }
+
     /// A bar's thickness carries no reading — only its length does — so it must not grow with the
     /// container. Below the cap the group keeps its share of the band; above it the band keeps
     /// the slack as gap.
@@ -525,15 +722,22 @@ final class ChartTests: XCTestCase {
     private func pane(
         _ spec: ChartSpec,
         width: CGFloat,
-        height: CGFloat
+        height: CGFloat,
+        widthHeldAt widthPriority: NSLayoutConstraint.Priority = .required
     ) throws -> (NSView, ChartCardView) {
         let controller = ChartPaneViewController(spec: spec, subtitle: "1 series")
         panes.append(controller)
         let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         host.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(controller.view)
+        // A split item is *positioned*, not pinned: `NSSplitViewController` states its width with
+        // a constraint at the item's holding priority, which is the number the pane's content is
+        // allowed to argue with. Required is the right fixture for a question about height and
+        // the wrong one for a question about width — it wins the argument the drag would lose.
+        let paneWidth = host.widthAnchor.constraint(equalToConstant: width)
+        paneWidth.priority = widthPriority
         NSLayoutConstraint.activate([
-            host.widthAnchor.constraint(equalToConstant: width),
+            paneWidth,
             host.heightAnchor.constraint(equalToConstant: height),
             controller.view.topAnchor.constraint(equalTo: host.topAnchor),
             controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
@@ -569,6 +773,10 @@ final class ChartTests: XCTestCase {
     /// first version of this chart drew its axis in `tertiary`, which comes out at 3.03:1 on
     /// white: correct by the design system's vocabulary and too faint to read.
     func testChartTextClearsTheContrastFloorInBothAppearances() throws {
+        let previousTheme = AppThemePalette.current
+        AppThemePalette.set(.system)
+        defer { AppThemePalette.set(previousTheme) }
+
         for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
             let bitmap = try render(comparison(), appearance: appearanceName)
             let measured = try XCTUnwrap(
@@ -582,14 +790,29 @@ final class ChartTests: XCTestCase {
         }
     }
 
-    /// The most common grey that is not the background — the core of the axis glyphs — against
-    /// the background, as a WCAG contrast ratio.
+    /// The most common ink in the value-axis gutter — the core of the axis glyphs — against the
+    /// background, as a WCAG contrast ratio.
+    ///
+    /// Looking across the whole card stopped measuring text once the grid became long enough:
+    /// its straight rules contain far more identical pixels than any antialiased glyph, and in
+    /// Aqua their neutral-blue tint is close enough to grey to pass the colour guard below. The
+    /// value-axis gutter is the surface this assertion is actually about. It contains the tick
+    /// labels, while the plot (and therefore every grid rule) starts at `axisLeading`. Its scan
+    /// begins at the content inset so the card's long border cannot impersonate a glyph either.
     private func dominantTextContrast(in bitmap: NSBitmapImageRep) -> Double? {
         var counts: [NSColor: Int] = [:]
         var background: NSColor?
         var backgroundCount = 0
-        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 1) {
-            for x in stride(from: 0, to: bitmap.pixelsWide, by: 1) {
+        let scale = CGFloat(bitmap.pixelsWide) / bitmap.size.width
+        let contentInset = Int((Design.Spacing.inset * scale).rounded(.up))
+        let gutterWidth = min(
+            bitmap.pixelsWide,
+            Int((Design.Chart.axisLeading * scale).rounded(.down))
+        )
+        let titleHeight = Int((Design.Spacing.pane * scale).rounded(.up))
+        let axisTop = max(contentInset, bitmap.pixelsHigh - titleHeight)
+        for y in stride(from: contentInset, to: axisTop, by: 1) {
+            for x in stride(from: contentInset, to: gutterWidth, by: 1) {
                 guard let colour = bitmap.colorAt(x: x, y: y)?
                     .usingColorSpace(.deviceRGB) else { continue }
                 let count = (counts[colour] ?? 0) + 1
@@ -602,12 +825,11 @@ final class ChartTests: XCTestCase {
         }
         guard let background else { return nil }
 
-        // Greys only: a coloured pixel is a bar, and a bar is not text.
+        // The gutter contains no marks, so its most common non-ground colour is text. Do not
+        // demand a mathematical grey here: styled themes are allowed to tint their label ink.
         let text = counts
             .filter { colour, _ in
                 colour != background
-                    && abs(colour.redComponent - colour.greenComponent) < 0.03
-                    && abs(colour.greenComponent - colour.blueComponent) < 0.03
                     && contrast(colour, background) > 1.5
             }
             .max { $0.value < $1.value }?

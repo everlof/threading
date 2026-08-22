@@ -20,6 +20,8 @@ extension ControlRefusal {
             "That terminal is mid-turn or still starting, so input cannot safely be delivered."
         case .targetHeldByOwnLimit(let reason):
             "\(reason) This is the user's own limit, not the provider's."
+        case .targetHeldByCurfew(let reason):
+            "\(reason) The user set a curfew on this session; it lifts when they lift it."
         case .notPermitted(let operation):
             "This session was not granted permission to \(operation.supervisionToolName ?? "perform that operation")."
         case .terminalCannotBeWoken:
