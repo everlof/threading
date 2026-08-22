@@ -128,6 +128,16 @@ struct CurfewReceipt: Codable, Equatable, Sendable {
         case held
         case interrupted
         case gaveUp
+
+        /// The opt-in escalation ended the agent.
+        ///
+        /// Only ever after `gaveUp`, and only where the user asked for it in Settings: the
+        /// default is to notify and leave the session alone. The process is *terminated* rather
+        /// than discarded, so the terminal's final screen stays visible and the session resumes
+        /// by its ordinary affordance — the whole feature exists because somebody wants to read
+        /// the conversation in the morning.
+        case stoppedAgent
+
         case lifted
         case ended
     }

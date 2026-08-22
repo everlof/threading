@@ -22,7 +22,14 @@ extension ConversationViewController: AppMessageReceiving {
     /// `.handedToTurn` needs every condition `flushOutboxIfReady` checks *and* an empty queue
     /// ahead of the message — with rows already waiting, ours joins the line and the honest
     /// answer is `.queuedBehindTurn`, whatever the transport's readiness.
-    func acceptAppMessage(_ prompt: ConversationPrompt) -> AppMessageAcceptance {
+    ///
+    /// `origin` rides onto the row rather than being decided at the drain, because the drain
+    /// looks at one item and this is the only place that knows where it came from: a curfew's
+    /// wrap-up is the single message a held session still hands over.
+    func acceptAppMessage(
+        _ prompt: ConversationPrompt,
+        origin: ConversationOutbox.Item.Origin
+    ) -> AppMessageAcceptance {
         guard !prompt.isEmpty else { return .refused(.emptyText) }
         guard RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) else {
             return .refused(.inputHeldRemotely)
@@ -31,7 +38,7 @@ extension ConversationViewController: AppMessageReceiving {
 
         let readyToHandOver = isViewLoaded && stream.canSend && !isPreparingTurn
             && outbox.pending.isEmpty
-        guard outbox.append(prompt) != nil else { return .refused(.queueFull) }
+        guard outbox.append(prompt, origin: origin) != nil else { return .refused(.queueFull) }
 
         refreshOutboxRail()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)

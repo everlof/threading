@@ -27,12 +27,15 @@ extension MainWindowController {
 
     /// Help ▸ Report a Problem. Lives beside the inspector's own sheet because both send the
     /// same private DTO through the same durable outbox; only the reviewed evidence differs.
-    func presentReportProblem() {
+    func presentReportProblem(prefill: (title: String, detail: String)? = nil, surface: String = "helpMenu") {
         MacRemoteDiagnostics.record(.issueReportOpened, fields: [
             .reason: "manual",
-            .surface: "helpMenu",
+            .surface: surface,
         ])
         let sheet = ReportProblemViewController()
+        if let prefill {
+            sheet.prefill(title: prefill.title, detail: prefill.detail)
+        }
         sheet.onDone = { [weak self, weak sheet] in
             guard let self, let sheet else { return }
             self.contentViewController?.dismiss(sheet)

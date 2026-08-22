@@ -36,6 +36,10 @@ final class RemoteSessionMirrorRegistry {
     private let terminalHydrationOutputQuietDelay: Duration
     private let terminalHydrationFirstOutputMaximumDelay: Duration
     private let terminalHydrationMaximumDelay: Duration
+    /// Read at every release rather than cached, so a `defaults write` takes effect without a
+    /// relaunch and a test can hand this registry milliseconds — or zero, which is the
+    /// release-immediately behaviour the grace replaced.
+    private let viewportLeaseGrace: @MainActor () -> Duration
 
     init(
         terminalApplication: (any RemoteTerminalApplicationCapability)? = nil,
@@ -43,13 +47,17 @@ final class RemoteSessionMirrorRegistry {
             RemoteTerminalHydrationDefaults.outputQuietDelay,
         terminalHydrationFirstOutputMaximumDelay: Duration =
             RemoteTerminalHydrationDefaults.firstOutputMaximumDelay,
-        terminalHydrationMaximumDelay: Duration = RemoteTerminalHydrationDefaults.maximumDelay
+        terminalHydrationMaximumDelay: Duration = RemoteTerminalHydrationDefaults.maximumDelay,
+        viewportLeaseGrace: @escaping @MainActor () -> Duration = {
+            .seconds(AppSettings.shared.remoteViewportLeaseGraceSeconds)
+        }
     ) {
         self.terminalApplication = terminalApplication
         self.terminalHydrationOutputQuietDelay = terminalHydrationOutputQuietDelay
         self.terminalHydrationFirstOutputMaximumDelay =
             terminalHydrationFirstOutputMaximumDelay
         self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
+        self.viewportLeaseGrace = viewportLeaseGrace
         // A remote surface is a view of this app, so theme changes are live state rather than a
         // reconnect-only preference. Broadcast broadly and resolve per session: assignments can
         // change one terminal, while profile and app-theme changes can affect many.
@@ -107,10 +115,10 @@ final class RemoteSessionMirrorRegistry {
         /// Devices that have already sent input, so the "first remote input" audit line is
         /// written once per device+session rather than per keystroke.
         var inputSeenDevices: Set<String> = []
-        /// Interactive clients that currently have a terminal view on screen. They share one
-        /// PTY, so the grid applied is the largest one all of them can display — see
-        /// `applyViewport`.
-        var viewportRequests: [ObjectIdentifier: ViewportRequest] = [:]
+        /// Interactive clients that currently have a terminal view on screen, plus the ones
+        /// that have just left and may come straight back. They share one PTY, so the grid
+        /// applied is the largest one all of them can display — see `applyViewport`.
+        var viewportLeases = ViewportLeases()
     }
 
     private struct ViewportRequest {
@@ -118,11 +126,61 @@ final class RemoteSessionMirrorRegistry {
         let rows: Int
     }
 
+    /// A lease whose client has gone, still counted by `resolvedViewport` until its grace
+    /// expires. See `releaseViewport(for:target:)` for why it exists.
+    private struct HeldViewportLease {
+        let cols: Int
+        let rows: Int
+        /// The releasing peer's authorization, kept so a later permission change can *narrow*
+        /// this lease away. It is read for exactly one question — may this device still
+        /// write? — and a `false` drops the lease. It never admits input, keeps a subscriber,
+        /// answers a permission prompt, or grants anything at all: a grace is a grid, not an
+        /// access.
+        let authorization: RemoteAuthorization
+        let expiry: Task<Void, Never>
+    }
+
+    /// Every grid one shared PTY is currently answering to.
+    ///
+    /// `active` is keyed by connection because that is the identity of a socket; `held` is keyed
+    /// by **device**, because a phone that comes back is a new `RemoteConnection` object and
+    /// would otherwise fail to match its own pending release — which is precisely the case the
+    /// grace exists for.
+    private struct ViewportLeases {
+        var active: [ObjectIdentifier: ViewportRequest] = [:]
+        var held: [String: HeldViewportLease] = [:]
+
+        /// What `resolvedViewport` intersects. A held lease counts exactly like a live one,
+        /// which is what makes a return inside the window cost zero resizes.
+        var grids: [(cols: Int, rows: Int)] {
+            active.values.map { (cols: $0.cols, rows: $0.rows) }
+                + held.values.map { (cols: $0.cols, rows: $0.rows) }
+        }
+
+        func cancelExpiries() {
+            for lease in held.values { lease.expiry.cancel() }
+        }
+
+        mutating func dropHeld() {
+            cancelExpiries()
+            held.removeAll()
+        }
+    }
+
+    /// One shared PTY a viewport lease can be held against.
+    ///
+    /// Agent sessions and standalone project terminals answer the same lease rules, so the grace
+    /// period is written once against this rather than twice against two mirror types.
+    private enum ViewportLeaseTarget: Hashable {
+        case session(SessionID)
+        case terminal(TerminalID)
+    }
+
     private struct ProjectTerminalMirror {
         var ring: RemoteRingBuffer
         var subscribers: [ObjectIdentifier: RemoteConnection] = [:]
         var inputSeenDevices: Set<String> = []
-        var viewportRequests: [ObjectIdentifier: ViewportRequest] = [:]
+        var viewportLeases = ViewportLeases()
     }
 
     /// One socket's initial replay plus first phone-owned resize. The external terminal program
@@ -920,10 +978,14 @@ final class RemoteSessionMirrorRegistry {
         cancelTerminalHydration(for: key)
         themeEventSubscribers.removeValue(forKey: key)
         if let terminalID = terminalByConnection.removeValue(forKey: key) {
-            releaseViewport(for: connection, terminalID: terminalID)
+            releaseViewport(for: connection, target: .terminal(terminalID))
             terminalMirrors[terminalID]?.subscribers.removeValue(forKey: key)
             if terminalMirrors[terminalID]?.subscribers.isEmpty == true,
                !AppSettings.shared.remoteAccessEnabled {
+                // A mirror that is going cannot hold a grid: nothing would be left to expire it,
+                // and this terminal would stay at phone width with no lease to explain it.
+                terminalMirrors[terminalID]?.viewportLeases.dropHeld()
+                applyViewport(for: terminalID)
                 removeTap(terminalID: terminalID)
                 terminalMirrors[terminalID] = nil
             }
@@ -933,7 +995,7 @@ final class RemoteSessionMirrorRegistry {
         let departingParticipantID = connection.authenticatedPeer?.authorization
             .collaborationParticipantID
         broadcastPresence("left", from: connection, sessionID: sessionID)
-        releaseViewport(for: connection, sessionID: sessionID)
+        releaseViewport(for: connection, target: .session(sessionID))
         mirrors[sessionID]?.subscribers.removeValue(forKey: key)
         presenceIDs[key] = nil
         if mirrors[sessionID]?.subscribers.isEmpty ?? true {
@@ -945,6 +1007,10 @@ final class RemoteSessionMirrorRegistry {
                 && AppSettings.shared.remoteAccessEnabled
             if !keepsTerminalCapture {
                 if mirrors[sessionID]?.surface == .terminal {
+                    // A mirror that is going cannot hold a grid: nothing would be left to expire
+                    // it, and the Mac would stay at phone width with no lease to explain it.
+                    mirrors[sessionID]?.viewportLeases.dropHeld()
+                    applyViewport(for: sessionID)
                     removeTap(sessionID: sessionID)
                 }
                 mirrors[sessionID] = nil
@@ -1070,6 +1136,11 @@ final class RemoteSessionMirrorRegistry {
     func remoteAccessStopped() {
         for transaction in terminalHydrations.values { transaction.cancel() }
         terminalHydrations.removeAll()
+        // Turning the master switch off is an authorization change, so every held grid ends now
+        // rather than at its own expiry. The mirrors are cleared below and each surface is put
+        // back to its Mac frame; this cancels the timers that would otherwise outlive them.
+        for mirror in mirrors.values { mirror.viewportLeases.cancelExpiries() }
+        for mirror in terminalMirrors.values { mirror.viewportLeases.cancelExpiries() }
         for sessionID in mirrors.keys where mirrors[sessionID]?.surface == .terminal {
             _ = terminalApplication?.setViewport(nil, for: sessionID)
             removeTap(sessionID: sessionID)
@@ -1163,14 +1234,16 @@ final class RemoteSessionMirrorRegistry {
             return
         }
 
-        mirrors[sessionID]?.viewportRequests[ObjectIdentifier(connection)] = ViewportRequest(
+        // Before the live request is recorded, so this device's own held grid stops counting at
+        // the same moment its replacement starts: a phone asking for the grid it left with
+        // resolves to the same intersection and costs no resize at all.
+        claimHeldViewport(for: connection, target: .session(sessionID))
+        mirrors[sessionID]?.viewportLeases.active[ObjectIdentifier(connection)] = ViewportRequest(
             cols: cols,
             rows: rows
         )
         let requestedGrid = Self.resolvedViewport(
-            of: mirrors[sessionID]?.viewportRequests.map {
-                (cols: $0.value.cols, rows: $0.value.rows)
-            } ?? []
+            of: mirrors[sessionID]?.viewportLeases.grids ?? []
         ).map { RemoteTerminalGrid(cols: $0.cols, rows: $0.rows) }
         let expectsResizeOutput = state.remoteViewport != requestedGrid
         applyViewport(for: sessionID)
@@ -1185,7 +1258,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     func releaseViewport(from connection: RemoteConnection, sessionID: SessionID) {
-        releaseViewport(for: connection, sessionID: sessionID)
+        releaseViewport(for: connection, target: .session(sessionID))
     }
 
     func requestViewport(
@@ -1200,7 +1273,8 @@ final class RemoteSessionMirrorRegistry {
               terminalMirrors[terminalID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let terminalApplication,
               case .available = terminalApplication.state(for: terminalID) else { return }
-        terminalMirrors[terminalID]?.viewportRequests[ObjectIdentifier(connection)] = .init(
+        claimHeldViewport(for: connection, target: .terminal(terminalID))
+        terminalMirrors[terminalID]?.viewportLeases.active[ObjectIdentifier(connection)] = .init(
             cols: cols,
             rows: rows
         )
@@ -1208,7 +1282,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     func releaseViewport(from connection: RemoteConnection, terminalID: TerminalID) {
-        releaseViewport(for: connection, terminalID: terminalID)
+        releaseViewport(for: connection, target: .terminal(terminalID))
     }
 
     /// - Parameter attachmentPaths: staged uploads the server already claimed for this exact
@@ -1730,10 +1804,24 @@ final class RemoteSessionMirrorRegistry {
     private func inputControlChanged(_ sessionID: SessionID) {
         if var mirror = mirrors[sessionID], mirror.surface == .terminal {
             let subscribers = mirror.subscribers
-            mirror.viewportRequests = mirror.viewportRequests.filter { key, _ in
+            mirror.viewportLeases.active = mirror.viewportLeases.active.filter { key, _ in
                 guard let authorization = subscribers[key]?.authenticatedPeer?.authorization
                 else { return false }
                 return canWrite(sessionID: sessionID, authorization: authorization)
+            }
+            // A held grid is re-checked against the authorization its device released with, and
+            // that snapshot can only ever *narrow* the lease: a device that would no longer be
+            // allowed to write loses the grid it was holding now, not at expiry. The timer is
+            // not a place where an access outlives its check.
+            //
+            // In Focused mode this means the 30-second `focusedControllerDisconnectGrace` ends a
+            // departed controller's viewport lease too, well before a longer viewport grace
+            // would have. That is correct: the moment control returns to the Mac owner, the
+            // phone that left is no longer a client whose grid the PTY answers to.
+            for (deviceID, lease) in mirror.viewportLeases.held
+            where !canWrite(sessionID: sessionID, authorization: lease.authorization) {
+                lease.expiry.cancel()
+                mirror.viewportLeases.held.removeValue(forKey: deviceID)
             }
             mirrors[sessionID] = mirror
             applyViewport(for: sessionID)
@@ -2239,7 +2327,9 @@ final class RemoteSessionMirrorRegistry {
         return mirror.subscribers.map { key, connection in
             let peer = connection.authenticatedPeer
             let authorization = peer?.authorization
-            let request = mirror.viewportRequests[key]
+            // `active` only: a held grid belongs to a device that has gone, and an audience
+            // list that showed it would be reporting a follower who is not watching anything.
+            let request = mirror.viewportLeases.active[key]
             return Follower(
                 id: key,
                 memberName: authorization?.member?.displayName,
@@ -2280,6 +2370,9 @@ final class RemoteSessionMirrorRegistry {
         promptReplayCache.remove(sessionID: sessionID.uuidString)
         attentionRequestPolicy.remove(sessionID: sessionID.uuidString)
         defer { followersChanged(sessionID) }
+        // Archival and discard are authorization changes, so a held grid ends here rather than
+        // at its own expiry. The mirror is about to go with it; this cancels the timers.
+        mirrors[sessionID]?.viewportLeases.dropHeld()
         guard let mirror = mirrors[sessionID] else { return }
         _ = terminalApplication?.setViewport(nil, for: sessionID)
         removeTap(sessionID: sessionID)
@@ -2299,6 +2392,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     func terminalDiscarded(_ terminalID: TerminalID) {
+        terminalMirrors[terminalID]?.viewportLeases.dropHeld()
         guard let mirror = terminalMirrors[terminalID] else { return }
         _ = terminalApplication?.setViewport(nil, for: terminalID)
         removeTap(terminalID: terminalID)
@@ -2398,11 +2492,117 @@ final class RemoteSessionMirrorRegistry {
         terminalHydrations.removeValue(forKey: key)?.cancel()
     }
 
-    private func releaseViewport(for connection: RemoteConnection, sessionID: SessionID) {
-        guard mirrors[sessionID]?.viewportRequests.removeValue(
-            forKey: ObjectIdentifier(connection)
-        ) != nil else { return }
-        applyViewport(for: sessionID)
+    // MARK: - Viewport leases
+
+    /// Ends one connection's lease, holding its grid for a grace period when the device can be
+    /// recognised on its return.
+    ///
+    /// A lease change is a real `SIGWINCH` and a full TUI repaint, and the joining client waits
+    /// for that repaint. Backgrounding the iOS app drops the socket exactly as a deliberate
+    /// close does, so a glance at a notification and a return used to reflow a working agent
+    /// twice — the most frequent cost this mirror imposes on the program it is watching.
+    ///
+    /// **The grace holds a grid, and only a grid.** The socket is already unsubscribed, the peer
+    /// is permitted nothing, and `followers(of:)` reads subscribers rather than leases, so a
+    /// held lease is invisible as an audience and useless as an access. Discard, archival, the
+    /// master switch and a loss of write permission all end it immediately rather than at
+    /// expiry; nothing here is a place where an authorization outlives its check.
+    ///
+    /// Two releases stay immediate: a connection that authenticated without a device id, which
+    /// could never be matched when it came back, and every release while the grace is configured
+    /// to zero — the kill switch that restores the behaviour this replaced.
+    private func releaseViewport(for connection: RemoteConnection, target: ViewportLeaseTarget) {
+        guard var leases = viewportLeases(for: target),
+              let request = leases.active.removeValue(forKey: ObjectIdentifier(connection))
+        else { return }
+        defer {
+            setViewportLeases(leases, for: target)
+            applyViewport(for: target)
+        }
+        let grace = viewportLeaseGrace()
+        guard grace > .zero,
+              let peer = connection.authenticatedPeer,
+              let deviceID = peer.deviceID else { return }
+        leases.held[deviceID]?.expiry.cancel()
+        leases.held[deviceID] = HeldViewportLease(
+            cols: request.cols,
+            rows: request.rows,
+            authorization: peer.authorization,
+            expiry: Task { @MainActor [weak self] in
+                try? await Task.sleep(for: grace)
+                guard !Task.isCancelled else { return }
+                self?.expireHeldViewport(deviceID: deviceID, target: target)
+            }
+        )
+        EventLog.shared.record(.remote, "Remote viewport lease held", leaseFields(
+            target: target,
+            deviceID: deviceID,
+            extra: [
+                "grid": "\(request.cols)×\(request.rows)",
+                "grace": String(describing: grace),
+            ]
+        ))
+    }
+
+    /// The window closed with nobody back. The grid stops counting and the Mac's own frame
+    /// decides again, exactly as an immediate release always did.
+    private func expireHeldViewport(deviceID: String, target: ViewportLeaseTarget) {
+        guard var leases = viewportLeases(for: target),
+              leases.held.removeValue(forKey: deviceID) != nil else { return }
+        setViewportLeases(leases, for: target)
+        EventLog.shared.record(.remote, "Remote viewport lease expired", leaseFields(
+            target: target,
+            deviceID: deviceID
+        ))
+        applyViewport(for: target)
+    }
+
+    /// A returning device takes its own pending lease back before its live request replaces it,
+    /// so the intersection never sees the grid twice and never sees it missing.
+    private func claimHeldViewport(for connection: RemoteConnection, target: ViewportLeaseTarget) {
+        guard let deviceID = connection.authenticatedPeer?.deviceID,
+              var leases = viewportLeases(for: target),
+              let lease = leases.held.removeValue(forKey: deviceID) else { return }
+        lease.expiry.cancel()
+        setViewportLeases(leases, for: target)
+    }
+
+    private func viewportLeases(for target: ViewportLeaseTarget) -> ViewportLeases? {
+        switch target {
+        case .session(let sessionID): return mirrors[sessionID]?.viewportLeases
+        case .terminal(let terminalID): return terminalMirrors[terminalID]?.viewportLeases
+        }
+    }
+
+    private func setViewportLeases(_ leases: ViewportLeases, for target: ViewportLeaseTarget) {
+        switch target {
+        case .session(let sessionID): mirrors[sessionID]?.viewportLeases = leases
+        case .terminal(let terminalID): terminalMirrors[terminalID]?.viewportLeases = leases
+        }
+    }
+
+    private func applyViewport(for target: ViewportLeaseTarget) {
+        switch target {
+        case .session(let sessionID): applyViewport(for: sessionID)
+        case .terminal(let terminalID): applyViewport(for: terminalID)
+        }
+    }
+
+    /// The device is pseudonymised for the same reason the sharing pane pseudonymises it: a
+    /// journal line has to be safe to hand to somebody, and correlating two lines only needs
+    /// the two to match.
+    private func leaseFields(
+        target: ViewportLeaseTarget,
+        deviceID: String,
+        extra: [String: String] = [:]
+    ) -> [String: String] {
+        var fields = extra
+        switch target {
+        case .session(let sessionID): fields["session"] = sessionID.uuidString
+        case .terminal(let terminalID): fields["terminal"] = terminalID.uuidString
+        }
+        fields["device"] = MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device")
+        return fields
     }
 
     private func applyViewport(for sessionID: SessionID) {
@@ -2410,10 +2610,8 @@ final class RemoteSessionMirrorRegistry {
               case .available(let state) = terminalApplication.state(for: sessionID) else {
             return
         }
-        let requests = mirrors[sessionID]?.viewportRequests.map {
-            (cols: $0.value.cols, rows: $0.value.rows)
-        } ?? []
-        guard let grid = Self.resolvedViewport(of: requests) else {
+        let leases = mirrors[sessionID]?.viewportLeases ?? ViewportLeases()
+        guard let grid = Self.resolvedViewport(of: leases.grids) else {
             guard state.remoteViewport != nil else { return }
             guard terminalApplication.setViewport(nil, for: sessionID) == .applied else { return }
             EventLog.shared.record(.remote, "Remote viewport released", [
@@ -2431,16 +2629,10 @@ final class RemoteSessionMirrorRegistry {
         EventLog.shared.record(.remote, "Remote viewport applied", [
             "session": sessionID.uuidString,
             "grid": "\(grid.cols)×\(grid.rows)",
-            "clients": String(requests.count),
+            "clients": String(leases.active.count),
+            "held": String(leases.held.count),
         ])
         followersChanged(sessionID)
-    }
-
-    private func releaseViewport(for connection: RemoteConnection, terminalID: TerminalID) {
-        guard terminalMirrors[terminalID]?.viewportRequests.removeValue(
-            forKey: ObjectIdentifier(connection)
-        ) != nil else { return }
-        applyViewport(for: terminalID)
     }
 
     private func applyViewport(for terminalID: TerminalID) {
@@ -2448,10 +2640,8 @@ final class RemoteSessionMirrorRegistry {
               case .available(let state) = terminalApplication.state(for: terminalID) else {
             return
         }
-        let requests = terminalMirrors[terminalID]?.viewportRequests.map {
-            (cols: $0.value.cols, rows: $0.value.rows)
-        } ?? []
-        let grid = Self.resolvedViewport(of: requests).map {
+        let leases = terminalMirrors[terminalID]?.viewportLeases ?? ViewportLeases()
+        let grid = Self.resolvedViewport(of: leases.grids).map {
             RemoteTerminalGrid(cols: $0.cols, rows: $0.rows)
         }
         guard state.remoteViewport != grid else { return }
@@ -2460,7 +2650,8 @@ final class RemoteSessionMirrorRegistry {
             ? "Remote terminal viewport released"
             : "Remote terminal viewport applied", [
                 "terminal": terminalID.uuidString,
-                "clients": String(requests.count),
+                "clients": String(leases.active.count),
+                "held": String(leases.held.count),
             ])
     }
 

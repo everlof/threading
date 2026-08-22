@@ -243,6 +243,15 @@ public struct ExtensionMediaFormat: RawRepresentable, Codable, Hashable, Sendabl
     public static let dotLottie = Self(rawValue: "dot-lottie")
     /// An animated raster document — GIF or APNG.
     public static let animatedImage = Self(rawValue: "animated-image")
+    /// A movie — a container the platform's own audiovisual stack plays, streamed from the file
+    /// rather than handed over as bytes.
+    ///
+    /// The one format whose source has to *be* a file: a screen recording is routinely larger
+    /// than every other document ceiling here put together, and a player that had to be handed
+    /// its bytes first would allocate a movie to play a movie. A host surface that cannot resolve
+    /// a source to a file therefore refuses this format rather than loading it — which is why an
+    /// extension's own package resource does not play here.
+    public static let video = Self(rawValue: "video")
 }
 
 public enum ExtensionMediaLoopMode: String, Codable, CaseIterable, Equatable, Sendable {

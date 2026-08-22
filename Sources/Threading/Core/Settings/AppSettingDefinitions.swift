@@ -13,7 +13,8 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case sessionRestorePolicy
     case sessionRestoreWindowDays
     case sessionRestoreLimit
-    case newChatOpeningMessage
+    case newChatOpeningPrefix
+    case newChatOpeningSuffix
     case legacyClosingConfirmation
     case suppressedConfirmations
     case hiddenNotices
@@ -58,6 +59,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteAccessTailscaleEnabled
     case remoteAccessTailscaleServeEnabled
     case remoteAccessListenerPort
+    case remoteViewportLeaseGraceSeconds
     case remoteAccessDoors
     case remoteAccessAdvertisedHostname
     case remoteAccessDiscoveryEnabled
@@ -410,6 +412,19 @@ extension TypedAppSettingValidation where Value == Int {
         }
     }
 
+    /// A range that clamps and honours its own floor.
+    ///
+    /// `range(_:)` folds any `value <= 0` to the absence value, which is right for a count where
+    /// zero is a way of saying "unset" and wrong for a duration where zero is a decision: it
+    /// makes "off" unreachable through the key, because writing `0` silently restores the
+    /// default. This factory clamps into the stated range and does nothing else, so a floor of
+    /// zero means zero.
+    static func clampingRange(_ range: ClosedRange<Int>) -> Self {
+        Self(erased: .integerRange(range)) { value, _ in
+            min(max(value, range.lowerBound), range.upperBound)
+        }
+    }
+
     /// A range that refuses rather than clamps.
     ///
     /// Clamping is right for a choice out of a list, where the nearest allowed value is what the
@@ -662,7 +677,7 @@ enum AppSettingDefinitions {
         identity: .restoresLastSession,
         persistenceKey: "restoresLastSession",
         absence: .registered(true),
-        presentations: [row("general", 12, "Startup", "Reopen the last session at launch",
+        presentations: [row("general", 13, "Startup", "Reopen the last session at launch",
                             ["relaunch", "restore", "startup"])]
     )
     static let restoresRunningSessions = AppSettingDescriptor<Bool>(
@@ -675,7 +690,7 @@ enum AppSettingDefinitions {
         persistenceKey: "sessionRestorePolicy",
         absence: .legacy(.restoresRunningSessions),
         validation: .allowedStrings(Set(SessionRestorePolicy.allCases.map(\.rawValue))),
-        presentations: [row("general", 13, "Startup", "Bring back at launch",
+        presentations: [row("general", 14, "Startup", "Bring back at launch",
                             ["reopen", "resume automatically", "running at quit", "restore"])]
     )
     static let sessionRestoreWindowDays = AppSettingDescriptor<Int>(
@@ -683,7 +698,7 @@ enum AppSettingDefinitions {
         persistenceKey: "sessionRestoreWindowDays",
         absence: .registered(SessionRestoreDefaults.windowDays),
         validation: .range((SessionRestoreDefaults.windowDayChoices.first ?? 1)...(SessionRestoreDefaults.windowDayChoices.last ?? 30)),
-        presentations: [row("general", 14, "Startup", "Counts as recently used",
+        presentations: [row("general", 15, "Startup", "Counts as recently used",
                             ["recently used", "days", "dormant"])]
     )
     static let sessionRestoreLimit = AppSettingDescriptor<Int>(
@@ -691,17 +706,30 @@ enum AppSettingDefinitions {
         persistenceKey: "sessionRestoreLimit",
         absence: .registered(SessionRestoreDefaults.limit),
         validation: .range((SessionRestoreDefaults.limitChoices.first ?? 4)...(SessionRestoreDefaults.limitChoices.last ?? 32)),
-        presentations: [row("general", 15, "Startup", "Sessions brought back",
+        presentations: [row("general", 16, "Startup", "Sessions brought back",
                             ["restore limit"])]
     )
-    static let newChatOpeningMessage = AppSettingDescriptor<String>(
-        identity: .newChatOpeningMessage,
+    static let newChatOpeningPrefix = AppSettingDescriptor<String>(
+        identity: .newChatOpeningPrefix,
+        persistenceKey: "newChatOpeningPrefix",
+        absence: .emptyString,
+        validation: .maximumBytes(1_048_576),
+        encoding: .removeEmpty,
+        presentations: [row("general", 9, "Opening Message", "Before the task you write",
+                            ["first message", "instructions", "opening message", "prefix",
+                             "prepend"])]
+    )
+    /// The historical key is the suffix's: this setting shipped alone, before the prefix
+    /// existed, and a stored instruction is not worth losing to a tidier spelling.
+    static let newChatOpeningSuffix = AppSettingDescriptor<String>(
+        identity: .newChatOpeningSuffix,
         persistenceKey: "newChatOpeningMessage",
         absence: .emptyString,
         validation: .maximumBytes(1_048_576),
         encoding: .removeEmpty,
-        presentations: [row("general", 9, "Opening Message", "Add to every new chat",
-                            ["first message", "instructions", "opening message"])]
+        presentations: [row("general", 10, "Opening Message", "After the task you write",
+                            ["first message", "instructions", "opening message", "suffix",
+                             "append", "add to every new chat"])]
     )
 
     // Migration-only identities remain typed descriptors so migrations never duplicate a
@@ -721,7 +749,7 @@ enum AppSettingDefinitions {
         identity: .hiddenNotices,
         persistenceKey: "hiddenNotices",
         absence: .emptyCollection,
-        presentations: [row("general", 16, "Confirmations", "Hidden extension messages",
+        presentations: [row("general", 17, "Confirmations", "Hidden extension messages",
                             ["notices"])]
     )
     static let closingConfirmationMigration = AppSettingDescriptor<Bool>(
@@ -825,7 +853,7 @@ enum AppSettingDefinitions {
         identity: .notifiesOnAttention,
         persistenceKey: "notifiesOnAttention",
         absence: .registered(true),
-        presentations: [row("general", 17, "Notifications", "Notify when a session needs you",
+        presentations: [row("general", 18, "Notifications", "Notify when a session needs you",
                             ["notifications", "alerts", "needs attention"])]
     )
     static let disabledAttentionAlerts = AppSettingDescriptor<[String]>(
@@ -843,14 +871,14 @@ enum AppSettingDefinitions {
         identity: .attentionAlertSound,
         persistenceKey: "attentionAlertSound",
         absence: .systemDefault,
-        presentations: [row("general", 18, "Notifications", "Alert sound",
+        presentations: [row("general", 19, "Notifications", "Alert sound",
                             ["sound", "alerts", "notifications"])]
     )
     static let terminalBellSound = AppSettingDescriptor<String>(
         identity: .terminalBellSound,
         persistenceKey: "terminalBellSound",
         absence: .systemDefault,
-        presentations: [row("general", 20, "Terminal Bell", "Bell sound",
+        presentations: [row("general", 21, "Terminal Bell", "Bell sound",
                             ["bell", "beep", "terminal bell", "alert sound"])]
     )
     static let soundEventChoices = AppSettingDescriptor<[String: String]>(
@@ -859,9 +887,9 @@ enum AppSettingDefinitions {
         absence: .emptyCollection,
         encoding: .removeEmpty,
         presentations: [
-            row("general", 19, "Notifications", "Sounds for each alert",
+            row("general", 20, "Notifications", "Sounds for each alert",
                 ["custom sounds", "per-event sounds", "customize events", "override"]),
-            row("general", 21, "Terminal Bell", "Sounds for each bell",
+            row("general", 22, "Terminal Bell", "Sounds for each bell",
                 ["custom sounds", "beep", "override"])
         ]
     )
@@ -869,7 +897,7 @@ enum AppSettingDefinitions {
         identity: .silencesAllSounds,
         persistenceKey: "silencesAllSounds",
         absence: .falseValue,
-        presentations: [row("general", 22, "Silence", "Silence every sound",
+        presentations: [row("general", 23, "Silence", "Silence every sound",
                             ["silence", "silence sounds", "mute"])]
     )
 
@@ -882,14 +910,14 @@ enum AppSettingDefinitions {
         identity: .includesAttachmentsOutsideProject,
         persistenceKey: "includesAttachmentsOutsideProject",
         absence: .falseValue,
-        presentations: [row("general", 10, "Attachments",
+        presentations: [row("general", 11, "Attachments",
                             "Include files outside the project", ["attachments"])]
     )
     static let capturesPageBeforeAgentActions = AppSettingDescriptor<Bool>(
         identity: .capturesPageBeforeAgentActions,
         persistenceKey: "capturesPageBeforeAgentActions",
         absence: .falseValue,
-        presentations: [row("general", 11, "Attachments",
+        presentations: [row("general", 12, "Attachments",
                             "Keep the page as it was before each agent action",
                             ["attachments", "browser"])]
     )
@@ -918,14 +946,14 @@ enum AppSettingDefinitions {
         identity: .reportsClaudeLifecycleEvents,
         persistenceKey: "reportsClaudeLifecycleEvents",
         absence: .registered(true),
-        presentations: [row("general", 25, "Claude Hooks",
+        presentations: [row("general", 26, "Claude Hooks",
                             "Report Claude turn and subagent activity", ["hooks"])]
     )
     static let installsCodexHooks = AppSettingDescriptor<Bool>(
         identity: .installsCodexHooks,
         persistenceKey: "installsCodexHooks",
         absence: .falseValue,
-        presentations: [row("general", 27, "Codex Hooks", "Report Codex turn boundaries",
+        presentations: [row("general", 28, "Codex Hooks", "Report Codex turn boundaries",
                             ["Codex hooks", "hooks.json"])]
     )
     static let readsClaudeLoginFromKeychain = AppSettingDescriptor<Bool>(
@@ -939,21 +967,21 @@ enum AppSettingDefinitions {
         identity: .suppressesClaudeStatusLine,
         persistenceKey: "suppressesClaudeStatusLine",
         absence: .falseValue,
-        presentations: [row("general", 26, "Claude Hooks",
+        presentations: [row("general", 27, "Claude Hooks",
                             "Hide Claude's status line in Threading terminals", ["status line"])]
     )
     static let bypassesCodexHookTrust = AppSettingDescriptor<Bool>(
         identity: .bypassesCodexHookTrust,
         persistenceKey: "bypassesCodexHookTrust",
         absence: .falseValue,
-        presentations: [row("general", 28, "Codex Hooks", "Skip Codex hook review", ["hooks"])]
+        presentations: [row("general", 29, "Codex Hooks", "Skip Codex hook review", ["hooks"])]
     )
     static let claudeRemoteControl = AppSettingDescriptor<String>(
         identity: .claudeRemoteControl,
         persistenceKey: "claudeRemoteControl",
         absence: .fallback("followClaude"),
         validation: .allowedStrings(Set(ClaudeRemoteControl.allCases.map(\.rawValue))),
-        presentations: [row("general", 24, "Claude Remote Control",
+        presentations: [row("general", 25, "Claude Remote Control",
                             "Remote Control for new Claude sessions",
                             ["Claude Remote Control", "claude.ai", "mobile"])]
     )
@@ -978,7 +1006,7 @@ enum AppSettingDefinitions {
         persistenceKey: "defaultPermissionMode",
         absence: .inherit,
         validation: .allowedStrings(Set(AgentPermissionMode.allCases.map(\.rawValue))),
-        presentations: [row("general", 23, "Permission Mode", "New sessions start in",
+        presentations: [row("general", 24, "Permission Mode", "New sessions start in",
                             ["permission mode", "ask before"])]
     )
 
@@ -1012,6 +1040,24 @@ enum AppSettingDefinitions {
         absence: .registered(Int(RemoteAccessDefaults.defaultListenerPort)),
         validation: .refusingRange(
             RemoteAccessDefaults.minimumListenerPort...RemoteAccessDefaults.maximumListenerPort
+        )
+    )
+    /// How long a released remote viewport lease keeps holding its grid.
+    ///
+    /// Behavioural rather than presented: no `presentations`, so `remotePolicy` resolves to
+    /// `.hidden` and this produces no Settings row and does not cross to the phone's mirror. It
+    /// is reachable by `defaults write` for somebody who needs a different window, and by a test.
+    ///
+    /// The range clamps rather than refuses, because the nearest allowed delay is what a person
+    /// typing a number meant — a port is the case where the number *is* the meaning, and a delay
+    /// is not. Zero is inside the range and is the kill switch: release immediately.
+    static let remoteViewportLeaseGraceSeconds = AppSettingDescriptor<Int>(
+        identity: .remoteViewportLeaseGraceSeconds,
+        persistenceKey: "remoteViewportLeaseGraceSeconds",
+        absence: .registered(RemoteAccessDefaults.viewportLeaseGraceSeconds),
+        validation: .clampingRange(
+            RemoteAccessDefaults.minimumViewportLeaseGraceSeconds ...
+                RemoteAccessDefaults.maximumViewportLeaseGraceSeconds
         )
     )
     /// Which routable doors get a listener.
@@ -1109,7 +1155,7 @@ enum AppSettingDefinitions {
         identity: .automaticUpdateChecksEnabled,
         persistenceKey: "automaticUpdateChecksEnabled",
         absence: .registered(true),
-        presentations: [row("general", 29, "Software Updates",
+        presentations: [row("general", 30, "Software Updates",
                             "Check for updates automatically", [
                                 "updates", "Sparkle", "agent", "CLI", "Claude", "Codex",
                                 "Grok", "OpenCode", "Cursor"
@@ -1120,7 +1166,7 @@ enum AppSettingDefinitions {
         persistenceKey: "preventsIdleSystemSleepWhileAgentsWork",
         absence: .registered(false),
         presentations: [row(
-            "general", 30, "Power", "Keep this Mac awake while agents work",
+            "general", 31, "Power", "Keep this Mac awake while agents work",
             ["sleep", "awake", "lid", "battery", "energy", "active turn"]
         )]
     )
@@ -1174,7 +1220,8 @@ enum AppSettingDefinitions {
         .init(defaultAgentKind), .init(githubAppClientID), .init(restoresLastSession),
         .init(restoresRunningSessions), .init(sessionRestorePolicy),
         .init(sessionRestoreWindowDays), .init(sessionRestoreLimit),
-        .init(newChatOpeningMessage), .init(legacyClosingConfirmation),
+        .init(newChatOpeningPrefix), .init(newChatOpeningSuffix),
+        .init(legacyClosingConfirmation),
         .init(suppressedConfirmations), .init(hiddenNotices),
         .init(closingConfirmationMigration), .init(usesAgentTitleInSidebar),
         .init(groupsSessionsByBranch), .init(groupsLoneBranches), .init(compactsSidebarTree),
@@ -1195,6 +1242,7 @@ enum AppSettingDefinitions {
         .init(defaultPermissionMode), .init(remoteAccessEnabled),
         .init(remoteAccessDoorMigration),
         .init(remoteAccessListenerPort),
+        .init(remoteViewportLeaseGraceSeconds),
         // In catalogue order: the ways in, then the browser convenience under the tailnet one.
         // `SettingsPages` projects its rows from this list, and a search result that lands on a
         // row above the one it names is how that projection goes wrong.

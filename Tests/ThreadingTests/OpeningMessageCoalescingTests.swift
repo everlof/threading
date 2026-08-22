@@ -12,15 +12,18 @@ import XCTest
 @MainActor
 final class OpeningMessageCoalescingTests: XCTestCase {
 
-    private var original = ""
+    private var originalPrefix = ""
+    private var originalSuffix = ""
 
     override func setUp() {
         super.setUp()
-        original = AppSettings.shared.newChatOpeningMessage
+        originalPrefix = AppSettings.shared.newChatOpeningPrefix
+        originalSuffix = AppSettings.shared.newChatOpeningSuffix
     }
 
     override func tearDown() {
-        AppSettings.shared.newChatOpeningMessage = original
+        AppSettings.shared.newChatOpeningPrefix = originalPrefix
+        AppSettings.shared.newChatOpeningSuffix = originalSuffix
         super.tearDown()
     }
 
@@ -29,7 +32,7 @@ final class OpeningMessageCoalescingTests: XCTestCase {
         _ = controller.view
         let field = try openingMessageField(in: controller)
 
-        AppSettings.shared.newChatOpeningMessage = "before"
+        AppSettings.shared.newChatOpeningSuffix = "before"
         // The page opens showing whatever is stored, so start from an empty field.
         field.stringValue = ""
 
@@ -50,7 +53,7 @@ final class OpeningMessageCoalescingTests: XCTestCase {
 
         XCTAssertEqual(broadcasts, 0, "typing broadcast a settings change per character")
         XCTAssertEqual(
-            AppSettings.shared.newChatOpeningMessage,
+            AppSettings.shared.newChatOpeningSuffix,
             "before",
             "the value should not be committed while it is still being typed"
         )
@@ -60,7 +63,7 @@ final class OpeningMessageCoalescingTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            AppSettings.shared.newChatOpeningMessage,
+            AppSettings.shared.newChatOpeningSuffix,
             "a settled sentence",
             "leaving the field should settle what was typed into it"
         )
@@ -73,7 +76,7 @@ final class OpeningMessageCoalescingTests: XCTestCase {
         _ = controller.view
         let field = try openingMessageField(in: controller)
 
-        AppSettings.shared.newChatOpeningMessage = ""
+        AppSettings.shared.newChatOpeningSuffix = ""
         field.stringValue = "typed, then the window closed"
         controller.controlTextDidChange(
             Notification(name: NSControl.textDidChangeNotification, object: field)
@@ -81,18 +84,64 @@ final class OpeningMessageCoalescingTests: XCTestCase {
         controller.viewWillDisappear()
 
         XCTAssertEqual(
-            AppSettings.shared.newChatOpeningMessage,
+            AppSettings.shared.newChatOpeningSuffix,
             "typed, then the window closed",
             "a page closed mid-sentence must not drop the sentence"
         )
     }
 
+    /// The prefix is the same field with the same coalescing, and the settle writes only the
+    /// half that changed — a prefix typed while the suffix stands must leave the suffix alone.
+    func testThePrefixCoalescesAndSettlesWithoutDisturbingTheSuffix() throws {
+        let controller = GeneralPreferencesViewController()
+        _ = controller.view
+        let prefix = try openingMessageField(
+            in: controller,
+            identifier: "settings.general.new-chat-opening-prefix"
+        )
+
+        AppSettings.shared.newChatOpeningPrefix = ""
+        AppSettings.shared.newChatOpeningSuffix = "Rename this chat."
+        prefix.stringValue = ""
+
+        var broadcasts = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: AppSettingsDidChange.name,
+            object: nil,
+            queue: .main
+        ) { _ in broadcasts += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        for character in "read the tests first" {
+            prefix.stringValue += String(character)
+            controller.controlTextDidChange(
+                Notification(name: NSControl.textDidChangeNotification, object: prefix)
+            )
+        }
+
+        XCTAssertEqual(broadcasts, 0, "typing broadcast a settings change per character")
+        XCTAssertEqual(AppSettings.shared.newChatOpeningPrefix, "")
+
+        controller.controlTextDidEndEditing(
+            Notification(name: NSControl.textDidEndEditingNotification, object: prefix)
+        )
+
+        XCTAssertEqual(AppSettings.shared.newChatOpeningPrefix, "read the tests first")
+        XCTAssertEqual(
+            AppSettings.shared.newChatOpeningSuffix,
+            "Rename this chat.",
+            "settling one half must not rewrite the other"
+        )
+        XCTAssertEqual(broadcasts, 1, "one settled half is one change")
+    }
+
     private func openingMessageField(
-        in controller: GeneralPreferencesViewController
+        in controller: GeneralPreferencesViewController,
+        identifier: String = "settings.general.new-chat-opening-suffix"
     ) throws -> ThemedTextField {
         let field = descendants(of: controller.view)
             .compactMap { $0 as? ThemedTextField }
-            .first { $0.accessibilityIdentifier() == "settings.general.new-chat-opening-message" }
+            .first { $0.accessibilityIdentifier() == identifier }
         return try XCTUnwrap(field, "the opening-message field should be on the page")
     }
 

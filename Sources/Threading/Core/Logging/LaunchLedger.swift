@@ -779,9 +779,11 @@ final class LaunchLedger: @unchecked Sendable {
             return nil
         }
 
+        // `O_CLOEXEC` for the reason `EventLog.openForAppending` gives: this handle outlives every
+        // agent launch, and `forkpty` hands an unmarked descriptor to every child.
         let descriptor = open(
             url.path,
-            O_WRONLY | O_APPEND | O_CREAT,
+            O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC,
             LaunchLedgerDefaults.fileMode
         )
         guard descriptor >= 0 else {

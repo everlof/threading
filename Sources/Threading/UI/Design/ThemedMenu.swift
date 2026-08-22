@@ -96,9 +96,13 @@ struct ThemedMenuItem {
     /// second tracking area over menu chrome.
     var help: String?
     var subtitle: String?
-    /// The action's command-key equivalent, without its modifier glyph. The row owns that
-    /// glyph because the same semantic shortcut is a cloverleaf in Platinum and an Amiga-key
-    /// cap in Workbench; padding the title with spaces cannot form an aligned shortcut column.
+    /// The complete chord that invokes the same action outside this menu.
+    ///
+    /// One value drives every modifier and the key, rather than asking a caller to bake glyphs
+    /// into the title. The row can therefore align a real shortcut column and keep a rebound
+    /// command truthful. `keyEquivalent` remains as the historical command-only shorthand used
+    /// by the component-gallery reproductions below.
+    var shortcut: KeyboardShortcut?
     var keyEquivalent: String?
     /// Toned runs over `subtitle`, set through `setSubtitle(_:)` so the two cannot disagree.
     /// The row draws these when present; everything that is not drawing — the tooltip, the
@@ -150,6 +154,7 @@ struct ThemedMenuItem {
         title: String,
         help: String? = nil,
         subtitle: String? = nil,
+        shortcut: KeyboardShortcut? = nil,
         keyEquivalent: String? = nil,
         image: NSImage? = nil,
         preview: ThemedMenuPreview? = nil,
@@ -161,6 +166,7 @@ struct ThemedMenuItem {
             title: title,
             help: help,
             subtitle: subtitle,
+            shortcut: shortcut,
             keyEquivalent: keyEquivalent,
             image: image,
             preview: preview,
@@ -175,6 +181,7 @@ struct ThemedMenuItem {
         title: String,
         help: String? = nil,
         subtitle: String? = nil,
+        shortcut: KeyboardShortcut? = nil,
         keyEquivalent: String? = nil,
         image: NSImage? = nil,
         preview: ThemedMenuPreview? = nil,
@@ -187,6 +194,7 @@ struct ThemedMenuItem {
             title: title,
             help: help,
             subtitle: subtitle,
+            shortcut: shortcut,
             keyEquivalent: keyEquivalent,
             image: image,
             preview: preview,
@@ -201,6 +209,7 @@ struct ThemedMenuItem {
         title: String,
         help: String? = nil,
         subtitle: String? = nil,
+        shortcut: KeyboardShortcut? = nil,
         keyEquivalent: String? = nil,
         image: NSImage? = nil,
         preview: ThemedMenuPreview? = nil,
@@ -213,6 +222,7 @@ struct ThemedMenuItem {
             title: title,
             help: help,
             subtitle: subtitle,
+            shortcut: shortcut,
             keyEquivalent: keyEquivalent,
             image: image,
             preview: preview,
@@ -227,6 +237,7 @@ struct ThemedMenuItem {
         title: String,
         help: String?,
         subtitle: String?,
+        shortcut: KeyboardShortcut?,
         keyEquivalent: String?,
         image: NSImage?,
         preview: ThemedMenuPreview?,
@@ -238,6 +249,7 @@ struct ThemedMenuItem {
         self.title = title
         self.help = help
         self.subtitle = subtitle
+        self.shortcut = shortcut
         self.keyEquivalent = keyEquivalent
         self.image = image
         self.preview = preview
@@ -245,6 +257,12 @@ struct ThemedMenuItem {
         self.isSelected = isSelected
         self.isEnabled = isEnabled
         self.destination = destination
+    }
+
+    /// The full chord a row draws. Historical fixture call sites that provide one bare key are
+    /// command-key rows by definition, which preserves their authored classic-theme grammar.
+    var resolvedShortcut: KeyboardShortcut? {
+        shortcut ?? keyEquivalent.map { KeyboardShortcut(key: $0, modifiers: .command) }
     }
 
     /// Sets both halves of a styled subtitle at once: the runs the row draws, and the plain
@@ -2372,20 +2390,38 @@ enum ThemedMenuMetrics {
 
     static var shortcutGap: CGFloat { usesClassicGrammar ? 8 : Design.Spacing.large }
 
-    /// One shared trailing column, measured from the widest key equivalent. Workbench draws
-    /// the modifier as artwork rather than a font character, so its fixed key cap participates
-    /// in the same measurement as the following Topaz key.
+    static let amigaCommandCapWidth: CGFloat = 13
+    static let amigaCommandCapGap: CGFloat = 2
+
+    /// The exact visible spelling for a chord under this menu grammar.
+    ///
+    /// Windows and Workbench keep their authored command-key forms for the ordinary ⌘ chord;
+    /// every other chord uses the platform glyph spelling so additional modifiers are never
+    /// hidden or guessed from one bare key.
+    static func shortcutText(_ shortcut: KeyboardShortcut) -> String {
+        if appearance == .windows98, shortcut.modifiers == .command {
+            return "Ctrl+" + KeyboardShortcut.keyDisplay(shortcut.key)
+        }
+        return shortcut.displayString
+    }
+
+    static func usesAmigaCommandCap(_ shortcut: KeyboardShortcut) -> Bool {
+        appearance == .amiga && shortcut.modifiers == .command
+    }
+
+    /// One shared trailing column, measured from the widest complete chord. Workbench draws its
+    /// ordinary command modifier as artwork rather than a font character, so the fixed key cap
+    /// participates in the same measurement as the following Topaz key.
     static func shortcutColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
         entries.compactMap { entry -> CGFloat? in
             guard case .item(let item) = entry,
-                  let key = item.keyEquivalent,
-                  !key.isEmpty else { return nil }
-            let keyWidth = ceil(key.size(withAttributes: [.font: titleFont]).width)
-            if appearance == .amiga {
-                return 13 + 2 + keyWidth
+                  let shortcut = item.resolvedShortcut else { return nil }
+            if usesAmigaCommandCap(shortcut) {
+                let key = KeyboardShortcut.keyDisplay(shortcut.key)
+                let keyWidth = ceil(key.size(withAttributes: [.font: titleFont]).width)
+                return amigaCommandCapWidth + amigaCommandCapGap + keyWidth
             }
-            let prefix = appearance == .windows98 ? "Ctrl+" : "⌘"
-            return ceil((prefix + key).size(withAttributes: [.font: titleFont]).width)
+            return ceil(shortcutText(shortcut).size(withAttributes: [.font: titleFont]).width)
         }.max() ?? 0
     }
 
@@ -4001,14 +4037,14 @@ private final class ThemedMenuRowView: ThemedControl {
             )
         }
 
-        if let key = item.keyEquivalent, !key.isEmpty, shortcutColumnWidth > 0 {
+        if let shortcut = item.resolvedShortcut, shortcutColumnWidth > 0 {
             let shortcutX = bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns
                 - shortcutColumnWidth
-            drawKeyEquivalent(
-                key,
+            drawShortcut(
+                shortcut,
                 in: NSRect(
                     x: shortcutX,
-                    y: bounds.midY - titleHeight / 2 + ThemedMenuMetrics.titleBaselineOffset,
+                    y: lineY - titleHeight / 2 + ThemedMenuMetrics.titleBaselineOffset,
                     width: shortcutColumnWidth,
                     height: titleHeight
                 ),
@@ -4284,17 +4320,26 @@ private final class ThemedMenuRowView: ThemedControl {
         draw(image, in: accessoryRect, tint: tint)
     }
 
-    private func drawKeyEquivalent(
-        _ key: String,
+    private func drawShortcut(
+        _ shortcut: KeyboardShortcut,
         in rect: NSRect,
         font: NSFont,
         color: NSColor
     ) {
-        if ThemedMenuMetrics.appearance == .amiga {
+        if ThemedMenuMetrics.usesAmigaCommandCap(shortcut) {
             // The Workbench manual does not spell "Amiga" in this column: it uses the black
             // Amiga-key cap followed by one Topaz character. Keep the cap as indexed geometry
             // so it remains exact even when the user's font override lacks a logo glyph.
-            let cap = NSRect(x: rect.minX, y: rect.midY - 6.5, width: 13, height: 13).integral
+            let key = KeyboardShortcut.keyDisplay(shortcut.key)
+            let keyWidth = ceil(key.size(withAttributes: [.font: font]).width)
+            let contentWidth = ThemedMenuMetrics.amigaCommandCapWidth
+                + ThemedMenuMetrics.amigaCommandCapGap + keyWidth
+            let cap = NSRect(
+                x: rect.maxX - contentWidth,
+                y: rect.midY - ThemedMenuMetrics.amigaCommandCapWidth / 2,
+                width: ThemedMenuMetrics.amigaCommandCapWidth,
+                height: ThemedMenuMetrics.amigaCommandCapWidth
+            ).integral
             color.setFill()
             cap.fill()
             let capInk = ThemedMenuMetrics.panelFill
@@ -4309,10 +4354,11 @@ private final class ThemedMenuRowView: ThemedControl {
             return
         }
 
-        let prefix = ThemedMenuMetrics.appearance == .windows98 ? "Ctrl+" : "⌘"
-        ((prefix + key) as NSString).draw(
-            in: rect,
-            withAttributes: [.font: font, .foregroundColor: color]
+        draw(
+            ThemedMenuMetrics.shortcutText(shortcut),
+            rightAlignedIn: rect,
+            font: font,
+            color: color
         )
     }
 

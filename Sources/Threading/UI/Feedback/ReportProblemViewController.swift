@@ -48,6 +48,22 @@ final class ReportProblemViewController: NSViewController {
 
 #endif
 
+    // MARK: - Public Methods
+
+    /// Opens the sheet with a report already written, for a failure Threading captured itself.
+    ///
+    /// The evidence is put in the **editable** field rather than carried alongside as an
+    /// attachment the user cannot see. Captured terminal output is arbitrary program text — it
+    /// is whatever the agent printed — so the one rule this sheet enforces about it is that
+    /// nobody can send it without having been shown it, and the way to guarantee that is to make
+    /// it the thing they are looking at and free to cut.
+    func prefill(title: String, detail: String) {
+        // `loadViewIfNeeded()` is macOS 14; touching `view` is the same guarantee on 13.
+        _ = view
+        titleField.stringValue = title
+        detailField.stringValue = detail
+    }
+
     // MARK: - Lifecycle
 
     override func loadView() {

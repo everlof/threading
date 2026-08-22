@@ -23,6 +23,16 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
     /// never learns a path, and the bytes never travel back across the boundary.
     typealias DocumentLoader = (ExtensionMediaSource) async -> Result<Data, MediaDocumentFailure>
 
+    /// Resolves a source to a **file**, for the one kind of renderer that reads its own.
+    ///
+    /// Separate from `DocumentLoader` and optional on purpose. Only a surface that already knows
+    /// a file behind its sources can answer — the attachments pane knows the attachment it is
+    /// previewing, the lightbox knows the item it was opened on — and a surface whose media comes
+    /// out of a signed package has no file to give and says so by not installing one. The URL is
+    /// host-side and stays there: it never reaches the extension, and neither do the bytes it
+    /// names.
+    typealias FileLoader = (ExtensionMediaSource) async -> Result<URL, MediaDocumentFailure>
+
     enum Layout {
         /// A canvas short enough to leave room for the list beside it and tall enough that a
         /// square document is not a stamp.
@@ -51,11 +61,19 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
     // MARK: - Playback
 
     private let loader: DocumentLoader
+    private let fileLoader: FileLoader?
     private let limits: MediaDocumentLimits
     private var session: (any MediaDocumentPlaybackSession)?
     private var state = MediaPlaybackState()
     private var loadGeneration = 0
     private var isPingPongReversing = false
+
+    /// Whether the user has silenced this player.
+    ///
+    /// Held across documents rather than inside `state`, which is rebuilt from the extension's
+    /// intent every time one arrives: muting is an answer about the room, not about the file, and
+    /// a panel that replaced its document would otherwise start talking again.
+    private var isMuted = false
 
     /// Set by the surface hosting the player — a tab going away, a pane collapsing.
     private var isPresentationActive = true
@@ -97,9 +115,11 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
 
     init(
         loader: @escaping DocumentLoader,
+        fileLoader: FileLoader? = nil,
         limits: MediaDocumentLimits = .default
     ) {
         self.loader = loader
+        self.fileLoader = fileLoader
         self.limits = limits
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -135,6 +155,7 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         transport.onPlayPause = { [weak self] in self?.togglePlayback() }
         transport.onScrub = { [weak self] value in self?.scrub(to: value) }
         transport.onScrubEnd = { [weak self] value in self?.finishScrub(at: value) }
+        transport.onToggleMute = { [weak self] in self?.toggleMute() }
 
         events.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in
             self?.needsDisplay = true
@@ -190,6 +211,9 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         transport.isPlaying = false
         transport.progress = 0
         transport.documentDuration = 0
+        // Whether the *next* document can make a sound is not known until it is open, and a
+        // speaker left over from the last one would offer to mute a silent animation.
+        transport.showsAudioControl = false
         showMessage(nil)
         load(newDocument)
     }
@@ -204,31 +228,66 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         let source = document.source
         let limits = limits
         let loader = loader
+        let fileLoader = fileLoader
 
         Task { @MainActor [weak self] in
-            let bytes = await loader(source)
-            guard let self, self.loadGeneration == generation else { return }
-            switch bytes {
+            let opened = await Self.open(
+                source,
+                with: renderer,
+                loader: loader,
+                fileLoader: fileLoader,
+                limits: limits
+            )
+            guard let self, self.loadGeneration == generation else {
+                if case .success(let session) = opened { session.invalidate() }
+                return
+            }
+            switch opened {
+            case .success(let session):
+                self.install(session)
             case .failure(let failure):
                 self.fail(with: failure)
-            case .success(let data):
-                do {
-                    // Parsing and archive expansion complete away from the main actor; only the
-                    // attachment and the first presentation happen here.
-                    let opened = try await renderer.open(data, limits: limits)
-                    guard self.loadGeneration == generation else {
-                        opened.invalidate()
-                        return
-                    }
-                    self.install(opened)
-                } catch let failure as MediaDocumentFailure {
-                    guard self.loadGeneration == generation else { return }
-                    self.fail(with: failure)
-                } catch {
-                    guard self.loadGeneration == generation else { return }
-                    self.fail(with: .invalidDocument(error.localizedDescription))
+            }
+        }
+    }
+
+    /// Opens one document by whichever route its renderer reads.
+    ///
+    /// Static, so the load can be in flight without the view being retained by it, and one
+    /// function rather than two branches at the call site because the *only* difference between
+    /// the routes is what a source resolves to. Parsing, archive expansion and reading a movie's
+    /// tracks all complete away from the main actor; only the attachment and the first
+    /// presentation happen on it.
+    private static func open(
+        _ source: ExtensionMediaSource,
+        with renderer: any MediaDocumentRenderer,
+        loader: DocumentLoader,
+        fileLoader: FileLoader?,
+        limits: MediaDocumentLimits
+    ) async -> Result<any MediaDocumentPlaybackSession, MediaDocumentFailure> {
+        do {
+            if let fileRenderer = renderer as? any MediaDocumentFileRenderer {
+                // A file-backed format is never handed bytes instead. A surface with no file for
+                // this source refuses the document rather than reading it into memory to find out
+                // the renderer cannot use it that way.
+                guard let fileLoader else { return .failure(.unresolvedSource) }
+                switch await fileLoader(source) {
+                case .failure(let failure):
+                    return .failure(failure)
+                case .success(let url):
+                    return .success(try await fileRenderer.open(fileAt: url, limits: limits))
                 }
             }
+            switch await loader(source) {
+            case .failure(let failure):
+                return .failure(failure)
+            case .success(let data):
+                return .success(try await renderer.open(data, limits: limits))
+            }
+        } catch let failure as MediaDocumentFailure {
+            return .failure(failure)
+        } catch {
+            return .failure(.invalidDocument(error.localizedDescription))
         }
     }
 
@@ -247,6 +306,8 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
             : 1.0 / 60.0
         transport.documentDuration = metadata.duration
         transport.progress = state.progress
+        transport.showsAudioControl = opened.hasAudio
+        transport.isMuted = isMuted
         opened.apply(state)
         opened.present(atProgress: state.progress)
 
@@ -287,7 +348,8 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
             isPlaying: playback.isPlaying && !Design.Motion.reducesMotion,
             loop: playback.loop,
             speed: playback.speed,
-            progress: playback.progress ?? currentProgress
+            progress: playback.progress ?? currentProgress,
+            isMuted: isMuted
         )
     }
 
@@ -337,6 +399,15 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
             session?.apply(state)
             startPlaying()
         }
+    }
+
+    /// Silence is the user's answer and it outlives the document, so it is applied to the
+    /// session rather than folded into a new playback intent.
+    private func toggleMute() {
+        isMuted.toggle()
+        state.isMuted = isMuted
+        transport.isMuted = isMuted
+        session?.apply(state)
     }
 
     private func startPlaying() {
@@ -417,6 +488,14 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
             // transport, which is a Double read and a label — not a decode.
             state.progress = session.currentProgress
             transport.progress = state.progress
+            if session.hasReachedEnd {
+                // Snapped rather than left where the engine's last sample landed: a movie stops a
+                // frame short of its own duration, and a transport reading 0.998 is a Play button
+                // that restarts nothing.
+                state.progress = 1
+                transport.progress = 1
+                complete()
+            }
             return
         }
 

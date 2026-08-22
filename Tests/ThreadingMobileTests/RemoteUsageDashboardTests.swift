@@ -41,4 +41,31 @@ final class RemoteUsageDashboardTests: XCTestCase {
     func testLimitDemoRejectsUnknownSeriesWithoutBroadeningSelection() {
         XCTAssertThrowsError(try RemoteUsageDemo.limit(seriesID: "unknown", days: 30))
     }
+
+    func testLimitChartDomainExcludesLaterBankedResetExpiry() throws {
+        let summary = try XCTUnwrap(
+            RemoteUsageDemo.dashboard().limitSeries.first { ($0.bankedResetCount ?? 0) > 0 }
+        )
+        let detail = try RemoteUsageDemo.limit(seriesID: summary.id, days: 7)
+        let domain = MobileUsageLimitChartDomain.range(for: detail)
+        let expiry = try XCTUnwrap(detail.series.nextBankedResetExpiresAt)
+        let projectionEnd = detail.projection.map {
+            $0.projectedExhaustionAt ?? $0.resetsAt
+        }
+        let expectedEnd = [detail.end, projectionEnd, detail.series.resetsAt]
+            .compactMap { $0 }
+            .max()
+
+        XCTAssertEqual(domain.lowerBound.timeIntervalSince1970, detail.start, accuracy: 0.001)
+        XCTAssertEqual(
+            domain.upperBound.timeIntervalSince1970,
+            try XCTUnwrap(expectedEnd),
+            accuracy: 0.001
+        )
+        XCTAssertLessThan(
+            domain.upperBound.timeIntervalSince1970,
+            expiry,
+            "a later banked-reset expiry compressed the selected history into the chart's edge"
+        )
+    }
 }

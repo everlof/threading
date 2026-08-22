@@ -457,6 +457,15 @@ final class SessionRowActionsTests: XCTestCase {
         )
         let options = try sessionOptions(in: entries)
 
+        let rename = try XCTUnwrap(
+            entries.compactMap(\.item).first { $0.title == L10n.string("Rename Session…") }
+        )
+        XCTAssertEqual(
+            rename.shortcut,
+            ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.renameSession),
+            "the row and pane-header menus must show the live binding for their rename action"
+        )
+
         XCTAssertNotNil(
             options.first { $0.item?.title == SessionActionMenuDefaults.attachmentsTitle }
         )
@@ -508,6 +517,9 @@ final class SessionRowActionsTests: XCTestCase {
                 // Beside Mute rather than beside Theme: both are conduct — what this chat does
                 // when nobody is watching — while Theme and Sound are presentation.
                 SessionActionMenuDefaults.limitRecoveryMenuTitle,
+                // And beside the limit fold, for the same reason: one asks what happens when the
+                // provider stops this chat, the other when the user's own clock does.
+                SessionActionMenuDefaults.curfewMenuTitle,
                 SessionActionMenuDefaults.attachmentsTitle
             ]
         )
@@ -1244,5 +1256,312 @@ final class SessionRowActionsTests: XCTestCase {
         PreferenceStore.shared.set(policy.rawValue, forKey: LimitRecoverySettings.storageKey)
         defer { PreferenceStore.shared.removeObject(forKey: LimitRecoverySettings.storageKey) }
         try run()
+    }
+}
+
+// MARK: - The Curfew Fold
+
+/// When a chat stops being spent, offered on the row that names it — and what each row writes.
+///
+/// A sibling class rather than more cases in the one above, because these rows **write**, and the
+/// write goes through `SessionCurfewCenter`, which settles the answer against `ProjectStore.shared`
+/// — the store a sidebar in the running app was handed. A fixture store of its own would exercise
+/// a path the app never takes and, worse, would have every choice refused as `targetNotFound` and
+/// answered with a modal notice. So: the hosted store, erased in teardown.
+///
+/// The rows themselves are `CurfewMenuTests`' subject. What is asked here is the wiring: that the
+/// fold is offered under the curfew's own mark, that each row hands back the choice it names, and
+/// that the writer stores **nothing** where the answer already matches what would be inherited —
+/// the rule that keeps a chat following its checkout and Settings.
+@MainActor
+final class SessionRowCurfewActionsTests: HostedStoreTestCase {
+
+    // MARK: - Fixture
+
+    private var restoredPreferences: CurfewPreferences!
+    private var project: Project!
+    private var chat: AgentSession!
+    private var sidebar: ProjectSidebarViewController!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+
+        // `CurfewSettings.shared` is `PreferenceStore`-backed, so this writes to the per-process
+        // scratch suite rather than the developer's own preferences — which matters more here
+        // than for most settings: switching quiet hours on in the real domain would arm a nightly
+        // hold on the copy of Threading they are working in.
+        restoredPreferences = CurfewSettings.shared.preferences
+        CurfewSettings.shared.preferences = .default
+
+        project = try XCTUnwrap(ProjectStore.shared.addProject(
+            folderURL: FileManager.default.temporaryDirectory.appendingPathComponent(
+                "session-curfew-fold-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        ))
+        chat = try XCTUnwrap(ProjectStore.shared.addSession(to: project.id, kind: .claude))
+
+        sidebar = ProjectSidebarViewController()
+        sidebar.actionSessionID = chat.id
+    }
+
+    override func tearDown() {
+        CurfewSettings.shared.preferences = restoredPreferences
+        restoredPreferences = nil
+        sidebar = nil
+        chat = nil
+        project = nil
+        super.tearDown()
+    }
+
+    /// The standing window, switched on through the settings the surfaces actually read — and
+    /// placed **ahead of now** rather than at the shipped 04:00.
+    ///
+    /// The default window is a fixture that changes what these rows say depending on when the
+    /// suite is run: a run at 07:33 is *inside* 04:00–08:00, so every chat is held and the fold
+    /// grows a Lift row. That is correct behaviour and a useless fixture. Two hours ahead is
+    /// outside the window at every hour of the day, midnight crossings included — `QuietHours`
+    /// wraps its own arithmetic — so "not held yet, and here is when it starts" is what these
+    /// cases ask about, at 07:33 or at any other time.
+    private func setQuietHours(enabled: Bool, now: Date = Date()) {
+        let calendar = Calendar.current
+        let minuteOfDay = calendar.component(.hour, from: now) * CurfewDefaults.minutesPerHour
+            + calendar.component(.minute, from: now)
+        var preferences = CurfewSettings.shared.preferences
+        preferences.quietHours = QuietHours(
+            isEnabled: enabled,
+            startMinute: (minuteOfDay + 2 * CurfewDefaults.minutesPerHour)
+                % CurfewDefaults.minutesPerDay,
+            endMinute: (minuteOfDay + 4 * CurfewDefaults.minutesPerHour)
+                % CurfewDefaults.minutesPerDay
+        )
+        CurfewSettings.shared.preferences = preferences
+    }
+
+    /// The fold, dug out of the menu the row and the pane header both build. Re-read from the
+    /// store each time, so a case that has just written a rule builds the menu the user would see
+    /// next rather than one holding the record as it was.
+    private func curfewFold() throws -> ThemedMenuItem {
+        let session = try XCTUnwrap(ProjectStore.shared.session(withID: chat.id))
+        let options = try XCTUnwrap(
+            sidebar.sessionActionEntries(for: session)
+                .compactMap(\.item)
+                .first { $0.title == SessionActionMenuDefaults.sessionOptionsTitle }?
+                .submenu,
+            "the session menu has no Session Options fold"
+        )
+        return try XCTUnwrap(
+            options.compactMap(\.item)
+                .first { $0.title == SessionActionMenuDefaults.curfewMenuTitle },
+            "the Session Options fold has no Curfew submenu"
+        )
+    }
+
+    private func namedRows() throws -> [CurfewMenu.RowID] {
+        try XCTUnwrap(curfewFold().submenu)
+            .compactMap { $0.item?.representedValue as? CurfewMenu.RowID }
+    }
+
+    /// One row by the identity it carries, never by its title: the titles hold formatted times
+    /// and are localized, so a title match would be an assertion about a formatter.
+    private func choose(_ id: CurfewMenu.RowID) throws {
+        let row = try XCTUnwrap(
+            try XCTUnwrap(curfewFold().submenu)
+                .compactMap(\.item)
+                .first { ($0.representedValue as? CurfewMenu.RowID) == id },
+            "the Curfew fold has no \(id) row"
+        )
+        try XCTUnwrap(row.onChoose, "the \(id) row answers nothing")()
+    }
+
+    private var storedRule: CurfewRule? {
+        ProjectStore.shared.session(withID: chat.id)?.curfewRule
+    }
+
+    // MARK: - The Fold
+
+    func testTheSessionOptionsFoldCarriesCurfewUnderTheCurfewsOwnMark() throws {
+        let fold = try curfewFold()
+        XCTAssertNotNil(fold.submenu, "the fold opens nothing")
+
+        // A symbol image configured for the menu's slot answers `name()` with nil, so the mark is
+        // compared by the description the system gives that particular symbol — which is what a
+        // built image still carries, and differs symbol by symbol.
+        let expected = try XCTUnwrap(ThemedMenuIcon.symbol(CurfewDefaults.symbol))
+        XCTAssertNotNil(
+            expected.accessibilityDescription,
+            "the system named this symbol nothing, so comparing descriptions proves nothing"
+        )
+        XCTAssertEqual(fold.image?.accessibilityDescription, expected.accessibilityDescription)
+    }
+
+    func testTheRowsCarryTheNamedIdentitiesEverySurfaceMatchesOn() throws {
+        setQuietHours(enabled: true)
+
+        XCTAssertEqual(
+            try namedRows(),
+            [.atQuietHours, .inherit, .exempt, .custom],
+            "the standing answers changed shape, or a row lost the identity tests find it by"
+        )
+    }
+
+    // MARK: - What Each Row Writes
+
+    /// The window's next opening, armed as a moment: a chat already running gets the time the
+    /// menu named, because late resolution belongs to a plan that has not started yet.
+    func testChoosingTheStandingWindowArmsThisChatUntilItsNextOpening() throws {
+        setQuietHours(enabled: true)
+        let start = try XCTUnwrap(
+            CurfewSettings.shared.preferences.quietHours.nextWindow(after: Date())?.start,
+            "an enabled window always has a next opening"
+        )
+
+        try choose(.atQuietHours)
+
+        XCTAssertEqual(storedRule, .until(start))
+    }
+
+    func testChoosingAnOfferedMomentArmsThisChatUntilIt() throws {
+        let offered = try XCTUnwrap(
+            try XCTUnwrap(curfewFold().submenu)
+                .compactMap(\.item)
+                .first { ($0.representedValue as? String) != nil },
+            "no moment was offered at all"
+        )
+
+        try XCTUnwrap(offered.onChoose)()
+
+        guard case .until(let deadline) = storedRule else {
+            return XCTFail("choosing a moment stored \(String(describing: storedRule))")
+        }
+        XCTAssertGreaterThan(deadline, Date(), "the chat was armed for a moment already past")
+    }
+
+    func testExemptStoresTheExemptionWhileAStandingWindowWouldHoldIt() throws {
+        setQuietHours(enabled: true)
+
+        try choose(.exempt)
+
+        XCTAssertEqual(storedRule, .exempt)
+    }
+
+    /// The nil-when-matching-inherited rule, on the case that shows what it is for: a chat inside
+    /// an exempt checkout is already exempt, so answering "exempt" writes **nothing** and the chat
+    /// keeps following the checkout — including when the checkout changes its mind later.
+    func testExemptStoresNothingWhereTheCheckoutIsAlreadyExempt() throws {
+        setQuietHours(enabled: true)
+        XCTAssertEqual(
+            ProjectStore.shared.setCurfewRule(.exempt, forProjectID: project.id),
+            .applied
+        )
+        XCTAssertEqual(
+            ProjectStore.shared.setCurfewRule(.exempt, forSessionID: chat.id),
+            .applied,
+            "the case needs a rule on the record for clearing it to be a change"
+        )
+
+        try choose(.exempt)
+
+        XCTAssertNil(
+            storedRule,
+            "the chat pinned an answer it would have inherited, so a later change misses it"
+        )
+    }
+
+    /// With no window configured there is nothing to be exempt from, and the vocabulary collapses
+    /// to the one answer a chat can still give: no curfew, which is what storing nothing means.
+    func testWithNoStandingWindowTheOnlyStandingAnswerClearsTheRule() throws {
+        XCTAssertEqual(
+            ProjectStore.shared.setCurfewRule(
+                .until(Date().addingTimeInterval(3_600)),
+                forSessionID: chat.id
+            ),
+            .applied
+        )
+
+        let named = try namedRows()
+        XCTAssertFalse(named.contains(.exempt), "a rule that does not exist was offered")
+        XCTAssertFalse(named.contains(.atQuietHours))
+
+        try choose(.inherit)
+
+        XCTAssertNil(storedRule)
+    }
+
+    // MARK: - Lifting
+
+    /// Legitimate, and offered only while something is actually holding: the rule is the user's
+    /// own. Lifting a curfew *this chat* set removes the rule, because "not tonight" and "never"
+    /// are the same sentence when the deadline was a one-shot.
+    func testLiftIsOfferedOnlyWhileACurfewHoldsAndReleasesTheChat() throws {
+        XCTAssertFalse(try namedRows().contains(.lift), "nothing is holding this chat")
+
+        XCTAssertEqual(
+            ProjectStore.shared.setCurfewRule(
+                .until(Date().addingTimeInterval(-3_600)),
+                forSessionID: chat.id
+            ),
+            .applied
+        )
+        XCTAssertTrue(CurfewHoldPolicy.isHeld(sessionID: chat.id, in: ProjectStore.shared))
+        XCTAssertTrue(try namedRows().contains(.lift))
+
+        try choose(.lift)
+
+        XCTAssertNil(storedRule)
+        XCTAssertFalse(
+            CurfewHoldPolicy.isHeld(sessionID: chat.id, in: ProjectStore.shared),
+            "the chat is still held after the one act that ends a curfew early"
+        )
+    }
+
+    // MARK: - The Checkout's Own Answer
+
+    /// One scope out, and only while there is a window to answer about. A checkout cannot name a
+    /// moment — the store refuses `.until` there — so with quiet hours off the entry says nothing
+    /// at all rather than offering an exemption from a rule nobody set.
+    func testTheProjectRowOffersTheStandingWindowOnlyWhileOneIsConfigured() throws {
+        let controller = ProjectSidebarViewController()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 320, height: 480)
+        controller.view.layoutSubtreeIfNeeded()
+        controller.mountInitialTreeIfNeeded()
+
+        let withoutAWindow = controller.projectMenuEntries(row: 0)
+        // The row has to have resolved a checkout at all, or every assertion below is about an
+        // entry list built for nothing: the project-scoped items are the ones that need an id.
+        XCTAssertNotNil(
+            withoutAWindow.compactMap(\.item)
+                .first { $0.title == SessionActionMenuDefaults.limitRecoveryMenuTitle },
+            "row 0 named no checkout, so this fixture tests nothing"
+        )
+        XCTAssertNil(
+            projectCurfewItem(in: withoutAWindow),
+            "a checkout was offered an exemption from a window nobody configured"
+        )
+
+        setQuietHours(enabled: true)
+        let fold = try XCTUnwrap(
+            projectCurfewItem(in: controller.projectMenuEntries(row: 0)),
+            "the project row has no Curfew entry"
+        )
+        let rows = try XCTUnwrap(fold.submenu).compactMap(\.item)
+        XCTAssertEqual(
+            rows.compactMap { $0.representedValue as? CurfewMenu.RowID },
+            [.inherit, .exempt]
+        )
+        // The resolved answer, not the record: a checkout that has said nothing is held tonight
+        // along with everything else, and an unmarked pair would state the opposite.
+        XCTAssertEqual(rows.map(\.isSelected), [true, false])
+
+        try XCTUnwrap(
+            rows.first { ($0.representedValue as? CurfewMenu.RowID) == .exempt }?.onChoose
+        )()
+
+        XCTAssertEqual(ProjectStore.shared.project(withID: project.id)?.curfewRule, .exempt)
+    }
+
+    private func projectCurfewItem(in entries: [ThemedMenuEntry]) -> ThemedMenuItem? {
+        entries.compactMap(\.item)
+            .first { $0.title == SessionActionMenuDefaults.curfewMenuTitle }
     }
 }

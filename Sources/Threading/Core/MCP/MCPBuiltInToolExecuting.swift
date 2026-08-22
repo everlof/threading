@@ -16,6 +16,13 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     _ arguments: DisplayCompareFilesArguments, for sessionID: SessionID
   ) -> MCPToolResult
 
+  /// Asynchronous because it decodes: the frames are read off the main actor, and a tool that
+  /// returned before they existed would return a sheet of nothing.
+  func videoFrames(
+    _ arguments: VideoFramesArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+
   func browserNavigate(
     _ arguments: BrowserNavigateArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
@@ -205,6 +212,9 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  /// Supplied by whatever owns the sheets a repair ends in — the window, in the app. Nil for a
+  /// host that has none, which is every test and the default below.
+  var conversationRepairHandler: ConversationRepairHandler? { get }
   func listSettings() -> MCPToolResult
   func notifyUser(_ arguments: NotifyUserArguments, for sessionID: SessionID) -> MCPToolResult
   func listThemes(for sessionID: SessionID) -> MCPToolResult
@@ -231,4 +241,42 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func extensionPreviewComponentPatch(
     _ arguments: ExtensionComponentPatchArguments, for sessionID: SessionID
   ) -> MCPToolResult
+#if DEBUG
+  func listIOSDebugDevices() -> MCPToolResult
+  func inspectIOSDebug(
+    _ arguments: IOSDebugInspectionArguments,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+#endif
+}
+
+// MARK: - Conversation Repair
+
+/// What a recovery agent's report is handed to.
+///
+/// A closure rather than a second protocol: the handler needs a window, sheets and the session
+/// coordinator, none of which belong to the type that serves tool calls — which is why
+/// `AgentToolCoordinator` is documented as owning tool behaviour *without* owning the window.
+typealias ConversationRepairHandler = @MainActor (
+  ConversationRepairArguments,
+  SessionID,
+  @escaping @MainActor @Sendable (MCPToolResult) -> Void
+) -> Void
+
+extension MCPBuiltInToolExecuting {
+
+  /// No handler means no host that can ask the user anything, so the tool refuses rather than
+  /// silently doing nothing. Every conformer gets this; only the app supplies a handler.
+  var conversationRepairHandler: ConversationRepairHandler? { nil }
+
+  func proposeConversationRepair(
+    _ arguments: ConversationRepairArguments,
+    for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  ) {
+    guard let conversationRepairHandler else {
+      return completion(.failure(LaunchRecoveryStrings.notARecoveryChat))
+    }
+    conversationRepairHandler(arguments, sessionID, completion)
+  }
 }

@@ -251,7 +251,32 @@ struct MobileIssueReportView: View {
             ]
         )
         .presentationDetents([.large])
+#if DEBUG
+        .task {
+            await presentReceiptEvidenceIfNeeded()
+        }
+#endif
     }
+
+#if DEBUG
+    /// Opens the shipping receipt over a populated form so UI evidence can prove that the
+    /// floating plate—not a translucent page panel—owns everything behind its text.
+    @MainActor
+    private func presentReceiptEvidenceIfNeeded() async {
+        guard ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "report-receipt" else { return }
+        reporterNote = "The receipt looked transparent and the report text remained visible "
+            + "beneath it."
+        try? await Task.sleep(for: .milliseconds(250))
+        guard !Task.isCancelled else { return }
+        notice = Notice(
+            title: "Sent to your Mac",
+            message: "A new Codex task is investigating this report in Threading.\n\n"
+                + "Fix transparent report receipt",
+            dismissReport: true
+        )
+    }
+#endif
 
     private var canSend: Bool {
         !reporterNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

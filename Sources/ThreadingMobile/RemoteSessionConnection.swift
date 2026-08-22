@@ -224,7 +224,7 @@ final class RemoteSessionConnection: ObservableObject {
     let target: RemoteLiveConnectionTarget
     let conversationStore = RemoteConversationStore()
     private var client: RemoteClient
-    private let reconnectClient: (@MainActor () async -> RemoteClient?)?
+    private let reconnectClient: (@MainActor (_ attempt: Int) async -> RemoteClient?)?
     private let deviceID: String
     private var task: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -242,6 +242,13 @@ final class RemoteSessionConnection: ObservableObject {
     private var connectionGeneration = 0
     private var pendingTerminalOutput = Data()
     private let pendingTerminalOutputLimit = 2 * 1_024 * 1_024
+    /// The mounted SwiftTerm view that owns terminal delivery and the phone's viewport lease.
+    ///
+    /// UIKit may finish dismantling an outgoing representable after SwiftUI has already mounted
+    /// its replacement on this same warm connection. Teardown therefore has to name the view it
+    /// is tearing down: an older view must not clear the replacement's callbacks or release the
+    /// viewport it just acquired.
+    private var terminalRendererOwner: ObjectIdentifier?
     private let terminalHydrationQuietDelay: Duration
     private let terminalHydrationMaximumDelay: Duration
     private var terminalHydrationQuietTask: Task<Void, Never>?
@@ -314,6 +321,37 @@ final class RemoteSessionConnection: ObservableObject {
         phase == .connected && task != nil && warmTransportState == .active
     }
 
+    /// Installs one terminal renderer as the owner of live output, authoritative grid updates,
+    /// and the viewport lease. A later mount atomically supersedes an earlier renderer.
+    func mountTerminalRenderer(
+        _ owner: AnyObject,
+        output: @escaping (Data) -> Void,
+        gridChange: @escaping (Int, Int) -> Void
+    ) {
+        guard warmTransportState != .parking, warmTransportState != .parked else { return }
+        terminalRendererOwner = ObjectIdentifier(owner)
+        // State first, bytes second. Both setters immediately replay anything that arrived
+        // before the view mounted, and the parser must know the host grid before taking bytes.
+        onTerminalGridChange = gridChange
+        onTerminalOutput = output
+    }
+
+    func isTerminalRendererOwner(_ owner: AnyObject) -> Bool {
+        terminalRendererOwner == ObjectIdentifier(owner)
+    }
+
+    /// Removes a renderer only while it still owns this connection. Returns whether removal
+    /// happened so the lifecycle ordering is directly testable without a UIKit transition.
+    @discardableResult
+    func unmountTerminalRenderer(_ owner: AnyObject) -> Bool {
+        guard isTerminalRendererOwner(owner) else { return false }
+        terminalRendererOwner = nil
+        onTerminalOutput = nil
+        onTerminalGridChange = nil
+        releaseTerminalViewport()
+        return true
+    }
+
     func terminalInputMode(settingEnabled: Bool) -> MobileTerminalInputMode {
         MobileCollaborationPresentation.terminalInputMode(
             settingEnabled: settingEnabled,
@@ -329,7 +367,7 @@ final class RemoteSessionConnection: ObservableObject {
         session: RemoteSessionSummaryDTO,
         target: RemoteLiveConnectionTarget? = nil,
         client: RemoteClient,
-        reconnectClient: (@MainActor () async -> RemoteClient?)? = nil,
+        reconnectClient: (@MainActor (_ attempt: Int) async -> RemoteClient?)? = nil,
         helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline,
         viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay,
         terminalHydrationQuietDelay: Duration =
@@ -521,6 +559,10 @@ final class RemoteSessionConnection: ObservableObject {
               task != nil,
               warmTransportState == .active else { return false }
 
+        // Move out of `active` before publishing any teardown state. SwiftUI may schedule one
+        // last update while this view disappears; a renderer must not remount onto a connection
+        // that has already committed to leaving host fan-out.
+        warmTransportState = .parking
         reportTyping(false)
         terminalHydrationQuietTask?.cancel()
         terminalHydrationQuietTask = nil
@@ -531,10 +573,10 @@ final class RemoteSessionConnection: ObservableObject {
         isTerminalHydrating = false
         pendingViewport = nil
         lastSentTerminalViewport = nil
+        terminalRendererOwner = nil
         onTerminalOutput = nil
         onTerminalGridChange = nil
         onWorkspaceChanged = nil
-        warmTransportState = .parking
         do {
             try send(RemoteClientMessage(type: "sessionPark"))
             return true
@@ -1560,7 +1602,7 @@ final class RemoteSessionConnection: ObservableObject {
             guard !Task.isCancelled, let self,
                   self.connectionGeneration == generation,
                   let reconnectClient = self.reconnectClient,
-                  let client = await reconnectClient() else { return }
+                  let client = await reconnectClient(attempt) else { return }
             guard !Task.isCancelled, self.connectionGeneration == generation else { return }
             self.client = client
             self.reconnectTask = nil

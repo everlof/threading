@@ -46,7 +46,8 @@ extension SessionCoordinator {
         // chat in the app that ignores the user's standing opening message.
         let opening = NewChatOpeningMessage.compose(
             prompt: DeveloperReportChat.framedReport(request.report),
-            reusableMessage: environment.settings.newChatOpeningMessage
+            prefix: environment.settings.newChatOpeningPrefix,
+            suffix: environment.settings.newChatOpeningSuffix
         )
 
         guard let session = startSessionUnattended(plan: plan, title: request.title) else {

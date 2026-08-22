@@ -188,8 +188,17 @@ extension ConversationViewController {
     /// something about *that turn*, not about the three messages they lined up behind it — and
     /// where the provider cancels its own copies, `still_queued` is how we learn which of ours
     /// survived so they can be put back rather than silently lost.
-    func stopCurrentTurn() {
-        guard stream.canInterrupt else { return }
+    ///
+    /// `completion` exists for the one caller that is not a person: a curfew asked for this stop
+    /// and counts what became of it. It runs **after** the ordinary handling above, and it runs on
+    /// the early guard too — with `.failed`, because a transport that had nothing to interrupt is
+    /// still an attempt this session has spent, and a caller whose budget only advanced on success
+    /// would keep pressing a key forever.
+    func stopCurrentTurn(completion: (@MainActor (InterruptReceipt) -> Void)? = nil) {
+        guard stream.canInterrupt else {
+            completion?(.failed(reason: L10n.string("There was no turn to stop.")))
+            return
+        }
 
         isStoppingTurn = true
         refreshComposerMode()
@@ -208,6 +217,7 @@ extension ConversationViewController {
             }
 
             self.refreshComposerMode()
+            completion?(receipt)
         }
     }
 

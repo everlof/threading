@@ -121,6 +121,36 @@ version of the same rule: a pane that *cannot* grow without bound needs nothing 
 given, down to `WindowDefaults.minHeight`, and AppKit's `constrainFrameRect` behaviour, so if the
 platform ever stops yanking the window the reason for the rule is gone with it.
 
+### And a pane may not decide how short it is either
+
+The rule above has a mirror, and the line between them is one number:
+**`NSLayoutConstraint.Priority.windowSizeStayPut`, which is 500.** That is the only thing holding a
+window at the size the user dragged it to. Every constraint in the window's content above that
+priority which *decides* a dimension of that content — not merely bounds it, decides it — is a
+constraint the window resizes itself to satisfy, and it does so on every layout pass, not once.
+
+This shipped in the display panel. The chart pane stood its card between the pane's top inset and
+a footer, with the footer's foot pulled to the bottom edge at `defaultHigh - 1`: a chain of
+equalities from the pane's top edge to its bottom one, stated at 749. That made the chart's
+*preferred* height the height of the window's content, and the window followed it — a chat with a
+chart tab open snapped to `WindowDefaults.minHeight` the moment it was selected, every time,
+whatever height the window had been left at. The panel's own width floor
+(`testThePanelHardFloorCostsOnlyItsOwnChrome`) is the same bug on the other axis, and both were
+reported the same way: as the window doing something the user did not ask for.
+
+The fix is not a lower priority on the fill — that only trades a window that shrinks for a chart
+that will not grow. It is to give the slack somewhere else to go: the gap over the footer is a
+`>=`, the footer's foot is required, and the *preference* that closes the gap sits below
+`windowSizeStayPut`. The pane still fills, the chart still stops at its own ceiling, and nothing
+in the pane states a height the window is entitled to hear.
+
+So the check when adding pane content is not "is anything required here" — a required equality
+that bounds a *subview* is fine, and the panel is full of them. It is: **can the layout engine
+derive this pane's own height from constraints above 500?** If it can, that height is the
+window's. `DisplayPaneLayoutTests/testPanelContentDoesNotDecideHowTallTheWindowIs` asserts it in
+the real window with a chart and an image, because a pane's `fittingSize` answers the same number
+either way and is no help at all in telling the two apart.
+
 **The toolbar holds only controls that act on the window itself, and everything else belongs
 to the pane it describes.** `NSToolbar` positions its items relative to the *window*, which is
 what makes it right for exactly two things: the sidebar toggle, which acts on the split rather
@@ -164,11 +194,12 @@ rule instead of two. `SidebarDefaults.maxWidth` survives as the ceiling on width
 proposes: a restored width, or an extension navigator's `preferredWidth`. How wide the user may
 drag is a different question from how wide the app may open it unasked.
 
-**And the width survives a relaunch.** The window's frame is autosaved, so a restart used to
-bring the arranged window back with the column reset to 240. `SidebarWidth` records it on divider
-movement and `restoreSidebarWidth` puts it back, both through `PreferenceStore` and for the same
-reasons as `DisplayPaneWidth` — it is a choice made with a divider, and a hosted test must not
-write it into the developer's own preferences. Two orderings are load-bearing: the restore runs
+**And the width survives a relaunch.** The window's size is restored from its autosaved frame, so
+a restart used to bring the arranged window back with the column reset to 240. `SidebarWidth`
+records it on divider movement and `restoreSidebarWidth` puts it back, both through
+`PreferenceStore` and for the same reasons as `DisplayPaneWidth` — it is a choice made with a
+divider, and a hosted test must not write it into the developer's own preferences. Two orderings
+are load-bearing: the restore runs
 in the same run-loop turn that claims the floor, and `recordsSidebarWidth` stays false until it
 has, or launch's default layout would overwrite the stored width one turn before it was read.
 The stored value is snapshotted before that turn is queued. It is launch input; re-reading the
@@ -988,11 +1019,19 @@ shrink it, but the bottom edge is off screen and the composer never returns, and
 window has no clamp to put it back. Nothing in the panes held it *down*: `MainWindowSizingTests`
 builds the real controller and drags it to `WindowDefaults.minHeight`. So
 `TitlebarActionWindow.constrainFrameRect` performs AppKit's own two steps for the untitled case —
-size into `visibleFrame`, then move inside it (`MainWindowFrame.held`) — and `applyInitialFrame`
-holds the restored frame the same way. Fullscreen is excepted: AppKit sizes a fullscreen window
-to the screen's *full* frame, menu bar included, and holding that inside `visibleFrame` would
-shrink a window the platform had just sized on purpose. The held frame is asserted **equal** to
-what AppKit gives a titled window across the same rectangles, so the two cannot drift.
+size into `visibleFrame`, then move inside it (`MainWindowFrame.held`). On launch,
+`applyInitialFrame` keeps the autosaved dimensions but replaces the old origin with the centre of
+the display the saved frame overlapped most (`MainWindowFrame.centered`). A second-display window
+therefore stays on that display, while an unplugged display falls back to the main screen. This is
+deliberately size restoration rather than position restoration: each launch begins predictably
+centred without discarding the dimensions the user chose. An unclean previous exit is the one
+exception: `MainWindowInitialFramePlan` declines `setFrameUsingName` entirely and starts from the
+default size at the centre. It saves that default before calling `setFrameAutosaveName`, whose
+otherwise-useful side effect is to reapply the old frame. Fullscreen is excepted: AppKit sizes a
+fullscreen window to the screen's *full* frame, menu bar included, and holding that inside
+`visibleFrame` would shrink a window the platform had just sized on purpose. The held frame is
+asserted **equal** to what AppKit gives a titled window across the same rectangles, so the two
+cannot drift.
 
 **What wrote 3386 was found the next day, reported as "opening one session throws the window
 off the screen".** The attachments pane's preview stated an image's *fitted height* — unbounded —

@@ -31,4 +31,14 @@ extension LimitEscapeStripView.Offer {
             busy: suggestion.busy
         )
     }
+
+    /// What a surface should draw for one session held by its own curfew.
+    ///
+    /// The line is written by `CurfewReceiptWords` and handed over whole: it is a ledger read
+    /// against a clock, and the two hosts must not each assemble their own. Neither answer the
+    /// refusal path carries applies — there is no login to move to and no window to wait for,
+    /// because nothing about the provider has stopped this — so this states the one it does have.
+    static func curfew(line: String) -> Self {
+        LimitEscapeStripView.Offer(source: .curfew, curfewLine: line)
+    }
 }

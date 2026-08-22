@@ -2,12 +2,12 @@ import AppKit
 
 // MARK: - Window Layout Reset
 
-/// Forgets where the user left the window and its dividers.
+/// Forgets the user's saved window size and divider geometry.
 ///
 /// **A launch input worth being able to discard.** `setFrameUsingName` is the one door into a
 /// window's frame that AppKit does not police — measured, it calls `constrainFrameRect(_:to:)`
 /// not at all — so a frame saved on a display that no longer exists is applied whole, and
-/// `MainWindowController.holdRestoredFrameOnScreen` is already the patch for it. The recovery
+/// `MainWindowController.centerRestoredFrameOnScreen` is already the patch for it. The recovery
 /// surface offers this because a window that comes up somewhere unusable is indistinguishable,
 /// from the outside, from an app that will not start.
 ///

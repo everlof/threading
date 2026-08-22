@@ -261,16 +261,44 @@ final class CodexHookInstallerTests: XCTestCase {
         )
     }
 
-    /// The port and token reach the hook through the environment precisely so the text can be
-    /// stable. If a literal port ever appears here, trust breaks on every app launch.
+    /// The token reaches the hook through the environment, and the rendezvous is a literal
+    /// because a unix socket path is fixed per user. If a literal *port* ever comes back here,
+    /// trust breaks on every app launch — which is what the socket replaced.
     func testCommandCarriesNoLaunchSpecificValues() {
-        for event in HookLifecycleEvent.allCases {
-            let command = CodexHookInstaller.command(for: event)
+        var commands = HookLifecycleEvent.allCases.map(CodexHookInstaller.command(for:))
+        commands.append(CodexHookInstaller.permissionCommand())
 
-            XCTAssertTrue(command.contains("$\(MCPDefaults.portEnvironmentKey)"))
+        for command in commands {
             XCTAssertTrue(command.contains("$\(MCPDefaults.sessionTokenEnvironmentKey)"))
             XCTAssertTrue(command.contains(MCPDefaults.hookMarker))
+            XCTAssertTrue(
+                command.contains(
+                    "--unix-socket \(MCPBridgeLocation.shellQuoted(MCPBridgeLocation.socketPath))"
+                ),
+                "the hook does not post over the rendezvous: \(command)"
+            )
+            XCTAssertFalse(
+                command.contains(MCPDefaults.portEnvironmentKey),
+                "a per-launch port came back into a file Codex trusts by its text: \(command)"
+            )
+            XCTAssertFalse(command.contains("http://\(MCPDefaults.host):"))
         }
+    }
+
+    /// The trust-hash claim, asserted on the bytes rather than on the generator.
+    ///
+    /// Codex pins a trusted hook by hashing its command text, so two consecutive "launches"
+    /// must leave the file byte-for-byte identical. Everything in the command is fixed at
+    /// compile time except the socket path, and that is fixed per user.
+    func testTheFileWrittenByTwoLaunchesIsByteIdentical() throws {
+        XCTAssertTrue(CodexHookInstaller.install(inCodexHome: codexHome.path))
+        let first = try Data(contentsOf: hooksFile)
+
+        XCTAssertFalse(
+            CodexHookInstaller.install(inCodexHome: codexHome.path),
+            "a second launch rewrote the file and revoked the user's trust decision"
+        )
+        XCTAssertEqual(try Data(contentsOf: hooksFile), first)
     }
 
     /// The file is read by every Codex run under the account, including ones the user starts

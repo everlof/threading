@@ -153,16 +153,27 @@ final class AppSettings {
         sessionRestorePolicy != .nothing
     }
 
-    /// Extra context appended to the first message of every new chat.
+    /// Standing context put *before* the task in the first message of every new chat.
+    ///
+    /// Empty means nothing is added. Same lifetime as the suffix below: consumed once when the
+    /// chat is created, never re-read on a resume.
+    var newChatOpeningPrefix: String {
+        get { AppSettingDefinitions.newChatOpeningPrefix.read(from: defaults) ?? "" }
+        set {
+            AppSettingDefinitions.newChatOpeningPrefix.write(newValue, to: defaults)
+        }
+    }
+
+    /// Extra context appended after the task in the first message of every new chat.
     ///
     /// Empty means no extra message. It is deliberately app-wide rather than copied into the
     /// session record: the value is consumed once when the chat is created, and the combined
     /// opening is what the provider persists in its own transcript. Resuming an existing chat
     /// never reads it.
-    var newChatOpeningMessage: String {
-        get { AppSettingDefinitions.newChatOpeningMessage.read(from: defaults) ?? "" }
+    var newChatOpeningSuffix: String {
+        get { AppSettingDefinitions.newChatOpeningSuffix.read(from: defaults) ?? "" }
         set {
-            AppSettingDefinitions.newChatOpeningMessage.write(newValue, to: defaults)
+            AppSettingDefinitions.newChatOpeningSuffix.write(newValue, to: defaults)
         }
     }
 
@@ -1054,6 +1065,20 @@ final class AppSettings {
         }
         set {
             AppSettingDefinitions.remoteAccessListenerPort.write(Int(newValue), to: defaults)
+        }
+    }
+
+    /// Read at release time rather than cached, so a `defaults write` takes effect without a
+    /// relaunch. `0` is a legal value and means "release immediately", which is the behaviour
+    /// the grace replaced; the range clamps rather than refuses, because the nearest allowed
+    /// delay is what somebody typing a number meant.
+    var remoteViewportLeaseGraceSeconds: Int {
+        get {
+            AppSettingDefinitions.remoteViewportLeaseGraceSeconds.read(from: defaults)
+                ?? RemoteAccessDefaults.viewportLeaseGraceSeconds
+        }
+        set {
+            AppSettingDefinitions.remoteViewportLeaseGraceSeconds.write(newValue, to: defaults)
         }
     }
 

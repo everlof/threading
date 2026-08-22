@@ -37,19 +37,39 @@ struct RowConductSummary: Equatable, Sendable {
     /// not the same fact. A record can hold a value that matches what it would have inherited —
     /// an older writer, or a setting toggled twice at a scope whose base is the same — and a mark
     /// for that would be a row claiming to be different while behaving identically.
+    ///
+    /// The two clock-driven statements — a curfew and a park by the user's own limit — enter as
+    /// ready sentences rather than as records, so this stays the one place that decides *order*
+    /// while remaining assertable with no store, no preferences suite and no account usage.
     static func session(
         muted: Bool?,
         inheritedMuted: Bool,
         limitRecovery: LimitRecoveryPolicy?,
-        inheritedLimitRecovery: LimitRecoveryPolicy
+        inheritedLimitRecovery: LimitRecoveryPolicy,
+        curfew: RowCurfewStatement? = nil,
+        parkedByOwnLimit: String? = nil
     ) -> RowConductSummary? {
         var statements: [String] = []
 
+        // A hold leads, ahead even of a park: the curfew names *this row* while a park names the
+        // account behind it, and the reader looking at one idle session wants the reason that
+        // belongs to it first. See `RowCurfewStatement.leads`.
+        if let curfew, curfew.leads {
+            statements.append(curfew.text)
+        }
+        if let parkedByOwnLimit {
+            statements.append(parkedByOwnLimit)
+        }
         if let limitRecovery, limitRecovery != inheritedLimitRecovery {
             statements.append(RowConductStrings.limitRecovery(limitRecovery))
         }
         if let muted, muted != inheritedMuted {
             statements.append(RowConductStrings.mute(muted))
+        }
+        // A fence that has not closed yet, or an exemption from one, is the quietest thing here:
+        // nothing has happened to this session, and nothing will until the named time.
+        if let curfew, !curfew.leads {
+            statements.append(curfew.text)
         }
 
         return statements.isEmpty ? nil : RowConductSummary(statements: statements)
@@ -60,14 +80,85 @@ struct RowConductSummary: Equatable, Sendable {
     static func project(
         muted: Bool?,
         limitRecovery: LimitRecoveryPolicy?,
-        inheritedLimitRecovery: LimitRecoveryPolicy
+        inheritedLimitRecovery: LimitRecoveryPolicy,
+        curfew: RowCurfewStatement? = nil
     ) -> RowConductSummary? {
         session(
             muted: muted,
             inheritedMuted: false,
             limitRecovery: limitRecovery,
-            inheritedLimitRecovery: inheritedLimitRecovery
+            inheritedLimitRecovery: inheritedLimitRecovery,
+            curfew: curfew
         )
+    }
+
+    // MARK: - The Curfew Rule
+
+    /// What one record's curfew is worth saying on its row, and where the sentence belongs.
+    ///
+    /// Pure, and separated from the resolution the way the rest of this file is separated from the
+    /// store: whether a mark appears is the whole product decision here, and a rule that lit up
+    /// every row would be worse than no rule at all.
+    ///
+    /// Four answers, in the order they are asked:
+    ///
+    /// - **Held** leads, whichever scope set the deadline. A held session looks idle and is not —
+    ///   nothing is being sent to it — and that is the one curfew fact a reader is owed before
+    ///   they go looking for a reason.
+    /// - **Armed** speaks only for the record's *own* answer (`ownScope`). A standing quiet-hours
+    ///   window that has not opened yet is inherited by every conversation on the machine, so
+    ///   marking it would put the same sentence on every row and tell nobody anything.
+    /// - **Exempt** speaks only where a window would otherwise have applied. "Exempt from quiet
+    ///   hours" on a machine with no quiet hours names a rule nobody set.
+    /// - Anything **matching what would have been inherited** says nothing, for the reason
+    ///   `session(…)` compares rather than tests for non-nil.
+    ///
+    /// Compared by deadline rather than by whole value, because the two can never be equal: an
+    /// inherited window carries `.quietHours` origin and a session's own answer carries
+    /// `.session`. The deadline is the difference a reader would notice — the margins around it
+    /// come from Settings either way.
+    static func curfewStatement(
+        hold: CurfewHold,
+        answer: CurfewResolution.Answer,
+        inherited: ResolvedCurfew?,
+        ownScope: CurfewScope,
+        now: Date,
+        locale: Locale = .current
+    ) -> RowCurfewStatement? {
+        if case .held(_, let curfew, _) = hold {
+            guard let text = CurfewReceiptWords.conductStatement(
+                curfew: curfew,
+                isExempt: false,
+                now: now,
+                locale: locale
+            ) else { return nil }
+            return RowCurfewStatement(text: text, leads: true)
+        }
+
+        guard answer.scope == ownScope else { return nil }
+
+        guard let curfew = answer.curfew else {
+            // The record exempted itself. `scope == ownScope` with no curfew is exactly that:
+            // a checkout's exemption answers at `.project`, so a chat inheriting one is silent
+            // here and the checkout's own row carries the sentence.
+            guard inherited != nil else { return nil }
+            guard let text = CurfewReceiptWords.conductStatement(
+                curfew: nil,
+                isExempt: true,
+                now: now,
+                locale: locale
+            ) else { return nil }
+            return RowCurfewStatement(text: text, leads: false)
+        }
+
+        guard curfew.deadline != inherited?.deadline else { return nil }
+        guard let text = CurfewReceiptWords.conductStatement(
+            curfew: curfew,
+            isExempt: false,
+            now: now,
+            locale: locale
+        ) else { return nil }
+        return RowCurfewStatement(text: text, leads: false)
     }
 
     // MARK: - Reading The Records
@@ -86,19 +177,10 @@ struct RowConductSummary: Equatable, Sendable {
     @MainActor
     static func forSession(
         _ session: AgentSession,
-        in store: ProjectStore = .shared
+        in store: ProjectStore = .shared,
+        now: Date = Date()
     ) -> RowConductSummary? {
         let project = store.project(forSessionID: session.id)
-        let settings = self.session(
-            muted: session.notificationsMuted,
-            inheritedMuted: project?.notificationsMuted ?? false,
-            limitRecovery: session.limitRecoveryPolicy,
-            inheritedLimitRecovery: LimitRecoveryResolution.resolve(
-                session: nil,
-                project: project?.limitRecoveryPolicy,
-                app: LimitRecoverySettings.policy
-            ).policy
-        )
 
         // A park by one of the user's own limits belongs in this family and **not** on the
         // warning triangle. `ThemedWarningMark` means "the provider stopped this and you cannot
@@ -106,13 +188,63 @@ struct RowConductSummary: Equatable, Sendable {
         // mutes itself or recovers differently, which is what this mark already says. The
         // process really is idle and the provider really would accept a turn, so there is no new
         // `SessionActivity` case either.
-        let park = CustomLimitParkPolicy.hold(sessionID: session.id)
-        guard let rule = park.rule else { return settings }
+        let park = CustomLimitParkPolicy.hold(sessionID: session.id, at: now)
 
-        return RowConductSummary(
-            statements: [RowConductStrings.parkedByOwnLimit(
-                CustomLimitReceipt.holdSummaryLine(park, rule: rule)
-            )] + (settings?.statements ?? [])
+        return self.session(
+            muted: session.notificationsMuted,
+            inheritedMuted: project?.notificationsMuted ?? false,
+            limitRecovery: session.limitRecoveryPolicy,
+            inheritedLimitRecovery: LimitRecoveryResolution.resolve(
+                session: nil,
+                project: project?.limitRecoveryPolicy,
+                app: LimitRecoverySettings.policy
+            ).policy,
+            curfew: curfewStatement(for: session, project: project, now: now),
+            parkedByOwnLimit: park.rule.map {
+                RowConductStrings.parkedByOwnLimit(
+                    CustomLimitReceipt.holdSummaryLine(park, rule: $0)
+                )
+            }
+        )
+    }
+
+    /// The curfew half of a session row, resolved from the records the caller already holds.
+    ///
+    /// Both the answer and what it would have inherited are computed from `session.curfewRule` and
+    /// `project?.curfewRule` rather than through `CurfewResolution.answer(forSessionID:)` and
+    /// `inherited(beyondSessionID:)`, which is the same economy `forSession` already documents:
+    /// those two conveniences would each go back to the store for a record this call is holding,
+    /// turning one project lookup per visible row into four. The chain they run is the same one,
+    /// entered a level lower.
+    ///
+    /// The hold likewise comes from `CurfewHoldPolicy`'s pure overload, so the row cannot disagree
+    /// with the seam that refuses a send about whether this session is held.
+    @MainActor
+    private static func curfewStatement(
+        for session: AgentSession,
+        project: Project?,
+        now: Date
+    ) -> RowCurfewStatement? {
+        let preferences = CurfewSettings.shared.preferences
+        let answer = CurfewResolution.resolve(
+            session: session.curfewRule,
+            project: project?.curfewRule,
+            preferences: preferences,
+            state: session.curfewState,
+            now: now
+        )
+
+        return curfewStatement(
+            hold: CurfewHoldPolicy.hold(answer: answer, state: session.curfewState, at: now),
+            answer: answer,
+            inherited: CurfewResolution.inherited(
+                beyond: .session,
+                project: project?.curfewRule,
+                preferences: preferences,
+                now: now
+            ),
+            ownScope: .session,
+            now: now
         )
     }
 
@@ -121,21 +253,65 @@ struct RowConductSummary: Equatable, Sendable {
     @MainActor
     static func forSession(
         _ sessionID: SessionID,
-        in store: ProjectStore = .shared
+        in store: ProjectStore = .shared,
+        now: Date = Date()
     ) -> RowConductSummary? {
         guard let session = store.session(withID: sessionID) else { return nil }
-        return forSession(session, in: store)
+        return forSession(session, in: store, now: now)
     }
 
     /// Takes the record rather than an id, so a row summarises the checkout it was handed.
     @MainActor
-    static func forProject(_ project: Project) -> RowConductSummary? {
-        self.project(
+    static func forProject(_ project: Project, now: Date = Date()) -> RowConductSummary? {
+        let preferences = CurfewSettings.shared.preferences
+
+        return self.project(
             muted: project.notificationsMuted,
             limitRecovery: project.limitRecoveryPolicy,
-            inheritedLimitRecovery: LimitRecoveryResolution.inherited(beyondProjectID: project.id)
+            inheritedLimitRecovery: LimitRecoveryResolution.inherited(beyondProjectID: project.id),
+            // A checkout is not a conversation, so nothing holds it: the hold is a fact about one
+            // session's clock, and the chats inside carry it on their own rows. What a checkout
+            // can say is that it exempted them — the only curfew answer `ProjectStore` lets it
+            // store.
+            curfew: curfewStatement(
+                hold: .clear,
+                answer: CurfewResolution.resolve(
+                    session: nil,
+                    project: project.curfewRule,
+                    preferences: preferences,
+                    state: nil,
+                    now: now
+                ),
+                inherited: CurfewResolution.inherited(
+                    beyond: .project,
+                    project: nil,
+                    preferences: preferences,
+                    now: now
+                ),
+                ownScope: .project,
+                now: now
+            )
         )
     }
+}
+
+// MARK: - Curfew Statement
+
+/// A row's curfew sentence and where it sits among the row's other conduct.
+///
+/// The two travel together rather than as a string and a separate flag, because they are one
+/// decision: a hold is prepended and everything else appended, and a call site free to pair the
+/// wrong half would put "Held by curfew since 04:00" last — after the two facts a reader only
+/// needs once they know why nothing is being sent.
+///
+/// The words come from `CurfewReceiptWords`, so the row, the strip and a refusal cannot drift
+/// into three descriptions of one fence.
+struct RowCurfewStatement: Equatable, Sendable {
+
+    let text: String
+
+    /// Whether this statement leads the row. True only for a hold.
+    let leads: Bool
 }
 
 // MARK: - Strings

@@ -174,4 +174,41 @@ enum CurfewReceiptWords {
     static func gaveUpAlertBody(count: Int) -> String {
         L10n.format("Kept working after %lld interrupts", Int64(count))
     }
+
+    // MARK: - Before Anything Has Happened
+
+    /// The whole ladder a chosen curfew *will* run, stated before any of it has.
+    ///
+    /// `stripSentence` is a ledger of what was done; this is the same line in the other tense, for
+    /// the one surface that has no session yet — the draft view's chip, where somebody is choosing
+    /// an end while writing the prompt. Three clauses in the order they will happen, and a margin
+    /// switched off in Settings drops its clause rather than printing "off": a wrap-up that will
+    /// never be sent is not news, and an interrupt that will never be typed must not be promised.
+    static func plannedLadder(
+        curfew: ResolvedCurfew,
+        locale: Locale = .current
+    ) -> String {
+        var clauses = [
+            L10n.format(
+                "Ends at %@",
+                ScheduledTimePresets.time(curfew.deadline, locale: locale),
+                locale: locale
+            )
+        ]
+        if let windDownAt = curfew.windDownAt {
+            clauses.append(L10n.format(
+                "wrap-up at %@",
+                ScheduledTimePresets.time(windDownAt, locale: locale),
+                locale: locale
+            ))
+        }
+        if let interruptAt = curfew.interruptAt {
+            clauses.append(L10n.format(
+                "interrupted after %@",
+                ScheduledTimePresets.time(interruptAt, locale: locale),
+                locale: locale
+            ))
+        }
+        return clauses.joined(separator: CurfewDefaults.receiptSeparator)
+    }
 }

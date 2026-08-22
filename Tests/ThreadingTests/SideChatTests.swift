@@ -743,13 +743,36 @@ final class SessionCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.sidebar.projectStore === projectStore)
     }
 
-    func testReusableOpeningMessageFollowsThePerChatTask() {
+    func testReusableOpeningMessageSurroundsThePerChatTask() {
         XCTAssertEqual(
             NewChatOpeningMessage.compose(
                 prompt: "  Fix the flaky test.\n",
-                reusableMessage: "\nRename this chat to one uppercase word.  "
+                prefix: "  Read the tests before you change anything.\n",
+                suffix: "\nRename this chat to one uppercase word.  "
             ),
-            "Fix the flaky test.\n\nRename this chat to one uppercase word."
+            "Read the tests before you change anything."
+                + "\n\nFix the flaky test."
+                + "\n\nRename this chat to one uppercase word."
+        )
+    }
+
+    /// Either half on its own keeps the task where it belongs relative to that half.
+    func testEitherHalfCanBeEmpty() {
+        XCTAssertEqual(
+            NewChatOpeningMessage.compose(
+                prompt: "Fix the flaky test.",
+                prefix: "Read the tests first.",
+                suffix: "  "
+            ),
+            "Read the tests first.\n\nFix the flaky test."
+        )
+        XCTAssertEqual(
+            NewChatOpeningMessage.compose(
+                prompt: "Fix the flaky test.",
+                prefix: "\n",
+                suffix: "Rename this chat."
+            ),
+            "Fix the flaky test.\n\nRename this chat."
         )
     }
 
@@ -757,12 +780,21 @@ final class SessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             NewChatOpeningMessage.compose(
                 prompt: " \n ",
-                reusableMessage: "Rename this chat."
+                prefix: "",
+                suffix: "Rename this chat."
             ),
             "Rename this chat."
         )
+        XCTAssertEqual(
+            NewChatOpeningMessage.compose(
+                prompt: " \n ",
+                prefix: "Read the tests first.",
+                suffix: ""
+            ),
+            "Read the tests first."
+        )
         XCTAssertNil(
-            NewChatOpeningMessage.compose(prompt: nil, reusableMessage: " \n ")
+            NewChatOpeningMessage.compose(prompt: nil, prefix: " ", suffix: " \n ")
         )
     }
 
@@ -772,11 +804,31 @@ final class SessionCoordinatorTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let message = "Use one word.\nKEEP IT UPPERCASE."
-        AppSettings(defaults: defaults).newChatOpeningMessage = message
-        XCTAssertEqual(AppSettings(defaults: defaults).newChatOpeningMessage, message)
+        AppSettings(defaults: defaults).newChatOpeningSuffix = message
+        XCTAssertEqual(AppSettings(defaults: defaults).newChatOpeningSuffix, message)
 
-        AppSettings(defaults: defaults).newChatOpeningMessage = ""
-        XCTAssertEqual(AppSettings(defaults: defaults).newChatOpeningMessage, "")
+        AppSettings(defaults: defaults).newChatOpeningSuffix = ""
+        XCTAssertEqual(AppSettings(defaults: defaults).newChatOpeningSuffix, "")
+    }
+
+    /// The prefix is its own key: clearing one half must not clear the other, and the suffix
+    /// keeps the historical key so an existing instruction survives this setting gaining a
+    /// second field.
+    func testNewChatOpeningPrefixIsStoredBesideTheSuffix() {
+        let suite = "SessionCoordinatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = AppSettings(defaults: defaults)
+        settings.newChatOpeningPrefix = "Read the tests first."
+        settings.newChatOpeningSuffix = "Rename this chat."
+
+        XCTAssertEqual(defaults.string(forKey: "newChatOpeningPrefix"), "Read the tests first.")
+        XCTAssertEqual(defaults.string(forKey: "newChatOpeningMessage"), "Rename this chat.")
+
+        settings.newChatOpeningPrefix = ""
+        XCTAssertEqual(settings.newChatOpeningPrefix, "")
+        XCTAssertEqual(settings.newChatOpeningSuffix, "Rename this chat.")
     }
 
     func testBranchTargetsItsExistingCheckout() {

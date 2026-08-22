@@ -435,52 +435,52 @@ final class DisplayPaneController: NSViewController {
       tabs(for: sessionID).lazy.filter { $0.browser != nil }.count
       < DisplayPaneDefaults.maximumBrowserTabs
 
-    var choices: [(String, String, Bool, () -> Void)] = [
+    var choices: [(String, String, String?, Bool, () -> Void)] = [
       (
-        "Terminal", "terminal", true,
+        "Terminal", "terminal", AppCommands.ID.newTerminalTab, true,
         {
           [weak self] in _ = self?.addTerminalTab(for: sessionID)
         }
       ),
       (
-        L10n.string("Execution audit"), "checklist.checked", canAddBrowser,
+        L10n.string("Execution audit"), "checklist.checked", nil, canAddBrowser,
         {
           [weak self] in _ = self?.addAuditTab(for: sessionID)
         }
       ),
       (
-        "Browser", "globe", canAddBrowser,
+        "Browser", "globe", nil, canAddBrowser,
         {
           [weak self] in _ = self?.addBrowserTab(for: sessionID)
         }
       ),
       (
-        "Private Browser", "hand.raised.fill", canAddBrowser,
+        "Private Browser", "hand.raised.fill", nil, canAddBrowser,
         {
           [weak self] in
           _ = self?.addBrowserTab(for: sessionID, contextKind: .private)
         }
       ),
       (
-        L10n.string("Overview"), "rectangle.grid.1x2", true,
+        L10n.string("Overview"), "rectangle.grid.1x2", nil, true,
         {
           [weak self] in _ = self?.activateOverview(for: sessionID)
         }
       ),
       (
-        "Review", "plus.forwardslash.minus", true,
+        "Review", "plus.forwardslash.minus", AppCommands.ID.review, true,
         {
           [weak self] in _ = self?.activateReview(for: sessionID)
         }
       ),
       (
-        "Compare Files…", "rectangle.on.rectangle", true,
+        "Compare Files…", "rectangle.on.rectangle", nil, true,
         {
           [weak self] in self?.chooseFilesToCompare(for: sessionID)
         }
       ),
       (
-        "Attachments", "paperclip", true,
+        "Attachments", "paperclip", nil, true,
         {
           [weak self] in _ = self?.activateAttachments(for: sessionID)
         }
@@ -489,16 +489,19 @@ final class DisplayPaneController: NSViewController {
     if ControlGrantStore.shared.isManager(sessionID) {
       choices.insert(
         (
-          L10n.string("Chats"), "person.3", true,
+          L10n.string("Chats"), "person.3", nil, true,
           { [weak self] in _ = self?.activateSupervision(for: sessionID) }
         ),
         at: 0
       )
     }
-    var entries = choices.map { title, symbol, isEnabled, action in
+    var entries = choices.map { title, symbol, commandID, isEnabled, action in
       ThemedMenuEntry.item(
         ThemedMenuItem(
           title: title,
+          shortcut: commandID.flatMap {
+            ShortcutOverrideStore.shared.shortcut(forID: $0)
+          },
           image: ThemedMenuIcon.symbol(symbol),
           isEnabled: isEnabled,
           onChoose: action
@@ -510,6 +513,9 @@ final class DisplayPaneController: NSViewController {
         .item(
           ThemedMenuItem(
             title: L10n.string("Current Theme"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(
+              forID: AppCommands.ID.currentTheme
+            ),
             image: ThemedMenuIcon.symbol("paintbrush.pointed"),
             onChoose: { [weak self] in
               guard let self else { return }

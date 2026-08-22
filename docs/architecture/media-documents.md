@@ -4,6 +4,8 @@ Everything about a document that varies over time: the `media` node, the host-ow
 renderer registry, the Lottie engine, bounded project-file handles, and the attachments preview
 seam that lets an extension own a preview body Threading has no native renderer for.
 
+It also covers movies, which are the first format whose renderer reads its own file.
+
 Read this before changing `Sources/Threading/Core/Media/`,
 `Sources/Threading/UI/Design/MediaDocumentPlayerView.swift`,
 `Sources/Threading/Core/Extensions/ExtensionProjectFileBroker.swift`, or the `.media` paths in
@@ -115,6 +117,64 @@ behind the one after it.
 `animatedImage` is first in the registry on purpose. It fixes a wart that predates the seam — an
 animated GIF attachment has always shown one frame — while proving the protocol with a decoder
 nobody has to audit.
+
+### `MediaDocumentFileRenderer`: the one format that reads its own file
+
+`open(_ document: Data, …)` carries an assumption that every format here was happy with until
+movies: **the whole document is resident**. A ten-minute screen recording is hundreds of megabytes,
+and reading one into memory to hand to a decoder that is going to stream it anyway is the
+allocation the seam exists to avoid. So a renderer may instead declare `open(fileAt:limits:)`, and
+`MediaDocumentPlayerView` gained a second, **optional** resolver (`FileLoader`) beside its
+`DocumentLoader`.
+
+Three consequences, each deliberate:
+
+- **The host resolves the file, never the extension.** The URL is minted on this side of the
+  boundary from a handle the host already owns, and nothing about it — not the path, not the
+  bytes — travels back. `attachments.preview@1` did not become a read authority.
+- **A surface with no file refuses the format.** An extension panel's media comes out of a signed
+  package, so it installs no `FileLoader` and a panel asking for `video` is refused with a stated
+  reason rather than quietly gaining a filesystem. The attachments pane and the lightbox install
+  one, because each already knows exactly which file it is looking at.
+- **Bytes are refused, not spilled to a temporary file.** The default `open(_:limits:)` on a file
+  renderer throws. Writing the buffer out to disk to "support both" would turn a refusal into an
+  unbounded copy of whatever was handed over.
+
+### Movies (`video`)
+
+`VideoDocumentRenderer` is the second engine, and it is AVFoundation: `AVPlayer` hands frames to an
+`AVPlayerLayer` installed in the canvas's `contentLayer`, so the session is **self-clocked** and
+the player above it stops asking for positions and starts mirroring them — a `Double` read per tick
+instead of a decode. AVKit is not used at any point: `AVPlayerView` brings its own chrome, and the
+transport here is `MediaTransportView` like every other format's.
+
+- **Nothing decodes into this process**, so the ceilings that bound a parsed document — bytes,
+  frames, duration — do not apply to a movie. They bound an allocation this path never makes. The
+  one that survives is `maximumVideoPixelDimension`, its own value (8,192) well above
+  `maximumPixelDimension`, because refusing a 4K screen recording would refuse the commonest movie
+  in a coding session to save nothing.
+- **A name is a claim; the decoder answers.** Admission is by extension (`mov`, `mp4`, `m4v` — what
+  AVFoundation actually opens, which is why `webm`, `mkv` and `avi` are absent), and playability is
+  confirmed when the document is opened. A file that is not a movie is refused with a sentence.
+- **The presented size, not the stored one.** A portrait recording stores a landscape frame plus a
+  rotation; a canvas given `naturalSize` alone draws it into a letterbox turned the wrong way.
+- **Sound is the new question**, and it is answered in three places. `MediaPlaybackState.isMuted`
+  is host-side and deliberately absent from `ExtensionMediaPlayback` — an extension that could
+  unmute a document could make a noise in a window nobody was looking at. `MediaTransportView`
+  grows a speaker only for a session that answers `hasAudio`, since a control that can change
+  nothing reads as a muted document rather than a silent one. And
+  `MediaDocumentRendererRegistry.autoplaysWhenHostOpens(_:)` states, once, that an animation the
+  host opens plays and a movie does not: a row reached with an arrow key is not a request for
+  audio, and a movie's first frame is a perfectly good picture of it. Reduce Motion still overrides
+  the answer in the direction it always did.
+- **Only a self-clocked session can see its own end.** `hasReachedEnd` exists because the player
+  reaches `.once` completion through arithmetic a self-clocked session never runs — without it a
+  finished movie sat at the end with the transport still offering Pause. `.pingPong` is honoured as
+  `.loop` for video: playing backwards needs a decoder that can, and most movie files' cannot.
+- **Copy Frame is synchronous** through `AVAssetImageGenerator`, rather than attaching an
+  `AVPlayerItemVideoOutput` that would make every movie pay a buffer copy for an action almost
+  nobody takes. It is one user-initiated request against a local file, and a frame that arrived
+  after the menu closed would land on a pasteboard already pasted from.
 
 ### The Lottie engine is in-tree, and here is why
 
@@ -316,6 +376,33 @@ The native body is always drawn **first**, then replaced if a candidate wins. It
 shows when no extension accepts, when the winner's generation dies, and when the last contribution
 is removed — removing an extension never closes the built-in surface or leaves blank chrome.
 
+### A movie is a kind, not a registration
+
+`.media` means *no native preview exists for this*. A movie has one, so filing it there would hide
+a playable file behind an extension that may never be installed — `SessionAttachment.Kind.video` is
+a first-class kind beside `.image` and `.pdf`.
+
+Two rules in the pane follow from the file never being read:
+
+- **The 64 MB preview ceiling does not apply to it.** That gate exists because every other preview
+  decodes, lays out or renders the whole file on the main thread. A recording passes the ceiling
+  before it has finished recording, and previewing it costs the same at two gigabytes as at two
+  megabytes.
+- **A poster frame is generated off the main actor, once per file, and only for a row that
+  exists.** `viewFor` is called for materialized rows, so the work is O(visible) — eight open
+  decoders in a hundred-recording session, not a hundred. Successes are cached by path, size and
+  modification date like every other thumbnail; refusals are remembered too, because the cost of a
+  refusal is the cost of a success and a row that cannot have a picture would otherwise pay it on
+  every scroll. A movie row also carries a small play mark: a poster frame is a picture of a
+  moment and so is a screenshot, and at 26 points nothing else tells them apart.
+
+The phone shows a movie the way it shows an animation — a card saying it plays on the Mac, and no
+bytes are asked for. Note what the *listing* already does above it: `RemoteAccessServer` omits any
+attachment over `RemoteAccessDefaults.maximumAttachmentBytes` (24 MB) from the list entirely, which
+for movies is the common case rather than the exception. That is the existing whole-file rule
+rather than something movies introduced, and it is the same reason the follow-on is a frame-stream
+or poster endpoint rather than a larger download.
+
 ### The attachment handle's scope
 
 `ExtensionMediaSource.sessionAttachment` resolves only for the attachment currently on screen, in
@@ -513,10 +600,15 @@ version the contract deliberately rather than leaking a host model as a shortcut
 
 ## What this unlocks beyond Lottie
 
-Recorded so the seams are not read as sized for one caller: SVG, video and screen-recording
-previews, audio waveforms, USDZ and GLB, notebooks, CSV and parquet tables, and the Mermaid and
-Graphviz rendering the `.diagram` kind currently declines. Every one is the same shape — the host
-carries an engine, the extension carries discovery and framing.
+Recorded so the seams are not read as sized for one caller: SVG, audio waveforms, USDZ and GLB,
+notebooks, CSV and parquet tables, and the Mermaid and Graphviz rendering the `.diagram` kind
+currently declines. Every one is the same shape — the host carries an engine, the extension carries
+discovery and framing.
+
+**Video and screen-recording previews were the first of these to be built**, and they are the
+evidence that the shape holds: one new renderer, one optional resolver on the player, and no new
+extension API. What they *did* cost is recorded above — a second `open` route, because the byte
+assumption was the one thing in the seam a movie could not live with.
 
 ## Where the code is
 
@@ -525,6 +617,7 @@ carries an engine, the extension carries discovery and framing.
 | SDK values | `Packages/ThreadingExtensionKit/Sources/ThreadingExtensionKit/ExtensionMediaDocument.swift`, `ExtensionProjectFiles.swift`, `ExtensionAttachmentPreview.swift` |
 | Registry, limits, failures | `Sources/Threading/Core/Media/MediaDocumentRenderer.swift` |
 | Animated raster documents | `Sources/Threading/Core/Media/AnimatedImageDocumentRenderer.swift` |
+| Movies | `Sources/Threading/Core/Media/VideoDocumentRenderer.swift` |
 | Content probe | `Sources/Threading/Core/Media/MediaContentProbe.swift` |
 | Lottie | `Sources/Threading/Core/Media/Lottie/` |
 | Shared ZIP reader | `Sources/Threading/Core/Storage/BoundedZipArchive.swift` |
@@ -534,4 +627,4 @@ carries an engine, the extension carries discovery and framing.
 | Attachment offer | `Sources/Threading/UI/Views/SessionAttachmentPreviewOffer.swift` |
 | Registered file types | `Sources/Threading/Core/Session/AttachmentMediaTypeRegistry.swift` |
 | Reference extension | `Packages/ThreadingExtensionKit/Examples/LottieViewerExtension/` |
-| Tests | `Tests/ThreadingTests/MediaTransportTests.swift`, `MediaTransportRenderTests.swift`, `MediaDocumentSeamTests.swift`, `LottieRendererTests.swift`, `ExtensionProjectFileBrokerTests.swift`, `SessionAttachmentMediaTests.swift` |
+| Tests | `Tests/ThreadingTests/MediaTransportTests.swift`, `MediaTransportRenderTests.swift`, `MediaDocumentSeamTests.swift`, `LottieRendererTests.swift`, `ExtensionProjectFileBrokerTests.swift`, `SessionAttachmentMediaTests.swift`, `SessionAttachmentVideoTests.swift` |

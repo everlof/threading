@@ -29,6 +29,18 @@ struct MediaDocumentLimits: Equatable, Sendable {
 
     /// The largest frame `copyCurrentFrame` will hand the pasteboard.
     var maximumCopiedFramePixels = 4_194_304
+
+    /// The natural size a **movie** may have on either axis.
+    ///
+    /// Its own ceiling, well above `maximumPixelDimension`, because the two are bounding
+    /// different things. A parsed document is rasterized into a buffer this process allocates, so
+    /// its pixels are our memory; a movie is decoded by the platform straight into a compositor
+    /// layer that is already clipped to the canvas, so its pixels are the window server's and a
+    /// 4K screen recording costs a player no more than a 720p one. Refusing 4K here would refuse
+    /// the single most common movie in a coding session — the recording the machine just made —
+    /// to save nothing at all. The ceiling stays because a decoder is still a decoder, and a file
+    /// claiming a 60,000-pixel axis is not a movie anyone recorded.
+    var maximumVideoPixelDimension = 8_192
 }
 
 /// Why a document did not play, in the host's own terms.
@@ -120,6 +132,24 @@ protocol MediaDocumentPlaybackSession: AnyObject {
     func copyCurrentFrame(maximumPixels: Int) throws -> CGImage
 
     func invalidate()
+
+    /// Whether this document can make a sound, which is what puts a mute control in the
+    /// transport. Defaulted, because every format the registry carried before movies is silent
+    /// and a silent document must not grow a control that does nothing.
+    var hasAudio: Bool { get }
+
+    /// Whether a **self-clocked** session has run to the end of its own timeline.
+    ///
+    /// Host-clocked sessions never answer this: the player advances their position itself, so it
+    /// already knows. A session that owns its clock is the only thing that can say, and without
+    /// it a movie that finished would sit at the end with the transport still showing Pause —
+    /// the player's `.once` completion is reached through arithmetic this session never runs.
+    var hasReachedEnd: Bool { get }
+}
+
+extension MediaDocumentPlaybackSession {
+    var hasAudio: Bool { false }
+    var hasReachedEnd: Bool { false }
 }
 
 /// The host's resolved playback intent — what the extension asked for, after Reduce Motion and
@@ -131,14 +161,24 @@ struct MediaPlaybackState: Equatable, Sendable {
     var speed: Double
     var progress: Double
 
+    /// Silence, resolved the same way playback is: the user's answer, not the document's.
+    ///
+    /// Host-side only, and deliberately absent from `ExtensionMediaPlayback`: whether a room
+    /// hears a document is the person in it's decision, and an extension that could unmute one
+    /// would be an extension that can make noise in a window nobody was looking at. A session
+    /// with no audio ignores it.
+    var isMuted: Bool
+
     init(
         isPlaying: Bool = false,
         loop: ExtensionMediaLoopMode = .loop,
         speed: Double = 1,
-        progress: Double = 0
+        progress: Double = 0,
+        isMuted: Bool = false
     ) {
         self.isPlaying = isPlaying
         self.loop = loop
+        self.isMuted = isMuted
         self.speed = speed.isFinite
             ? min(max(speed, ExtensionMediaPlayback.speedRange.lowerBound),
                   ExtensionMediaPlayback.speedRange.upperBound)
@@ -160,6 +200,36 @@ protocol MediaDocumentRenderer: Sendable {
     ) async throws -> MediaDocumentPlaybackSession
 }
 
+/// A renderer that reads the file itself instead of being handed its bytes.
+///
+/// The seam a movie needs and the reason it is a seam rather than a bigger `maximumDocumentBytes`:
+/// the byte route's contract is that the whole document is resident, which every other format is
+/// happy with and no movie ever will be. A ten-minute screen recording is hundreds of megabytes,
+/// and reading it into memory to hand to a decoder that is going to stream it anyway is the
+/// allocation this protocol exists to not make.
+///
+/// The **host** resolves the file. A path is not something the extension supplied and not
+/// something it can observe: `MediaDocumentPlayerView` asks its own file resolver, so a surface
+/// that has no file behind its sources — an extension panel, whose media comes out of a signed
+/// package — refuses the format instead of quietly gaining a filesystem.
+protocol MediaDocumentFileRenderer: MediaDocumentRenderer {
+    func open(
+        fileAt url: URL,
+        limits: MediaDocumentLimits
+    ) async throws -> MediaDocumentPlaybackSession
+}
+
+extension MediaDocumentFileRenderer {
+    /// Bytes are not a source this renderer can use, and pretending otherwise by spilling them to
+    /// a temporary file would turn a refusal into an unbounded copy of whatever was passed.
+    func open(
+        _ document: Data,
+        limits: MediaDocumentLimits
+    ) async throws -> MediaDocumentPlaybackSession {
+        throw MediaDocumentFailure.unresolvedSource
+    }
+}
+
 /// The single place a document format is carried.
 ///
 /// This is the decision the `.diagram` attachment kind declined once — *rendering would take an
@@ -174,7 +244,8 @@ enum MediaDocumentRendererRegistry {
         // proving the seam with a decoder the platform already ships.
         .animatedImage: AnimatedImageDocumentRenderer(),
         .lottie: LottieDocumentRenderer(),
-        .dotLottie: LottieDocumentRenderer()
+        .dotLottie: LottieDocumentRenderer(),
+        .video: VideoDocumentRenderer()
     ]
 
     static var supportedFormats: Set<ExtensionMediaFormat> {
@@ -188,6 +259,31 @@ enum MediaDocumentRendererRegistry {
     static func supports(_ format: ExtensionMediaFormat) -> Bool {
         renderers[format] != nil
     }
+
+    /// Whether this format's renderer needs a file rather than bytes.
+    ///
+    /// Asked by a host surface *before* it spends a read: a caller that cannot answer with a file
+    /// has nothing to do but refuse, and finding that out after loading the document would mean
+    /// reading a movie into memory to discover the movie could not be played that way.
+    static func requiresFile(_ format: ExtensionMediaFormat) -> Bool {
+        renderers[format] is any MediaDocumentFileRenderer
+    }
+
+    /// Whether the host starts this format playing when *it* is the one opening the document.
+    ///
+    /// Host policy, in one place, because the honest answer differs by format and neither the
+    /// pane nor the lightbox is where that belongs. An animation opened in a lightbox plays: it
+    /// is silent, it is usually two seconds long, and a still frame of it says almost nothing.
+    /// A movie does not: it has sound, so autoplay is the app deciding to make a noise in a room
+    /// it cannot see, and a first frame is a perfectly good picture of a movie. Reduce Motion
+    /// still overrides this in `MediaDocumentPlayerView`; this is the answer *before* that.
+    static func autoplaysWhenHostOpens(_ format: ExtensionMediaFormat) -> Bool {
+        !formatsThatCanCarrySound.contains(format)
+    }
+
+    /// Stated by format rather than asked of an opened session, because the question is asked to
+    /// decide what to *open* — a session that could answer it is one the host already started.
+    private static let formatsThatCanCarrySound: Set<ExtensionMediaFormat> = [.video]
 
     /// Installs a renderer for the duration of a test. Returns the previous entry so the caller
     /// can put it back; a registry a test can only add to is a registry the next test inherits.

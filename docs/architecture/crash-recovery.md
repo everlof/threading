@@ -29,6 +29,218 @@ an ending this build cannot name are skipped *through* rather than resetting the
 thirty seconds into a launch is not evidence that anything was fixed, and only ten interactive
 minutes is.
 
+The marker also gates the main window's frame. A clean, first or intentional-relaunch outcome may
+restore the autosaved size; an `unclean` outcome may not use either its size or position. The main
+window starts at `WindowDefaults` in the centre instead. `MainWindowInitialFramePlan` makes that
+decision before the controller is built, and `applyInitialFrame` replaces the stale autosave before
+registering its name because `setFrameAutosaveName` otherwise reapplies it as a side effect. This
+is separate from `LaunchRestorationPlan`: an intentional recovery relaunch holds back the workspace
+but is still a clean source of window geometry.
+
+## A launch that could not get in at all
+
+Everything above is about a launch that started. This section is about the one that could not,
+because another Threading held the single-instance lock and would not answer.
+
+`SingleInstanceLock` is an `flock` on `~/Library/Application Support/Threading/threading.lock`,
+held for the process's lifetime and released by the kernel. That is exactly right for a process
+that *dies* and exactly nothing for a process that *wedges*: the lock is real, the owner is alive,
+nothing is on screen, and every fresh launch could only put up a one-button alert and quit.
+
+There are **two** failures here, they look identical from the outside, and only one of them is
+about a wedged app.
+
+### The lock the children were holding
+
+An `flock` belongs to the *open file description*, not to the process, and it is held while any
+duplicate of that description exists. `fork` copies the whole descriptor table and `exec` keeps
+whatever is not marked close-on-exec, so a lock file opened without `O_CLOEXEC` is inherited by
+every child — and Threading's children are `forkpty` agent CLIs that outlive a crash by
+reparenting to launchd. Measured on a live instance: ten `claude` and `node` children, every one
+of them holding fd 6 on the lock file.
+
+So when Threading *died*, its orphaned children went on holding its lock. Indefinitely. The user
+came back in the morning to "Threading is already running" with no Threading running, and no way
+out short of Activity Monitor or a restart.
+
+**`O_CLOEXEC` on the lock open is the fix, and it is the whole fix for that failure.** The same
+flag is now on `EventLog`'s journal handle and `LaunchLedger`'s append handle for the same reason
+— neither blocks a relaunch the way an `flock` does, but both are long-lived descriptors that were
+leaking into every agent process. The rule is that a long-lived descriptor is closed on exec
+unless a child is meant to have it.
+
+It is not retroactive. Children spawned by a build that shipped without the flag keep the
+inherited descriptor across the upgrade, so the triage below still has to have an answer for them,
+and does.
+
+### The lock the wedged owner was holding
+
+The other failure is a live owner that stopped answering: main thread hung, nothing on screen,
+`flock` perfectly valid. No flag fixes that one, and the rest of this section is about it.
+
+### The owner card
+
+On a successful acquire the lock file — which used to hold nothing at all — receives a small JSON
+card through the descriptor already held: pid, the kernel's own start timestamp for that pid, the
+owning bundle's absolute path, the version, and when it was written. `ftruncate` first, so a
+shorter card cannot leave the tail of a longer one behind.
+
+`SingleInstanceLock.readOwnerCard(at:)` opens the file read-only and **without** `flock`, so
+asking costs the owner nothing and the question can be put by the very process the owner has
+locked out. It is bounded, and absent, empty, torn, oversized and garbage all answer the same
+`nil`.
+
+**The card is information, never authority.** A card that cannot be written does not fail the
+acquire, and a card that cannot be read only costs the loser its extra choices. The fail-open
+acquire semantics are unchanged: a lock file that cannot be opened still lets the launch through.
+
+The bundle path is there for one reason. "Another Threading is already running" is unhelpful when
+the other Threading is a Debug copy under DerivedData that the user has no idea is running, so the
+alert names the path whenever it is not our own.
+
+Neither a hosted test bundle nor a losing instance can ever write a card, by construction rather
+than by a guard: the acquire that writes one sits below `applicationDidFinishLaunching`'s
+`XCTestCase` return, and a loser's acquire failed. That matters because a card is what authorises
+the *offer* to end a process.
+
+### The heartbeat
+
+`SingleInstanceHeartbeat` rewrites `threading.heartbeat` beside the lock every five seconds, and
+staleness is judged from the file's modification time rather than from anything in it.
+
+**The timer is on the main queue, deliberately**, for the reason
+`LaunchLedger.armStabilityCheckpoint` gives: a timer on a utility queue keeps ticking straight
+through a hang, and would certify an app nobody can use. A wedged main thread stops producing the
+heartbeat, which is the whole signal. It is also touched on `NSWorkspace.didWakeNotification`,
+because a Mac that slept for an hour wakes with an hour-old heartbeat and a fast prober would read
+a perfectly live owner as wedged.
+
+It starts immediately after the lock is taken and stops on the quit path, so only the process that
+owns the state ever writes it. **It runs in recovery mode too**: a wedged recovery instance locks
+the user out exactly as a wedged normal one does, and this observes rather than acts.
+
+### The triage
+
+`SingleInstanceTriage.verdict(card:cardIdentityStillValid:heartbeatAge:)` is a pure function, in
+the shape `OrphanedAgentChildSweep` already uses and for the same reason — the whole table can be
+asserted without a lock, a process or a window.
+
+| card | owner identity | heartbeat age | verdict |
+|---|---|---|---|
+| absent | — | — | `alertOnly(.noOwnerCard)` |
+| present | `unreadable` | — | `alertOnly(.ownerIdentityUnreadable)` |
+| present | `gone` | — | `orphanedLockHolders(ownerPID:bundlePath:)` |
+| present | `confirmed` | absent | `alertOnly(.heartbeatMissing)` |
+| present | `confirmed` | ≤ 30 s | `activateOwner(pid:bundlePath:)` |
+| present | `confirmed` | > 30 s | `offerTakeover(pid:bundlePath:staleness:)` |
+
+Fail closed at every ambiguity. `confirmed` is the sweep's exact guard — pid alive *and* the
+kernel's start timestamp equal to the card's — because pids are handed out again and a card
+written an hour ago may name a browser now. A missing heartbeat under a healthy card is silence,
+not evidence of death, and silence is what an owner from before this mechanism existed produces.
+
+**The identity is three answers rather than a `Bool`,** because "the owner is gone while its lock
+is still held" is a different situation from "the owner is unrecognisable" and has a different
+remedy. Collapsing them was how the inherited-descriptor lockout had no answer at all. A recycled
+pid counts as `gone`: the *owner* is certainly not running, which is the fact the verdict turns
+on, and nothing downstream ever signals that number.
+
+`orphanedLockHolders` is reachable only because our own acquire was refused, so the lock is
+demonstrably held while the process that took it is demonstrably dead. Only one thing can do that.
+
+`activateOwner` brings the owner to the front and quits quietly with no alert: the user
+double-clicked the Dock icon and meant to switch to it. Only if activation fails does the alert go
+up. On `alertOnly(.noOwnerCard)` there is one courtesy first — activate whatever else is running
+under our bundle identifier — because an owner from before the card says nothing about itself and
+the system can still answer that much. Nothing destructive hangs off it.
+
+### The takeover
+
+`offerTakeover` puts up a confirmation through `ConfirmationAlert`
+(`ConfirmationPrompt.takeOverSingleInstanceLock`, `alwaysAsks(.irreversible)`, so Return is on
+Quit and the affirmative is destructive). **Never a kill without that confirmation, never a kill
+on an identity mismatch, and never an automatic takeover.** The prompt can never be switched off:
+suppressed, it would silently end a running Threading on every launch that found a slow one.
+
+On confirmation, `SingleInstanceTakeover.run(owner:actions:)`:
+
+1. **Waits two heartbeat periods and re-reads the mtime.** The alert was on screen for as long as
+   the user took to read it, which is long enough for a paused debugger or a disk stall to come
+   back. A heartbeat that has ticked means the owner is alive after all, and the answer becomes
+   activate rather than kill.
+2. **Verifies the identity again**, because that wait is itself a window in which the owner could
+   exit and its pid be handed on.
+3. **`SIGTERM`, poll for the lock, `SIGKILL`, poll again.** The signal is not the success
+   condition; holding the lock is. A process that survives both leaves the launch exactly where it
+   started — an alert and a quit — rather than earning a third escalation.
+
+An owner the probe reports as already gone is never signalled at all; the lock is simply polled
+for.
+
+Acquiring goes through the ordinary `SingleInstanceLock.acquire`, so a takeover leaves this
+process holding the descriptor for its lifetime and having written its own card, exactly as a
+normal launch does. `ownsSingleInstanceLock` is then set and the launch continues from the line
+below the guard.
+
+### Releasing a lock the children inherited
+
+`orphanedLockHolders` reads the **previous launch's** `AgentChildLedger` — the record of what it
+had running when it died — and offers to end the entries whose identity still checks out, naming
+their executables. `ConfirmationPrompt.endOrphanedAgentProcesses`, on the same
+`alwaysAsks(.irreversible)` branch as the takeover: those are somebody's conversations, and
+whatever they were mid-turn on is lost.
+
+The ledger is read **without consuming it**. `OrphanedAgentChildSweep` consumes it, and the sweep
+runs *after* the lock is acquired — which is precisely the deadlock when those children are what
+is holding the lock. A launch that is about to quit must not empty the list the launch that gets
+in will need.
+
+Each candidate is verified on the pair the ledger recorded, through `OrphanedAgentChildSweep`'s
+own `verdict`. A run that verifies nothing signals nothing and takes nothing: the lock is then
+held by something this launch cannot name, and the alert says so rather than claiming Threading is
+already running, which is the one thing that is definitely not true.
+
+### Why the taken-over launch reads as unclean, and why that is right
+
+The takeover necessarily happens **before** `EventLog.beginLaunch()` — nothing may write into the
+state directory until this process owns it. So the killed owner's marker is still on disk when
+this launch consumes it, and the previous launch reads as `.unclean`. Held-back restoration and
+the crash-loop counter then apply to the wedged instance.
+
+That is intended. It *was* an instance that did not come back, and a launch that had to step over
+a body is the last one that should be relaunching that body's workspace automatically. `SIGKILL`
+writes no `.ips`, and the report matcher below pins candidates to the marker's pid, so nothing
+stray can be attached to it either.
+
+Immediately after `beginLaunch` the launch journals one line — "Took over the single-instance lock
+from an unresponsive instance", with the owner's pid, its bundle path, the staleness in seconds,
+and whether the kill was needed — so the story is reconstructable from the journal alone.
+
+## Pinning the crash report to a pid
+
+`EventLog`'s matcher used to attach the newest `Threading-*.ips` in
+`~/Library/Logs/DiagnosticReports` whose modification time fell at or after the marker's start.
+The time window alone is not enough, and not theoretically: **the unit-test bundle is hosted in
+this app**, so a test that traps writes `Threading-<stamp>.ips` under the same process name as the
+shipping app. A suite run while the real app is open drops several of those into exactly the
+window a genuine launch would match, and the report hung off the user's crash is then a stack from
+a test host — a plausible wrong answer, which is worse than none.
+
+A candidate is now attached only when the pid it records equals the pid the marker named:
+
+- **parseable and different** → skipped, and the scan continues, because the real report may be
+  older than the stranger's.
+- **unparseable** → skipped (fail closed), and said out loud once per launch. A format change that
+  made every report unreadable would otherwise look exactly like macOS having written none.
+- **marker with no pid** → the old time-window behaviour for that one launch. Compatibility, not a
+  standing exception; every marker written from now on carries a pid.
+
+Only a bounded prefix of the file is read (512 KB). The pid is a top-level key of the body a few
+hundred bytes in, whatever the report's size, so the body is parsed as JSON when it fits and
+scanned for the quoted `"pid"` key when it does not — a spin report runs to tens of megabytes and
+must not be loaded to answer this. The key is quoted precisely so the scan cannot land on
+`"byPid"`.
+
 ## Opening a launch happens in two steps
 
 The `begin` record carries the **mode**, and the mode is decided from the history the ledger

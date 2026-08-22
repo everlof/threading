@@ -441,18 +441,29 @@ final class MediaInspectorView: NSView, ThemedComponent {
     /// Built lazily: most inspections are images, and a player that never plays anything should
     /// not be one more view every lightbox lays out.
     private lazy var mediaPlayer: MediaDocumentPlayerView = {
-        let player = MediaDocumentPlayerView(loader: { [weak self] _ in
-            await MainActor.run {
-                guard let self,
-                      let data = try? BoundedFileReader.read(
-                          self.selectedItem.url,
-                          maximumBytes: MediaDocumentLimits.default.maximumDocumentBytes
-                      ) else {
-                    return .failure(.unresolvedSource)
+        let player = MediaDocumentPlayerView(
+            loader: { [weak self] _ in
+                await MainActor.run {
+                    guard let self,
+                          let data = try? BoundedFileReader.read(
+                              self.selectedItem.url,
+                              maximumBytes: MediaDocumentLimits.default.maximumDocumentBytes
+                          ) else {
+                        return .failure(.unresolvedSource)
+                    }
+                    return .success(data)
                 }
-                return .success(data)
+            },
+            // The lightbox always has a file: every item it walks is one. A format whose renderer
+            // reads its own — a movie, which is never read into memory here or anywhere — is
+            // therefore playable in the same rail as the pictures it sits between.
+            fileLoader: { [weak self] _ in
+                await MainActor.run {
+                    guard let self else { return .failure(.unresolvedSource) }
+                    return .success(self.selectedItem.url)
+                }
             }
-        })
+        )
         player.isHidden = true
         addSubview(player)
         NSLayoutConstraint.activate([
@@ -961,11 +972,18 @@ final class MediaInspectorView: NSView, ThemedComponent {
             hasInstalledMediaPlayer = true
             mediaPlayer.isHidden = false
             mediaPlayer.setPresentationActive(true)
+            // Opening a two-second animation playing is what an animation is; opening a movie
+            // playing is the app making a noise in a room it cannot see. The registry states
+            // which is which, so the lightbox and the pane cannot disagree about it.
+            let autoplays = MediaDocumentRendererRegistry.autoplaysWhenHostOpens(format)
             mediaPlayer.update(document: ExtensionMediaDocument(
                 id: "inspector",
                 source: .sessionAttachment(item.url.lastPathComponent),
                 format: format,
-                playback: ExtensionMediaPlayback(isPlaying: true, loop: .loop),
+                playback: ExtensionMediaPlayback(
+                    isPlaying: autoplays,
+                    loop: autoplays ? .loop : .once
+                ),
                 accessibilityLabel: item.title
             ))
         } else if let image, image.isValid {

@@ -151,6 +151,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Whether this process won the single-instance lock and therefore owns the state.
     private var ownsSingleInstanceLock = false
 
+    /// What a takeover ended, held between the takeover and `beginLaunch`.
+    ///
+    /// The takeover necessarily happens *before* the journal opens — nothing may write into the
+    /// state directory until this process owns it — so the record cannot be written where it
+    /// happens. It is carried the few lines to where the journal exists.
+    private var singleInstanceTakeover: SingleInstanceTakeoverRecord?
+
     /// What the launch history said about this launch, decided once at the top of the launch and
     /// held.
     ///
@@ -252,12 +259,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         // Before anything can touch the stores: a second instance must never get far enough
         // to write projects.json, or the two silently overwrite each other's state.
-        guard SingleInstanceLock.acquire() else {
-            presentAlreadyRunningAlert()
-            NSApp.terminate(nil)
-            return
+        //
+        // Losing the lock is no longer the end of the launch. `resolveLostSingleInstanceLock`
+        // reads who holds it and either switches to that instance, offers to end an unresponsive
+        // one, or puts up the alert this always had. Only a takeover that actually took the lock
+        // comes back true, and everything below is then reached exactly as if the first acquire
+        // had won.
+        if !SingleInstanceLock.acquire() {
+            guard resolveLostSingleInstanceLock() else {
+                NSApp.terminate(nil)
+                return
+            }
         }
         ownsSingleInstanceLock = true
+
+        // Immediately after the lock and only in the process that holds it: a heartbeat from an
+        // instance that lost is a lie about who owns the state. In recovery too — a wedged
+        // recovery instance locks the user out exactly as a wedged normal one does.
+        SingleInstanceHeartbeat.shared.start()
 
         // The first thing this instance does once it owns the state, because until the marker is
         // down a launch that dies leaves nothing behind to say so. It is deliberately *ahead* of
@@ -273,6 +292,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         //
         // After the lock, so only the instance that owns the state writes the journal.
         EventLog.shared.beginLaunch()
+
+        // The first thing this launch says, if it got here over something else's body.
+        //
+        // **It is deliberately after `beginLaunch`, and that has a consequence worth naming**:
+        // the killed owner's marker is still on disk, so this launch consumes it and reads the
+        // previous launch as `.unclean`. Held-back restoration and the crash-loop counter then
+        // apply to the wedged instance — which is right. It *was* an instance that did not come
+        // back, and a launch that had to step over it is the last one that should be relaunching
+        // its workspace automatically. `SIGKILL` writes no `.ips`, and the report matcher pins
+        // candidates to the marker's pid, so nothing stray can be attached to it either.
+        recordSingleInstanceTakeoverIfNeeded()
 
         // Beside the marker and immediately after it, because the two mean the same launch by the
         // same id: the marker knows *how* the previous launch ended and only the ledger knows how
@@ -425,7 +455,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 ExtensionIdentityResolverRegistry.shared
         }
 
-        let mainWindowController = MainWindowController(environment: environment)
+        let mainWindowController = MainWindowController(
+            environment: environment,
+            initialFramePlan: MainWindowInitialFramePlan(
+                previousLaunch: EventLog.shared.previousLaunchOutcome
+            )
+        )
         mainWindowController.issueReportSubmitter = MacIssueReportSubmitter(
             diagnosticsProvider: { [weak self] in
                 guard let self else { throw MacIssueReportError.invalidPackage }
@@ -516,6 +551,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // Registered before attention alerts so an important activity edge wakes a snoozed
             // session before the alert centre decides whether that same edge may notify.
             SessionSnoozeCenter.shared.start()
+            // Beside Snooze because it is the same kind of thing — one process timer over
+            // persisted deadlines, materializing what was missed while the app was shut. It
+            // refuses to start under a hosted test bundle for its own reason: it types.
+            SessionCurfewCenter.shared.start()
             AttentionAlertCenter.shared.start()
             AgentWorkloadMonitor.shared.start()
 
@@ -752,6 +791,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // clean quit — so `EventLog` enforces that one too, by refusing to end a launch this
         // process never began.
         guard ownsSingleInstanceLock else { return .terminateNow }
+
+        // Stopped on every path out of the owning process, including the startup fixture's:
+        // a beat written while the app is tearing down says the main thread is turning for a
+        // launch that is nearly gone.
+        SingleInstanceHeartbeat.shared.stop()
 
         // The startup fixture returns before any agent, extension or background service is
         // started. Running their ordinary shutdown graph would construct idle singletons and
@@ -1377,14 +1421,263 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
-    private func presentAlreadyRunningAlert() {
+    // MARK: - Single Instance Triage
+
+    /// What this launch does about a lock it could not take.
+    ///
+    /// Returns `true` only when a takeover actually acquired the lock, in which case the caller
+    /// carries on with an ordinary launch. Every other path either quits quietly, because the
+    /// owner has been brought to the front and there is nothing to say, or puts up an alert
+    /// first. See `docs/architecture/crash-recovery.md`.
+    private func resolveLostSingleInstanceLock() -> Bool {
+        let card = SingleInstanceLock.readOwnerCard()
+        let verdict = SingleInstanceTriage.verdict(
+            card: card,
+            ownerIdentity: card.map { SingleInstanceTriage.identity(of: $0) } ?? .unreadable,
+            heartbeatAge: SingleInstanceHeartbeat.age()
+        )
+
+        switch verdict {
+        case .activateOwner(let pid, let bundlePath):
+            guard !Self.activateOwner(pid: pid) else { return false }
+            presentAlreadyRunningAlert(ownerBundlePath: bundlePath)
+            return false
+
+        case .orphanedLockHolders(let ownerPID, let bundlePath):
+            return releaseOrphanedSingleInstanceLock(ownerPID: ownerPID, bundlePath: bundlePath)
+
+        case .alertOnly(let refusal):
+            ThreadingLogger.app.notice(
+                "Single-instance triage refused a takeover: \(refusal.rawValue, privacy: .public)"
+            )
+            // An owner from before this mechanism existed says nothing about itself, so the
+            // courtesy is the one thing the *system* can still answer: bring whatever else is
+            // running under our identifier to the front. It is not evidence of anything — the
+            // stray copy in DerivedData shares the identifier too — so nothing destructive
+            // hangs off it.
+            if refusal == .noOwnerCard, Self.activateOwnerByBundleIdentifier() { return false }
+            presentAlreadyRunningAlert(ownerBundlePath: card?.bundlePath)
+            return false
+
+        case .offerTakeover(let pid, let bundlePath, let staleness):
+            guard let card, confirmSingleInstanceTakeover(staleness: staleness) else {
+                return false
+            }
+            return performSingleInstanceTakeover(
+                card: card,
+                pid: pid,
+                bundlePath: bundlePath,
+                staleness: staleness
+            )
+        }
+    }
+
+    private func performSingleInstanceTakeover(
+        card: SingleInstanceOwnerCard,
+        pid: pid_t,
+        bundlePath: String,
+        staleness: TimeInterval
+    ) -> Bool {
+        switch SingleInstanceTakeover.run(owner: card, actions: SingleInstanceTakeover.live) {
+        case .acquired(let escalated):
+            singleInstanceTakeover = SingleInstanceTakeoverRecord(
+                pid: pid,
+                bundlePath: bundlePath,
+                staleness: staleness,
+                escalated: escalated
+            )
+            return true
+
+        case .ownerRecovered:
+            // It beat while the alert was on screen. Nothing was signalled, and the user's
+            // original intent — open Threading — is served by the instance that is already here.
+            guard !Self.activateOwner(pid: pid) else { return false }
+            presentAlreadyRunningAlert(ownerBundlePath: bundlePath)
+            return false
+
+        case .identityUnverified, .lockStillHeld:
+            presentTakeoverFailedAlert(ownerBundlePath: bundlePath)
+            return false
+        }
+    }
+
+    /// The dead-owner case: the process that took the lock is gone and the lock is still held.
+    ///
+    /// Only one thing can do that — a duplicate of its descriptor living on in a child it
+    /// spawned — and the previous launch's own agent-child ledger is the only record of which
+    /// processes those are. It is read **without consuming**: the sweep that would ordinarily
+    /// consume it runs after the lock is acquired, which is precisely the deadlock here, and a
+    /// launch that is about to quit must not empty the list the launch that gets in will need.
+    private func releaseOrphanedSingleInstanceLock(
+        ownerPID: pid_t,
+        bundlePath: String
+    ) -> Bool {
+        let holders = SingleInstanceTakeover.verifiedHolders(
+            in: AgentChildLedger.shared.inheritedRecords().value
+        )
+        guard !holders.isEmpty else {
+            presentOrphanedLockAlert(ownerPID: ownerPID, bundlePath: bundlePath)
+            return false
+        }
+        guard ConfirmationAlert.ask(Self.orphanedLockReleaseConfirmation(holders: holders)) else {
+            return false
+        }
+
+        let outcome = SingleInstanceTakeover.releaseOrphanedLock(records: holders) {
+            SingleInstanceTakeover.pollForLock(upTo: $0)
+        }
+
+        switch outcome {
+        case .acquired(let ended):
+            singleInstanceTakeover = SingleInstanceTakeoverRecord(
+                pid: ownerPID,
+                bundlePath: bundlePath,
+                staleness: 0,
+                escalated: true,
+                endedChildren: ended
+            )
+            return true
+        case .nothingToEnd, .lockStillHeld:
+            // Deliberately not the takeover's alert: that one says another Threading is still
+            // holding the state, and the one thing known here is that no Threading is running.
+            presentOrphanedLockAlert(ownerPID: ownerPID, bundlePath: bundlePath)
+            return false
+        }
+    }
+
+    /// Built separately from being asked, so a test can hold the wording to what ending those
+    /// processes actually costs.
+    static func orphanedLockReleaseConfirmation(
+        holders: [AgentChildRecord]
+    ) -> ConfirmationRequest {
+        let names = holders.map(\.executable).sorted()
+        return ConfirmationRequest(
+            prompt: .endOrphanedAgentProcesses,
+            title: L10n.string("Threading is not running, but its session state is still locked"),
+            message: L10n.format(
+                """
+                A previous Threading did not shut down, and %1$lld of the agent processes it \
+                started are still holding the lock on your projects: %2$@. Ending them lets this \
+                Threading start. Anything they were in the middle of is lost.
+                """,
+                holders.count,
+                ListFormatter.localizedString(byJoining: names)
+            ),
+            confirmTitle: L10n.string("End Them and Continue"),
+            cancelTitle: L10n.string("Quit"),
+            style: .critical
+        )
+    }
+
+    /// The same situation with nothing left to name. Better than "already running", which is the
+    /// one thing that is definitely not true here.
+    private func presentOrphanedLockAlert(ownerPID: pid_t, bundlePath: String) {
+        ThreadingLogger.app.error(
+            "Single-instance lock is held by a descriptor its owner left behind (pid=\(ownerPID, privacy: .public)), and nothing in the child ledger still checks out"
+        )
+        let alert = ThemedAlert()
+        alert.messageText = L10n.string(
+            "Threading is not running, but its session state is still locked"
+        )
+        var informative = L10n.string("""
+            A previous Threading did not shut down and something it started is still holding the \
+            lock on your projects. Quitting those processes, or restarting the Mac, lets \
+            Threading open again.
+            """)
+        if bundlePath != Bundle.main.bundlePath {
+            informative += "\n\n" + L10n.format("The copy holding it is at %@.", bundlePath)
+        }
+        alert.informativeText = informative
+        alert.alertStyle = .critical
+        alert.runModal()
+    }
+
+    private func recordSingleInstanceTakeoverIfNeeded() {
+        guard let takeover = singleInstanceTakeover else { return }
+        EventLog.shared.record(
+            .app,
+            SingleInstanceDefaults.takeoverMessage,
+            takeover.journalDetail
+        )
+    }
+
+    private static func activateOwner(pid: pid_t) -> Bool {
+        guard let owner = NSRunningApplication(processIdentifier: pid) else { return false }
+        return owner.activate(options: [.activateAllWindows])
+    }
+
+    private static func activateOwnerByBundleIdentifier() -> Bool {
+        guard let identifier = Bundle.main.bundleIdentifier else { return false }
+        let ours = ProcessInfo.processInfo.processIdentifier
+        guard let owner = NSRunningApplication
+            .runningApplications(withBundleIdentifier: identifier)
+            .first(where: { $0.processIdentifier != ours }) else { return false }
+        return owner.activate(options: [.activateAllWindows])
+    }
+
+    /// The dead end this always had, now able to name the copy that is holding the lock.
+    ///
+    /// A path is only worth a sentence when it is not ours: "another Threading" is unhelpful
+    /// when the other Threading is a Debug build sitting in DerivedData that the user has no
+    /// idea is running.
+    private func presentAlreadyRunningAlert(ownerBundlePath: String? = nil) {
         let alert = ThemedAlert()
         alert.messageText = L10n.string("Threading is already running")
-        alert.informativeText = L10n.string("""
+        var informative = L10n.string("""
             Another Threading is open and owns the session state. Running two at once would \
             silently overwrite each other's projects, so this one will quit.
             """)
+        if let ownerBundlePath, ownerBundlePath != Bundle.main.bundlePath {
+            informative += "\n\n" + L10n.format("The copy holding it is at %@.", ownerBundlePath)
+        }
+        alert.informativeText = informative
         alert.alertStyle = .warning
+        alert.runModal()
+    }
+
+    /// The one destructive choice this surface offers.
+    ///
+    /// Framed as what it costs rather than as what it fixes: the other instance is ended
+    /// outright, and whatever it had in flight goes with it. Through the confirmation register
+    /// like every other question the user can answer wrongly, which also puts Return on Quit.
+    private func confirmSingleInstanceTakeover(staleness: TimeInterval) -> Bool {
+        ConfirmationAlert.ask(Self.singleInstanceTakeoverConfirmation(staleness: staleness))
+    }
+
+    /// Built separately from being asked, so a test can hold the wording to what the takeover
+    /// actually does without a modal.
+    static func singleInstanceTakeoverConfirmation(
+        staleness: TimeInterval
+    ) -> ConfirmationRequest {
+        ConfirmationRequest(
+            prompt: .takeOverSingleInstanceLock,
+            title: L10n.string("Threading is running but not responding"),
+            message: L10n.format(
+                """
+                The Threading that owns the session state has not answered for %lld seconds. \
+                You can end it and start this one instead. Anything it was in the middle of is \
+                lost.
+                """,
+                Int(staleness.rounded())
+            ),
+            confirmTitle: L10n.string("End It and Continue"),
+            cancelTitle: L10n.string("Quit"),
+            style: .critical
+        )
+    }
+
+    private func presentTakeoverFailedAlert(ownerBundlePath: String) {
+        let alert = ThemedAlert()
+        alert.messageText = L10n.string("Threading could not take over the session state")
+        var informative = L10n.string("""
+            The other Threading is still holding the state, so this one will quit rather than \
+            risk two of them writing to it.
+            """)
+        if ownerBundlePath != Bundle.main.bundlePath {
+            informative += "\n\n" + L10n.format("The copy holding it is at %@.", ownerBundlePath)
+        }
+        alert.informativeText = informative
+        alert.alertStyle = .critical
         alert.runModal()
     }
 
@@ -1771,6 +2064,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // carries the same action beside a chevron that picks the app; this is the menu-bar
         // half of it, and the reason the chord exists at all.
         menu.addItem(commandItem(AppCommands.ID.openIn, action: #selector(openInExternalApp)))
+        menu.addItem(commandItem(
+            AppCommands.ID.renameSession,
+            action: #selector(performHostMenuCommand(_:))
+        ))
 
         let scriptsSeparator = NSMenuItem.separator()
         scriptsSeparator.isHidden = true
@@ -2335,6 +2632,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.revokeManager: mainWindowController?.revokeCurrentManagerRole()
         case AppCommands.ID.newProject: mainWindowController?.newProject()
         case AppCommands.ID.addProject: mainWindowController?.addProject()
+        case AppCommands.ID.renameSession: mainWindowController?.renameCurrentSession()
         case AppCommands.ID.closeSession: mainWindowController?.closeCurrentSession()
         case AppCommands.ID.closeTab: mainWindowController?.closeActiveTab()
         case AppCommands.ID.find: mainWindowController?.showFind()

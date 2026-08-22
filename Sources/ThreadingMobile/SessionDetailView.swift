@@ -517,17 +517,19 @@ struct SessionDetailView: View {
             return
         }
 #endif
-        if let hostID = model.activeHostID {
-            let pool = MobileSessionConnectionPool.shared
-            pool.discardEntries(exceptHostID: hostID)
-            let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
-            if let warmed = pool.take(key) as? RemoteSessionConnection {
-                warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
-                    workspaceActivity?.receive(event)
-                }
-                connection = warmed
-                return
+        guard let hostID = model.activeHostID else {
+            launchError = RemoteClientError.invalidResponse.localizedDescription
+            return
+        }
+        let pool = MobileSessionConnectionPool.shared
+        pool.discardEntries(exceptHostID: hostID)
+        let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
+        if let warmed = pool.take(key) as? RemoteSessionConnection {
+            warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
+                workspaceActivity?.receive(event)
             }
+            connection = warmed
+            return
         }
         do {
             // A UI switch deliberately tears down the old process. Always ask readiness from
@@ -542,9 +544,8 @@ struct SessionDetailView: View {
             let made = RemoteSessionConnection(
                 session: current,
                 client: client,
-                reconnectClient: {
-                    await model.refresh()
-                    return model.client
+                reconnectClient: { attempt in
+                    await model.clientForSessionReconnect(hostID: hostID, attempt: attempt)
                 }
             )
             made.onWorkspaceChanged = { [weak workspaceActivity] event in
@@ -787,6 +788,7 @@ struct TerminalRemoteView: View {
     @State private var directAttachmentItems: [ComposerAttachmentItem] = []
     @State private var directAttachmentNotice: String?
     @State private var directAttachmentPhotoItems: [PhotosPickerItem] = []
+    @State private var isPickingDirectAttachmentPhotos = false
     @State private var isImportingDirectAttachmentFiles = false
     @State private var pendingDirectAttachmentInsertionID: String?
     @State private var selectionQuotes: [RemoteTerminalSelectionQuote] = []
@@ -863,8 +865,9 @@ struct TerminalRemoteView: View {
                     && connection.supportsTerminalAttachmentInsertion,
                 canAttach: directAttachmentTray?.canAcceptMore == true
                     || isDirectAttachmentEvidence,
-                attachmentPhotoItems: $directAttachmentPhotoItems,
-                attachmentSelectionLimit: remainingDirectAttachmentSlots,
+                chooseAttachmentPhotos: {
+                    isPickingDirectAttachmentPhotos = true
+                },
                 chooseAttachmentFiles: {
                     isImportingDirectAttachmentFiles = true
                 }
@@ -898,6 +901,12 @@ struct TerminalRemoteView: View {
         .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
             handleDirectAttachmentInsertion(feedback)
         }
+        .photosPicker(
+            isPresented: $isPickingDirectAttachmentPhotos,
+            selection: $directAttachmentPhotoItems,
+            maxSelectionCount: remainingDirectAttachmentSlots,
+            matching: .any(of: [.images, .videos])
+        )
         .fileImporter(
             isPresented: $isImportingDirectAttachmentFiles,
             allowedContentTypes: ComposerAttachmentSources.documentTypes,
@@ -1270,6 +1279,7 @@ private struct TerminalLineComposer: View {
     @State private var attachmentTray: ComposerAttachmentTray?
     @State private var attachmentItems: [ComposerAttachmentItem] = []
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var isPickingPhotos = false
     @State private var isImportingFiles = false
     @FocusState private var draftIsFocused: Bool
 
@@ -1298,11 +1308,11 @@ private struct TerminalLineComposer: View {
 
             HStack(alignment: .center, spacing: MobileDesign.Spacing.small) {
                 Menu {
-                    PhotosPicker(
-                        selection: $photoItems,
-                        maxSelectionCount: remainingAttachmentSlots,
-                        matching: .any(of: [.images, .videos])
-                    ) {
+                    // A PhotosPicker inside a Menu is torn down with the menu before its sheet
+                    // can present; the item requests presentation and .photosPicker below shows it.
+                    Button {
+                        isPickingPhotos = true
+                    } label: {
                         Label(MobileL10n.string("Photo Library"), systemImage: "photo.on.rectangle")
                     }
                     Button {
@@ -1366,6 +1376,12 @@ private struct TerminalLineComposer: View {
         .onChange(of: photoItems) { _, items in
             Task { await loadPhotos(items) }
         }
+        .photosPicker(
+            isPresented: $isPickingPhotos,
+            selection: $photoItems,
+            maxSelectionCount: remainingAttachmentSlots,
+            matching: .any(of: [.images, .videos])
+        )
         .fileImporter(
             isPresented: $isImportingFiles,
             allowedContentTypes: ComposerAttachmentSources.documentTypes,

@@ -556,7 +556,230 @@ final class EventLogTests: XCTestCase {
         XCTAssertEqual(reports.count, 2)
     }
 
+    // MARK: - Attributing the Crash Report
+
+    /// The window alone attaches the wrong report, and that is not theoretical.
+    ///
+    /// The unit-test bundle is hosted *in this app*, so a test that traps writes
+    /// `Threading-<stamp>.ips` under the same process name as the shipping app. A suite run while
+    /// the real app is open drops several of those into exactly the window a genuine launch would
+    /// match, and the report hung off the user's crash is then a stack from a test host — a
+    /// plausible wrong answer, which is worse than none.
+    func testTheReportIsAttachedOnlyWhenItsOwnPidIsThePreviousLaunches() throws {
+        let reports = try makeReportsDirectory()
+        let pid = ProcessInfo.processInfo.processIdentifier
+        try writeMarker(pid: String(pid), startedAt: Date().addingTimeInterval(-60))
+        let ours = try writeCrashReport(named: "Threading-ours", pid: pid, in: reports)
+
+        let log = EventLog(directory: testDirectory, diagnosticReportsDirectory: reports)
+        log.beginLaunch()
+
+        guard case .unclean(let report) = log.previousLaunchOutcome else {
+            return XCTFail("the marker's launch never came back, so this is an unclean exit")
+        }
+        XCTAssertEqual(report?.lastPathComponent, ours.lastPathComponent)
+    }
+
+    func testAReportBelongingToAnotherProcessIsNotAttached() throws {
+        let reports = try makeReportsDirectory()
+        let pid = ProcessInfo.processInfo.processIdentifier
+        try writeMarker(pid: String(pid), startedAt: Date().addingTimeInterval(-60))
+        _ = try writeCrashReport(named: "Threading-stranger", pid: pid &+ 1, in: reports)
+
+        let log = EventLog(directory: testDirectory, diagnosticReportsDirectory: reports)
+        log.beginLaunch()
+
+        guard case .unclean(let report) = log.previousLaunchOutcome else {
+            return XCTFail("the marker's launch never came back, so this is an unclean exit")
+        }
+        XCTAssertNil(report)
+    }
+
+    /// A stranger's report is skipped rather than ending the search: the real one may be older
+    /// than it, which is precisely the case a test-host crash creates.
+    func testAStrangersReportDoesNotHideAnOlderReportOfOurOwn() throws {
+        let reports = try makeReportsDirectory()
+        let pid = ProcessInfo.processInfo.processIdentifier
+        try writeMarker(pid: String(pid), startedAt: Date().addingTimeInterval(-120))
+        let ours = try writeCrashReport(
+            named: "Threading-ours",
+            pid: pid,
+            in: reports,
+            modified: Date().addingTimeInterval(-60)
+        )
+        _ = try writeCrashReport(named: "Threading-stranger", pid: pid &+ 1, in: reports)
+
+        let log = EventLog(directory: testDirectory, diagnosticReportsDirectory: reports)
+        log.beginLaunch()
+
+        guard case .unclean(let report) = log.previousLaunchOutcome else {
+            return XCTFail("the marker's launch never came back, so this is an unclean exit")
+        }
+        XCTAssertEqual(report?.lastPathComponent, ours.lastPathComponent)
+    }
+
+    /// Fail closed, and say so once. A format change that made every report unreadable would
+    /// otherwise look exactly like macOS having written none.
+    func testAReportWhosePidCannotBeReadIsSkippedAndSaidOutLoud() throws {
+        let reports = try makeReportsDirectory()
+        try writeMarker(
+            pid: String(ProcessInfo.processInfo.processIdentifier),
+            startedAt: Date().addingTimeInterval(-60)
+        )
+        try Data("no header line, no body, no pid".utf8)
+            .write(to: reports.appendingPathComponent("Threading-broken.ips"))
+
+        let log = EventLog(directory: testDirectory, diagnosticReportsDirectory: reports)
+        log.beginLaunch()
+
+        guard case .unclean(let report) = log.previousLaunchOutcome else {
+            return XCTFail("the marker's launch never came back, so this is an unclean exit")
+        }
+        XCTAssertNil(report)
+
+        let messages = try journalRecords().compactMap { $0["message"] as? String }
+        XCTAssertEqual(
+            messages.filter { $0 == EventLogDefaults.unreadableCrashReportMessage }.count,
+            1
+        )
+    }
+
+    /// The pid is a top-level key of the body, a few hundred bytes in, so a report far larger
+    /// than the read cap is still attributable.
+    func testAReportLargerThanTheReadCapIsStillMatchedOnItsPid() throws {
+        let reports = try makeReportsDirectory()
+        let pid = ProcessInfo.processInfo.processIdentifier
+        try writeMarker(pid: String(pid), startedAt: Date().addingTimeInterval(-60))
+        let ours = try writeCrashReport(
+            named: "Threading-huge",
+            pid: pid,
+            in: reports,
+            paddingBytes: EventLogDefaults.maximumCrashReportPrefixBytes * 2
+        )
+
+        let log = EventLog(directory: testDirectory, diagnosticReportsDirectory: reports)
+        log.beginLaunch()
+
+        guard case .unclean(let report) = log.previousLaunchOutcome else {
+            return XCTFail("the marker's launch never came back, so this is an unclean exit")
+        }
+        XCTAssertEqual(report?.lastPathComponent, ours.lastPathComponent)
+    }
+
+    /// The scan behind the cap looks for the *quoted* key, so a report whose termination block
+    /// names another process first cannot make it read the wrong number.
+    func testTheScanIsNotFooledByAKeyThatMerelyEndsInPid() throws {
+        let reports = try makeReportsDirectory()
+        let pid = ProcessInfo.processInfo.processIdentifier
+        try writeMarker(pid: String(pid), startedAt: Date().addingTimeInterval(-60))
+
+        let header = #"{"app_name":"Threading","bug_type":"309"}"#
+        let padding = String(
+            repeating: "f",
+            count: EventLogDefaults.maximumCrashReportPrefixBytes * 2
+        )
+        let body = """
+        {
+          "termination" : {"byPid" : \(pid &+ 500), "code" : 5},
+          "pid" : \(pid),
+          "frames" : "\(padding)"
+        }
+        """
+        let url = reports.appendingPathComponent("Threading-ordered.ips")
+        try Data("\(header)\n\(body)".utf8).write(to: url)
+
+        let log = EventLog(directory: testDirectory, diagnosticReportsDirectory: reports)
+        log.beginLaunch()
+
+        guard case .unclean(let report) = log.previousLaunchOutcome else {
+            return XCTFail("the marker's launch never came back, so this is an unclean exit")
+        }
+        XCTAssertEqual(report?.lastPathComponent, url.lastPathComponent)
+    }
+
+    /// A marker written before the pid was recorded keeps the old behaviour for that one launch.
+    /// Compatibility, not a standing exception: every marker written from now on carries a pid.
+    func testAMarkerWithNoPidFallsBackToTheTimeWindow() throws {
+        let reports = try makeReportsDirectory()
+        try writeMarker(pid: nil, startedAt: Date().addingTimeInterval(-60))
+        let newest = try writeCrashReport(
+            named: "Threading-newest",
+            pid: ProcessInfo.processInfo.processIdentifier &+ 7,
+            in: reports
+        )
+
+        let log = EventLog(directory: testDirectory, diagnosticReportsDirectory: reports)
+        log.beginLaunch()
+
+        guard case .unclean(let report) = log.previousLaunchOutcome else {
+            return XCTFail("the marker's launch never came back, so this is an unclean exit")
+        }
+        XCTAssertEqual(report?.lastPathComponent, newest.lastPathComponent)
+    }
+
     // MARK: - Helpers
+
+    private func makeReportsDirectory() throws -> URL {
+        let reports = testDirectory.appendingPathComponent("DiagnosticReports", isDirectory: true)
+        try FileManager.default.createDirectory(at: reports, withIntermediateDirectories: true)
+        return reports
+    }
+
+    /// Stands in for a launch that never came back, without needing a process that did not.
+    private func writeMarker(pid: String?, startedAt: Date) throws {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = .current
+
+        var marker: [String: String] = [
+            EventLogDefaults.markerLaunchKey: UUID().uuidString,
+            EventLogDefaults.markerStartedAtKey: formatter.string(from: startedAt),
+            EventLogDefaults.markerVersionKey: "1.0 (1)"
+        ]
+        marker[EventLogDefaults.markerPIDKey] = pid
+
+        try FileManager.default.createDirectory(
+            at: testDirectory,
+            withIntermediateDirectories: true
+        )
+        try JSONSerialization.data(withJSONObject: marker)
+            .write(to: testDirectory.appendingPathComponent(EventLogDefaults.markerFileName))
+    }
+
+    /// The shape macOS writes: one JSON header line, then a JSON body whose leading scalars
+    /// carry the pid. `paddingBytes` grows the body past the reader's cap without moving the pid.
+    @discardableResult
+    private func writeCrashReport(
+        named name: String,
+        pid: Int32,
+        in directory: URL,
+        modified: Date? = nil,
+        paddingBytes: Int = 0
+    ) throws -> URL {
+        let header = #"{"app_name":"Threading","bug_type":"309","incident_id":"\#(UUID().uuidString)"}"#
+        var body = """
+        {
+          "uptime" : 270000,
+          "procRole" : "Background",
+          "pid" : \(pid),
+          "procName" : "Threading",
+          "termination" : {"byPid" : \(pid &+ 1_000)},
+        """
+        if paddingBytes > 0 {
+            body += "\n  \"frames\" : \"\(String(repeating: "f", count: paddingBytes))\","
+        }
+        body += "\n  \"version\" : 2\n}"
+
+        let url = directory.appendingPathComponent("\(name).ips")
+        try Data("\(header)\n\(body)".utf8).write(to: url)
+        if let modified {
+            try FileManager.default.setAttributes(
+                [.modificationDate: modified],
+                ofItemAtPath: url.path
+            )
+        }
+        return url
+    }
 
     private var markerPath: String {
         testDirectory.appendingPathComponent(EventLogDefaults.markerFileName).path

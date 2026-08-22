@@ -690,6 +690,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
     private(set) var renderedPointCount = 0
     private(set) var renderedMarkerCount = 0
     var displayedGeometryForTesting: [ThemedChartRenderedSeries] { displayedGeometry }
+    var resolvedXRangeForTesting: ClosedRange<Date>? { resolvedXRange }
     var resolvedYRangeForTesting: ClosedRange<Double> { resolvedYRange }
     /// The marks' own rectangle, so a test can point at a band rather than restate the gutter
     /// widths this view derives from the model's orientation.

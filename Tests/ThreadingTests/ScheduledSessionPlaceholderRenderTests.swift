@@ -36,6 +36,55 @@ final class ScheduledSessionPlaceholderRenderTests: XCTestCase {
         return nil
     }
 
+    // MARK: - The Configuration Line
+
+    /// A waiting start says what it will be *and* when it will stop.
+    ///
+    /// The end is last on the line, and in the same words the composer's chip used when it was
+    /// chosen: the row is read as the receipt for that choice, and it is the one clause that is
+    /// not a property of the agent — keeping it apart from the others is what stops "Until 04:00"
+    /// reading as something the model was configured with.
+    func testTheConfigurationLineNamesTheEndTheStartIsCarrying() throws {
+        let deadline = Date(timeIntervalSince1970: 2_000_000_000)
+
+        let endless = TerminalContainerViewController.scheduledConfiguration(plan(curfew: nil))
+        XCTAssertEqual(endless, "Codex · gpt-5.6 · main · Native chat")
+
+        let bounded = TerminalContainerViewController.scheduledConfiguration(
+            plan(curfew: .at(deadline))
+        )
+        XCTAssertEqual(
+            bounded,
+            endless + " · Until \(ScheduledTimePresets.time(deadline))",
+            "the end has to close the line rather than displace what the session will be"
+        )
+
+        // A start that follows the standing window names it without a time, because the window it
+        // will resolve against is the one configured on the night it fires.
+        let standing = TerminalContainerViewController.scheduledConfiguration(
+            plan(curfew: .atQuietHours)
+        )
+        XCTAssertTrue(
+            standing.hasPrefix(endless + " · Until quiet hours"),
+            "a start following quiet hours said nothing about it: \(standing)"
+        )
+    }
+
+    private func plan(curfew: ScheduledCurfewPlan?) -> ScheduledSessionPlan {
+        ScheduledSessionPlan(
+            reservedSessionID: SessionID(),
+            projectID: ProjectID(),
+            kind: .codex,
+            accountHandle: .standard,
+            model: "gpt-5.6",
+            reasoningEffort: nil,
+            branch: "main",
+            usesNativeUI: true,
+            permissionMode: nil,
+            curfew: curfew
+        )
+    }
+
     func testRendersTimeResetAndConversationTriggers() throws {
         let fixtures = [
             Fixture(
@@ -72,6 +121,22 @@ final class ScheduledSessionPlaceholderRenderTests: XCTestCase {
                     problem: "Waiting for that conversation to finish its current turn",
                     brief: "Inspect the completed implementation, run the focused checks, and report any lifecycle gaps.",
                     configuration: "Codex · gpt-5.6 · High · feature/scheduled-chat · Native chat"
+                )
+            ),
+            // A start that already knows when it stops. The end is the last clause of the
+            // configuration line, which is the whole reason it is rendered: on a line this long
+            // it has to still be findable at the end of it.
+            Fixture(
+                name: "curfew-light",
+                theme: .system,
+                appearance: .aqua,
+                model: .init(
+                    trigger: "Starts automatically Today at 23:30 · in 6 hours",
+                    problem: nil,
+                    brief: "Keep the migration audit going overnight with /loop, commit what is safe, and leave a handoff note before you stop.",
+                    configuration: TerminalContainerViewController.scheduledConfiguration(
+                        plan(curfew: .at(Date(timeIntervalSince1970: 2_000_000_000)))
+                    )
                 )
             )
         ]

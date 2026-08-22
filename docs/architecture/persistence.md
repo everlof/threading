@@ -509,7 +509,10 @@ Two prefixes stay uncovered on purpose:
 **Ending a launch is gated on having begun one, in `EventLog` itself.** The marker is a single
 file and more than one process reaches a quit path here: the instance that loses the
 single-instance lock puts up an alert and terminates, and the lock fails open, so two live
-instances are possible rather than impossible. Removing the file from a process that never wrote
+instances are possible rather than impossible. The lock file also carries an owner card and has a
+heartbeat beside it now, and a loser can end an owner that has stopped answering rather than only
+quitting — see [`crash-recovery.md`](crash-recovery.md), including why a launch that took the lock
+over reads the killed owner's marker as an unclean exit and why that is intended. Removing the file from a process that never wrote
 it would tell the *running* instance's next launch that its crash had been a clean quit — the one
 thing the marker exists to catch. So `beginLaunch` mints a per-launch token, writes it into the
 marker and holds it; `endLaunch` refuses outright without one, and removes only a file still
@@ -716,6 +719,20 @@ says so: the **preferences domain** (the bundle identifier, `codes.threading`) a
 store, the panel layouts and their cached PNGs, project icons, avatars, usage history,
 icon-research records and the instance lock. Settings ▸ **Advanced** shows both and reveals them,
 because "where is my data" is a question answered with a path to copy rather than a sentence.
+
+**One subdirectory of that root is owner-only, and is a secret rather than state.**
+`Threading/bridge/` is `0700` and holds two things a hook needs to find its way back to the app:
+`mcp.sock`, the MCP server's unix rendezvous, and `session-tokens.json` (`0600`), the durable
+per-session MCP tokens. The token is what guards a session's endpoint, so the directory's
+permissions — not the endpoint's — are the boundary; see
+[`mcp-and-display.md`](mcp-and-display.md). It is a plain file rather than a Keychain item
+because it is read from the MCP queue on every hook and every tool call, and because losing it
+costs a launch's routing rather than an account. An unreadable file is quarantined as
+`.unreadable-<uuid>` and the launch mints fresh tokens; if the quarantine itself fails, writes
+are refused for the rest of the launch rather than destroying the only copy. `MCPBridgeLocation`
+resolves the directory — and the per-session `mcp/` and `settings/` files beside it — through
+`StateManager`'s hosted-test redirect, so a test bundle hosted in the shipping app writes none of
+this into the developer's own Application Support.
 
 Security capabilities are the deliberate third category. Native owner-device records, including
 their 256-bit bearers, live in one versioned login-Keychain item with
