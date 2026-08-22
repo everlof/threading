@@ -56,23 +56,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         MobileTerminalWirePerformanceProbe.terminalViewCreated(connection.session)
 #endif
 
-        let coordinator = context.coordinator
-        let terminalSession = connection.session
-        connection.onTerminalOutput = { [weak view] data in
-            guard let view else { return }
-#if DEBUG
-            MobileTerminalWirePerformanceProbe.feed(data, session: terminalSession) {
-                view.feed(byteArray: Array(data)[...])
-            }
-#else
-            view.feed(byteArray: Array(data)[...])
-#endif
-            coordinator.restoreViewportIfPossible()
-        }
-        connection.onTerminalGridChange = { [weak view] cols, rows in
-            guard view?.usesLocalViewport == false else { return }
-            view?.setAuthoritativeGrid(cols: cols, rows: rows)
-        }
+        context.coordinator.bindRenderer(to: connection)
         if allowsDirectInput {
 #if DEBUG
             if ProcessInfo.processInfo.environment[
@@ -92,7 +76,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: RemoteTerminalView, context: Context) {
-        context.coordinator.connection = connection
+        context.coordinator.bindRenderer(to: connection)
         context.coordinator.allowsInput = allowsDirectInput
         context.coordinator.initialScrollProgress = initialScrollProgress
         context.coordinator.onScrollProgress = onScrollProgress
@@ -117,10 +101,12 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: RemoteTerminalView, coordinator: Coordinator) {
         coordinator.captureViewport()
+        coordinator.unbindRenderer(from: uiView)
         coordinator.detach()
-        coordinator.connection.onTerminalOutput = nil
-        coordinator.connection.onTerminalGridChange = nil
-        coordinator.connection.releaseTerminalViewport()
+        // SwiftTerm 2 keeps a display driver and renderer graph per view. This representable is
+        // being permanently dismantled, not merely moved between windows, so close that graph
+        // through the dependency's explicit lifecycle seam.
+        _ = uiView.updateUiClosed()
     }
 
     /// Installs the palette only when it changed. `updateUIView` runs for every published
@@ -185,7 +171,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, TerminalViewDelegate {
-        var connection: RemoteSessionConnection
+        private(set) var connection: RemoteSessionConnection
         var allowsInput: Bool
         let keyBridge: TerminalKeyBridge
         var initialScrollProgress: Double?
@@ -206,6 +192,44 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             self.keyBridge = keyBridge
             self.initialScrollProgress = initialScrollProgress
             self.onScrollProgress = onScrollProgress
+        }
+
+        /// Rebinds a reused UIKit view without letting the previous connection retain its
+        /// callbacks. The ownership check also repairs a warm connection whose parking step
+        /// deliberately removed every renderer callback before this view was updated again.
+        func bindRenderer(to nextConnection: RemoteSessionConnection) {
+            guard let view = terminalView else {
+                connection = nextConnection
+                return
+            }
+            if connection !== nextConnection {
+                connection.unmountTerminalRenderer(view)
+                connection = nextConnection
+            }
+            guard !connection.isTerminalRendererOwner(view) else { return }
+            let terminalSession = connection.session
+            connection.mountTerminalRenderer(
+                view,
+                output: { [weak self, weak view] data in
+                    guard let self, let view else { return }
+#if DEBUG
+                    MobileTerminalWirePerformanceProbe.feed(data, session: terminalSession) {
+                        view.feed(byteArray: Array(data)[...])
+                    }
+#else
+                    view.feed(byteArray: Array(data)[...])
+#endif
+                    self.restoreViewportIfPossible()
+                },
+                gridChange: { [weak view] cols, rows in
+                    guard view?.usesLocalViewport == false else { return }
+                    view?.setAuthoritativeGrid(cols: cols, rows: rows)
+                }
+            )
+        }
+
+        func unbindRenderer(from view: RemoteTerminalView) {
+            connection.unmountTerminalRenderer(view)
         }
 
         @MainActor

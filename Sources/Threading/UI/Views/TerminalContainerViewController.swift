@@ -20,6 +20,11 @@ final class TerminalContainerViewController: NSViewController {
     typealias SessionComposerFactory = @MainActor () -> SessionComposerViewController
 
     private let placeholderView = SessionPlaceholderView()
+
+    /// The pane a failed launch gets instead of the dormant placeholder. Built lazily: most
+    /// sessions never fail to start, and the well inside it owns a text network.
+    private lazy var launchFailureView = LaunchFailureView()
+    private var isLaunchFailureViewInstalled = false
     private var scheduledPlaceholderView: ScheduledSessionPlaceholderView?
     private let appEvents = AppEventObservations()
 
@@ -649,6 +654,7 @@ final class TerminalContainerViewController: NSViewController {
         applyDrawer(for: nil)
 
         placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
         let composerViewController = composerViewController
         composerViewController.view.isHidden = false
         applyPaneBackground(.chrome)
@@ -733,6 +739,7 @@ final class TerminalContainerViewController: NSViewController {
             currentTerminalID = nil
             currentSessionID = nil
             placeholderView.isHidden = true
+            hideLaunchFailureIfNeeded()
             hideComposerIfLoaded()
             applyPaneBackground(.chrome)
             // The session's shell goes with the session — see `showComposer`.
@@ -975,6 +982,28 @@ final class TerminalContainerViewController: NSViewController {
         drawerHostController.removeSession(sessionID)
     }
 
+    /// Puts the failure surface in the pane the first time one is needed, in the placeholder's
+    /// own frame so the two occupy exactly the same space and never both show.
+    private func installLaunchFailureViewIfNeeded() {
+        guard !isLaunchFailureViewInstalled else { return }
+        isLaunchFailureViewInstalled = true
+
+        view.addSubview(launchFailureView, positioned: .below, relativeTo: gitStatusOverlay)
+        NSLayoutConstraint.activate([
+            launchFailureView.topAnchor.constraint(equalTo: contentTopAnchor),
+            launchFailureView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            launchFailureView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            launchFailureView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+    }
+
+    /// Takes the failure surface off the pane. Cheap and idempotent, so every route that shows
+    /// something else can call it without asking whether a failure was on screen.
+    private func hideLaunchFailureIfNeeded() {
+        guard isLaunchFailureViewInstalled else { return }
+        launchFailureView.isHidden = true
+    }
+
     private func setupPlaceholder() {
         placeholderView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(placeholderView)
@@ -1031,6 +1060,19 @@ final class TerminalContainerViewController: NSViewController {
         if let scheduled = ScheduledMessageStore.shared.scheduledStart(for: sessionID) {
             applyDrawer(for: nil)
             showScheduledState(scheduled, session: agentSession)
+            return
+        }
+
+        // **Looking at a failed session does not retry it.** Selecting a dormant row is the
+        // reopen gesture, so without this a session whose resume the runtime refuses re-runs the
+        // same doomed command on every click — each attempt spending a launch, a process and a
+        // second of the user's attention to reproduce a failure they have already read. The
+        // retry is a button on the surface below instead, which is a decision rather than a
+        // side effect of navigating.
+        if let failure = agentSession.lastLaunchFailure,
+           !AgentRuntime.shared.hasTerminal(sessionID: sessionID) {
+            applyDrawer(for: nil)
+            showLaunchFailureState(failure, session: agentSession)
             return
         }
 
@@ -1237,6 +1279,7 @@ final class TerminalContainerViewController: NSViewController {
 
         currentChild = controller
         placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
 
         // The terminal is inset below the toolbar, so the strip above it is the pane's own
@@ -1263,6 +1306,7 @@ final class TerminalContainerViewController: NSViewController {
 
         currentProjectTerminal = controller
         placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
         applyPaneBackground(.terminal(controller.paneBackgroundColor))
         refreshTerminalTextVisibilityNotice()
@@ -1389,6 +1433,7 @@ final class TerminalContainerViewController: NSViewController {
 
         currentConversation = conversation
         placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
 
         // A conversation outlives its time on screen — `AgentRuntime` keeps it for a dormant
@@ -1502,6 +1547,7 @@ final class TerminalContainerViewController: NSViewController {
         currentTerminalID = nil
         hideComposerIfLoaded()
         placeholderView.isHidden = false
+        hideLaunchFailureIfNeeded()
         applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "terminal",
@@ -1528,6 +1574,7 @@ final class TerminalContainerViewController: NSViewController {
 
         hideComposerIfLoaded()
         placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
         recoveryView?.isHidden = true
         scheduledView.isHidden = false
         applyPaneBackground(.chrome)
@@ -1541,7 +1588,7 @@ final class TerminalContainerViewController: NSViewController {
             ),
             problem: ScheduledTiming.problem(for: message.state),
             brief: message.summary,
-            configuration: scheduledConfiguration(plan)
+            configuration: Self.scheduledConfiguration(plan)
         ))
         scheduledView.onStartNow = { [weak self] in
             guard let self else { return }
@@ -1585,7 +1632,19 @@ final class TerminalContainerViewController: NSViewController {
         showScheduledState(message, session: session)
     }
 
-    private func scheduledConfiguration(_ plan: ScheduledSessionPlan) -> String {
+    /// What a waiting start will be, as one line: the runtime, the login, the model, the
+    /// posture, the checkout, the surface — and last, where there is one, the end it already
+    /// carries.
+    ///
+    /// The end goes at the end of the line for the obvious reason and one better one: it is the
+    /// only clause that is not a property of the agent, so keeping it apart from the others is
+    /// what stops "Until 04:00" reading as another thing the model was configured with. Stated in
+    /// the same words the composer's chip used when it was chosen, because a waiting row is read
+    /// as the receipt for that choice.
+    ///
+    /// Static because nothing here is about this pane: it is a sentence made of a plan, which is
+    /// how a test can ask what a plan reads as without standing a container up.
+    static func scheduledConfiguration(_ plan: ScheduledSessionPlan) -> String {
         var parts = [plan.kind.displayName]
         if !plan.accountHandle.isStandard { parts.append(plan.accountHandle.name) }
         if let model = plan.model { parts.append(ModelName.display(for: model)) }
@@ -1597,6 +1656,12 @@ final class TerminalContainerViewController: NSViewController {
         }
         if let branch = plan.branch { parts.append(branch) }
         parts.append(plan.usesNativeUI ? L10n.string("Native chat") : L10n.string("Terminal"))
+        if let curfew = CurfewMenu.title(
+            for: plan.curfew,
+            quietHours: CurfewSettings.shared.preferences.quietHours
+        ) {
+            parts.append(curfew)
+        }
         return parts.joined(separator: " · ")
     }
 
@@ -1629,6 +1694,7 @@ final class TerminalContainerViewController: NSViewController {
         currentSettingsPageID = nil
         hideComposerIfLoaded()
         placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
         recoveryView.isHidden = false
         applyPaneBackground(.chrome)
     }
@@ -1648,6 +1714,7 @@ final class TerminalContainerViewController: NSViewController {
         recoveryView?.isHidden = true
         hideComposerIfLoaded()
         placeholderView.isHidden = false
+        hideLaunchFailureIfNeeded()
         currentComposerProjectID = nil
         currentSettingsPageID = nil
         applyPaneBackground(.chrome)
@@ -1673,6 +1740,7 @@ final class TerminalContainerViewController: NSViewController {
 
         hideComposerIfLoaded()
         placeholderView.isHidden = false
+        hideLaunchFailureIfNeeded()
         applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "terminal",
@@ -1701,6 +1769,97 @@ final class TerminalContainerViewController: NSViewController {
         resumeCurrentTerminal()
     }
 
+    // MARK: - Launch Failure
+
+    /// The pane for a session whose agent died on the way up.
+    ///
+    /// Deliberately not the dormant placeholder with different words. Dormant means "this ended
+    /// and can be picked up"; this means "this did not start, and pressing the same button will
+    /// do the same thing" — and the difference is the whole reason the surface exists.
+    private func showLaunchFailureState(
+        _ failure: SessionLaunchFailure,
+        session: AgentSession
+    ) {
+        installLaunchFailureViewIfNeeded()
+        hideComposerIfLoaded()
+        placeholderView.isHidden = true
+        recoveryView?.isHidden = true
+        scheduledPlaceholderView?.isHidden = true
+        launchFailureView.isHidden = false
+        applyPaneBackground(.chrome)
+        currentSessionID = session.id
+        gitStatusOverlay.updateModel(nil)
+
+        let sessionID = session.id
+        launchFailureView.configure(
+            title: L10n.format("%@ couldn’t start", session.displayTitle),
+            summary: failure.summary,
+            output: failure.detail,
+            actions: launchFailureActions(failure, sessionID: sessionID)
+        )
+    }
+
+    /// The ways out, in the order somebody actually tries them.
+    ///
+    /// Retry first because a launch failure is sometimes weather — a login that had just
+    /// expired, a CLI mid-upgrade — and the cheapest correct move is to ask again. Reading and
+    /// keeping the evidence comes next. Anything that reaches for another process is last, and
+    /// only appears when there is something for it to work on.
+    private func launchFailureActions(
+        _ failure: SessionLaunchFailure,
+        sessionID: SessionID
+    ) -> [LaunchFailureAction] {
+        var actions: [LaunchFailureAction] = [
+            LaunchFailureAction(
+                title: L10n.string("Try Again"),
+                emphasis: .primary
+            ) { [weak self] in
+                self?.relaunchAfterFailure(sessionID: sessionID)
+            },
+            LaunchFailureAction(title: L10n.string("Copy Details")) {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(failure.report, forType: .string)
+            },
+            LaunchFailureAction(title: L10n.string("Report a Problem…")) { [weak self] in
+                guard let self else { return }
+                self.delegate?.terminalContainer(
+                    self,
+                    didRequestProblemReport: failure,
+                    for: sessionID
+                )
+            }
+        ]
+
+        if LaunchRecoveryBrief.canAttempt(failure) {
+            actions.append(
+                LaunchFailureAction(title: L10n.string("Try Recovering with an Agent")) {
+                    [weak self] in
+                    guard let self else { return }
+                    self.delegate?.terminalContainer(
+                        self,
+                        didRequestLaunchRecovery: failure,
+                        for: sessionID
+                    )
+                }
+            )
+        }
+        return actions
+    }
+
+    /// The retry the surface offers, which is the one route allowed past the selection gate.
+    ///
+    /// The record is cleared first so the relaunch is not immediately refused by the gate that
+    /// sent us here. A second failure writes a second record, so nothing is lost by clearing an
+    /// old one the user has decided to act on.
+    private func relaunchAfterFailure(sessionID: SessionID) {
+        ProjectStore.shared.update(sessionID: sessionID) { stored in
+            stored.lastLaunchFailure = nil
+        }
+        currentSessionID = nil
+        show(sessionID: sessionID)
+    }
+
     private func showDormantState(for sessionID: SessionID) {
         guard let agentSession = ProjectStore.shared.session(withID: sessionID) else {
             showEmptyState()
@@ -1709,6 +1868,7 @@ final class TerminalContainerViewController: NSViewController {
 
         hideComposerIfLoaded()
         placeholderView.isHidden = false
+        hideLaunchFailureIfNeeded()
         applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "arrow.clockwise.circle",
@@ -1724,7 +1884,19 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     /// Explains what resuming will do, which differs once a resumable identifier is known.
+    ///
+    /// A session that holds an identifier is not the same as a session that can be resumed with
+    /// it. The optimistic sentence below was shown after a resume the runtime had just refused,
+    /// beside a button that would refuse it again — which is how a placeholder ends up being the
+    /// least accurate surface in the app. A session with a standing failure gets the launch
+    /// failure surface instead of this one, and this sentence keeps the claim it can support.
     private func dormantDetail(for agentSession: AgentSession) -> String {
+        if agentSession.lastLaunchFailure != nil {
+            return L10n.string(
+                "The last attempt to open this conversation did not finish."
+            )
+        }
+
         if agentSession.isResumable {
             return L10n.string(
                 "The conversation is saved and will pick up where it left off."
@@ -2416,7 +2588,14 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
 
             if sessionID == self.currentSessionID {
                 self.detachCurrentChild()
-                self.showDormantState(for: sessionID)
+                // The controller has already written the record by the time this runs, so the
+                // store is the one place both this route and a later selection read it from.
+                if let stored = ProjectStore.shared.session(withID: sessionID),
+                   let failure = stored.lastLaunchFailure {
+                    self.showLaunchFailureState(failure, session: stored)
+                } else {
+                    self.showDormantState(for: sessionID)
+                }
             }
 
             self.delegate?.terminalContainer(self, sessionDidExit: sessionID, exitCode: exitCode)
@@ -2545,6 +2724,19 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     )
     /// The empty state's one action: begin a session, the same route ⌘N takes.
     func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController)
+    /// The launch-failure surface asked to file this failure, with its captured output as
+    /// evidence the user reads before anything is sent.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestProblemReport failure: SessionLaunchFailure,
+        for sessionID: SessionID
+    )
+    /// The launch-failure surface asked for an agent to attempt a repair.
+    func terminalContainer(
+        _ container: TerminalContainerViewController,
+        didRequestLaunchRecovery failure: SessionLaunchFailure,
+        for sessionID: SessionID
+    )
     /// A diagnostic's remediation opens a settings page through the window, which owns the
     /// matching sidebar selection and navigation-history entry.
     func terminalContainer(

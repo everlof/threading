@@ -158,6 +158,9 @@ struct AgentToolDependencies {
   /// The typed session control plane — scope and refusal rules for every cross-session
   /// operation, whoever the caller is. Handlers own wording only.
   let control: WorkspaceControlPlane
+#if DEBUG
+  let mobileDebugInspection = MobileDebugInspectionService(captures: .shared)
+#endif
   /// The project's durable visual baselines. Injected rather than reached for as a singleton from
   /// the handler, so a test drives its own directory instead of the developer's.
   let baselines: BrowserBaselineStore
@@ -204,6 +207,7 @@ struct AgentToolDependencies {
 final class AgentToolCoordinator: AgentCommandHandling, MCPBuiltInToolExecuting {
 
   let displayPaneController: DisplayPaneController
+  var conversationRepairHandler: ConversationRepairHandler?  // see MainWindowLaunchRecovery
   /// Where this session's browser actually is, across every pane that can hold one. The panel
   /// stays a separate dependency because `display_*` and `panel_*` are panel-scoped by
   /// contract; only the `browser_*` family follows the browser.

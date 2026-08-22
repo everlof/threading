@@ -2123,6 +2123,111 @@ public struct RemoteAppThemeUpdateDTO: Codable, Equatable, Sendable {
     }
 }
 
+#if DEBUG
+/// Debug-build-only request sent over the already-authenticated app-events socket.
+///
+/// The request id binds the following REST upload to the paired device that owns this socket.
+/// `screenshotPolicy` is deliberately a closed vocabulary so the phone never accepts an
+/// arbitrary capture instruction from the network.
+public struct RemoteMobileDebugCaptureRequestDTO: Codable, Equatable, Sendable {
+    public enum ScreenshotPolicy: String, Codable, Equatable, Sendable {
+        case none
+        case latestIncident
+        case current
+    }
+
+    public let type: String
+    public let requestID: String
+    public let screenshotPolicy: ScreenshotPolicy
+
+    public init(requestID: String, screenshotPolicy: ScreenshotPolicy) {
+        self.type = "mobileDebugCaptureRequest"
+        self.requestID = requestID
+        self.screenshotPolicy = screenshotPolicy
+    }
+}
+
+/// A bounded, structured snapshot of the iOS client's operational state.
+///
+/// This intentionally reuses the content-free diagnostic record vocabulary. It does not carry
+/// prompts, terminal output, paths, URLs, bearer tokens, notification text, or arbitrary log
+/// strings. The screenshot is the sole visual-content exception and exists only in Debug builds.
+public struct RemoteMobileDebugCaptureDTO: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 1
+
+    public let schemaVersion: Int
+    public let captureID: String
+    public let requestID: String
+    public let capturedAt: String
+    public let appVersion: String
+    public let appBuild: String
+    public let operatingSystem: String
+    public let deviceModel: String
+    public let applicationState: String
+    public let connectionState: String
+    public let activeEndpointKind: String
+    public let pairedHostCount: Int
+    public let visibleSessionCount: Int
+    public let diagnostics: [RemoteDiagnosticRecord]
+    public let screenshotJPEGBase64: String?
+    public let screenshotKind: String?
+
+    public init(
+        schemaVersion: Int = Self.currentSchemaVersion,
+        captureID: String,
+        requestID: String,
+        capturedAt: String,
+        appVersion: String,
+        appBuild: String,
+        operatingSystem: String,
+        deviceModel: String,
+        applicationState: String,
+        connectionState: String,
+        activeEndpointKind: String,
+        pairedHostCount: Int,
+        visibleSessionCount: Int,
+        diagnostics: [RemoteDiagnosticRecord],
+        screenshotJPEGBase64: String?,
+        screenshotKind: String?
+    ) {
+        self.schemaVersion = schemaVersion
+        self.captureID = captureID
+        self.requestID = requestID
+        self.capturedAt = capturedAt
+        self.appVersion = appVersion
+        self.appBuild = appBuild
+        self.operatingSystem = operatingSystem
+        self.deviceModel = deviceModel
+        self.applicationState = applicationState
+        self.connectionState = connectionState
+        self.activeEndpointKind = activeEndpointKind
+        self.pairedHostCount = pairedHostCount
+        self.visibleSessionCount = visibleSessionCount
+        self.diagnostics = diagnostics
+        self.screenshotJPEGBase64 = screenshotJPEGBase64
+        self.screenshotKind = screenshotKind
+    }
+}
+
+public struct RemoteMobileDebugCaptureUploadRequestDTO: Codable, Equatable, Sendable {
+    public let capture: RemoteMobileDebugCaptureDTO
+
+    public init(capture: RemoteMobileDebugCaptureDTO) {
+        self.capture = capture
+    }
+}
+
+public struct RemoteMobileDebugCaptureUploadResponseDTO: Codable, Equatable, Sendable {
+    public let captureID: String
+    public let storedAt: String
+
+    public init(captureID: String, storedAt: String) {
+        self.captureID = captureID
+        self.storedAt = storedAt
+    }
+}
+#endif
+
 /// A scoped session-catalogue change. Row-only mutations carry one already-authorised summary so
 /// clients can update in O(changed) work. Structural mutations leave both delta fields nil and
 /// ask the client to fetch its own authoritative `/api/me` snapshot.

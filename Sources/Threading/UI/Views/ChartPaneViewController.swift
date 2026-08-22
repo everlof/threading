@@ -19,11 +19,20 @@ final class ChartPaneViewController: NSViewController {
     private enum Layout {
         static let inset = Design.Spacing.inset
 
-        /// How hard the content holds the foot of the pane — a step below the card's own ceiling
-        /// on the plot (`ChartCardView.applyPlotCeiling`) and below the height a ranking states,
-        /// which is the point: the pane is the room on offer, not an instruction to fill it.
+        /// How hard the content pulls the chart down to the foot of the pane.
+        ///
+        /// **Below `windowSizeStayPut`, which is the load-bearing part.** A window's own size is
+        /// nailed at that priority (500) and nothing else; a constraint above it that *decides*
+        /// the height of the window's content is a constraint the window resizes itself to
+        /// satisfy. Stated at `defaultHigh - 1` this was above the line, so the chart's preferred
+        /// height became the window's: opening a chat with a chart tab in it snapped the window
+        /// to its own minimum height, every time, until the tab was closed.
+        ///
+        /// It is also still below the card's ceiling on the plot
+        /// (`ChartCardView.applyPlotCeiling`) and below the height a ranking states, which is the
+        /// other half: the pane is the room on offer, not an instruction to fill it.
         static let fillsPane = NSLayoutConstraint.Priority(
-            NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
+            NSLayoutConstraint.Priority.windowSizeStayPut.rawValue - 1
         )
 
         /// How long a button wears the checkmark that says the pasteboard took it. A copy makes
@@ -94,22 +103,37 @@ final class ChartPaneViewController: NSViewController {
             ),
             card.topAnchor.constraint(equalTo: container.topAnchor, constant: Layout.inset),
 
+            // The gap over the footer is what absorbs the room the chart does not want, and
+            // that is deliberate: the alternative — a chain of equalities from the pane's top
+            // edge to its bottom one — states the height of the window's content, and a window
+            // resizes itself to satisfy any such statement made above `windowSizeStayPut`.
+            // Slack in the gap is slack the window never hears about.
             footer.topAnchor.constraint(
-                equalTo: card.bottomAnchor,
+                greaterThanOrEqualTo: card.bottomAnchor,
                 constant: Design.Spacing.small
             ),
             footer.leadingAnchor.constraint(equalTo: card.leadingAnchor),
             footer.trailingAnchor.constraint(equalTo: card.trailingAnchor),
 
-            // The foot of the pane is a limit; reaching it is only a preference. **Filling the
-            // pane must not be required**: required, it outranked the card's own ceiling on the
-            // plot, so a panel dragged narrow went on drawing a column of chart the full height
-            // of the window — which is the shape that reported this.
+            // The footer stands at the foot of the pane. Required, because the caption and the
+            // two ways out belong at the bottom edge whatever the chart above them is doing —
+            // and it costs the window nothing, since the gap and not the pane's height is what
+            // gives when the chart is short.
             footer.bottomAnchor.constraint(
-                lessThanOrEqualTo: container.bottomAnchor,
+                equalTo: container.bottomAnchor,
                 constant: -Layout.inset
             )
         ]
+
+        // A chart reaches the footer when its own shape lets it, which is most of them: the
+        // preference closes the gap the `>=` above leaves open, so a column chart still takes the
+        // whole pane it is given.
+        let fills = footer.topAnchor.constraint(
+            equalTo: card.bottomAnchor,
+            constant: Design.Spacing.small
+        )
+        fills.priority = Layout.fillsPane
+        constraints.append(fills)
 
         // A chart takes the room its own shape asks for, not the room the panel happens to have.
         // See `ChartCardView.boundedHeight(for:)`: a ranking's vertical axis is its categories,
@@ -121,13 +145,6 @@ final class ChartPaneViewController: NSViewController {
             let height = card.heightAnchor.constraint(equalToConstant: bounded)
             height.priority = .defaultHigh
             constraints.append(height)
-        } else {
-            let fills = footer.bottomAnchor.constraint(
-                equalTo: container.bottomAnchor,
-                constant: -Layout.inset
-            )
-            fills.priority = Layout.fillsPane
-            constraints.append(fills)
         }
 
         NSLayoutConstraint.activate(constraints)

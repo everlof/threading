@@ -4,13 +4,21 @@ import os
 /// Maps the MCP endpoints handed to agents back to the sessions that own them.
 ///
 /// Each session gets a private URL whose path carries an unguessable token, so a tool call
-/// arriving over the socket identifies its session by construction. Nothing has to be inferred
-/// from the process, and two sessions of the same project cannot be confused for each other.
+/// arriving over either endpoint identifies its session by construction. Nothing has to be
+/// inferred from the process, and two sessions of the same project cannot be confused for each
+/// other.
 ///
-/// The token is the only thing guarding the endpoint. That is sufficient because the listener
-/// binds loopback, so reaching it already requires local code execution — but it is why the
-/// token must not be derived from the session identifier, which is written to disk in
-/// `projects.json`.
+/// The token is the only thing guarding the endpoint. That is sufficient because both listeners
+/// are local — a loopback port and an owner-only unix socket — so reaching either already
+/// requires local code execution. It is also why the token must not be derived from the session
+/// identifier, which is written to disk in readable places.
+///
+/// **The token is durable.** It used to be minted into an in-memory dictionary and documented as
+/// stable for the app's lifetime, which made a session's whole bridge a property of one launch:
+/// a hook arriving after a restart, or during one before the listener was up, carried a token
+/// nothing recognised and was dropped. It is now persisted (`MCPSessionTokenStore`), minted once
+/// per session and rotated only when the session is deleted. Ad-hoc endpoints are the deliberate
+/// exception — a helper run *is* one run, so its token is never written down.
 enum MCPSessionRegistry {
 
     // MARK: - Properties
@@ -21,6 +29,13 @@ enum MCPSessionRegistry {
         /// Scopes of the ad-hoc endpoints — synthetic sessions belonging to helper runs, not
         /// to `ProjectStore`. Membership here is also what exempts an id from `retainOnly`.
         var adHocScopesBySession: [SessionID: [String]] = [:]
+
+        /// The durable half. Loaded on first access rather than at launch, so a process that
+        /// never mints or resolves a token never reads the file.
+        var tokenStore = MCPSessionTokenStore()
+        var hasLoadedDurableTokens = false
+        /// Ordering tag for the writer, so a snapshot taken earlier cannot land later.
+        var durableGeneration: UInt64 = 0
     }
 
     /// Launch and deletion happen on main while requests resolve tokens on the MCP queue.
@@ -29,21 +44,40 @@ enum MCPSessionRegistry {
 
     // MARK: - Public Methods
 
-    /// The token for a session, minted on first use and stable for the app's lifetime.
+    /// The token for a session, minted on first use and durable from then on.
     static func token(for sessionID: SessionID) -> String {
-        storage.withLock { storage in
+        var deferred = DeferredWork()
+
+        let token = storage.withLock { storage -> String in
+            loadDurableTokensIfNeeded(&storage, deferring: &deferred)
+
             if let existing = storage.tokensBySession[sessionID] { return existing }
 
             let token = UUID().uuidString.lowercased()
             storage.tokensBySession[sessionID] = token
             storage.sessionsByToken[token] = sessionID
+            deferred.snapshot = durableSnapshot(&storage)
             return token
         }
+
+        deferred.perform()
+        return token
     }
 
     /// The session a request path belongs to, or nil if the token is unknown.
+    ///
+    /// Loads the durable tokens too, because this is the side a hook arrives on: a report that
+    /// reaches the listener before anything in this launch has minted a token still has to route.
     static func session(forToken token: String) -> SessionID? {
-        storage.withLock { $0.sessionsByToken[token] }
+        var deferred = DeferredWork()
+
+        let sessionID = storage.withLock { storage -> SessionID? in
+            loadDurableTokensIfNeeded(&storage, deferring: &deferred)
+            return storage.sessionsByToken[token]
+        }
+
+        deferred.perform()
+        return sessionID
     }
 
     /// Mints an endpoint for a short-lived helper run, restricted to the named tools.
@@ -53,6 +87,11 @@ enum MCPSessionRegistry {
     /// advertised exactly the tools it was launched for and nothing of the session surface.
     /// Ad-hoc ids survive `retainOnly` (they are not `ProjectStore`'s to retain) and are
     /// instead revoked explicitly by `endAdHoc` when the run finishes.
+    ///
+    /// Its token is deliberately **not** persisted: the scope exists for the length of one
+    /// helper run, so a token surviving a restart would outlive everything that could honour it.
+    /// The scope and the token are inserted under one lock acquisition, so no snapshot can ever
+    /// observe the token before the ad-hoc marking that excludes it from the file.
     static func beginAdHoc(allowedTools: [String]) -> SessionID {
         let sessionID = SessionID()
         storage.withLock { storage in
@@ -156,6 +195,13 @@ enum MCPSessionRegistry {
     /// `fastMode` follows the same precedence rule. It is present for both terminal and Native
     /// Claude launches when Threading chose Standard or Fast, and absent when speed belongs to
     /// the account's own settings.
+    ///
+    /// `socketPath` is the rendezvous the hooks post to. It is injectable so a test can name a
+    /// path of its own, and it has no "not available yet" case: the path is a fixed property of
+    /// the user's home directory, knowable long before any listener binds it. That is what
+    /// deleted this function's worst branch — a session launched before the listener had a port
+    /// used to get no hooks at all, which silently cost it accurate activity and, if it was a
+    /// rendered session, blocked its tools outright with no card to approve them.
     static func writeHookSettings(
         for sessionID: SessionID,
         brokersPermissions: Bool,
@@ -163,33 +209,9 @@ enum MCPSessionRegistry {
         remoteControl: Bool? = nil,
         fastMode: Bool? = nil,
         statusLineOverride: String? = nil,
-        listenerPort: UInt16? = MCPServer.shared.port
+        socketPath: String = MCPBridgeLocation.socketPath
     ) -> String? {
-        let port = listenerPort
         let needsListener = brokersPermissions || reportsLifecycle
-
-        if needsListener, port == nil {
-            // Silent otherwise, and total: no port means no hooks, so the session falls back to
-            // inferring its state from output and — if it is a rendered one — to having its
-            // tools blocked outright with no card to approve them.
-            ThreadingLogger.mcp.error(
-                "No MCP port; \(sessionID, privacy: .public) launches without hooks"
-            )
-            EventLog.shared.record(.hooks, "Launched without hooks, MCP listener has no port", [
-                "session": sessionID.uuidString,
-                "brokersPermissions": brokersPermissions ? "yes" : "no",
-                "reportsLifecycle": reportsLifecycle ? "yes" : "no"
-            ])
-
-            // A settings file is still written when the session has a launch override to state.
-            // Losing the hooks costs accurate activity; dropping one of these would silently
-            // undo a choice the user made, which is a different order of wrong and must not
-            // depend on whether an unrelated listener came up.
-            if remoteControl == nil, fastMode == nil, statusLineOverride == nil {
-                removeSettingsFile(for: sessionID)
-                return nil
-            }
-        }
 
         // This is what makes terminal opt-out complete rather than an empty hooks dictionary
         // still carried through `--settings`.
@@ -200,14 +222,11 @@ enum MCPSessionRegistry {
 
         var hooks: [String: Any] = [:]
 
-        if needsListener, let port {
-            let base = "http://\(MCPDefaults.host):\(port)"
-            let token = token(for: sessionID)
-
+        if needsListener {
             appendHooks(
                 to: &hooks,
-                base: base,
-                token: token,
+                socketPath: socketPath,
+                token: token(for: sessionID),
                 brokersPermissions: brokersPermissions,
                 reportsLifecycle: reportsLifecycle
             )
@@ -250,15 +269,21 @@ enum MCPSessionRegistry {
         }
     }
 
-    /// The `curl` entries themselves, split out so the settings file can still be written when
-    /// there is no listener to point them at.
+    /// The `curl` entries themselves, split out so the settings file can still be written for a
+    /// session that asked for no hooks but has another launch override to state.
+    ///
+    /// They post over the unix socket rather than the loopback port. The path is quoted because
+    /// it contains `Application Support`, and the URL is quoted because a lifecycle report's
+    /// `?event=` would otherwise be read as a shell glob.
     private static func appendHooks(
         to hooks: inout [String: Any],
-        base: String,
+        socketPath: String,
         token: String,
         brokersPermissions: Bool,
         reportsLifecycle: Bool
     ) {
+        let base = MCPDefaults.socketURLBase
+        let transport = "--unix-socket \(MCPBridgeLocation.shellQuoted(socketPath))"
         // Accumulated per hook name rather than assigned, because one name can carry entries
         // from both halves of this function: `PreToolUse` is how a native session brokers
         // permission *and* how a terminal session learns that a question tool opened. Assigning
@@ -268,7 +293,8 @@ enum MCPSessionRegistry {
         if brokersPermissions {
             let url = "\(base)\(MCPDefaults.permissionPathPrefix)\(token)"
             let command = "curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
-                + " -H 'Content-Type: application/json' --data-binary @- \(url)"
+                + " \(transport)"
+                + " -H 'Content-Type: application/json' --data-binary @- '\(url)'"
 
             // No matcher: every tool is offered, and `PermissionPolicy` decides which are
             // worth interrupting for. Policy in Swift beats policy in a glob.
@@ -292,7 +318,8 @@ enum MCPSessionRegistry {
                 // they sit on the same event a broker would, and say nothing back.
                 let timeout = MCPDefaults.lifecycleTimeout(for: event)
                 let command = "curl -s --max-time \(Int(timeout))"
-                    + " -H 'Content-Type: application/json' --data-binary @- \(url)"
+                    + " \(transport)"
+                    + " -H 'Content-Type: application/json' --data-binary @- '\(url)'"
                     + " >/dev/null 2>&1 || true"
 
                 for name in registration.eventNames {
@@ -322,10 +349,16 @@ enum MCPSessionRegistry {
     /// Revokes the endpoints of every session not in the given set.
     ///
     /// Called when sessions are deleted, so a token cannot outlive the session it addressed
-    /// and go on reaching a panel for something the user removed.
+    /// and go on reaching a panel for something the user removed. It is also what bounds the
+    /// durable file: the sweep runs with the live session set and the resulting snapshot
+    /// *replaces* the file, so a deleted session's row goes with its endpoint.
     @MainActor
     static func retainOnly(sessionIDs: Set<SessionID>) {
-        let removedSessionIDs = storage.withLock { storage in
+        var deferred = DeferredWork()
+
+        let removedSessionIDs = storage.withLock { storage -> [SessionID] in
+            loadDurableTokensIfNeeded(&storage, deferring: &deferred)
+
             // Ad-hoc endpoints are not in `ProjectStore`, so the sweep must not read their
             // absence from the retained set as deletion — a helper mid-run would lose its
             // endpoint because an unrelated session was removed.
@@ -340,8 +373,14 @@ enum MCPSessionRegistry {
                 storage.sessionsByToken.removeValue(forKey: token)
             }
 
+            // Taken unconditionally: a sweep that removed nothing may still be the first thing
+            // to load a file whose rows this launch has never rewritten, and the file has to
+            // stop naming a session even when that session never minted a token here.
+            deferred.snapshot = durableSnapshot(&storage)
             return removed
         }
+
+        deferred.perform()
 
         // Disk cleanup and permission cancellation can call into other subsystems. Keeping them
         // outside the registry lock prevents unrelated work from extending the critical section.
@@ -353,16 +392,49 @@ enum MCPSessionRegistry {
     /// Revokes one permanently deleted session without filtering the complete endpoint map.
     @MainActor
     static func remove(sessionID: SessionID) {
+        var deferred = DeferredWork()
+
         let removed = storage.withLock { storage -> Bool in
+            loadDurableTokensIfNeeded(&storage, deferring: &deferred)
+
             guard storage.adHocScopesBySession[sessionID] == nil else { return false }
-            guard let token = storage.tokensBySession.removeValue(forKey: sessionID) else {
-                return true
+            if let token = storage.tokensBySession.removeValue(forKey: sessionID) {
+                storage.sessionsByToken.removeValue(forKey: token)
             }
-            storage.sessionsByToken.removeValue(forKey: token)
+            // Taken even when this launch never minted for the session: the row may have come
+            // from the file, and a deleted session must not stay addressable across a restart.
+            deferred.snapshot = durableSnapshot(&storage)
             return true
         }
+
+        deferred.perform()
         guard removed else { return }
         removeSupportFilesAndPermissions(for: sessionID)
+    }
+
+    /// Blocks until every durable token write has landed.
+    ///
+    /// For tests, which have to observe the file a mint or a revocation produced. The app never
+    /// waits: an unwritten token is still in memory, and only the next launch reads the file.
+    static func waitForPendingTokenWrites() {
+        MCPSessionTokenWriter.waitForPendingWrites()
+    }
+
+    /// Points the registry at `file` and forgets everything the previous one loaded.
+    ///
+    /// This is a test's synthetic restart, and the registry is a global by construction — a
+    /// token has to resolve from the MCP queue with no session object in hand — so there is
+    /// nowhere else to inject it. Production never calls this; the app's file is
+    /// `MCPBridgeLocation.tokenFile`, which already redirects under a hosted test bundle.
+    static func reload(from file: URL = MCPBridgeLocation.tokenFile) {
+        MCPSessionTokenWriter.waitForPendingWrites()
+        storage.withLock { storage in
+            storage.tokensBySession.removeAll()
+            storage.sessionsByToken.removeAll()
+            storage.adHocScopesBySession.removeAll()
+            storage.tokenStore = MCPSessionTokenStore(file: file)
+            storage.hasLoadedDurableTokens = false
+        }
     }
 
     @MainActor
@@ -374,6 +446,72 @@ enum MCPSessionRegistry {
             }
         }
         PermissionBroker.discard(sessionID: sessionID)
+    }
+
+    // MARK: - Durable Tokens
+
+    /// Work a locked section produced but must not do while holding the lock.
+    ///
+    /// `EventLog.record` takes its own queue synchronously and a token write touches the
+    /// filesystem; neither belongs inside an unfair lock, where it would extend a critical
+    /// section every hook and every tool call passes through.
+    private struct DeferredWork {
+        var journal: [MCPSessionTokenStore.Diagnostic] = []
+        var snapshot: MCPSessionTokenSnapshot?
+
+        func perform() {
+            for entry in journal {
+                EventLog.shared.record(.hooks, entry.message, entry.detail)
+            }
+            if let snapshot {
+                MCPSessionTokenWriter.write(snapshot)
+            }
+        }
+    }
+
+    /// Reads the durable tokens once per launch, into both directions of the map.
+    ///
+    /// A stored row that has no in-memory counterpart is exactly the case this exists for: the
+    /// hook of a session this launch has not touched yet still resolves. A row whose token is
+    /// already claimed in memory is left alone, since the live mapping is the newer fact.
+    ///
+    /// One bounded read, once. It happens under the registry's lock because the alternative — a
+    /// window where two callers both see an unloaded map — is a second token minted for a
+    /// session that already had one, which is the exact defect the file removes.
+    private static func loadDurableTokensIfNeeded(
+        _ storage: inout Storage,
+        deferring deferred: inout DeferredWork
+    ) {
+        guard !storage.hasLoadedDurableTokens else { return }
+        storage.hasLoadedDurableTokens = true
+
+        let (tokens, diagnostic) = storage.tokenStore.load()
+        if let diagnostic { deferred.journal.append(diagnostic) }
+
+        for (sessionID, token) in tokens {
+            guard storage.tokensBySession[sessionID] == nil,
+                  storage.sessionsByToken[token] == nil else {
+                continue
+            }
+            storage.tokensBySession[sessionID] = token
+            storage.sessionsByToken[token] = sessionID
+        }
+    }
+
+    /// The durable set as it stands, tagged so the writer can drop a stale one.
+    ///
+    /// Ad-hoc endpoints are filtered out here rather than at the write, so there is exactly one
+    /// place that decides what is durable.
+    private static func durableSnapshot(_ storage: inout Storage) -> MCPSessionTokenSnapshot {
+        storage.durableGeneration += 1
+        let tokens = storage.tokensBySession.filter {
+            storage.adHocScopesBySession[$0.key] == nil
+        }
+        return MCPSessionTokenSnapshot(
+            generation: storage.durableGeneration,
+            tokens: tokens,
+            store: storage.tokenStore
+        )
     }
 
     // MARK: - Private Methods
@@ -402,12 +540,14 @@ enum MCPSessionRegistry {
         }
     }
 
+    /// The per-session config and settings files, under the same root as the bridge's own state.
+    ///
+    /// Identical to `~/Library/Application Support/Threading/<directory>/<id>.json` in the app.
+    /// Under a hosted test bundle it follows `StateManager`'s scratch redirect for the reason
+    /// that redirect exists: these tests run inside the shipping app, and every fixture session
+    /// used to leave a token-bearing file in the developer's own Application Support.
     private static func supportFile(_ sessionID: SessionID, in directory: String) -> URL {
-        let appSupport = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-
-        return appSupport
-            .appendingPathComponent("Threading", isDirectory: true)
+        MCPBridgeLocation.supportRoot
             .appendingPathComponent(directory, isDirectory: true)
             .appendingPathComponent(sessionID.uuidString)
             .appendingPathExtension(MCPDefaults.configFileExtension)

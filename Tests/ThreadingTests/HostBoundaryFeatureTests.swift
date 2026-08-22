@@ -154,6 +154,65 @@ final class HostCommandPlaneTests: XCTestCase {
         XCTAssertEqual(invoked, ["enabled"])
     }
 
+    func testPaletteRemovesItsPresentationBeforeInvokingACommand() {
+        var isPresentedDuringInvocation: Bool?
+        var presentationCheck: (() -> Bool)?
+        var dismissalCount = 0
+        let controller = CommandPaletteViewController(
+            catalog: { [self] in [descriptor(id: "rename", title: "Rename Session")] },
+            invoke: { id in
+                isPresentedDuringInvocation = presentationCheck?()
+                return .invoked(commandID: id)
+            }
+        )
+        presentationCheck = { [weak controller] in
+            controller?.isPresentedForTesting == true
+        }
+        controller.onDismiss = { dismissalCount += 1 }
+        let window = makePaletteWindow()
+        defer { window.contentView = nil }
+
+        controller.present(in: window)
+        drainMainRunLoop(until: { controller.visibleCommandIDsForTesting == ["rename"] })
+        XCTAssertTrue(controller.isPresentedForTesting)
+
+        controller.confirmSelectionForTesting()
+
+        XCTAssertEqual(isPresentedDuringInvocation, false)
+        XCTAssertFalse(controller.isPresentedForTesting)
+        XCTAssertEqual(dismissalCount, 1)
+    }
+
+    func testPaletteRestoresItsPresentationAfterDynamicRefusal() {
+        var isPresentedDuringInvocation: Bool?
+        var presentationCheck: (() -> Bool)?
+        var dismissalCount = 0
+        let controller = CommandPaletteViewController(
+            catalog: { [self] in [descriptor(id: "rename", title: "Rename Session")] },
+            invoke: { id in
+                isPresentedDuringInvocation = presentationCheck?()
+                return .refused(commandID: id, reason: "The session changed.")
+            }
+        )
+        presentationCheck = { [weak controller] in
+            controller?.isPresentedForTesting == true
+        }
+        controller.onDismiss = { dismissalCount += 1 }
+        let window = makePaletteWindow()
+        defer { window.contentView = nil }
+
+        controller.present(in: window)
+        drainMainRunLoop(until: { controller.visibleCommandIDsForTesting == ["rename"] })
+        controller.confirmSelectionForTesting()
+
+        XCTAssertEqual(isPresentedDuringInvocation, false)
+        XCTAssertTrue(controller.isPresentedForTesting)
+        XCTAssertEqual(dismissalCount, 0)
+
+        controller.dismiss()
+        XCTAssertEqual(dismissalCount, 1)
+    }
+
     func testOpenPaletteDropsExtensionRowsImmediatelyWhenRegistryRemovesThem() {
         let registry = CommandRegistry(builtInCommands: [])
         registry.replaceExtensionCommands(
@@ -186,6 +245,18 @@ final class HostCommandPlaneTests: XCTestCase {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
         }
         XCTAssertTrue(condition(), "asynchronous UI state did not settle")
+    }
+
+    private func makePaletteWindow() -> NSWindow {
+        let frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+        let window = NSWindow(
+            contentRect: frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSView(frame: frame)
+        return window
     }
 }
 

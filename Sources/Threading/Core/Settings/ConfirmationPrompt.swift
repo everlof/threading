@@ -46,6 +46,11 @@ enum ConfirmationPrompt: String, CaseIterable {
     case continueRunningSessionWithAnotherProvider
     case switchRunningSessionSurface
 
+    /// What to do about a repair an agent proposes for a broken conversation. Not a lifecycle
+    /// prompt — nothing is running — but it belongs beside them because the subject is one
+    /// session and the answer changes what that session is.
+    case conversationRepairOutcome
+
     // MARK: Recoverable elsewhere
 
     case quitWithRunningAgents
@@ -78,6 +83,8 @@ enum ConfirmationPrompt: String, CaseIterable {
     case runDestructiveExtensionCommand
     case runProjectScript
     case stopSessionProcess
+    case takeOverSingleInstanceLock
+    case endOrphanedAgentProcesses
 
     // MARK: Security grants
 
@@ -237,6 +244,18 @@ enum ConfirmationPrompt: String, CaseIterable {
              // behaves as though nothing brings it back: Return on Cancel, the verb on a
              // destructive button.
              .stopSessionProcess,
+             // The other instance is ended outright and whatever it had in flight goes with
+             // it, so nothing in the app brings it back — and this is the one prompt the user
+             // meets before there is an app to bring anything back *in*. It can never be
+             // switched off for the same reason `approveSystemPermissionPrompt` cannot:
+             // suppressed, it would silently kill a running Threading on every launch that
+             // found a slow one.
+             .takeOverSingleInstanceLock,
+             // The agent processes a crashed launch left behind, ended so the lock descriptor
+             // they inherited is released. Each is verified on its recorded identity first, and
+             // each is somebody's conversation: whatever it was mid-turn on is gone. It sits on
+             // the same branch as the takeover above and for the same reason.
+             .endOrphanedAgentProcesses,
              // Regranting authority is possible, but the complete supervision graph this
              // operation closes has no one-step restore in the app. Default to Cancel like
              // the other broad removals whose recovery requires rebuilding state by hand.
@@ -271,6 +290,13 @@ enum ConfirmationPrompt: String, CaseIterable {
             return .alwaysAsks(.securityGrant)
 
         case .installUpdate, .installUpdateAndRelaunch:
+            return .alwaysAsks(.newQuestionEachTime)
+
+        // Each repair is a different agent's account of a different broken conversation, and the
+        // decision is about *that* account — what it says it found, what it says it changed.
+        // There is no answer to remember: a box saying "always accept what an agent proposes
+        // about my conversations" is the setting this deliberately cannot have.
+        case .conversationRepairOutcome:
             return .alwaysAsks(.newQuestionEachTime)
         }
     }

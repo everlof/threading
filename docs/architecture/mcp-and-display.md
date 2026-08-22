@@ -8,16 +8,50 @@ Threading hosts an MCP server and registers it with each Claude or Codex session
 which is how an agent reaches the GUI it is running inside. The terminal stays the input
 surface; the display panel becomes the output surface for anything the terminal renders badly.
 
-The transport is HTTP over a loopback port (`NWListener`, no dependency, no entitlement — the
-app is unsandboxed already). stdio was the alternative and is worse here: it spawns a child
-that would then have to find its way back to the running app, when the app is already alive
-and already owns the routing table.
+The transport is HTTP (`NWListener`, no dependency, no entitlement — the app is unsandboxed
+already) over **two endpoints that share one handler**. stdio was the alternative for the tool
+channel and is worse as the *only* transport here: it spawns a child that would then have to
+find its way back to the running app, when the app is already alive and already owns the
+routing table.
+
+- **A loopback TCP port** (`port: .any` on `127.0.0.1`), which is what `--mcp-config` and
+  Codex's one-run `mcp_servers` override carry. A CLI resolves that URL itself and cannot be
+  handed a socket, so this endpoint stays until the stdio shim replaces the tool channel.
+- **A unix socket** at `~/Library/Application Support/Threading/bridge/mcp.sock`, in a `0700`
+  directory, which is what the hooks post to. Two things follow from a path instead of a port,
+  and both are the point. It is **stable**: a port is minted per launch, so anything addressed
+  by one — a hook command, a `hooks.json` Codex trusts by its text — was addressed to a single
+  run of the app. And it is **tighter**: a loopback port is reachable by any local process that
+  guesses a token, while an owner-only directory is not.
+
+`MCPBridgeLocation` owns both the socket path and the token file beside it, and resolves them
+through `StateManager`'s hosted-test redirect, so a test bundle running inside the shipping app
+neither binds the developer's socket nor rewrites their tokens. A path over 103 bytes cannot fit
+`sockaddr_un.sun_path`; that case logs, skips the unix listener, and leaves TCP carrying
+everything, because an app broken by a long user name would be worse than the bug the rendezvous
+fixes. `MCPServer.socketPath` reports what actually bound — a different question from
+`MCPBridgeLocation.socketPath`, which answers before any listener exists and is what the hooks
+are written against.
 
 **Session routing is the whole design.** `MCPSessionRegistry` mints a per-session token and
 `AgentLauncher` passes a URL embedding it through Claude's `--mcp-config` file or Codex's
 one-run `mcp_servers` overrides, so a tool call arrives already attributed — the URL *is* the
 identity. `AgentSession.id` is the key, not
 `agentSessionID`, which is nil for Codex until discovery.
+
+**The token is durable**, and that is what makes a hook's address outlive one launch. It used to
+live in an in-memory dictionary documented as stable for the app's lifetime, so a report arriving
+after a restart — or during one, before the listener was up — carried a token nothing recognised
+and was dropped. `MCPSessionTokenStore` persists the map to
+`…/Threading/bridge/session-tokens.json`, `0600` inside the `0700` directory, loaded once on the
+first registry call and rewritten on every mint and every revocation. A token is minted once per
+session and rotated only when the session is deleted; `retainOnly` runs with the live session set
+and *replaces* the file, which is also what bounds it. It stays a random UUID rather than
+anything derived from the session id, for the reason the registry header gives: the id is written
+to disk in readable places and the token is the only thing guarding the endpoint. An ad-hoc
+endpoint's token is deliberately never written down — a helper run is one run. A file this build
+cannot read is quarantined (`.unreadable-<uuid>`) and the launch mints fresh, rather than being
+interpreted as empty and overwritten; a single unparsable row is skipped and the rest still load.
 
 Grok native Chat receives the same private endpoint through ACP's `mcpServers` member on
 `session/new` and `session/load`. This is per-process and per-session, so no `.mcp.json` or user
@@ -770,6 +804,47 @@ because a repeat almost always means the agent just rewrote one side; a turn end
 visible compare tab for the same reason. The user's own route in is the `+` menu's "Compare
 Files…", which is an open panel asked for exactly two files.
 
+**`video_frames` is the one tool that exists because of what an agent kept doing instead.**
+Screen recordings arrive here as a quoted path in a prompt — never as an attachment, since the
+attachment store has only ever held images. So every recording began with the agent shelling out
+to `ffprobe` and `ffmpeg`, and the transcripts show that costing between 4 and 35 shell calls per
+clip, with the same three mistakes each time: a `drawtext` filter that this machine's Homebrew
+`ffmpeg` is built without, so numbering the cells fails; a contact sheet dense enough to cover the
+clip but too downscaled to read, which then bought nine crop-and-zoom passes; and
+`select='gt(scene,N)'`, which on a screen recording picks one frame, pads the rest of the grid
+black, and misses the transient the uniform sample caught.
+
+The tool answers all three by construction. It decodes through `AVAssetImageGenerator`
+(`VideoFrameSheet`), so there is no `ffmpeg` and no filter to be missing. The cell-to-time table
+travels as **text** beside the picture, which is what `drawtext` was wanted for and cannot fail.
+And the grid is solved rather than chosen: an image is downscaled to 1,568px on its long edge
+before a model sees it, so a cell's delivered width is the sheet's width over its column count.
+`VideoFrameSheet.grid` tries every column count and keeps the one with fewest empty cells, then
+the largest cell — which is why nine frames of a desktop capture come back 3×3 and four frames of
+a phone capture come back as a 4×1 filmstrip, opposite answers the square root would not give.
+The sheet is built *at* the delivery size, so nothing is decoded or sent that the downscale would
+discard.
+
+Nine cells is the ceiling, and it is also the whole scaling contract: an hour-long clip costs the
+same nine decodes as a two-second one, because a longer clip is sampled more sparsely rather than
+more expensively. When a cell still lands under the legible width the reply says so and names the
+two ways out — a narrower `from`/`to`, or a `crop` — because that failure looks exactly like
+success: a sheet arrives, and is merely too small to answer the question. `crop` is a named object
+rather than ffmpeg's `w:h:x:y` string for the reason the schema's `.object` case exists at all,
+and it is measured against the *presented* frame, so a portrait recording's rectangle means what
+it looks like rather than what the container stored.
+
+The result carries an MCP image block, which makes it the second exception to the plain-text rule
+after `browser_screenshot`, and for the same reason: the agent's own visual inspection is the
+entire purpose, so a sentence in its place would be the agent describing a picture it never saw.
+The sheet is recorded as a session attachment too, so the user sees what the agent saw.
+
+`VideoFrameSheet` deliberately carries its own forty-line probe rather than calling
+`VideoDocumentRenderer.plan`, which asks the same questions for the player. The player asks them
+against `MediaDocumentLimits` — ceilings written for a canvas that will hold the decoded frame —
+and a tool an agent calls on a file the user just pasted should not start failing because those
+limits were retuned. Collapse the two once the movie engine has settled.
+
 **The tab is not the only size the comparison has.** The surface's controls row carries a button
 that opens the same pair in `CompareInspectorView` over the whole window (see
 [`design-system.md`](design-system.md)), because a pane the divider decides is a poor place to
@@ -820,10 +895,17 @@ host has asked for it.
 `MCPServer` calls its handler on the main queue, because neither `ProjectStore`, `AgentRuntime`
 nor AppKit is thread-safe. Everything arriving off the network hops before touching them.
 
-The listener must be ready before any launch, since a launch reads the port — so
+The TCP listener must be ready before any launch, since `--mcp-config` reads the port — so
 `AppDelegate` defers `restoreSelectedSession()` to the `start` callback. That callback fires
 whether the listener came up or not: a failed server costs sessions their panel, not their
 launch (`mcpFlags` returns "" and the command line is unchanged).
+
+**The unix listener is deliberately outside that gate.** `start` kicks it off and does not wait
+for it, because nothing a launch writes depends on it having bound: the hooks are written from a
+path, not from a listener. That is what deleted `writeHookSettings`' worst branch — a session
+launched before the port arrived used to get *no hooks at all*, which silently cost it accurate
+activity and, for a rendered session, blocked its tools with no card to approve them. There is no
+longer a case where a session that asked for hooks does not get them.
 
 **Tab order belongs to the user's hand.** The strip is `ThemedTabStripView` (the design
 system's, shared with every tab host) and tabs reorder by drag or by the chip's

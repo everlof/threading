@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // MARK: - Tool Call
@@ -128,6 +129,60 @@ struct DisplayCompareFilesArguments: Codable, Sendable {
     self.newPath = newPath
     self.oldTitle = oldTitle
     self.newTitle = newTitle
+  }
+}
+
+/// A rectangle of a video frame, in source pixels with the origin at the top left.
+///
+/// A named object rather than a `"w:h:x:y"` string for the reason the schema's `.object` case
+/// exists at all: four numbers in a fixed order is a format a model gets subtly wrong, and a
+/// crop that is wrong by a transposition returns a picture of the wrong part of the screen
+/// without failing.
+struct VideoCropArguments: Codable, Sendable {
+  let x: Double?
+  let y: Double?
+  let width: Double?
+  let height: Double?
+
+  init(x: Double? = nil, y: Double? = nil, width: Double? = nil, height: Double? = nil) {
+    self.x = x
+    self.y = y
+    self.width = width
+    self.height = height
+  }
+
+  /// `nil` unless all four members are present and the rectangle has area — a partial crop is
+  /// a caller's mistake, and guessing the missing halves would answer a different question.
+  var rect: CGRect? {
+    guard let x, let y, let width, let height, width >= 1, height >= 1 else { return nil }
+    return CGRect(x: x, y: y, width: width, height: height)
+  }
+
+  var isPartial: Bool {
+    let present = [x, y, width, height].compactMap { $0 }.count
+    return present > 0 && present < 4
+  }
+}
+
+struct VideoFramesArguments: Codable, Sendable {
+  let path: String?
+  let from: Double?
+  let to: Double?
+  let frames: Int?
+  let crop: VideoCropArguments?
+
+  init(
+    path: String? = nil,
+    from: Double? = nil,
+    to: Double? = nil,
+    frames: Int? = nil,
+    crop: VideoCropArguments? = nil
+  ) {
+    self.path = path
+    self.from = from
+    self.to = to
+    self.frames = frames
+    self.crop = crop
   }
 }
 
@@ -1384,6 +1439,30 @@ struct StorageCleanupArguments: Codable, Sendable {
   let reason: String?
 }
 
+/// What a recovery agent found, and where it put the file it wants Threading to use.
+///
+/// There is no target argument, and that is the security property rather than an omission: the
+/// conversation being repaired is read from the caller's own recovery ticket
+/// (`LaunchRecoveryRegistry`), so a chat can only ever propose a repair for the conversation it
+/// was created for. See `LaunchRecoveryTicket`.
+struct ConversationRepairArguments: Codable, Sendable {
+  /// Absolute path to the repaired file, which must be inside the working folder Threading
+  /// prepared. Omitted when the agent is reporting that it could not repair anything.
+  let repairedPath: String?
+  let whatWasWrong: String?
+  let whatWasDone: String?
+  /// The agent's own verdict. Threading checks the file regardless — this decides whether the
+  /// user is asked to accept a repair or simply shown what was learned.
+  let repaired: Bool?
+
+  enum CodingKeys: String, CodingKey {
+    case repairedPath = "repaired_path"
+    case whatWasWrong = "what_was_wrong"
+    case whatWasDone = "what_was_done"
+    case repaired
+  }
+}
+
 /// Paths an agent believes are reclaimable, for Threading to check rather than take on trust.
 ///
 /// Same line-per-path shape as `StorageCleanupArguments`, and deliberately so: an agent that
@@ -1515,6 +1594,25 @@ struct SessionCostArguments: Codable, Sendable {
     self.project = project
   }
 }
+
+#if DEBUG
+struct IOSDebugInspectionArguments: Codable, Sendable {
+  let deviceID: String?
+  let fresh: Bool?
+  let screenshot: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case deviceID = "device_id"
+    case fresh, screenshot
+  }
+
+  init(deviceID: String? = nil, fresh: Bool? = nil, screenshot: String? = nil) {
+    self.deviceID = deviceID
+    self.fresh = fresh
+    self.screenshot = screenshot
+  }
+}
+#endif
 
 struct ResumeSessionArguments: Codable, Sendable {
   let sessionID: String?
@@ -1942,6 +2040,18 @@ struct MCPToolResult: Encodable, Sendable {
     return MCPToolResult(content: content, isError: false, structuredContent: nil)
   }
 
+#if DEBUG
+  static func debugEvidence(_ text: String, jpegData: Data?) -> MCPToolResult {
+    var content: [Content] = [.text(text)]
+    if let jpegData {
+      content.append(
+        .image(data: jpegData.base64EncodedString(), mimeType: "image/jpeg")
+      )
+    }
+    return MCPToolResult(content: content, isError: false, structuredContent: nil)
+  }
+#endif
+
   private enum CodingKeys: String, CodingKey {
     case content, isError, structuredContent
   }
@@ -2355,6 +2465,7 @@ enum MCPTools {
 
   static let listReclaimableStorage = MCPBuiltInTool.listReclaimableStorage.rawValue
   static let proposeStorageCleanup = MCPBuiltInTool.proposeStorageCleanup.rawValue
+  static let proposeConversationRepair = MCPBuiltInTool.proposeConversationRepair.rawValue
 
   static let notifyUser = MCPBuiltInTool.notifyUser.rawValue
 
@@ -2377,6 +2488,10 @@ enum MCPTools {
     MCPBuiltInTool.extensionValidateComponentPatch.rawValue
   static let extensionPreviewComponentPatch =
     MCPBuiltInTool.extensionPreviewComponentPatch.rawValue
+#if DEBUG
+  static let listIOSDebugDevices = MCPBuiltInTool.listIOSDebugDevices.rawValue
+  static let inspectIOSDebug = MCPBuiltInTool.inspectIOSDebug.rawValue
+#endif
 
   static let continuationTools = names(in: .continuation)
   static let displayTools = names(in: .display)
@@ -2455,7 +2570,8 @@ enum MCPTools {
 
   /// The only authored built-in inventory. Each row owns its closed identity, typed decoding,
   /// execution binding, schema, annotations, family, group, and Settings presentation.
-  static let authoredDeclarations: [MCPToolDefinition] = [
+  static let authoredDeclarations: [MCPToolDefinition] = {
+    var declarations: [MCPToolDefinition] = [
     MCPToolDefinition(
       tool: .displayImage,
       name: "display_image",
@@ -3007,6 +3123,93 @@ enum MCPTools {
           ),
         ],
         required: ["old_path", "new_path"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .videoFrames,
+      name: "video_frames",
+      groupID: "display",
+      family: .display,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Read a video",
+      detail: "Turn a screen recording into frames you can actually look at.",
+      symbol: "film",
+      decodeArguments: { container in
+        try container.decodeIfPresent(VideoFramesArguments.self, forKey: .arguments)
+          ?? VideoFramesArguments()
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.videoFrames(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Look at a video the user posted — a .mov or .mp4 screen recording, a simulator \
+        capture, a screencast. Call this the moment a path to one appears in the \
+        conversation; do not shell out to ffmpeg, and do not ask the user to describe \
+        what happens in their own recording. Returns a contact sheet as an image you can \
+        read directly, the timestamp of every cell, and the clip's duration, size, frame \
+        rate and whether it has audio — so no separate ffprobe call is needed either. \
+        Works in two stages, and the second is not optional when the answer is small: \
+        call it once with no window to see where in the clip something happens, then \
+        again with from/to and crop to actually read that moment. Cells are capped at \
+        nine because a denser sheet arrives too downscaled to read; when the reply says \
+        a cell is below the legible width, narrow the window or crop rather than asking \
+        for more frames. The sheet is also shown to the user in the display panel.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "path": MCPPropertySchema(
+            type: .string,
+            description: """
+              Path to the video. Absolute, or relative to the session's project folder. \
+              A path the user pasted may be shell-escaped; unescape it first.
+              """
+          ),
+          "from": MCPPropertySchema(
+            type: .number,
+            description: """
+              Start of the window to sample, in seconds. Omit to start at the beginning.
+              """
+          ),
+          "to": MCPPropertySchema(
+            type: .number,
+            description: """
+              End of the window to sample, in seconds. Omit to run to the end. Narrowing \
+              this is how a moment gets bigger cells, because the same nine cells then \
+              cover less time.
+              """
+          ),
+          "frames": MCPPropertySchema(
+            type: .number,
+            description: """
+              How many frames to sample, 1 to 9. Defaults to 9. Ask for fewer to make each \
+              one larger — two frames of a tall phone recording arrive about three times \
+              the width of nine.
+              """
+          ),
+          "crop": MCPPropertySchema(
+            type: .object,
+            description: """
+              Region of the frame to keep, in source pixels with the origin at the top \
+              left — the same corner ffmpeg's crop uses. Give all four members or none. \
+              This is the other way to make a cell readable, and the right one when the \
+              thing you are checking is a corner of the screen.
+              """,
+            properties: [
+              "x": MCPPropertySchema(type: .number, description: "Left edge, in pixels."),
+              "y": MCPPropertySchema(type: .number, description: "Top edge, in pixels."),
+              "width": MCPPropertySchema(type: .number, description: "Width, in pixels."),
+              "height": MCPPropertySchema(type: .number, description: "Height, in pixels."),
+            ],
+            required: ["x", "y", "width", "height"]
+          ),
+        ],
+        required: ["path"]
       )
     ),
     MCPToolDefinition(
@@ -6049,6 +6252,66 @@ enum MCPTools {
       )
     ),
     MCPToolDefinition(
+      tool: .proposeConversationRepair,
+      name: "propose_conversation_repair",
+      groupID: "session-lifecycle",
+      family: .session,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Report a conversation repair",
+      detail: "Say what was wrong and hand back the file you fixed. The user decides.",
+      symbol: "bandage",
+      decodeArguments: { container in
+        try container.decodeIfPresent(ConversationRepairArguments.self, forKey: .arguments)
+          ?? ConversationRepairArguments(
+            repairedPath: nil,
+            whatWasWrong: nil,
+            whatWasDone: nil,
+            repaired: nil
+          )
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.proposeConversationRepair(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Only for a chat Threading opened to repair a broken conversation. Report what you \
+        found. Set `repaired` true and give `repaired_path` when you have a fixed file for \
+        Threading to use; it must be inside the working folder you were given. Set it false \
+        when you could not fix it, and still say what was wrong — that is the useful half. \
+        This does not replace anything: Threading checks the file, shows the user what you \
+        say, keeps a backup, and asks them.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "repaired": MCPPropertySchema(
+            type: .boolean,
+            description: "Whether you produced a file you believe Threading should use."
+          ),
+          "repaired_path": MCPPropertySchema(
+            type: .string,
+            description: """
+              Absolute path to your repaired file, inside the working folder Threading \
+              prepared. Leave out when `repaired` is false.
+              """
+          ),
+          "what_was_wrong": MCPPropertySchema(
+            type: .string,
+            description: "Plain description of the fault you found, in the user's terms."
+          ),
+          "what_was_done": MCPPropertySchema(
+            type: .string,
+            description: "What you changed, specifically enough that someone could check it."
+          ),
+        ],
+        required: ["repaired"]
+      )
+    ),
+    MCPToolDefinition(
       tool: .proposeStorageCleanup,
       name: "propose_storage_cleanup",
       groupID: "storage",
@@ -6888,6 +7151,92 @@ enum MCPTools {
       )
     ),
   ]
+#if DEBUG
+    declarations.append(contentsOf: [
+    MCPToolDefinition(
+      tool: .listIOSDebugDevices,
+      name: "list_ios_debug_devices",
+      groupID: "settings-directory",
+      family: .settings,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "List iOS Debug devices",
+      detail: "See live and cached paired-iPhone checkup evidence.",
+      symbol: "iphone.gen3.radiowaves.left.and.right",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, _, _, completion in
+        completion(handler.listIOSDebugDevices())
+      },
+      description: """
+        List paired iPhones known to the Debug evidence bridge. Reports whether each phone is \
+        currently connected over its authenticated app-events socket and the timestamp of its \
+        newest bounded evidence capture. Use this before inspect_ios_debug when more than one \
+        iPhone is available. This tool exists only in Debug builds.
+        """,
+      inputSchema: MCPInputSchema(properties: [:], required: [])
+    ),
+    MCPToolDefinition(
+      tool: .inspectIOSDebug,
+      name: "inspect_ios_debug",
+      groupID: "settings-directory",
+      family: .settings,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Check iOS Debug evidence",
+      detail: "Inspect fresh or cached iPhone state, diagnostics, and error evidence.",
+      symbol: "stethoscope",
+      decodeArguments: { container in
+        try container.decodeIfPresent(IOSDebugInspectionArguments.self, forKey: .arguments)
+          ?? IOSDebugInspectionArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, _, completion in
+        handler.inspectIOSDebug(arguments, completion: completion)
+      },
+      description: """
+        Check up on Threading iOS usage using bounded evidence copied to this Mac by a paired \
+        owner iPhone. By default, ask a connected phone for fresh evidence and fall back to the \
+        newest cached capture if it is offline or does not answer. Always state whether the \
+        result is fresh or cached and how old it is. Diagnostics contain structural connection \
+        events, never prompts, terminal output, paths, credentials, or notification text. \
+        screenshot may be "incident" (the default and privacy-preserving), "current" (capture \
+        the visible screen now), or "none". Only request "current" when the user explicitly asks \
+        for a current screenshot. This tool exists only in Debug builds.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "device_id": MCPPropertySchema(
+            type: .string,
+            description: "Optional device id from list_ios_debug_devices."
+          ),
+          "fresh": MCPPropertySchema(
+            type: .boolean,
+            description: "Request new evidence when connected. Defaults to true."
+          ),
+          "screenshot": MCPPropertySchema(
+            type: .string,
+            description: "incident (default), current, or none."
+          ),
+        ],
+        required: []
+      )
+    ),
+    ])
+#endif
+    return declarations
+  }()
 
   /// The complete, deterministic built-in registry. Only identities with exactly one schema are
   /// admitted; a partial or duplicated declaration therefore fails closed in `tools/list`.

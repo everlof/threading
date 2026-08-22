@@ -55,6 +55,8 @@ final class RemoteTerminalScrollTests: XCTestCase {
             onScrollProgress: { _ in }
         )
         coordinator.attach(to: view)
+        let recorder = RecordingTerminalDelegate()
+        view.terminalDelegate = recorder
 
         XCTAssertFalse(
             coordinator.reportsTerminalViewportChanges,
@@ -62,21 +64,29 @@ final class RemoteTerminalScrollTests: XCTestCase {
         )
         XCTAssertFalse(view.shouldReportSizeChange(newCols: 48, newRows: 41))
 
-        view.setAuthoritativeGrid(cols: 109, rows: 84)
+        // A desktop terminal can be wider than the phone viewport protocol accepts. Rendering
+        // that host-owned grid is valid; echoing it as the phone's lease is not.
+        view.setAuthoritativeGrid(cols: 268, rows: 83)
 
         XCTAssertFalse(
             coordinator.reportsTerminalViewportChanges,
             "Installing the Mac grid must never echo it back as the phone's request."
         )
-        XCTAssertFalse(view.shouldReportSizeChange(newCols: 109, newRows: 84))
+        XCTAssertFalse(view.shouldReportSizeChange(newCols: 268, newRows: 83))
+        XCTAssertTrue(
+            recorder.sizeReports.isEmpty,
+            "The suppression hook must reach SwiftTerm's delegate boundary, not merely answer false."
+        )
 
         view.setUsesLocalViewport(true)
+        let localGrid = view.terminalDimensions
 
         XCTAssertTrue(
             coordinator.reportsTerminalViewportChanges,
             "The final interactive phone grid owns the remote viewport."
         )
         XCTAssertTrue(view.shouldReportSizeChange(newCols: 48, newRows: 41))
+        XCTAssertEqual(recorder.sizeReports, ["\(localGrid.cols)x\(localGrid.rows)"])
     }
 
     func testAFreshViewSitsAtTheLiveTail() {
@@ -203,6 +213,64 @@ final class RemoteTerminalScrollTests: XCTestCase {
         settleTerminalCallbacks(for: view)
 
         XCTAssertTrue(recorder.text.contains("<65;"), "expected wheel-down reports, got \(recorder.text)")
+    }
+
+    /// An alternate buffer deliberately has no local scrollback, so letting UIScrollView own the
+    /// finger only drags its current screen into blank space. xterm Alternate Scroll Mode defines
+    /// the wheel as cursor keys; whether an application assigns those keys to content is its own
+    /// contract. Threading launches Codex inline because Codex assigns them to composer history.
+    func testXtermAlternateScrollModeTurnsAFingerDragIntoCursorKeys() {
+        let view = makeView(feeding: Fixture.shortRun)
+        let recorder = RecordingTerminalDelegate()
+        view.terminalDelegate = recorder
+        view.feed(text: "\u{1b}[?1049h")
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertTrue(view.terminalStateSnapshot().isAlternateBuffer)
+        XCTAssertEqual(view.terminalStateSnapshot().mouseMode, .off)
+        XCTAssertNotNil(view.panMouseGesture)
+        XCTAssertEqual(view.panGestureRecognizer.minimumNumberOfTouches, 2)
+
+        view.forwardWheelDrag(
+            distance: Fixture.dragDistance,
+            gestureRecognizer: UIPanGestureRecognizer()
+        )
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertTrue(
+            recorder.text.contains("\u{1b}[A"),
+            "expected cursor-up input for alternate scroll, got \(recorder.text.debugDescription)"
+        )
+        XCTAssertFalse(recorder.text.contains("<64;"), "cursor scrolling is not a mouse report")
+    }
+
+    func testLeavingTheAlternateScreenReturnsOneFingerToLocalScrollback() {
+        let view = makeView(feeding: Fixture.shortRun)
+        view.feed(text: "\u{1b}[?1049h")
+        settleTerminalCallbacks(for: view)
+        XCTAssertNotNil(view.panMouseGesture)
+
+        view.feed(text: "\u{1b}[?1049l")
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertNil(view.panMouseGesture)
+        XCTAssertEqual(view.panGestureRecognizer.minimumNumberOfTouches, 1)
+    }
+
+    func testResetAlternateScrollModeSuppressesCursorKeyTranslation() {
+        let view = makeView(feeding: Fixture.shortRun)
+        let recorder = RecordingTerminalDelegate()
+        view.terminalDelegate = recorder
+        view.feed(text: "\u{1b}[?1049h\u{1b}[?1007l")
+        settleTerminalCallbacks(for: view)
+
+        view.forwardWheelDrag(
+            distance: Fixture.dragDistance,
+            gestureRecognizer: UIPanGestureRecognizer()
+        )
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertTrue(recorder.text.isEmpty)
     }
 
     /// The application's gesture and the scroll view's own both live on this view, and two pan
@@ -377,11 +445,18 @@ final class RemoteTerminalScrollTests: XCTestCase {
 private final class RecordingTerminalDelegate: NSObject, TerminalViewDelegate {
     private let lock = NSLock()
     private var bytes: [UInt8] = []
+    private var sizes: [String] = []
 
     var text: String {
         lock.lock()
         defer { lock.unlock() }
         return String(decoding: bytes, as: UTF8.self)
+    }
+
+    var sizeReports: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return sizes
     }
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
@@ -390,7 +465,11 @@ private final class RecordingTerminalDelegate: NSObject, TerminalViewDelegate {
         lock.unlock()
     }
 
-    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        lock.lock()
+        sizes.append("\(newCols)x\(newRows)")
+        lock.unlock()
+    }
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     func scrolled(source: TerminalView, position: Double) {}

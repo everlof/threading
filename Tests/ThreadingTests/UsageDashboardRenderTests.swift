@@ -49,6 +49,9 @@ final class UsageDashboardRenderTests: XCTestCase {
                     isBuilding: false,
                     animated: false
                 )
+                if tab == .limitHistory {
+                    dashboard.selectLimitRangeForTesting(days: 7)
+                }
                 dashboard.selectTabForTesting(tab)
                 let host = laidOut(dashboard, appearance: appearance)
                 AppThemeRefresh.repaint(host)
@@ -121,6 +124,38 @@ final class UsageDashboardRenderTests: XCTestCase {
 
         print("Rendered Usage dashboard fixtures to \(directory.path)")
         XCTAssertEqual(files.count, fixtures.count * UsageDashboardView.DashboardTab.allCases.count)
+    }
+
+    func testLimitHistoryChartDoesNotStretchToALaterBankedResetExpiry() throws {
+        let selected = try XCTUnwrap(limitFixtures().first)
+        let dashboard = UsageDashboardView()
+        dashboard.update(
+            report: reportFixture(),
+            limits: [selected],
+            isBuilding: false,
+            animated: false
+        )
+        dashboard.selectLimitRangeForTesting(days: 7)
+
+        let selectedRange = try XCTUnwrap(selected.range(days: 7))
+        let chartRange = try XCTUnwrap(dashboard.limitChartXRangeForTesting)
+        let expiry = try XCTUnwrap(selected.nextResetCreditExpiresAt)
+        let expectedEnd = [
+            selectedRange.end,
+            selected.projection?.endpointAt,
+            selected.resetsAt
+        ].compactMap { $0 }.max()
+
+        XCTAssertEqual(
+            chartRange.upperBound.timeIntervalSinceReferenceDate,
+            try XCTUnwrap(expectedEnd).timeIntervalSinceReferenceDate,
+            accuracy: 0.001
+        )
+        XCTAssertLessThan(
+            chartRange.upperBound,
+            expiry,
+            "a later banked-reset expiry compressed the selected history into the chart's edge"
+        )
     }
 
     /// The page before it has numbers: a scan in flight, and a scan that found nothing.
@@ -418,7 +453,7 @@ final class UsageDashboardRenderTests: XCTestCase {
                 windowLabel: "Weekly",
                 windowDuration: 7 * 86_400,
                 source: .codexAPI,
-                nextResetCreditExpiresAt: now.addingTimeInterval(4 * 86_400),
+                nextResetCreditExpiresAt: now.addingTimeInterval(28 * 86_400),
                 resetCreditCount: 3
             ))
             if step == 0, index > 0 {
@@ -452,7 +487,7 @@ final class UsageDashboardRenderTests: XCTestCase {
             currentFraction: latest.fraction,
             resetsAt: latest.resetsAt,
             resetCreditCount: 3,
-            nextResetCreditExpiresAt: now.addingTimeInterval(4 * 86_400)
+            nextResetCreditExpiresAt: now.addingTimeInterval(28 * 86_400)
         )]
     }
 }

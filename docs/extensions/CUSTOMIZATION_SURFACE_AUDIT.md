@@ -49,7 +49,16 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
 | Session Overview body | — | host-only | Activity attribution and lazy tree, usage/accounting truth, Info polling/process controls/port routing, section lifecycle, persistence and empty-panel fallback | Host-only |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
+| Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
+
+The launch failure surface remains host-only because its content *is* the evidence. The whole
+surface exists because an agent's account of why it would not start was being destroyed, and a
+replaceable presentation of that account is one that can paraphrase, truncate or restyle the one
+text nobody should be reading second-hand. The repair route compounds it: the offer's eligibility,
+the working-copy boundary and the "checked, backed up, then asked" sequence are a safety contract,
+not a layout. An extension that wants to act on these failures should ask for a published typed
+failure record to observe, not for the box the words are in.
 
 The standalone terminal row remains host-only because no published extension entity or data
 capability represents its live shell. Exposing replacement presentation without that authority

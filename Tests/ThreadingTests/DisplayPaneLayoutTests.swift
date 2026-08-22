@@ -237,6 +237,98 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         )
     }
 
+    /// The same claim about the other axis, which a chart broke.
+    ///
+    /// Reported from the running app with a screenshot: opening a chat whose panel holds a chart
+    /// snapped the window to 300 points tall — its own minimum — and did it again on every open,
+    /// whatever height the user had left it. A window's own size is nailed at `windowSizeStayPut`
+    /// and nothing stronger, so *any* constraint above that priority which decides the height of
+    /// the window's content is one the window resizes itself to satisfy. The chart pane held its
+    /// foot at `defaultHigh - 1`, which is above the line, so the chart's preferred height became
+    /// the window's.
+    ///
+    /// Asserted on the window rather than on the pane, because the pane's `fittingSize` is not
+    /// the bug and does not move: it answers the same 287 points before the fix and after. What
+    /// changed is whether the window follows it. An image tab stands beside the chart as the
+    /// control — the panel has always been able to hold one without touching the window.
+    func testPanelContentDoesNotDecideHowTallTheWindowIs() throws {
+        let fixture = try projectAndSession()
+        defer { fixture.tearDown() }
+
+        let controller = makeMainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1400, height: 800))
+        controller.displayPaneController.showSession(fixture.sessionID)
+        // Unanimated: this is a question about constraints, and a reveal in flight would put
+        // the window's height mid-animation into the measurement.
+        controller.setDisplayPaneVisible(true, animated: false)
+        window.layoutIfNeeded()
+
+        let opened = window.frame.height
+
+        controller.displayPaneController.addContentTab(
+            DisplayContent(
+                body: .image(
+                    filledImage(size: NSSize(width: 400, height: 300), color: .systemTeal),
+                    url: fixture.folder.appendingPathComponent("shot.png")
+                ),
+                title: "Shot",
+                subtitle: "a picture"
+            ),
+            for: fixture.sessionID
+        )
+        window.layoutIfNeeded()
+        XCTAssertEqual(
+            window.frame.height, opened, accuracy: 1,
+            "an image tab moved the window's height"
+        )
+
+        controller.displayPaneController.addContentTab(
+            DisplayContent(
+                body: .chart(chartSpec()),
+                title: "Chart",
+                subtitle: "2 series · 3 categories"
+            ),
+            for: fixture.sessionID
+        )
+        window.layoutIfNeeded()
+        XCTAssertEqual(
+            window.frame.height, opened, accuracy: 1,
+            "a chart tab resized the window to \(window.frame.height)"
+        )
+
+        // And again on the next pass, since the reported shape was a window that snapped back
+        // every time rather than once.
+        window.setContentSize(NSSize(width: 1400, height: 800))
+        window.layoutIfNeeded()
+        XCTAssertEqual(
+            window.frame.height, opened, accuracy: 1,
+            "the chart pulled the window back down to \(window.frame.height)"
+        )
+    }
+
+    /// A comparison of three categories, the ordinary shape an agent produces.
+    private func chartSpec() -> ChartSpec {
+        ChartSpec(
+            title: "Cold start by phase",
+            summary: nil,
+            kind: .bar,
+            categories: ["parse", "layout", "first paint"],
+            series: [
+                ChartSpec.Series(
+                    name: "Before", values: [42, 31, 68], details: nil, emphasis: .negative
+                ),
+                ChartSpec.Series(
+                    name: "After", values: [26, 24, 39], details: nil, emphasis: .positive
+                )
+            ],
+            stacked: false,
+            valueFormat: .number,
+            unit: "ms",
+            maximumValue: nil
+        )
+    }
+
     // MARK: - The Panel Opens Wide Enough to Read
 
     /// A required width constraint, laid out and then released, holds the pane for exactly as
@@ -773,6 +865,14 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         )
         let review = try XCTUnwrap(entries.firstIndex { $0.itemTitle == "Review" })
         XCTAssertGreaterThan(theme, review, "the global document led the chat's own surfaces")
+        XCTAssertEqual(
+            entries[review].item?.shortcut,
+            ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.review)
+        )
+        XCTAssertEqual(
+            entries[theme].item?.shortcut,
+            ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.currentTheme)
+        )
         guard case .separator = entries[theme - 1] else {
             return XCTFail("Current Theme reads as another of this chat's tabs")
         }

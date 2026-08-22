@@ -131,6 +131,96 @@ final class SessionLifecycleConfirmationTests: XCTestCase {
         XCTAssertEqual(undone, 1)
     }
 
+    /// Provider-backed archive finishes asynchronously. A chat selected during that wait owns
+    /// the pane; the completion for the older chat must not replace it with the empty state.
+    func testDelayedArchiveCompletionDoesNotClearANewerSessionSelection() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-archive-selection-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        let store = ProjectStore(stateManager: manager)
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let archiving = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .claude,
+            title: "Finishing archive"
+        ))
+        let selected = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .claude,
+            title: "Still selected"
+        ))
+
+        let sidebar = ProjectSidebarViewController(projectStore: store)
+        let container = TerminalContainerViewController(recovery: true)
+        var archiveCompletion: ProviderArchiveSync.Completion?
+        let coordinator = SessionCoordinator(
+            sidebar: sidebar,
+            container: container,
+            environment: AppEnvironment(
+                projectStore: store,
+                agentRuntime: AgentRuntime(
+                    currentSessionProjection: CurrentSessionProjection { _ in nil }
+                ),
+                settings: AppSettings(defaults: UserDefaults.standard),
+                eventLog: EventLog(directory: directory.appendingPathComponent("Logs"))
+            ),
+            onPresentationChanged: {},
+            archiveStateSetter: { archived, sessionID, completion in
+                XCTAssertTrue(archived)
+                XCTAssertEqual(sessionID, archiving.id)
+                archiveCompletion = completion
+            }
+        )
+
+        container.show(sessionID: archiving.id)
+        store.selectedSessionID = archiving.id
+        coordinator.setArchived(true, for: archiving.id)
+
+        container.show(sessionID: selected.id)
+        store.selectedSessionID = selected.id
+        archiveCompletion?(.success(()))
+
+        XCTAssertEqual(
+            container.currentSessionID,
+            selected.id,
+            "a stale archive completion emptied the chat selected while the provider was working"
+        )
+    }
+
+    func testArchivePresentationResolutionPreservesUndoWithoutOverridingNewerNavigation() {
+        let archived = SessionID()
+        let replacement = SessionID()
+
+        let stillVisible = SessionCoordinator.archivePresentationResolution(
+            archivedSessionID: archived,
+            visibleSessionID: archived,
+            selectedSessionID: archived
+        )
+        XCTAssertTrue(stillVisible.clearsVisibleSession)
+        XCTAssertTrue(stillVisible.reselectsOnUndo)
+
+        let clearedByArchiveEvent = SessionCoordinator.archivePresentationResolution(
+            archivedSessionID: archived,
+            visibleSessionID: nil,
+            selectedSessionID: archived
+        )
+        XCTAssertFalse(clearedByArchiveEvent.clearsVisibleSession)
+        XCTAssertTrue(clearedByArchiveEvent.reselectsOnUndo)
+
+        let newerSelection = SessionCoordinator.archivePresentationResolution(
+            archivedSessionID: archived,
+            visibleSessionID: replacement,
+            selectedSessionID: replacement
+        )
+        XCTAssertFalse(newerSelection.clearsVisibleSession)
+        XCTAssertFalse(newerSelection.reselectsOnUndo)
+    }
+
     // MARK: - The archive the agent performs
 
     /// A row that leaves the sidebar on its own is the one report that has to name an actor:

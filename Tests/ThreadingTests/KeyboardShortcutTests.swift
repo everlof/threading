@@ -197,6 +197,14 @@ final class AppCommandTests: XCTestCase {
         XCTAssertTrue(command.isEditable)
     }
 
+    func testRenameSessionShipsAsAnEditableCurrentSessionCommandR() throws {
+        let command = try XCTUnwrap(AppCommands.command(id: AppCommands.ID.renameSession))
+        XCTAssertEqual(command.title, "Rename Session…")
+        XCTAssertEqual(command.defaultShortcut, KeyboardShortcut(key: "r", modifiers: .command))
+        XCTAssertEqual(command.scope, .session)
+        XCTAssertTrue(command.isEditable)
+    }
+
     func testManagerCommandsDeclareTheirScopeAndRisk() throws {
         let newManager = try XCTUnwrap(AppCommands.command(id: AppCommands.ID.newManager))
         XCTAssertEqual(newManager.scope, .project)

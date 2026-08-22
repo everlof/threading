@@ -31,6 +31,10 @@ final class RowExtensionCommandMenuTests: XCTestCase {
                     id: "inspect",
                     title: "Inspect Session",
                     scope: .session,
+                    defaultShortcut: .init(
+                        key: "u",
+                        modifiers: [.control, .option]
+                    ),
                     menuPlacements: [.sessionRow]
                 ),
                 .init(
@@ -61,6 +65,11 @@ final class RowExtensionCommandMenuTests: XCTestCase {
                 as? ProjectSidebarViewController.RowExtensionCommandReference
         )
         XCTAssertEqual(reference.commandID, "extension.com.example.rowmenu.inspect")
+        XCTAssertEqual(
+            command.shortcut,
+            ShortcutOverrideStore.shared.shortcut(forID: reference.commandID),
+            "the row dropdown did not show the extension command's live binding"
+        )
         XCTAssertEqual(
             reference.context.sessionID,
             session.id.uuidString.lowercased(),

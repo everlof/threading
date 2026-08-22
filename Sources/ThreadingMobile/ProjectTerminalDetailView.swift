@@ -129,6 +129,9 @@ struct ProjectTerminalDetailView: View {
 
     private func open() async {
         do {
+            guard let hostID = model.activeHostID else {
+                throw RemoteClientError.invalidResponse
+            }
             try await model.makeTerminalReady(currentTerminal)
             guard let client = model.client else { throw RemoteClientError.invalidResponse }
             let latest = model.me?.terminals?.first(where: { $0.id == terminal.id }) ?? terminal
@@ -151,9 +154,8 @@ struct ProjectTerminalDetailView: View {
                 session: presentation,
                 target: .projectTerminal(latest.id),
                 client: client,
-                reconnectClient: {
-                    await model.refresh()
-                    return model.client
+                reconnectClient: { attempt in
+                    await model.clientForSessionReconnect(hostID: hostID, attempt: attempt)
                 }
             )
             connection = made

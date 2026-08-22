@@ -1361,7 +1361,7 @@ final class MobileThemeOutlineView: UIView {
 private final class RemoteConversationNavigationTitleView: UIControl {
     private let titleLabel = MobileMorphingTitleLabel()
     private let statusLabel = MobileMorphingTitleLabel()
-    private let dot = UIView()
+    private let dot = MobileConnectionStatusIndicatorView()
     private var titleColor = UIColor.label
     private var titleGroundColor = UIColor.systemBackground
     private var statusLabelColor = UIColor.secondaryLabel
@@ -1394,7 +1394,6 @@ private final class RemoteConversationNavigationTitleView: UIControl {
             dot.widthAnchor.constraint(equalToConstant: MobileDesign.Size.navigationStatusIndicator),
             dot.heightAnchor.constraint(equalTo: dot.widthAnchor),
         ])
-        dot.layer.cornerRadius = MobileDesign.Size.navigationStatusIndicator / 2
         titleLabel.isAccessibilityElement = false
         statusLabel.isAccessibilityElement = false
         addAction(UIAction { [weak self] _ in self?.reconnect?() }, for: .touchUpInside)
@@ -1424,6 +1423,11 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         isWorking: Bool,
         recovery: (title: String, action: () -> Void)?
     ) {
+        dot.update(
+            color: statusColor,
+            status: status,
+            reducesMotion: UIAccessibility.isReduceMotionEnabled
+        )
         titleLabel.configure(
             title: title,
             textStyle: .headline,
@@ -1444,7 +1448,6 @@ private final class RemoteConversationNavigationTitleView: UIControl {
             reducesMotion: UIAccessibility.isReduceMotionEnabled,
             role: .connectionStatus
         )
-        dot.backgroundColor = statusColor
         // One variant per working period, chosen on the hidden→visible edge, so a turn keeps
         // the animation it started with instead of re-rolling on every render.
         if isWorking, orb.isHidden {

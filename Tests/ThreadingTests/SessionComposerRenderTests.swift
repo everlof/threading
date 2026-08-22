@@ -29,10 +29,23 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
     private var savedAgentKind: AgentKind?
     private var savedPermissionMode: AgentPermissionMode?
 
+    /// The standing curfew preferences, put back in teardown.
+    ///
+    /// `CurfewSettings` is `PreferenceStore`-backed, so a hosted test writes to a scratch suite
+    /// rather than to the copy of Threading the developer is running — but it is a *process*
+    /// singleton, and a class that left quiet hours switched on would go on deciding what every
+    /// class after it resolves. Switched off here so the composer's end offer has exactly one
+    /// possible answer: the one the draft itself chose.
+    private var savedCurfewPreferences: CurfewPreferences?
+
     override func setUp() {
         super.setUp()
         savedAgentKind = AppSettings.shared.defaultAgentKind
         savedPermissionMode = AppSettings.shared.defaultPermissionMode
+        savedCurfewPreferences = CurfewSettings.shared.preferences
+        var preferences = CurfewPreferences.default
+        preferences.quietHours = QuietHours(isEnabled: false)
+        CurfewSettings.shared.preferences = preferences
     }
 
     override func tearDown() {
@@ -41,8 +54,12 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
             AppSettings.shared.defaultAgentKind = savedAgentKind
         }
         AppSettings.shared.defaultPermissionMode = savedPermissionMode
+        if let savedCurfewPreferences {
+            CurfewSettings.shared.preferences = savedCurfewPreferences
+        }
         savedAgentKind = nil
         savedPermissionMode = nil
+        savedCurfewPreferences = nil
         super.tearDown()
     }
 
@@ -1155,6 +1172,235 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         XCTAssertEqual(ScheduledMessageStore.shared.attachments.urls(for: waiting).count, 1)
     }
 
+    // MARK: - Ending It
+
+    /// The end offer is the clock's neighbour, and it says which of the two it is.
+    ///
+    /// Two icon buttons that both open a menu of times need to be told apart by their spoken
+    /// names before anything else: "later" belongs to the start, "at a time" to the end. And
+    /// unlike the clock this one can never refuse — an end needs neither a project nor a brief to
+    /// be a coherent answer — so a press here always opens offers.
+    func testTheEndOfferSitsBesideTheClockAndSaysWhichOneItIs() throws {
+        let composer = SessionComposerViewController()
+        let host = host(composer, size: Render.tall)
+        composer.show(projectID: nil)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            composer.curfewButton.accessibilityTitle(),
+            "End this session at a time"
+        )
+        XCTAssertEqual(composer.curfewButton.toolTip, "End this session at a time")
+        XCTAssertEqual(
+            composer.scheduleButton.accessibilityTitle(),
+            "Start this session later",
+            "the two offers stopped being distinguishable by name"
+        )
+        XCTAssertEqual(
+            composer.curfewButton.accessibilityIdentifier(),
+            "composer.session-start.curfew"
+        )
+        XCTAssertTrue(composer.curfewButton.presentsMenu)
+
+        let row = try XCTUnwrap(
+            controls(in: composer.view).first {
+                $0.accessibilityIdentifier() == "composer.session-start.actions"
+            }
+        )
+        let inRow = { (view: NSView) in view.convert(view.bounds, to: row) }
+        XCTAssertTrue(composer.curfewButton.isDescendant(of: row))
+        XCTAssertLessThanOrEqual(
+            inRow(composer.curfewButton).maxX,
+            inRow(composer.scheduleButton).minX,
+            "the end and the start offers overlapped instead of sitting side by side"
+        )
+        XCTAssertLessThanOrEqual(
+            inRow(composer.scheduleButton).maxX,
+            inRow(try startButton(in: composer.view)).minX,
+            "the clock lost its place beside the primary"
+        )
+
+        // No project, no brief: the offers are still real ones rather than a stated refusal.
+        let entries = composer.curfewEntries()
+        XCTAssertGreaterThan(entries.count, 1)
+        XCTAssertTrue(
+            entries.contains { entry in
+                guard case .item(let item) = entry else { return false }
+                return item.representedValue as? CurfewMenu.RowID == .custom && item.isEnabled
+            },
+            "an end could not be chosen from the draft view at all"
+        )
+        XCTAssertFalse(
+            entries.contains { entry in
+                guard case .item(let item) = entry else { return false }
+                return item.representedValue as? CurfewMenu.RowID == .exempt
+            },
+            "a session that does not exist yet was offered an exemption"
+        )
+    }
+
+    /// **The chip appears because something was chosen, and leaves when it is taken back.**
+    ///
+    /// Attached and detached rather than hidden: a draft with no end has no curfew surface at all
+    /// — nothing in the hierarchy, nothing in the accessibility tree — rather than an invisible
+    /// one saying "No curfew" on every draft anybody ever writes.
+    func testTheChosenEndAppearsAsAChipAndLeavesWhenItIsTakenBack() throws {
+        let composer = SessionComposerViewController()
+        let host = host(composer, size: Render.tall)
+        composer.show(projectID: nil)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertNil(
+            chip(named: "composer.session-start.curfew.chosen", in: composer.view),
+            "a draft that chose no end still carried a chip about one"
+        )
+
+        let deadline = Date().addingTimeInterval(4 * 60 * 60)
+        composer.selectedCurfew = .at(deadline)
+        host.layoutSubtreeIfNeeded()
+
+        let chosen = try XCTUnwrap(
+            chip(named: "composer.session-start.curfew.chosen", in: composer.view),
+            "choosing an end left the box saying nothing about it"
+        )
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        XCTAssertTrue(
+            chosen.isDescendant(of: prompt),
+            "the end was stated on the pane rather than on the box's own row"
+        )
+        XCTAssertEqual(
+            chosen.accessibilityTitle(),
+            "Until \(ScheduledTimePresets.time(deadline))"
+        )
+
+        // The title is the glance; the tooltip is the whole ladder the choice will run.
+        let tooltip = try XCTUnwrap(chosen.toolTip)
+        let clauses = tooltip.components(separatedBy: CurfewDefaults.receiptSeparator)
+        XCTAssertEqual(clauses.count, 3, "the tooltip did not state the ladder: \(tooltip)")
+        XCTAssertEqual(clauses.first, "Ends at \(ScheduledTimePresets.time(deadline))")
+        let preferences = CurfewSettings.shared.preferences
+        let windDownMargin = try XCTUnwrap(preferences.windDownMargin)
+        let grace = try XCTUnwrap(preferences.grace)
+        XCTAssertEqual(
+            clauses[1],
+            "wrap-up at \(ScheduledTimePresets.time(deadline.addingTimeInterval(-windDownMargin)))"
+        )
+        XCTAssertEqual(
+            clauses[2],
+            "interrupted after \(ScheduledTimePresets.time(deadline.addingTimeInterval(grace)))"
+        )
+
+        // A margin switched off in Settings drops its clause rather than promising a wrap-up that
+        // will never be sent or an interrupt that will never be typed.
+        XCTAssertEqual(
+            CurfewReceiptWords.plannedLadder(curfew: ResolvedCurfew(
+                deadline: deadline,
+                origin: .session,
+                windDownMargin: nil,
+                grace: nil,
+                windDownText: preferences.windDownText
+            )),
+            "Ends at \(ScheduledTimePresets.time(deadline))"
+        )
+
+        // Following whatever governs the session it becomes is the same answer as no end at all,
+        // and it takes the chip with it.
+        let inherit = try XCTUnwrap(
+            composer.curfewEntries().compactMap { entry -> ThemedMenuItem? in
+                guard case .item(let item) = entry else { return nil }
+                return item.representedValue as? CurfewMenu.RowID == .inherit ? item : nil
+            }.first
+        )
+        inherit.onChoose?()
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertNil(composer.selectedCurfew)
+        XCTAssertNil(
+            chip(named: "composer.session-start.curfew.chosen", in: composer.view),
+            "taking the end back left its chip behind"
+        )
+    }
+
+    /// The chosen end, drawn on the fullest row it will ever join.
+    ///
+    /// A new member of a footer that already carries four choices and a usage reading is exactly
+    /// the kind of addition that passes every assertion and crowds the picture — the box's row is
+    /// where this app has run out of width before.
+    func testRendersTheChosenEndOnTheBox() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        for (name, appearanceName) in [
+            ("light", NSAppearance.Name.aqua),
+            ("dark", NSAppearance.Name.darkAqua)
+        ] {
+            let composer = SessionComposerViewController()
+            let host = host(composer, size: Render.tall)
+            host.appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            AppThemeRefresh.repaint(host)
+            composer.show(projectID: nil)
+
+            let prompt = try XCTUnwrap(promptView(in: composer.view))
+            prompt.stringValue = "Keep the migration audit going overnight with /loop."
+            try XCTUnwrap(chip(named: "composer.session-start.model", in: composer.view))
+                .configure(symbolName: "cpu", title: "Fable 5 · 1M")
+            try XCTUnwrap(chip(named: "composer.session-start.mode", in: composer.view))
+                .configure(symbolName: "hand.raised", title: "Ask")
+            try XCTUnwrap(chip(named: "composer.session-start.effort", in: composer.view))
+                .configure(symbolName: "brain", title: "Extra High")
+            let usage = try XCTUnwrap(usageLabel(in: composer.view))
+            usage.readings = [reading("5h", "43%"), reading("7d", "73%")]
+            usage.isHidden = false
+            composer.selectedCurfew = .at(Date(timeIntervalSince1970: 2_000_000_000))
+            host.layoutSubtreeIfNeeded()
+
+            let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.wantsLayer = true
+            host.layer?.backgroundColor = Design.Surface.ground.cgColor
+            host.cacheDisplay(in: host.bounds, to: rep)
+            try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("composer-curfew-\(name).png"))
+        }
+        print("Rendered the chosen end to \(directory.path)")
+    }
+
+    /// The end travels with the start rather than being armed by the screen that chose it.
+    ///
+    /// A draft has no session to arm anything on, and a curfew armed on a start that failed would
+    /// be a rule holding nothing. What crosses the boundary is the plan; the receiver turns it
+    /// into a deadline once there is a conversation for it to belong to.
+    func testStartingASessionHandsTheChosenEndToWhateverMakesTheSession() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+        let recorder = StartRecorder()
+        composer.delegate = recorder
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer {
+            store.removeProject(id: project.id)
+            DraftStore.shared.setDraft("", for: project.id)
+        }
+        composer.show(projectID: project.id)
+
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        prompt.stringValue = "Spend what is left of this window"
+        try startButton(in: composer.view).performClick()
+        XCTAssertEqual(recorder.curfews, [nil], "an ordinary start invented an end")
+
+        let deadline = Date().addingTimeInterval(4 * 60 * 60)
+        composer.selectedCurfew = .at(deadline)
+        prompt.stringValue = "Spend what is left of this window"
+        try startButton(in: composer.view).performClick()
+        XCTAssertEqual(recorder.curfews.last ?? nil, .at(deadline))
+
+        // Pointing the composer at another project resets the decision with every other one.
+        let other = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer { store.removeProject(id: other.id) }
+        composer.show(projectID: other.id)
+        XCTAssertNil(composer.selectedCurfew, "the end outlived the draft that chose it")
+    }
+
     func testWordsTypedBeforeChoosingAProjectFollowIntoIt() throws {
         let composer = SessionComposerViewController()
         _ = composer.view
@@ -1877,6 +2123,10 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
     private(set) var fastModes: [Bool?] = []
     private(set) var managedWorkspacePlans: [ManagedWorkspacePlan?] = []
 
+    /// The end each start carried. A plan rather than a rule: the composer never arms one, and
+    /// what this records is exactly what reaches the receiver that will.
+    private(set) var curfews: [ScheduledCurfewPlan?] = []
+
     /// The images sent with each opening prompt, as they crossed the boundary rather than as
     /// they read inside the sentence: the session does not exist yet, so this is the only form
     /// in which the receiver can file them.
@@ -1896,13 +2146,15 @@ private final class StartRecorder: SessionComposerViewControllerDelegate {
         managedWorkspacePlan: ManagedWorkspacePlan?,
         role: SessionRole,
         prompt: String,
-        attachmentPaths: [String]
+        attachmentPaths: [String],
+        curfew: ScheduledCurfewPlan?
     ) -> Bool {
         prompts.append(prompt)
         reasoningEfforts.append(reasoningEffort)
         fastModes.append(fastMode)
         managedWorkspacePlans.append(managedWorkspacePlan)
         self.attachmentPaths.append(attachmentPaths)
+        curfews.append(curfew)
         return starts
     }
 

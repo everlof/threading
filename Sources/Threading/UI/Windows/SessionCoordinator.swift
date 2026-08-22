@@ -8,6 +8,12 @@ import AppKit
 @MainActor
 final class SessionCoordinator: SessionComposerViewControllerDelegate {
 
+    typealias ArchiveStateSetter = (
+        _ archived: Bool,
+        _ sessionID: SessionID,
+        _ completion: @escaping ProviderArchiveSync.Completion
+    ) -> Void
+
     /// Not private: `SessionCoordinator+ScheduledMessages` performs a due send against the same
     /// two surfaces every other lifecycle decision here goes through, and a scheduled start that
     /// reached for its own sidebar would be a second answer to "where does a session appear".
@@ -15,6 +21,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     let container: TerminalContainerViewController
     let environment: AppEnvironment
     let onPresentationChanged: () -> Void
+    private let archiveStateSetter: ArchiveStateSetter
 
     /// Consumed by the next selected session exactly once.
     private var pendingPrompt: String?
@@ -31,12 +38,20 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         sidebar: ProjectSidebarViewController,
         container: TerminalContainerViewController,
         environment: AppEnvironment,
-        onPresentationChanged: @escaping () -> Void
+        onPresentationChanged: @escaping () -> Void,
+        archiveStateSetter: @escaping ArchiveStateSetter = { archived, sessionID, completion in
+            ProviderArchiveSync.shared.setArchived(
+                archived,
+                for: sessionID,
+                completion: completion
+            )
+        }
     ) {
         self.sidebar = sidebar
         self.container = container
         self.environment = environment
         self.onPresentationChanged = onPresentationChanged
+        self.archiveStateSetter = archiveStateSetter
 
         // An agent asked to be done with its session, and its turn has now ended. It arrives as
         // an announcement rather than a call because `SessionArchiveScheduler` is in Core and
@@ -78,6 +93,27 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // announcements are picked up.
         appEvents.observe(LimitWaitForResetRequested.self) { event in
             LimitRecoveryCoordinator.shared.armWaitForReset(for: event.sessionID)
+        }
+
+        // And once more, for the clock the user set: `SessionCurfewCenter` owns when a curfew's
+        // grace has run out and announces it, because stopping a turn is a gesture on a
+        // conversation surface and Core's ratchet on concrete controllers is exact. What became
+        // of the stop goes straight back, since that is what the curfew counts.
+        appEvents.observe(CurfewInterruptRequested.self) { [weak self] event in
+            self?.interruptForCurfew(event.sessionID)
+        }
+    }
+
+    /// Ends the turn a curfew has run out of patience with, and reports what happened.
+    private func interruptForCurfew(_ sessionID: SessionID) {
+        guard let conversation = environment.agentRuntime.conversation(for: sessionID) else {
+            return
+        }
+        conversation.stopCurrentTurn { receipt in
+            SessionCurfewCenter.shared.noteInterruptOutcome(
+                sessionID: sessionID,
+                receipt: receipt
+            )
         }
     }
 
@@ -352,6 +388,27 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         ])
     }
 
+    /// Archiving the repair chat once its work has been accepted.
+    ///
+    /// The receipt names the *repaired* conversation rather than the row that is leaving, because
+    /// that is what the user pressed a button about. Everything else — agent first, provider
+    /// before the local row — is `archive`'s, unchanged.
+    func archiveAfterRecovery(
+        _ sessionID: SessionID,
+        repaired title: String,
+        onReport: @escaping () -> Void
+    ) {
+        archive(sessionID, receipt: { _, _, _ in
+            ToastRequest(
+                message: L10n.format("Repaired “%@”", title),
+                detail: L10n.string("The repair chat has been filed away."),
+                actionTitle: L10n.string("Report This…"),
+                action: onReport,
+                identifier: "sidebar.toast.archive.afterRecovery"
+            )
+        })
+    }
+
     /// Archiving, with the receipt left to the caller.
     ///
     /// The order is load-bearing and shared by both routes: the agent stops first, because a
@@ -369,17 +426,23 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
               !session.isArchived else { return false }
 
         let wasRunning = environment.agentRuntime.isRunning(sessionID: sessionID)
-        let wasShowing = sessionID == container.currentSessionID
-
-        ProviderArchiveSync.shared.setArchived(true, for: sessionID) { [weak self] result in
+        archiveStateSetter(true, sessionID) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
-                if wasShowing {
+                let presentation = Self.archivePresentationResolution(
+                    archivedSessionID: sessionID,
+                    visibleSessionID: container.currentSessionID,
+                    selectedSessionID: environment.projectStore.selectedSessionID
+                )
+                if presentation.clearsVisibleSession {
                     container.show(sessionID: nil)
                 }
                 sidebar.presentToast(receipt(session, wasRunning) { [weak self] in
-                    self?.restore(sessionID, reselecting: wasShowing)
+                    self?.restore(
+                        sessionID,
+                        reselecting: presentation.reselectsOnUndo
+                    )
                 })
                 onArchived()
             case .failure(let failure):
@@ -392,6 +455,29 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
         }
         return true
+    }
+
+    /// Resolves navigation at the archive's commit edge, not when a potentially slow provider
+    /// command began. A newer selection owns the pane and must survive the older archive.
+    ///
+    /// The archive-state event can clear the target before this completion runs. In that case
+    /// the persisted sidebar selection is the evidence that this archive took the page away and
+    /// that Undo should restore it. An explicit move to another session updates that selection,
+    /// so the archived page cannot reclaim focus from its replacement.
+    static func archivePresentationResolution(
+        archivedSessionID: SessionID,
+        visibleSessionID: SessionID?,
+        selectedSessionID: SessionID?
+    ) -> (clearsVisibleSession: Bool, reselectsOnUndo: Bool) {
+        if visibleSessionID == archivedSessionID {
+            let stillSelected = selectedSessionID == nil
+                || selectedSessionID == archivedSessionID
+            return (stillSelected, stillSelected)
+        }
+        if visibleSessionID == nil, selectedSessionID == archivedSessionID {
+            return (false, true)
+        }
+        return (false, false)
     }
 
     /// Integration happens before provider filing because the process must still have reached
@@ -454,7 +540,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
         }
 
-        ProviderArchiveSync.shared.setArchived(false, for: sessionID) { [weak self] result in
+        archiveStateSetter(false, sessionID) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
@@ -685,7 +771,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             case .success(let session):
                 self.pendingPrompt = NewChatOpeningMessage.compose(
                     prompt: ConversationContinuation.openingPrompt(for: session),
-                    reusableMessage: environment.settings.newChatOpeningMessage
+                    prefix: environment.settings.newChatOpeningPrefix,
+                    suffix: environment.settings.newChatOpeningSuffix
                 )
                 self.sidebar.reload()
                 self.sidebar.select(sessionID: session.id)
@@ -709,7 +796,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let title = prompt.flatMap(SessionNaming.promptTitle(from:))
         let opening = NewChatOpeningMessage.compose(
             prompt: prompt,
-            reusableMessage: environment.settings.newChatOpeningMessage
+            prefix: environment.settings.newChatOpeningPrefix,
+            suffix: environment.settings.newChatOpeningSuffix
         )
         guard let session = environment.projectStore.addSideChat(of: sessionID, title: title)
         else { return }
@@ -779,7 +867,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         managedWorkspacePlan: ManagedWorkspacePlan?,
         role: SessionRole,
         prompt: String,
-        attachmentPaths: [String]
+        attachmentPaths: [String],
+        curfew: ScheduledCurfewPlan?
     ) -> Bool {
         let targetProjectID = Self.targetProjectID(
             startingAt: projectID,
@@ -790,7 +879,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var opening = NewChatOpeningMessage.compose(
             prompt: task,
-            reusableMessage: environment.settings.newChatOpeningMessage
+            prefix: environment.settings.newChatOpeningPrefix,
+            suffix: environment.settings.newChatOpeningSuffix
         )
 
         let sessionID = SessionID()
@@ -877,6 +967,10 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return false
         }
 
+        // Armed now the session exists, and never before it: the draft carried a *plan*, and a
+        // curfew belongs to a conversation somebody can see, hold and lift.
+        armCurfew(curfew, forSessionID: session.id)
+
         // The mode is recorded as chosen — nil included, which reads as "inherit" rather than
         // as a mode. Reading the resolved flag back belongs to the "Launching agent" entry,
         // which carries the whole command line.
@@ -942,6 +1036,36 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         sidebar.presentToast(Self.sessionStartFailureToast(reason: reason, retry: retry))
     }
 
+    /// Turns the end a draft chose into the rule a live session runs under.
+    ///
+    /// **After the session exists, and only then.** A plan is an intention about a conversation
+    /// that may never happen — a scheduled start can be cancelled, an immediate one can fail on a
+    /// blocked store — and a curfew armed on either would be a rule holding nothing, which nobody
+    /// can see and nobody can lift.
+    ///
+    /// A plan that names no moment by the time it fires is **journalled and dropped**, never
+    /// forced: a wall-clock end that has already passed would hold the session from its first
+    /// breath, which is not what "end it at four" asked for, and a standing window switched off
+    /// in the meantime names nothing at all. The next morning's question is *why did this session
+    /// have no curfew*, and the answer is in `EventLog(.curfew)`.
+    func armCurfew(_ plan: ScheduledCurfewPlan?, forSessionID sessionID: SessionID) {
+        switch ScheduledCurfewPlanResolution.deadline(
+            for: plan,
+            preferences: CurfewSettings.shared.preferences,
+            now: Date()
+        ) {
+        case .noCurfew:
+            return
+        case .arm(let deadline):
+            SessionCurfewCenter.shared.setCurfew(.until(deadline), forSessionID: sessionID)
+        case .skipped(let reason):
+            environment.eventLog.record(.curfew, "Planned curfew not armed", [
+                "session": sessionID.uuidString,
+                "reason": reason.rawValue
+            ])
+        }
+    }
+
     /// Starts a session requested by the paired owner device through the same one-shot prompt
     /// route as the Mac composer. Selecting it is intentional: a terminal must be installed in
     /// a laid-out view before its PTY can start, and the native surface follows the same
@@ -962,7 +1086,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var opening = NewChatOpeningMessage.compose(
             prompt: task,
-            reusableMessage: environment.settings.newChatOpeningMessage
+            prefix: environment.settings.newChatOpeningPrefix,
+            suffix: environment.settings.newChatOpeningSuffix
         )
         guard !task.isEmpty else { return nil }
 
@@ -1493,15 +1618,16 @@ enum SessionReportBackRequest {
 
 // MARK: - New Chat Opening Message
 
-/// Joins the per-chat task with the reusable message from Settings.
+/// Joins the per-chat task with the reusable text from Settings, on either side of it.
 ///
-/// The task remains first so the provider sees the thing this chat is about before the standing
-/// instruction, while the blank line keeps two independently-authored messages readable. The
-/// caller derives the sidebar title from the task alone: a reusable instruction should not make
-/// every chat start with the same name.
+/// Two standing fields rather than one because the two jobs read differently to a model: text
+/// before the task frames what is about to be asked, and text after it is an instruction about
+/// the answer. Blank lines keep independently-authored parts readable, and an empty field is
+/// simply absent rather than a blank paragraph. The caller derives the sidebar title from the
+/// task alone: reusable text should not make every chat start with the same name.
 enum NewChatOpeningMessage {
-    static func compose(prompt: String?, reusableMessage: String) -> String? {
-        let parts = [prompt, reusableMessage]
+    static func compose(prompt: String?, prefix: String, suffix: String) -> String? {
+        let parts = [prefix, prompt, suffix]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !parts.isEmpty else { return nil }

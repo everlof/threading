@@ -164,7 +164,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             guard allowMouseReporting != oldValue, terminal != nil else { return }
             // A host that declines reports must get one-finger scrolling back
             // even when the application still has mouse tracking enabled.
-            applyMouseMode(terminalStateSnapshot().mouseMode)
+            refreshProgramScrollGesture(mouseMode: terminalStateSnapshot().mouseMode)
         }
     }
 
@@ -1242,13 +1242,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     var wheelDragAccumulator: CGFloat = 0
     var wheelBudget = WheelReportBudget()
 
-    /// A one-finger drag is this device's wheel for a mouse-tracking
-    /// application. Two fingers remain available for local scrollback.
+    /// A one-finger drag is this device's wheel for a mouse-tracking application. In an
+    /// alternate buffer that does not track the mouse, xterm's Alternate Scroll Mode turns the
+    /// same drag into cursor keys. Two fingers remain available for local scrollback.
     @objc func panMouseHandler (_ gestureRecognizer: UIPanGestureRecognizer){
         guard gestureRecognizer.view != nil,
-              allowMouseReporting,
-              !shiftBypassesMouseReporting(for: gestureRecognizer),
-              withTerminal({ $0.mouseMode != .off }) else { return }
+              allowMouseReporting else { return }
         switch gestureRecognizer.state {
         case .began:
             wheelDragAccumulator = 0
@@ -1261,7 +1260,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
 
-    /// Reports whole-cell drag distance as bounded wheel presses.
+    /// Reports whole-cell drag distance as bounded wheel presses, or as cursor keys when an
+    /// alternate-screen application relies on Alternate Scroll Mode instead of mouse tracking.
     public func forwardWheelDrag(distance: CGFloat,
                                  gestureRecognizer: UIGestureRecognizer) {
         let cellHeight = cellDimension.height
@@ -1272,24 +1272,57 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         guard lines != 0 else { return }
         wheelDragAccumulator -= CGFloat(lines) * cellHeight
 
-        let reports = wheelBudget.grant(min(abs(lines), Int(WheelReportBudget.burst)))
-        guard reports > 0 else { return }
-
-        withTerminal { terminal in
-            let hit = calculateTapHitLocked(point: gestureRecognizer.location(in: self))
-            guard let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return }
-            let flags = terminal.encodeButton(button: lines > 0 ? 4 : 5,
-                                              release: false,
-                                              shift: false,
-                                              meta: false,
-                                              control: false)
-            for _ in 0..<reports {
-                terminal.sendEvent(buttonFlags: flags,
-                                   x: grid.col,
-                                   y: grid.row,
-                                   pixelX: hit.pixels.col,
-                                   pixelY: hit.pixels.row)
+        enum Route {
+            case mouse
+            case cursorKeys
+            case none
+        }
+        let route = withTerminal { terminal -> Route in
+            if allowMouseReporting,
+               !shiftBypassesMouseReportingLocked(for: gestureRecognizer),
+               terminal.mouseMode != .off {
+                return .mouse
             }
+            if allowMouseReporting,
+               terminal.isDisplayBufferAlternate,
+               terminal.alternateScrollMode {
+                return .cursorKeys
+            }
+            return .none
+        }
+
+        switch route {
+        case .mouse:
+            let reports = wheelBudget.grant(min(abs(lines), Int(WheelReportBudget.burst)))
+            guard reports > 0 else { return }
+            withTerminal { terminal in
+                let hit = calculateTapHitLocked(point: gestureRecognizer.location(in: self))
+                guard let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else {
+                    return
+                }
+                let flags = terminal.encodeButton(button: lines > 0 ? 4 : 5,
+                                                  release: false,
+                                                  shift: false,
+                                                  meta: false,
+                                                  control: false)
+                for _ in 0..<reports {
+                    terminal.sendEvent(buttonFlags: flags,
+                                       x: grid.col,
+                                       y: grid.row,
+                                       pixelX: hit.pixels.col,
+                                       pixelY: hit.pixels.row)
+                }
+            }
+        case .cursorKeys:
+            for _ in 0..<abs(lines) {
+                if lines > 0 {
+                    sendKeyUp()
+                } else {
+                    sendKeyDown()
+                }
+            }
+        case .none:
+            break
         }
     }
    
@@ -3516,6 +3549,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         case .bufferActivated:
             resetManualScrollTracking()
             updateScroller()
+            refreshProgramScrollGesture()
         case .mouseModeChanged:
             // iOS has no tracking-area equivalent to update.
             break
@@ -3599,12 +3633,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let mouseMode = source.mouseMode
         onMain { [weak self] in
             guard let self else { return }
-            self.applyMouseMode(mouseMode)
+            self.refreshProgramScrollGesture(mouseMode: mouseMode)
         }
     }
 
-    private func applyMouseMode(_ mouseMode: Terminal.MouseMode) {
-        if allowMouseReporting && mouseMode != .off {
+    /// One finger belongs to the program while it either tracks the mouse or owns an alternate
+    /// buffer whose wheel contract is cursor keys. Without the second branch a Codex-style TUI
+    /// let UIScrollView drag its intentionally history-free alternate buffer into blank space.
+    private func refreshProgramScrollGesture(mouseMode: Terminal.MouseMode? = nil) {
+        let capturesProgramScroll = allowMouseReporting && withTerminal { terminal in
+            (mouseMode ?? terminal.mouseMode) != .off || terminal.isDisplayBufferAlternate
+        }
+        if capturesProgramScroll {
             enableMousePanGesture()
         } else {
             disableMousePanGesture()

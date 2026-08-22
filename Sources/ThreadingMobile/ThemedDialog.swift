@@ -226,7 +226,7 @@ private struct ThemedDialogPresentation: View {
 
             actionArea
         }
-        .background(theme.panel, in: RoundedRectangle(cornerRadius: cardRadius))
+        .background(theme.floatingSurface, in: RoundedRectangle(cornerRadius: cardRadius))
         .overlay {
             RoundedRectangle(cornerRadius: cardRadius)
                 .stroke(theme.border, lineWidth: theme.borderWidth)

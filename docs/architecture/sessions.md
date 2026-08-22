@@ -527,6 +527,12 @@ the conversation. `SessionNaming` holds the rules; three names remain, resolved 
    composer has the prompt, or by the first `UserPromptSubmit` hook report for a prompt typed
    straight into the terminal. Empty until then; the display falls back to "New Session".
 
+The explicit rename is also the registry command `session.rename`, editable and bound to ⌘R by
+default. The Project menu routes it to the selected session, while the sidebar row, pane-header
+menu and terminal context menu keep their target-specific route. Each draws the registry's current
+binding and keeps the same clear-to-follow-the-agent rename contract. A rebind therefore changes
+both what fires and what every action menu promises.
+
 Claude records both kinds of title in the transcript as different record types, measured
 across this machine's transcripts rather than assumed: `ai-title` is the CLI's own name,
 re-appended every turn (so the *last* one is current, and `SessionNaming` reads the file's
@@ -691,6 +697,17 @@ rollout file it writes under `~/.codex/sessions/`. OpenCode also assigns its own
 its supported `opencode session list --format json` command and selects the newest record for
 the launching checkout. This intentionally avoids its private storage schema.
 
+**A Threading-owned Codex terminal runs with `--no-alt-screen`.** Codex's default alternate
+buffer deliberately has no terminal scrollback. It enables DEC alternate-scroll, but that mode
+translates a wheel into Up/Down keys and Codex assigns those keys to composer history, not the
+conversation transcript. On iPhone the visible frame therefore moved away to empty alternate-
+buffer rows while the older conversation existed only in Codex's retained model. The CLI's
+supported inline mode puts the rendered transcript in Threading's terminal-owned scrollback,
+which is the same bounded record the Mac view and remote terminal protocol already mirror. The
+flag belongs only to interactive terminal launches; native app-server and headless pipe transports
+have no terminal buffer to configure. An already-running Codex process must be relaunched before
+the launch contract can affect it.
+
 **An identifier is not a conversation, so the resume branch asks the filesystem — and the
 encoding it asks with is load-bearing.** Claude's id is minted before anything is written, so
 `AgentLauncher` emits `--resume` only when `ClaudeTranscript.exists` finds the file and otherwise
@@ -756,12 +773,20 @@ has an explicit model; otherwise the live/custom catalog and `/model` inside Gro
 authoritative.
 
 **A reusable opening message is part of the first turn, not a turn on every launch.**
-`AppSettings.newChatOpeningMessage` is optional app-wide context entered under Settings ▸
-General. `SessionCoordinator` trims it and appends it after the task with one blank line, then
-hands the combined text through the existing one-shot `pendingPrompt`: a terminal launch keeps
-one trailing operand, while a Native launch sends the same string over its stream. Ordinary
-sessions, side chats (including a plain fork with no question), cross-provider continuations,
-and sessions started from the paired owner device all converge there.
+`AppSettings.newChatOpeningPrefix` and `newChatOpeningSuffix` are optional app-wide context
+entered under Settings ▸ General, one field on each side of the task. `NewChatOpeningMessage`
+trims all three parts, drops the empty ones, and joins what is left with one blank line in the
+order prefix, task, suffix; `SessionCoordinator` hands the combined text through the existing
+one-shot `pendingPrompt`, so a terminal launch keeps one trailing operand while a Native launch
+sends the same string over its stream. Ordinary sessions, side chats (including a plain fork
+with no question), cross-provider continuations, and sessions started from the paired owner
+device all converge there.
+
+Two fields rather than one because the halves are read differently: text before the task frames
+how the work should be done, and text after it is an instruction about the answer — an order the
+model reads as written, which no single field lets the user express without positioning the task
+by hand. The suffix shipped first and keeps its original persistence key, `newChatOpeningMessage`,
+so an instruction already stored survives the setting growing a second field.
 
 The session title is still derived from the **per-chat task alone**. Otherwise one reusable
 instruction would give every Codex chat the same prompt-derived title while waiting for the
@@ -1362,6 +1387,13 @@ archive took it *off screen*, since undoing a stray click must not move somebody
 were doing; and it does not relaunch the agent, because archiving stopped it exactly as closing
 does and starting a process is a heavier thing than a click being taken back. The session
 returns dormant, with Resume on its placeholder.
+
+For a provider-backed archive, “took it off screen” is decided when the provider command commits,
+not when that potentially slow command began. A newer sidebar selection owns the pane and an older
+archive completion must not replace it with the empty state. The lifecycle event may already have
+cleared the archived page before the initiating coordinator receives completion; in that case the
+sidebar's still-selected session identity is the evidence Undo uses. If selection already names
+another session at that commit, neither the completion nor its Undo may move focus back.
 
 `ConfirmationPrompt.archiveRunningSession` was removed rather than left switched off: a case
 nobody asks still ships a Settings row for a question that no longer exists. The line the

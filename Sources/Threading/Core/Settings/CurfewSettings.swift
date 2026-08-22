@@ -157,19 +157,58 @@ struct CurfewPreferences: Codable, Equatable, Sendable {
 
     var quietHours: QuietHours
 
+    /// Whether a curfew that has given up also ends the agent.
+    ///
+    /// **Off unless the user says otherwise.** The shipped ladder stops at an interrupt: the
+    /// whole feature exists so somebody can read the conversation in the morning, and ending a
+    /// process nobody asked to end is the one step of this that cannot be taken back. Switched
+    /// on, the escalation still *terminates* rather than discards — the final screen stays and
+    /// the session resumes by its ordinary affordance.
+    var stopsAgentOnGiveUp: Bool
+
     init(
         windDownMargin: TimeInterval? = CurfewDefaults.windDownMargin,
         grace: TimeInterval? = CurfewDefaults.grace,
         windDownText: String = CurfewDefaults.windDownText,
-        quietHours: QuietHours = .default
+        quietHours: QuietHours = .default,
+        stopsAgentOnGiveUp: Bool = false
     ) {
         self.windDownMargin = windDownMargin
         self.grace = grace
         self.windDownText = windDownText
         self.quietHours = quietHours
+        self.stopsAgentOnGiveUp = stopsAgentOnGiveUp
     }
 
     static let `default` = CurfewPreferences()
+
+    // MARK: - Codable
+
+    /// Hand-written for one key, and only for that key.
+    ///
+    /// A synthesized decode of a non-optional `Bool` throws `keyNotFound` on every record written
+    /// before this switch existed, and `RecoverableDefaultsStore` answers a throw by quarantining
+    /// the value and standing the defaults up — so adding the switch would silently reset the
+    /// margins, the wrap-up text and the standing window of everyone who had set them. The other
+    /// four keys decode exactly as they always did, so a record this build cannot read stays a
+    /// record this build refuses rather than one it quietly rewrites.
+    enum CodingKeys: String, CodingKey {
+        case windDownMargin
+        case grace
+        case windDownText
+        case quietHours
+        case stopsAgentOnGiveUp
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        windDownMargin = try container.decodeIfPresent(TimeInterval.self, forKey: .windDownMargin)
+        grace = try container.decodeIfPresent(TimeInterval.self, forKey: .grace)
+        windDownText = try container.decode(String.self, forKey: .windDownText)
+        quietHours = try container.decode(QuietHours.self, forKey: .quietHours)
+        stopsAgentOnGiveUp = try container
+            .decodeIfPresent(Bool.self, forKey: .stopsAgentOnGiveUp) ?? false
+    }
 }
 
 // MARK: - Curfew Settings

@@ -177,7 +177,13 @@ extension SessionComposerViewController {
             usesNativeUI: usesNativeUI,
             permissionMode: selectedAgent.supportsPermissionModes ? selectedPermissionMode : nil,
             managedWorkspacePlan: selectedManagedWorkspacePlan,
-            role: selectedRole
+            role: selectedRole,
+            // The end travels as the *choice*, not as a moment. `atQuietHours` resolved here
+            // would write down tonight's 04:00 into a plan that fires on Thursday; the plan is
+            // read back against the settings in force when the session actually starts. The
+            // waiting row is not under curfew either way — there is nothing yet to wind down,
+            // hold or interrupt, so a start that is cancelled leaves nothing to lift.
+            curfew: selectedCurfew
         )
     }
 
@@ -310,6 +316,10 @@ extension SessionComposerViewController {
         selectedPermissionMode = plan.permissionMode
         selectedManagedWorkspacePlan = plan.managedWorkspacePlan
         selectedRole = plan.role ?? .chat
+        // The chip follows the record being edited rather than the last draft written in this
+        // box: an edit reopens the whole decision, and the end is one of them. A record from
+        // before curfews existed carries none, which reads correctly as a session with no end.
+        selectedCurfew = plan.curfew
         managedWorkspaceCheckbox.state = plan.managedWorkspacePlan == nil ? .off : .on
         refreshChips()
     }

@@ -172,6 +172,47 @@ final class ScheduledStartEditingTests: HostedStoreTestCase {
         )
     }
 
+    // MARK: - The End It Was Given
+
+    /// The end chosen while writing the brief is one of the frozen decisions, so it rides into
+    /// the record with the model and the checkout — and comes back out into the chip when the
+    /// record is reopened. An edit reopens the whole decision, not only its words.
+    func testAChosenEndIsFrozenIntoThePlanAndLoanedBackWhenTheRowIsEdited() throws {
+        let (composer, projectID) = try makeComposer()
+        let deadline = Date().addingTimeInterval(6 * 60 * 60)
+        composer.selectedCurfew = .at(deadline)
+
+        let message = try schedule("Spend what is left of this window", on: composer, in: projectID)
+        guard case .newSession(let plan) = message.target else {
+            return XCTFail("the schedule stopped being a session start")
+        }
+        XCTAssertEqual(plan.curfew, .at(deadline))
+
+        // The composer moves on; the record is the authority from here.
+        composer.selectedCurfew = nil
+        composer.beginEditingScheduledStart(message.id)
+        XCTAssertEqual(
+            composer.selectedCurfew,
+            .at(deadline),
+            "reopening the row restored its words but not the end it was given"
+        )
+    }
+
+    /// A start written before curfews existed — and any start nobody gave an end — reopens as
+    /// what it is, rather than inheriting whatever the last draft in this box chose.
+    func testAStartWithNoEndClearsAChipTheBoxWasStillCarrying() throws {
+        let (composer, projectID) = try makeComposer()
+        let message = try schedule("Run the release audit", on: composer, in: projectID)
+
+        composer.selectedCurfew = .atQuietHours
+        composer.beginEditingScheduledStart(message.id)
+
+        XCTAssertNil(
+            composer.selectedCurfew,
+            "an endless record adopted an end from the draft that was in the box"
+        )
+    }
+
     // MARK: - The Record Leaving Mid-Edit
 
     func testARecordRemovedMidEditEndsTheEditKeepingTheWords() throws {

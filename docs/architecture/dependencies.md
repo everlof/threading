@@ -111,6 +111,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     DispatchIO callbacks cannot leak old bytes into the replacement terminal. Deinitialization
     closes the PTY, cancels the monitor and gives the child to an independent waiter so it cannot
     remain a zombie.
+  - **Raw-output observers use stable callback references.** Direct-delivery parsing invokes the
+    host's byte observer on the SwiftTerm reader thread, after parsing and before the borrowed PTY
+    buffer can be reused. The observer is held by `LockedBytesCallback`, which snapshots a stable
+    callback object under its lock and invokes it after unlocking; it is never returned as a raw
+    function through generic `Locked<Value>.withLock`. Under Swift 6.2, repeatedly
+    reading a function through that generic inout seam can layer reabstraction thunks until the
+    reader stack overflows. A nil observer performs no byte copy, while an installed observer gets
+    an independently owned array that it may hand to another queue.
   - **Mouse-wheel coordinates are viewport-relative.** Full-screen clients such as Claude enable
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets
@@ -145,7 +153,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     the press-and-drag it used to send, which is a selection gesture and moved nothing at all.
     Both pans live on the one scroll view and two of them cannot both recognise, so mouse
     tracking gives one finger to the program and keeps two for the local scrollback, which is
-    this device's option-wheel. `RemoteTerminalScrollTests` covers both rules.
+    this device's option-wheel. Xterm Alternate Scroll Mode remains cursor-key translation, not a
+    promise that every TUI uses those keys for history; Codex uses them for composer history and
+    is therefore launched in its supported inline mode so the terminal owns its transcript
+    scrollback. `RemoteTerminalScrollTests` covers the emulator rules; `AgentLaunchQuotingTests`
+    holds the Codex launch boundary.
   - **`pasteText` is ours.** Upstream reaches bracketed paste only through `paste(_:)`, which
     reads `NSPasteboard.general` — so text that never came from the clipboard could only be sent
     as typing, or by writing over the user's clipboard first. A drop is a paste, and the markers

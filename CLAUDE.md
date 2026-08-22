@@ -168,6 +168,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 |---|---|
 | The toolbar, the pane header strips, the sidebar's silhouette, split-item behaviour, anything pinning to `topAnchor` | [`window-chrome.md`](docs/architecture/window-chrome.md) |
 | The MCP server, tool routing by session token, launch flags, the display panel and its web view | [`mcp-and-display.md`](docs/architecture/mcp-and-display.md) |
+| The Debug-only paired-iPhone evidence bridge, automatic error screenshots, bounded Mac cache and iOS checkup tools | [`ios-debug-bridge.md`](docs/architecture/ios-debug-bridge.md) |
 | The session-owned in-panel iOS Simulator, CoreSimulator lifecycle, direct framebuffer/input helper, leases and agent route | [`simulator-pane.md`](docs/architecture/simulator-pane.md) |
 | The live browser an agent drives: origin grants, the accessibility snapshot, refs and semantic locators, the browser tools | [`agent-browser.md`](docs/architecture/agent-browser.md) |
 | Natively rendered conversations: the Claude/Codex stream transports, permission brokering, transcript replay, the timeline model, tool rows, diffs, the turn rail | [`native-conversations.md`](docs/architecture/native-conversations.md) |
@@ -175,10 +176,11 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Session state (`dormant`/`idle`/`working`/`needsAttention`/`limitReached`), Claude/Codex lifecycle hooks, provider-neutral output inference, `hooks.json`, the shell-command policy | [`session-activity.md`](docs/architecture/session-activity.md) |
 | Reading git metadata (worktrees, submodules, identities), the Git Review pane, staging, the commit graph, diff syntax highlighting | [`git.md`](docs/architecture/git.md) |
 | The draft opt-in for a session-owned detached worktree, execution-directory routing, finish handshake, local merge and disposal | [`managed-workspaces.md`](docs/architecture/managed-workspaces.md) |
-| Documents that vary over time: the `media` node, the host-owned player and its renderer registry, the Lottie engine, bounded project-file handles, the attachments preview seam | [`media-documents.md`](docs/architecture/media-documents.md) |
+| Documents that vary over time: the `media` node, the host-owned player and its renderer registry, the Lottie and movie engines, bounded project-file handles, the attachments preview seam | [`media-documents.md`](docs/architecture/media-documents.md) |
 | The runtime capability matrix, side chats and forking, the shell drawer, session naming, launching, resuming, importing outside conversations | [`sessions.md`](docs/architecture/sessions.md) |
 | Writing a message now and sending it later: the record, the store, the clock, waking a dormant session, the usage-reset presets | [`scheduled-messages.md`](docs/architecture/scheduled-messages.md) |
 | A session refused over a rate limit: the transcript signal, the limit chooser, recovery policies, the parked state, the scheduled continuation | [`limit-recovery.md`](docs/architecture/limit-recovery.md) |
+| An agent that would not start: the captured failure record, the launch-failure surface, the transcript preflight, and repairing a broken conversation with an agent | [`launch-failure.md`](docs/architecture/launch-failure.md) |
 | The typed session control plane: actor/scope/refusal contract, cross-session messaging (`list_sessions`/`send_to_session`), delivery per surface, provenance | [`control-plane.md`](docs/architecture/control-plane.md) |
 | The first-launch walkthrough: window deferral and the terminate trap, the completed flag, the global conversation scan, the notifications opt-in | [`onboarding.md`](docs/architecture/onboarding.md) |
 | Terminal themes, app themes, the three assignment scopes, the MCP theme tools, glow and clipping | [`themes.md`](docs/architecture/themes.md) |

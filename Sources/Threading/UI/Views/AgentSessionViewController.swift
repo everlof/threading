@@ -53,27 +53,35 @@ final class AgentSessionViewController: NSViewController {
     /// can be retried from the size-change callback.
     private var pendingLaunchPlan: AgentLaunchPlan?
     private var identifierLaunchDate: Date?
+
+    /// When this controller's current process started, for every launch rather than only the
+    /// ones awaiting an identifier. `SessionLaunchFailure` is decided on how long a process
+    /// lived, so the clock has to start for launches that already know who they are.
+    private var processLaunchDate: Date?
+
+    /// Cancels the "this launch survived" check when the process exits before it fires.
+    private var launchSurvivalWorkItem: DispatchWorkItem?
+
     private var isDiscoveringIdentifier = false
     private var nextIdentifierDiscoveryAt = Date.distantPast
     private let remoteViewportBanner = RemoteViewportBannerView()
 
-    /// The one-tap way past a spent usage limit, under the terminal rather than over it.
+    /// The one-tap way past a spent usage limit, in the pane's standing-condition ribbon.
     ///
-    /// A terminal pane has no composer of its own — the box is inside the TUI — so the strip
-    /// takes the place the composer occupies in a rendered conversation: the bottom of the
-    /// column, on the terminal's own margins, directly under where the user types. It **pushes**
-    /// rather than covers, the rule `PaneNoticeView` states: nothing it has to say is said over
-    /// output somebody is reading.
+    /// A terminal pane has no composer of its own — the box is inside the TUI — so the refusal
+    /// occupies the same pane-width slot as it does over a rendered conversation. It **pushes**
+    /// rather than covers: nothing it has to say is said over output somebody is reading.
     private lazy var limitEscapeStrip = LimitEscapeStripView()
 
-    /// The terminal's lower edge, which belongs to the pane until the strip stands under it.
-    private lazy var terminalAbovePane = session.terminalView.bottomAnchor.constraint(
-        equalTo: view.bottomAnchor,
-        constant: -TerminalPadding.bottom
+    /// The terminal normally starts at the pane's content edge; the ribbon takes that edge while
+    /// a refusal stands. The lower edge never moves, so only one dimension of the PTY changes.
+    private lazy var terminalBelowPaneTop = session.terminalView.topAnchor.constraint(
+        equalTo: view.topAnchor,
+        constant: TerminalPadding.top
     )
-    private lazy var terminalAboveStrip = session.terminalView.bottomAnchor.constraint(
-        equalTo: limitEscapeStrip.topAnchor,
-        constant: -Design.Spacing.small
+    private lazy var terminalBelowLimitRibbon = session.terminalView.topAnchor.constraint(
+        equalTo: limitEscapeStrip.bottomAnchor,
+        constant: TerminalPadding.top
     )
     private var attachmentObserver: TerminalAttachmentObserver?
     private var transcriptAttachmentObserver: TerminalTranscriptAttachmentObserver?
@@ -211,14 +219,12 @@ final class AgentSessionViewController: NSViewController {
         view.addSubview(remoteViewportBanner)
         view.addSubview(limitEscapeStrip)
 
-        let terminalAtTopConstraint = session.terminalView.topAnchor.constraint(
-            equalTo: view.topAnchor,
-            constant: TerminalPadding.top
-        )
-
         NSLayoutConstraint.activate([
-            terminalAtTopConstraint,
-            terminalAbovePane,
+            terminalBelowPaneTop,
+            session.terminalView.bottomAnchor.constraint(
+                equalTo: view.bottomAnchor,
+                constant: -TerminalPadding.bottom
+            ),
             session.terminalView.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor,
                 constant: TerminalPadding.leading
@@ -236,19 +242,17 @@ final class AgentSessionViewController: NSViewController {
                 constant: -Design.Spacing.large
             ),
 
-            // On the terminal's own margins, so the strip and the text it sits under share a
-            // column rather than reading as two differently indented things.
+            // Pane-wide and top-anchored, matching the rendered-conversation host. The ribbon's
+            // own content inset aligns its ink; its silhouette does not become a rounded terminal
+            // row floating inside the output column.
             limitEscapeStrip.leadingAnchor.constraint(
-                equalTo: view.leadingAnchor,
-                constant: TerminalPadding.leading
+                equalTo: view.leadingAnchor
             ),
             limitEscapeStrip.trailingAnchor.constraint(
-                equalTo: view.trailingAnchor,
-                constant: -TerminalPadding.trailing
+                equalTo: view.trailingAnchor
             ),
-            limitEscapeStrip.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor,
-                constant: -TerminalPadding.bottom
+            limitEscapeStrip.topAnchor.constraint(
+                equalTo: view.topAnchor
             )
         ])
 
@@ -291,33 +295,79 @@ final class AgentSessionViewController: NSViewController {
             guard let self else { return }
             LimitEscapeSuggestionStore.shared.dismiss(self.sessionID)
         }
+        // The rule is the user's own, so ending it is an ordinary act rather than an exception —
+        // and it is the only answer a curfew's ribbon carries. See `LimitEscapeStripView`.
+        limitEscapeStrip.onLiftCurfew = { [weak self] in
+            guard let self else { return }
+            SessionCurfewCenter.shared.lift(sessionID: self.sessionID)
+        }
         appEvents.observe(LimitEscapeSuggestionDidChange.self) { [weak self] event in
             guard let self, event.sessionID == self.sessionID else { return }
             self.refreshLimitEscapeStrip()
+        }
+        // A curfew engaging, being lifted, or giving up moves this ribbon with nothing else
+        // having changed: no suggestion arrived and no usage reading moved.
+        appEvents.observe(CurfewDidChange.self) { [weak self] event in
+            guard let self, event.sessionID == self.sessionID else { return }
+            self.refreshLimitEscapeStrip()
+        }
+        // The standing quiet hours reach every session that never answered for itself, and say
+        // nothing about which ones.
+        appEvents.observe(CurfewSettingsDidChange.self) { [weak self] _ in
+            self?.refreshLimitEscapeStrip()
         }
         refreshLimitEscapeStrip()
     }
 
     private func refreshLimitEscapeStrip() {
+        // A provider refusal first: it is the one the user cannot answer, and telling somebody
+        // about their own bedtime while the provider has stopped them would be the smaller fact
+        // on top of the larger one.
         let offer = LimitEscapeSuggestionStore.shared.offer(for: sessionID)
             .map(LimitEscapeStripView.Offer.init)
+            ?? curfewOffer()
         limitEscapeStrip.setOffer(offer)
 
-        // The terminal gives up the rows the strip stands in rather than being drawn over, so
+        // The terminal gives up the rows the ribbon stands in rather than being drawn over, so
         // the PTY is resized exactly once as the offer appears and once as it leaves.
         let isShowing = offer != nil
-        guard terminalAboveStrip.isActive != isShowing else { return }
+        guard terminalBelowLimitRibbon.isActive != isShowing else { return }
 
-        // Deactivated before its replacement is activated, both ways round: two lower edges
+        // Deactivated before its replacement is activated, both ways round: two upper edges
         // active at once is an unsatisfiable pair, and AppKit says so in the log rather than
         // waiting for the next pass to sort it out.
         if isShowing {
-            terminalAbovePane.isActive = false
-            terminalAboveStrip.isActive = true
+            terminalBelowPaneTop.isActive = false
+            terminalBelowLimitRibbon.isActive = true
         } else {
-            terminalAboveStrip.isActive = false
-            terminalAbovePane.isActive = true
+            terminalBelowLimitRibbon.isActive = false
+            terminalBelowPaneTop.isActive = true
         }
+    }
+
+    /// The ribbon's curfew state, or nil while nothing is holding this session.
+    ///
+    /// Only a **held** curfew draws, exactly as it does over a rendered conversation: an armed
+    /// one is a fact about tonight rather than a state the pane is in, and the terminal gives up
+    /// real rows to this ribbon.
+    ///
+    /// The cannot-tell clause arrives on its own through `canTellWorking`, which is where most of
+    /// these sessions land: a CLI that does not read Escape as *stop*, or a runtime reporting no
+    /// turns, still gets the hold and never gets a keystroke — and the sentence says so rather
+    /// than implying a fence that is not there.
+    private func curfewOffer() -> LimitEscapeStripView.Offer? {
+        let now = Date()
+        guard case .held(_, let curfew, let state) = CurfewHoldPolicy.hold(
+            sessionID: sessionID,
+            at: now
+        ) else { return nil }
+
+        return .curfew(line: CurfewReceiptWords.stripSentence(
+            curfew: curfew,
+            state: state,
+            canTellWorking: SessionCurfewCenter.shared.canTellWorking(sessionID: sessionID),
+            now: now
+        ))
     }
 
     /// Fills the inset area with the terminal's own background so the padding reads as part
@@ -361,6 +411,22 @@ final class AgentSessionViewController: NSViewController {
         guard let agentSession = ProjectStore.shared.session(withID: sessionID),
               let project = ProjectStore.shared.project(forSessionID: sessionID) else {
             ThreadingLogger.agent.error("Cannot launch session \(self.sessionID, privacy: .public): not found in store")
+            return
+        }
+
+        // Asked before a plan exists, because the answer is that no plan should be built: the
+        // conversation this row names cannot be reopened, and every command line that could be
+        // built from here either fails the same way or quietly opens a different conversation.
+        // Recording it as a launch failure is what makes the pane say so.
+        if let refusal = AgentLauncher.resumeRefusal(for: agentSession, in: project) {
+            EventLog.shared.record(.session, "Refused agent launch", [
+                "session": sessionID.uuidString,
+                "cause": refusal.knownCause ?? "unrecognised"
+            ])
+            ProjectStore.shared.update(sessionID: sessionID) { stored in
+                stored.lastLaunchFailure = refusal
+            }
+            delegate?.agentSession(self, didExitWithCode: nil)
             return
         }
 
@@ -589,6 +655,8 @@ final class AgentSessionViewController: NSViewController {
 
         pendingLaunchPlan = nil
         isRunning = true
+        processLaunchDate = Date()
+        armLaunchSurvivalCheck()
         resetTranscriptFallbackObservation()
         activityTracker.markRunning()
         if AppSettings.shared.remoteAccessEnabled {
@@ -620,6 +688,75 @@ final class AgentSessionViewController: NSViewController {
         }
 
         delegate?.agentSessionDidChangeState(self)
+    }
+
+    // MARK: - Launch Failure
+
+    /// Retires a previous failure once this launch has outlived the window that defines one.
+    ///
+    /// Cleared on survival rather than on start, so a retry that fails the same way never blinks
+    /// the band off and on again, and a band the user is still reading is not taken away by the
+    /// press that is about to reproduce it. One work item per launch, cancelled by the exit.
+    private func armLaunchSurvivalCheck() {
+        launchSurvivalWorkItem?.cancel()
+        guard ProjectStore.shared.session(withID: sessionID)?.lastLaunchFailure != nil else {
+            launchSurvivalWorkItem = nil
+            return
+        }
+
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.launchSurvivalWorkItem = nil
+            guard self.isRunning else { return }
+            ProjectStore.shared.update(sessionID: self.sessionID) { stored in
+                stored.lastLaunchFailure = nil
+            }
+            self.delegate?.agentSessionDidChangeState(self)
+        }
+        launchSurvivalWorkItem = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + SessionLaunchFailureDefaults.youngProcessWindow,
+            execute: item
+        )
+    }
+
+    /// Builds the record for an exit that reads as a failed launch, or nil for an ordinary one.
+    ///
+    /// The screen is passed in rather than read here because the caller reads it first, before
+    /// any of the teardown that follows an exit has run.
+    private func launchFailure(
+        exitCode: Int32?,
+        screen: [String]
+    ) -> SessionLaunchFailure? {
+        guard let launchedAt = processLaunchDate else { return nil }
+        let ranFor = Date().timeIntervalSince(launchedAt)
+        guard SessionLaunchFailure.looksLikeLaunchFailure(
+            exitCode: exitCode,
+            ranFor: ranFor
+        ) else { return nil }
+
+        let detail = Array(screen.suffix(SessionLaunchFailureDefaults.capturedLineCount))
+        let diagnosis = SessionLaunchDiagnosis.classify(lines: detail, kind: agentKind)
+        let transcriptPath = ProjectStore.shared.session(withID: sessionID)
+            .flatMap { stored -> URL? in
+                guard let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+                    return nil
+                }
+                return SessionTranscript.existingURL(for: stored, in: project)
+            }?.path
+
+        return SessionLaunchFailure(
+            origin: .processExit,
+            exitCode: exitCode,
+            ranFor: ranFor,
+            summary: diagnosis?.summary ?? L10n.format(
+                "%@ stopped right after starting.",
+                agentKind.displayName
+            ),
+            detail: detail,
+            transcriptPath: transcriptPath,
+            knownCause: diagnosis?.knownCause
+        )
     }
 
     /// Re-reads provider metadata on the quiet edge of a TUI repaint.
@@ -1074,6 +1211,13 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         attachmentObserver?.scanNow()
         agentTitleRefreshWorkItem?.cancel()
         agentTitleRefreshWorkItem = nil
+        launchSurvivalWorkItem?.cancel()
+        launchSurvivalWorkItem = nil
+
+        // Read the screen before anything else touches this controller: the terminal buffer is
+        // still whole here — `processTerminated` closes the PTY and leaves the view alone — and
+        // it is about to be the only place the reason for this exit was ever written down.
+        let failure = launchFailure(exitCode: exitCode, screen: session.visibleScreenLines())
         if agentKind.supports(.providerTitleMetadata) {
             SessionNaming.refreshAgentTitle(forSessionID: sessionID)
         }
@@ -1087,9 +1231,23 @@ extension AgentSessionViewController: TerminalSessionDelegate {
             "exitCode": exitCode.map(String.init) ?? "unknown"
         ])
 
+        if let failure {
+            // A second record, because the first one is a line in a journal and this one is the
+            // thing a person will be shown. Its summary is logged rather than its captured
+            // output: the journal is not reviewed before it is read, and the output is not.
+            EventLog.shared.record(.session, "Agent failed to launch", [
+                "session": sessionID.uuidString,
+                "exitCode": exitCode.map(String.init) ?? "unknown",
+                "cause": failure.knownCause ?? "unrecognised"
+            ])
+        }
+
         ProjectStore.shared.update(sessionID: sessionID) { stored in
             stored.lastExitCode = exitCode
             stored.lastActiveAt = Date()
+            if let failure {
+                stored.lastLaunchFailure = failure
+            }
         }
 
         if let exitCode, exitCode != 0 {
@@ -1195,7 +1353,7 @@ private final class RemoteViewportBannerView: BackdropOverlay {
     private let icon = NSImageView()
     private let titleLabel = NSTextField(labelWithString: L10n.string("Fit to iPhone"))
     private let detailLabel = NSTextField(
-        labelWithString: L10n.string("Mac size returns when the remote view closes")
+        labelWithString: L10n.string("Mac size returns shortly after the remote view closes")
     )
 
     override init(frame frameRect: NSRect) {
