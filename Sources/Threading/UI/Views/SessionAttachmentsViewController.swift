@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import ThreadingExtensionKit
 import WebKit
@@ -70,6 +71,18 @@ final class SessionAttachmentsViewController: NSViewController {
     )
     private var extensionPreviewHost: NSView?
     private var extensionPreviewPlayers: [String: MediaDocumentPlayerView] = [:]
+    /// The one player the pane owns itself, for the one format it plays natively.
+    ///
+    /// Built on the first movie and kept: a player is a canvas, a transport and a themed subtree,
+    /// and most sessions never hold a movie at all. It is separate from
+    /// `extensionPreviewPlayers` because that dictionary belongs to whichever extension body is
+    /// currently accepted, and this one belongs to the pane.
+    private var videoPlayer: MediaDocumentPlayerView?
+    /// The movie the pane's own player may resolve a file for — exactly one, and only while it is
+    /// the row on screen. The same scoping rule the extension handle follows, for the same
+    /// reason: a resolver that answered for any attachment would be a resolver that answers after
+    /// the selection moved.
+    private var videoAttachment: SessionAttachment?
     /// The attachment an extension preview may resolve a `sessionAttachment` handle for.
     ///
     /// Exactly one, and only while it is the row on screen. That is what makes the handle valid
@@ -1018,7 +1031,14 @@ final class SessionAttachmentsViewController: NSViewController {
 
         let size = (try? attachment.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         timing.metadataNanoseconds = DispatchTime.now().uptimeNanoseconds - metadataStarted
-        guard size <= SessionAttachmentsDefaults.maximumPreviewFileBytes else {
+        // The ceiling is about *reading*: every preview under it decodes, lays out or renders the
+        // whole file, so a 64 MB one is a stall on the main thread. A movie is the exception and
+        // not by exemption — it is never read here at all. The platform streams it from disk into
+        // a compositor layer, so the cost of previewing one does not scale with its size, while a
+        // ten-minute screen recording is past this ceiling before it has finished recording.
+        // Applying it would refuse the ordinary case to prevent work nobody does.
+        if attachment.kind != .video,
+           size > SessionAttachmentsDefaults.maximumPreviewFileBytes {
             showPreviewMessage(L10n.string("This file is too large to preview here."))
             return
         }
@@ -1102,6 +1122,24 @@ final class SessionAttachmentsViewController: NSViewController {
             timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
             showMediaFallback(for: attachment, size: size)
             offerMediaPreview(for: attachment)
+
+        case .video:
+            // The player owns everything from here: the decoder, the clock, the transport, the
+            // sound and the visibility lifecycle. The pane's part is which file, and that it
+            // opens paused — the movie has audio, and a row selected with an arrow key is not a
+            // request to make a noise.
+            let clearStarted = DispatchTime.now().uptimeNanoseconds
+            hideInstalledPreviews()
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            let installStarted = DispatchTime.now().uptimeNanoseconds
+            let player = installedVideoPlayer()
+            timing.installNanoseconds = DispatchTime.now().uptimeNanoseconds - installStarted
+            let presentStarted = DispatchTime.now().uptimeNanoseconds
+            videoAttachment = attachment
+            player.isHidden = false
+            player.setPresentationActive(true)
+            player.update(document: Self.videoDocument(for: attachment))
+            timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
 
         case .diagram:
             // A tighter cap than the general one: this lands in a text view, and a text view
@@ -1297,7 +1335,7 @@ final class SessionAttachmentsViewController: NSViewController {
         let inspectable = attachments.filter {
             switch $0.kind {
             case .image, .pdf: true
-            case .media: Self.inspectableMediaFormat(for: $0) != nil
+            case .media, .video: Self.inspectableMediaFormat(for: $0) != nil
             case .html, .archive, .document, .diagram: false
             }
         }
@@ -1311,7 +1349,7 @@ final class SessionAttachmentsViewController: NSViewController {
                 content: {
                     switch attachment.kind {
                     case .image: .image
-                    case .media:
+                    case .media, .video:
                         Self.inspectableMediaFormat(for: attachment)
                             .map(MediaInspectorItemContent.media) ?? .document
                     default: .document
@@ -1333,6 +1371,11 @@ final class SessionAttachmentsViewController: NSViewController {
     static func inspectableMediaFormat(
         for attachment: SessionAttachment
     ) -> ExtensionMediaFormat? {
+        // A movie's kind already *is* the answer: nothing is admitted as `.video` that the host
+        // has no player for, so the extension does not have to be read back out of the name.
+        if attachment.kind == .video {
+            return MediaDocumentRendererRegistry.supports(.video) ? .video : nil
+        }
         guard attachment.kind == .media else { return nil }
         let format: ExtensionMediaFormat
         switch attachment.url.pathExtension.lowercased() {
@@ -1387,6 +1430,53 @@ final class SessionAttachmentsViewController: NSViewController {
         return image
     }
 
+    /// The pane's own player, built on the first movie and reused after it.
+    private func installedVideoPlayer() -> MediaDocumentPlayerView {
+        if let videoPlayer { return videoPlayer }
+        let player = MediaDocumentPlayerView(
+            loader: { _ in .failure(.unresolvedSource) },
+            fileLoader: { [weak self] source in
+                await MainActor.run {
+                    // Scoped to the row on screen. The handle is the attachment's own id, so a
+                    // player asked for a file after the selection moved resolves nothing rather
+                    // than opening whatever it was last pointed at.
+                    guard case .sessionAttachment(let id) = source,
+                          let self,
+                          let attachment = self.videoAttachment,
+                          attachment.id == id else {
+                        return .failure(.unresolvedSource)
+                    }
+                    return .success(attachment.url)
+                }
+            }
+        )
+        player.isHidden = true
+        installPreviewSurface(player, fillsVertically: false)
+        videoPlayer = player
+        return player
+    }
+
+    /// What the pane asks the player for when the selected row is a movie.
+    ///
+    /// `id` is the attachment's, which is the identity rule the player already keeps: a refresh
+    /// that re-selects the same row hands the same document back and the movie stays where it
+    /// was, while a different row is a different id and starts over.
+    static func videoDocument(for attachment: SessionAttachment) -> ExtensionMediaDocument {
+        ExtensionMediaDocument(
+            id: attachment.id,
+            source: .sessionAttachment(attachment.id),
+            format: .video,
+            playback: ExtensionMediaPlayback(
+                isPlaying: MediaDocumentRendererRegistry.autoplaysWhenHostOpens(.video),
+                // A movie is a recording of something that happened once. Looping one is the
+                // animation's answer to reaching the end, not a movie's.
+                loop: .once
+            ),
+            allowsFrameCopy: true,
+            accessibilityLabel: attachment.name
+        )
+    }
+
     private func installedDocumentView() -> MediaInspectorDocumentView {
         if let documentView { return documentView }
         let document = MediaInspectorDocumentView()
@@ -1424,14 +1514,23 @@ final class SessionAttachmentsViewController: NSViewController {
         return scroll
     }
 
-    private func installPreviewSurface(_ surface: NSView) {
+    /// - Parameter fillsVertically: whether the surface is asked to be exactly as tall as the
+    ///   pane. A surface that states its own height — a player, whose canvas keeps the document's
+    ///   aspect ratio above a transport — is pinned no further than the bottom, because a required
+    ///   equality there is a constraint that can only be satisfied by breaking the aspect the
+    ///   picture is in.
+    private func installPreviewSurface(_ surface: NSView, fillsVertically: Bool = true) {
         surface.translatesAutoresizingMaskIntoConstraints = false
         previewHost.addSubview(surface, positioned: .below, relativeTo: previewMessage)
         NSLayoutConstraint.activate([
             surface.topAnchor.constraint(equalTo: previewHost.topAnchor),
             surface.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
-            surface.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor),
+            fillsVertically
+                ? surface.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor)
+                : surface.bottomAnchor.constraint(
+                    lessThanOrEqualTo: previewHost.bottomAnchor
+                ),
         ])
     }
 
@@ -1456,6 +1555,19 @@ final class SessionAttachmentsViewController: NSViewController {
         documentView?.isHidden = true
         clearHTMLPreview()
         clearSourcePreview()
+        clearVideoPreview()
+    }
+
+    /// The movie stops when it stops being the row on screen.
+    ///
+    /// Both halves matter and neither is the other: the player's clock is stopped by saying its
+    /// presentation is over, and the file behind it is released by forgetting which attachment
+    /// the resolver may answer for. A player left active behind another selection is the defect
+    /// the whole visibility lifecycle exists to prevent — with sound, it is one nobody could miss.
+    private func clearVideoPreview() {
+        videoAttachment = nil
+        videoPlayer?.setPresentationActive(false)
+        videoPlayer?.isHidden = true
     }
 
     private func clearSourcePreview() {
@@ -2166,11 +2278,27 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
         guard attachments.indices.contains(row) else { return nil }
         let attachment = attachments[row]
         let count = annotationDocument(for: attachment)?.annotations.count ?? 0
+        // Only for a row that exists: a movie's frame costs a decoder, and this list is the one
+        // place in the app where the number of files is the session's rather than the schema's.
+        SessionAttachmentThumbnails.requestPosterFrame(for: attachment) { [weak self] _ in
+            self?.redrawRow(for: attachment.id)
+        }
         return SessionAttachmentRowView(attachment: attachment, annotationCount: count)
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         SessionAttachmentsDefaults.rowHeight
+    }
+
+    /// Redraws one row, found by identity rather than by the index it had when the work started.
+    ///
+    /// A poster frame arrives whenever the decoder is finished, and by then the list may have
+    /// reloaded, filtered or gained a row above this one. Reloading the index it *was* would
+    /// repaint whichever file has moved into that slot.
+    private func redrawRow(for attachmentID: String) {
+        guard isViewLoaded,
+              let row = attachments.firstIndex(where: { $0.id == attachmentID }) else { return }
+        tableView.reloadData(forRowIndexes: [row], columnIndexes: [0])
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -2274,12 +2402,34 @@ final class SessionAttachmentRowView: NSView {
             ? ImageAnnotationCountView(count: annotationCount)
             : nil
 
+        // A movie's poster frame is a picture of a moment, which is exactly what a screenshot is
+        // — and in a 26-point well nothing else tells the two apart. The mark says which of the
+        // rows in this history can be played, and it is drawn over the frame rather than beside
+        // the name because the well is where the reader already is.
+        let playMark: NSImageView? = attachment.kind == .video ? {
+            let mark = NSImageView()
+            mark.image = NSImage(
+                systemSymbolName: "play.circle.fill",
+                accessibilityDescription: nil
+            )
+            mark.contentTintColor = Design.Text.label
+            mark.symbolConfiguration = NSImage.SymbolConfiguration(
+                pointSize: SessionAttachmentsDefaults.playMarkSize,
+                weight: .semibold
+            )
+            mark.setAccessibilityElement(false)
+            mark.setAccessibilityIdentifier(SessionAttachmentsDefaults.playMarkIdentifier)
+            mark.translatesAutoresizingMaskIntoConstraints = false
+            return mark
+        }() : nil
+
         addSubview(icon)
         addSubview(name)
         addSubview(path)
         addSubview(origin)
         addSubview(moment)
         if let annotationBadge { addSubview(annotationBadge) }
+        if let playMark { addSubview(playMark) }
         addSubview(dropLabel)
         pathLabel = path
 
@@ -2339,6 +2489,13 @@ final class SessionAttachmentRowView: NSView {
             )
         ])
 
+        if let playMark {
+            NSLayoutConstraint.activate([
+                playMark.centerXAnchor.constraint(equalTo: icon.centerXAnchor),
+                playMark.centerYAnchor.constraint(equalTo: icon.centerYAnchor)
+            ])
+        }
+
         if let annotationBadge {
             NSLayoutConstraint.activate([
                 annotationBadge.trailingAnchor.constraint(
@@ -2391,29 +2548,102 @@ enum SessionAttachmentThumbnails {
         return cache
     }()
 
+    /// Movies already looked at. A poster frame is generated once per file and answered from
+    /// here afterwards, so scrolling a list of recordings starts no work at all.
+    private static var pendingPosterKeys: Set<String> = []
+    /// Movies that would not give up a frame. Remembered so a row that cannot have a picture
+    /// does not start a generator every time it scrolls back into view — the cost of a refusal
+    /// is the same as the cost of a success, and a list of them would pay it forever.
+    private static var refusedPosterKeys: Set<String> = []
+
     /// The row's picture, or nil for anything that is not an image Threading can decode — a PDF,
     /// a file that has gone, bytes that are not really a picture. The caller falls back to the
     /// file icon rather than showing an empty well.
+    ///
+    /// A movie answers only from what has already been generated. Its frame is not something the
+    /// main thread may go and get: extracting one opens a decoder, and this is called once per
+    /// visible row on every reload of a list the store rewrites whenever a session prints a path.
     static func thumbnail(for attachment: SessionAttachment) -> NSImage? {
-        guard attachment.kind == .image else { return nil }
-        return thumbnail(
-            for: attachment.url,
-            size: SessionAttachmentsDefaults.iconSize
+        switch attachment.kind {
+        case .image:
+            return thumbnail(for: attachment.url, size: SessionAttachmentsDefaults.iconSize)
+        case .video:
+            return cache.object(forKey: posterKey(for: attachment.url) as NSString)
+        case .pdf, .html, .archive, .document, .diagram, .media:
+            return nil
+        }
+    }
+
+    /// Extracts a movie's poster frame, off the main actor, at most once per file.
+    ///
+    /// Started from `viewFor`, which is called for materialized rows only, so the work is
+    /// O(visible) rather than O(session) — a hundred-recording session that shows eight rows
+    /// opens eight decoders, not a hundred. `completion` is called only when there is a new
+    /// picture to show; a cached, pending or refused frame answers nothing and starts nothing.
+    static func requestPosterFrame(
+        for attachment: SessionAttachment,
+        completion: @escaping @MainActor (NSImage) -> Void
+    ) {
+        guard attachment.kind == .video else { return }
+        let key = posterKey(for: attachment.url)
+        guard cache.object(forKey: key as NSString) == nil,
+              !refusedPosterKeys.contains(key),
+              pendingPosterKeys.insert(key).inserted else { return }
+
+        let url = attachment.url
+        let pixels = SessionAttachmentsDefaults.iconSize * SessionAttachmentsDefaults.thumbnailScale
+        Task { @MainActor in
+            let frame = await Task.detached(priority: .utility) { () -> CGImage? in
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+                // The rotation a recording stores rather than applies. Without this a portrait
+                // capture arrives on its side in a 26-point well, which is exactly the size at
+                // which nobody can tell that is what happened.
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: pixels, height: pixels)
+                // The first frame the decoder can give, not the first frame there is: asking for
+                // an exact time makes the generator decode forward from a keyframe, and a poster
+                // for a row is not worth that. The tolerance runs forwards only, so a clip
+                // shorter than the window still answers with something inside itself.
+                generator.requestedTimeToleranceBefore = .zero
+                generator.requestedTimeToleranceAfter = Self.posterFrameTolerance
+                return try? await generator.image(at: .zero).image
+            }.value
+
+            pendingPosterKeys.remove(key)
+            guard let frame else {
+                if refusedPosterKeys.count >= SessionAttachmentsDefaults.thumbnailCacheCount {
+                    // The refusals are keyed by path *and* modification date, so a file rewritten
+                    // often is a new key each time. Dropping the set is the bounded answer: the
+                    // cost of forgetting is one retry per row, and the cost of not is a set that
+                    // grows for as long as the app runs.
+                    refusedPosterKeys.removeAll()
+                }
+                refusedPosterKeys.insert(key)
+                return
+            }
+            let poster = NSImage(
+                cgImage: frame,
+                size: NSSize(width: frame.width, height: frame.height)
+            )
+            cache.setObject(poster, forKey: key as NSString)
+            completion(poster)
+        }
+    }
+
+    /// How far into a movie a poster frame may be taken from.
+    private static let posterFrameTolerance = CMTime(seconds: 1, preferredTimescale: 600)
+
+    private static func posterKey(for url: URL) -> String {
+        let pixels = Int(
+            (SessionAttachmentsDefaults.iconSize * SessionAttachmentsDefaults.thumbnailScale)
+                .rounded()
         )
+        return key(for: url, pixels: pixels)
     }
 
     static func thumbnail(for url: URL, size: CGFloat) -> NSImage? {
         let pixels = Int((size * SessionAttachmentsDefaults.thumbnailScale).rounded())
-        // Read through `FileManager` rather than `URL.resourceValues`, which answers from
-        // `NSURL`'s own cache: the same `URL` value asked twice reports the date it had the
-        // first time, so a chart regenerated in place would keep its old thumbnail forever.
-        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let modified = (attributes?[.modificationDate] as? Date)?
-            .timeIntervalSinceReferenceDate ?? 0
-        // The modification date is in the key rather than checked against a stored one: an
-        // overwritten file is a different picture at the same path, and this list exists to show
-        // the newest of exactly that.
-        let key = "\(url.path)|\(modified)|\(pixels)" as NSString
+        let key = key(for: url, pixels: pixels) as NSString
         if let cached = cache.object(forKey: key) { return cached }
 
         guard let image = BoundedImageDecoder.thumbnail(
@@ -2422,6 +2652,20 @@ enum SessionAttachmentThumbnails {
         ) else { return nil }
         cache.setObject(image, forKey: key)
         return image
+    }
+
+    /// One picture per path, per size, per version of the file behind it.
+    ///
+    /// Read through `FileManager` rather than `URL.resourceValues`, which answers from `NSURL`'s
+    /// own cache: the same `URL` value asked twice reports the date it had the first time, so a
+    /// chart regenerated in place would keep its old thumbnail forever. The modification date is
+    /// in the key rather than checked against a stored one — an overwritten file is a different
+    /// picture at the same path, and this list exists to show the newest of exactly that.
+    private static func key(for url: URL, pixels: Int) -> String {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let modified = (attributes?[.modificationDate] as? Date)?
+            .timeIntervalSinceReferenceDate ?? 0
+        return "\(url.path)|\(modified)|\(pixels)"
     }
 }
 
@@ -2531,6 +2775,10 @@ enum SessionAttachmentsDefaults {
     /// menu saying the same thing.
     static let menuWidth: CGFloat = 220
     static let iconSize: CGFloat = 26
+    /// The play mark over a movie's poster frame. Half the well: readable at a glance and small
+    /// enough that the frame underneath is still the thing being shown.
+    static let playMarkSize: CGFloat = 13
+    static let playMarkIdentifier = "attachment.row.play"
     static let maximumPreviewFileBytes = 64 * 1024 * 1024
 
     /// The diagram-source cap, far under the general one: source lands in a text view, and a

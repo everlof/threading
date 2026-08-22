@@ -110,6 +110,15 @@ struct MobileSettingsView: View {
                     ] == nil {
                         settingsSection("Developer") {
                             SettingsNavigationRow(
+                                symbol: "iphone.and.arrow.forward",
+                                title: "Debug bridge",
+                                detail: "Automatic paired-Mac checkups"
+                            ) {
+                                MobileDebugBridgeView()
+                            }
+
+                            ThemedRowDivider()
+                            SettingsNavigationRow(
                                 symbol: "square.grid.2x2",
                                 title: "Connection progress",
                                 detail: "Body and navigation loading states"

@@ -1159,6 +1159,11 @@ enum AgentLauncher {
         appendPermissionMode(for: session, to: &command)
         appendCodexHookFlags(for: session, to: &command)
 
+        // No preflight branch here on purpose. `codexResumeRefusal` is asked *before* a plan is
+        // built, by the surface that can show the answer — because the only thing this function
+        // could do with a refusal is fall through to a fresh launch, and silently starting a new
+        // conversation in place of the one the user asked to reopen is worse than any failure it
+        // would be avoiding.
         if let existingID = session.resumeState.transcriptID {
             command.append(word: "resume")
             command.append(word: existingID.rawValue)
@@ -1167,6 +1172,34 @@ enum AgentLauncher {
 
         appendPrompt(prompt, to: &command)
         return (command, .awaitingIdentifier)
+    }
+
+    /// Why this session's conversation must not be reopened, or nil to go ahead.
+    ///
+    /// Returns the failure rather than a bool so the caller that *reports* it — the launch path,
+    /// which records a `.preflight` `SessionLaunchFailure` — says the same thing the process
+    /// would have said, worked out in one place.
+    ///
+    /// Provider-neutral: `TranscriptResumeHealth` decides what "unusable" means per runtime, and
+    /// answers `usable` for every runtime that has no such check.
+    static func resumeRefusal(
+        for session: AgentSession,
+        in project: Project
+    ) -> SessionLaunchFailure? {
+        guard session.resumeState.transcriptID != nil,
+              let url = SessionTranscript.existingURL(for: session, in: project),
+              case .unusable(let reason, let cause) = TranscriptResumeHealth.verdict(
+                for: url,
+                kind: session.kind
+              )
+        else { return nil }
+
+        return SessionLaunchFailure(
+            origin: .preflight,
+            summary: reason,
+            transcriptPath: url.path,
+            knownCause: cause
+        )
     }
 
     /// OpenCode's interactive TUI resumes with `--session <ses_…>`. A fresh invocation creates

@@ -15,6 +15,28 @@ final class UsageWindowPreferencesViewController: NSViewController {
 
     private let appEvents = AppEventObservations()
 
+    /// The wrap-up template, retained across rebuilds.
+    ///
+    /// Every other control on this page is rebuilt from the value it shows, which is correct for
+    /// a switch and wrong for free text: a usage reading landing while somebody is halfway
+    /// through a sentence would replace the field under them. Retained, the field keeps what is
+    /// in it, and the two edges below — `currentEditor()` and `controlTextDidEndEditing` — decide
+    /// when the stored message and the typed one meet.
+    ///
+    /// Built here rather than through `SettingsUI.textField`, because this one spans its row:
+    /// that helper pins a fixed control width, which cannot be satisfied inside a `fullRow`
+    /// whose content is pinned to both of the card's edges.
+    private lazy var windDownField: ThemedTextField = {
+        let field = ThemedTextField()
+        field.applyFont(.body)
+        field.delegate = self
+        field.setAccessibilityIdentifier(CurfewSettingsDefaults.wrapUpFieldIdentifier)
+        return field
+    }()
+
+    /// True only while the field's own commit is being written. See `commitWindDownText`.
+    private var isCommittingWindDownText = false
+
     private static let time: DateFormatter = {
         let formatter = DateFormatter()
         formatter.setLocalizedDateFormatFromTemplate("j:mm")
@@ -35,6 +57,15 @@ final class UsageWindowPreferencesViewController: NSViewController {
         appEvents.observe(UsageWindowPokeDidChange.self) { [weak self] _ in self?.rebuild() }
         appEvents.observe(UsageWindowScheduleDidChange.self) { [weak self] _ in self?.rebuild() }
         appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in self?.rebuild() }
+
+        // The curfew defaults and the standing quiet hours are edited on this page and read by
+        // the menu, the strip and the engine, so the page follows the store rather than its own
+        // last write — a curfew lifted from a chat, or a window edited in another window, has to
+        // reach the "Tonight" line here too.
+        appEvents.observe(CurfewSettingsDidChange.self) { [weak self] _ in
+            guard let self, !self.isCommittingWindDownText else { return }
+            self.rebuild()
+        }
 
         // Built on load rather than only on appearance, so the page has its content the moment
         // it has a view. The observers above keep it current from there.
@@ -65,6 +96,7 @@ final class UsageWindowPreferencesViewController: NSViewController {
 
         sections.append(scheduledSendSection())
         sections.append(limitRecoverySection())
+        sections.append(curfewSection())
         sections.append(accountsSection())
         if let ledger = ledgerSection() { sections.append(ledger) }
         sections.append(SettingsUI.note(UsageWindowStrings.footnote))
@@ -160,6 +192,239 @@ final class UsageWindowPreferencesViewController: NSViewController {
               let policy = LimitRecoveryPolicy(rawValue: raw) else { return }
         LimitRecoverySettings.policy = policy
         rebuild()
+    }
+
+    // MARK: - Curfew
+
+    /// When a session stops being spent, and the standing window that ends all of them.
+    ///
+    /// On this page for the reason the two sections above it are: a curfew is chosen against a
+    /// window's boundaries — the case the whole feature was written for is a window that resets
+    /// at 04:00 while its owner is asleep — and the standing half of it is set here or nowhere.
+    /// The per-session half lives in the composer and in each session's own menu, which is what
+    /// the explanation says first, because a page of margins for a thing the reader has never
+    /// seen chosen explains nothing.
+    ///
+    /// Every writer here is a read-modify-write on `CurfewSettings.shared.preferences`: the
+    /// record carries five fields edited by four controls, and a whole-record write from a stale
+    /// copy is how one popup erases another. See `docs/feature-drafts/curfew.md`.
+    private func curfewSection() -> NSView {
+        let preferences = CurfewSettings.shared.preferences
+        let quietHours = preferences.quietHours
+
+        // Not while it is being typed into — see `windDownField`.
+        if windDownField.currentEditor() == nil {
+            windDownField.stringValue = preferences.windDownText
+        }
+
+        let rows: [NSView] = [
+            SettingsUI.fullRow(SettingsUI.note(CurfewSettingsStrings.explanation)),
+            SettingsUI.row(
+                title: CurfewSettingsStrings.windDownTitle,
+                control: choicePopUp(
+                    titles: CurfewDefaults.windDownMarginChoices
+                        .map(CurfewSettingsStrings.windDownChoice),
+                    selecting: CurfewDefaults.windDownMarginChoices
+                        .firstIndex(of: preferences.windDownMargin),
+                    action: #selector(windDownMarginChanged)
+                )
+            ),
+            SettingsUI.row(
+                title: CurfewSettingsStrings.graceTitle,
+                control: choicePopUp(
+                    titles: CurfewDefaults.graceChoices.map(CurfewSettingsStrings.graceChoice),
+                    selecting: CurfewDefaults.graceChoices.firstIndex(of: preferences.grace),
+                    action: #selector(graceChanged)
+                )
+            ),
+            SettingsUI.row(title: CurfewSettingsStrings.wrapUpTitle),
+            windDownEditor(),
+            SettingsUI.row(
+                title: CurfewSettingsStrings.giveUpTitle,
+                subtitle: CurfewSettingsStrings.giveUpSubtitle,
+                control: choicePopUp(
+                    titles: CurfewSettingsStrings.giveUpChoices,
+                    selecting: preferences.stopsAgentOnGiveUp
+                        ? CurfewSettingsDefaults.stopsAgentIndex
+                        : CurfewSettingsDefaults.notifyIndex,
+                    action: #selector(giveUpPolicyChanged)
+                )
+            ),
+            SettingsUI.row(
+                title: CurfewSettingsStrings.quietHoursTitle,
+                subtitle: CurfewSettingsStrings.quietHoursSubtitle,
+                control: SettingsUI.toggle(
+                    isOn: quietHours.isEnabled,
+                    target: self,
+                    action: #selector(quietHoursEnabledChanged)
+                )
+            ),
+            // The two times stay on the page while the window is off rather than disappearing
+            // with it: a switch whose consequences vanish gives the reader nothing to decide
+            // with, and these are the rows that say what switching it on would do.
+            SettingsUI.row(
+                title: CurfewSettingsStrings.fromTitle,
+                control: quietHoursTimePopUp(
+                    selecting: quietHours.startMinute,
+                    isEnabled: quietHours.isEnabled,
+                    action: #selector(quietHoursStartChanged)
+                )
+            ),
+            SettingsUI.row(
+                title: CurfewSettingsStrings.toTitle,
+                control: quietHoursTimePopUp(
+                    selecting: quietHours.endMinute,
+                    isEnabled: quietHours.isEnabled,
+                    action: #selector(quietHoursEndChanged)
+                )
+            ),
+            // What the four controls above actually amount to tonight, in times rather than in
+            // margins — the row that turns a form into a plan the reader can check.
+            SettingsUI.detailRow(
+                symbol: CurfewDefaults.symbol,
+                title: CurfewSettingsStrings.tonightTitle,
+                detail: CurfewSettingsSentence.tonight(preferences: preferences),
+                localizes: false
+            )
+        ]
+
+        return SettingsUI.section(CurfewSettingsStrings.caption, SettingsCard(rows: rows))
+    }
+
+    /// The wrap-up template across the card, with the one thing its author has to know under it.
+    private func windDownEditor() -> NSView {
+        let note = SettingsUI.note(CurfewSettingsStrings.placeholderNote)
+        let stack = NSStackView(views: [windDownField, note])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+
+        // A `.leading` stack gives each arranged view its fitting width, and neither a field nor
+        // a wrapping label has one worth having: both are pinned to the column instead.
+        for child in [windDownField, note] as [NSView] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                child.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+                child.trailingAnchor.constraint(equalTo: stack.trailingAnchor)
+            ])
+        }
+
+        return SettingsUI.fullRow(stack)
+    }
+
+    /// A pop-up over an ordered list of choices, carrying its **index**.
+    ///
+    /// Two of the three curfew choices have `nil` as a legitimate answer — no wrap-up at all,
+    /// never interrupt — and `nil` cannot ride in a `representedValue` and be told apart from a
+    /// row that carries nothing. The index can, and it is the same list on the way back out.
+    private func choicePopUp(
+        titles: [String],
+        selecting index: Int?,
+        action: Selector,
+        isEnabled: Bool = true
+    ) -> ThemedPopUp {
+        let popUp = SettingsUI.popUp(target: self, action: action)
+        for (offset, title) in titles.enumerated() {
+            popUp.addItem(ThemedMenuItem(title: title, representedValue: offset))
+        }
+        popUp.selectItem(at: index ?? 0)
+        popUp.isEnabled = isEnabled
+        return popUp
+    }
+
+    /// A time of day over the whole day, in half hours: a nightly window is as legitimately
+    /// 23:30 to 07:00 as 04:00 to 08:00, so neither end is bounded the way a working day's is.
+    private func quietHoursTimePopUp(
+        selecting minute: Int,
+        isEnabled: Bool,
+        action: Selector
+    ) -> ThemedPopUp {
+        let popUp = timePopUp(
+            selecting: minute,
+            range: CurfewSettingsDefaults.quietHoursRange,
+            action: action
+        )
+        popUp.isEnabled = isEnabled
+        return popUp
+    }
+
+    // MARK: - Curfew Actions
+
+    @objc private func windDownMarginChanged(_ sender: ThemedPopUp) {
+        guard let choice = choice(CurfewDefaults.windDownMarginChoices, from: sender) else {
+            return
+        }
+        var preferences = CurfewSettings.shared.preferences
+        preferences.windDownMargin = choice
+        CurfewSettings.shared.preferences = preferences
+    }
+
+    @objc private func graceChanged(_ sender: ThemedPopUp) {
+        guard let choice = choice(CurfewDefaults.graceChoices, from: sender) else { return }
+        var preferences = CurfewSettings.shared.preferences
+        preferences.grace = choice
+        CurfewSettings.shared.preferences = preferences
+    }
+
+    @objc private func giveUpPolicyChanged(_ sender: ThemedPopUp) {
+        guard let index = sender.selectedItem?.representedValue as? Int else { return }
+        var preferences = CurfewSettings.shared.preferences
+        preferences.stopsAgentOnGiveUp = index == CurfewSettingsDefaults.stopsAgentIndex
+        CurfewSettings.shared.preferences = preferences
+    }
+
+    @objc private func quietHoursEnabledChanged(_ sender: ThemedToggle) {
+        var preferences = CurfewSettings.shared.preferences
+        preferences.quietHours.isEnabled = sender.state == .on
+        CurfewSettings.shared.preferences = preferences
+    }
+
+    @objc private func quietHoursStartChanged(_ sender: ThemedPopUp) {
+        guard let minute = sender.selectedItem?.representedValue as? Int else { return }
+        var preferences = CurfewSettings.shared.preferences
+        // No clamping against the end, unlike the working day above: `end <= start` is how a
+        // window says it crosses midnight, which is the ordinary case here.
+        preferences.quietHours.startMinute = minute
+        CurfewSettings.shared.preferences = preferences
+    }
+
+    @objc private func quietHoursEndChanged(_ sender: ThemedPopUp) {
+        guard let minute = sender.selectedItem?.representedValue as? Int else { return }
+        var preferences = CurfewSettings.shared.preferences
+        preferences.quietHours.endMinute = minute
+        CurfewSettings.shared.preferences = preferences
+    }
+
+    /// The choice a pop-up built by `choicePopUp` is standing on, back out of its index.
+    private func choice(
+        _ choices: [TimeInterval?],
+        from popUp: ThemedPopUp
+    ) -> TimeInterval?? {
+        guard let index = popUp.selectedItem?.representedValue as? Int,
+              choices.indices.contains(index) else { return nil }
+        return choices[index]
+    }
+
+    /// The typed message becomes the stored one when the field is left, never per keystroke: a
+    /// half-typed template is a message that would be sent, and the store refuses an empty one.
+    ///
+    /// The write is flagged, because the page rebuilds on `CurfewSettingsDidChange` and this
+    /// notification arrives while AppKit is still delivering the field's own end of editing —
+    /// rebuilding there would pull the field out of the view tree mid-notification, for a change
+    /// that alters nothing else the page draws.
+    fileprivate func commitWindDownText() {
+        var preferences = CurfewSettings.shared.preferences
+        guard windDownField.stringValue != preferences.windDownText else { return }
+        preferences.windDownText = windDownField.stringValue
+
+        isCommittingWindDownText = true
+        CurfewSettings.shared.preferences = preferences
+        isCommittingWindDownText = false
+
+        // A refused message — empty, or longer than the store accepts — leaves the stored one
+        // exactly as it was, so the field goes back to saying what is actually stored rather
+        // than showing text nothing will ever send.
+        windDownField.stringValue = CurfewSettings.shared.preferences.windDownText
     }
 
     // MARK: - Diagram
@@ -546,6 +811,19 @@ final class UsageWindowPreferencesViewController: NSViewController {
     }
 }
 
+// MARK: - Text Editing
+
+extension UsageWindowPreferencesViewController: NSTextFieldDelegate {
+
+    /// A field that is left settles the message; so does leaving the page, since ending editing
+    /// is what removing the field produces. Between them, no path out of this row can lose what
+    /// was typed into it.
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard notification.object as? NSTextField === windDownField else { return }
+        commitWindDownText()
+    }
+}
+
 // MARK: - Usage Window Preferences Defaults
 
 enum UsageWindowPreferencesDefaults {
@@ -690,5 +968,219 @@ private enum UsageWindowStrings {
 
     static func recordFailed(_ when: String, _ account: String) -> String {
         L10n.format("Failed at %@ · %@", when, account)
+    }
+}
+
+// MARK: - Curfew Settings Defaults
+
+enum CurfewSettingsDefaults {
+
+    /// The whole day in half hours. A nightly window is as legitimately 23:30 to 07:00 as it is
+    /// 04:00 to 08:00, so neither end is bounded the way the working day's two are.
+    static let quietHoursRange = stride(from: 0, through: 23 * 60 + 30, by: 30)
+
+    /// Where the give-up choice's two rows sit, so the popup and the write agree on one order.
+    static let notifyIndex = 0
+    static let stopsAgentIndex = 1
+
+    /// The margins are stored in seconds and offered in minutes.
+    static let secondsPerMinute: TimeInterval = 60
+
+    /// What ends the "Tonight" line, whose clauses are joined by
+    /// `CurfewDefaults.receiptSeparator` — a ledger of clauses, closed as a sentence.
+    static let sentenceTerminator = "."
+
+    static let wrapUpFieldIdentifier = "settings.curfew.wrap-up-message"
+}
+
+// MARK: - Curfew Settings Strings
+
+private enum CurfewSettingsStrings {
+
+    static var caption: String { L10n.string("Quiet Hours & Curfews") }
+
+    static var explanation: String {
+        L10n.string("""
+            A curfew ends a session's spending at a time you choose — from the composer when you \
+            start a session, or from a session's menu. Before it, Threading asks the agent to \
+            wrap up; at the time it stops sending on its own; after a grace it interrupts \
+            whatever is still running. You keep the conversation and can continue it by hand. \
+            Quiet hours are a curfew every session follows daily unless it is exempt.
+            """)
+    }
+
+    static var windDownTitle: String { L10n.string("Send a wrap-up before the curfew") }
+    static var graceTitle: String { L10n.string("Interrupt a turn still running") }
+    static var wrapUpTitle: String { L10n.string("Wrap-up message") }
+
+    static var placeholderNote: String {
+        L10n.format("%@ is replaced by the curfew time.", CurfewDefaults.timePlaceholder)
+    }
+
+    static var giveUpTitle: String {
+        L10n.format(
+            "If it keeps working after %lld interrupts",
+            Int64(CurfewDefaults.maximumInterrupts)
+        )
+    }
+
+    static var giveUpSubtitle: String {
+        L10n.string("Stopping keeps the conversation on screen; Resume Session brings it back.")
+    }
+
+    static var giveUpChoices: [String] {
+        [L10n.string("Notify me"), L10n.string("Stop the agent")]
+    }
+
+    static var quietHoursTitle: String { L10n.string("Quiet hours") }
+    static var quietHoursSubtitle: String {
+        L10n.string("Every session is held between these times unless it is exempt.")
+    }
+
+    static var fromTitle: String { L10n.string("From") }
+    static var toTitle: String { L10n.string("To") }
+
+    static var tonightTitle: String { L10n.string("Tonight") }
+
+    /// "Off" rather than "0 minutes before": no wrap-up at all is a different answer from one
+    /// sent at the deadline, and the popup should not make them look like the same scale.
+    static func windDownChoice(_ margin: TimeInterval?) -> String {
+        guard let margin else { return L10n.string("Off") }
+        return L10n.format(
+            "%lld minutes before",
+            Int64(margin / CurfewSettingsDefaults.secondsPerMinute)
+        )
+    }
+
+    static func graceChoice(_ grace: TimeInterval?) -> String {
+        guard let grace else { return L10n.string("Never") }
+        guard grace > 0 else { return L10n.string("At the curfew") }
+        return L10n.format(
+            "%lld minutes after",
+            Int64(grace / CurfewSettingsDefaults.secondsPerMinute)
+        )
+    }
+}
+
+// MARK: - Curfew Settings Sentence
+
+/// What tonight's settings actually do, as one line of times.
+///
+/// Pure, and separate from the page for the reason `CurfewReceiptWords` is separate from the
+/// engine: this is the only part of the section that can be *wrong* rather than merely ugly — it
+/// states margins as clock times, across a midnight and across the two nights a year that are
+/// not 24 hours long — and it is asserted here on its answer rather than through a laid-out view.
+enum CurfewSettingsSentence {
+
+    /// The line under "Tonight".
+    ///
+    /// With quiet hours on it is the standing window's own ladder, in the order it happens:
+    /// *"Wrap-up at 03:50 · held from 04:00 · a turn still running at 04:05 is interrupted ·
+    /// lifts 08:00."* With them off there is no nightly deadline to name, so it says what the
+    /// same margins would do to a curfew set on one session — which is the half of the feature
+    /// that is still switched on.
+    static func tonight(
+        preferences: CurfewPreferences,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        locale: Locale = .current
+    ) -> String {
+        // The window being served tonight is the one in progress if there is one — asked at
+        // 05:00 inside a 04:00–08:00 window, "Tonight" means the hold the reader is standing in,
+        // not tomorrow's.
+        guard let window = preferences.quietHours.window(containing: now, calendar: calendar)
+                ?? preferences.quietHours.nextWindow(after: now, calendar: calendar) else {
+            return withoutQuietHours(preferences, locale: locale)
+        }
+
+        let deadline = window.start
+        var clauses: [String] = []
+
+        if let margin = preferences.windDownMargin {
+            clauses.append(L10n.format(
+                "Wrap-up at %@",
+                time(deadline.addingTimeInterval(-margin), locale),
+                locale: locale
+            ))
+            clauses.append(L10n.format("held from %@", time(deadline, locale), locale: locale))
+        } else {
+            // The hold leads the sentence when nothing precedes it, which is a different string
+            // rather than a capitalized one: where a language capitalizes is its own business.
+            clauses.append(L10n.format("Held from %@", time(deadline, locale), locale: locale))
+        }
+
+        clauses.append(interruptClause(preferences, deadline: deadline, locale: locale))
+        clauses.append(L10n.format("lifts %@", time(window.end, locale), locale: locale))
+
+        return clauses.joined(separator: CurfewDefaults.receiptSeparator)
+            + CurfewSettingsDefaults.sentenceTerminator
+    }
+
+    // MARK: - Private Methods
+
+    /// What happens to a turn that is still running when the deadline arrives.
+    private static func interruptClause(
+        _ preferences: CurfewPreferences,
+        deadline: Date,
+        locale: Locale
+    ) -> String {
+        guard let grace = preferences.grace else {
+            // The hold still applies; nothing is typed. Said outright, because a ladder that
+            // stops one rung early is exactly the thing a reader would otherwise assume.
+            return L10n.string("nothing is interrupted")
+        }
+
+        let clause = L10n.format(
+            "a turn still running at %@ is interrupted",
+            time(deadline.addingTimeInterval(grace), locale),
+            locale: locale
+        )
+        guard preferences.stopsAgentOnGiveUp else { return clause }
+        return L10n.format("%@, then the agent is stopped", clause, locale: locale)
+    }
+
+    /// The same margins with no standing window to hang them on.
+    private static func withoutQuietHours(
+        _ preferences: CurfewPreferences,
+        locale: Locale
+    ) -> String {
+        let wrapUp: String
+        if let margin = preferences.windDownMargin {
+            wrapUp = L10n.format(
+                "sends a wrap-up %lld minutes before",
+                Int64(margin / CurfewSettingsDefaults.secondsPerMinute),
+                locale: locale
+            )
+        } else {
+            wrapUp = L10n.string("sends no wrap-up")
+        }
+
+        var interrupt: String
+        if let grace = preferences.grace {
+            interrupt = grace > 0
+                ? L10n.format(
+                    "interrupts a turn still running %lld minutes after",
+                    Int64(grace / CurfewSettingsDefaults.secondsPerMinute),
+                    locale: locale
+                )
+                : L10n.string("interrupts a turn still running at the curfew")
+            if preferences.stopsAgentOnGiveUp {
+                interrupt = L10n.format("%@, then stops the agent", interrupt, locale: locale)
+            }
+        } else {
+            interrupt = L10n.string("never interrupts a turn still running")
+        }
+
+        return L10n.format(
+            "Quiet hours are off. A curfew you set on a session %1$@ and %2$@.",
+            wrapUp,
+            interrupt,
+            locale: locale
+        )
+    }
+
+    /// One clock reading, in the same words every other curfew surface uses.
+    private static func time(_ date: Date, _ locale: Locale) -> String {
+        ScheduledTimePresets.time(date, locale: locale)
     }
 }

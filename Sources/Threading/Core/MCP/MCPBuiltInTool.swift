@@ -12,6 +12,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case displayScene
   case displayHTML
   case displayCompareFiles
+  case videoFrames
   case conversationHistory
   case browserNavigate
   case browserHistory
@@ -69,6 +70,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case listReclaimableStorage
   case suggestReclaimableLocation
   case proposeStorageCleanup
+  case proposeConversationRepair
   case listSettings
   case notifyUser
   case listThemes
@@ -86,6 +88,10 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case extensionDescribeComponent
   case extensionValidateComponentPatch
   case extensionPreviewComponentPatch
+#if DEBUG
+  case listIOSDebugDevices
+  case inspectIOSDebug
+#endif
 
   enum Family: String, CaseIterable, Sendable {
     case continuation

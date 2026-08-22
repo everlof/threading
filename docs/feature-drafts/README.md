@@ -43,7 +43,6 @@ reshuffling it is a line move.
   and the settle edge `AccountUsageService` already observes for updates. Its account order (B1)
   is the consent the automatic move depends on and must ship before it; the reset keep-alive's
   Claude half (B5) can ship ahead of the rest.
-
 ### Next — researched and ready, waiting for a slot
 
 - [Observed work for terminal sessions](observed-work-for-terminal-sessions.md) — feed the Activity

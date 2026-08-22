@@ -211,6 +211,7 @@
 				ThreadingMobile/HostedRemoteConnectionManager.swift,
 				ThreadingMobile/Localizable.xcstrings,
 				ThreadingMobile/MobileAgentIdentity.swift,
+				ThreadingMobile/MobileDebugBridge.swift,
 				ThreadingMobile/MobileIssueReportArchive.swift,
 				ThreadingMobile/MobileIssueReporting.swift,
 				ThreadingMobile/MobileLoadingPlaceholder.swift,

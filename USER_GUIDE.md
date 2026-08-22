@@ -28,6 +28,37 @@ the main window. **Settings ▸ Advanced ▸ Welcome Tour** offers it again in t
 Again…** opens it immediately over the running app, and **Clear Flag** makes the *next launch*
 open with it — the true first-launch experience, main window held back and all.
 
+## Opening Threading When It Is Already Open
+
+Only one Threading may run at a time: two of them share the same projects and sessions, and
+whichever saved last would silently overwrite the other. Opening a second one therefore does not
+start a second app — but what it does instead now depends on what the first one is doing.
+
+- **The one already running is fine.** It comes to the front and the copy you just opened leaves
+  without saying anything. This is the ordinary case, and it is what double-clicking the Dock icon
+  or the app in Finder now does.
+- **It has stopped responding.** If the running Threading has not answered for half a minute,
+  you are told so and offered **End It and Continue**. Taking it ends that copy outright, so
+  anything it was in the middle of is lost, and the copy you opened starts in its place with your
+  projects and sessions intact. **Quit** leaves everything as it is. Return is on Quit, and the
+  question cannot be switched off.
+- **Nothing is running, but the state is still locked.** A Threading that was killed rather than
+  quit used to leave its agent processes holding the lock on your projects, so every relaunch was
+  refused with nothing to switch to. That no longer happens to processes started by this version,
+  and where it does happen you are told what is holding it and offered **End Them and Continue**.
+  Ending them loses whatever those agents were in the middle of.
+- **Threading cannot tell.** If the running copy is too old to say who it is, nothing is ended:
+  you get the plain "Threading is already running" notice and this copy quits. That is deliberate,
+  and it is the same answer this has always given.
+
+When the copy holding your sessions is not the one you opened — a development build, or a copy
+still sitting in a Downloads folder — the notice names the path it is running from, which is
+usually the whole explanation.
+
+A copy that had to be ended did not quit cleanly, so the launch that replaced it treats it as
+such: sessions are not relaunched automatically that once. Open the ones you want from the
+sidebar.
+
 ## Layout
 
 One window. The sidebar runs the full height on the left, listing projects and their sessions.
@@ -531,16 +562,24 @@ and the Keyboard setting below gives you one answer everywhere if you would rath
 The button sits at the right end of the row under the box; **Import _n_ conversations** appears
 at its left end when this project has conversations it could adopt.
 
-To give every new chat the same standing instruction, enter an **Opening Message** under
-**Settings ▸ General**. Threading appends it after the task you write and sends both as the
-chat's first turn. For example:
+To give every new chat the same standing instruction, fill in an **Opening Message** under
+**Settings ▸ General**. There are two fields, one on each side of the task you write, and either
+can be left empty:
 
-> Rename this chat to a ONE-WORD, ALL-CAPS name that represents it.
+- **Before the task you write** — standing context the agent reads first, framing how the work
+  should be done. For example:
 
-It is sent once to Terminal and Native chats, including side chats and cross-provider
-continuations. Reopening or resuming an existing chat does not send it again, and imported
-conversations receive nothing. The sidebar's initial name still comes from the task you typed,
-not from this reusable message.
+  > Think it through before you start changing files.
+
+- **After the task you write** — a standing instruction about the answer. For example:
+
+  > Rename this chat to a ONE-WORD, ALL-CAPS name that represents it.
+
+Threading sends whichever fields are filled together with the task as the chat's first turn, in
+that order, separated by blank lines. Both go once to Terminal and Native chats, including side
+chats and cross-provider continuations. Reopening or resuming an existing chat does not send them
+again, and imported conversations receive nothing. The sidebar's initial name still comes from the
+task you typed, not from this reusable text.
 
 **Want one answer everywhere?** Say so under **Settings ▸ Keyboard ▸ Composer**, at *When
 writing a prompt, press Return to*. The default — **Do What the Composer Expects** — is the
@@ -917,6 +956,37 @@ Resuming works by session id:
 | OpenCode | `opencode` (id discovered after the first prompt) | `opencode --session <ses_…>` |
 | Cursor | `cursor-agent acp` (Chat only; id assigned when the session opens) | the same command, loading the stored id |
 
+### When an agent won't start
+
+Sometimes the agent starts and stops again a second later — a login that has expired, a CLI that
+is not on this Mac, or a saved conversation its runtime refuses to reopen. The agent usually
+prints why, and Threading now keeps those words instead of letting them vanish with the terminal.
+
+The pane shows **“<name>” couldn't start**, a plain sentence about what happened, and the exact
+output the agent printed, in a box you can select and copy. The record survives quitting the app,
+so a failure you come back to tomorrow still says what went wrong.
+
+Four things you can do with it:
+
+- **Try Again** relaunches. Some failures are weather — a login that had just lapsed, a CLI
+  mid-upgrade — and asking again is the cheapest thing that works.
+- **Copy Details** puts the whole account on the clipboard: the sentence, the exit code, the
+  conversation file, and the output.
+- **Report a Problem…** opens the usual report sheet with all of that already written in, for you
+  to read, edit and send — or not.
+- **Try Recovering with an Agent** appears when the fault is in the conversation's own saved file.
+  Threading copies that file somewhere safe, opens a chat, and briefs an agent to repair the copy.
+  The agent never touches your real conversation: when it is done, Threading checks its work,
+  shows you what it found, and asks before replacing anything — keeping a backup of the original
+  either way. Accept, and the original chat is repaired in place, keeping its name and history;
+  the repair chat is filed away.
+
+**Selecting a failed session no longer retries it.** Clicking a row used to re-run the same
+failing command every time; now it shows you what happened and waits for you to choose.
+
+Threading also checks a Codex conversation's saved file before reopening it. If the file is in a
+state Codex will refuse, the pane says so without spending a launch to find out.
+
 Claude Code and Grok accept ids chosen up front, so Threading assigns them. Grok is marked
 resumable only after its supported session listing confirms the conversation exists; quitting
 the first browser-login screen therefore leaves it safe to launch fresh again. Codex assigns its
@@ -1157,7 +1227,8 @@ everything still running.
 
 Nothing else offers the checkbox. Anything that deletes for good — removing a project,
 **deleting a session**, deleting an archived session or a theme, reclaiming build directories,
-clearing website data, running an extension command marked destructive — asks every time, and
+clearing website data, running an extension command marked destructive, ending a Threading that
+has stopped responding or the agent processes a crashed one left behind — asks every time, and
 puts **Return** on Cancel rather than on the action. So does anything that grants access outside Threading: a
 website for the browser, a tool call, an unreviewed extension, or a shared chat link. Those
 prompts have their own narrower memory instead — "Always Allow This Host" is one host,
@@ -2895,10 +2966,10 @@ The **Attachments** tab is the session's visual history — the images, PDFs, do
 archives that went in either direction, newest first. Two things land there:
 
 - **What the agent surfaces.** A path it prints to an existing image (PNG, JPEG, GIF, WebP,
-  HEIC, TIFF, BMP), PDF, archive (ZIP, TAR, GZ, BZ2, XZ, 7Z, RAR), open document (ODT, ODS,
-  ODP, DOCX, XLSX, PPTX, RTF), or diagram source (DOT, GV, MMD, Mermaid), in the terminal or in
-  a native Chat reply, and any image it shows deliberately through the display tool. Code files
-  are ignored because Git Review already covers them.
+  HEIC, TIFF, BMP), movie (MOV, MP4, M4V), PDF, archive (ZIP, TAR, GZ, BZ2, XZ, 7Z, RAR), open
+  document (ODT, ODS, ODP, DOCX, XLSX, PPTX, RTF), or diagram source (DOT, GV, MMD, Mermaid), in
+  the terminal or in a native Chat reply, and any image it shows deliberately through the display
+  tool. Code files are ignored because Git Review already covers them.
 - **Animations, when Threading recognises one.** A Lottie animation is a `.json` file, and the
   pane will not list every `.json` in your session to catch it — so Threading looks inside the
   first part of the file and lists it only when what it finds is actually an animation. A
@@ -2912,7 +2983,18 @@ archives that went in either direction, newest first. Two things land there:
 An animation plays in the preview with play/pause, a scrubber and its elapsed time, and it keeps
 playing in the lightbox when you press Space or double-click. It stops when you look away —
 another tab, a collapsed pane, a window behind another one, or the Dock. Under **Reduce Motion**
-it opens paused; press Play and it plays. If an extension is installed that draws a format
+it opens paused; press Play and it plays.
+
+**Movies play here too** — a screen recording, a simulator capture, a clip an agent produced.
+Selecting the row shows the first frame with the same transport under it, plus a speaker button
+when the movie has sound. It opens **paused**: a row you arrived at with an arrow key is not a
+request to make a noise. Press Play and it plays with sound, once through; the same movie plays
+in the lightbox on Space or a double-click, on the rail beside the session's images and PDFs.
+Selecting another row stops it, as does looking away. Movie rows show a frame from the movie with
+a small play mark on it, so a recording is not mistaken for a screenshot, and the size limit that
+refuses other large previews does not apply — a movie is played straight off disk rather than
+read into memory, so a multi-gigabyte recording opens as quickly as a short one. On the phone, a
+movie row says it plays on your Mac. If an extension is installed that draws a format
 Threading does not carry itself, its preview takes the place of the built-in one; remove the
 extension and the built-in preview comes back.
 
@@ -2932,8 +3014,9 @@ unchanged while the saved document continues to be editable.
 Open **Attachments** from the session `⋯` menu's **Session Options** or the panel's **+** menu.
 The tab is two panes: the list above, and the selected file's preview filling the space below —
 images and PDFs inline (click an image to enter the same collection-aware media inspector),
-archives and documents through the same Quick Look preview the space bar shows in Finder, and
-diagram files as their own source text, ready to read or drag into a chat.
+movies in their own player, archives and documents through the same Quick Look preview the space
+bar shows in Finder, and diagram files as their own source text, ready to read or drag into a
+chat.
 HTML files render inline too; use **Open in Browser** when the full browser window is the better
 place to read or interact with one.
 
@@ -2949,8 +3032,8 @@ taller in one movement, rather than aiming at the two lines in turn. Grab the li
 and it is just the fold.
 
 **Space previews the selected row**, the way it does in Finder — with Threading's own inspector
-rather than the system panel. An image or a PDF opens on the rail with every other image and PDF
-in the session beside it, so the arrow keys and the thumbnail strip walk the list without closing
+rather than the system panel. An image, a movie or a PDF opens on the rail with every other
+image, movie and PDF in the session beside it, so the arrow keys and the thumbnail strip walk the list without closing
 anything; an archive or a document opens on its own. Space closes it again, and the list keeps
 your selection. HTML and diagram source have no inspector — the pane already renders those below
 the fold — so Space does nothing on those rows. The trackpad's preview gesture (three-finger tap,
@@ -3256,6 +3339,15 @@ and is told the panel exists, and when each one is the right answer, so it reach
 instead of printing a file path or an ASCII table. `display_chart` takes only the numbers and
 their names, never any drawing: every agent Threading supports reads that guidance the same way,
 which is why a chart from Codex and a chart from Claude are the same picture.
+
+Alongside them is `video_frames`, which works the other way round: it lets an agent *look at* a
+screen recording you paste. Give it the path to a `.mov` or `.mp4` and it decodes the frames
+itself — no ffmpeg, nothing to install — and comes back with a contact sheet, the timestamp of
+every frame in it, and the clip's length, size and frame rate. The same sheet is added to the
+session's Attachments, so you can see exactly what the agent looked at. If the detail it needs is
+small, it reads the clip twice: once whole to find the moment, then again over a few tenths of a
+second, or cropped to one corner of the screen. Before this existed, an agent handed a recording
+would spend several minutes and a few dozen shell commands rediscovering how to do that.
 
 They are pre-approved, so displaying something does not raise a permission prompt every time.
 This does not affect any other tool: your normal permission rules and your own MCP servers
@@ -4049,8 +4141,8 @@ than borrowing an unrelated app translation.
 - **New sessions use** — the agent the composer opens on; any other can be picked there
 - **Conversation Speed** — choose Agent's Setting, Standard, or Fast independently for Claude
   and Codex; applies to Terminal and Native sessions on their next launch
-- **Opening Message** — optional text appended once to every new chat's first turn; see
-  [Creating](#creating)
+- **Opening Message** — optional standing text sent once with every new chat's first turn,
+  before the task, after it, or both; see [Creating](#creating)
 - **Name sessions after the agent's own title** — see [Names](#names)
 - **Group sessions by branch** — see [Grouping sessions by branch](#grouping-sessions-by-branch)
 - **Follow the checkout's branch** — an idle session's recorded branch tracks its checkout,
@@ -4506,6 +4598,11 @@ Threading restarts itself immediately after a reset. That is not a convenience: 
 holds your projects and window layout in memory and would write them straight back over the reset
 otherwise.
 
+On an ordinary launch, Threading restores the main window's previous size and centres it on the
+display where it was last used. If that display is no longer connected, the window is centred on
+the main display instead. After a force quit or crash, Threading ignores that saved size and
+display position for the next launch and opens a default-sized window in the centre instead.
+
 **Only Threading's two file locations and, for Reset Everything, its paired-owner Keychain item
 are touched.** Your agent logins, and anything the Claude or Codex CLIs keep for themselves, live
 in their own stores and are left exactly where they are — so a reset does not sign you out.
@@ -4569,7 +4666,7 @@ The pane explains why it came up and how far the launch that failed got, then of
 | **Try Normal Launch Once** | Restarts Threading and lets that one launch come up normally, whatever the crash history says. If it fails too, the launch after it returns to recovery |
 | **Continue in Recovery Mode** | Puts the screen away and leaves the app as it is. A band stays across the top of the pane, and **Show Options** brings the screen back |
 | **Disable Extensions for Next Launch** | The next launch starts no extensions and no companions. Nothing is uninstalled and nothing is switched off: the launch after that starts them again. Press it a second time to change your mind |
-| **Reset Window Layout** | Forgets the window size and position, the sidebar width, the panel widths and the shell drawer height. Nothing else is touched |
+| **Reset Window Layout** | Forgets the window size, the sidebar width, the panel widths and the shell drawer height. Nothing else is touched |
 | **Reveal Crash Report** | Shows the `.ips` file macOS filed for the failed launch in the Finder, ready to attach to a bug report. Offered only when there is one |
 | **Create Support Report** | Writes the share-safe diagnostics file and reveals it, the same as **Help > Create Remote Support Report** |
 | **Move App Data Aside** | The recoverable reset from **Settings > Advanced**: your projects, sessions and settings move into a dated folder under `~/Library/Application Support/Threading Resets/` and Threading restarts on nothing. Nothing is deleted, and the folder can be moved back |

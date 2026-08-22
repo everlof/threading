@@ -770,6 +770,47 @@ because a repeat almost always means the agent just rewrote one side; a turn end
 visible compare tab for the same reason. The user's own route in is the `+` menu's "Compare
 Files…", which is an open panel asked for exactly two files.
 
+**`video_frames` is the one tool that exists because of what an agent kept doing instead.**
+Screen recordings arrive here as a quoted path in a prompt — never as an attachment, since the
+attachment store has only ever held images. So every recording began with the agent shelling out
+to `ffprobe` and `ffmpeg`, and the transcripts show that costing between 4 and 35 shell calls per
+clip, with the same three mistakes each time: a `drawtext` filter that this machine's Homebrew
+`ffmpeg` is built without, so numbering the cells fails; a contact sheet dense enough to cover the
+clip but too downscaled to read, which then bought nine crop-and-zoom passes; and
+`select='gt(scene,N)'`, which on a screen recording picks one frame, pads the rest of the grid
+black, and misses the transient the uniform sample caught.
+
+The tool answers all three by construction. It decodes through `AVAssetImageGenerator`
+(`VideoFrameSheet`), so there is no `ffmpeg` and no filter to be missing. The cell-to-time table
+travels as **text** beside the picture, which is what `drawtext` was wanted for and cannot fail.
+And the grid is solved rather than chosen: an image is downscaled to 1,568px on its long edge
+before a model sees it, so a cell's delivered width is the sheet's width over its column count.
+`VideoFrameSheet.grid` tries every column count and keeps the one with fewest empty cells, then
+the largest cell — which is why nine frames of a desktop capture come back 3×3 and four frames of
+a phone capture come back as a 4×1 filmstrip, opposite answers the square root would not give.
+The sheet is built *at* the delivery size, so nothing is decoded or sent that the downscale would
+discard.
+
+Nine cells is the ceiling, and it is also the whole scaling contract: an hour-long clip costs the
+same nine decodes as a two-second one, because a longer clip is sampled more sparsely rather than
+more expensively. When a cell still lands under the legible width the reply says so and names the
+two ways out — a narrower `from`/`to`, or a `crop` — because that failure looks exactly like
+success: a sheet arrives, and is merely too small to answer the question. `crop` is a named object
+rather than ffmpeg's `w:h:x:y` string for the reason the schema's `.object` case exists at all,
+and it is measured against the *presented* frame, so a portrait recording's rectangle means what
+it looks like rather than what the container stored.
+
+The result carries an MCP image block, which makes it the second exception to the plain-text rule
+after `browser_screenshot`, and for the same reason: the agent's own visual inspection is the
+entire purpose, so a sentence in its place would be the agent describing a picture it never saw.
+The sheet is recorded as a session attachment too, so the user sees what the agent saw.
+
+`VideoFrameSheet` deliberately carries its own forty-line probe rather than calling
+`VideoDocumentRenderer.plan`, which asks the same questions for the player. The player asks them
+against `MediaDocumentLimits` — ceilings written for a canvas that will hold the decoded frame —
+and a tool an agent calls on a file the user just pasted should not start failing because those
+limits were retuned. Collapse the two once the movie engine has settled.
+
 **The tab is not the only size the comparison has.** The surface's controls row carries a button
 that opens the same pair in `CompareInspectorView` over the whole window (see
 [`design-system.md`](design-system.md)), because a pane the divider decides is a poor place to

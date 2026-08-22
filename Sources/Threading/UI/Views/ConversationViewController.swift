@@ -474,6 +474,20 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// live on/off fast mode, offered on the same chip so the two providers read alike.
     private let speedChip = ChipView()
 
+    /// When this conversation stops being spent — **last on the row, and present only while a
+    /// curfew actually resolves.**
+    ///
+    /// The four chips before it answer *what the next reply is sent with*; this one answers *how
+    /// long there will be replies at all*, which is a different question and the reason it is not
+    /// mixed in among them. It is also the only one of the five that is usually absent: a chat
+    /// with no curfew is the ordinary case, and a chip reading "No curfew" on every conversation
+    /// forever would spend a permanent slot naming a rule nobody set.
+    ///
+    /// The schedule chevron beside the send stays "send later". Two clocks on one composer are
+    /// only confusable while they answer the same question, and these answer opposite ones —
+    /// when the next message goes out, and when the last one will.
+    let curfewChip = ChipView()
+
     /// The context meter — how full the model's window is, updated at each turn boundary.
     /// Distinct from the account usage pill, which is quota; this is the conversation's own
     /// weight. Hidden until the stream has reported a reading.
@@ -601,15 +615,28 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             guard let self, event.sessionID == self.sessionID else { return }
             self.refreshLimitEscapeStrip()
         }
+        // Lifting is the one answer a curfew's strip carries, and it is the user's own rule
+        // ending rather than an exception being made to somebody else's — see
+        // `LimitEscapeStripView.Offer.Source`.
+        limitEscapeStrip.onLiftCurfew = { [weak self] in
+            guard let self else { return }
+            SessionCurfewCenter.shared.lift(sessionID: self.sessionID)
+        }
         // A curfew engaging or being lifted is the one thing that moves the queue's hold without
         // anything else changing: no usage reading moved, no suggestion arrived. Without this,
         // a lifted curfew would leave the messages behind it sitting until the next turn ended.
-        //
-        // The strip's own curfew line is not read here yet — `refreshLimitEscapeStrip` has no
-        // curfew source until the strip gains one, and this call site is where its refresh goes.
         appEvents.observe(CurfewDidChange.self) { [weak self] event in
             guard let self, event.sessionID == self.sessionID else { return }
             self.flushOutboxIfReady()
+            self.refreshLimitEscapeStrip()
+            self.refreshCurfewChip()
+        }
+        // The standing window is a curfew for every session that never answered for itself, so
+        // switching it on or moving it changes what this chat is under without any event naming
+        // this chat.
+        appEvents.observe(CurfewSettingsDidChange.self) { [weak self] _ in
+            self?.refreshLimitEscapeStrip()
+            self?.refreshCurfewChip()
         }
         refreshLimitEscapeStrip()
     }
@@ -625,14 +652,44 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             return
         }
 
+        // A park outranks a curfew for the same reason, one step down: a park is a line drawn
+        // against an account's spend that this conversation cannot move on its own, while a
+        // curfew is this conversation's own clock and the strip's Lift ends it. Both are the
+        // user's, so the ranking is which one the reader can do least about.
         let park = CustomLimitParkPolicy.hold(sessionID: sessionID)
-        let offer = park.rule.map {
-            LimitEscapeStripView.Offer(
+        if let rule = park.rule {
+            applyLimitEscapeOffer(LimitEscapeStripView.Offer(
                 source: .ownLimit,
-                resetHint: parkResetHint(for: $0)
-            )
+                resetHint: parkResetHint(for: rule)
+            ))
+            return
         }
-        applyLimitEscapeOffer(offer)
+
+        applyLimitEscapeOffer(curfewOffer())
+    }
+
+    /// The strip's curfew state, or nil while nothing is holding this conversation.
+    ///
+    /// Only a **held** curfew draws. An armed one is a fact about tonight rather than a state the
+    /// pane is in, and a ribbon standing over the transcript all afternoon to say so would be the
+    /// loudest thing on screen for the least reason — the footer chip is where an armed curfew
+    /// belongs, and it says the same thing in the space a plan deserves.
+    ///
+    /// The hold carries its own resolution and state, so nothing here re-reads the record: a
+    /// sentence assembled from a second read could disagree with the decision that produced it.
+    func curfewOffer() -> LimitEscapeStripView.Offer? {
+        let now = Date()
+        guard case .held(_, let curfew, let state) = CurfewHoldPolicy.hold(
+            sessionID: sessionID,
+            at: now
+        ) else { return nil }
+
+        return .curfew(line: CurfewReceiptWords.stripSentence(
+            curfew: curfew,
+            state: state,
+            canTellWorking: SessionCurfewCenter.shared.canTellWorking(sessionID: sessionID),
+            now: now
+        ))
     }
 
     /// Applies one resolved offer to both the ribbon and the pane geometry. Kept as the single
@@ -1229,12 +1286,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             self?.selectFastMode(choice.fastMode)
         }
 
+        // No `onSelect`: `CurfewMenu` builds rows that carry their own answer, so the choice is
+        // routed by the row rather than decoded back out of a represented value here.
+        curfewChip.itemsProvider = { [weak self] in self?.curfewMenuEntries() ?? [] }
+
         // The split divider owns the pane's width. These labels therefore truncate when all
         // four choices no longer fit, using `ChipView`'s tooltip and hover expansion to reveal
         // the full value. Marking every chip required made their combined fitting width a
         // 590-point minimum on the conversation pane, so a divider dragged past that point
         // sprang back even though the prompt box itself had already yielded.
-        for chip in [modelChip, modeChip, effortChip, speedChip] {
+        for chip in [modelChip, modeChip, effortChip, speedChip, curfewChip] {
             chip.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
 
@@ -1246,7 +1307,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // keeping those two slots identical across the two composers is the point. Effort and
         // speed follow in the same order on both.
         promptView.setFooterControls(
-            leading: [modelChip, modeChip, effortChip, speedChip],
+            leading: [modelChip, modeChip, effortChip, speedChip, curfewChip],
             trailing: [contextLabel]
         )
         refreshConversationControls()
@@ -3119,6 +3180,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     private func refreshConversationControls() {
         refreshInputControl()
+        // Ahead of the guards below, because a curfew is not a property of the model catalog: a
+        // runtime that publishes no models, and a conversation whose record has gone, both still
+        // have a clock — and both would otherwise return before this ran, freezing the chip on
+        // whatever it last said.
+        refreshCurfewChip()
         // The transport answers this, not the runtime: when a change lands is a property of
         // the wire protocol carrying it. See `ConversationStreamSession`.
         let canConfigure = stream.acceptsConfigurationChange

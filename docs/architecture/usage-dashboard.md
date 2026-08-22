@@ -288,6 +288,12 @@ dashed. The page shows projected 100% when it falls before reset, otherwise proj
 at reset; scheduled reset, observed reset, banked-reset expiry and projected exhaustion are
 different marker kinds.
 
+The selected history supplies the chart's lower bound. Its upper bound may extend through the
+active projection or scheduled reset, but a later banked-reset expiry never sets the scale: that
+inventory fact remains fully stated in the summary card and is drawn as a marker only when it
+already falls inside the active chart domain. The same rule applies on macOS and iPhone, so a
+credit expiring weeks later cannot compress a seven-day history into a sliver.
+
 The limit chart offers 7, 30 and 90 days while storage retains 180. It keeps discontinuities as
 separate segments so a reset is not drawn as consumption in reverse. Downsampling preserves
 endpoints, extrema and complete, evenly spaced reset pairs under a hard budget—even a corrupt

@@ -701,6 +701,26 @@ phrase stops reading as one line. Dashboard route progress, SwiftUI terminal chr
 Native-conversation chrome all enter through this same mobile design boundary. Reduce Motion
 lands the next phrase synchronously with no scroll or fade.
 
+The same boundary reserves LabelMorph's raster overflow inside its clipping frame. The package
+draws each glyph into a padded tile so overhanging ink survives; clipping the wrapper at the
+typographic advance instead cut the leading edge of the first character in the navigation bar.
+The connection dot fades out at its old position and back in at its new one on every phrase
+identity change, even when its colour did not change, because the centred dot-and-phrase row moves
+horizontally when the new phrase has a different width. Hiding the real dot during that reflow is
+what prevents the first frame from teleporting before an ordinary opacity animation could start.
+Reduce Motion lands both the dot and the phrase without that transition.
+
+An automatic dashboard reconnect does not present the full recovery card on its first transient
+route miss. While recovery is already scheduled, the existing compact connection card says
+“Connection interrupted. Trying again…” and the navigation line says “Trying again…”. Three
+consecutive complete route races make the failure settled enough to disclose the actionable
+recovery card. Once disclosed, that card remains stable through the next attempt and leaves only
+after success, rather than alternating page-sized progress and error surfaces on every backoff
+tick. Failures whose remedy is not another connection attempt — identity, permission, pairing or
+upgrade failures — remain immediate. Connection truth, retry policy, recovery actions and this
+presentation are host-owned; no extension may relabel a transient miss as success or a retry as a
+settled failure.
+
 **A chat has one name, wherever it is drawn.** The list draws the catalogue's
 `AgentSession.displayTitle` and so does every title on the screen that list opens —
 `MobileSessionChrome.navigationTitle(for:in:liveTitle:)` resolves it against `model.me` rather

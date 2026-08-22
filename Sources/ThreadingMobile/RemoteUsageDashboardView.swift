@@ -26,6 +26,21 @@ private enum MobileUsageMetric: String, CaseIterable {
     }
 }
 
+enum MobileUsageLimitChartDomain {
+    static func range(for detail: RemoteUsageLimitDTO) -> ClosedRange<Date> {
+        let projectionEnd = detail.projection.map {
+            $0.projectedExhaustionAt ?? $0.resetsAt
+        }
+        let end = [
+            detail.end,
+            projectionEnd,
+            detail.series.resetsAt
+        ].compactMap { $0 }.max() ?? detail.end
+        let start = Date(timeIntervalSince1970: detail.start)
+        return start...Date(timeIntervalSince1970: max(detail.start, end))
+    }
+}
+
 @MainActor
 final class RemoteUsageDashboardModel: ObservableObject {
     @Published private(set) var dashboard: RemoteUsageDashboardDTO?
@@ -694,6 +709,7 @@ struct RemoteUsageDashboardView: View {
                             .lineStyle(.init(lineWidth: 2, dash: [2, 3]))
                     }
                 }
+                .chartXScale(domain: MobileUsageLimitChartDomain.range(for: detail))
                 .chartYScale(domain: 0...1)
                 .chartYAxis {
                     AxisMarks(values: [0, 0.5, 1]) { value in
@@ -1264,7 +1280,7 @@ enum RemoteUsageDemo {
             currentFraction: 0.63,
             resetsAt: now + 3 * 86_400,
             bankedResetCount: 2,
-            nextBankedResetExpiresAt: now + 8 * 86_400
+            nextBankedResetExpiresAt: now + 28 * 86_400
         ),
         .init(
             id: "codex|work|weekly",

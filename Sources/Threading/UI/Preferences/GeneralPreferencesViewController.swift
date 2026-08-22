@@ -68,8 +68,19 @@ final class GeneralPreferencesViewController: NSViewController {
     private let remoteControlPopUp = ThemedPopUp()
     private let permissionModePopUp = ThemedPopUp()
     private let shellField = ThemedTextField()
-    private let newChatOpeningMessageField = ThemedTextField()
+    /// The two halves of the opening message, either side of the task. One timer settles
+    /// whichever of them was typed into, because both write the same kind of value and neither
+    /// means anything until the typing stops.
+    private let newChatOpeningPrefixField = ThemedTextField()
+    private let newChatOpeningSuffixField = ThemedTextField()
     private var openingMessageWriteTimer: Timer?
+    /// The half with typing in it that has not settled yet, and the only half a flush writes.
+    ///
+    /// One at a time, because moving to the other field ends editing in this one and settles it
+    /// first. Naming it matters: a flush that wrote *both* fields would push whatever this page
+    /// last read into the half nobody touched, undoing a change made anywhere else while
+    /// Settings was open — and would broadcast twice for one settled sentence.
+    private weak var unsettledOpeningMessageField: ThemedTextField?
 
     /// The scratchpad's folder, **shown rather than typed.** A path with a typo in it is a
     /// scratchpad nobody can find and an agent launching into nothing; the picker cannot
@@ -253,14 +264,23 @@ final class GeneralPreferencesViewController: NSViewController {
         shellField.target = self
         shellField.action = #selector(shellPathChanged)
 
-        newChatOpeningMessageField.placeholderString = L10n.string(
+        newChatOpeningPrefixField.placeholderString = L10n.string(
+            "For example: Think it through before you start changing files."
+        )
+        newChatOpeningPrefixField.stringValue = AppSettings.shared.newChatOpeningPrefix
+        newChatOpeningPrefixField.setAccessibilityIdentifier(
+            "settings.general.new-chat-opening-prefix"
+        )
+        newChatOpeningPrefixField.delegate = self
+
+        newChatOpeningSuffixField.placeholderString = L10n.string(
             "For example: Rename this chat to a ONE-WORD, ALL-CAPS name that represents it."
         )
-        newChatOpeningMessageField.stringValue = AppSettings.shared.newChatOpeningMessage
-        newChatOpeningMessageField.setAccessibilityIdentifier(
-            "settings.general.new-chat-opening-message"
+        newChatOpeningSuffixField.stringValue = AppSettings.shared.newChatOpeningSuffix
+        newChatOpeningSuffixField.setAccessibilityIdentifier(
+            "settings.general.new-chat-opening-suffix"
         )
-        newChatOpeningMessageField.delegate = self
+        newChatOpeningSuffixField.delegate = self
     }
 
     private func configure(_ toggle: ThemedToggle, isOn: Bool, action: Selector) {
@@ -461,6 +481,10 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.section("Sessions", sessions),
             SettingsUI.section("Conversation Speed", conversationSpeedCard()),
             SettingsUI.section("Opening Message", openingMessageCard()),
+            SettingsUI.note("Both are sent once, inside the first turn of a new chat — side "
+                + "chats and cross-provider continuations included. Neither is sent again when "
+                + "a chat resumes, and an imported conversation receives nothing. The name in "
+                + "the sidebar still comes from the task you wrote."),
             SettingsUI.section("Attachments", attachmentDetectionCard()),
             SettingsUI.section("Scratchpad", scratchpad),
             SettingsUI.note("Chats that are about no project live here. The folder is made the "
@@ -563,15 +587,24 @@ final class GeneralPreferencesViewController: NSViewController {
     }
 
     /// Standing context for a new conversation, kept visibly separate from the task composed
-    /// for one chat. Empty is the off state.
+    /// for one chat. Either field empty is that half's off state.
+    ///
+    /// Two of them because the halves do different work: text before the task sets how the
+    /// agent should work on whatever follows, and text after it is an instruction about the
+    /// answer — an order the model reads as written, which is why they are separate fields
+    /// rather than one message the user has to position by hand.
     private func openingMessageCard() -> SettingsCard {
         SettingsCard(rows: [
             SettingsUI.row(
-                title: "Add to every new chat",
-                subtitle: "Appended once after the task you write. "
-                    + "It is not sent again when an existing chat resumes."
+                title: "Before the task you write",
+                subtitle: "Sent once ahead of the task, framing how this chat should be worked on."
             ),
-            SettingsUI.fullRow(newChatOpeningMessageField)
+            SettingsUI.fullRow(newChatOpeningPrefixField),
+            SettingsUI.row(
+                title: "After the task you write",
+                subtitle: "Sent once after the task, for a standing instruction about the answer."
+            ),
+            SettingsUI.fullRow(newChatOpeningSuffixField)
         ])
     }
 
@@ -743,7 +776,11 @@ final class GeneralPreferencesViewController: NSViewController {
 
     // MARK: - Opening Message
 
-    private func scheduleOpeningMessageWrite() {
+    private func scheduleOpeningMessageWrite(for field: ThemedTextField) {
+        if let unsettled = unsettledOpeningMessageField, unsettled !== field {
+            flushOpeningMessageWrite()
+        }
+        unsettledOpeningMessageField = field
         openingMessageWriteTimer?.invalidate()
         openingMessageWriteTimer = Timer.scheduledTimer(
             withTimeInterval: GeneralPreferencesDefaults.textSettingCoalescingInterval,
@@ -756,9 +793,16 @@ final class GeneralPreferencesViewController: NSViewController {
     private func flushOpeningMessageWrite() {
         openingMessageWriteTimer?.invalidate()
         openingMessageWriteTimer = nil
-        let typed = newChatOpeningMessageField.stringValue
-        guard AppSettings.shared.newChatOpeningMessage != typed else { return }
-        AppSettings.shared.newChatOpeningMessage = typed
+        guard let field = unsettledOpeningMessageField else { return }
+        unsettledOpeningMessageField = nil
+        let typed = field.stringValue
+        if field === newChatOpeningPrefixField {
+            guard AppSettings.shared.newChatOpeningPrefix != typed else { return }
+            AppSettings.shared.newChatOpeningPrefix = typed
+        } else {
+            guard AppSettings.shared.newChatOpeningSuffix != typed else { return }
+            AppSettings.shared.newChatOpeningSuffix = typed
+        }
     }
 
     // MARK: - Alert Sound
@@ -1519,15 +1563,22 @@ extension GeneralPreferencesViewController: NSTextFieldDelegate {
     /// the moment it is made and must still broadcast at once. Only free text arrives one
     /// keystroke at a time, and it means nothing until it stops.
     func controlTextDidChange(_ notification: Notification) {
-        guard notification.object as? NSTextField === newChatOpeningMessageField else { return }
-        scheduleOpeningMessageWrite()
+        guard let field = openingMessageField(notification.object) else { return }
+        scheduleOpeningMessageWrite(for: field)
     }
 
     /// A field that is left settles the setting immediately; so does leaving the page. Between
     /// them, no path out of this row can lose what was typed into it.
     func controlTextDidEndEditing(_ notification: Notification) {
-        guard notification.object as? NSTextField === newChatOpeningMessageField else { return }
+        guard openingMessageField(notification.object) != nil else { return }
         flushOpeningMessageWrite()
+    }
+
+    private func openingMessageField(_ object: Any?) -> ThemedTextField? {
+        guard let field = object as? ThemedTextField,
+              field === newChatOpeningPrefixField || field === newChatOpeningSuffixField
+        else { return nil }
+        return field
     }
 }
 

@@ -127,6 +127,7 @@ final class ComponentGalleryViewController: NSViewController {
         "PaneFoldDivider",
         "PaneFooterView",
         "PaneHeaderView",
+        "LaunchFailureView",
         "PaneNoticeView",
         "PanelListView",
         "PromptCompletionPresenter",
@@ -1536,6 +1537,18 @@ final class ComponentGalleryViewController: NSViewController {
                 offersWaitForReset: true,
                 resetHint: "9:40pm (Europe/Rome)",
                 problem: "Daniel Block is close to its own limit now."
+            ),
+            // The user's own line, which wears the conduct mark rather than the triangle and
+            // carries a Lift instead of a ✕. Three of them, because the ledger is the point: the
+            // hold on its own, the hold after the ladder has run, and the honest one where
+            // Threading can stop delivering but cannot tell whether anything is running.
+            .curfew(line: "Curfew since 04:00 · wrap-up sent 03:50"),
+            .curfew(
+                line: "Curfew since 04:00 · wrap-up sent 03:50 · interrupted 04:05 ×2"
+            ),
+            .curfew(
+                line: "Curfew since 04:00 · Threading cannot tell whether this session is "
+                    + "working, so it only stops delivering messages."
             )
         ]
         let limitEscapeStrips = NSStackView(views: limitEscapeOffers.map { offer in
@@ -1549,6 +1562,9 @@ final class ComponentGalleryViewController: NSViewController {
             }
             strip.onWaitForReset = { [weak self] in
                 self?.showReceipt(L10n.string("Continuing when the window resets."))
+            }
+            strip.onLiftCurfew = { [weak self] in
+                self?.showReceipt(L10n.string("Curfew lifted."))
             }
             return strip
         })
@@ -1769,9 +1785,14 @@ final class ComponentGalleryViewController: NSViewController {
                 ),
                 story(
                     "LimitEscapeStripView",
-                    "The way past a spent usage limit. Three states: the offer, the same offer "
-                        + "being carried out, and one that could not be taken. The button names "
-                        + "the whole action, which is why pressing it asks nothing further.",
+                    "One ribbon for every standing reason a conversation has stopped. Four "
+                        + "provider states first: the offer, the offer with no login to move to, "
+                        + "the same offer being carried out, and one that could not be taken. "
+                        + "Then three curfews — the user's own line, which wears the conduct mark "
+                        + "rather than the triangle, ends with Lift rather than a ✕, and states "
+                        + "plainly where Threading cannot tell whether the session is working. "
+                        + "The button names the whole action, which is why pressing it asks "
+                        + "nothing further.",
                     limitEscapeStrips
                 )
             ]
@@ -3110,6 +3131,16 @@ final class ComponentGalleryViewController: NSViewController {
                     makePaneNoticeSample()
                 ),
                 story(
+                    "LaunchFailureView",
+                    "What a session shows when its agent died on the way up. The well is the "
+                        + "point: an agent that refuses to start prints its reason to a terminal "
+                        + "that is then torn down, and on the specimen this was built against "
+                        + "the message was legible for one frame. Select the text — copying it "
+                        + "is most of what this surface is for. It does not wrap, because a "
+                        + "wrapped stack trace stops looking like the thing the terminal showed.",
+                    makeLaunchFailureSample()
+                ),
+                story(
                     "ToastView",
                     "A receipt for something already done, with the way back on it. Press Show "
                         + "to send one into the pane below: it slides in above the footer, holds "
@@ -3129,6 +3160,31 @@ final class ComponentGalleryViewController: NSViewController {
                 )
             ]
         )
+    }
+
+    private func makeLaunchFailureSample() -> NSView {
+        let view = LaunchFailureView()
+        view.configure(
+            title: L10n.string("ADOPTION couldn’t start"),
+            summary: L10n.string(
+                "Codex could not read this conversation's saved file, so it stopped instead of resuming."
+            ),
+            output: [
+                "Error: Failed to resume session from ~/.codex/sessions/2026/08/20/rollout.jsonl:",
+                "thread/resume failed during TUI bootstrap: thread/resume failed: error resuming",
+                "thread: Fatal error: Failed to initialize session: thread-store internal error:",
+                "failed to resume local thread recorder: final paginated rollout record is",
+                "missing an ordinal (code -32603)"
+            ].map { L10n.string($0) },
+            actions: [
+                LaunchFailureAction(title: L10n.string("Try Again"), emphasis: .primary) {},
+                LaunchFailureAction(title: L10n.string("Copy Details")) {},
+                LaunchFailureAction(title: L10n.string("Report a Problem…")) {},
+                LaunchFailureAction(title: L10n.string("Try Recovering with an Agent")) {}
+            ]
+        )
+        view.heightAnchor.constraint(equalToConstant: 420).isActive = true
+        return view
     }
 
     private func makeDocumentTableSample() -> NSView {

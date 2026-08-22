@@ -53,7 +53,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Not private: the toolbar delegate needs the split view for its tracking separator.
     private(set) lazy var splitViewController = SidebarSplitViewController()
-    private lazy var sidebarViewController = ProjectSidebarViewController(
+    lazy var sidebarViewController = ProjectSidebarViewController(
         projectStore: environment.projectStore,
         canAskAgentToRename: { [weak self] sessionID in
             guard let self else { return false }
@@ -86,7 +86,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 ?? L10n.string("The workspace window is no longer available.")
         }
     )
-    private lazy var containerViewController = TerminalContainerViewController()
+    lazy var containerViewController = TerminalContainerViewController()
     private lazy var extensionHookViewController = ExtensionComponentHookViewController(
         target: .init(component: .applicationMainWindow, contractVersion: 1),
         child: splitViewController,
@@ -106,7 +106,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private lazy var sidebarItem = NSSplitViewItem(viewController: workspaceSidebarViewController)
 
     /// Owns session creation, import, worktree targeting, surface switches, and closing.
-    private lazy var sessionCoordinator = SessionCoordinator(
+    lazy var sessionCoordinator = SessionCoordinator(
         sidebar: sidebarViewController,
         container: containerViewController,
         environment: environment,
@@ -430,7 +430,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         fatalError("init(coder:) has not been implemented")
     }
 
-    convenience init(environment: AppEnvironment) {
+    convenience init(
+        environment: AppEnvironment,
+        initialFramePlan: MainWindowInitialFramePlan
+    ) {
         let constructionStarted = DispatchTime.now().uptimeNanoseconds
         let createdWindow = Self.createWindow()
         let windowCreated = DispatchTime.now().uptimeNanoseconds
@@ -451,7 +454,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.delegate = self
 
         let frameStarted = DispatchTime.now().uptimeNanoseconds
-        applyInitialFrame()
+        applyInitialFrame(initialFramePlan)
         startupPerformance.initialFrameNanoseconds = DispatchTime.now().uptimeNanoseconds
             - frameStarted
 
@@ -521,8 +524,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ///
     /// Assigning a `contentViewController` resizes the window to that controller's fitting
     /// size, so any earlier frame is discarded. The intended size is therefore applied here,
-    /// after setup, restoring the user's own size when one was saved.
-    private func applyInitialFrame() {
+    /// after setup, restoring the user's own size only when this launch's plan permits it.
+    private func applyInitialFrame(_ plan: MainWindowInitialFramePlan) {
         guard let window else { return }
 
 #if DEBUG
@@ -541,20 +544,35 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 #endif
 
-        if window.setFrameUsingName(MainWindowDefaults.frameAutosaveName) {
-            holdRestoredFrameOnScreen(window)
+        let restoredSavedFrame = plan == .restoreSavedFrame
+            && window.setFrameUsingName(MainWindowDefaults.frameAutosaveName)
+
+        if restoredSavedFrame {
+            // Naming the autosave after changing the restored frame re-applies its stored origin
+            // and silently undoes the centring below. Register first, then make the intended
+            // launch frame the final mutation — and therefore the geometry AppKit records from
+            // this point on.
+            window.setFrameAutosaveName(MainWindowDefaults.frameAutosaveName)
+            centerRestoredFrameOnScreen(window)
         } else {
             window.setContentSize(NSSize(
                 width: WindowDefaults.defaultWidth,
                 height: WindowDefaults.defaultHeight
             ))
             window.center()
-        }
 
-        window.setFrameAutosaveName(MainWindowDefaults.frameAutosaveName)
+            // `setFrameAutosaveName` restores an existing frame as a side effect. On an unclean
+            // launch that would put the suspect geometry back even though this method never
+            // asked for it. Replace the autosave with the default frame before registering, so
+            // AppKit has no stale size or position left to apply.
+            if plan == .useDefaultFrame {
+                window.saveFrame(usingName: MainWindowDefaults.frameAutosaveName)
+            }
+            window.setFrameAutosaveName(MainWindowDefaults.frameAutosaveName)
+        }
     }
 
-    /// A restored frame that no longer fits the screen, brought back to it.
+    /// Restores the saved size at the centre of the display that held it.
     ///
     /// `setFrameUsingName` is the one door into a window's frame that AppKit does not police —
     /// measured, it calls `constrainFrameRect(_:to:)` not at all — so whatever was saved is what
@@ -563,13 +581,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// window is frameless and nothing ever constrains it again. It shipped as a window 3386
     /// points tall on a 1084-point screen, restored to exactly that on every launch, with the
     /// composer two thousand points below the bottom of the display and no edge left to drag.
-    private func holdRestoredFrameOnScreen(_ window: NSWindow) {
+    ///
+    /// The frame's overlap still chooses the display, so a workspace saved on a second screen
+    /// remains there. Its dimensions survive; its old origin is deliberately replaced by the
+    /// display's centre. A vanished display falls back to the main screen through `bounds(for:)`.
+    private func centerRestoredFrameOnScreen(_ window: NSWindow) {
         guard let bounds = MainWindowFrame.bounds(for: window) else { return }
 
-        let held = MainWindowFrame.held(window.frame, within: bounds)
-        guard held != window.frame else { return }
+        let centered = MainWindowFrame.centered(window.frame, within: bounds)
+        guard centered != window.frame else { return }
 
-        window.setFrame(held, display: false)
+        window.setFrame(centered, display: false)
     }
 
     // MARK: - Setup
@@ -919,6 +941,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     private func setupAgentToolCoordinator() {
         _ = agentToolCoordinator
+        // The window is what can put a question in front of somebody, so the repair tool ends
+        // here rather than inside the type that serves tool calls. See `MainWindowLaunchRecovery`.
+        agentToolCoordinator.conversationRepairHandler = { [weak self] arguments, sessionID, done in
+            guard let self else { return done(.failure(LaunchRecoveryStrings.chatNotCreated)) }
+            self.proposeConversationRepair(arguments, for: sessionID, completion: done)
+        }
         SupervisionActionRegistry.shared.register(.init(
             spawn: { [weak self] plan, brief, sideChatParentID, managerID in
                 guard let self else {
@@ -1118,7 +1146,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         splitViewController.addSplitViewItem(displayItem)
 
         // Records the width whenever the divider moves, so a width the user chose survives
-        // a restart. The window's own frame is autosaved for the same reason.
+        // a restart. The window's own size is restored from its autosaved frame for the same
+        // reason; launch deliberately recentres that size.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(splitViewDidResize),
@@ -4442,10 +4471,10 @@ enum MainWindowDefaults {
 
 /// Remembers how wide the user left the sidebar, across launches.
 ///
-/// The window's own frame is autosaved, so a restart used to bring back the window the user
-/// arranged with the column inside it reset to 240. Same reasoning as `DisplayPaneWidth`, and
-/// the same store: this is a choice made with a divider, and a hosted test must not write it
-/// into the developer's own preferences.
+/// The window's own size is restored from its autosaved frame, so a restart used to bring back
+/// the window the user arranged with the column inside it reset to 240. Same reasoning as
+/// `DisplayPaneWidth`, and the same store: this is a choice made with a divider, and a hosted
+/// test must not write it into the developer's own preferences.
 enum SidebarWidth {
     private static let key = "ThreadingSidebarWidth"
 

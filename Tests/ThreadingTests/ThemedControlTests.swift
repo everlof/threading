@@ -7592,6 +7592,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ImageAnnotationCountView",
                 "ImageCompareCanvas",
                 "ImageCompareView",
+                "LaunchFailureView",
                 "LimitEscapeStripView",
                 "MediaInspectorCanvas",
                 "MediaInspectorDocumentView",

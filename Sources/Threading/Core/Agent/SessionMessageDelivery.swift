@@ -38,8 +38,24 @@ enum AppMessageSteerResult: Equatable, Sendable {
 @MainActor
 protocol AppMessageReceiving: AnyObject {
     var isRunning: Bool { get }
-    func acceptAppMessage(_ prompt: ConversationPrompt) -> AppMessageAcceptance
+
+    /// `origin` is what a held outbox reads back off the row it is about to hand over: a curfew's
+    /// wrap-up drains while the session is held and nothing else does. It is a requirement rather
+    /// than a defaulted parameter because Swift does not allow default arguments on protocol
+    /// requirements; the convenience below is what keeps every ordinary caller unchanged.
+    func acceptAppMessage(
+        _ prompt: ConversationPrompt,
+        origin: ConversationOutbox.Item.Origin
+    ) -> AppMessageAcceptance
+
     func steerAppMessage(_ prompt: ConversationPrompt) -> AppMessageSteerResult
+}
+
+extension AppMessageReceiving {
+    /// Almost every app-composed message is an ordinary one, delivered on the user's behalf.
+    func acceptAppMessage(_ prompt: ConversationPrompt) -> AppMessageAcceptance {
+        acceptAppMessage(prompt, origin: .user)
+    }
 }
 
 // MARK: - Session Message Delivery
@@ -189,12 +205,14 @@ enum SessionMessageDelivery {
     static func deliver(
         _ prompt: ConversationPrompt,
         to sessionID: SessionID,
+        origin: ConversationOutbox.Item.Origin = .user,
         completion: @escaping @MainActor (Outcome) -> Void
     ) {
         deliver(
             prompt,
             chat: AgentRuntime.shared.conversation(for: sessionID),
             terminal: liveTerminalTarget(for: sessionID),
+            origin: origin,
             completion: completion
         )
     }
@@ -204,9 +222,10 @@ enum SessionMessageDelivery {
         _ prompt: ConversationPrompt,
         chat: AppMessageReceiving?,
         terminal: TerminalTarget?,
+        origin: ConversationOutbox.Item.Origin = .user,
         completion: @escaping @MainActor (Outcome) -> Void
     ) {
-        let outcome = deliver(prompt, chat: chat, terminal: terminal)
+        let outcome = deliver(prompt, chat: chat, terminal: terminal, origin: origin)
         let viaTerminal = !(chat?.isRunning ?? false)
         guard outcome == .sentNow, viaTerminal, let terminal else {
             completion(outcome)
@@ -222,22 +241,32 @@ enum SessionMessageDelivery {
     /// A native conversation takes both, so the references arrive as references. A terminal has
     /// no context rail to put them in, so it is handed `transportText` — the provider-neutral
     /// envelope this repository already uses whenever context has to cross as text.
-    static func deliver(_ prompt: ConversationPrompt, to sessionID: SessionID) -> Outcome {
+    static func deliver(
+        _ prompt: ConversationPrompt,
+        to sessionID: SessionID,
+        origin: ConversationOutbox.Item.Origin = .user
+    ) -> Outcome {
         deliver(
             prompt,
             chat: AgentRuntime.shared.conversation(for: sessionID),
-            terminal: liveTerminalTarget(for: sessionID)
+            terminal: liveTerminalTarget(for: sessionID),
+            origin: origin
         )
     }
 
     /// The rules, apart from the lookups — what `SessionMessageDeliveryTests` drives.
+    ///
+    /// `origin` reaches only the native queue. A terminal has no outbox to remember it in: the
+    /// wrap-up is typed between turns, and what exempts it there is the scheduled send's own
+    /// stand-aside rather than a row's provenance.
     static func deliver(
         _ prompt: ConversationPrompt,
         chat: AppMessageReceiving?,
-        terminal: TerminalTarget?
+        terminal: TerminalTarget?,
+        origin: ConversationOutbox.Item.Origin = .user
     ) -> Outcome {
         if let chat, chat.isRunning {
-            switch chat.acceptAppMessage(prompt) {
+            switch chat.acceptAppMessage(prompt, origin: origin) {
             case .handedToTurn: return .sentNow
             case .queuedBehindTurn: return .queuedBehindTurn
             case .refused: return .notTaken

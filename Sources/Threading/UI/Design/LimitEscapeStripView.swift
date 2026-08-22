@@ -34,9 +34,15 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         /// and wearing the triangle for it would teach the reader that the triangle is sometimes
         /// negotiable. Same surface, same geometry, same two offers — a different mark, a
         /// different sentence, and a Continue that says *Anyway*.
+        ///
+        /// Two of the three are the user's own line, and they are still separate: a custom limit
+        /// is a statement about an account's spend that stands down for this turn of the window,
+        /// and a curfew is a statement about one conversation's clock that is lifted or not at
+        /// all. One button, three acts — see `continuePressed`.
         enum Source: Equatable {
             case provider
             case ownLimit
+            case curfew
         }
 
         var source: Source = .provider
@@ -58,6 +64,15 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         /// provider refused without saying, and then the clause is simply absent.
         let resetHint: String?
 
+        /// The whole of what a curfew has done to this session, already written by
+        /// `CurfewReceiptWords.stripSentence` — the deadline, the wrap-up, each interrupt, and
+        /// the honest clause where Threading cannot tell whether the session is working.
+        ///
+        /// A finished sentence rather than the parts, for the reason this struct is not a
+        /// `LimitEscapeSuggestion`: assembling a ledger out of a state, a resolution and a clock
+        /// is a judgement, and the view would be making it. Read only under `.curfew`.
+        let curfewLine: String?
+
         /// Why the offer cannot be taken, when it cannot. It replaces the sentence and dims the
         /// buttons rather than naming a different login: another account is a *new* suggestion
         /// the user can press, not something to escalate to on their behalf.
@@ -76,6 +91,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             reading: String? = nil,
             offersWaitForReset: Bool = false,
             resetHint: String? = nil,
+            curfewLine: String? = nil,
             problem: String? = nil,
             busy: LimitEscapeAction? = nil
         ) {
@@ -84,6 +100,7 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             self.reading = reading
             self.offersWaitForReset = offersWaitForReset
             self.resetHint = resetHint
+            self.curfewLine = curfewLine
             self.problem = problem
             self.busy = busy
         }
@@ -113,6 +130,11 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
     /// migrates the conversation to another login: these are different acts, and a park's Continue
     /// keeps the session exactly where it is.
     var onContinueAnyway: (() -> Void)?
+
+    /// End the curfew holding this session. Separate again from the park's answer: a park stands
+    /// down for one turn of a usage window and the rule survives, while lifting a curfew ends the
+    /// rule itself — "not tonight" rather than "just this once".
+    var onLiftCurfew: (() -> Void)?
 
     /// The offer currently drawn, or nil while the strip has nothing to say.
     private(set) var offer: Offer?
@@ -152,6 +174,14 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
     /// row. The edge-to-edge rule is what makes it pane chrome instead.
     private let separator = SeparatorView()
     private let contentAreaGuide = NSLayoutGuide()
+
+    /// Keeps the answers clear of the ✕ — and is stood down when there is no ✕ on the row, so a
+    /// curfew's Lift is not held back from an edge by a control that is not there. A hidden view
+    /// outside a stack keeps its frame, and a guard measured against one reserves its width.
+    private lazy var actionsBeforeDismiss = actions.trailingAnchor.constraint(
+        lessThanOrEqualTo: dismissButton.leadingAnchor,
+        constant: -Design.Spacing.small
+    )
 
     private lazy var minimumHeightConstraint = heightAnchor.constraint(
         greaterThanOrEqualToConstant: LimitEscapeStripDefaults.rowHeight
@@ -200,11 +230,23 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         }
 
         isHidden = false
-        mark.isHidden = offer.source == .ownLimit
-        conductMark.isHidden = offer.source != .ownLimit
+        // The triangle is the provider's alone. Both of the user's own lines — a custom limit and
+        // a curfew — wear the conduct mark instead.
+        mark.isHidden = offer.source != .provider
+        conductMark.isHidden = offer.source == .provider
         messageLabel.stringValue = Self.sentence(for: offer)
         messageLabel.toolTip = messageLabel.stringValue
         mark.setAccessibilityLabel(Self.sentence(for: offer))
+        conductMark.setAccessibilityLabel(Self.sentence(for: offer))
+
+        // **A standing state has the lift, not a wave-away.** The ✕ means "put this away until it
+        // happens again", which is the right answer to a refusal that already happened and cannot
+        // be undone. A curfew has not finished happening: it is holding the session *now*, and a
+        // dismissal would hide the one sentence saying why nothing is being sent while leaving the
+        // hold exactly where it was. The button beside it ends the thing itself, so there is
+        // nothing left for a ✕ to mean here.
+        dismissButton.isHidden = offer.source == .curfew
+        actionsBeforeDismiss.isActive = !dismissButton.isHidden
 
         // The button keeps its title and its numbers when the offer cannot be taken, and is
         // dimmed instead of removed: what it would have done is still the clearest statement of
@@ -214,9 +256,10 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         // Absence is different from refusal, and the two are drawn differently on purpose: a
         // login that *cannot be moved to* is dimmed with its reason, while a login that does not
         // exist is not a dimmed button with nothing behind it — it is simply not on the row.
-        // A park always offers its Continue Anyway, with or without a second login to move to:
-        // the rule is the user's own, so walking through it needs no destination.
-        continueButton.isHidden = !(offer.offersAccountEscape || offer.source == .ownLimit)
+        // A park always offers its Continue Anyway, and a curfew always offers its Lift, with or
+        // without a second login to move to: the rule is the user's own, so walking through it —
+        // or ending it — needs no destination.
+        continueButton.isHidden = offer.source == .provider && !offer.offersAccountEscape
         if !continueButton.isHidden {
             continueButton.title = Self.actionTitle(for: offer)
             continueButton.isEnabled = offer.offersContinuation && !offer.isBusy
@@ -295,7 +338,6 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             slot: Design.Size.inlineButtonGlyph
         )
         conductMark.imageScaling = .scaleProportionallyDown
-        conductMark.contentTintColor = Design.Text.secondary
         conductMark.translatesAutoresizingMaskIntoConstraints = false
         conductMark.isHidden = true
         conductMark.setAccessibilityElement(true)
@@ -349,9 +391,11 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
                 equalTo: messageLabel.trailingAnchor,
                 constant: Design.Spacing.medium
             ),
+            actionsBeforeDismiss,
+            // The row's own closing inset, which stands whether or not a ✕ is on it.
             actions.trailingAnchor.constraint(
-                lessThanOrEqualTo: dismissButton.leadingAnchor,
-                constant: -Design.Spacing.small
+                lessThanOrEqualTo: trailingAnchor,
+                constant: -LimitEscapeStripDefaults.contentInset
             ),
             // The plate grows with its tallest member rather than clipping it: a material that
             // states a taller control height than the row's floor must not push the button
@@ -404,6 +448,9 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         messageLabel.textColor = offer?.problem == nil
             ? Design.Text.label
             : Design.Status.warning
+        // Inked here rather than at construction, like the sentence beside it: a theme switched
+        // under a strip that is already standing has to reach the mark as well as the plate.
+        conductMark.contentTintColor = Design.Text.secondary
     }
 
     // MARK: - Copy
@@ -415,6 +462,13 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
     /// restated it as a local time would be inventing the half it does not know.
     private static func sentence(for offer: Offer) -> String {
         if let problem = offer.problem { return problem }
+        // A curfew arrives with its whole ledger already written — the deadline, the wrap-up,
+        // each interrupt — because only its owner can read a state against a clock. The fallback
+        // is the bare fact, so a line that failed to arrive still says why the session is held
+        // rather than leaving the plate blank.
+        if offer.source == .curfew {
+            return offer.curfewLine ?? L10n.string("Under a curfew")
+        }
         guard let hint = offer.resetHint, !hint.isEmpty else {
             return offer.source == .ownLimit
                 ? L10n.string("Held at your own limit")
@@ -429,6 +483,10 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
     }
 
     private static func actionTitle(for offer: Offer) -> String {
+        // **Lift**, and this one is not an exception being made: the rule is the user's own and
+        // ending it is the ordinary way it ends. Same word as the menu row that does the same
+        // thing, because here they really are one behaviour.
+        if offer.source == .curfew { return L10n.string("Lift Curfew") }
         guard let accountName = offer.accountName else {
             // **Anyway**, and the word is load-bearing: this button walks through a rule the
             // reader wrote, so it has to read as an exception rather than as a resume.
@@ -451,20 +509,30 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         guard offer.offersContinuation else { return sentence(for: offer) }
 
         var parts = [sentence(for: offer)]
-        if offer.offersAccountEscape { parts.append(actionTitle(for: offer)) }
+        // Asked the same way the button's own visibility is decided, so the spoken row and the
+        // drawn row cannot disagree about what there is to press. A park's Continue Anyway and a
+        // curfew's Lift stand with no login to name, and a reader who cannot glance at the strip
+        // is owed them.
+        if offer.offersAccountEscape || offer.source != .provider {
+            parts.append(actionTitle(for: offer))
+        }
         if offer.offersWaitForReset { parts.append(LimitEscapeStripStrings.waitToolTip) }
         return parts.joined(separator: ". ")
     }
 
     // MARK: - Actions
 
-    /// One button, two acts, chosen by whose limit stopped this. A provider refusal's Continue
+    /// One button, three acts, chosen by whose line stopped this. A provider refusal's Continue
     /// moves the conversation to another login; a park's Continue Anyway leaves it exactly where
-    /// it is and stands the user's own rule down for this turn of the window.
+    /// it is and stands the user's own rule down for this turn of the window; a curfew's Lift
+    /// ends the rule outright.
     @objc private func continuePressed() {
-        if offer?.source == .ownLimit {
+        switch offer?.source {
+        case .curfew:
+            onLiftCurfew?()
+        case .ownLimit:
             onContinueAnyway?()
-        } else {
+        case .provider, nil:
             onContinue?()
         }
     }

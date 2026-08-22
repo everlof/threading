@@ -108,6 +108,20 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
         return current + view.subviews.flatMap { all(type, in: $0) }
     }
 
+    private func glyphRenderingFrames(
+        in label: MobileMorphingTitleLabel
+    ) -> [CGRect] {
+        var frames: [CGRect] = []
+        func walk(_ layer: CALayer) {
+            if layer is CATextLayer {
+                frames.append(layer.convert(layer.bounds, to: label.layer))
+            }
+            layer.sublayers?.forEach(walk)
+        }
+        walk(label.layer)
+        return frames
+    }
+
     /// Lets SwiftUI commit its next layout pass, the way a runloop turn does in the app. The
     /// bug this file exists for lives in that pass, so a fixture that only calls
     /// `layoutIfNeeded` never sees it.
@@ -165,6 +179,30 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
             accuracy: 0.5
         )
         XCTAssertLessThan(statusLabel.bounds.width, titleLabel.bounds.width)
+    }
+
+    /// LabelMorph's raster tiles deliberately extend past each glyph's typographic advance.
+    /// The mobile wrapper clips its navigation slot, so it must reserve that overflow inside its
+    /// own bounds or the first character loses its leading pixels in the real bar.
+    func testTheConnectionStatusKeepsEveryGlyphRasterInsideItsClip() throws {
+        let status = "Trying LAN"
+        let fixture = hosted(title: "David's MacBook Pro", status: status)
+        let label = try morphingLabel(with: status, in: fixture.window)
+        let frames = glyphRenderingFrames(in: label)
+
+        XCTAssertFalse(frames.isEmpty)
+        for frame in frames {
+            XCTAssertGreaterThanOrEqual(
+                frame.minX,
+                label.bounds.minX - 0.01,
+                "the first glyph raster starts outside the clipped wrapper: \(frame)"
+            )
+            XCTAssertLessThanOrEqual(
+                frame.maxX,
+                label.bounds.maxX + 0.01,
+                "the final glyph raster ends outside the clipped wrapper: \(frame)"
+            )
+        }
     }
 
     /// Holding still must not be bought by taking a width the bar has not got. A stated width

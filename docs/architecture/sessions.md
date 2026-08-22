@@ -762,12 +762,20 @@ has an explicit model; otherwise the live/custom catalog and `/model` inside Gro
 authoritative.
 
 **A reusable opening message is part of the first turn, not a turn on every launch.**
-`AppSettings.newChatOpeningMessage` is optional app-wide context entered under Settings ▸
-General. `SessionCoordinator` trims it and appends it after the task with one blank line, then
-hands the combined text through the existing one-shot `pendingPrompt`: a terminal launch keeps
-one trailing operand, while a Native launch sends the same string over its stream. Ordinary
-sessions, side chats (including a plain fork with no question), cross-provider continuations,
-and sessions started from the paired owner device all converge there.
+`AppSettings.newChatOpeningPrefix` and `newChatOpeningSuffix` are optional app-wide context
+entered under Settings ▸ General, one field on each side of the task. `NewChatOpeningMessage`
+trims all three parts, drops the empty ones, and joins what is left with one blank line in the
+order prefix, task, suffix; `SessionCoordinator` hands the combined text through the existing
+one-shot `pendingPrompt`, so a terminal launch keeps one trailing operand while a Native launch
+sends the same string over its stream. Ordinary sessions, side chats (including a plain fork
+with no question), cross-provider continuations, and sessions started from the paired owner
+device all converge there.
+
+Two fields rather than one because the halves are read differently: text before the task frames
+how the work should be done, and text after it is an instruction about the answer — an order the
+model reads as written, which no single field lets the user express without positioning the task
+by hand. The suffix shipped first and keeps its original persistence key, `newChatOpeningMessage`,
+so an instruction already stored survives the setting growing a second field.
 
 The session title is still derived from the **per-chat task alone**. Otherwise one reusable
 instruction would give every Codex chat the same prompt-derived title while waiting for the

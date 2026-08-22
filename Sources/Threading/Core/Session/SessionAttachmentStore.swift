@@ -22,6 +22,14 @@ struct SessionAttachment: Equatable, Identifiable {
         /// Diagram *source* — Graphviz dot, Mermaid. Text, not pixels: the pane previews the
         /// source itself, since rendering would take a diagram engine the app does not carry.
         case diagram
+        /// A movie — a screen recording, a simulator capture, a clip an agent produced.
+        ///
+        /// A kind of its own rather than a `.media` registration, because the host *does* carry
+        /// this engine: `VideoDocumentRenderer` plays it with the platform's own audiovisual
+        /// stack. `.media` means "no native preview exists for this"; a movie has one, and filing
+        /// it under the fallback would hide a playable file behind an extension that may never be
+        /// installed.
+        case video
         /// A document Threading has no *native* preview for: a format an extension registered, or
         /// an ambiguous one the host's own probe recognized — a bare JSON Lottie is both a `.json`
         /// and an animation, and only the bytes can say which.
@@ -1610,6 +1618,18 @@ enum AttachmentReferenceDetector {
     private static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"
     ]
+    /// What the platform's audiovisual stack actually plays, which is a shorter list than the
+    /// one people mean by "video".
+    ///
+    /// `webm`, `mkv` and `avi` are deliberately absent: AVFoundation opens none of them, so
+    /// admitting one would put a row in the pane whose preview could only ever say it cannot be
+    /// played — and would take that file's name off the terminal line where the user can still
+    /// open it in something that can. The gate is the *name* here and playability is confirmed by
+    /// the decoder at preview time, because an extension is a claim and a container is not
+    /// obliged to honour it.
+    private static let videoExtensions: Set<String> = [
+        "mov", "mp4", "m4v"
+    ]
     private static let archiveExtensions: Set<String> = [
         "zip", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "7z", "rar"
     ]
@@ -1630,6 +1650,7 @@ enum AttachmentReferenceDetector {
     static let registrableExtensions: Set<String> = ["lottie"]
     private static let extensions =
         imageExtensions.sorted() + ["pdf", "html", "htm"]
+            + videoExtensions.sorted()
             + archiveExtensions.sorted() + documentExtensions.sorted()
             + diagramExtensions.sorted()
             + registrableExtensions.sorted()
@@ -1741,6 +1762,7 @@ enum AttachmentReferenceDetector {
         if imageExtensions.contains(ext) { return .image }
         if ext == "pdf" { return .pdf }
         if ext == "html" || ext == "htm" { return .html }
+        if videoExtensions.contains(ext) { return .video }
         if archiveExtensions.contains(ext) { return .archive }
         if documentExtensions.contains(ext) { return .document }
         if diagramExtensions.contains(ext) { return .diagram }

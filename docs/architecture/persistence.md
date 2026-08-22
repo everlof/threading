@@ -509,7 +509,10 @@ Two prefixes stay uncovered on purpose:
 **Ending a launch is gated on having begun one, in `EventLog` itself.** The marker is a single
 file and more than one process reaches a quit path here: the instance that loses the
 single-instance lock puts up an alert and terminates, and the lock fails open, so two live
-instances are possible rather than impossible. Removing the file from a process that never wrote
+instances are possible rather than impossible. The lock file also carries an owner card and has a
+heartbeat beside it now, and a loser can end an owner that has stopped answering rather than only
+quitting — see [`crash-recovery.md`](crash-recovery.md), including why a launch that took the lock
+over reads the killed owner's marker as an unclean exit and why that is intended. Removing the file from a process that never wrote
 it would tell the *running* instance's next launch that its crash had been a clean quit — the one
 thing the marker exists to catch. So `beginLaunch` mints a per-launch token, writes it into the
 marker and holds it; `endLaunch` refuses outright without one, and removes only a file still

@@ -101,6 +101,17 @@ final class AgentChildLedger: @unchecked Sendable {
         }
     }
 
+    /// The same list, read without consuming it.
+    ///
+    /// One caller, and it is the one that cannot use the consuming read: a launch refused the
+    /// single-instance lock has not reached `OrphanedAgentChildSweep` — that runs *after* the
+    /// lock is taken, which is exactly the deadlock when the previous launch's orphans are the
+    /// ones holding it. Emptying the ledger from a process that is about to quit would rob the
+    /// launch that does get in of the only record of what is still running.
+    func inheritedRecords() -> RecoverableStoreLoadOutcome<[AgentChildRecord]> {
+        queue.sync { store.load(defaultValue: []) }
+    }
+
     /// Records a child that has just been spawned. Returns whether the record reached disk — a
     /// caller cannot do anything about a refusal, but a test can assert one.
     @discardableResult

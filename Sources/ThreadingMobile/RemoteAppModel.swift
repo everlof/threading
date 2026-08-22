@@ -26,6 +26,15 @@ enum MobileNavigationRoute: Hashable {
     }
 }
 
+/// When a recoverable route miss becomes a settled, actionable dashboard failure.
+///
+/// One miss is ordinary network movement and the automatic retry already owns it. Three
+/// consecutive bounded route races are enough to say that the Mac is unavailable *for now*
+/// without flashing the full recovery surface between every backoff attempt.
+enum MobileConnectionRecoveryPolicy {
+    static let settledFailureAttempt = 3
+}
+
 @MainActor
 final class RemoteAppModel: ObservableObject {
     enum Phase: Equatable {
@@ -56,6 +65,10 @@ final class RemoteAppModel: ObservableObject {
             total: Int
         )
         case loadingSessions(routeKind: String)
+        /// One complete bounded route race ended, but automatic recovery is already scheduled.
+        /// This is not yet the settled recovery surface: the dashboard keeps the same compact
+        /// progress anatomy and says exactly why it is waiting.
+        case waitingToRetry(attempt: Int)
     }
 
     @Published private(set) var hosts: [PairedRemoteHost] {
@@ -120,7 +133,10 @@ final class RemoteAppModel: ObservableObject {
     private var themeEventsHostID: String?
     private var themeEventsGeneration = 0
     private var themeEventsRecoveryTask: Task<Void, Never>?
-    private var themeEventsRecoveryAttempt = 0
+    /// Consecutive automatic recovery waits since the last successful catalogue/event socket.
+    /// The dashboard uses the count to keep a transient miss in compact progress chrome and
+    /// disclose the full recovery surface only after repeated bounded attempts.
+    @Published private(set) var connectionRecoveryAttempt = 0
     private var themeEventsDidReceiveHello = false
     private var themeEventsStartedAt: UInt64?
     private var themeEventsDiagnosticFields: [RemoteDiagnosticField: String] = [:]
@@ -143,6 +159,11 @@ final class RemoteAppModel: ObservableObject {
     private static let sessionDeltaCoalescingDelay = Duration.milliseconds(50)
     private static let themeEventsHelloDeadline = Duration.seconds(15)
     private static let maximumThemeEventsRecoveryDelay: TimeInterval = 60
+#if DEBUG
+    var mobileDebugAuthenticatedEventsTask: URLSessionWebSocketTask? {
+        themeEventsDidReceiveHello ? themeEventsTask : nil
+    }
+#endif
 
     init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
         self.continuity = continuity
@@ -229,6 +250,9 @@ final class RemoteAppModel: ObservableObject {
             if demoMode == "sessions-offline" {
                 me = nil
                 phase = .offline(.transport(URLError(.timedOut), host: link.baseURL.host))
+                // This fixture is the settled recovery state, after automatic retries have had
+                // their chance. `isDemo` prevents another attempt from being scheduled.
+                connectionRecoveryAttempt = MobileConnectionRecoveryPolicy.settledFailureAttempt
             } else if demoMode == "sessions-connecting" {
                 me = nil
                 phase = .connecting
@@ -262,6 +286,9 @@ final class RemoteAppModel: ObservableObject {
         }
         activeHostID = restoredHostID ?? loaded.first?.id
         continuity.setActiveHostID(activeHostID)
+#if DEBUG
+        MobileDebugIncidentRecorder.shared.attach(self)
+#endif
     }
 
     // MARK: - The demo
@@ -737,6 +764,9 @@ final class RemoteAppModel: ObservableObject {
                 return
             }
             me = response
+            if connectionRecoveryAttempt != 0 {
+                connectionRecoveryAttempt = 0
+            }
             phase = .online
             restoreRouteIfPossible(hostID: hostID, response: response)
             MobileDiagnostics.recordConnectivity(
@@ -2117,7 +2147,7 @@ final class RemoteAppModel: ObservableObject {
             .socketConnecting,
             fields: themeEventFields(phase: "events.hello").merging([
                 .result: "started",
-                .attempt: String(themeEventsRecoveryAttempt + 1),
+                .attempt: String(connectionRecoveryAttempt + 1),
                 .timeoutMS: MobileDiagnostics.milliseconds(Self.themeEventsHelloDeadline),
                 .protocolVersion: String(RemoteProtocol.current),
                 .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
@@ -2171,11 +2201,16 @@ final class RemoteAppModel: ObservableObject {
                         .socketConnected,
                         fields: themeEventFields(phase: "events.hello").merging([
                             .result: "succeeded",
-                            .attempt: String(themeEventsRecoveryAttempt + 1),
+                            .attempt: String(connectionRecoveryAttempt + 1),
                         ]) { _, new in new }
                     )
+#if DEBUG
+                    sendMobileDebugHello(on: task)
+#endif
                 }
-                themeEventsRecoveryAttempt = 0
+                if connectionRecoveryAttempt != 0 {
+                    connectionRecoveryAttempt = 0
+                }
                 switch envelope.type {
                 case "appTheme":
                     if let update = try? JSONDecoder().decode(
@@ -2207,6 +2242,15 @@ final class RemoteAppModel: ObservableObject {
                     ) {
                         RemoteNotificationBridge.received(event, connectionID: hostID)
                     }
+#if DEBUG
+                case "mobileDebugCaptureRequest":
+                    if let request = try? JSONDecoder().decode(
+                        RemoteMobileDebugCaptureRequestDTO.self,
+                        from: data
+                    ) {
+                        await performMobileDebugCapture(request, hostID: hostID)
+                    }
+#endif
                 default:
                     continue
                 }
@@ -2254,7 +2298,9 @@ final class RemoteAppModel: ObservableObject {
         clearThemeEventSocket(reason: "owner")
         themeEventsRecoveryTask?.cancel()
         themeEventsRecoveryTask = nil
-        themeEventsRecoveryAttempt = 0
+        if connectionRecoveryAttempt != 0 {
+            connectionRecoveryAttempt = 0
+        }
         sessionsChangedRefreshGeneration &+= 1
         sessionsChangedRefreshTask?.cancel()
         sessionsChangedRefreshTask = nil
@@ -2289,18 +2335,21 @@ final class RemoteAppModel: ObservableObject {
     private func scheduleThemeEventsRecovery(for hostID: String) {
         guard !isDemo, activeHostID == hostID, themeEventsTask == nil,
               themeEventsRecoveryTask == nil else { return }
-        let exponent = min(themeEventsRecoveryAttempt, 6)
+        let exponent = min(connectionRecoveryAttempt, 6)
         let delay = min(
             pow(2, Double(exponent)),
             Self.maximumThemeEventsRecoveryDelay
         )
-        themeEventsRecoveryAttempt &+= 1
+        connectionRecoveryAttempt &+= 1
+        if case .offline = phase {
+            connectionProgress = .waitingToRetry(attempt: connectionRecoveryAttempt)
+        }
         if !themeEventsDiagnosticFields.isEmpty {
             MobileDiagnostics.recordConnectivity(
                 .socketReconnectScheduled,
                 fields: themeEventFields(phase: "events.backoff").merging([
                     .result: "scheduled",
-                    .attempt: String(themeEventsRecoveryAttempt + 1),
+                    .attempt: String(connectionRecoveryAttempt + 1),
                     .delayMS: MobileDiagnostics.milliseconds(delay),
                 ]) { _, new in new }
             )
@@ -2548,6 +2597,42 @@ final class RemoteAppModel: ObservableObject {
         material: .init(
             panelRadius: 22,
             controlRadius: 11,
+            borderWidth: 1
+        )
+    )
+
+    /// Deterministic projection of the System-theme seam that matters to floating chrome.
+    /// `panel` is intentionally only a label wash, while the Mac-resolved floating role is an
+    /// opaque control surface. This is an evidence sentinel, not a snapshot of OS-owned pixels.
+    static let demoSystemRemoteTheme = RemoteThemeDTO(
+        id: "system-remote",
+        name: "System remote",
+        mode: "dark",
+        colors: [
+            "ground": "#1E1E1E",
+            "surface": "#1E1E1E",
+            "panel": "#FFFFFF0D",
+            "elevated": "#2C2C2E",
+            "floating_surface": "#2C2C2E",
+            "control_resting": "#FFFFFF12",
+            "control_hover": "#FFFFFF20",
+            "border": "#FFFFFF1A",
+            "divider": "#FFFFFF0D",
+            "label": "#FFFFFF",
+            "secondary_label": "#FFFFFFB2",
+            "tertiary_label": "#FFFFFF73",
+            "accent": "#0A84FF",
+            "accent_muted": "#0A84FF2E",
+            "selection": "#0A84FF4D",
+            "status_positive": "#30D158",
+            "status_warning": "#FFD60A",
+            "status_negative": "#FF453A",
+            "diff_added": "#30D158",
+            "diff_removed": "#FF453A",
+        ],
+        material: .init(
+            panelRadius: 14,
+            controlRadius: 8,
             borderWidth: 1
         )
     )

@@ -757,6 +757,14 @@ enum SessionActionMenuDefaults {
     }
 
     static let limitRecoverySymbol = "clock.arrow.circlepath"
+
+    /// The fold holding when this chat stops being spent.
+    ///
+    /// One word, and the same one the strip, the chip and Settings use: a curfew is a thing the
+    /// user set, not a description of what happens under it. "End this session at…" would read
+    /// as a command performed on press rather than a standing rule with a submenu, which is the
+    /// distinction the fold beside it (`limitRecoveryMenuTitle`) was named for too.
+    static var curfewMenuTitle: String { L10n.string("Curfew") }
 }
 
 // MARK: - Session Row Actions
@@ -1095,6 +1103,10 @@ extension ProjectSidebarViewController {
         if let remote = remoteControlEntry(for: session) { submenu.append(remote) }
         submenu.append(muteEntry(for: session))
         submenu.append(limitRecoveryEntry(for: session))
+        // Beside the limit fold rather than after Attachments: both answer "what happens to this
+        // chat when nobody is watching", and the pair reads as one subject — the difference being
+        // only whether the clock that stops it is the provider's or the user's.
+        submenu.append(curfewEntry(for: session))
         submenu.append(attachmentsEntry())
         return .item(ThemedMenuItem(
             title: SessionActionMenuDefaults.sessionOptionsTitle,
@@ -1215,6 +1227,94 @@ extension ProjectSidebarViewController {
             policy == inherited ? nil : policy,
             forSessionID: sessionID
         ).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
+        reload()
+    }
+
+    /// When this conversation stops being spent, offered on the row that names it.
+    ///
+    /// The rows themselves are `CurfewMenu`'s, because the composer's button and the chat's chip
+    /// ask exactly this question and a third copy of the vocabulary here would be a third place
+    /// for "Follow quiet hours" to say something slightly different. What this call site owns is
+    /// the two facts the menu refuses to fetch for itself: the resolved answer, which needs the
+    /// store this sidebar was handed, and the usage reading, which is a **cached** one.
+    ///
+    /// **The reading is not refreshed here**, unlike the conversation's own schedule menu. That
+    /// menu opens when somebody has decided to schedule something; this fold is built on every
+    /// right-click and every press of a row's `⋯`, and kicking a provider fetch on each of those
+    /// would spend a network round trip to qualify rows nobody opened. A stale reading offers a
+    /// window's reset one refresh late; an eager one costs on every menu in the sidebar.
+    private func curfewEntry(for session: AgentSession) -> ThemedMenuEntry {
+        let account = AgentAccountDiscovery.account(
+            for: session.kind,
+            handle: session.accountHandle
+        )
+        return .item(ThemedMenuItem(
+            title: SessionActionMenuDefaults.curfewMenuTitle,
+            image: ThemedMenuIcon.symbol(CurfewDefaults.symbol),
+            submenu: CurfewMenu.entries(
+                usage: account.flatMap { AccountUsageService.shared.usage(for: $0) },
+                metering: session.model,
+                quietHours: CurfewSettings.shared.preferences.quietHours,
+                resolved: CurfewResolution.answer(forSessionID: session.id, in: projectStore),
+                holds: CurfewHoldPolicy.isHeld(sessionID: session.id, in: projectStore),
+                onChoose: { [weak self] choice in self?.chooseCurfew(choice) }
+            )
+        ))
+    }
+
+    /// Carries out one chosen row.
+    ///
+    /// Every write goes through `SessionCurfewCenter` rather than straight to the store: arming
+    /// a fence is only half of it, and the half this menu cannot do is settle the session against
+    /// the clock — a deadline already past has to take hold the moment it is written, not at the
+    /// next timer tick. Lifting is the centre's for a sharper reason still: "not tonight" and
+    /// "never" are different writes, and which one a lift is depends on where the curfew came
+    /// from, which is a question only the resolution chain can answer.
+    private func chooseCurfew(_ choice: CurfewMenu.Choice) {
+        guard let sessionID = actionSessionID else { return }
+
+        switch choice {
+        case .at(let deadline), .atQuietHours(let deadline):
+            // Both are stored as the moment, the standing window's next opening included: a
+            // session already running is armed *now*, so what it gets is the time the menu named.
+            // Late resolution — "whenever quiet hours next begin", read again at fire time —
+            // belongs to a plan for a session that has not started yet.
+            setCurfew(.until(deadline), forSessionID: sessionID)
+        case .exempt:
+            // Nil where the answer already matches what would have been inherited, so a chat
+            // keeps *following* its checkout and Settings and a later change there still reaches
+            // it — `chooseLimitRecovery`'s rule, and the reason the field is optional. Exempt
+            // from a window nobody has set up is what saying nothing already does.
+            let inherited = CurfewResolution.inherited(
+                beyondSessionID: sessionID,
+                in: projectStore
+            )
+            setCurfew(inherited == nil ? nil : .exempt, forSessionID: sessionID)
+        case .inherit:
+            setCurfew(nil, forSessionID: sessionID)
+        case .lift:
+            SessionCurfewCenter.shared.lift(sessionID: sessionID)
+            reload()
+        case .custom:
+            ScheduleMomentPickerViewController.present(
+                over: self,
+                title: L10n.string("End this session"),
+                confirmTitle: L10n.string("Set Curfew")
+            ) { [weak self] deadline in
+                guard let self, let deadline else { return }
+                self.setCurfew(.until(deadline), forSessionID: sessionID)
+            }
+        }
+    }
+
+    private func setCurfew(_ rule: CurfewRule?, forSessionID sessionID: SessionID) {
+        guard SessionCurfewCenter.shared
+            .setCurfew(rule, forSessionID: sessionID)
+            .succeeded else {
             reload()
             presentProjectNotice(L10n.string("The project data could not be saved."))
             return
