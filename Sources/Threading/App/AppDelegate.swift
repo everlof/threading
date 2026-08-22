@@ -136,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
     private var workspaceNavigatorMenu: NSMenu?
     private var commandPaletteController: CommandPaletteViewController?
+    private var agentCLIUpdateCoordinator: AgentCLIUpdateCoordinator?
 
     /// The same semantic catalog and invocation route feeds menus, shortcuts and the palette.
     /// It deliberately re-resolves window context each time either closure runs.
@@ -581,6 +582,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // restoration and the scheduled-message services live.
         guard plan.startsBackgroundServices else { return }
 
+        // One sweep of the runtime inventory, at most once a day and re-checked while the app
+        // keeps running. Process and network work stay off-main; a found result waits for a
+        // visible, active main window before its toast clock starts.
+        let agentCLIUpdateCoordinator = AgentCLIUpdateCoordinator(
+            canPresent: { [weak self, weak mainWindowController] in
+                guard let self else { return false }
+                return NSApp.isActive
+                    && !self.isOnboardingActive
+                    && mainWindowController?.window?.isVisible == true
+            },
+            present: { [weak mainWindowController] updates, updatesDidStart in
+                mainWindowController?.presentAgentCLIUpdates(updates, didStart: updatesDidStart)
+            }
+        )
+        self.agentCLIUpdateCoordinator = agentCLIUpdateCoordinator
+        agentCLIUpdateCoordinator.start()
+
         // Fills empty icon slots in the background; it observes the store from here on, so
         // projects added later are swept as they appear.
         ProjectIconDiscovery.shared.start()
@@ -894,6 +912,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         isOnboardingActive = false
         NSApp.activate(ignoringOtherApps: true)
 
+        agentCLIUpdateCoordinator?.presentationMayBeReady()
         restoreSelectedSessionIfReady()
     }
 
@@ -1029,6 +1048,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         mainWindowController.resumeRemoteSession(sessionID)
         return true
+    }
+
+    @MainActor
+    func resumeRemoteTerminal(_ terminalID: TerminalID) -> Bool {
+        guard ownsSingleInstanceLock,
+              ProjectStore.shared.terminal(withID: terminalID) != nil,
+              let mainWindowController else {
+            return false
+        }
+        mainWindowController.resumeRemoteTerminal(terminalID)
+        return true
+    }
+
+    @MainActor
+    func moveRemoteSession(
+        _ sessionID: SessionID,
+        to accountHandle: AccountHandle
+    ) -> Result<Void, RemoteSessionAccountMoveFailure> {
+        guard ownsSingleInstanceLock, let mainWindowController else {
+            return .failure(.appUnavailable)
+        }
+        guard let session = ProjectStore.shared.session(withID: sessionID) else {
+            return .failure(.sessionNotFound)
+        }
+        guard session.kind.supportsAccounts else {
+            return .failure(.unsupportedRuntime)
+        }
+        guard session.accountHandle != accountHandle else { return .success(()) }
+        guard let account = AgentAccountDiscovery.accounts(for: session.kind).first(where: {
+            $0.handle == accountHandle
+        }) else {
+            return .failure(.accountNotFound)
+        }
+
+        switch SessionMigration.move(sessionID: sessionID, to: account) {
+        case .success:
+            mainWindowController.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+            return .success(())
+        case .failure(let error):
+            return .failure(.moveRefused(error.message))
+        }
     }
 
     @MainActor

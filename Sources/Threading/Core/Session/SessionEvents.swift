@@ -106,3 +106,26 @@ struct ScheduledMessagesWereMissed: AppEvent {
     static let name = Notification.Name("scheduledMessagesWereMissed")
     let ids: [ScheduledMessageID]
 }
+
+/// One session's curfew moved: the rule it follows, or the state that rule has reached.
+///
+/// Carries the identity, unlike `ScheduledMessagesDidChange`, because everything that listens is
+/// about one session — the escape strip, the row's conduct mark, the chat's chip — and the two
+/// consumers that *act* on it, the scheduler standing aside and the outbox drain, ask about one
+/// target at a time. A list-shaped event would have every row re-resolving a chain that moved
+/// for one of them.
+struct CurfewDidChange: AppEvent {
+    static let name = Notification.Name("curfewDidChange")
+    let sessionID: SessionID
+}
+
+/// A curfew's grace has run out on a natively rendered turn that is still going.
+///
+/// Announced rather than performed, for `ScheduledMessageDidBecomeDue`'s reason: the engine that
+/// decides this lives in Core and knows nothing about conversation surfaces, while stopping a
+/// turn is a gesture on one. `SessionCoordinator` performs it and reports back what became of it,
+/// which is what the curfew counts its interrupts from.
+struct CurfewInterruptRequested: AppEvent {
+    static let name = Notification.Name("curfewInterruptRequested")
+    let sessionID: SessionID
+}

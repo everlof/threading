@@ -243,6 +243,13 @@ still reaches it. The check still reads the **resolved** answer rather than the 
 because an unmarked list on a chat that will in fact continue by itself states the opposite of what
 happens.
 
+The iPhone's owner-only Chat Settings sheet is another writer of that same chat-scoped record, not
+a mobile recovery engine. The Mac sends the resolved answer as one optional scalar, the phone
+chooses among the same outcomes, and the server writes nil when the requested answer equals the
+project/app inheritance. Detection, chooser answering, scheduling, ranking, migration budgets and
+diagnostics therefore remain on the Mac. Guest summaries omit the answer and guest mutations are
+denied.
+
 **Only a chat's own menu names a login.** `resumeVia` carries an `AccountID`, and a login belongs
 to exactly one runtime while a checkout hosts chats of several and Settings speaks for all of them
 — so those two scopes offer `LimitRecoveryPolicy.runtimeNeutralChoices`, whose third entry means

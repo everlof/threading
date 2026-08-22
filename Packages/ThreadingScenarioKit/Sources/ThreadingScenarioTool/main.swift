@@ -8,7 +8,7 @@ enum ScenarioToolError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .usage:
-            return "usage: threading-scenario validate <scenario.json> [...] | replay <scenario.json> --scenario-root <directory>"
+            return "usage: threading-scenario validate <scenario.json> [...] | replay <scenario.json> --scenario-root <directory> | terminal-fixture <codex|claude> [--history-lines <count>]"
         case .privacyFindings(let url, let findings):
             let summary = findings
                 .map { "step \($0.step): \($0.kind.rawValue)" }
@@ -43,6 +43,27 @@ do {
             scenarioRoot: URL(fileURLWithPath: arguments[3], isDirectory: true)
         )
         exit(status)
+
+    case "terminal-fixture" where arguments.count == 2 || arguments.count == 4:
+        guard let provider = TerminalWireFixtureProvider(rawValue: arguments[1]) else {
+            throw ScenarioToolError.usage
+        }
+        let historyLines: Int
+        if arguments.count == 4 {
+            guard arguments[2] == "--history-lines",
+                  let value = Int(arguments[3]),
+                  value > 0,
+                  value <= TerminalWireFixture.maximumHistoryLines else {
+                throw ScenarioToolError.usage
+            }
+            historyLines = value
+        } else {
+            historyLines = TerminalWireFixture.defaultHistoryLines
+        }
+        exit(try TerminalWireFixtureRunner.run(
+            provider: provider,
+            historyLines: historyLines
+        ))
 
     default:
         throw ScenarioToolError.usage

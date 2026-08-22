@@ -126,16 +126,13 @@ final class PaneFoldDivider: ThemedControl {
 
     /// Three rects rather than one over another: overlapping cursor rects are resolved by an order
     /// AppKit does not promise, and the corner's whole job is to say it is not the plain fold.
-    override func resetCursorRects() {
-        var band = bounds
-        for side in [ThemedSplitView.Side.leading, .trailing] {
-            guard let corner = cornerRect(on: side) else { continue }
-            addCursorRect(corner, cursor: Self.cornerCursor(on: side))
-            if side == .leading { band.origin.x = corner.maxX }
-            band.size.width -= corner.width
-        }
-        guard band.width > 0 else { return }
-        addCursorRect(band, cursor: .resizeUpDown)
+    /// The corners first, then the band under the whole seam. Stated in that order the band no
+    /// longer has to be trimmed around them by hand: a claim wins the ground it shares with a
+    /// later one, and `PointerClaiming` carves the rest. See `PointerClaiming`.
+    override var pointerClaims: [PointerClaim] {
+        [ThemedSplitView.Side.leading, .trailing].compactMap { side in
+            cornerRect(on: side).map { PointerClaim($0, Self.cornerCursor(on: side)) }
+        } + [PointerClaim(bounds, .resizeUpDown)]
     }
 
     // MARK: - The Corner

@@ -102,6 +102,29 @@ enum Design {
         static let group = Spacing.large
     }
 
+    // MARK: - Layout Priority
+
+    /// The layout priorities this app names rather than spells, because each of them is a rule
+    /// about *meaning* that a bare number hides.
+    enum Priority {
+
+        /// For content that has already said it may be shortened — a truncating label, a strip
+        /// that scrolls — so that saying it is enough to make it true.
+        ///
+        /// `fittingSize` resolves at `.fittingSizeCompression` (50), and an ordinary view's
+        /// resistance is 750: held inside its container by a required `<=`, such content is
+        /// still a **measurement** there, whatever its line-break mode or its scrolling says.
+        /// Its text becomes the smallest width its pane is allowed to be — and a pane minimum in
+        /// a split window is the *window's* minimum. The display panel's floor has moved with a
+        /// placeholder sentence, a file name, the widest tab title and a chart title in turn,
+        /// each found the same way: a window whose smallest size depends on what is open in it.
+        /// Below the fitting-size pass the content shortens instead of pushing, and the tooltip
+        /// or the accessibility value carries the rest.
+        static let belowFittingSize = NSLayoutConstraint.Priority(
+            NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1
+        )
+    }
+
     // MARK: - Radius
 
     @MainActor
@@ -948,6 +971,16 @@ enum Design {
         /// two-thousand-point row in a conversation, which is a scroll, not a chart.
         static let minimumCardHeight: CGFloat = 160
         static let maximumCardHeight: CGFloat = 720
+        /// The tallest a plot may stand for its own width before the height stops being
+        /// resolution and starts being stretch.
+        ///
+        /// Two, rather than square, because a chart *is* allowed to be portrait: a pane is a
+        /// tall rectangle and a column chart read in one is the ordinary case, not the odd one.
+        /// The cap is there for what happens past that — a panel dragged narrow was drawing 700
+        /// points of column over 120 points of plot, bars reduced to threads with no room under
+        /// them for the names of the categories they measure. At two-to-one the extra height has
+        /// stopped adding anything a reader gets to use, so the chart leaves it to the pane.
+        static let maximumPlotAspect: CGFloat = 2
         static let rankingRowHeight: CGFloat = 32
         static let legendHeight: CGFloat = 16
         static let legendSwatch: CGFloat = 8
@@ -1026,6 +1059,25 @@ enum Design {
                 return Design.Categorical.hue(at: index).color
             }
         }
+    }
+
+    // MARK: - Workload analyzer
+
+    /// The compact spectrum display that may replace the sidebar identity under a player
+    /// material. Its geometry is fixed and bounded independently of session count: the exact
+    /// count is printed beside seven visual bands rather than materializing one view per agent.
+    enum WorkloadAnalyzer {
+        static let size = NSSize(width: 86, height: 24)
+        static let contentInset = Spacing.tight
+        static let bandCount = 7
+        static let cellCount = 6
+        static let bandWidth: CGFloat = 5
+        static let bandGap: CGFloat = 2
+        static let cellHeight: CGFloat = 2
+        static let cellGap: CGFloat = 1
+        static let readingGap = Spacing.small
+        static let readingWidth: CGFloat = 15
+        static let peakHeight: CGFloat = 1
     }
 
     enum UsageDashboard {
@@ -1960,19 +2012,22 @@ enum Design {
         /// rest or under Reduce Motion.
         static var brandParticleWeaveCycle: TimeInterval { reducesMotion ? 0 : 1.45 }
         static var brandParticleBreathCycle: TimeInterval { reducesMotion ? 0 : 1.8 }
-        /// Weave answers an ordinary pass immediately. Rotation is earned by a deliberate
+        /// Weave answers an ordinary pass immediately. A tumble is earned by a deliberate
         /// dwell, late enough that crossing the sidebar never turns the brand into ambient
         /// motion, but soon enough to reward someone inspecting the implied box.
         static var brandParticleHoverHold: TimeInterval { reducesMotion ? 0 : 0.9 }
-        /// Once that dwell is earned, the complete particle box makes one perspective turn.
-        /// It is distinct from Orbit's planar strand-step: the dots keep weaving locally while
-        /// their shared parent turns in depth.
-        static var brandParticleBoxTurnCycle: TimeInterval { reducesMotion ? 0 : 2.8 }
+        /// Once that dwell is earned, the complete particle box follows a long, irregular closed
+        /// tumble. It is distinct from Orbit's planar strand-step: the dots keep weaving locally
+        /// while their shared parent changes direction across all three axes in depth.
+        static var brandParticleBoxTumbleCycle: TimeInterval { reducesMotion ? 0 : 7.6 }
         /// Exactly one strand-step per cycle keeps the rotating particle mark seamless: its
         /// six-fold silhouette at the end is the silhouette it had at the beginning.
         static var brandParticleOrbitCycle: TimeInterval { reducesMotion ? 0 : 2.4 }
         /// The outer dots answer a press first; this is the whole outer-to-core cascade.
         static var brandParticlePressCascade: TimeInterval { reducesMotion ? 0 : 0.1 }
+        /// The player workload analyzer advances in deliberately stepped display frames. It is
+        /// zero under Reduce Motion, which removes the driver instead of drawing identical frames.
+        static var workloadAnalyzerFrameInterval: TimeInterval { reducesMotion ? 0 : 0.1 }
     }
 
     // MARK: - Opacity

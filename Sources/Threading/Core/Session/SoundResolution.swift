@@ -370,11 +370,9 @@ extension SoundResolution {
             if let scope = Scope(storedOverrides: store.terminal(withID: terminalID)?.soundOverrides) {
                 scopes.append(scope)
             }
-            // The **home** project rather than the cwd-derived one the theme resolves through.
-            // `displayProject` runs `GitInfo.worktreeIdentity` per project, which is a child
-            // process, and a bell arrives as fast as a program can write a byte. The record
-            // that persists the terminal is the one that answers for it, and the submenu reads
-            // the same scope so what it says is what rings.
+            // The record that persists the terminal is the project that answers for it. This
+            // lookup stays O(1), which matters because a bell arrives as fast as a program can
+            // write a byte, and it matches the same ownership used by themes and placement.
             if let scope = Scope(
                 storedOverrides: store.homeProject(forTerminalID: terminalID)?.soundOverrides
             ) {

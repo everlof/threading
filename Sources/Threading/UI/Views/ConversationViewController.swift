@@ -591,6 +591,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             guard let self, event.sessionID == self.sessionID else { return }
             self.refreshLimitEscapeStrip()
         }
+        // A curfew engaging or being lifted is the one thing that moves the queue's hold without
+        // anything else changing: no usage reading moved, no suggestion arrived. Without this,
+        // a lifted curfew would leave the messages behind it sitting until the next turn ended.
+        //
+        // The strip's own curfew line is not read here yet — `refreshLimitEscapeStrip` has no
+        // curfew source until the strip gains one, and this call site is where its refresh goes.
+        appEvents.observe(CurfewDidChange.self) { [weak self] event in
+            guard let self, event.sessionID == self.sessionID else { return }
+            self.flushOutboxIfReady()
+        }
         refreshLimitEscapeStrip()
     }
 
@@ -643,6 +653,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// When the user's hand last touched the scroll view, so a bounds change can be read as
     /// theirs rather than as one of our own scrolls landing.
     var lastUserScrollAt: TimeInterval = 0
+    private var hasBracketedLiveScroll = false
+    private var userScrollEndedAwaitingElasticSettle = false
+    private var legacyUserScrollEndWorkItem: DispatchWorkItem?
     private var viewportSaveWorkItem: DispatchWorkItem?
     private var didRestoreContinuityViewport = false
 
@@ -1440,27 +1453,84 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             object: scrollView.contentView
         )
 
-        // Both roads a gesture arrives by: wheel and trackpad through the scroll view's own
-        // event, scroller-thumb drags through the live-scroll notifications. Programmatic
-        // scrolls pass through neither, which is what lets a bounds change be attributed.
+        // The event seam timestamps every wheel and momentum event before its bounds change.
+        // AppKit brackets gesture scrolls and scroller tracking with live-scroll notifications;
+        // legacy mice are explicitly not guaranteed that pair, so their events use the existing
+        // short attribution window as an end fallback. Programmatic scrolls pass through neither.
         scrollView.onUserScroll = { [weak self] in
-            self?.lastUserScrollAt = ProcessInfo.processInfo.systemUptime
+            self?.userScrollEventArrived()
         }
-        for name in [
+        appEvents.observe(
             NSScrollView.willStartLiveScrollNotification,
-            NSScrollView.didLiveScrollNotification
-        ] {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(userScrolled),
-                name: name,
-                object: scrollView
-            )
+            object: scrollView
+        ) { [weak self] in
+            self?.userScrollWillStart()
+        }
+        appEvents.observe(NSScrollView.didLiveScrollNotification, object: scrollView) {
+            [weak self] in
+            self?.userScrollEventArrived()
+        }
+        appEvents.observe(NSScrollView.didEndLiveScrollNotification, object: scrollView) {
+            [weak self] in
+            self?.userScrollDidEnd()
         }
     }
 
-    @objc private func userScrolled() {
+    private func userScrollWillStart() {
+        legacyUserScrollEndWorkItem?.cancel()
+        legacyUserScrollEndWorkItem = nil
+        hasBracketedLiveScroll = true
+        beginUserScroll()
+    }
+
+    private func userScrollEventArrived() {
         lastUserScrollAt = ProcessInfo.processInfo.systemUptime
+        guard !hasBracketedLiveScroll else { return }
+        beginUserScroll()
+
+        // AppKit documents legacy mice as the exception to its start/end notification pair.
+        // Treat quiet after their last event as the end, while bracketed gestures always wait
+        // for AppKit's authoritative did-end notification.
+        legacyUserScrollEndWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.hasBracketedLiveScroll else { return }
+            self.legacyUserScrollEndWorkItem = nil
+            self.finishUserScrollWhenSettled()
+        }
+        legacyUserScrollEndWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + ConversationDefaults.gestureAttribution,
+            execute: work
+        )
+    }
+
+    private func beginUserScroll() {
+        lastUserScrollAt = ProcessInfo.processInfo.systemUptime
+        userScrollEndedAwaitingElasticSettle = false
+        autoScroll.noteUserScrollBegan()
+    }
+
+    private func userScrollDidEnd() {
+        legacyUserScrollEndWorkItem?.cancel()
+        legacyUserScrollEndWorkItem = nil
+        hasBracketedLiveScroll = false
+        lastUserScrollAt = ProcessInfo.processInfo.systemUptime
+        finishUserScrollWhenSettled()
+    }
+
+    private func finishUserScrollWhenSettled() {
+        guard autoScroll.isUserScrolling else { return }
+        guard !isConversationRubberBanding else {
+            userScrollEndedAwaitingElasticSettle = true
+            return
+        }
+
+        userScrollEndedAwaitingElasticSettle = false
+        let shouldCatchUp = autoScroll.noteUserScrollEnded()
+        scheduleConversationViewportSave()
+        if shouldCatchUp {
+            scrollToBottom()
+        }
     }
 
     @objc private func visibleRegionChanged() {
@@ -1471,6 +1541,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         if sinceGesture < ConversationDefaults.gestureAttribution {
             autoScroll.noteUserScrolled(nearBottom: isNearConversationBottom)
             scheduleConversationViewportSave()
+        }
+        if userScrollEndedAwaitingElasticSettle {
+            finishUserScrollWhenSettled()
         }
         updateVisibleTurns()
         updateStickyStep()
@@ -2644,6 +2717,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     private func applyHandledEvent(_ event: StreamEvent) {
+        recordAgentActivity(in: event)
         if case .initialised(_, let model) = event, let model {
             reportedModel = model
             if currentSession?.isCrossProviderContinuation == true {
@@ -2699,6 +2773,36 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
     }
 
+    /// Feeds the app-wide activity envelope from provider-neutral stream semantics. Replay is a
+    /// historical read, not live work; completion metrics are receipts rather than activity.
+    /// Text sizes are logarithmically compressed by `AgentActivityPulse`, while tool and plan
+    /// edges use fixed bounded weights so no provider's wire chunking becomes the visual scale.
+    private func recordAgentActivity(in event: StreamEvent) {
+        guard !isReplaying else { return }
+
+        let magnitude: Double?
+        switch event {
+        case .textDelta(let text):
+            magnitude = AgentActivityPulse.output(byteCount: text.utf8.count)
+        case .thinkingDelta(let text):
+            magnitude = AgentActivityPulse.thinking(byteCount: text.utf8.count)
+        case .assistantMessage(let blocks):
+            magnitude = blocks.contains {
+                if case .toolUse = $0 { return true }
+                return false
+            } ? AgentActivityPulse.toolTransition : AgentActivityPulse.assistantMessage
+        case .toolResults:
+            magnitude = AgentActivityPulse.toolTransition
+        case .runPlanUpdated, .backgroundWork:
+            magnitude = AgentActivityPulse.planOrBackgroundChange
+        case .initialised, .userMessage, .transcriptNotice, .turnFinished, .unknown:
+            magnitude = nil
+        }
+
+        guard let magnitude else { return }
+        AgentWorkloadMonitor.shared.recordActivity(sessionID: sessionID, magnitude: magnitude)
+    }
+
     private func handleSubagent(_ event: SubagentEvent) {
         subagentState.apply(event)
     }
@@ -2746,6 +2850,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         return overflow <= 0
             || scrollView.contentView.bounds.origin.y
                 >= overflow - ConversationDefaults.bottomTolerance
+    }
+
+    /// Whether the clip view currently sits outside the range its own constraint method permits.
+    /// That difference is AppKit's elastic offset; writing the exact end while it exists is the
+    /// abrupt snap this gate prevents.
+    private var isConversationRubberBanding: Bool {
+        guard isViewLoaded else { return false }
+        let bounds = scrollView.contentView.bounds
+        let constrained = scrollView.contentView.constrainBoundsRect(bounds)
+        return abs(bounds.origin.y - constrained.origin.y) > 0.5
     }
 
     @objc func scrollToConversationEnd() {

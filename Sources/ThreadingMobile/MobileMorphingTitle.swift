@@ -2,6 +2,12 @@ import LabelMorph
 import SwiftUI
 import UIKit
 
+enum MobileMorphingTextRole: Equatable {
+    case chatName
+    case connectionStatus
+    case connectionProgress
+}
+
 // MARK: - Mobile Glyph Presentation
 
 /// Chooses how a title's marks are drawn, without changing the title itself.
@@ -68,6 +74,7 @@ final class MobileMorphingTitleLabel: UIView {
     private let label = MorphingLabel()
     private var textStyle = UIFont.TextStyle.headline
     private var weight = UIFont.Weight.regular
+    private var role = MobileMorphingTextRole.chatName
     private var presentedTitle = ""
 
     var stringValue: String { presentedTitle }
@@ -106,7 +113,7 @@ final class MobileMorphingTitleLabel: UIView {
             (view: MobileMorphingTitleLabel, _) in
             view.applyFont()
         }
-        applyEffect(morphingTo: "")
+        applyEffect(morphingTo: "", role: .chatName)
     }
 
     override var intrinsicContentSize: CGSize {
@@ -120,11 +127,14 @@ final class MobileMorphingTitleLabel: UIView {
         textColor: UIColor,
         groundColor: UIColor,
         alignment: NSTextAlignment,
-        reducesMotion: Bool
+        reducesMotion: Bool,
+        role: MobileMorphingTextRole = .chatName
     ) {
         let fontChanged = self.textStyle != textStyle || self.weight != weight
+        let roleChanged = self.role != role
         self.textStyle = textStyle
         self.weight = weight
+        self.role = role
         if fontChanged || label.font != resolvedFont() {
             applyFont()
         }
@@ -139,9 +149,11 @@ final class MobileMorphingTitleLabel: UIView {
             && window != nil
         // The label is given the presentation; everything this view answers with — the title it
         // reports, what VoiceOver reads, what counts as a rename — stays the title it was told.
-        let presented = MobileGlyphPresentation.presented(title)
-        if animates {
-            applyEffect(morphingTo: presented)
+        let presented = role == .chatName
+            ? MobileGlyphPresentation.presented(title)
+            : title
+        if roleChanged || animates {
+            applyEffect(morphingTo: presented, role: role)
         }
         label.setText(presented, animated: animates)
         presentedTitle = title
@@ -164,26 +176,79 @@ final class MobileMorphingTitleLabel: UIView {
         return UIFont(descriptor: descriptor, size: 0)
     }
 
-    private func applyEffect(morphingTo title: String) {
-        let preset = MorphPreset.shapeMorph
-        label.effect = preset.makeEffect(intensity: Defaults.intensity)
-        var timing = preset.recommendedTiming
-        timing.duration *= MobileDesign.Motion.nameMorphTempo
-        let steps = Double(max(1, max(presentedTitle.count, title.count) - 1))
-        timing.stagger = min(
-            timing.stagger * MobileDesign.Motion.nameMorphTempo,
-            MobileDesign.Motion.nameMorphCascade / steps
+    private func applyEffect(morphingTo title: String, role: MobileMorphingTextRole) {
+        switch role {
+        case .chatName:
+            let preset = MorphPreset.shapeMorph
+            label.effect = preset.makeEffect(intensity: Defaults.intensity)
+            var timing = preset.recommendedTiming
+            timing.duration *= MobileDesign.Motion.nameMorphTempo
+            let steps = Double(max(1, max(presentedTitle.count, title.count) - 1))
+            timing.stagger = min(
+                timing.stagger * MobileDesign.Motion.nameMorphTempo,
+                MobileDesign.Motion.nameMorphCascade / steps
+            )
+            label.timing = timing
+            label.fadeStyle = .none
+
+        case .connectionStatus:
+            label.effect = MorphPreset.lineScrollUp.makeEffect(
+                intensity: MobileDesign.Motion.connectionStatusMorphIntensity
+            )
+            label.timing = MorphTiming(
+                duration: MobileDesign.Motion.connectionStatusMorphDuration,
+                stagger: 0
+            )
+            applyConnectionFade()
+
+        case .connectionProgress:
+            label.effect = MorphPreset.crossfade.makeEffect()
+            label.timing = MorphPreset.crossfade.recommendedTiming
+            applyConnectionFade()
+        }
+    }
+
+    private func applyConnectionFade() {
+        label.fadeStyle = .traveling
+        label.fadeConfiguration = MorphFadeConfiguration(
+            pulseCount: MobileDesign.Motion.connectionStatusFadePulseCount,
+            minimumOpacity: MobileDesign.Motion.connectionStatusFadeMinimumOpacity,
+            pulseDuration: MobileDesign.Motion.connectionStatusFadePulseDuration,
+            pauseDuration: MobileDesign.Motion.connectionStatusFadePauseDuration,
+            travelDuration: MobileDesign.Motion.connectionStatusFadeTravelDuration
         )
-        label.timing = timing
+    }
+
+    func playFade() {
+        label.playFade()
+    }
+
+    func stopFade() {
+        label.stopFade()
     }
 
     var isAnimatingTitleForTesting: Bool {
         layer.sublayers?.contains(where: Self.hasAnimations) == true
     }
 
+    var isAnimatingLineScrollForTesting: Bool {
+        Self.hasAnimation(withPrefix: "morph.line.", in: layer)
+    }
+
+    var isAnimatingTravelingFadeForTesting: Bool {
+        Self.hasAnimation(withPrefix: "morph.fade.traveling", in: layer)
+    }
+
     private static func hasAnimations(_ layer: CALayer) -> Bool {
         if layer.animationKeys()?.isEmpty == false { return true }
         return layer.sublayers?.contains(where: hasAnimations) == true
+    }
+
+    private static func hasAnimation(withPrefix prefix: String, in layer: CALayer) -> Bool {
+        if layer.animationKeys()?.contains(where: { $0.hasPrefix(prefix) }) == true { return true }
+        return layer.sublayers?.contains {
+            hasAnimation(withPrefix: prefix, in: $0)
+        } == true
     }
 }
 
@@ -195,13 +260,32 @@ struct MobileMorphingTitle: UIViewRepresentable {
     let textColor: UIColor
     let groundColor: UIColor
     let alignment: NSTextAlignment
+    let role: MobileMorphingTextRole
     @Environment(\.accessibilityReduceMotion) private var reducesMotion
+
+    init(
+        title: String,
+        textStyle: UIFont.TextStyle,
+        weight: UIFont.Weight,
+        textColor: UIColor,
+        groundColor: UIColor,
+        alignment: NSTextAlignment,
+        role: MobileMorphingTextRole = .chatName
+    ) {
+        self.title = title
+        self.textStyle = textStyle
+        self.weight = weight
+        self.textColor = textColor
+        self.groundColor = groundColor
+        self.alignment = alignment
+        self.role = role
+    }
 
     func makeUIView(context: Context) -> MobileMorphingTitleLabel {
         MobileMorphingTitleLabel()
     }
 
-    /// Takes the width it is offered rather than the width its text happens to want.
+    /// Keeps chat-name geometry stable while a connection phrase stays beside its status mark.
     ///
     /// A morph is built against the geometry it starts in: the label resolves every character's
     /// final slot up front and animates each one there. A label sized to its own text cannot
@@ -211,6 +295,11 @@ struct MobileMorphingTitle: UIViewRepresentable {
     /// renaming a chat to `✳ <name>` moved the terminal's navigation title 27 points and did
     /// exactly that. Filling the offer instead makes the container decide — the bar's title
     /// area, the row's remaining width — and a rename changes only the glyphs inside it.
+    ///
+    /// A connection phrase has the opposite contract. It shares a horizontal row with a status
+    /// dot, so taking the full offer strands that dot at the invisible label frame's leading edge
+    /// while the phrase is centred inside it. Status text therefore hugs its intrinsic measure,
+    /// bounded by the offer only when the bar genuinely needs to truncate it.
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: MobileMorphingTitleLabel,
@@ -218,7 +307,11 @@ struct MobileMorphingTitle: UIViewRepresentable {
     ) -> CGSize? {
         let intrinsic = uiView.intrinsicContentSize
         guard let width = proposal.width, width.isFinite else { return intrinsic }
-        return CGSize(width: width, height: intrinsic.height)
+        let fittedWidth = switch role {
+        case .chatName: width
+        case .connectionStatus, .connectionProgress: min(width, intrinsic.width)
+        }
+        return CGSize(width: fittedWidth, height: intrinsic.height)
     }
 
     func updateUIView(_ view: MobileMorphingTitleLabel, context: Context) {
@@ -229,7 +322,8 @@ struct MobileMorphingTitle: UIViewRepresentable {
             textColor: textColor,
             groundColor: groundColor,
             alignment: alignment,
-            reducesMotion: reducesMotion
+            reducesMotion: reducesMotion,
+            role: role
         )
     }
 }

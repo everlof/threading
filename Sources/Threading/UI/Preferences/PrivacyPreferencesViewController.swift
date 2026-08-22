@@ -483,11 +483,14 @@ final class PrivacyPreferencesViewController: NSViewController {
             ),
             SettingsUI.detailRow(
                 symbol: "arrow.down.circle",
-                title: "Update checks reach GitHub",
-                detail: "Threading uses Sparkle to check a release feed on GitHub once a day. "
-                    + "The request carries the version you are on and your macOS version, the "
-                    + "way any download does — no identifier, and nothing about your projects. "
-                    + "Turn it off in General settings and nothing is asked."
+                title: "Update checks reach release sources",
+                detail: "Once a day, Threading asks GitHub about the app, npm about installed "
+                    + "Claude, Codex, Grok and OpenCode tools, and cursor.com about installed "
+                    + "Cursor. The app request carries the version you are on and your macOS "
+                    + "version, the way any download does. The agent requests include no "
+                    + "account, project, session or installed version. Neither carries an "
+                    + "identifier or anything about your projects. Turn the check off in "
+                    + "General and nothing is asked."
             ),
             SettingsUI.detailRow(
                 symbol: "lifepreserver",

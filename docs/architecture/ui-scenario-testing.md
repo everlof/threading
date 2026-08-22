@@ -332,6 +332,19 @@ The recorded boundary depends on the provider:
 | Codex Native Chat | app-server JSON-RPC stdin/stdout |
 | Grok Native Chat | ACP stdin/stdout |
 
+PTY replay is byte-exact. An expected host write consumes exactly its rendered byte count and an
+agent emission writes exactly its payload; neither side adds a newline or applies JSON framing.
+That makes a privacy-reviewed real capture suitable for reproducing a particular erase, cursor,
+alternate-screen or partial UTF-8 sequence. It does **not** make the capture responsive: a fixed
+tape cannot invent the TUI's answer to an iPhone grid it has never seen.
+
+For resize and scroll performance, `threading-scenario terminal-fixture codex|claude` is the
+responsive companion to tape replay. It owns a real raw-mode PTY but spends no provider tokens.
+The Codex workload builds terminal-owned normal scrollback and re-emits it after SIGWINCH; the
+Claude workload owns an alternate screen, repaints it while typing, and consumes SGR mouse-wheel
+reports to move a virtual transcript. These are generated behavioral workloads, not copied
+provider output and not claims about exact provider pixels.
+
 Injecting `[StreamEvent]` directly is useful for model and rendering tests but is not an
 application-level scenario: it bypasses the parser, framing, child ownership, launch failure,
 and exactly-once completion paths the scenario exists to prove.

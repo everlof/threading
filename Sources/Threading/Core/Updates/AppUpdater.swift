@@ -15,9 +15,10 @@ import Sparkle
 /// The user's switch is the authority. `SUEnableAutomaticChecks` in Info.plist is only the
 /// shipped default; `AppSettings.automaticUpdateChecksEnabled` is what Settings ▸ General
 /// writes, and it is pushed into the updater on every settings change so the two can never
-/// disagree about whether Threading is allowed to talk to its release feed. The same recorded
-/// value answers Sparkle's first-run permission request inside `UpdateUserDriver`, so that
-/// prompt never draws.
+/// disagree about whether Threading is allowed to talk to its release feed. The agent CLI update
+/// coordinator reads the same authority for its separate fixed daily check. The same recorded
+/// value answers Sparkle's first-run permission request inside `UpdateUserDriver`, so that prompt
+/// never draws.
 @MainActor
 final class AppUpdater {
 

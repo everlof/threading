@@ -74,6 +74,32 @@ final class ConversationAutoScrollTests: XCTestCase {
         scroll.noteReplayFinished()
         XCTAssertTrue(scroll.followsNewContent)
     }
+
+    func testOrdinaryFollowRequestStillLandsImmediately() {
+        var scroll = ConversationAutoScroll()
+        XCTAssertTrue(scroll.claimFollowRequest())
+    }
+
+    func testFollowRequestWaitsForTheUsersScrollToEnd() {
+        var scroll = ConversationAutoScroll()
+        scroll.noteUserScrollBegan()
+
+        XCTAssertFalse(scroll.claimFollowRequest())
+        XCTAssertTrue(scroll.followsNewContent, "deferring a landing released autofollow intent")
+        XCTAssertTrue(scroll.noteUserScrollEnded())
+        XCTAssertFalse(scroll.isUserScrolling)
+    }
+
+    func testDeferredFollowDoesNotPullBackAUserWhoScrolledAway() {
+        var scroll = ConversationAutoScroll()
+        scroll.noteUserScrollBegan()
+        XCTAssertFalse(scroll.claimFollowRequest())
+
+        scroll.noteUserScrolled(nearBottom: false)
+
+        XCTAssertFalse(scroll.noteUserScrollEnded())
+        XCTAssertEqual(scroll.mode, .free)
+    }
 }
 
 @MainActor
@@ -122,6 +148,60 @@ final class ConversationAutoScrollLayoutTests: XCTestCase {
         // The arrow stops being on offer the moment the jump is taken; whether it is still
         // *drawn* is the length of its departure, which `FloatingScrollTargetMotionTests` owns.
         XCTAssertFalse(controller.jumpToEndButton.isFloatingPresent)
+        XCTAssertTrue(controller.autoScroll.followsNewContent)
+    }
+
+    func testStreamingDoesNotMoveALiveBottomScrollAndCatchesUpAfterward() {
+        let controller = makeDeepConversationController()
+
+        // Materialise the streaming row before the gesture so the next delta follows the exact
+        // production path that used to write the bottom once per token.
+        for change in controller.timeline.apply(.textDelta("Starting")) {
+            controller.apply(change)
+        }
+        controller.view.layoutSubtreeIfNeeded()
+        for change in controller.timeline.apply(.textDelta(" reply")) {
+            controller.apply(change)
+        }
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        controller.view.layoutSubtreeIfNeeded()
+
+        let bottomBeforePull = controller.maximumConversationScrollOffsetY()
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: controller.scrollView
+        )
+        // A detached clip view constrains a programmatic out-of-range origin, so the harness
+        // cannot manufacture AppKit's real elastic offset. A position inside the bottom
+        // tolerance exercises the same live-scroll ownership gate while remaining following.
+        let livePullOffset = bottomBeforePull - 24
+        controller.scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: livePullOffset))
+
+        for change in controller.timeline.apply(.textDelta(" token")) {
+            controller.apply(change)
+        }
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertEqual(
+            controller.scrollView.contentView.bounds.origin.y,
+            livePullOffset,
+            accuracy: 0.5,
+            "a streaming follow replaced AppKit's live-scroll position"
+        )
+        XCTAssertTrue(controller.autoScroll.followsNewContent)
+
+        NotificationCenter.default.post(
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: controller.scrollView
+        )
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertEqual(
+            controller.scrollView.contentView.bounds.origin.y,
+            controller.maximumConversationScrollOffsetY(),
+            accuracy: 0.5
+        )
+        XCTAssertFalse(controller.autoScroll.isUserScrolling)
         XCTAssertTrue(controller.autoScroll.followsNewContent)
     }
 

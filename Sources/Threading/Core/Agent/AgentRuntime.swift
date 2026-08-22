@@ -179,12 +179,15 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     // MARK: - RemoteTerminalSurfaceQuerying
 
-    var remoteTerminalSessionIDs: Set<SessionID> {
-        Set(controllers.keys)
+    var remoteTerminalIdentities: Set<TerminalInstanceIdentity> {
+        Set(controllers.keys.map(TerminalInstanceIdentity.agentSession))
     }
 
-    func remoteTerminalSurface(for sessionID: SessionID) -> (any RemoteTerminalSurface)? {
-        controllers[sessionID]?.remoteTerminalSurface
+    func remoteTerminalSurface(
+        for identity: TerminalInstanceIdentity
+    ) -> (any RemoteTerminalSurface)? {
+        guard case .agentSession(let sessionID) = identity else { return nil }
+        return controllers[sessionID]?.remoteTerminalSurface
     }
 
     // MARK: - Public Methods
@@ -357,7 +360,13 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             // the transcript already holds every call, and the turn end is when it is complete.
             AgentWorkHydration.hydrate(sessionID: report.sessionID)
         case .awaitingUser:
-            SessionSnoozeCenter.shared.record(.inputRequested, for: report.sessionID)
+            // Asked of the tracker rather than assumed. A runtime's "waiting" notice is not
+            // always a request for input — an idle prompt on a session paused on its own child
+            // is the CLI stating that nothing is being asked — and ending a snooze for one is
+            // the same misreading the sidebar already refuses. One rule, one answer.
+            if tracker.honoursAwaitingUserNotice(report.notification) {
+                SessionSnoozeCenter.shared.record(.inputRequested, for: report.sessionID)
+            }
         case .blockingAskOpened:
             SessionSnoozeCenter.shared.record(.inputRequested, for: report.sessionID)
         case .turnStarted, .blockingAskClosed, .sessionStarted, .subagentStarted, .subagentStopped:
@@ -388,7 +397,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             controller.noteTurnFinishedForAttachmentDetection(
                 lastAssistantMessage: report.lastAssistantMessage
             )
-        case .awaitingUser: tracker.noteAwaitingUser()
+        case .awaitingUser: tracker.noteAwaitingUser(report.notification)
         case .blockingAskOpened: tracker.noteBlockingAskOpened(id: report.toolCallID)
         case .blockingAskClosed: tracker.noteBlockingAskClosed(id: report.toolCallID)
         // Not a turn boundary, but the earliest proof the CLI is up: delivery gates on it.

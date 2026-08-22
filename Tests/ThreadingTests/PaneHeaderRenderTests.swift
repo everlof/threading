@@ -65,16 +65,59 @@ final class PaneHeaderRenderTests: XCTestCase {
         print("Rendered pane header storybook to \(directory.path)")
     }
 
+    /// The shipping header with the spectrum material selected: three live workers, a recent
+    /// semantic-output pulse, and MAX lit because one worker uses its provider's top effort.
+    func testRendersClassicPlayerWorkloadAnalyzer() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        defer {
+            AppThemePalette.set(.system)
+            Design.Motion.reduceMotionOverrideForTesting = nil
+        }
+        AppThemePalette.set(AppThemeStyles.classicPlayer)
+        Design.Motion.reduceMotionOverrideForTesting = true
+
+        let intensity = AgentIntensity(
+            workload: AgentWorkload(workingCount: 3, anyAtTopEffort: true),
+            recentActivity: 0.78,
+            measuredAt: 100
+        )
+        let data = try XCTUnwrap(
+            headerImage(appearance: .darkAqua, workloadIntensity: intensity),
+            "Failed to render the Classic Player workload analyzer"
+        )
+        try data.write(
+            to: directory.appendingPathComponent(
+                "sidebar-workload-analyzer-classic-player.png"
+            )
+        )
+        print("Rendered Classic Player workload analyzer to \(directory.path)")
+    }
+
     // MARK: - Helpers
 
     /// The sidebar header's exact shape: the brand row at the leading edge, the list's add
     /// and arrangement controls at the trailing one.
-    private func headerImage(appearance name: NSAppearance.Name) -> Data? {
+    private func headerImage(
+        appearance name: NSAppearance.Name,
+        workloadIntensity: AgentIntensity? = nil
+    ) -> Data? {
         let appearance = NSAppearance(named: name)
 
         var data: Data?
         let render: @MainActor () -> Void = {
             let brand = SidebarBrandView()
+            if let workloadIntensity,
+               let analyzer = self.descendant(
+                   of: brand,
+                   as: AgentWorkloadAnalyzerView.self
+               ) {
+                analyzer.freezePresentationForTesting(
+                    intensity: workloadIntensity,
+                    phase: 0.37
+                )
+            }
 
             let add = ThemedIconButton(
                 symbolName: "plus",
@@ -122,5 +165,13 @@ final class PaneHeaderRenderTests: XCTestCase {
             }
         }
         return data
+    }
+
+    private func descendant<T: NSView>(of view: NSView, as type: T.Type) -> T? {
+        for subview in view.subviews {
+            if let match = subview as? T { return match }
+            if let match = descendant(of: subview, as: type) { return match }
+        }
+        return nil
     }
 }

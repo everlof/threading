@@ -25,14 +25,20 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Surface | Proposed contract | First authority | Host must retain | Status |
 | --- | --- | --- | --- | --- |
 | Main window content | `application.main-window@1` | around-hook | window chrome, input routing | Implemented |
+| Sidebar workload analyzer | existing theme `material.chart_style: spectrum` | theme-selected host presentation | workload/intensity truth, exact count, effort judgement, accessibility, bounded motion | Implemented |
 | Project row | `sidebar.project-row@1` | properties, slot, replacement | selection, DnD, row actions, count | Implemented |
 | Project hover card | `sidebar.project-hover-card@1` | hook, replacement | hover, popover, sizing, dismissal | Implemented |
 | Session row | `sidebar.session-row@1` | properties, slot, replacement | selection, DnD, activity, actions | Implemented |
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
+| Work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
+| Mobile terminal key bar | — | host-only | PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
+| Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
+| Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
 | Account setup and reconnect | — | host-only | provider identity, isolated-home routing, child-process lifecycle, login verification, credential non-capture, native failure and installation fallback | Host-only |
+| Custom-limit authoring | — | host-only | account/window identity, numeric validation, rule semantics, persistence, bounded history work, keyboard and accessibility contract | Host-only |
 | Start composer accessories | `composer.session-start@1` | protected horizontal hook | text input, submission, keyboard, drafts | Implemented |
 | Reply composer accessories | `composer.conversation-reply@1` | protected horizontal hook | text input, submission, keyboard, stream/permission state | Implemented |
 | User message | `conversation.user-message@1` | protected vertical hook | transcript order, content, turn boundary | Implemented |
@@ -52,6 +58,41 @@ therefore keeps its identity, selection, foreground-command spinner and lifecycl
 host-owned; a future public row starts by publishing the typed terminal context rather than by
 leaking the AppKit cell.
 
+The macOS sidebar and iOS dashboard organization controls remain host-only navigation chrome.
+They arrange existing public or host-only rows without changing those rows' presentation
+contracts. Threading owns persisted project membership, chat-versus-terminal classification,
+stable order inside each type, direction persistence and the navigation destination; allowing a
+replacement control to contradict any of those facts would make the same terminal appear to have
+different ownership across surfaces.
+
+The mobile terminal key bar is host-only even though its key layout is deliberately customizable
+by the person using that phone. Its presentation is inseparable from permission-gated PTY writes,
+DECCKM/xterm encoding, latching and live two-finger modifier state, touch cancellation, haptic and
+accessibility feedback, attachment upload/custody and path insertion, and the device-local
+archive's validated fallback. Letting an extension replace that shell could show a key, file or
+pressed state that the host did not send. Threading owns those behaviors and the complete
+interactive cap; the built-in keyboard editor remains the one presentation customization seam.
+
+The mobile terminal selection quote tray is host-only for the same reasons. A chip stands for
+text the person selected in the terminal and chose to send; the host owns that snapshot, decides
+whether it travels as one bracketed paste from the emulator's seeded mode, writes it to the PTY
+or into the atomic line submission, and removes it. An extension drawing the chip could show
+lines that are not the ones about to be sent.
+
+Mobile connection reuse settings and metrics are host-only because their presentation states
+transport facts that an extension cannot observe or enforce. Threading owns authentication,
+subscriber detachment, viewport/presence/input-control release, resume authorization, expiry and
+capacity bounds, and the privacy boundary of the aggregate counters. An extension may not replace
+or relabel this page and claim a socket is cheap, parked, reused or private when the host lifecycle
+does not say so.
+
+The sidebar workload analyzer is deliberately not a second extension component around the brand
+row. It is one presentation of an existing theme-owned slot: any installed theme may select the
+spectrum material, while `SidebarBrandView` keeps the exact operational facts and accessible
+wording host-owned. Publishing replacement UI here would either expose no useful data or require
+a new brokered app-wide activity capability; theme selection provides the useful customization
+without turning runtime state into presentation authority.
+
 Account setup and reconnect remain host-only because the presentation is inseparable from an
 authentication boundary. Threading must keep the selected provider paired with the exact
 `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, own cancellation and timeout of the child process, verify through
@@ -59,6 +100,14 @@ the provider before registering a location, and preserve a native missing-CLI/in
 fallback. The provider CLI owns the browser UI and credential. Allowing an extension to replace
 this surface could visually claim a different provider, solicit a credential, or report success
 without the host's verification; additive decoration has no use worth that ambiguity.
+
+Custom-limit authoring remains host-only because its visible percentages are executable account
+policy, not decorative Settings copy. Threading keeps the selected account and provider window
+paired with the exact metric, validates whole-number bounds before dismissal, converts a reserved
+share to its complementary pace allowance, bounds rolling history to one week, persists the rule,
+and retains the keyboard, focus and accessibility contract of the modal. An extension may present
+its own settings, but cannot replace this surface and visually claim that Threading will enforce a
+different bound from the one the host stored.
 
 Session Overview is host-only because its two sections expose host-owned operational truth rather
 than a presentation-only document: exact versus observed work attribution, transcript-accounted

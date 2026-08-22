@@ -1080,7 +1080,7 @@ final class SessionAttachmentStoreTests: XCTestCase {
             sessionID: session,
             projectRoot: { [checkout] in checkout },
             currentDirectory: { [checkout] in checkout },
-            text: { buffer.text },
+            text: { _ in TerminalScanRead(text: buffer.text, nextAbsoluteRow: 0) },
             record: { resolution, sessionID, root, shouldAdmit in
                 await store.recordScanned(
                     resolved: resolution,

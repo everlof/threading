@@ -25,7 +25,7 @@ final class AccountsPreferencesViewController: NSViewController {
     /// The limits half of the page. Retained across rebuilds because it holds which folds are
     /// open, and a fold that closed every time a rule was added would be the page arguing with
     /// the person using it.
-    private let limits = AccountLimitsSectionController()
+    private let limits: AccountLimitsSectionController
 
     init(
         accountsProvider: @escaping () -> [AgentAccount] = {
@@ -33,10 +33,16 @@ final class AccountsPreferencesViewController: NSViewController {
                 .filter(\.supportsAccounts)
                 .flatMap { AgentAccountDiscovery.allAccounts(for: $0) }
         },
-        setupCoordinator: AgentAccountSetupCoordinator = AgentAccountSetupCoordinator()
+        setupCoordinator: AgentAccountSetupCoordinator = AgentAccountSetupCoordinator(),
+        limitSettings: CustomLimitSettings? = nil,
+        accountStore: AccountPreferencesStore? = nil
     ) {
         self.accountsProvider = accountsProvider
         self.setupController = AccountSetupCardViewController(coordinator: setupCoordinator)
+        self.limits = AccountLimitsSectionController(
+            settings: limitSettings,
+            accountStore: accountStore
+        )
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -67,6 +73,11 @@ final class AccountsPreferencesViewController: NSViewController {
     override func viewWillAppear() {
         super.viewWillAppear()
         reload()
+    }
+
+    /// Opens the limit folds in the production Accounts page for deterministic rendered evidence.
+    func expandLimitsForTesting() {
+        limits.expandEverythingForTesting()
     }
 
     // MARK: - Reload

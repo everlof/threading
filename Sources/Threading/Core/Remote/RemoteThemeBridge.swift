@@ -94,6 +94,10 @@ enum RemoteThemeBridge {
         terminalTheme(ThemeAssignments.theme(for: sessionID))
     }
 
+    static func terminalTheme(for terminalID: TerminalID) -> RemoteTerminalThemeDTO {
+        terminalTheme(ThemeAssignments.theme(forTerminal: terminalID))
+    }
+
     static func terminalTheme(_ theme: TerminalTheme) -> RemoteTerminalThemeDTO {
         return RemoteTerminalThemeDTO(
             id: theme.id.rawValue,

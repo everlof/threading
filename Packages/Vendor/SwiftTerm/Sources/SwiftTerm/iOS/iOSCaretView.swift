@@ -16,8 +16,20 @@ import CoreGraphics
 class CaretView: UIView {
     weak var terminal: TerminalView?
     var ctline: CTLine?
+    /// Cell width of the character currently under the caret (2 for full-width
+    /// CJK). Used to center its glyph within the caret, matching the text.
+    var glyphColumnWidth: Int = 1
+    var powerlineCodePoint: UInt32?
+    var renderCursorColor = UIColor.gray
+    var renderTextColor = UIColor.black
+    var renderCustomBlockGlyphs = true
+    var renderNormalFont: UIFont?
     var bgColor: CGColor
-    var tracksFocus = true
+    var tracksFocus = true {
+        didSet {
+            updateCursorStyle()
+        }
+    }
     
     public init (frame: CGRect, cursorStyle: CursorStyle, terminal: TerminalView)
     {
@@ -77,18 +89,36 @@ class CaretView: UIView {
         }
     }
     
-    func setText (ch: CharData) {
+    func setText (_ data: CaretRenderData) {
+        glyphColumnWidth = max(1, Int(data.width))
+        renderCursorColor = data.cursorColor
+        renderTextColor = data.textColor
+        renderCustomBlockGlyphs = data.customBlockGlyphs
+        renderNormalFont = data.normalFont
+        let hideBlinkingText = !data.textBlinkVisible && data.cellAttribute.style.contains(.blink)
+        if hideBlinkingText {
+            powerlineCodePoint = nil
+        } else {
+            powerlineCodePoint = PowerlineRenderer.glyph(for: UInt32(data.code)) == nil
+                ? nil : UInt32(data.code)
+        }
+        let character = hideBlinkingText ? " " : data.character
+        // A host glyph fallback carries an explicit font; appending a
+        // variation selector would only fight it.
+        let usesGlyphFallback = data.attributes[SwiftTermGlyphPolicyKey] != nil
         let res = NSAttributedString (
-            string: String (ch.getCharacter()),
-            attributes: terminal?.getAttributedValue(ch.attribute, usingFg: caretColor, andBg: caretTextColor ?? terminal?.nativeForegroundColor ?? TTColor.black))
+            string: usesGlyphFallback ? String (character)
+                                      : UnicodeUtil.textPresentationAdjusted (character),
+            attributes: data.attributes)
         ctline = CTLineCreateWithAttributedString(res)
         setNeedsDisplay(bounds)
     }
     
     func updateCursorStyle () {
+        let canBlink = !tracksFocus || (superview?.isFirstResponder ?? true)
         switch style {
         case .blinkUnderline, .blinkBlock, .blinkBar:
-            updateAnimation(to: true)
+            updateAnimation(to: canBlink)
         case .steadyBar, .steadyBlock, .steadyUnderline:
             updateAnimation(to: false)
         }

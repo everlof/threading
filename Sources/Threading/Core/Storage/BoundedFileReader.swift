@@ -24,11 +24,19 @@ enum BoundedFileReader {
         // The limit is a refusal boundary, not an expected allocation size. Keep the initial
         // reservation small so callers with a generous safety cap do not pay that cap up front.
         data.reserveCapacity(min(maximumBytes, 64 * 1_024))
+        // Every chunk is an autoreleased `NSData`, so without a pool per iteration the whole
+        // file is held twice: once in `data` and once again as the chunks that built it, until
+        // whatever is above this returns. A caller reading many files in one loop pays that for
+        // all of them at once, which is how reading a 4.4 GB cache became 4.4 GB resident.
         while data.count <= maximumBytes {
             let remaining = maximumBytes + 1 - data.count
-            guard let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)),
-                  !chunk.isEmpty else { break }
-            data.append(chunk)
+            let readMore = try autoreleasepool { () -> Bool in
+                guard let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)),
+                      !chunk.isEmpty else { return false }
+                data.append(chunk)
+                return true
+            }
+            guard readMore else { break }
         }
         guard data.count <= maximumBytes else {
             throw BoundedFileReadError.exceedsLimit(maximumBytes: maximumBytes)

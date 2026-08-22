@@ -151,6 +151,57 @@ final class ConversationOutboxTests: XCTestCase {
         XCTAssertTrue(outbox.items.allSatisfy { $0.state.isPending })
     }
 
+    // MARK: - Origin
+
+    /// The queue is the user's by default. Nothing else may appear in it by accident, because
+    /// the hold downstream reads this field to decide what it still lets through.
+    func testAnAppendedMessageIsTheUsersUnlessSaidOtherwise() {
+        var outbox = ConversationOutbox()
+        let id = outbox.append(prompt("mine"))!
+        XCTAssertEqual(outbox[id]?.origin, .user)
+    }
+
+    /// A curfew's wrap-up is the one item a held outbox still hands over, so the origin has to
+    /// survive the hand-over rather than only the append: the drain reads it off the item it is
+    /// about to give the transport, not off the call that queued it.
+    func testACurfewWrapUpKeepsItsOriginThroughTheHandOver() {
+        var outbox = ConversationOutbox()
+        outbox.append(prompt("mine"))
+        let windDown = outbox.append(prompt("wrap up and commit"), origin: .curfewWindDown)!
+
+        XCTAssertEqual(outbox[windDown]?.origin, .curfewWindDown)
+        XCTAssertEqual(outbox.pending.map(\.origin), [.user, .curfewWindDown])
+
+        XCTAssertEqual(outbox.handOverNext()?.origin, .user)
+        let handed = outbox.handOverNext()
+        XCTAssertEqual(handed?.id, windDown)
+        XCTAssertEqual(handed?.origin, .curfewWindDown)
+        XCTAssertEqual(handed?.state, .handedOver)
+    }
+
+    /// The held drain has to read the next item's origin *before* deciding whether it may hand
+    /// anything over, so peeking has to answer exactly what `handOverNext()` would take — and
+    /// leave it untouched, because a row put back after being taken is indistinguishable in the
+    /// rail from one a transport refused.
+    func testPeekingNamesTheNextItemWithoutTakingIt() {
+        var outbox = ConversationOutbox()
+        XCTAssertNil(outbox.nextPending)
+
+        let first = outbox.append(prompt("mine"))!
+        outbox.append(prompt("and this"), origin: .curfewWindDown)
+
+        XCTAssertEqual(outbox.nextPending?.id, first)
+        XCTAssertEqual(outbox.nextPending?.state, .queued)
+        XCTAssertEqual(outbox.nextPending?.origin, .user)
+        // Asking twice is still asking: nothing was consumed.
+        XCTAssertEqual(outbox.handOverNext()?.id, first)
+
+        // Handed-over rows are history; the peek moves past them to what is still owed.
+        XCTAssertEqual(outbox.nextPending?.origin, .curfewWindDown)
+        XCTAssertEqual(outbox.nextPending?.id, outbox.handOverNext()?.id)
+        XCTAssertNil(outbox.nextPending)
+    }
+
     // MARK: - Turn Outcome
 
     func testStoppedIsNotAnError() {

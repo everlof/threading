@@ -3,7 +3,7 @@ import Security
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 
-struct PairedRemoteHost: Codable, Hashable, Identifiable {
+struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     let id: String
     /// Stable Mac identity, separate from `id` because one Mac may have an owner pairing and
     /// several one-chat guest capabilities without either overwriting another in Keychain.
@@ -200,7 +200,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
     var connectionOptionLabels: [String] {
         var result: [String] = []
         var seen: Set<String> = []
-        if hostedCredential != nil {
+        if hostedCredential != nil, hostedServiceURL != nil {
             let label = Self.connectionLabel(forEndpointKind: RemoteHostEndpointKind.hosted)
             result.append(label)
             seen.insert(label)
@@ -216,11 +216,17 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
         switch kind {
         case RemoteHostEndpointKind.tailscale: return MobileL10n.string("Tailscale")
         case RemoteHostEndpointKind.relay: return MobileL10n.string("Relay")
-        case RemoteHostEndpointKind.lan: return MobileL10n.string("This network")
+        case RemoteHostEndpointKind.lan: return MobileL10n.string("LAN")
         case RemoteHostEndpointKind.vpn: return MobileL10n.string("VPN")
         case RemoteHostEndpointKind.hosted: return MobileL10n.string("Direct")
         default: return MobileL10n.string("Direct")
         }
+    }
+
+    /// A route name after a verb. Every route is a compact, established network term, so the
+    /// same label works both as a standalone value and inside a status sentence.
+    static func connectionLabelInSentence(forEndpointKind kind: String) -> String {
+        connectionLabel(forEndpointKind: kind)
     }
 
     var menuTitle: String {
@@ -335,10 +341,10 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable {
 }
 
 /// One address the phone will try, and the door it belongs to.
-struct RemoteHostConnectionCandidate: Equatable {
+struct RemoteHostConnectionCandidate: Equatable, Sendable {
     let link: RemoteConnectionLink
     /// The Mac's semantic name for this door. It follows every fallback attempt so presentation
-    /// can collapse a sticky-port walk back to one human route such as "This network".
+    /// can collapse a sticky-port walk back to one human route such as "LAN".
     let kind: String
     /// Attempts sharing this identifier are the same advertised door at another port of the
     /// sticky range. An answer from one of them ends the walk over the rest.

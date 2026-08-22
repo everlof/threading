@@ -142,6 +142,43 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
         XCTAssertEqual(capability.endCapture(for: missingID), .unavailable)
     }
 
+    func testStandaloneTerminalAndChatTerminalRemainDistinctWithTheSameUUID() {
+        let uuid = UUID()
+        let sessionID = SessionID(uuid)
+        let terminalID = TerminalID(uuid)
+        let sessionSurface = RecordingSurface(
+            isRunning: true,
+            snapshot: RemoteTerminalSnapshot(
+                grid: .init(cols: 80, rows: 24),
+                title: "Chat terminal",
+                screenSeed: Data(),
+                remoteViewport: nil
+            )
+        )
+        let terminalSurface = RecordingSurface(
+            isRunning: true,
+            snapshot: RemoteTerminalSnapshot(
+                grid: .init(cols: 120, rows: 40),
+                title: "Project terminal",
+                screenSeed: Data(),
+                remoteViewport: nil
+            )
+        )
+        let capability = LiveRemoteTerminalApplicationCapability(surfaces: RecordingQuery(
+            identitySurfaces: [
+                .agentSession(sessionID): sessionSurface,
+                .projectTerminal(terminalID): terminalSurface,
+            ]
+        ))
+
+        XCTAssertEqual(capability.sessionIDs, [sessionID])
+        XCTAssertEqual(capability.terminalIDs, [terminalID])
+        XCTAssertEqual(capability.sendInput([1], to: sessionID), .applied)
+        XCTAssertEqual(capability.sendInput([2], to: terminalID), .applied)
+        XCTAssertEqual(sessionSurface.inputs, [[1]])
+        XCTAssertEqual(terminalSurface.inputs, [[2]])
+    }
+
     func testMirrorConsumesTheInjectedApplicationCapability() {
         let sessionID = SessionID()
         let snapshot = RemoteTerminalSnapshot(
@@ -178,18 +215,26 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
     }
 
     private final class RecordingQuery: RemoteTerminalSurfaceQuerying {
-        let surfaces: [SessionID: RecordingSurface]
+        let surfaces: [TerminalInstanceIdentity: RecordingSurface]
 
         init(surfaces: [SessionID: RecordingSurface]) {
-            self.surfaces = surfaces
+            self.surfaces = Dictionary(uniqueKeysWithValues: surfaces.map {
+                (.agentSession($0.key), $0.value)
+            })
         }
 
-        var remoteTerminalSessionIDs: Set<SessionID> {
+        init(identitySurfaces: [TerminalInstanceIdentity: RecordingSurface]) {
+            surfaces = identitySurfaces
+        }
+
+        var remoteTerminalIdentities: Set<TerminalInstanceIdentity> {
             Set(surfaces.keys)
         }
 
-        func remoteTerminalSurface(for sessionID: SessionID) -> (any RemoteTerminalSurface)? {
-            surfaces[sessionID]
+        func remoteTerminalSurface(
+            for identity: TerminalInstanceIdentity
+        ) -> (any RemoteTerminalSurface)? {
+            surfaces[identity]
         }
     }
 
@@ -249,27 +294,35 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
             self.snapshot = snapshot
         }
 
-        var sessionIDs: Set<SessionID> { [sessionID] }
+        var identities: Set<TerminalInstanceIdentity> { [.agentSession(sessionID)] }
 
-        func state(for sessionID: SessionID) -> RemoteTerminalStateResult {
+        func state(for identity: TerminalInstanceIdentity) -> RemoteTerminalStateResult {
+            guard case .agentSession(let sessionID) = identity else { return .unavailable }
             stateSessionIDs.append(sessionID)
             return sessionID == self.sessionID ? .available(snapshot.state) : .unavailable
         }
 
-        func currentSnapshot(for sessionID: SessionID) -> RemoteTerminalCaptureResult {
+        func currentSnapshot(
+            for identity: TerminalInstanceIdentity
+        ) -> RemoteTerminalCaptureResult {
+            guard case .agentSession(let sessionID) = identity else { return .unavailable }
             snapshotSessionIDs.append(sessionID)
             return sessionID == self.sessionID ? .captured(snapshot) : .unavailable
         }
 
         func beginCapture(
-            for sessionID: SessionID,
+            for identity: TerminalInstanceIdentity,
             output: @escaping RemoteTerminalOutputSink
         ) -> RemoteTerminalCaptureResult {
+            guard case .agentSession(let sessionID) = identity else { return .unavailable }
             captureSessionIDs.append(sessionID)
             return sessionID == self.sessionID ? .captured(snapshot) : .unavailable
         }
 
-        func endCapture(for sessionID: SessionID) -> RemoteTerminalMutationResult {
+        func endCapture(
+            for identity: TerminalInstanceIdentity
+        ) -> RemoteTerminalMutationResult {
+            guard case .agentSession(let sessionID) = identity else { return .unavailable }
             guard sessionID == self.sessionID else { return .unavailable }
             endedSessionIDs.append(sessionID)
             return .applied
@@ -277,15 +330,17 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
 
         func sendInput(
             _ bytes: [UInt8],
-            to sessionID: SessionID
+            to identity: TerminalInstanceIdentity
         ) -> RemoteTerminalMutationResult {
-            sessionID == self.sessionID ? .applied : .unavailable
+            guard case .agentSession(let sessionID) = identity else { return .unavailable }
+            return sessionID == self.sessionID ? .applied : .unavailable
         }
 
         func setViewport(
             _ grid: RemoteTerminalGrid?,
-            for sessionID: SessionID
+            for identity: TerminalInstanceIdentity
         ) -> RemoteTerminalMutationResult {
+            guard case .agentSession(let sessionID) = identity else { return .unavailable }
             guard sessionID == self.sessionID else { return .unavailable }
             viewportCalls.append(.init(sessionID: sessionID, grid: grid))
             return .applied

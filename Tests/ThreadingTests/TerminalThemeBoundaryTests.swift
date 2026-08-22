@@ -1,5 +1,5 @@
 import XCTest
-import SwiftTerm
+@testable import SwiftTerm
 @testable import Threading
 
 /// The terminal is a SwiftTerm rendering surface whose scrollbar is application chrome.
@@ -46,18 +46,18 @@ final class TerminalThemeBoundaryTests: XCTestCase {
 
     func testRemoteGridRestoresLatestNaturalMacGrid() {
         let view = terminal()
-        let original = view.getTerminal().getDims()
+        let original = view.terminalDimensions
 
         view.setRemoteGrid(cols: 42, rows: 20)
-        XCTAssertEqual(view.getTerminal().getDims().cols, 42)
-        XCTAssertEqual(view.getTerminal().getDims().rows, 20)
+        XCTAssertEqual(view.terminalDimensions.cols, 42)
+        XCTAssertEqual(view.terminalDimensions.rows, 20)
 
         view.frame.size = NSSize(width: 700, height: 500)
-        XCTAssertEqual(view.getTerminal().getDims().cols, 42)
-        XCTAssertEqual(view.getTerminal().getDims().rows, 20)
+        XCTAssertEqual(view.terminalDimensions.cols, 42)
+        XCTAssertEqual(view.terminalDimensions.rows, 20)
 
         view.clearRemoteGrid()
-        let restored = view.getTerminal().getDims()
+        let restored = view.terminalDimensions
         XCTAssertGreaterThan(restored.cols, original.cols)
         XCTAssertGreaterThan(restored.rows, original.rows)
     }
@@ -71,24 +71,23 @@ final class TerminalThemeBoundaryTests: XCTestCase {
     func testLayoutLeavesARemoteControlledTerminalUntouched() {
         let view = terminal()
         view.setRemoteGrid(cols: 46, rows: 20)
-        let emulator = view.getTerminal()
 
         // DECSTBM, as every full-screen agent sets it.
         view.feed(text: "\u{1b}[5;15r")
-        XCTAssertEqual(emulator.buffer.scrollTop, 4)
-        XCTAssertEqual(emulator.buffer.scrollBottom, 14)
+        XCTAssertEqual(view.terminalStateSnapshot().scrollTop, 4)
+        XCTAssertEqual(view.terminalStateSnapshot().scrollBottom, 14)
 
         view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)  // the rect it already has
-        XCTAssertEqual(emulator.getDims().cols, 46)
-        XCTAssertEqual(emulator.getDims().rows, 20)
-        XCTAssertEqual(emulator.buffer.scrollTop, 4)
-        XCTAssertEqual(emulator.buffer.scrollBottom, 14)
+        XCTAssertEqual(view.terminalDimensions.cols, 46)
+        XCTAssertEqual(view.terminalDimensions.rows, 20)
+        XCTAssertEqual(view.terminalStateSnapshot().scrollTop, 4)
+        XCTAssertEqual(view.terminalStateSnapshot().scrollBottom, 14)
 
         view.frame = NSRect(x: 0, y: 0, width: 900, height: 640)  // a real window resize
-        XCTAssertEqual(emulator.getDims().cols, 46)
-        XCTAssertEqual(emulator.getDims().rows, 20)
-        XCTAssertEqual(emulator.buffer.scrollTop, 4)
-        XCTAssertEqual(emulator.buffer.scrollBottom, 14)
+        XCTAssertEqual(view.terminalDimensions.cols, 46)
+        XCTAssertEqual(view.terminalDimensions.rows, 20)
+        XCTAssertEqual(view.terminalStateSnapshot().scrollTop, 4)
+        XCTAssertEqual(view.terminalStateSnapshot().scrollBottom, 14)
     }
 
     /// Re-leasing the grid already in force is not a resize. The lease is re-applied whenever any
@@ -100,8 +99,8 @@ final class TerminalThemeBoundaryTests: XCTestCase {
 
         view.setRemoteGrid(cols: 46, rows: 20)
 
-        XCTAssertEqual(view.getTerminal().buffer.scrollTop, 4)
-        XCTAssertEqual(view.getTerminal().buffer.scrollBottom, 14)
+        XCTAssertEqual(view.terminalStateSnapshot().scrollTop, 4)
+        XCTAssertEqual(view.terminalStateSnapshot().scrollBottom, 14)
     }
 
     // MARK: - Profile boundary
@@ -124,7 +123,7 @@ final class TerminalThemeBoundaryTests: XCTestCase {
 
         XCTAssertEqual(session.terminalView.font.fontName, profile.font.fontName)
         XCTAssertEqual(session.terminalView.font.pointSize, profile.font.pointSize)
-        XCTAssertEqual(session.terminalView.getTerminal().options.scrollback, 1_234)
+        XCTAssertEqual(session.terminalView.terminalStateSnapshot().historySize, 1_234)
     }
 
     func testTerminalSessionUsesSwiftTermsExactChildPID() {
@@ -210,15 +209,15 @@ final class TerminalThemeBoundaryTests: XCTestCase {
 
         var forwardedCount = 0
         view.onMouseReportForwarded = { forwardedCount += 1 }
-        let bottomPosition = view.getTerminal().buffer.yDisp
+        let bottomPosition = view.terminalStateSnapshot().viewportRow
 
         view.scrollWheel(with: try XCTUnwrap(makeWheelEvent(modifiers: [])))
         XCTAssertEqual(forwardedCount, 1)
-        XCTAssertEqual(view.getTerminal().buffer.yDisp, bottomPosition)
+        XCTAssertEqual(view.terminalStateSnapshot().viewportRow, bottomPosition)
 
         view.scrollWheel(with: try XCTUnwrap(makeWheelEvent(modifiers: [.option])))
         XCTAssertEqual(forwardedCount, 1)
-        XCTAssertLessThan(view.getTerminal().buffer.yDisp, bottomPosition)
+        XCTAssertLessThan(view.terminalStateSnapshot().viewportRow, bottomPosition)
     }
 
     /// The bug this exists for: under any-event tracking every pointer move is written to the
@@ -313,6 +312,14 @@ final class TerminalThemeBoundaryTests: XCTestCase {
 
     func testTerminalInstallsAThemedBackdropScrollerWithoutChangingItsBehavior() throws {
         let terminal = terminal()
+        let window = NSWindow(
+            contentRect: terminal.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: true
+        )
+        window.contentView = terminal
+        terminal.suspendsRenderingWhenNotVisible = false
         let scroller = try XCTUnwrap(
             terminal.subviews.compactMap { $0 as? ThemedScroller }.first
         )
@@ -329,6 +336,8 @@ final class TerminalThemeBoundaryTests: XCTestCase {
         for line in 0..<200 {
             terminal.feed(text: "line \(line)\r\n")
         }
+        terminal.frameTick()
+        terminal.layoutSubtreeIfNeeded()
         XCTAssertTrue(scroller.isEnabled)
         XCTAssertLessThan(scroller.knobProportion, 1)
     }

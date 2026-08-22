@@ -189,7 +189,12 @@ final class UsageWindowPoker {
                 on: usage,
                 in: CustomLimitSettings.shared.rules(for: account.id),
                 at: now
-            )
+            ),
+            // The window the user is asleep inside, if they drew one. Only the one *containing*
+            // `now`: a window later tonight is not a reason to skip a poke this morning, and
+            // `QuietHours.window(containing:)` is the same arithmetic every curfew surface reads.
+            quietHoursUntil: CurfewSettings.shared.preferences.quietHours
+                .window(containing: now)?.end
         ))
     }
 

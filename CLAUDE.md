@@ -168,6 +168,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 |---|---|
 | The toolbar, the pane header strips, the sidebar's silhouette, split-item behaviour, anything pinning to `topAnchor` | [`window-chrome.md`](docs/architecture/window-chrome.md) |
 | The MCP server, tool routing by session token, launch flags, the display panel and its web view | [`mcp-and-display.md`](docs/architecture/mcp-and-display.md) |
+| The session-owned in-panel iOS Simulator, CoreSimulator lifecycle, direct framebuffer/input helper, leases and agent route | [`simulator-pane.md`](docs/architecture/simulator-pane.md) |
 | The live browser an agent drives: origin grants, the accessibility snapshot, refs and semantic locators, the browser tools | [`agent-browser.md`](docs/architecture/agent-browser.md) |
 | Natively rendered conversations: the Claude/Codex stream transports, permission brokering, transcript replay, the timeline model, tool rows, diffs, the turn rail | [`native-conversations.md`](docs/architecture/native-conversations.md) |
 | The exact agent-execution ledger: provider-native adapters, redaction, hash-linked storage, filters and the live browser split | [`execution-audit.md`](docs/architecture/execution-audit.md) |
@@ -215,6 +216,10 @@ the canonical policy for both humans and agents.
 - System chrome is contained behind a named wrapper and a narrow, documented policy exception.
 - Colours come from semantic `Design` roles, and theme colours never become unrecorded layer
   `CGColor`s.
+- A view says what it tells the pointer by declaring `PointerClaiming`; `addCursorRect` and
+  `NSCursor.…set()` are lint errors outside that seam. Claiming nothing is not claiming the
+  arrow — cursor rectangles are a *window's* list, so a view that registers none inherits the
+  I-beam of whatever is behind it.
 - A new component includes behavior, accessibility, live-theme-switch and rendered-state tests.
 
 `scripts/check_theme_boundaries.sh` is an error-producing build lint. Do not silence it with a
@@ -310,6 +315,9 @@ unbounded. Read the full rationale and current audit in
 - Collapse, paginate, and cap **before** constructing views, attributed documents, images, or
   constraints. Hiding a subtree after it was built saves pixels, not construction, layout, or
   memory.
+- **A cap on output is not a cap on work.** A bound stated in bytes, rows or items *returned* says
+  nothing about how much was examined to produce them, and the two diverge exactly when the content
+  is sparse. Bound the scan, not just the result.
 - A local disclosure, toggle, append, or status change updates the affected stable identities. It
   does not clear and rebuild a whole externally sized page or timeline.
 - Layout, resize, scroll, pointer, and stream callbacks do no filesystem/process work and no work

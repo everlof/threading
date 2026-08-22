@@ -19,18 +19,24 @@ extension UIColor {
         return Color(red: UInt16 (clamp (red)*65535), green: UInt16(clamp (green)*65535), blue: UInt16(clamp (blue)*65535))
     }
 
-    /// `NSColor`'s spelling for the alpha channel, so code in `Apple/` — compiled for both
-    /// platforms — can ask for it without a `#if`.
-    ///
-    /// The SGR 2 (faint) handling in `AppleTerminalView` is the case that needed it: written
-    /// against AppKit, it built for macOS and broke the iOS target, because this extension
-    /// already mirrors `inverseColor` and `make` across the two but had no alpha accessor.
-    var alphaComponent: CGFloat { cgColor.alpha }
-
     func inverseColor() -> UIColor {
         var red: CGFloat = 0.0, green: CGFloat = 0.0, blue: CGFloat = 0.0, alpha: CGFloat = 1.0
         self.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
         return UIColor (red: 1.0 - red, green: 1.0 - green, blue: 1.0 - blue, alpha: alpha)
+    }
+
+    /// Returns a dimmed version of the color (SGR 2 faint/dim attribute) by
+    /// blending 50 % toward `background`. The result is fully opaque so that
+    /// adjacent box-drawing characters tile without visible seams.
+    func dimmedColor (towards background: UIColor) -> UIColor {
+        var fRed: CGFloat = 0.0, fGreen: CGFloat = 0.0, fBlue: CGFloat = 0.0, fAlpha: CGFloat = 1.0
+        self.getRed(&fRed, green: &fGreen, blue: &fBlue, alpha: &fAlpha)
+        var bRed: CGFloat = 0.0, bGreen: CGFloat = 0.0, bBlue: CGFloat = 0.0, bAlpha: CGFloat = 1.0
+        background.getRed(&bRed, green: &bGreen, blue: &bBlue, alpha: &bAlpha)
+        return UIColor (red: (fRed + bRed) * 0.5,
+                        green: (fGreen + bGreen) * 0.5,
+                        blue: (fBlue + bBlue) * 0.5,
+                        alpha: fAlpha)
     }
 
     static func make (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> TTColor

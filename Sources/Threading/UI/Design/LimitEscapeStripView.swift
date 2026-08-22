@@ -17,7 +17,7 @@ import AppKit
 ///
 /// One direction, like `ScheduledMessageStripView`: the store is the truth, this draws what it is
 /// handed, and both gestures are reported back as intentions.
-final class LimitEscapeStripView: NSView, ThemedComponent {
+final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
 
     // MARK: - Offer
 
@@ -433,6 +433,22 @@ final class LimitEscapeStripView: NSView, ThemedComponent {
     }
 
     @objc private func waitPressed() { onWaitForReset?() }
+
+    // MARK: - Pointer
+
+    /// An opaque plate over a terminal or a transcript, both of which claim an I-beam over the
+    /// whole of themselves. Saying so is what stops the two answers offering to select text that
+    /// is behind the strip. See `PointerClaiming`.
+    var restingPointer: NSCursor? { .arrow }
+
+    override func resetCursorRects() {
+        registerPointerClaims()
+    }
+
+    override func layout() {
+        super.layout()
+        refreshPointerClaims()
+    }
 
     // MARK: - Accessibility
 

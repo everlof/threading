@@ -1,6 +1,7 @@
 # Remote access
 
-Remote access mirrors Threading sessions to a browser or to the native `ThreadingMobile` iOS app.
+Remote access mirrors Threading sessions and standalone project terminals to a browser or to the
+native `ThreadingMobile` iOS app.
 It is an opt-in beta feature: open the dedicated **Settings → Remote Access** page on the Mac,
 turn on **Remote Access**, and switch on the ways in you want. There is no connection *mode* any
 more: a mode forced one choice between overlapping things, and a way in is one switch per network,
@@ -160,9 +161,18 @@ categories. Focused mode does not attempt to recognize questions drawn by a Clau
 TUI; only structured Native questions/permissions and explicit human requests can create the
 corresponding notifications.
 
-An owner pairing is stored as one logical Mac identity, not as one hostname. iOS attempts its
-durable hosted ICE/TURN credential first, then the private endpoints the Mac advertises. Owner
-responses carry the addresses each way in is currently answering on, tailnet included, plus an
+An owner pairing is stored as one logical Mac identity, not as one hostname. For the read-only
+catalogue request, iOS starts a constant-size race: its durable hosted ICE/TURN credential and at
+most four private-network lanes. LAN and VPN each keep one sequential lane; Tailscale gets up to
+two so its IPv4 and IPv6 doors can start together, with later tailnet names continuing in those
+lanes. The first valid `/api/me` response wins and cancels every other lane. A failed fast route
+does not suppress a slower success. One advertised door and its sticky port range always stay in
+one lane; a door that answers ends the rest of its port walk, and so does one whose address nothing
+was reachable at. The concurrency ceiling does not grow with endpoint or port count. Mutations deliberately keep
+the established sequential failover and one idempotency key; racing operations with side effects
+would make the transport optimization part of mutation semantics.
+
+Owner responses carry the addresses each way in is currently answering on, tailnet included, plus an
 explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still
 decoded by an older phone and are never sent again. The iPhone orders only HTTPS endpoints allowed
 by that policy, with no preference between the private-network kinds — which of this Mac's own
@@ -183,6 +193,25 @@ This mobile browser is deliberately host-owned. Threading retains project/sessio
 launch scoping, connection truth, row actions and the native fallback; the macOS extension
 composition engine neither runs nor renders on iOS, so this surface does not advertise a visual
 replacement contract it cannot honor.
+
+Before the first catalogue arrives, the dashboard names only the operation happening now:
+checking saved connections, trying a way in, or loading sessions after the Mac has answered.
+These values come from `RemoteAppModel.fetchMe` at the point the bounded race begins and when its
+winner is known;
+there is no cosmetic timer that can claim a different step from the work the transport is doing.
+LabelMorph's traveling fade periodically crosses the unchanged current phrase, while Reduce Motion
+leaves it still. The navigation status names the same current route. The surface remains host-only
+because connection truth and fallback policy remain Threading's responsibility even while
+presentation changes. The card always renders one status row; endpoint and sticky-port
+cardinality never create retained views per network attempt.
+
+Debug builds expose those same two render components through **Settings → Developer → Connection
+progress**. `MobileConnectionProgressLab` can hold the body card, navigation item, or both at each
+authored checkpoint without starting a network request. The deterministic evidence scene is
+`THREADING_MOBILE_DEMO=connection-progress-lab`; it enters through `RootView` and renders
+`MobileConnectionProgressCard` plus `MobileConnectionNavigationTitle`, so the lab cannot become a
+parallel mock of the shipping UI. Its five stories and three surface choices are a fixed
+developer-authored set, independent of the number of endpoints or retries on a real Mac.
 
 **A row says who is talking, the way the Mac sidebar does.** Its tile is the runtime's own mark —
 Claude's starburst, OpenAI's knot, an SF Symbol for a runtime we bundle no artwork for — with an
@@ -216,6 +245,26 @@ account/window's current inventory and nearest expiry; zero is distinct from una
 historical banked-reset marker means a credit was observed being used rather than merely being
 available. One-chat guest links cannot discover or read this whole-host data.
 
+An open chat's **… ▸ Chat Settings** puts its operational controls beside that chat. **Account**
+shows the current login and its normalized usage, and can move a live conversation to another
+login for the same agent after warning that the running process will stop. **When the Limit Is
+Reached** selects the resolved per-chat answer: stop and wait for the person, continue at reset,
+continue on the best login, or continue on one named login. **Usage** opens the same whole-host
+dashboard without making the person return to the session list. These controls are owner-only;
+guest summaries omit both `accountID` and `limitRecovery`, and guest requests to either mutation
+route are denied.
+
+The account catalogue already sent once per owner response is the scaling boundary here. Each
+session adds only two optional scalars—the routed account handle and resolved recovery policy—and
+the phone joins those to the top-level agent/account catalogue only for the selected chat. It does
+not copy an account or usage array onto every session row, and the settings sheet builds account
+menus only when opened.
+
+Chat Settings is deliberately host-owned under the customization-surface gate. Threading keeps
+account discovery and credentials, transcript migration, recovery execution, usage provenance,
+confirmation, and compatibility fallback. The iOS extension composition engine has no contract
+for replacing operational session settings, so this sheet does not advertise one.
+
 Opening a dormant session resumes it
 in its existing agent UI or Native surface. Agent UI sessions mirror the CLI's terminal
 scrollback and accept keyboard input; Native sessions render user messages, assistant responses, code and tool
@@ -238,8 +287,9 @@ reasoning effort and UI surface. The stable default is the agent's own Claude Co
 Threading's Native UI remains an explicit experimental choice. Account choices include the Mac's
 latest normalized rate-limit usage, while credentials and config paths stay on the Mac. The
 session is created through the same Mac launch path as a local session and appears on both
-devices immediately. Owners can also rename, pin, archive, restore and switch a session between
-Native and its agent UI from either side. A UI switch stops the current process, then resumes
+devices immediately. Owners can also rename, pin, archive, restore, move a running chat between
+accounts, set its limit recovery, and switch it between Native and its agent UI from either side.
+A UI or account switch stops the current process, then resumes
 the same provider conversation identifier on the other surface. The session row's **Interface**
 submenu shows both choices with the active one checked on Mac and iPhone, and catalogue changes
 are pushed immediately so another open device follows the switch without waiting for polling.
@@ -333,6 +383,24 @@ runs both ways with no protocol bump: a client that omits the field — every ea
 the browser client — receives the whole ring byte for byte, and a host that predates the field
 ignores it and does the same.
 
+**A current host says when initial terminal presentation is complete.** Replay completion alone
+is not enough for an interactive phone: its first final-width viewport sends SIGWINCH, and Codex
+or Claude can repaint the entire application after an arbitrary scheduling gap. A host advertising
+`terminalHydrationBoundary` therefore accepts a request id on each `viewport` generation sent
+before reveal, observes the resulting PTY output on the Mac, and queues a final screen seed, mode
+seed and `terminalReady(requestID:)` after the local burst settles. WebSocket ordering makes that marker a
+proof about every earlier binary frame; network packet timing is not used as a repaint heuristic.
+The phone reveals only the marker matching its current viewport transaction, and if SwiftTerm has
+not mounted yet, the marker waits until its buffered output has been delivered to the renderer.
+A view-only terminal has no viewport lease and receives an untagged boundary after attach.
+
+PTY applications expose SIGWINCH but no portable "repaint finished" acknowledgement, so the host
+uses bounded local timing: 200 ms quiet after the first resize output, one second if the application
+does not repaint, and three seconds for continuous output, always followed by a fresh authoritative
+screen seed. The phone keeps a four-second failure escape. Compatibility remains additive: an
+older phone ignores the feature and marker; a current phone connected to an older host retains its
+one-second input-silence fallback.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients
@@ -420,13 +488,14 @@ be SS3 or CSI (DECCKM) and got the wrong answer; a paste went out unbracketed, w
 multi-line paste line by line.
 
 `RemoteTerminalModeSeed` states them instead. `RemoteTerminalState.modes` — mouse tracking and its
-encoding, application cursor keys, bracketed paste — is read off the Mac's live emulator, and
-`attachTerminal` sends the private-mode statement **after** the ring, because the ring is replayed
-history and history holds modes that stopped being true: an agent that has since exited to a shell
-would otherwise leave the phone reporting clicks into a prompt as pasted escape text. The
-statement is authoritative rather than additive — every tracking mode and every encoding is reset
-before the ones in force are set, and tracking is set last, because resetting an encoding also
-stops tracking on this emulator.
+encoding, application cursor keys, bracketed paste, and kitty keyboard-enhancement flags — is read
+off the Mac's live emulator, and `attachTerminal` sends the mode statement **after** the ring,
+because the ring is replayed history and history holds modes that stopped being true: an agent
+that has since exited to a shell would otherwise leave the phone reporting clicks into a prompt
+as pasted escape text. The statement is authoritative rather than additive — every tracking mode
+and every encoding is reset before the ones in force are set, kitty flags are replaced even when
+the answer is zero, and tracking is set last, because resetting an encoding also stops tracking
+on this emulator.
 
 **A tap also has to be the button a TUI listens for.** Two things in the fork stood between an
 armed phone and a click. iOS encoded every tap as xterm button 1, the *middle* button, where the
@@ -450,6 +519,38 @@ instead of repeating the click. With the keyboard already up, or nothing trackin
 keeps its old meanings — the program's click and word selection respectively.
 `RemoteTerminalTapTests` pins all of it.
 
+**Selecting text had to survive the thing being selected.** SwiftTerm's iOS view cleared the
+selection on every line feed whenever the program tracked the mouse — which on the phone is
+whenever it can type, and which is exactly while an agent is printing the lines someone is
+trying to select. The Mac's view had already replaced that with the honest rule, and the fork's
+iOS view now shares it: a selection is dropped only when the buffer rows it names stop holding
+the same text, because a full scrollback recycled from the top or the alternate screen scrolled
+in place; output that merely appends beneath it leaves it alone. The gesture changed with it. A
+**long press selects the word under the finger directly**, with handles, and brings the edit
+menu up when the finger lifts — moving before lifting extends from that word, a press inside an
+existing selection keeps it — instead of a "Select" menu standing between the finger and the
+word. It never takes the keyboard: the old path called `becomeFirstResponder` because the
+pre-iOS 16 menu controller could not show without it, so a view-only phone, whose view refuses
+first responder, could not copy at all. The menu is `UIEditMenuInteraction` now, an interaction
+on the view rather than a responder-chain service, and it takes the system's own localized
+Copy / Select All / Paste when the system offers them. Over a tracking program the first tap is
+still that program's click and a double tap still asks for the keyboard; neither route moved.
+
+**The selection becomes part of the message, not only the pasteboard.** Beside Copy the menu
+offers **Add to message**, the fork's one host seam here (`extraSelectionMenuActions`). The
+selected text becomes a chip — "2 lines" and the first line of it — and the highlight is
+cleared as Copy clears it, because the buffer keeps moving under the range and the chip is what
+gets sent; the chip's × is the cancel. In the independent composer the chip rides with the
+draft and Send delivers both. Under a direct-input TUI the chip stands above the key bar with an
+insert control, as staged attachments do, and inserting types the lines at the TUI's cursor
+without Return. Both paths wrap the lines in bracketed paste when the program has turned it on
+(`RemoteTerminalSelectionQuote`, ThreadingRemoteKit), which is what keeps an agent's prompt from
+reading every line break as Return — Claude Code shows the block as one "[Pasted text]" token —
+and go in as typed otherwise, exactly as a paste would. A view-only phone is offered Copy but not
+the quote and not Paste, since nothing it sends arrives. `RemoteTerminalSelectionTests` and
+`RemoteTerminalSelectionQuoteTests` pin this; the `terminal-selection-quote` evidence capture
+shows the handles, the themed selection and the chip together.
+
 **The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
 a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the
 session off its own frame and put the rest behind a scrollbar, and only resizing the *Mac* ever
@@ -470,6 +571,20 @@ notification preferences, in-app presence/typing, independent terminal drafts an
 diagnostics are useful without a Mac and stay available from the dashboard's `…` menu after
 pairing. The stock icon picker is manual because iOS confirms every icon change; when a connected
 Mac uses a built-in style, the picker names that style as the matching choice.
+
+**Settings → Advanced** controls the bounded warm-session pool. Its defaults are 60 seconds and
+three connections; hold time can be set from 5–300 seconds and size from 0–8, with zero disabling
+reuse. Popping a chat parks only its authenticated WebSocket. The host first removes it from PTY
+and conversation fan-out, releases its viewport, presence, typing and input-control state, and the
+phone retains no terminal renderer. Reopening that same chat resumes through the ordinary hello
+and bounded replay/snapshot path. A Mac that does not advertise `sessionConnectionParking` is
+always disconnected normally.
+
+The same page exposes the evidence for changing those defaults: current and peak occupancy,
+reuse hits and misses, hit rate, actual hold timing, holds that ended without reuse, each expiry or
+eviction reason, unsupported hosts, and fixed reuse/unused age buckets. These aggregates persist
+only on that iPhone and contain no Mac id, session id, title, prompt or per-connection history.
+Backgrounding or a memory warning drains the pool; lowering either setting applies immediately.
 
 The Mac and paired iPhone share one in-app appearance. Choose **Appearance** in the iPhone
 dashboard's `…` menu, use **Settings → Mac appearance**, or choose an app theme on the Mac; the
@@ -513,6 +628,15 @@ Pairing and sharing are deliberately different actions:
   View only waits for a running chat, and says so beside its dimmed button: a viewer cannot wake
   a dormant one, so there would be nothing to watch. The three live in `ShareLinkGrant`, which is
   what replaced a `switch` on the alert's button *index*.
+- **Share Terminal…** in a standalone terminal's `…` menu creates the same kind of durable,
+  device-bound membership, scoped to that `TerminalID` rather than a `SessionID`. **View only**
+  receives the bounded screen seed and subsequent output but cannot start a stopped shell, type,
+  paste, send keys or resize the PTY; the button therefore waits until that shell is running.
+  **Full control** may start it and send arbitrary PTY input and viewport changes. It is the same
+  authority as sitting at that terminal on the Mac: commands run as the Mac user, and the project
+  folder is only the shell's starting directory, not a security boundary. A terminal capability
+  can never approve an AI permission request, discover chats or other terminals, manage the host,
+  or create another share.
 - **A guest cannot be somebody with only a browser any more.** That worked because the Cloudflare
   Quick Tunnel gave Threading a public origin; removing the relay removes the origin, and this is a
   real capability loss rather than a tidy-up. The browser client is unchanged and still speaks the
@@ -528,6 +652,20 @@ Pairing and sharing are deliberately different actions:
   another invitation for another person; forwarding an already accepted invite does not clone
   the membership. A credential that cannot be restored exactly fails closed rather than creating
   a replacement identity.
+
+Standalone terminals remain a separate wire type. `RemoteMeDTO.terminals` is optional and carries
+`RemoteProjectTerminalSummaryDTO`; a terminal is never adapted into `RemoteSessionSummaryDTO`, so
+an older client ignores the new catalogue instead of inventing agent, transcript, archive,
+workspace or permission behavior for a shell. WebSockets use `/ws/terminal/<TerminalID>`, lifecycle
+uses `/api/terminal/<TerminalID>/…`, and `RemoteScope.projectTerminal` compares the typed identity
+on every request. Even a terminal and chat containing identical UUID bytes do not share authority.
+
+The terminal catalogue applies the session-sized scaling gate: one bounded summary per durable
+terminal, one lazy dashboard row per visible result, and no retained view or timer per hidden
+terminal. A detail screen opens one socket and one bounded replay only when selected. This surface
+is deliberately host-owned under the customization-surface gate. Threading keeps terminal
+identity, PTY lifetime, authorization, sharing, replay and input enforcement; the iOS extension
+composition engine has no contract for replacing a raw project shell.
 
 Use **Open in Browser** to test the browser client without leaving the Mac. The owner pairing link
 can also be copied from the pairing sheet, but it is intentionally not presented as a general
@@ -545,6 +683,23 @@ starting a chat now go through one function, so a new chat is opened with the tr
 surface can survive — a terminal still commits its final geometry immediately rather than being
 resized through every intermediate width. The session's own screen owns the wait: a brand-new
 session is not yet running, so it shows "Resuming on your Mac…" until the agent answers.
+
+**Connected to the Mac and attached to one chat are separate truths.** The dashboard's connected
+state means a route answered and returned the current catalogue; entering a row then opens that
+session's own live socket for replay, conversation deltas, presence and input. An available row
+therefore says "Opening chat…" rather than claiming the phone is connecting to the Mac again. A
+dormant row keeps "Resuming on your Mac…" until the process is ready, then passes through the same
+opening state. Leaving the detail screen closes that session socket without unpairing the phone or
+taking the dashboard offline.
+
+The navigation status is one changing phrase, so `MobileMorphingTitleLabel` uses LabelMorph's
+whole-line scroll rather than its character-by-character name morph. The scroll clears one full
+caption line and one synchronized, shallow opacity breath shares its 650 ms budget. This is
+deliberately not a traveling wave: when "Opening chat…" gives way immediately to a Mac name, a
+staggered pulse leaves the trailing `Book Pro` fully lit while the leading half flickers, and the
+phrase stops reading as one line. Dashboard route progress, SwiftUI terminal chrome and UIKit
+Native-conversation chrome all enter through this same mobile design boundary. Reduce Motion
+lands the next phrase synchronously with no scroll or fade.
 
 **A chat has one name, wherever it is drawn.** The list draws the catalogue's
 `AgentSession.displayTitle` and so does every title on the screen that list opens —
@@ -608,9 +763,13 @@ session either.
 
 ## Sending a file from the phone
 
-The composer's paperclip attaches a photo or a document to the next prompt. It is the only route
-by which a remote client can cause the Mac to keep a file, so it is worth saying exactly what it
-does and where it stops.
+The composer's paperclip attaches a photo or a document to the next prompt. A direct-input TUI
+keeps the same paperclip as a fixed utility cap at the start of its control-key bar; picked files
+appear in a bounded tray above the bar, and its explicit Insert action types their quoted session
+paths at the current cursor without Return. The explicit step matters because an upload may
+finish after the person has moved the TUI cursor. Neither mode lets asynchronous transfer mutate
+the terminal unexpectedly. This is the only route by which a remote client can cause the Mac to
+keep a file, so it is worth saying exactly what it does and where it stops.
 
 **The bytes go over first, and the prompt names them afterwards.** `POST …/attachment-upload`
 carries one chunk of base64 inside the same JSON envelope every other mutation uses; chunk 0
@@ -655,6 +814,16 @@ iOS and the browser keep a small seven-day journal of typed connection events on
 Every connect attempt ends in one of them: connected, ended, or failed with a stated reason, so a
 phone that never reached the Mac leaves a record rather than a silence. Each carries the kind of
 route it used and a hash of the address it aimed at, never the address itself.
+An iOS catalogue refresh also carries one trace from `hostRefreshStarted` through every bounded
+route preparation/request and its terminal refresh result. Route records name their phase,
+configured timeout, monotonic duration, attempt position, cancellation and winning transport.
+Hosted preparation adds coarse rendezvous/host-wait/offer/ICE/proxy stages without SDP, ICE
+candidates or service addresses. Pairing, sequential mutation failover, notification registration
+and local discovery resolution use the same bounded route records. Live session and dashboard
+event sockets use separate traces across hello, failure/end and the scheduled exponential
+reconnect delay; both own an explicit hello deadline rather than relying on URLSession to end a
+silent peer. Public report delivery records each 30-second HTTPS attempt and whether it was
+delivered, left idempotently queued, or terminally refused.
 They do not send it to the Mac by default. A paired interactive owner can open **Diagnostics** on
 iPhone, or use the control beside the Mac in the browser session list, and choose **Share
 diagnostics for 30 minutes**. The existing bounded history is sent first and new events follow
@@ -813,6 +982,20 @@ cardinality checks; duplicate key identities and oversized actions are refused w
 the active or durable layout. Keys ride the existing `input` frame, so the server's
 capability/Focused-mode/size checks apply unchanged and no protocol bump was needed.
 
+A named cap takes its bytes from SwiftTerm's live encoder rather than stopping at that classic
+fallback. Codex negotiates kitty keyboard event reporting before `/model`; under that contract a
+touch arrow is a press followed by a release, and enhanced functional-key spelling takes
+precedence over DECCKM. The bar owns both ends of a touch and sends both events in one ordered PTY
+write. Snippets and hand-authored raw sequences remain verbatim by definition.
+
+Modifier caps have two compatible lifetimes. A completed tap still cycles off → armed → locked →
+off, but the cap is also active from touch-down to touch-up, so holding ⌃ or ⌥ with one finger and
+tapping an arrow with another sends one real xterm chord. Using a modifier in that held chord
+consumes its later button activation instead of accidentally arming the following key. One shared
+button style owns the immediate pressed travel and theme fill for every cap; retained, prewarmed
+feedback generators acknowledge completed key and latch actions instead of constructing a cold
+generator after each release.
+
 It is the only bar over the keyboard. SwiftTerm fits its own `TerminalAccessory` — a fixed
 esc/ctrl/tab/arrow row — from `TerminalView`'s initializer, which stacked a second row of nearly
 the same keys under this one; `RemoteTerminalView.dropBuiltInKeyboardAccessory()` clears it
@@ -832,6 +1015,9 @@ already up produced no notification and no button — it now asks the bridge on 
 trailing controls are a bare `Image` in a reserved 44pt frame with no fill behind it, which
 answers taps on the glyph alone; the key caps are hit-testable across their whole cap only
 because each carries a background. `contentShape` makes the reserved area the real one.
+The two trailing SF Symbols also cannot be aligned by their equal frames: the dismissal chevron
+and customization badge extend below different keyboard-shaped motifs. Their group aligns on the
+symbols' first text baseline, which puts the shared keyboard chassis on one visible ink line.
 
 iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
 terminal drafts are written locally as they change, pending request ids survive a reconnect, and
@@ -1192,7 +1378,7 @@ a second certificate for the same address.
 - **The dashboard stops loading when the attempt has stopped.** An offline phase retains the
   structured failure rather than only its sentence, so an owner with no cached catalogue gets a
   recovery card instead of an indeterminate “Loading sessions…” card. It names only the saved
-  doors in product language (This network, Tailscale, VPN or Direct), never an address or port,
+  doors in compact product language (LAN, Tailscale, VPN or Direct), never an address or port,
   offers the cause-specific next step, and keeps re-scanning available after an ordinary route
   failure. The complete 26-character identity already pinned by the phone is shown for comparison
   with **Settings ▸ Remote Access** on the Mac; a mismatch has no “trust this answer” shortcut.
@@ -1212,6 +1398,14 @@ a second certificate for the same address.
   the remaining ports of that range, in the listener's own order, and only while nothing has
   answered. An HTTP status, an authentication refusal or a refused certificate ends that door
   immediately.
+- **A door is also over when its address definitively cannot be reached.** A name-resolution or
+  explicit no-route failure rules out every remaining port at that address, so `RemoteDoorWalk`
+  moves to the next door and records one bounded skip decision. A generic request timeout is not
+  such a verdict: URLSession does not say whether a port was filtered or a server accepted the
+  connection and stalled, and a listener may still occupy another port of the sticky range. The
+  read-only catalogue races network families independently, so preserving that port walk does
+  not put a viable Tailscale or VPN lane behind repeated LAN timeouts. A refusal also keeps
+  walking; finding a listener on another port is the walk's reason to exist.
 - **Local Network access.** `NSLocalNetworkUsageDescription` ships with the `lan` door because
   iOS prompts on the first unicast to a same-subnet private address, not only on Bonjour. A
   denial produces an ordinary no-route error, which the phone tells apart from an absent host by

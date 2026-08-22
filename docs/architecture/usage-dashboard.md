@@ -432,6 +432,51 @@ The thresholds are regression alarms, not target frame times. The actual page sw
 most 90 daily points per provider or 280 prepared history points; the larger transition fixture is
 there to expose accidental raw-array work in animation and interaction paths.
 
+## A scan is 2,824 sources of transient memory
+
+Measured on the developer machine on 2026-08-20, on a window that had been up 25 hours:
+
+```
+transcript sources                  2,824   (1,864 Codex rollouts + 960 Claude)
+UsageScanCache on disk                4.4 GB   (2,824 entries, 140 of them over 10 MB)
+live NSConcreteData in the app        4.46 GB  (72,893 buffers of 64 KiB)
+process physical footprint           10.3 GB, 14.1 GB peak
+```
+
+Those three numbers are the same bytes. `BoundedFileReader` reads every file in 64 KiB chunks
+through `FileHandle.read(upToCount:)`, which returns **autoreleased** `NSData`, and `JSONDecoder`
+leaves an autoreleased `_NSJSONReader` behind per decode. The scan loop walks every source this
+machine has ever produced without draining a pool, so the entire cache directory became resident
+in a single pass and stayed there until the scan returned. Two heap censuses 51 minutes apart
+caught it growing: `NSConcreteData` +4,912, `_NSJSONReader` +4,419, `__NSExactBlockVariable__`
++4,416, all in lockstep, and the payloads read back as `UsageScanCache.Envelope` JSON.
+
+`UsageScanCache.records(...)` now wraps each source in `autoreleasepool`, and
+`BoundedFileReader.read` wraps each chunk append, so a file's chunks are gone before the next file
+opens. Returned records are Swift values, so the bound costs the scan nothing.
+
+Two things this exposed that are worth keeping in view:
+
+- **`maximumEntryBytes` is 64 MB per entry and there is no aggregate bound.** 2,824 entries under a
+  per-entry cap is the "per-item bounds mistaken for a global bound" pattern from the Scaling Gate.
+  4.4 GB of derived cache is already larger than most of what this app stores; it is marked
+  `rebuildableCache`/`derivedCache` so storage reclamation can offer it, but nothing caps its total.
+- **The scan accumulates `records` for every source before deduplicating.** That is deliberate, since
+  global deduplication has to see every response identity, but it means peak scan memory scales with
+  total history rather than with one source. Only the transient per-file bytes were fixed here.
+
+`BoundedFileReaderTests.testReadingManyFilesDoesNotRetainEveryFilesChunks` reads 120 MB across 120
+files and fails if the footprint grows by more than 40 MB. Reverting the pool to confirm the test
+bites, on the same build and fixture:
+
+| Reading 120 MB across 120 files | Footprint growth |
+|---|---:|
+| Without `autoreleasepool` | 132 MB |
+| With `autoreleasepool` | under 40 MB (passes) |
+
+132 MB retained for 120 MB read is the mechanism stated plainly: every chunk that built a file was
+still alive when the next file opened.
+
 ## Verification ownership
 
 - `UsageLedgerTests`, `UsageProviderAdapterTests` and `UsageScanCacheTests`: normalization,

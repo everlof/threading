@@ -697,6 +697,23 @@ struct AgentSession: Codable, Identifiable {
   /// the global switch could only ever be the broad one. See `LimitRecoveryResolution`.
   var limitRecoveryPolicy: LimitRecoveryPolicy?
 
+  /// When this conversation stops being spent on its own. Nil inherits the project's answer,
+  /// which inherits the standing quiet hours in Settings — the same three scopes as the theme
+  /// and the limit recovery above, and optional for the same reason: a chat inside a checkout
+  /// that exempted itself can still ask to be ended at 04:00.
+  ///
+  /// `.until` carries a wall-clock moment rather than a duration, because the whole feature
+  /// exists for the hours the user is asleep across. See `CurfewResolution`.
+  var curfewRule: CurfewRule?
+
+  /// What this session's curfew has already done — the wrap-up it sent, the hold it announced,
+  /// the interrupts it spent. Nil is a conversation that has never been under one.
+  ///
+  /// Kept beside the rule rather than derived from it, because it is the truth across a
+  /// relaunch: the deadline inside it is the *instance's* identity, so a new deadline replaces
+  /// the whole record rather than editing it. See `SessionCurfewState`.
+  var curfewState: SessionCurfewState?
+
   /// An execution directory owned for this session alone. Nil is the ordinary path: launch in
   /// the Project folder exactly as Threading always has.
   var managedWorkspace: ManagedWorkspace?
@@ -787,6 +804,8 @@ struct AgentSession: Codable, Identifiable {
     self.notificationsMuted = nil
     self.soundOverrides = nil
     self.limitRecoveryPolicy = nil
+    self.curfewRule = nil
+    self.curfewState = nil
     self.managedWorkspace = nil
   }
 
@@ -802,6 +821,7 @@ struct AgentSession: Codable, Identifiable {
     case handoff
     case themeID, themeName, notificationsMuted, soundOverrides
     case limitRecoveryPolicy
+    case curfewRule, curfewState
     case managedWorkspace
   }
 
@@ -1135,6 +1155,21 @@ struct AgentSession: Codable, Identifiable {
       String.self,
       forKey: .limitRecoveryPolicy
     ).flatMap(LimitRecoveryPolicy.init(rawValue:))
+    // Through the stored form for the reason above: a rule kind a later build invented reads as
+    // "never chose" — the answer then falls through to the project and the standing window —
+    // rather than one unreadable setting costing the record its title and its resume state.
+    curfewRule = try container.decodeIfPresent(
+      CurfewRule.Stored.self,
+      forKey: .curfewRule
+    ).flatMap(CurfewRule.init(stored:))
+    // `try?` for the same reason one level up. The state is the log of what a curfew already
+    // did; a malformed one is worth losing on its own rather than taking the session with it.
+    // The record then reads as never having been under a curfew, and the engine builds fresh
+    // state from the rule that is still there.
+    curfewState = try? container.decodeIfPresent(
+      SessionCurfewState.self,
+      forKey: .curfewState
+    )
     managedWorkspace = try container.decodeIfPresent(
       ManagedWorkspace.self,
       forKey: .managedWorkspace
@@ -1186,6 +1221,8 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
     try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
+    try container.encodeIfPresent(curfewRule, forKey: .curfewRule)
+    try container.encodeIfPresent(curfewState, forKey: .curfewState)
     try container.encodeIfPresent(managedWorkspace, forKey: .managedWorkspace)
   }
 

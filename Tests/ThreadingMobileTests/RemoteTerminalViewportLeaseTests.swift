@@ -20,6 +20,9 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
 
     private enum Fixture {
         static let settleDelay: Duration = .milliseconds(40)
+        static let hydrationQuietDelay: Duration = .milliseconds(80)
+        static let hydrationHalfDelay: Duration = .milliseconds(40)
+        static let staticDemoHydrationWait: Duration = .milliseconds(1_200)
         /// Comfortably past the settle delay, far short of flaking on a busy machine.
         static let settleTimeout: TimeInterval = 2
         /// The grids one pinch from 9 to 13 points reports, oldest first.
@@ -110,6 +113,181 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         )
     }
 
+    /// Codex answers a resize by clearing and re-emitting terminal-owned history in many PTY
+    /// reads. The emulator must keep parsing those reads, but the phone must not reveal the
+    /// clear and partial reflow states between them.
+    @MainActor
+    func testInitialTerminalStaysHydratingUntilOutputIsQuietAfterTheViewport() async throws {
+        let connection = Self.demoConnection(
+            hydrationQuietDelay: Fixture.hydrationQuietDelay
+        )
+        connection.onTerminalOutput = { _ in }
+        connection.connect()
+
+        // Model an older host: it knows the ordinary terminal protocol but does not advertise
+        // the ordered hydration boundary. The phone must retain its conservative silence
+        // fallback for compatibility.
+        connection.receiveServerTextForTesting(Self.encoded(RemoteHelloDTO(
+            surface: .terminal,
+            capability: RemoteCapability.interact.rawValue,
+            cols: 80,
+            rows: 24,
+            title: "Legacy terminal",
+            features: []
+        )))
+
+        XCTAssertTrue(connection.isTerminalHydrating)
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+        try await Task.sleep(for: Fixture.hydrationHalfDelay)
+        XCTAssertTrue(connection.isTerminalHydrating)
+
+        // Another repaint chunk restarts the quiet boundary instead of exposing a partial frame.
+        connection.receiveDemoTerminalOutput(Data("late repaint chunk".utf8))
+        try await Task.sleep(for: Fixture.hydrationHalfDelay)
+        XCTAssertTrue(connection.isTerminalHydrating)
+        try await Task.sleep(for: Fixture.hydrationQuietDelay)
+        XCTAssertFalse(connection.isTerminalHydrating)
+    }
+
+    /// A current Mac puts `terminalReady` behind the resize repaint and final screen seed, so a
+    /// one-second phone timer is both slower and less accurate than the ordered wire boundary.
+    @MainActor
+    func testCurrentHostRevealsOnTheMatchingTerminalBoundary() {
+        let connection = Self.demoConnection(hydrationQuietDelay: .seconds(2))
+        connection.onTerminalOutput = { _ in }
+        connection.connect()
+
+        XCTAssertTrue(connection.isTerminalHydrating)
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+
+        XCTAssertFalse(
+            connection.isTerminalHydrating,
+            "The host boundary must avoid the old fixed quiet tax"
+        )
+    }
+
+    /// WebSocket ordering alone is insufficient when the SwiftTerm view has not mounted: the
+    /// binary frames can be buffered in the connection while the later ready text is decoded.
+    /// Reveal follows renderer delivery, not merely socket receipt.
+    @MainActor
+    func testTerminalBoundaryWaitsForBufferedOutputToReachSwiftTerm() {
+        let connection = Self.demoConnection(hydrationQuietDelay: .seconds(2))
+        connection.connect()
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+
+        XCTAssertTrue(connection.isTerminalHydrating)
+        var received = Data()
+        connection.onTerminalOutput = { received.append($0) }
+
+        XCTAssertFalse(received.isEmpty)
+        XCTAssertFalse(connection.isTerminalHydrating)
+    }
+
+    /// A settled layout can supersede the first grid while its repaint is still in flight. A
+    /// delayed boundary from that older generation must not uncover the newer resize.
+    @MainActor
+    func testAStaleTerminalBoundaryCannotRevealANewerViewportGeneration() throws {
+        let connection = Self.demoConnection(hydrationQuietDelay: .seconds(2))
+        connection.onTerminalOutput = { _ in }
+        connection.receiveServerTextForTesting(Self.encoded(RemoteHelloDTO(
+            surface: .terminal,
+            capability: RemoteCapability.interact.rawValue,
+            cols: 80,
+            rows: 24,
+            title: "Current terminal",
+            features: [RemoteWebSocketFeature.terminalHydrationBoundary.rawValue]
+        )))
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+        let requestID = try XCTUnwrap(connection.terminalHydrationRequestIDForTesting)
+
+        connection.receiveServerTextForTesting(Self.encoded(
+            RemoteTerminalReadyDTO(requestID: "stale-viewport-generation")
+        ))
+        XCTAssertTrue(connection.isTerminalHydrating)
+
+        connection.receiveServerTextForTesting(Self.encoded(
+            RemoteTerminalReadyDTO(requestID: requestID)
+        ))
+        XCTAssertFalse(connection.isTerminalHydrating)
+    }
+
+    /// A layout can briefly cross another cell count and then settle back on the grid already
+    /// leased to the Mac. The duplicate lease is intentionally not sent; its newly constructed
+    /// request id must not replace the id of the viewport that really did cross the wire.
+    @MainActor
+    func testAnUnsentDuplicateViewportCannotReplaceTheHydrationGeneration() async throws {
+        let session = RemoteSessionSummaryDTO(
+            id: "0e6f7d1c-5716-470b-933c-d68310644b4f",
+            title: "Codex · AnotherTerminal",
+            agentKind: "codex",
+            surface: .terminal,
+            state: "running",
+            projectName: "AnotherTerminal"
+        )
+        let connection = RemoteSessionConnection(
+            session: session,
+            client: RemoteClient(
+                link: RemoteConnectionLink(
+                    string: "https://viewport-generation.invalid/#fixture"
+                )!
+            ),
+            viewportSettleDelay: Fixture.settleDelay,
+            terminalHydrationQuietDelay: .seconds(2),
+            terminalHydrationMaximumDelay: .seconds(2)
+        )
+        connection.receiveServerTextForTesting(Self.encoded(RemoteHelloDTO(
+            surface: .terminal,
+            capability: RemoteCapability.interact.rawValue,
+            cols: 80,
+            rows: 24,
+            title: "Current terminal",
+            features: [RemoteWebSocketFeature.terminalHydrationBoundary.rawValue]
+        )))
+
+        connection.updateTerminalViewport(cols: 48, rows: 41)
+        let sentRequestID = try XCTUnwrap(connection.terminalHydrationRequestIDForTesting)
+        connection.updateTerminalViewport(cols: 47, rows: 41)
+        connection.updateTerminalViewport(cols: 48, rows: 41)
+        try await Task.sleep(for: Fixture.settleDelay * 2)
+
+        XCTAssertEqual(connection.terminalHydrationRequestIDForTesting, sentRequestID)
+        connection.receiveServerTextForTesting(Self.encoded(
+            RemoteTerminalReadyDTO(requestID: sentRequestID)
+        ))
+        XCTAssertFalse(connection.isTerminalHydrating)
+    }
+
+    /// The screenshot fixtures preload terminal bytes before SwiftUI mounts the representable.
+    /// Taking that buffer must start the same hydration transaction as a real socket frame;
+    /// otherwise the animated opening placeholder remains forever and no evidence can stabilize.
+    @MainActor
+    func testBufferedStaticDemoOutputCompletesHydrationAfterTheViewport() async throws {
+        let connection = RemoteSessionConnection.demoTerminal()
+        var received = Data()
+
+        connection.onTerminalOutput = { received.append($0) }
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+        try await Task.sleep(for: Fixture.staticDemoHydrationWait)
+
+        XCTAssertFalse(received.isEmpty)
+        XCTAssertFalse(connection.isTerminalHydrating)
+    }
+
     /// `updateUIView` runs for every published change on the connection, and reinstalling an
     /// identical palette clears SwiftTerm's attribute caches and marks the whole screen dirty —
     /// a cold whole-grid repaint per presence or status tick, growing with cell count as the
@@ -121,19 +299,21 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             font: UIFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         )
         TerminalViewRepresentable.apply(Self.theme(background: "#101010"), to: view)
-        view.getTerminal().clearUpdateRange()
+        XCTAssertEqual(view.themeApplicationCount, 1)
 
         TerminalViewRepresentable.apply(Self.theme(background: "#101010"), to: view)
 
-        XCTAssertNil(
-            view.getTerminal().getUpdateRange(),
+        XCTAssertEqual(
+            view.themeApplicationCount,
+            1,
             "An unchanged theme must not invalidate a single row"
         )
 
         TerminalViewRepresentable.apply(Self.theme(background: "#202020"), to: view)
 
-        XCTAssertNotNil(
-            view.getTerminal().getUpdateRange(),
+        XCTAssertEqual(
+            view.themeApplicationCount,
+            2,
             "A changed theme still repaints"
         )
     }
@@ -145,17 +325,19 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             font: UIFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         )
         TerminalViewRepresentable.apply(nil, to: view)
-        view.getTerminal().clearUpdateRange()
+        XCTAssertEqual(view.themeApplicationCount, 1)
 
         TerminalViewRepresentable.apply(nil, to: view)
 
-        XCTAssertNil(view.getTerminal().getUpdateRange())
+        XCTAssertEqual(view.themeApplicationCount, 1)
     }
 
     // MARK: - Private Methods
 
     @MainActor
-    private static func demoConnection() -> RemoteSessionConnection {
+    private static func demoConnection(
+        hydrationQuietDelay: Duration = .milliseconds(500)
+    ) -> RemoteSessionConnection {
         let session = RemoteSessionSummaryDTO(
             id: "0e6f7d1c-5716-470b-933c-d68310644b4f",
             title: "Claude Code · AnotherTerminal",
@@ -168,7 +350,9 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         return RemoteSessionConnection(
             session: session,
             client: RemoteClient(link: link),
-            viewportSettleDelay: Fixture.settleDelay
+            viewportSettleDelay: Fixture.settleDelay,
+            terminalHydrationQuietDelay: hydrationQuietDelay,
+            terminalHydrationMaximumDelay: .seconds(2)
         )
     }
 
@@ -187,5 +371,9 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
                 "#3333ff", "#ff33ff", "#33ffff", "#ffffff",
             ]
         )
+    }
+
+    private static func encoded<T: Encodable>(_ value: T) -> String {
+        String(decoding: try! JSONEncoder().encode(value), as: UTF8.self)
     }
 }

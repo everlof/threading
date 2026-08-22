@@ -567,8 +567,8 @@ final class AppSettings {
         return raw.flatMap(SidebarSessionOrder.init(rawValue:)) ?? .manual
     }
 
-    /// How a project's sessions are arranged in the sidebar. Pinned sessions are hoisted
-    /// first under every order; this decides the order among equals.
+    /// How a project's chats and terminals are arranged in the sidebar. Pinned chats are
+    /// hoisted within the chat group; this decides the order among equals or which type leads.
     ///
     /// Choosing a *different* order lands on that order's natural direction. A direction is a
     /// statement about one order's field — "Z to A" is about names — so carrying it into the
@@ -595,7 +595,7 @@ final class AppSettings {
     }
 
     /// Whether the chosen order runs backwards: newest added first, least recently active
-    /// first, Z to A. Pinned sessions still lead — reversing reverses the sort, not the list.
+    /// first, Z to A, or terminals before chats.
     var sidebarSessionOrderIsReversed: Bool {
         get { Self.sidebarSessionOrderIsReversed }
         set {
@@ -1142,7 +1142,8 @@ final class AppSettings {
         }
     }
 
-    /// Whether Threading may ask its release feed whether a newer version exists.
+    /// Whether Threading may ask its own and installed agent tools' official release sources
+    /// whether newer versions exist.
     ///
     /// Defaults to **on**, and `defaults.bool` cannot express that — an unset key reads `false`,
     /// which would ship the feature switched off for everyone who never opened Settings. The
@@ -1656,7 +1657,7 @@ enum PromptReturnKey: String, CaseIterable {
 
 // MARK: - Sidebar Session Order
 
-/// How a project's sessions are arranged in the sidebar.
+/// How a project's chats and terminals are arranged in the sidebar.
 ///
 /// `manual` is the store's own order — the order sessions were created in, which is also the
 /// only order the user can influence directly. The others are derived orders, re-applied on
@@ -1665,6 +1666,7 @@ enum SidebarSessionOrder: String, CaseIterable {
     case manual
     case recentActivity
     case name
+    case type
 
     /// The menu wording: what the order sorts by, since "manual" describes a mechanism and
     /// "order added" describes what the list actually shows.
@@ -1673,6 +1675,7 @@ enum SidebarSessionOrder: String, CaseIterable {
         case .manual: L10n.string("Sort by Order Added")
         case .recentActivity: L10n.string("Sort by Recent Activity")
         case .name: L10n.string("Sort by Name")
+        case .type: L10n.string("Sort by Type")
         }
     }
 
@@ -1684,6 +1687,7 @@ enum SidebarSessionOrder: String, CaseIterable {
         case .manual: L10n.string("Oldest First")
         case .recentActivity: L10n.string("Most Recent First")
         case .name: L10n.string("A to Z")
+        case .type: L10n.string("Chats First")
         }
     }
 
@@ -1693,6 +1697,7 @@ enum SidebarSessionOrder: String, CaseIterable {
         case .manual: L10n.string("Newest First")
         case .recentActivity: L10n.string("Least Recent First")
         case .name: L10n.string("Z to A")
+        case .type: L10n.string("Terminals First")
         }
     }
 }

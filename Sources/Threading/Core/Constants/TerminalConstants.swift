@@ -24,6 +24,17 @@ enum TerminalDefaults {
     /// at a call site reads like a line ending rather than like pressing a key.
     static let submitSequence = "\r"
 
+    /// What Escape sends to a PTY, which every one of these TUIs reads as "stop this turn".
+    ///
+    /// Named for `submitSequence`'s reason and typed under a stricter rule, because this is the
+    /// one keystroke Threading presses while the user is asleep. Only a curfew sends it, only
+    /// into a terminal whose runtime claims `AgentCapabilities.escapeInterruptsTerminalTurn` and
+    /// whose tracker reports a turn actually in flight, and never twice inside
+    /// `CurfewDefaults.reinterruptSpacing`. The spacing is not politeness: a second Escape at an
+    /// *idle* Claude Code prompt interrupts nothing and opens its rewind chooser, so the next
+    /// thing typed lands in a list of checkpoints instead of in the conversation.
+    static let interruptSequence = "\u{1b}"
+
     /// How long a turn waits after a pasted file path before Return is typed for it.
     ///
     /// Claude Code and Codex resolve a pasted image path asynchronously — they read the file

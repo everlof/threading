@@ -63,7 +63,26 @@ final class UsageScanCache {
         prepareDirectory()
     }
 
+    /// One source is one unit of transient memory.
+    ///
+    /// A scan walks every transcript this machine has ever produced, and both halves of a source
+    /// allocate through Objective-C: the cache read hands back autoreleased `NSData` chunks, and
+    /// `JSONDecoder` leaves an autoreleased `_NSJSONReader` per decode. Nothing in the scan loop
+    /// drained a pool, so all of it stayed resident until the whole scan returned. With 2,824
+    /// sources behind a 4.4 GB cache directory that reached 4.4 GB of live `NSData` in one pass,
+    /// which is most of a 14 GB peak. Returned records are Swift values and are unaffected by the
+    /// pool, so the bound costs the scan nothing.
     func records(
+        for source: URL,
+        parserID: String,
+        parse: () -> [UsageLedgerRecord]
+    ) -> Result {
+        autoreleasepool {
+            resolveRecords(for: source, parserID: parserID, parse: parse)
+        }
+    }
+
+    private func resolveRecords(
         for source: URL,
         parserID: String,
         parse: () -> [UsageLedgerRecord]
@@ -98,6 +117,17 @@ final class UsageScanCache {
     /// Cache for a supported CLI export. `revision` is the session's durable last-activity
     /// stamp, so a dormant OpenCode session costs no process launch on a warm rebuild.
     func records(
+        forKey key: String,
+        revision: Date,
+        parserID: String,
+        parse: () throws -> [UsageLedgerRecord]
+    ) throws -> Result {
+        try autoreleasepool {
+            try resolveRecords(forKey: key, revision: revision, parserID: parserID, parse: parse)
+        }
+    }
+
+    private func resolveRecords(
         forKey key: String,
         revision: Date,
         parserID: String,

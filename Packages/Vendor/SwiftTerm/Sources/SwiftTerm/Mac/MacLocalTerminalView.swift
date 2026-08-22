@@ -9,8 +9,13 @@
 import Foundation
 import AppKit
 
+private struct WeakLocalProcessInputReference {
+    weak var value: LocalProcess?
+}
+
 /// Delegate for the ``LocalProcessTerminalView`` class that is used to
 /// notify the user of process-related changes.
+@MainActor
 public protocol LocalProcessTerminalViewDelegate: AnyObject {
     /**
      * This method is invoked to notify that the terminal has been resized to the specified number of columns and rows
@@ -43,6 +48,84 @@ public protocol LocalProcessTerminalViewDelegate: AnyObject {
     func processTerminated (source: TerminalView, exitCode: Int32?)
 }
 
+private final class LocalProcessTerminalViewProcessAdapter:
+    LocalProcessDelegate, LocalProcessBorrowedDataDelegate, Sendable
+{
+    private let renderOwner: TerminalRenderOwner
+    private let frameSignal: FrameDriverSignal
+    private let crossThreadState: Locked<TerminalViewCrossThreadState>
+    private let diagnosticsState: Locked<TerminalView.Diagnostics>
+    private let outputHandler: LockedVoidCallback
+    private let windowSize = Locked(winsize())
+    private let inputProcess = Locked(WeakLocalProcessInputReference())
+    private let terminationHandler: @MainActor @Sendable (Int32?) -> Void
+
+    init(renderOwner: TerminalRenderOwner,
+         frameSignal: FrameDriverSignal,
+         crossThreadState: Locked<TerminalViewCrossThreadState>,
+         diagnosticsState: Locked<TerminalView.Diagnostics>,
+         outputHandler: LockedVoidCallback,
+         terminationHandler: @escaping @MainActor @Sendable (Int32?) -> Void) {
+        self.renderOwner = renderOwner
+        self.frameSignal = frameSignal
+        self.crossThreadState = crossThreadState
+        self.diagnosticsState = diagnosticsState
+        self.outputHandler = outputHandler
+        self.terminationHandler = terminationHandler
+    }
+
+    func updateWindowSize(_ value: winsize) {
+        windowSize.withLock { $0 = value }
+    }
+
+    func attachInputProcess(_ process: LocalProcess) {
+        inputProcess.withLock { $0.value = process }
+    }
+
+    func sendInput(_ bytes: [UInt8]) {
+        inputProcess.withLock { reference in
+            reference.value?.send(data: bytes[...])
+        }
+    }
+
+    func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
+        let handler = terminationHandler
+        Task { @MainActor in
+            handler(exitCode)
+        }
+    }
+
+    func dataReceived(slice: ArraySlice<UInt8>) {
+        frameSignal.markDirty()
+        let parse = Profiling.begin(.ioParse, "bytes=%d", slice.count)
+        _ = renderOwner.feed(bytes: slice)
+        parse.end()
+        diagnosticsState.withLock { diagnostics in
+            diagnostics.bytesFed += slice.count
+            diagnostics.batches += 1
+        }
+        outputHandler.call()
+        frameSignal.markDirty()
+    }
+
+    func dataReceivedBorrowed(_ bytes: Span<UInt8>) {
+        frameSignal.markDirty()
+        let parse = Profiling.begin(.ioParse, "bytes=%d", bytes.count)
+        _ = renderOwner.feed(borrowedBytes: bytes)
+        parse.end()
+        diagnosticsState.withLock { diagnostics in
+            diagnostics.bytesFed += bytes.count
+            diagnostics.batches += 1
+        }
+        outputHandler.call()
+        frameSignal.markDirty()
+    }
+
+    func getWindowSize() -> winsize {
+        windowSize.withLock { $0 }
+    }
+}
+
 /**
  * `LocalProcessTerminalView` is an AppKit NSView that can be used to host a local process
  * the process is launched inside a pseudo-terminal.
@@ -63,17 +146,29 @@ public protocol LocalProcessTerminalViewDelegate: AnyObject {
  *
  * If you want additional control over the delegate methods implemented in this class, you can
  * subclass this and override the methods
+ *
+ * Terminal parsing for this view runs on the background LocalProcess IO thread. TerminalViewDelegate
+ * callbacks produced by parsing are marshalled back to the main thread by TerminalView.
  */
-open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalProcessDelegate {
+open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     
     public internal(set) var process: LocalProcess!
+    private var processAdapter: LocalProcessTerminalViewProcessAdapter!
+    nonisolated private let processOutputHandler = LockedVoidCallback()
 
     public override init (frame: CGRect)
     {
         super.init (frame: frame)
         setup ()
     }
-    
+
+    /// Creates a local process terminal view with explicit startup options for the underlying `Terminal`
+    public override init (frame: CGRect, font: NSFont? = nil, options: TerminalOptions)
+    {
+        super.init (frame: frame, font: font, options: options)
+        setup ()
+    }
+
     public required init? (coder: NSCoder)
     {
         super.init (coder: coder)
@@ -83,7 +178,40 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
     func setup ()
     {
         terminalDelegate = self
-        process = LocalProcess (delegate: self)
+        let adapter = LocalProcessTerminalViewProcessAdapter(
+            renderOwner: renderOwner,
+            frameSignal: frameSignal,
+            crossThreadState: crossThreadState,
+            diagnosticsState: diagnosticsState,
+            outputHandler: processOutputHandler,
+            terminationHandler: { [weak self] exitCode in
+                guard let self, let process = self.process else { return }
+                self.processTerminated(process, exitCode: exitCode)
+            })
+        processAdapter = adapter
+        // Direct delivery keeps process output on the IO parse thread. The
+        // explicit main queue preserves UI lifecycle delivery.
+        process = LocalProcess(
+            delegate: adapter,
+            dispatchQueue: .main,
+            directDelivery: true)
+        adapter.attachInputProcess(process)
+        inputSender.replaceDelivery(
+            { [adapter] bytes in
+                adapter.sendInput(bytes)
+            },
+            deliverOnMain: { [weak self] bytes in
+                guard let self else { return }
+                self.terminalDelegate?.send(source: self, data: bytes[...])
+            })
+        adapter.updateWindowSize(getWindowSize())
+    }
+
+    /// Installs a notification that runs on the process parse thread after an
+    /// output batch is applied. The handler receives no mutable terminal state
+    /// and must return quickly.
+    public func setProcessOutputHandler(_ handler: (@Sendable () -> Void)?) {
+        processOutputHandler.replace(with: handler)
     }
     
     /**
@@ -91,13 +219,8 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
      */
     public weak var processDelegate: LocalProcessTerminalViewDelegate?
 
-    /**
-     * Gives a subclass a chance to keep the child process on an explicitly managed grid.
-     *
-     * The terminal renderer has already observed the AppKit frame change when this is called.
-     * Returning false suppresses only the PTY resize and delegate notification; the subclass
-     * can immediately re-apply its managed grid. The default preserves SwiftTerm behaviour.
-     */
+    /// Gives a subclass a chance to keep the child process on an explicitly
+    /// managed grid. The default preserves SwiftTerm's resize behaviour.
     open func shouldApplyProcessSizeChange(newCols: Int, newRows: Int) -> Bool {
         true
     }
@@ -109,11 +232,9 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
         guard shouldApplyProcessSizeChange(newCols: newCols, newRows: newRows) else {
             return
         }
-        guard process.running else {
-            return
-        }
         var size = getWindowSize()
-        let _ = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: process.childfd, windowSize: &size)
+        processAdapter.updateWindowSize(size)
+        guard process.updateWindowSize(&size) else { return }
         
         processDelegate?.sizeChanged (source: self, newCols: newCols, newRows: newRows)
     }
@@ -126,6 +247,13 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
         }
     }
     
+    public func clipboardRead(source: TerminalView) -> Data? {
+        guard let str = NSPasteboard.general.string(forType: .string) else {
+            return nil
+        }
+        return str.data(using: .utf8)
+    }
+    
     /**
      * Invoke this method to notify the processDelegate of the new title for the terminal window
      */
@@ -136,7 +264,14 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
     public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
         processDelegate?.hostCurrentDirectoryUpdate(source: source, directory: directory)
     }
-    
+
+    /**
+     * Invoked when the user activates a link, override to handle the link yourself
+     */
+    open func requestOpenLink (source: TerminalView, link: String, params: [String:String])
+    {
+        openLink (link)
+    }
 
     /**
      * This method is invoked when input from the user needs to be sent to the client
@@ -163,25 +298,22 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
     open func rangeChanged(source: TerminalView, startY: Int, endY: Int) {
         //
     }
-
-    /**
-     * Called when iTerm2-style OSC 1337 sequences are received.
-     * Override this method to handle custom OSC 1337 content.
-     */
-    open func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {
-        // Default implementation does nothing
-    }
-
+    
     /**
      * Launches a child process inside a pseudo-terminal.
      * - Parameter executable: The executable to launch inside the pseudo terminal, defaults to /bin/bash
      * - Parameter args: an array of strings that is passed as the arguments to the underlying process
      * - Parameter environment: an array of environment variables to pass to the child process, if this is null, this picks a good set of defaults from `Terminal.getEnvironmentVariables`.
      * - Parameter execName: If provided, this is used as the Unix argv[0] parameter, otherwise, the executable is used as the args [0], this is used when the intent is to set a different process name than the file that backs it.
+     * - Parameter currentDirectory: If provided, the process will be launched with this as the current working directory.
      */
-    public func startProcess(executable: String = "/bin/bash", args: [String] = [], environment: [String]? = nil, execName: String? = nil)
+    public func startProcess(executable: String = "/bin/bash", args: [String] = [], environment: [String]? = nil, execName: String? = nil, currentDirectory: String? = nil)
     {
-        process.startProcess(executable: executable, args: args, environment: environment, execName: execName)
+        // A nil environment keeps the LocalProcess default (TERM=xterm-256color);
+        // hosts that want options.termName in the child's environment pass
+        // Terminal.getEnvironmentVariables(termName:) explicitly
+        processAdapter.updateWindowSize(getWindowSize())
+        process.startProcess(executable: executable, args: args, environment: environment, execName: execName, currentDirectory: currentDirectory)
     }
 
     /**
@@ -210,8 +342,13 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
      */
     open func getWindowSize () -> winsize
     {
-        let f: CGRect = self.frame
-        return winsize(ws_row: UInt16(terminal.rows), ws_col: UInt16(terminal.cols), ws_xpixel: UInt16 (f.width), ws_ypixel: UInt16 (f.height))
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        let dimensions = terminalDimensions
+        let pxW = Int((cellDimension?.width ?? 0) * CGFloat(dimensions.cols) * scale)
+        let pxH = Int((cellDimension?.height ?? 0) * CGFloat(dimensions.rows) * scale)
+        return winsize(ws_row: UInt16(dimensions.rows),
+                       ws_col: UInt16(dimensions.cols),
+                       ws_xpixel: UInt16(pxW), ws_ypixel: UInt16(pxH))
     }
 }
 

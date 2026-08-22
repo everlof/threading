@@ -81,6 +81,16 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
                       "no MobileMorphingTitleLabel in the hosted title")
     }
 
+    private func morphingLabel(
+        with value: String,
+        in view: UIView
+    ) throws -> MobileMorphingTitleLabel {
+        try XCTUnwrap(
+            all(MobileMorphingTitleLabel.self, in: view).first { $0.stringValue == value },
+            "no MobileMorphingTitleLabel presenting \(value) in the hosted title"
+        )
+    }
+
     private func navigationBar(in view: UIView) throws -> UINavigationBar {
         try XCTUnwrap(first(UINavigationBar.self, in: view), "no UINavigationBar in the host")
     }
@@ -91,6 +101,11 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
             if let found = first(type, in: child) { return found }
         }
         return nil
+    }
+
+    private func all<T: UIView>(_ type: T.Type, in view: UIView) -> [T] {
+        let current = (view as? T).map { [$0] } ?? []
+        return current + view.subviews.flatMap { all(type, in: $0) }
     }
 
     /// Lets SwiftUI commit its next layout pass, the way a runloop turn does in the app. The
@@ -107,7 +122,7 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
     /// `hello` names the chat, and the agent's own title arrives with its mark in front of the
     /// same words. The label went from 147 points wide to 174 and the morph stopped half way.
     func testTheTitleKeepsItsGeometryWhenTheAgentMarkArrives() throws {
-        let fixture = hosted(title: Fixture.storedName, status: "Connecting to Mac…")
+        let fixture = hosted(title: Fixture.storedName, status: "Opening chat…")
         let label = try morphingLabel(in: fixture.window)
         let before = label.bounds
 
@@ -134,6 +149,22 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
             try morphingLabel(in: long.window).bounds.width,
             accuracy: 0.5
         )
+    }
+
+    /// The status dot and phrase are one reading. Giving the phrase the title's full invisible
+    /// slot left the dot at that slot's leading edge, more than a hundred points from the words.
+    func testTheConnectionStatusHugsItsWordsInsteadOfTheTitleSlot() throws {
+        let status = "Trying LAN"
+        let fixture = hosted(title: "David's MacBook Pro", status: status)
+        let titleLabel = try morphingLabel(with: "David's MacBook Pro", in: fixture.window)
+        let statusLabel = try morphingLabel(with: status, in: fixture.window)
+
+        XCTAssertEqual(
+            statusLabel.bounds.width,
+            statusLabel.intrinsicContentSize.width,
+            accuracy: 0.5
+        )
+        XCTAssertLessThan(statusLabel.bounds.width, titleLabel.bounds.width)
     }
 
     /// Holding still must not be bought by taking a width the bar has not got. A stated width

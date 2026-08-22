@@ -48,6 +48,19 @@ describe("private issue-report intake", () => {
   it("accepts a reviewed connection-recovery report from iOS", async () => {
     const report = makeReport();
     report.trigger = "connectionRecovery";
+    report.diagnostics.records.push({
+      timestamp: report.createdAt,
+      source: "iOSClient",
+      level: "info",
+      event: "hostDiscoveryMatched",
+      fields: {
+        peer: "peer-a1b2c3d4e5f6",
+        transport: "lan",
+        phase: "resolve",
+        result: "matched",
+        origin: "origin-a1b2c3d4e5f6",
+      },
+    });
 
     expect((await submit(report)).status).toBe(201);
   });
@@ -88,6 +101,18 @@ describe("private issue-report intake", () => {
     await expect(rejectedText.json()).resolves.toMatchObject({
       error: { code: "invalidReport" },
     });
+
+    const rawOrigin = makeReport();
+    rawOrigin.diagnostics.records[0]!.fields.origin = "192.168.1.42:8760";
+    expect((await submit(rawOrigin)).status).toBe(400);
+
+    const prefixedRawOrigin = makeReport();
+    prefixedRawOrigin.diagnostics.records[0]!.fields.origin = "origin-192.168.1.42:8760";
+    expect((await submit(prefixedRawOrigin)).status).toBe(400);
+
+    const proseDuration = makeReport();
+    proseDuration.diagnostics.records[0]!.fields.durationMS = "fifteen-seconds";
+    expect((await submit(proseDuration)).status).toBe(400);
   });
 
   it("accepts joined client records only inside a Mac host report", async () => {
@@ -249,8 +274,19 @@ function makeReport(): TestReport {
         timestamp: now,
         source: "iOSClient",
         level: "info",
-        event: "socketConnected",
-        fields: { transport: "webrtc", trace: "trace-123" },
+        event: "hostRouteEnded",
+        fields: {
+          transport: "hosted",
+          trace: "trace-123",
+          phase: "hosted.awaitingHost",
+          result: "failed",
+          durationMS: "15017",
+          timeoutMS: "15000",
+          attempt: "1",
+          total: "2",
+          origin: "origin-abcdef123456",
+          detail: "identity.accepted",
+        },
       }],
     },
   };

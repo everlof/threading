@@ -21,10 +21,12 @@ struct ThreadingMobileHostedRoot: View {
                 // `onChange(of: scenePhase)` does not fire for the phase the app launches into,
                 // so the first foreground is this one.
                 model.startDiscovery()
-                await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
-                await notifications.prepare()
-                await notifications.sync(hosts: model.hosts)
-                await MobileIssueReportOutbox.shared.flush()
+                if !model.isEphemeralTerminalWireFixture {
+                    await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
+                    await notifications.prepare()
+                    await notifications.sync(hosts: model.hosts)
+                    await MobileIssueReportOutbox.shared.flush()
+                }
             }
             .onChange(of: scenePhase) { _, phase in
                 notifications.scenePhase = phase
@@ -34,24 +36,30 @@ struct ThreadingMobileHostedRoot: View {
                     // address it finds is only useful while somebody is looking at the app.
                     model.startDiscovery()
                     Task {
-                        await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
                         await model.refresh()
-                        await notifications.refreshAuthorization()
-                        await notifications.sync(hosts: model.hosts)
-                        await MobileIssueReportOutbox.shared.flush()
+                        if !model.isEphemeralTerminalWireFixture {
+                            await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
+                            await notifications.refreshAuthorization()
+                            await notifications.sync(hosts: model.hosts)
+                            await MobileIssueReportOutbox.shared.flush()
+                        }
                     }
                 } else if phase == .background {
                     model.stopDiscovery()
                     model.suspendHostedConnections()
-                    Task {
-                        await MobileIssueReportOutbox.shared.setConnectivityRetryActive(false)
+                    if !model.isEphemeralTerminalWireFixture {
+                        Task {
+                            await MobileIssueReportOutbox.shared.setConnectivityRetryActive(false)
+                        }
                     }
                 }
             }
             .onChange(of: notifications.deviceToken) { _, _ in
+                guard !model.isEphemeralTerminalWireFixture else { return }
                 Task { await notifications.sync(hosts: model.hosts) }
             }
             .onChange(of: model.hosts) { _, hosts in
+                guard !model.isEphemeralTerminalWireFixture else { return }
                 Task { await notifications.sync(hosts: hosts) }
             }
     }

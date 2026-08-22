@@ -56,6 +56,16 @@ final class SidebarArrangementMenuTests: XCTestCase {
         }
     }
 
+    func testTypeOrderOffersChatAndTerminalDirections() throws {
+        try withDefault(SidebarSessionOrder.type.rawValue, forKey: "sidebarSessionOrder") {
+            let titles = ProjectSidebarViewController().arrangementMenuEntries()
+                .compactMap(\.item?.title)
+
+            XCTAssertTrue(titles.contains("Chats First"))
+            XCTAssertTrue(titles.contains("Terminals First"))
+        }
+    }
+
     /// The seeded defaults: both grouping toggles on, the store's own order chosen.
     func testDefaultsCarryTheirChecks() throws {
         let entries = ProjectSidebarViewController().arrangementMenuEntries()

@@ -128,9 +128,10 @@ private final class SemanticSceneMarkControl: ThemedControl {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func resetCursorRects() {
-        guard item.onActivate != nil, isEnabled else { return }
-        addCursorRect(bounds, cursor: .pointingHand)
+    /// A mark that acts is pressable geometry rather than a control's plate, so it takes the
+    /// hand; one that does not act is still opaque, so it takes the arrow. See `PointerClaiming`.
+    override var restingPointer: NSCursor? {
+        item.onActivate != nil && isEnabled ? .pointingHand : .arrow
     }
 
     override func mouseDown(with event: NSEvent) {

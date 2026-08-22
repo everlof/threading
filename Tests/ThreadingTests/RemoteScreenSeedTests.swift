@@ -9,26 +9,21 @@ import SwiftTerm
 /// leaves the column alone on LF and discards NUL without advancing, so the browser drew the
 /// screen as a staircase of run-together words. These assert on the byte stream because the byte
 /// stream is the whole contract.
+@MainActor
 final class RemoteScreenSeedTests: XCTestCase {
 
     // MARK: - Harness
 
-    private final class Silent: TerminalDelegate {
-        func send(source: Terminal, data: ArraySlice<UInt8>) {}
+    private func makeTerminal(cols: Int = 20, rows: Int = 5) -> TerminalView {
+        TerminalView(
+            frame: .zero,
+            options: TerminalOptions(cols: cols, rows: rows, scrollback: 200))
     }
 
-    private var delegate = Silent()
-
-    private func makeTerminal(cols: Int = 20, rows: Int = 5) -> Terminal {
-        delegate = Silent()
-        return Terminal(
-            delegate: delegate,
-            options: TerminalOptions(cols: cols, rows: rows, scrollback: 200)
-        )
-    }
-
-    private func seed(_ terminal: Terminal) -> String {
-        String(decoding: RemoteScreenSeed.repaint(of: terminal), as: UTF8.self)
+    private func seed(_ terminal: TerminalView) -> String {
+        String(
+            decoding: RemoteScreenSeed.repaint(of: terminal.terminalStateSnapshot()),
+            as: UTF8.self)
     }
 
     /// The printable text of the seed, with every escape sequence removed, so a test can talk
@@ -67,7 +62,7 @@ final class RemoteScreenSeedTests: XCTestCase {
         let terminal = makeTerminal()
         terminal.feed(text: "one\r\ntwo\r\nthree\r\nfour")
 
-        let bytes = Array(RemoteScreenSeed.repaint(of: terminal))
+        let bytes = Array(RemoteScreenSeed.repaint(of: terminal.terminalStateSnapshot()))
         let lineFeeds = bytes.enumerated().filter { $0.element == UInt8(ascii: "\n") }
 
         XCTAssertFalse(lineFeeds.isEmpty, "a multi-row screen should emit line feeds")
@@ -87,7 +82,7 @@ final class RemoteScreenSeedTests: XCTestCase {
         // is exactly how a TUI leaves gaps between words.
         terminal.feed(text: "left\u{1b}[12Gright")
 
-        let bytes = RemoteScreenSeed.repaint(of: terminal)
+        let bytes = RemoteScreenSeed.repaint(of: terminal.terminalStateSnapshot())
 
         XCTAssertFalse(bytes.contains(0), "a NUL is dropped by the client, collapsing the gap")
         XCTAssertTrue(
@@ -103,7 +98,7 @@ final class RemoteScreenSeedTests: XCTestCase {
         terminal.feed(text: "ab\u{1b}[K\u{1b}[7Gz")
 
         XCTAssertFalse(
-            RemoteScreenSeed.repaint(of: terminal).contains(0),
+            RemoteScreenSeed.repaint(of: terminal.terminalStateSnapshot()).contains(0),
             "erased cells carry code 0 and must not reach the client as NUL"
         )
         XCTAssertTrue(
@@ -239,10 +234,10 @@ final class RemoteScreenSeedTests: XCTestCase {
         let terminal = makeTerminal()
         terminal.feed(text: "one\r\ntwo")
 
-        let cursor = terminal.getCursorLocation()
+        let cursor = terminal.terminalStateSnapshot().cursor
 
         XCTAssertTrue(
-            seed(terminal).hasSuffix("\u{1b}[\(cursor.y + 1);\(cursor.x + 1)H"),
+            seed(terminal).hasSuffix("\u{1b}[\(cursor.row + 1);\(cursor.col + 1)H"),
             "the client must resume typing where the Mac's cursor actually is"
         )
     }

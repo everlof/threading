@@ -220,6 +220,45 @@ final class AgentLaunchQuotingTests: XCTestCase {
         }
     }
 
+    /// Threading owns the daily release check and the visible updater receipt. Every Codex
+    /// process it starts must therefore decline Codex's duplicate startup check, especially a
+    /// terminal restored in the background before anyone has opened its chat.
+    func testEveryThreadingCodexLaunchDisablesTheProviderStartupUpdateCheck() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        let session = AgentSession(kind: .codex, title: "t")
+        let endpoint = "http://127.0.0.1:9/mcp/t"
+
+        let sources = try [
+            XCTUnwrap(try AgentLauncher.plan(for: session, in: project).arguments.last),
+            XCTUnwrap(try AgentLauncher.streamPlan(for: session, in: project).arguments.last),
+            XCTUnwrap(
+                AgentLauncher.codexResearchPlan(
+                    in: "/tmp/not-a-repository",
+                    prompt: "find the mark"
+                ).arguments.last
+            ),
+            ShellCommand.executing(
+                XCTUnwrap(AgentLauncher.settingsResearchCommand(
+                    kind: .codex,
+                    prompt: "find the setting",
+                    mcpConfigPath: nil,
+                    endpointURL: endpoint
+                )),
+                in: "/tmp/not-a-repository"
+            ).source
+        ]
+        let expected = "\(AgentDefaults.codexCheckForUpdateOnStartupKey)=false"
+
+        for source in sources {
+            let words = try Self.tokenizing(source)
+            XCTAssertEqual(
+                words.filter { $0 == expected },
+                [expected],
+                "a Threading-managed Codex process may not show its own update prompt: \(words)"
+            )
+        }
+    }
+
     // MARK: - Against the CLI's own parser
 
     /// A prompt that begins with `-` is a prompt, not a flag.
@@ -391,6 +430,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         XCTAssertEqual(words, [
             "env", "-u", "CODEX_HOME",
             AgentDefaults.codexExecutable,
+            "--config", "check_for_update_on_startup=false",
             "--config", "model_reasoning_effort=\"low\"",
             "--sandbox", "read-only",
             "exec",
@@ -464,6 +504,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         XCTAssertEqual(words, [
             "env", "-u", "CODEX_HOME",
             AgentDefaults.codexExecutable,
+            "--config", "check_for_update_on_startup=false",
             "--config", "model_reasoning_effort=\"low\"",
             "--sandbox", "read-only",
             "--config", "mcp_servers.threading.url=\"http://127.0.0.1:9/mcp/t\"",

@@ -82,6 +82,7 @@ final class ComponentGalleryViewController: NSViewController {
     static let componentNames: Set<String> = [
         "AgentActivityBeamView",
         "AgentWorkSummaryView",
+        "AgentWorkloadAnalyzerView",
         "BackdropOverlay",
         "BackdropThemedControl",
         "BrowserAnnotationOverlay",
@@ -134,6 +135,7 @@ final class ComponentGalleryViewController: NSViewController {
         "RevealHighlightView",
         "SearchMatchLabel",
         "SearchResultRowView",
+        "ScreenshotReportDropTargetView",
         "SemanticSceneView",
         "SeparatorView",
         "ShortcutRecorderView",
@@ -3114,7 +3116,8 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThreadingMarkView",
                     "The Threading mark drawn live: brand threads under System, the theme's "
                         + "accent under a style. Rest, then Weave, Breathe and Orbit from left "
-                        + "to right; Preview holds Weave through its box turn, while Replay "
+                        + "to right; Weave is held at one box-tumble pose, Preview plays the "
+                        + "whole route, and Replay "
                         + "shows the launch stitch.",
                     makeThreadingMarkSample()
                 ),
@@ -3123,6 +3126,22 @@ final class ComponentGalleryViewController: NSViewController {
                     "The sidebar's brand row: the mark beside the app's name — or the logo, "
                         + "wordmark and face the current chrome's sidebar brand states instead.",
                     makeSidebarBrandSample()
+                ),
+                story(
+                    "AgentWorkloadAnalyzerView",
+                    "The spectrum material's workload reading in place of the brand: seven "
+                        + "fixed bands off the shared AgentIntensity envelope, the working "
+                        + "count in one-bit figures, and MAX at provider-relative top effort. "
+                        + "Decorative, and it drives no timer while hidden, idle, or under "
+                        + "Reduce Motion.",
+                    makeAgentWorkloadAnalyzerSample()
+                ),
+                story(
+                    "ScreenshotReportDropTargetView",
+                    "The native titlebar's accepted-image state: a quiet wash and one exact "
+                        + "sentence beside the traffic lights. It is transient, has no resting "
+                        + "surface, and never takes titlebar hit-testing.",
+                    makeScreenshotReportDropTargetSample()
                 ),
                 story(
                     "PaneFooterView",
@@ -4065,6 +4084,17 @@ final class ComponentGalleryViewController: NSViewController {
         return backdrop
     }
 
+    private func makeScreenshotReportDropTargetSample() -> NSView {
+        let target = ScreenshotReportDropTargetView()
+        target.translatesAutoresizingMaskIntoConstraints = false
+        target.setPresented(true, animated: false)
+        NSLayoutConstraint.activate([
+            target.widthAnchor.constraint(equalToConstant: 440),
+            target.heightAnchor.constraint(equalToConstant: 32)
+        ])
+        return target
+    }
+
     /// The mark at rest and in all three particle treatments. They are deliberately shown at
     /// inspection size here; the real sidebar exercises Weave at 24pt.
     private func makeThreadingMarkSample() -> NSView {
@@ -4077,12 +4107,15 @@ final class ComponentGalleryViewController: NSViewController {
             small.widthAnchor.constraint(equalToConstant: 20),
             small.heightAnchor.constraint(equalToConstant: 20)
         ]
-        for mark in particleMarks {
+        for (motion, mark) in zip(ThreadingMarkParticleMotion.allCases, particleMarks) {
             constraints += [
                 mark.widthAnchor.constraint(equalToConstant: 44),
                 mark.heightAnchor.constraint(equalToConstant: 44)
             ]
-            mark.setParticlePresentation(phase: 0.34)
+            mark.setParticlePresentation(
+                phase: 0.34,
+                heldHoverPhase: motion == .weave ? 0.58 : nil
+            )
         }
         NSLayoutConstraint.activate(constraints)
 
@@ -4124,7 +4157,7 @@ final class ComponentGalleryViewController: NSViewController {
         DispatchQueue.main.asyncAfter(
             deadline: .now()
                 + Design.Motion.brandParticleHoverHold
-                + Design.Motion.brandParticleBoxTurnCycle
+                + Design.Motion.brandParticleBoxTumbleCycle
         ) { [weak self] in
             self?.particleMarkSamples.forEach { $0.setHovered(false) }
         }
@@ -4150,6 +4183,32 @@ final class ComponentGalleryViewController: NSViewController {
         ])
 
         return pane
+    }
+
+    private func makeAgentWorkloadAnalyzerSample() -> NSView {
+        let row = NSStackView(views: [
+            makeWorkloadAnalyzerSpecimen(workingCount: 0, atTopEffort: false),
+            makeWorkloadAnalyzerSpecimen(workingCount: 3, atTopEffort: false),
+            makeWorkloadAnalyzerSpecimen(workingCount: 12, atTopEffort: true)
+        ])
+        row.orientation = .horizontal
+        row.spacing = Design.Spacing.medium
+        return row
+    }
+
+    /// Presented rather than frozen, because the analyzer is a live reading and the gallery is
+    /// where its real cadence is reviewed. It starts no frame timer at an idle workload and none
+    /// under Reduce Motion, so the resting specimen stays still on the component's own terms
+    /// rather than on a test seam's.
+    private func makeWorkloadAnalyzerSpecimen(workingCount: Int, atTopEffort: Bool) -> NSView {
+        let analyzer = AgentWorkloadAnalyzerView()
+        analyzer.update(intensity: AgentIntensity(
+            workload: AgentWorkload(workingCount: workingCount, anyAtTopEffort: atTopEffort),
+            recentActivity: 0,
+            measuredAt: 0
+        ))
+        analyzer.setPresented(true)
+        return analyzer
     }
 
     private func makeSurfaceViewSample() -> NSView {

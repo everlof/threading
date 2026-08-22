@@ -254,8 +254,8 @@ final class WindowEdgeTests: HostedStoreTestCase {
         )
 
         terminal.setRemoteGrid(
-            cols: terminal.getTerminal().getDims().cols,
-            rows: terminal.getTerminal().getDims().rows
+            cols: terminal.terminalDimensions.cols,
+            rows: terminal.terminalDimensions.rows
         )
         let frozen = resizeSweep(window: window, sizes: sizes, terminal: terminal)
         Self.printResizeResult(
@@ -282,8 +282,8 @@ final class WindowEdgeTests: HostedStoreTestCase {
         )
 
         terminal.setRemoteGrid(
-            cols: terminal.getTerminal().getDims().cols,
-            rows: terminal.getTerminal().getDims().rows
+            cols: terminal.terminalDimensions.cols,
+            rows: terminal.terminalDimensions.rows
         )
         let frozenWithRepaint = resizeSweep(
             window: window,
@@ -314,7 +314,7 @@ final class WindowEdgeTests: HostedStoreTestCase {
         XCTAssertGreaterThan(natural.gridChanges, 0)
         XCTAssertEqual(frozen.gridChanges, 0)
         XCTAssertEqual(frozenWithRepaint.gridChanges, 0)
-        XCTAssertFalse(terminal.getTerminal().isCurrentBufferAlternate)
+        XCTAssertFalse(terminal.terminalStateSnapshot().isAlternateBuffer)
     }
 
     /// Opens and closes the production trailing pane beside a synthetic Codex alternate-screen
@@ -404,7 +404,7 @@ final class WindowEdgeTests: HostedStoreTestCase {
         XCTAssertEqual(natural.refusedGridChanges, 0)
         XCTAssertEqual(frozen.acceptedGridChanges, 0)
         XCTAssertGreaterThan(frozen.refusedGridChanges, 0)
-        XCTAssertFalse(terminal.getTerminal().isCurrentBufferAlternate)
+        XCTAssertFalse(terminal.terminalStateSnapshot().isAlternateBuffer)
     }
 
     private func displayPaneSweep(
@@ -415,7 +415,7 @@ final class WindowEdgeTests: HostedStoreTestCase {
         animated: Bool
     ) -> PaneTransitionSweepResult {
         if freezesGrid {
-            let grid = terminal.getTerminal().getDims()
+            let grid = terminal.terminalDimensions
             terminal.setRemoteGrid(cols: grid.cols, rows: grid.rows)
         }
 
@@ -586,7 +586,7 @@ final class WindowEdgeTests: HostedStoreTestCase {
         var gridChanges = 0
 
         for size in sizes {
-            let previousGrid = terminal?.getTerminal().getDims()
+            let previousGrid = terminal?.terminalDimensions
             let started = DispatchTime.now().uptimeNanoseconds
             window.setContentSize(size)
             window.contentView?.layoutSubtreeIfNeeded()
@@ -595,7 +595,7 @@ final class WindowEdgeTests: HostedStoreTestCase {
             samples.append(DispatchTime.now().uptimeNanoseconds - started)
 
             if let previousGrid, let terminal {
-                let currentGrid = terminal.getTerminal().getDims()
+                let currentGrid = terminal.terminalDimensions
                 if previousGrid.cols != currentGrid.cols || previousGrid.rows != currentGrid.rows {
                     gridChanges += 1
                 }

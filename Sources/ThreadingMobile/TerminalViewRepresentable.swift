@@ -14,6 +14,11 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     let onFontSizeChange: @MainActor (Double) -> Void
     let initialScrollProgress: Double?
     let onScrollProgress: @MainActor (Double) -> Void
+    /// Receives the selected text when the person chooses to quote it into their message.
+    /// `nil` when nothing typed here can reach the Mac, in which case the menu offers no such
+    /// action. Defaulted so the view composes without a quote sink while the composer wiring
+    /// that supplies one is being assembled.
+    var quoteSelection: (@MainActor (String) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -43,13 +48,25 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         // gesture claimed by the emulator and then dropped scrolls nothing at all.
         view.allowMouseReporting = allowsDirectInput
         view.configureFontSizing(onChange: onFontSizeChange)
+        view.configureSelectionMenu(quoteSelection: quoteSelection, canPaste: allowsDirectInput)
         context.coordinator.attach(to: view)
         Self.apply(theme, to: view)
         view.accessibilityLabel = MobileL10n.string("Remote terminal")
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.terminalViewCreated(connection.session)
+#endif
 
         let coordinator = context.coordinator
+        let terminalSession = connection.session
         connection.onTerminalOutput = { [weak view] data in
-            view?.feed(byteArray: Array(data)[...])
+            guard let view else { return }
+#if DEBUG
+            MobileTerminalWirePerformanceProbe.feed(data, session: terminalSession) {
+                view.feed(byteArray: Array(data)[...])
+            }
+#else
+            view.feed(byteArray: Array(data)[...])
+#endif
             coordinator.restoreViewportIfPossible()
         }
         connection.onTerminalGridChange = { [weak view] cols, rows in
@@ -85,6 +102,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         keyBridge.refreshKeyboardAvailability()
         uiView.allowMouseReporting = allowsDirectInput
         uiView.configureFontSizing(onChange: onFontSizeChange)
+        uiView.configureSelectionMenu(quoteSelection: quoteSelection, canPaste: allowsDirectInput)
         uiView.applyPreferredFontSize(MobileTerminalFontSize.resolvedPreference(fontSize))
         let ownsViewport = connection.capability == .interact
         uiView.setUsesLocalViewport(ownsViewport)
@@ -121,6 +139,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             view.nativeBoldForegroundColor = nil
             view.nativeBackgroundColor = fallback
             view.backgroundColor = fallback
+            view.selectionHandleColor = .white
             view.keyboardAppearance = .dark
             return
         }
@@ -153,6 +172,11 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         }
         if let cursor = UIColor(remoteHex: theme.cursor) {
             view.caretColor = cursor
+            // The selection plate is usually translucent, so the handles take the theme's
+            // other interaction colour, which is always readable over its background.
+            view.selectionHandleColor = cursor
+        } else {
+            view.selectionHandleColor = foreground
         }
 
         view.keyboardAppearance = MobileKeyboardAppearance.over(background)
@@ -193,6 +217,9 @@ struct TerminalViewRepresentable: UIViewRepresentable {
                 Task { @MainActor in
                     guard let self, let view,
                           view.isDragging || view.isDecelerating || view.isTracking else { return }
+#if DEBUG
+                    MobileTerminalWirePerformanceProbe.localScrollChanged(self.connection.session)
+#endif
                     self.captureViewport()
                 }
             }
@@ -245,6 +272,12 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             Task { @MainActor [weak self] in
                 guard let self, self.allowsInput else { return }
                 let typed = self.keyBridge.applyLatchesToTyped(bytes)
+#if DEBUG
+                MobileTerminalWirePerformanceProbe.terminalInput(
+                    typed[...],
+                    session: self.connection.session
+                )
+#endif
                 self.connection.sendTerminalInput(typed[...])
             }
         }
@@ -290,6 +323,9 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     /// very first application apart from an applied nil, whose fallback colours count too.
     private(set) var appliedTheme: RemoteTerminalThemeDTO?
     private(set) var hasAppliedTheme = false
+#if DEBUG
+    private(set) var themeApplicationCount = 0
+#endif
     private var allowsKeyboardInput = true
     private var authoritativeColumns = 0
     private var authoritativeRows = 0
@@ -310,6 +346,33 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     /// once is enough: it installs the accessory from its initializer and never again.
     func dropBuiltInKeyboardAccessory() {
         inputAccessoryView = nil
+    }
+
+    /// Puts the app's own action beside Copy in the terminal's edit menu.
+    ///
+    /// Copy keeps the text on the pasteboard; this keeps it in the message, as a chip the
+    /// person can still take back. Taking the quote clears the selection the way Copy does:
+    /// the chip is the thing that persists, the highlight was only how it was chosen.
+    func configureSelectionMenu(
+        quoteSelection: (@MainActor (String) -> Void)?,
+        canPaste: Bool
+    ) {
+        allowsPasteFromEditMenu = canPaste
+        guard let quoteSelection else {
+            extraSelectionMenuActions = nil
+            return
+        }
+        extraSelectionMenuActions = { [weak self] text in
+            [
+                UIAction(
+                    title: MobileL10n.string("Add to message"),
+                    image: UIImage(systemName: "text.quote")
+                ) { _ in
+                    quoteSelection(text)
+                    self?.clearSelection()
+                },
+            ]
+        }
     }
 
     func setAllowsKeyboardInput(_ allowed: Bool) {
@@ -343,6 +406,9 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     func noteAppliedTheme(_ theme: RemoteTerminalThemeDTO?) {
         appliedTheme = theme
         hasAppliedTheme = true
+#if DEBUG
+        themeApplicationCount += 1
+#endif
     }
 
     func beginFontPinch() {
@@ -519,7 +585,7 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     /// which would discard the scrolling region the Mac's output relies on.
     private func applyAuthoritativeGrid() {
         guard authoritativeColumns > 0, authoritativeRows > 0 else { return }
-        let current = getTerminal().getDims()
+        let current = terminalDimensions
         guard current.cols != authoritativeColumns || current.rows != authoritativeRows else {
             return
         }

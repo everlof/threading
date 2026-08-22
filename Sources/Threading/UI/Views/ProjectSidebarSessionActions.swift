@@ -648,6 +648,60 @@ enum ShareChatSheet {
     }
 }
 
+@MainActor
+enum ShareTerminalSheet {
+    private enum Grant: CaseIterable {
+        case view
+        case control
+
+        var capability: RemoteCapability { self == .view ? .view : .interact }
+        var title: String {
+            switch self {
+            case .view: return L10n.string("Copy View-Only Link")
+            case .control: return L10n.string("Copy Full-Control Link")
+            }
+        }
+    }
+
+    static func run(for terminalID: TerminalID) {
+        guard let terminal = ProjectStore.shared.terminal(withID: terminalID) else { return }
+        let grants = Grant.allCases
+        let chosen = ConfirmationAlert.choose(ChoiceRequest(
+            prompt: .shareChatLink,
+            title: L10n.format("Share “%@”", ProjectTerminalTitle.displayTitle(for: terminal)),
+            message: L10n.string(
+                "A view-only link can watch output while this shell is running. A full-control "
+                    + "link can start the shell and run commands as your Mac user. The project "
+                    + "folder is only the starting directory, not a security boundary. Neither "
+                    + "grant can approve AI permissions or manage Threading."
+            ),
+            options: grants.map { grant in
+                ConfirmationOption(
+                    title: grant.title,
+                    isEnabled: grant != .view
+                        || ProjectTerminalRuntime.shared.isRunning(terminalID: terminalID)
+                )
+            },
+            style: .informational
+        ))
+        guard let chosen, grants.indices.contains(chosen) else { return }
+        switch RemoteAccessCoordinator.shared.createTerminalShare(
+            for: terminalID,
+            capability: grants[chosen].capability
+        ) {
+        case .success(let created):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(created.url.absoluteString, forType: .string)
+        case .failure(let error):
+            let unavailable = ThemedAlert()
+            unavailable.messageText = L10n.string("This terminal cannot be shared yet")
+            unavailable.informativeText = error.localizedDescription
+            unavailable.alertStyle = .warning
+            unavailable.runModal()
+        }
+    }
+}
+
 enum SessionActionMenuDefaults {
     static var attachmentsTitle: String { L10n.string("Attachments") }
     static let attachmentsSymbol = "paperclip"

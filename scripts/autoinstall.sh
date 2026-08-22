@@ -200,7 +200,35 @@ ensure_checkout() {
     # --local hardlinks the object store instead of copying it, so this costs a checkout of the
     # working tree and almost nothing for the history.
     git clone --local "$SOURCE_REPO" "$CHECKOUT"
+    point_submodules_at_source
     git -C "$CHECKOUT" submodule update --init --recursive
+}
+
+# The vendored packages are our own forks, and a pin that lands on master is routinely a commit
+# that exists only in this machine's checkout: committing here deliberately does not push them
+# (CLAUDE.md - `submodule.recurse` would publish them to their real GitHub remotes). Fetching a
+# submodule from GitHub therefore fails with `upload-pack: not our ref`, and because the object
+# never arrives, *every* later commit fails the same way at checkout rather than only the one that
+# moved the pin - which is how nine consecutive commits went uninstalled on 2026-08-20.
+#
+# The superproject is already a --local clone of the working tree, so the fix is to read the
+# submodules from that same tree rather than from the network. This still builds the pinned commit:
+# `submodule update` checks out the exact recorded sha, and only the objects come from elsewhere.
+# It runs after `submodule sync`, which rewrites these same keys back from .gitmodules.
+point_submodules_at_source() {
+    local key path name source_git_dir
+    while read -r key path; do
+        name="${key#submodule.}"
+        name="${name%.path}"
+        source_git_dir="$(git -C "$SOURCE_REPO/$path" rev-parse --absolute-git-dir 2>/dev/null)" || continue
+        git -C "$CHECKOUT" config "submodule.$name.url" "$source_git_dir" || return 1
+        # An already-initialised submodule fetches through its own remote, which `submodule sync`
+        # has just pointed back at GitHub, so the superproject key alone would not be read.
+        if [[ -d "$CHECKOUT/.git/modules/$name" ]]; then
+            git -C "$CHECKOUT/.git/modules/$name" config remote.origin.url "$source_git_dir" || return 1
+        fi
+    done < <(git -C "$CHECKOUT" config --file "$CHECKOUT/.gitmodules" --get-regexp '^submodule\..*\.path$' 2>/dev/null)
+    return 0
 }
 
 # Every step states its own failure, because `set -e` is suspended inside a function the caller
@@ -214,6 +242,7 @@ prepare_checkout() {
     # ignored build products that make the next compile incremental.
     git -C "$CHECKOUT" clean -fdq || return 1
     git -C "$CHECKOUT" submodule sync --recursive --quiet || return 1
+    point_submodules_at_source || return 1
     git -C "$CHECKOUT" submodule update --init --recursive --quiet || return 1
 }
 

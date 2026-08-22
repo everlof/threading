@@ -55,7 +55,9 @@ final class ToastRenderTests: XCTestCase {
         /// as a wall over the list, whether a truncated message still names its session, and
         /// whether a way back set in a theme's own face still fits the strip it is standing in.
         /// The cleanup story holds an in-flight operation at half progress: the determinate bar
-        /// must remain legible on every material without being confused for the dwell rail.
+        /// must remain legible on every material without being confused for the dwell rail. The
+        /// update story carries three aligned version rows and its update action at the same real
+        /// sidebar width, which is the longest shape the daily five-tool check ordinarily produces.
         enum Story: String, CaseIterable {
             case running
             case dormant
@@ -63,6 +65,7 @@ final class ToastRenderTests: XCTestCase {
             case queued
             case opened
             case cleanup
+            case agentUpdates = "agent-updates"
         }
 
         /// What the cards in an opened deck stand for: three different sessions, one of them
@@ -196,6 +199,30 @@ final class ToastRenderTests: XCTestCase {
                 currentName: "DerivedData",
                 persistenceRecovery: .notNeeded
             ))
+        case .agentUpdates:
+            return AgentCLIUpdateToast.request(for: [
+                AgentCLIUpdate(
+                    id: "claude",
+                    displayName: "Claude Code",
+                    installedVersion: "2.1.220",
+                    latestVersion: "2.1.237",
+                    updateCommand: "claude update"
+                ),
+                AgentCLIUpdate(
+                    id: "codex",
+                    displayName: "Codex",
+                    installedVersion: "0.145.0",
+                    latestVersion: "0.148.0",
+                    updateCommand: "codex update"
+                ),
+                AgentCLIUpdate(
+                    id: "opencode",
+                    displayName: "OpenCode",
+                    installedVersion: "1.17.0",
+                    latestVersion: "1.18.19",
+                    updateCommand: "opencode upgrade"
+                )
+            ], runUpdates: { _ in })
         }
     }
 

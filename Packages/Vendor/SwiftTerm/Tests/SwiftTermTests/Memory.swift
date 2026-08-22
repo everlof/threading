@@ -8,20 +8,25 @@
 //
 #if os(macOS)
 import Foundation
-import XCTest
+import Testing
 
 @testable import SwiftTerm
 
-final class SwiftTermMemory: XCTestCase {
-    static var deinited = false
-    static var terminalDeinited = false
+final class SwiftTermMemory {
+    private struct DeinitState: Sendable {
+        var headless = false
+        var terminal = false
+    }
+
+    private static let deinitState = Locked(DeinitState())
+
     class SimpleTerminal: HeadlessTerminal {
         
         init (queue: DispatchQueue) {
             super.init (queue: queue, onEnd: { x in })
         }
         deinit {
-            SwiftTermMemory.deinited = true
+            SwiftTermMemory.deinitState.withLock { $0.headless = true }
         }
     }
     
@@ -35,18 +40,18 @@ final class SwiftTermMemory: XCTestCase {
         }
         
         deinit {
-            SwiftTermMemory.terminalDeinited = true
+            SwiftTermMemory.deinitState.withLock { $0.terminal = true }
         }
     }
     
     // This tests that the `Terminal` instance is not leaking
-    func testTerminal () {
-        SwiftTermMemory.terminalDeinited = false
+    @Test func testTerminal() {
+        SwiftTermMemory.deinitState.withLock { $0.terminal = false }
         func run () {
             let _ = SubTerminal (delegate: EmptyTerminalDelegate ())
         }
         run ()
-        XCTAssertEqual(SwiftTermMemory.terminalDeinited, true)
+        #expect(SwiftTermMemory.deinitState.withLock { $0.terminal })
 
     }
     
@@ -59,15 +64,10 @@ final class SwiftTermMemory: XCTestCase {
     
     // This test ensures that we are not keeping any strong references
     // in the code that would prevent terminal containers from being released
-    func testMemory ()
-    {
-        SwiftTermMemory.deinited = false
+    @Test func testMemory() {
+        SwiftTermMemory.deinitState.withLock { $0.headless = false }
         allocate ()
-        XCTAssertEqual(SwiftTermMemory.deinited, true)
+        #expect(SwiftTermMemory.deinitState.withLock { $0.headless })
     }
-    
-    static var allTests = [
-        ("testMemory", testMemory),
-    ]
 }
 #endif

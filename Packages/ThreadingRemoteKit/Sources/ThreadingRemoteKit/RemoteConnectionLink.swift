@@ -278,6 +278,18 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
             .appendingPathComponent("resume")
     }
 
+    public func resumeTerminalURL(terminalID: String) -> URL {
+        terminalActionURL(terminalID: terminalID, action: "resume")
+    }
+
+    public func terminalShareURL(terminalID: String) -> URL {
+        terminalActionURL(terminalID: terminalID, action: "share")
+    }
+
+    public func terminalUnshareURL(terminalID: String) -> URL {
+        terminalActionURL(terminalID: terminalID, action: "unshare")
+    }
+
     public func sessionThemeURL(sessionID: String) -> URL {
         baseURL
             .appendingPathComponent("api/session")
@@ -303,6 +315,14 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
 
     public func sessionSurfaceURL(sessionID: String) -> URL {
         sessionActionURL(sessionID: sessionID, action: "surface")
+    }
+
+    public func sessionAccountURL(sessionID: String) -> URL {
+        sessionActionURL(sessionID: sessionID, action: "account")
+    }
+
+    public func sessionLimitRecoveryURL(sessionID: String) -> URL {
+        sessionActionURL(sessionID: sessionID, action: "limit-recovery")
     }
 
     public func sessionShareURL(sessionID: String) -> URL {
@@ -404,10 +424,21 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         webSocketURL(pathComponents: ["ws", "session", sessionID])
     }
 
+    public func terminalWebSocketURL(terminalID: String) -> URL? {
+        webSocketURL(pathComponents: ["ws", "terminal", terminalID])
+    }
+
     private func sessionActionURL(sessionID: String, action: String) -> URL {
         baseURL
             .appendingPathComponent("api/session")
             .appendingPathComponent(sessionID)
+            .appendingPathComponent(action)
+    }
+
+    private func terminalActionURL(terminalID: String, action: String) -> URL {
+        baseURL
+            .appendingPathComponent("api/terminal")
+            .appendingPathComponent(terminalID)
             .appendingPathComponent(action)
     }
 

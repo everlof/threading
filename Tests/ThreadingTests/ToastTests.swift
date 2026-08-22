@@ -138,6 +138,43 @@ final class ToastTests: XCTestCase {
         XCTAssertEqual(buttons(in: toast).map(\.title), ["Undo"])
     }
 
+    func testTheBandAlignsRepeatedValuesAsAComparisonInsteadOfBodyText() throws {
+        let comparison = ToastComparison(
+            currentTitle: "Installed",
+            targetTitle: "Available",
+            rows: [
+                ToastComparisonRow(
+                    label: "Claude Code",
+                    currentValue: "2.1.220",
+                    targetValue: "2.1.237"
+                ),
+                ToastComparisonRow(
+                    label: "Codex",
+                    currentValue: "0.145.0",
+                    targetValue: "0.148.0"
+                )
+            ]
+        )
+        let toast = ToastView(request: ToastRequest(
+            message: "2 agent tool updates are available",
+            comparison: comparison,
+            actionTitle: "Update All",
+            action: {}
+        ))
+        let values = descendants(of: toast)
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+
+        XCTAssertTrue(values.contains("Installed"))
+        XCTAssertTrue(values.contains("Available"))
+        XCTAssertTrue(values.contains("Claude Code"))
+        XCTAssertTrue(values.contains("2.1.220"))
+        XCTAssertTrue(values.contains("2.1.237"))
+        XCTAssertFalse(values.contains { $0.contains("→") })
+        XCTAssertTrue(try XCTUnwrap(toast.accessibilityLabel()).contains(
+            "Claude Code, Installed 2.1.220, Available 2.1.237"
+        ))
+    }
+
     /// A toast with nothing to offer is a receipt, and must not grow an empty control row.
     ///
     /// It still has a way out, and the band is still tall enough to hold it: one short line of
@@ -237,6 +274,34 @@ final class ToastTests: XCTestCase {
             SidebarDefaults.minWidth - ToastDefaults.hostInset * 2 + 0.5,
             "the band overhung the column instead of wrapping inside it"
         )
+    }
+
+    func testAComparisonDoesNotWidenTheSidebarForLongVersions() throws {
+        let (column, bottom, _) = column(width: SidebarDefaults.minWidth)
+        let presenter = ToastPresenter(host: column, above: bottom)
+        presenter.dwell = 30
+        presenter.present(ToastRequest(
+            message: "An agent tool update is available",
+            comparison: ToastComparison(
+                currentTitle: "Installed",
+                targetTitle: "Available",
+                rows: [ToastComparisonRow(
+                    label: "Cursor",
+                    currentValue: "2026.08.10-aaaaaaaa",
+                    targetValue: "2026.08.11-bbbbbbbb"
+                )]
+            ),
+            actionTitle: "Update Cursor",
+            action: {}
+        ))
+        column.superview?.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(column.frame.width, SidebarDefaults.minWidth, accuracy: 0.5)
+        XCTAssertLessThanOrEqual(
+            try XCTUnwrap(presenter.current).frame.width,
+            SidebarDefaults.minWidth - ToastDefaults.hostInset * 2 + 0.5
+        )
+        presenter.invalidate()
     }
 
     /// The same rule from the other side: the divider has no maximum, so a column can be dragged

@@ -283,14 +283,49 @@ final class SessionActivityTracker {
     /// or out of the mark.
     private var openAsks: Set<String> = []
 
-    /// Whether the agent ended its turn on work it had just started, which will wake it again.
+    /// Why the agent's turn ended on work that will wake it again, if it did.
+    ///
+    /// The *kind* is kept and not just the fact, because the two kinds carry different
+    /// guarantees about ever ending, and one rule needs that difference —
+    /// `honoursAwaitingUserNotice`. It is read straight off the `Stop` payload rather than
+    /// inferred; `BackgroundWorkLedger` owns the separate question of whether there is a pause
+    /// at all.
+    enum TurnPause {
+        /// The turn ended having handed nothing off, or having left only work an earlier turn
+        /// already parked. Whatever happens next is the user's move.
+        case none
+
+        /// A subagent or a workflow is still running. **Bounded by construction**: it ends, and
+        /// its result re-enters this conversation without anybody typing. So the row will
+        /// correct itself, and a notice claiming the session wants the user meanwhile is wrong
+        /// about a fact this side already holds.
+        case delegated
+
+        /// A shell or a monitor this turn started. It may stand for hours and nothing in the
+        /// payload says which — an `npm test` and an `npm run dev` are the same entry — so
+        /// nothing here may assume it will ever end.
+        case standing
+
+        var logName: String {
+            switch self {
+            case .none: return "none"
+            case .delegated: return "delegated"
+            case .standing: return "standing"
+            }
+        }
+    }
+
+    /// What the agent left running when its turn ended, if anything is holding the session open.
     ///
     /// A third fact rather than a longer turn, because the turn genuinely did end: the CLI is
     /// back at its prompt and will answer the user. What has *not* happened is the session
     /// finishing — a backgrounded shell re-enters the conversation on its own, and the agent
-    /// speaks again with nobody having typed. Reported by `Stop`, and only ever true for a
+    /// speaks again with nobody having typed. Reported by `Stop`, and only ever set for a
     /// session that reports its own turns.
-    private var pausedOnOwnWork = false
+    private var pause: TurnPause = .none
+
+    /// Whether the turn is paused at all, which is all `settle()` has ever needed to know.
+    private var pausedOnOwnWork: Bool { pause != .none }
 
     /// Claude commonly reports `Stop` and a later idle-prompt `Notification` for one result.
     /// They are one unread episode; new work opens the next one.
@@ -359,11 +394,17 @@ final class SessionActivityTracker {
 
     // MARK: - Public Methods
 
-    /// Records a chunk of output.
-    func recordOutput(byteCount: Int) {
+    /// Records a chunk of output and returns the accepted burst size when that output is strong
+    /// enough to drive a provider-neutral activity presentation.
+    ///
+    /// `nil` is as important as the byte count: unattended launch paint, resize/pointer paint,
+    /// echoed input below the working threshold, and output from an otherwise idle reporting
+    /// session are not agent activity. The caller may animate only a non-nil answer.
+    @discardableResult
+    func recordOutput(byteCount: Int) -> Int? {
         // A background relaunch's boot output is a repaint we provoked, exactly like a
         // resize — except its window ends when the session is seen, not on a timer.
-        if launchedUnattended { return }
+        if launchedUnattended { return nil }
 
         if isSuppressed {
             // A redraw we caused. It must not start a session working, but it also must not
@@ -373,13 +414,14 @@ final class SessionActivityTracker {
             if !reportsOwnActivity, turnInFlight {
                 restartQuietTimer()
             }
-            return
+            return nil
         }
 
         bytesSinceQuiet += byteCount
 
         // Below the threshold this is most likely the terminal echoing typed characters.
-        guard bytesSinceQuiet >= ActivityDefaults.workingByteThreshold else { return }
+        guard bytesSinceQuiet >= ActivityDefaults.workingByteThreshold else { return nil }
+        let acceptedByteCount = bytesSinceQuiet
 
         // An agent that reports its own turns has already said what it is doing, and its output
         // may not start or end one. It answers exactly one question the reports leave open: a
@@ -400,10 +442,11 @@ final class SessionActivityTracker {
             // the CLI repainting around its chooser as readily as it is the agent carrying on,
             // and only one of those means the session can work again — the transcript says
             // which, so nothing has to be inferred from bytes.
-            guard isVisible, turnInFlight, awaitsUser else { return }
-            awaitsUser = false
-            settle(.output)
-            return
+            if isVisible, turnInFlight, awaitsUser {
+                awaitsUser = false
+                settle(.output)
+            }
+            return activity == .working ? acceptedByteCount : nil
         }
 
         if !turnInFlight { attentionEpisodeOpen = false }
@@ -411,6 +454,7 @@ final class SessionActivityTracker {
         awaitsUser = false
         settle(.output)
         restartQuietTimer()
+        return acceptedByteCount
     }
 
     /// Notes that the terminal was resized.
@@ -502,6 +546,28 @@ final class SessionActivityTracker {
         return true
     }
 
+    /// Ends the active turn when the session's own transcript records the user interrupting it —
+    /// Claude's half of the boundary Codex reports above. See `ClaudeTranscriptInterruption`.
+    ///
+    /// It takes a turn generation rather than a turn id because Claude names no turn: its
+    /// `UserPromptSubmit` payload carries a session and a prompt and nothing to match a later
+    /// read against, so the count of turns begun is the identity — the same stand-in
+    /// `noteTurnRefused` uses, and for the same reason.
+    ///
+    /// The fallback contract is otherwise identical: it cannot latch an inferred session, cannot
+    /// end an idle one, and cannot end a turn other than the one it was read for. It settles
+    /// exactly like `Stop`, because an interrupted turn genuinely ended and the CLI is back at
+    /// its prompt.
+    @discardableResult
+    func noteTurnInterrupted(turn generation: Int) -> Bool {
+        guard reportsOwnActivity, turnInFlight, generation == turnGeneration else {
+            return false
+        }
+
+        finishReportedTurn(backgroundWork: [], cause: .turnInterrupted)
+        return true
+    }
+
     /// Ends the active turn when the session's own transcript records a request the provider
     /// refused for something other than the account's allowance — an expired login, a dropped
     /// connection. See `ClaudeTranscriptTurnRefusal`, which is where that record and the
@@ -538,7 +604,14 @@ final class SessionActivityTracker {
         // whose close was lost. Believed over the ask, because `Stop` is the stronger statement:
         // the agent is back at its prompt, and a mark saying otherwise would never come down.
         openAsks.removeAll()
-        pausedOnOwnWork = backgroundWork.turnEnded(leaving: inFlight)
+        // The ledger answers whether this boundary pauses at all — it is the half that has to
+        // remember earlier turns — and the payload answers which kind, since delegated work is
+        // exactly what it says it is. Called once: `turnEnded` moves the ledger on.
+        if backgroundWork.turnEnded(leaving: inFlight) {
+            pause = inFlight.contains { $0.kind == .delegated } ? .delegated : .standing
+        } else {
+            pause = .none
+        }
         // Not merely unflagged — *nothing* is waiting to be read, so an off-screen session must
         // not take the unread mark either.
         awaitsUser = !isVisible && !pausedOnOwnWork
@@ -556,16 +629,62 @@ final class SessionActivityTracker {
     /// readily as for a finished turn, and treating the two the same is what left a working
     /// session showing nothing at all: the question was answered, the agent went on, and the
     /// state had no way back to `working` until the next prompt.
-    func noteAwaitingUser() {
+    ///
+    /// The notice is `.unspecified` by default, which is the reading that changes nothing: a
+    /// runtime that names no type, or names one this build has never heard of, still flags.
+    func noteAwaitingUser(_ notice: HookNotificationKind = .unspecified) {
+        // First, and unconditionally: the report proves the hooks reached this session whether
+        // or not the notice it carried is worth anything.
         adoptOwnReports()
-        // Claude raises `Notification` once its prompt has sat idle a while, and a session
-        // relaunched in the background is precisely a prompt sitting idle: honouring it would
-        // flag every restored session a minute after startup. A *real* ask arrives inside a
-        // turn, and the turn's start already ended the grace.
-        guard !launchedUnattended else { return }
-        awaitsUser = true
+        let honoured = honoursAwaitingUserNotice(notice)
+        if honoured { awaitsUser = true }
+        // Settled either way, so a refused notice still leaves a line. "Why did no mark appear"
+        // is a question asked in the past tense as often as its opposite, and `record` already
+        // keeps a reported cause that moved nothing for exactly that reason — the alternative
+        // is a hook that arrives, changes nothing, and is invisible to whoever asks later.
         settle(.awaitingUserReported)
-        if !turnInFlight { raiseAttention() }
+        if honoured, !turnInFlight { raiseAttention() }
+    }
+
+    /// Whether a runtime's own "waiting" notice is evidence that anyone is being waited *for*.
+    ///
+    /// Two cases where it is not, and both are the same mistake — reading "this prompt is idle"
+    /// as "the user is needed":
+    ///
+    /// - An **unattended launch**. A session relaunched in the background is precisely a prompt
+    ///   sitting idle, so honouring the notice flagged every restored session a minute after
+    ///   startup. A real ask arrives inside a turn, and the turn's start already ended the grace.
+    /// - A session **paused on delegated work**. The agent's turn ended on a subagent it is
+    ///   waiting for, so its prompt is idle *because* of that child — and 60s later
+    ///   (`messageIdleNotifThresholdMs`) the CLI says so, which used to overwrite the one fact
+    ///   that knew better. Measured on CLI 2.1.238 in a session whose child ran for 18 minutes:
+    ///   the row went `working -> needsAttention` a minute after each turn, came back to
+    ///   `working` the moment it was looked at (`cause=seen`, `paused` set on both edges), and
+    ///   dropped again on the next quiet stretch. The pause is not a guess — the `Stop` payload
+    ///   named the child — and a notice that names no question cannot outrank it.
+    ///
+    /// Two narrowings, and both are the same instinct: refuse a notice only where refusing it
+    /// cannot lose anything.
+    ///
+    /// - **`.delegated` only, not every pause.** A subagent ends and reports back, so the row
+    ///   corrects itself with nobody typing. Standing work carries no such promise — a
+    ///   backgrounded dev server may outlive the day — and a session parked on one is exactly
+    ///   where a late "nothing is happening here" is worth having, so `.standing` keeps it.
+    /// - **`.idlePrompt` only, not every notice.** The two failures are not symmetrical: a
+    ///   spurious mark is noise, while a swallowed permission prompt is a session waiting for an
+    ///   answer nobody knows it wants. A terminal session has no other signal for one —
+    ///   `blockingAskOpened` is scoped to the tools that ask outright, and a `Bash` approval is
+    ///   not among them — so suppression is opt-in by exact name, and everything else,
+    ///   including a type this build has never heard of, stays loud.
+    ///
+    /// Asked by `AgentRuntime` too, before it records the notice as a reason to wake a snoozed
+    /// session: one rule, so a notice cannot be too weak for the sidebar and loud enough to end
+    /// a snooze at the same time. That reading also matches what `SessionSnoozeCenter.record`
+    /// already says it is for — a *new* edge, not old state a relaunch happened to re-read.
+    func honoursAwaitingUserNotice(_ notice: HookNotificationKind) -> Bool {
+        if launchedUnattended { return false }
+        if notice == .idlePrompt, pause == .delegated { return false }
+        return true
     }
 
     /// The agent called a tool whose result is the user's answer — see `TurnBlockingTools`.
@@ -732,7 +851,7 @@ final class SessionActivityTracker {
         reportedTurnID = nil
         awaitsUser = false
         openAsks.removeAll()
-        pausedOnOwnWork = false
+        pause = .none
         attentionEpisodeOpen = false
         limitPark = .none
         backgroundWork.forget()
@@ -764,7 +883,7 @@ final class SessionActivityTracker {
         reportedTurnID = nil
         awaitsUser = false
         openAsks.removeAll()
-        pausedOnOwnWork = false
+        pause = .none
         limitPark = .none
         backgroundWork.forget()
         settle(.running)
@@ -868,7 +987,7 @@ final class SessionActivityTracker {
             awaits=\(self.awaitsUser, privacy: .public) \
             asks=\(self.openAsks.count, privacy: .public) \
             park=\(self.limitPark.logName, privacy: .public) \
-            paused=\(self.pausedOnOwnWork, privacy: .public) \
+            paused=\(self.pause.logName, privacy: .public) \
             reports=\(self.reportsOwnActivity, privacy: .public) \
             unattended=\(self.launchedUnattended, privacy: .public)
             """

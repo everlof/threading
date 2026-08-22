@@ -103,7 +103,7 @@ Components so far:
 | `ThemedButton` | A drop-in `NSButton`: bordered, plain, or prominent — `emphasis` names those three as primary/secondary/tertiary, `buttonStyle.primaryTreatment` decides whether a primary is filled, outlined, or a classic raised default action, and `shortcut` draws the chord it answers to on its own face. Ordinary actions centre their icon/title unit; a menu cell opts into leading content alignment and fills its host column, so the hover and hit target describe the whole cell while the ink keeps a stable edge. `showsSubmenuIndicator` reserves a real trailing chevron column for a hover/detail destination, so long titles truncate before the cue instead of taking it with them. `buttonStyle.titleRendering: pixel_5x6` selects the clean-room one-bit display alphabet for supported titles; a title containing any unsupported localized character stays whole and falls back to the scalable font. |
 | `ThemedActionPopoverViewController` | A bounded rich preview followed by a short menu-like command list. It takes structured action/separator entries, makes every action a full-cell `ThemedButton`, and applies `SeparatorView`'s visible-ink spacing. The caller constructs the optional preview only from the hover scheduler's presentation callback, never while mounting the anchor list. |
 | `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. `SurfacePresentation.persistent` is the ordinary standing well; `.onInteraction` keeps the same text inset, frame and hit target while drawing no plate at rest, raises `controlHover` under the pointer, and restores the ordinary well and focus ring for editing — the browser address bar's content-first grammar. `Design.Size.fieldHeight`, its own step: it borrowed `chipHeight` for as long as a field was "a chip you can type in", and a chip holds a word at rest where a field holds a caret. With a 2pt rule on each side, 26 left twenty points inside for a 13pt face — about three points of air — and the text read as wedged against the border. The two fields placed by frame rather than by intrinsic size (`TextPromptDefaults.fieldHeight`, `SidebarDefaults.renameFieldHeight`) restate the same token. **The cell is put on `wraps = false`, `isScrollable = true` in `setup()`**, which AppKit gives only through the `NSTextField(string:)` factory that `cellClass` rules out: a cell built by `init(frame:)` wraps, and a wrapping cell grows its *field editor* rather than scrolling it — 128pt of editor inside the `fieldHeight` well, unclipped by the control, so a sentence longer than the row drew its earlier lines through the field's own top border and over the row above. Settings' opening message shipped that way; multi-line editing is `ThemedTextView`, not a taller field. |
-| `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. |
+| `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. Its trailing run rides *inside* the field: the ✕ every search field owes its reader, and an optional owner-installed action in front of it (Settings' Ask AI), both acting on what was typed the way the magnifier does. The query yields room for whatever is visible there, and so does the pointer — the field's I-beam stops where the run begins, since `NSTextField`'s own claim is its whole bounds and would otherwise promise text over a button. See the [2026-08-21 note](#2026-08-21--the-carets-cursor-claims-the-whole-field-buttons-and-all). |
 | `PanelListView` | The display panel's list vocabulary: a scrolling stack of full-width rows under quiet section headings, with wrapped notes for a section that has no rows. Extracted after the Info and Sharing panes each built the same scroll–clip–stack by hand with silently different insets, which is how one pane's headings stopped lining up with anything above them. The geometry is stated once — content ink at `Spacing.inset`, on the pane header's own column — and `rowSpacing` is the one density decision a pane keeps. A heading never carries the count of its rows: the rows make the count apparent, a decision the Sharing pane made first and the component keeps panes from re-deciding apart. |
 | `SearchMatchLabel` | The other half of a search field: a line of text that says which of its own words the query accounts for. **Two signals, always both** — the matched run takes its role's `emphasized` weight *and* `Design.Surface.searchMatch`, an accent held at `Opacity.searchMatchGround` behind it. Weight alone vanishes in a list where several rows matched; a tint alone is the first thing Differentiate Without Colour takes away. It is a component rather than a call to `NSTextField.label(attributed:)` because an attributed string freezes its fonts and inks and `AppThemeRefresh`'s sweep re-resolves a *recorded role*, which it cannot reach inside — so this rebuilds on `AppThemeDidChange`, the same wiring `ThemedTextField`'s placeholder carries. `SearchTextMatch` is where "a query landed here" is decided, and filters may read its `comparisonOptions` so a result cannot be admitted by a more forgiving spelling than the mark uses. Its second rule is the one to know: **a token containing the whole line marks all of it**, which is what makes a row showing eight characters of a session id answer honestly to a pasted thirty-six-character one. |
 | `SearchResultRowView` | One destination a search turned up, with where it lives: a `SearchMatchLabel` title over a quiet caption path line — the settings sidebar's "Alert sound / Notifications" under the General row. A component of its own rather than a taller `ThemedTabItemView`: a tab names a *place* and holds one line forever, while a result names a thing the reader just asked for and owes them the path to it; what the two share (hover plate, press, keyboard activation, focus ring, ink source) they share through `BackdropThemedControl`. The host hands it the leading inset of the rows above so results align with the page row's title ink. Choosing one reports page **and** row, because the row is the answer — the settings sidebar routes that through `SettingsRowReveal`, which scrolls the built page to the anchored row (`SettingsRowAnchor`, the tag `SettingsUI` puts on every titled row) and stands the wash below on it. |
@@ -123,14 +123,16 @@ Components so far:
 | `ThemedTableHeaderView` | A semantic-role table header that retains AppKit resizing and tracking. |
 | `ThemedTableRowView` | The row a list is *selected* in, handed back from `rowViewForRow:`/`rowViewForItem:`. Fills with `Design.Surface.selection` — the accent held back far enough that the row's own label tiers still read over it, so a themed list needs no second set of inks — at the theme's control corner, inset a hair so two selected rows read as two. Under **System** it defers to `super`, keeping AppKit's own highlight. Not the sidebar's row: `SidebarHoverRowView` fills with the accent at full strength because the selected session is the window's subject, and draws its own capsule under every theme — System included — because that shape closes with the column the divider narrows. |
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. `frameGap(to:forInkGap:)` and `applyOpticalSpacing(in:precededBy:followedBy:inkGap:)` keep an authored gap between the rule and visible content on either axis: the adjacent `OpticalInsetProviding` control owns its invisible padding, while bare content keeps the full gap. |
+| `PointerClaiming` / `PointerClaim` | What a view tells the pointer, declared rather than registered. `restingPointer` is the cursor over everything the view covers — `.arrow` for opaque chrome, which `ThemedControl` and `BackdropOverlay` default to, and `nil` **only** for a view that is genuinely see-through and means what is behind it to answer. `pointerClaims` names the parts that differ, most specific first; they may overlap each other and are carved in one place, so AppKit's undefined case cannot be constructed. It exists because claiming nothing is not claiming the arrow: cursor rectangles are a *window's* list, and a view that registers none inherits the claim behind it — a terminal's I-beam, a text view's, an `NSTextField`'s over its own controls. Registration is `registerPointerClaims()`, invalidation is `refreshPointerClaims()` (the base classes call it from `layout()`, since AppKit re-asks only when the *view's* geometry moved), and `resolvedPointerClaims()` is what a test reads. `addCursorRect` and `NSCursor.…set()` are build-lint errors outside the seam. See the three 2026-08-21 notes below. |
 | `HoverTrackingView` / `HoverPopoverScheduler` | The pointer bridge and timing policy for hover-presented detail. A `ThemedControl` anchor reports its already-shared state through `onHoverChange`; a feature does not install a competing tracking area over it. The surface root reports crossing into the popover, while the scheduler owns dwell, crossing grace, and cancellation. |
 | `ThemedStatusProgressRing` | A compact semantic ring for bounded completed/pending/failed counts. It draws a neutral track plus positive and negative slices; adjacent text must name every non-zero bucket so hue is never the only signal. |
 | `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
 | `ThemedSplitView` | An `NSSplitView` whose divider is measured against the window backdrop on every ground, stepping up to the theme's border on chrome or neutral ink over an unrelated terminal palette when its rule would disappear, and weighed by the theme's rule width rather than AppKit's fixed hairline. |
 | `ThemedSurfaceView` | A pane's ground, and the one view that re-resolves its fill on a *system* light/dark switch. |
 | `SidebarBackdropView` | The sidebar's ground: the platform's sidebar material under the identity theme, an opaque themed surface under a style — plus the gradient and image layers a style's `SidebarStyle.Background` states, every frozen layer colour restated per apply. |
-| `ThreadingMarkView` | The Threading mark drawn live from `ThreadingMarkGeometry` (the same normalized silhouette the app icon and the SVG state): brand threads under System, the theme's accent held legible under a style, and a one-shot `playDrawIn()` that strokes the shield, stitches the six strands and lands the core. Its opt-in particle presentation samples that same geometry into individually tintable points and offers Weave, Breathe and Orbit cadences; no particle layer is built for passive marks, no cadence runs at rest, and none is constructed under Reduce Motion. Decorative; the brand row beside it carries the accessible name. |
-| `SidebarBrandView` | The sidebar's brand row: the mark (or a theme's own logo, or nothing) beside the wordmark, a `MorphingTitleLabel` so a chrome that renames the row morphs it. Self-wired to `AppThemeDidChange` and the appearance flip; one accessibility element carrying the brand's name. |
+| `ThreadingMarkView` | The Threading mark drawn live from `ThreadingMarkGeometry` (the same normalized silhouette the app icon and the SVG state): brand threads under System, the theme's accent held legible under a style, and a one-shot `playDrawIn()` that strokes the shield, stitches the six strands and lands the core. Its opt-in particle presentation samples that same geometry into individually tintable points and offers Weave, Breathe and Orbit cadences; a held Weave tumbles the shared field through a bounded irregular 3D route while its points keep travelling locally. No particle layer is built for passive marks, no cadence runs at rest, and none is constructed under Reduce Motion. Decorative; the brand row beside it carries the accessible name. |
+| `SidebarBrandView` / `AgentWorkloadAnalyzerView` | The sidebar's brand row: the mark (or a theme's own logo, or nothing) beside the wordmark, a `MorphingTitleLabel` so a chrome that renames the row morphs it. A spectrum material replaces those identity pixels with the fixed-cost seven-band workload analyzer: working count in one-bit figures (`99+` overflow, with the exact count accessible), `MAX` at provider-relative top effort, and band height from the shared theme-independent `AgentIntensity` envelope. It is material-gated rather than theme-ID-gated, so all other themes keep their stated brand and player-derived themes opt in automatically. Self-wired to theme, appearance and intensity changes; one accessibility element states either the brand or the workload. The analyzer is decorative, stops its timer while hidden/idle, and has no timer under Reduce Motion. |
+| `ScreenshotReportDropTargetView` | The transient answer to the native titlebar's otherwise invisible screenshot destination: a quiet `dropTarget` wash, photo glyph and “Drop screenshot to report” beside the traffic lights. It never hit-tests and has no resting surface. A valid drag gets one short arrival; Reduce Motion shows the complete still state. |
 | `ControlButtonGroupView` / `ToolbarButtonGroupView` | Related icon actions as one compact run, so their internal spacing is the component's rather than an `NSStackView` decision at each call site. A content `ControlRowView` hands its live theme metrics to the group and the group promotes every button; the named toolbar subclass preserves the same contract when the group is one `NSToolbarItem`. |
 | `SplitIconButtonView` | Two actions on **one** plate: a press, and a chevron welded to it that offers the other ways to take it — the pane header's Open in control. Its counterpart above is the right container for buttons that act on different things; this is for two halves of one thing, which read as an icon and an unrelated chevron the moment they are spaced apart. The surface is drawn once, here, and the halves draw none (`ThemedIconButton.drawsSurface`): a raised half fills *inside* the plate's silhouette, clipped to it, so the outer end keeps the plate's corner and the join is a straight edge that exists only under the pointer. Nothing is drawn between them at rest, and a **focus ring is the same construction**: the half that holds the keyboard rings along the plate's silhouette and squares the ring at the weld (`ThemedControl.drawKeyboardFocus(weldedInto:)`). The halves are deliberately unequal (`Design.Size.splitMenuWidth`) — the press is the point, the chevron the exception. See [`external-apps.md`](external-apps.md). |
 | `SplitButtonView` | The same weld for a **titled** press on the pane's own ground — the attachments footer's Copy Path with its menu chevron. The plate draws exactly what the press it holds would have drawn for itself at that emphasis (`ThemedButton.plate(for:material:)` — the material's resting fill, hairline, frame and depth), and the halves — a `ThemedButton` press, a `ThemedIconButton` chevron (`Target.titledSplitMenu`) — bring no surface of their own (`SplitControlHalf`). **Welding follows matched emphasis**: nothing is drawn between the halves at rest, so a plate holds no seam while both halves stand on the same ground, and what cannot share one is a *mismatch* — an accent-filled press against a chevron still reading the chrome's roles is the permanent colour seam the weld exists to remove. So a primary plate paints the primary face and *names the ground it painted* to its chevron (`InkSource.primaryAction` through `hostGround`), which is how a glyph built for the chrome stays legible on a block of accent. **A focused half rings along the plate**, turned where the plate turns its own corners and squared at the weld (`ThemedSurface.Shape.portion(in:)`): a half has no silhouette of its own, and taking its bounds for one drew a rounded rectangle floating inside the accent plate — the second control inside the control the weld exists to remove, reported as the chevron looking broken the moment it could take focus. The spread form is then a real choice rather than a workaround: the composer's Start Session keeps its clock *beside* it (`Target.besidePrimary`) and the prompt's compact send keeps its schedule chevron beside the glyph because a send and a schedule act on different things. |
@@ -2225,9 +2227,13 @@ Three cadences share that data:
 - **Weave** advances the shield's points around its closed path and each strand's points from its
   outer end into the knot. It is the sidebar choice because motion reinforces what the mark means
   and remains readable in the real 24pt slot. An ordinary pass only weaves; after a deliberate
-  dwell, the sampled mark's shared parent makes a closed pitch-and-yaw turn with perspective.
-  The dots keep travelling in that parent's local coordinates, so the implied box rotates as one
-  rigid object instead of the individual dots orbiting around its centre.
+  dwell, the sampled mark's shared parent follows a long irregular closed route through pitch,
+  yaw and a smaller roll with perspective. Nine bounded orientations are joined by one periodic
+  spline, so the box changes direction while carrying momentum and never turns its 24pt face near
+  edge-on. The route is fixed rather than runtime-random: it reads as varied motion in product
+  while repeated hovers and evidence frames remain reproducible. The dots keep travelling in that
+  parent's local coordinates, so the implied box tumbles as one rigid object instead of the
+  individual dots orbiting around its centre.
 - **Breathe** pulls each point inward and returns it, phase-offset just enough to keep it organic
   without letting the silhouette expand out of its box.
 - **Orbit** turns the whole field exactly one sixth per cycle. Six-fold symmetry makes the seam
@@ -2235,9 +2241,9 @@ Three cadences share that data:
 
 The continuous vector remains the resting state. Particle layers are opt-in (the passive composer
 hero builds none), repeating animations start only on pointer entry and are removed on exit, and
-Reduce Motion constructs no pointer animation at all. A deterministic phase seam exists for the
-Component Gallery and render tests; visual verification therefore compares real Core Animation
-layers without depending on the wall clock.
+Reduce Motion constructs no pointer animation at all. Deterministic phase seams exist for each
+local cadence and for the held tumble; the Component Gallery and render tests can therefore
+compare real Core Animation layers without depending on the wall clock.
 
 ## 2026-08-06 — a one-column list's column is as wide as the list
 
@@ -2621,6 +2627,12 @@ front-most rectangle is shown to win over one behind it. That precedence is **no
 an attempt to measure it in a scratch app failed to make its window key, and no measurement means
 no rule. Do not extend `CoveredWindowCursor` to the scrim on the assumption either way.
 
+*Evidence has since arrived from the app itself: the corner card's hand wins over the terminal's
+I-beam behind it, so a rectangle in front does win — see
+[2026-08-21](#2026-08-21--a-surface-in-front-owns-the-cursor-over-what-it-covers). That reopens the
+scrim's cursor rectangle as a real option; it does not make the change, and the counted claim above
+is still what a surface covering a whole window uses.*
+
 ## 2026-08-14 — a corner a theme states is not a corner every shape can turn
 
 Reported from a screenshot of the Component Gallery under Botanical: the theme menu's highlighted
@@ -2997,3 +3009,108 @@ pinned content inside it. A detached view is a flexible layout root, so Auto Lay
 as overflowing its pane had in fact been handed a wider one. CLAUDE.md already says this — "a
 detached fixture with a frame constrains nothing" — and all three now state their width with a
 constraint. The failures were real; they were just reported against the wrong object.
+## 2026-08-21 — the caret's cursor claims the whole field, buttons and all
+
+Reported from Settings, pointing at the search field's own controls: *"shouldn't this be an arrow
+pointer when hovering these?"* — Ask AI and the ✕ beside it, both answering the pointer with an
+I-beam that promised text where a button stood.
+
+Nothing about the buttons was wrong, and the field's insets were not the answer either.
+`ThemedSearchField` already yields room at its trailing edge so a long query truncates before it
+runs under the run of controls, and both `drawingRect(forBounds:)` and the field editor's frame
+respect it. **Cursor rectangles do not go through either.** Measured on a scratch field with an
+inset cell: `NSTextField` registers exactly one rectangle, the I-beam, over its **whole bounds** —
+the cell's drawing rect is not consulted — and registers none at all once the field is neither
+editable nor selectable. A subview that registers nothing is inside that rectangle, not outside
+it, so every search field in the app had this: the ✕ is on all of them.
+
+The field's own claim is therefore **carved** rather than covered by an arrow rectangle laid on
+top. Overlapping cursor rectangles are documented as undefined, and which of two AppKit prefers is
+the precedence [2026-08-13](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it)
+already failed to measure; a fix that depends on it would be a guess. AppKit's rectangle arrives
+through `addCursorRect(_:cursor:)`, so clipping there is the whole change — whatever the field
+would have claimed, it claims only over the query — and a button with nothing registered over it
+keeps the ordinary arrow every other `ThemedButton` in the window shows.
+
+Two details are load-bearing. The edge is read from the controls' **frames**, not from the inset
+the text yields: a themed button's frame reaches past the alignment rect the stack lays it out by,
+and at that optical inset (2pt here) the pointer is already over the button while the arithmetic
+still calls it text. And the run appearing or leaving has to `invalidateCursorRects(for:)` the
+field, because a *subview's* visibility invalidates nothing about its superview's rectangles.
+
+## 2026-08-21 — a surface in front owns the cursor over what it covers
+
+Reported an hour after the search field above, from the session pane's corner card: *"'62 files'
+has arrow cursor, but '5.8m tokens' has text positioning cursor."* Two rows of one card, a row
+apart, answering the pointer with different things.
+
+Same root as the search field, one level out. `GitStatusOverlayView` registered a pointing hand
+over the rows that open Git Review and **nothing** over the rest of itself — deliberately, so a
+card holding no Git sentence would not promise a click that does nothing. But cursor rectangles
+are a *window's* list, and claiming nothing is not the same as claiming the arrow: the card is
+opaque chrome floating over the session pane, `TerminalView.resetCursorRects` claims an I-beam
+over the whole of itself, and a native conversation's text views claim theirs. So every row the
+card did not speak for inherited the claim underneath it, and the usage and children rows — which
+are buttons — spent their lives offering to select text that is behind the card.
+
+**The precedence [2026-08-13](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it)
+could not measure has been running in production the whole time.** That note left open whether a
+front-most rectangle wins over one behind it, because a scratch app could not be made key. The
+card answers it from the other side: its hand over the Git rows has always won over the terminal's
+I-beam beneath them, in the same window, with the terminal's rectangle registered first. A view in
+front wins. (What is still unmeasured, and still not to be assumed, is the ordering of two
+rectangles registered by the *same* view — AppKit documents that as undefined, and both of today's
+fixes carve rather than layer for exactly that reason.)
+
+So the card claims its own silhouette: the acting region keeps the hand, and the up-to-four
+rectangles around it take the arrow. The line between the two is **what the row looks like**, not
+whether it acts — the Git rows are text that is pressable, which is what a hand says, and the rows
+below them are controls, which show what every other `ThemedButton` in the window shows. Any
+opaque surface floating over a terminal or a transcript inherits this rule: speak for every point
+you cover, or the view underneath will.
+
+
+## 2026-08-21 — the pointer got a boundary
+
+Two bugs in one morning, reported an hour apart, both of the same shape: a view that registered no
+cursor rectangle was not showing the arrow, it was showing whatever the view behind it claimed.
+The fixes were right and neither could stop the third one, because the rule they encoded —
+*speak for every point you cover* — lived in prose and in two `resetCursorRects` overrides.
+
+The inventory said the rule was already not holding. **Three** patterns answered one question:
+seventeen `resetCursorRects` overrides, each carving its own rectangle arithmetic (three of them
+subtracting rectangles by hand); one view setting the cursor imperatively from a `.cursorUpdate`
+tracking area, outside the window's list altogether; and `CoveredWindowCursor`, which is right for
+a surface covering a whole window and wrong for anything smaller.
+
+`PointerClaiming` makes the answer a value. A view declares `restingPointer` and `pointerClaims`;
+`registerPointerClaims()` is the only thing that touches AppKit. Three things that used to be
+copied or forgotten now happen once:
+
+- **Overlap is unconstructable.** Claims resolve specific-first, each carved against what is
+  already claimed, in a band decomposition — so a surface with a dozen markers stays countable
+  rather than splitting each piece against each hole. `PaneFoldDivider` had been trimming its band
+  around its corners by hand; `BrowserAnnotationOverlay` had been registering its crosshair *under*
+  its markers and trusting AppKit's undefined ordering to prefer the later one.
+- **The resting cursor is a decision somebody made.** `nil` is now a statement — the browser
+  annotation overlay says it while it is only watching, because a link's hand and the page's own
+  I-beam are the right answers through a transparent sheet — and everything else says what it
+  holds.
+- **Staleness has one answer.** `refreshPointerClaims()`, called from `layout()` by both base
+  classes, because AppKit re-asks a view only when the *view's* geometry moved: a card whose rows
+  changed inside an unchanged frame, or a field whose trailing controls appeared, otherwise keeps
+  registering yesterday's rectangles.
+
+`ThemedControl` and `BackdropOverlay` default to `.arrow`, which is where the class of bug
+actually dies: every control is correct the day it is written, including the ones nobody has
+audited. That default also settles a defect the
+[2026-08-13 note](#2026-08-13--a-dropdown-covered-the-seam-but-not-the-cursor-over-it) left open —
+`InWindowOverlayScrim` is a `ThemedControl`, so a scrim covering a split view's seam now answers
+for it, which that note could not do while the front-versus-behind precedence was unmeasured.
+
+The gate is the same ladder every other rule here climbed: `scripts/check_theme_boundaries.sh`
+fails a build that calls `addCursorRect` or `NSCursor.…set()` outside the seam, and a
+`resetCursorRects` override may be exactly `registerPointerClaims()` — a guard in front of it is a
+claim decided where nothing can read it. `CoveredWindowCursor` and `CoveredWindowPointer` keep
+named exceptions, since a window-level switch is a different mechanism and still the right one for
+a surface that has taken a whole window over.

@@ -449,6 +449,79 @@ final class EventLogTests: XCTestCase {
         XCTAssertEqual((root["otherData"] as? [String: String])?["reason"], "unit-test")
     }
 
+    /// The automatic stall signal must describe the thread being blocked, not a round trip.
+    ///
+    /// Requiring a span to begin and end on the main thread was meant to exclude cross-queue work,
+    /// but an `await` that resumes on the main actor satisfies both endpoints while occupying the
+    /// thread for neither. `attachments.scan` wrapped a worker hop, so it passed the test on every
+    /// pass and exported a trace every cooldown, continuously, for something that was never a
+    /// stall. A span that crosses queues now says so.
+    func testACrossQueueSpanIsNotReportedAsAMainThreadStall() throws {
+        var configuration = PerformanceRecorder.Configuration()
+        configuration.slowMainThreadMilliseconds = 0
+        configuration.automaticExportCooldownSeconds = 0
+        let traceDirectory = testDirectory.appendingPathComponent("stall-traces")
+        let recorder = PerformanceRecorder(
+            directory: traceDirectory,
+            configuration: configuration
+        )
+
+        // Ended first, so if it did export, its trace would be the oldest one on disk.
+        recorder.begin("test.crossing", category: "test", crossesQueues: true).end()
+        recorder.begin("test.synchronous", category: "test").end()
+
+        let deadline = Date().addingTimeInterval(5)
+        var written: [URL] = []
+        while Date() < deadline, written.isEmpty {
+            written = ((try? FileManager.default.contentsOfDirectory(
+                at: traceDirectory,
+                includingPropertiesForKeys: nil
+            )) ?? []).filter { $0.pathExtension == "json" }
+            if written.isEmpty { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        }
+
+        let first = try XCTUnwrap(written.sorted(by: { $0.path < $1.path }).first)
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: first)) as? [String: Any]
+        )
+        XCTAssertEqual(
+            (root["otherData"] as? [String: String])?["reason"],
+            "slow-main-span:test.synchronous",
+            "only the synchronous span asked for a trace"
+        )
+    }
+
+    /// A bounded ring is a sampling window, so a span emitted often enough evicts every other
+    /// subsystem from it. One span held 94% of a real trace and nothing said so; reading it as a
+    /// timeline hid that the rest of the app had simply been pushed out.
+    func testATraceNamesTheSpanSaturatingItsRing() throws {
+        var configuration = PerformanceRecorder.Configuration()
+        configuration.slowMainThreadMilliseconds = .greatestFiniteMagnitude
+        let traceDirectory = testDirectory.appendingPathComponent("saturation-traces")
+        let recorder = PerformanceRecorder(
+            directory: traceDirectory,
+            configuration: configuration
+        )
+
+        for _ in 0..<9 {
+            recorder.measure("test.flood", category: "test") {}
+        }
+        recorder.measure("test.rare", category: "test") {}
+
+        let url = try recorder.export(reason: "unit-test")
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        let otherData = try XCTUnwrap(root["otherData"] as? [String: String])
+
+        XCTAssertEqual(otherData["dominant_span"], "test.flood")
+        XCTAssertEqual(otherData["dominant_span_events"], "9")
+        XCTAssertEqual(otherData["dominant_span_share"], "90%")
+        XCTAssertEqual(otherData["ring_events"], "10")
+        XCTAssertEqual(otherData["ring_distinct_spans"], "2")
+        XCTAssertEqual(otherData["top_spans"]?.contains("test.flood=9/"), true)
+    }
+
     func testPerformanceTraceBoundsEventsAndReports() throws {
         var configuration = PerformanceRecorder.Configuration()
         configuration.eventCapacity = 2

@@ -289,6 +289,16 @@
                                                 <action selector="allowMouseReporting:" target="Ady-hI-5gd" id="2ic-hh-vRb"/>
                                             </connections>
                                         </menuItem>
+                                        <menuItem title="Custom Block Glyphs" id="n1S-3x-LZb">
+                                            <connections>
+                                                <action selector="toggleCustomBlockGlyphs:" target="Ady-hI-5gd" id="KpX-Fv-1m0"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="ANSI 256 Palette" id="QmM-zN-kK1">
+                                            <connections>
+                                                <action selector="toggleAnsi256PaletteStrategy:" target="Ady-hI-5gd" id="Vw2-1s-H4W"/>
+                                            </connections>
+                                        </menuItem>
                                         <menuItem title="Enter Full Screen" keyEquivalent="f" id="4J7-dP-txa">
                                             <modifierMask key="keyEquivalentModifierMask" control="YES" command="YES"/>
                                             <connections>
@@ -364,6 +374,31 @@ GQ
                                                 <action selector="debugToggleHostLogging:" target="Ady-hI-5gd" id="LMD-BF-wDc"/>
                                             </connections>
                                         </menuItem>
+                                        <menuItem isSeparatorItem="YES" id="bl0-00-sep"/>
+                                        <menuItem title="IO Baseline: Flood" id="bl1-00-aa1">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="debugRunBaselineFlood:" target="Ady-hI-5gd" id="bl1-00-ac1"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="IO Baseline: Bidi Flood" id="bl2-00-aa2">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="debugRunBaselineBidiFlood:" target="Ady-hI-5gd" id="bl2-00-ac2"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="IO Baseline: TUI Scroll" id="bl3-00-aa3">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="debugRunBaselineTui:" target="Ady-hI-5gd" id="bl3-00-ac3"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="IO Baseline: Binary Cat" id="bl4-00-aa4">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="debugRunBaselineBinary:" target="Ady-hI-5gd" id="bl4-00-ac4"/>
+                                            </connections>
+                                        </menuItem>
                                         <menuItem title="Show Debug Buffer" id="k5i-qy-zy2">
                                             <modifierMask key="keyEquivalentModifierMask"/>
                                             <connections>
@@ -387,6 +422,25 @@ GQ
                                             <modifierMask key="keyEquivalentModifierMask"/>
                                             <connections>
                                                 <action selector="resizificatorDown:" target="Ady-hI-5gd" id="oOh-5S-lVH"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="Toggle Metal Renderer" id="qCs-hZ-2n5">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="toggleMetalRenderer:" target="Ady-hI-5gd" id="QbO-bt-8ys"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="Use Per-Frame Metal Buffering" id="dWc-9x-NlP">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="toggleMetalBufferingMode:" target="Ady-hI-5gd" id="Z7a-Rj-3vS"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem isSeparatorItem="YES" id="rvT-Sp-623"/>
+                                        <menuItem title="Test Reverse Video Transparency" id="rvT-Mn-623">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="toggleReverseVideoTest:" target="Ady-hI-5gd" id="rvT-Cn-623"/>
                                             </connections>
                                         </menuItem>
                                     </items>

@@ -202,9 +202,9 @@ final class AnnotatedImageView: ThemedControl {
         }
     }
 
-    override func resetCursorRects() {
-        guard isEnabled, image != nil, isAnnotating else { return }
-        addCursorRect(bounds, cursor: .crosshair)
+    /// The crosshair while a mark can be placed, the arrow otherwise. See `PointerClaiming`.
+    override var restingPointer: NSCursor? {
+        isEnabled && image != nil && isAnnotating ? .crosshair : .arrow
     }
 
     // MARK: - Accessibility

@@ -155,6 +155,7 @@ enum AgentDefaults {
     static let codexVisibleModel = "list"
 
     /// One-run override keys and values.
+    static let codexCheckForUpdateOnStartupKey = "check_for_update_on_startup"
     static let codexReasoningEffortKey = "model_reasoning_effort"
     static let codexResearchReasoningEffort = "low"
 

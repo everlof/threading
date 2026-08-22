@@ -541,6 +541,81 @@ Two questions this section used to carry are settled: the claudex key sharing is
 remains), and a dev build no longer schedules checks against the stable feed
 (`UpdateFeedPolicy.allowsScheduledChecks`, tested in `UpdateFlowTests`).
 
+## Agent CLI release notices
+
+The same **Check for updates automatically** setting also authorizes a separate daily health
+check for installed agent TUIs. Sparkle cannot answer this question: each provider owns its tool,
+version scheme, release source and update command. `AgentKind.cliUpdateDefinition` therefore makes
+the existing exhaustive five-runtime inventory the catalog: Claude Code (`@anthropic-ai/claude-code`),
+Codex (`@openai/codex`), Grok (`@xai-official/grok`) and OpenCode (`opencode-ai`) read their public
+npm `latest` documents; Cursor reads the version pinned by its public `cursor.com/install` script.
+There is no authentication and no fallback source whose meaning Threading would have to guess.
+
+Local discovery uses the same login-shell path as an agent launch, and for the same reason twice
+over. A GUI application inherits none of the user's interactive `PATH`, so the lookup has to happen
+inside a login shell — and the npm-published agents install a `#!/usr/bin/env node` launcher, which
+cannot resolve its own interpreter outside that environment either. Running the tool directly with
+the app's own environment was the first version of this, and it reported `claude` and `codex` as
+*broken* on a machine where both work: `env: node: No such file or directory`, exit 127. So
+`AgentCLIVersionProbe` puts `command -v` and the version command in **one** login shell per runtime
+— one child, not two — with a sentinel distinguishing "not installed" (silence) from "the tool
+answered badly" (a logged failure). It is a bounded one-shot child off the main thread: ten seconds
+for the profile and the command together, 64 KiB of stdout, inherited agent identity removed.
+
+Only installed tools reach the network. Their HTTPS reads run concurrently with a ten-second
+timeout and a 256 KiB response cap enforced against the transfer rather than the result, so a
+source that declares no length cannot be downloaded in full and rejected afterwards; a failed or
+malformed source is logged and omitted without suppressing good answers from the others. The
+catalog is the runtime inventory itself — `AgentCLIUpdateChecker` refuses a longer one instead of
+silently truncating to it — so one daily sweep is at most one child process per runtime and one
+small request per installed tool: five and five today, constant in projects, accounts, sessions,
+files and transcripts. There is no user-data stress fixture to add for a cardinality that cannot
+grow with user data.
+
+`AgentCLIUpdateCoordinator` records attempts at a 24-hour cadence, cancels when the shared setting
+turns off, and holds a result while the app is inactive or onboarding covers the window. Three
+details of that sentence are load-bearing and each was wrong first:
+
+- **The cadence needs a clock of its own.** Threading is left running for days, so "once a day"
+  driven only by launch means "once per launch". An hourly poll asks whether the interval has
+  elapsed, and returning to the app asks too; both go through the same `checkIfDue`.
+- **The attempt is stamped on the answer, not the intent.** Writing it before the work meant that
+  switching the setting off and on again — which cancels the in-flight check — had already spent
+  the day's attempt, so the user's toggle appeared to do nothing.
+- **The receipt is deduplicated on the action, not the presentation.** A fingerprint of
+  tool/current/latest versions prevents the same receipt from returning, but it is recorded when a
+  terminal actually starts the run. Recorded at presentation, a band that dwelled fourteen seconds
+  behind another window, or one whose terminal refused to open, would have silenced those versions
+  for ever.
+
+`AppSettingsDidChange` is the shared app-settings notification, so it re-checks the schedule but
+deliberately does not flush a held receipt: doing so dropped the band over the Settings pane the
+user was working in.
+
+The receipt uses the existing sidebar `Toast` component, remains for the unattended dwell, pauses
+under the pointer like every toast, and aligns now/latest values through the toast's generic
+comparison table. Checking never starts an updater. Pressing **Update** creates a durable
+standalone terminal and sends it one host-built shell command; each provider command is a quoted
+argument to its own login-shell child, runs sequentially, and leaves prompts, output and exit-code
+receipts visible and interruptible. A failing provider does not suppress the next one. That
+command spans several terminal lines, because the `printf` receipts carry real newlines — every
+one of them a continuation the shell consumes before it runs anything, and none within the tty's
+1023-byte canonical-mode limit (247 bytes at the longest, for a five-tool run).
+
+That host-owned check also makes Threading the central update manager for every Codex process it
+starts. Each Codex invocation therefore receives the documented one-run override
+`check_for_update_on_startup=false`. Without it, a session restored in the background can stop at
+Codex's own update menu before anybody opens the chat, duplicating Threading's receipt and leaving
+the conversation unavailable for work. The override is applied to terminal, native and headless
+launches so none of their streams can acquire unsolicited startup UI, and it never edits the
+account's `config.toml`; Codex launched outside Threading keeps the user's own policy.
+
+The customization-surface decision is deliberately **host-only**. Provider identity, trusted
+release-source selection, version precedence and whether Threading may suggest an install command
+are integrity behavior the host must own. Presentation is not a new hard-coded surface: it reuses
+the theme-native toast extension component, while the host retains source selection, scheduling,
+deduplication, trusted command selection and visible-terminal execution.
+
 ## Releasing beside the iOS companion
 
 The Mac app and the iOS companion release on different clocks — Sparkle is self-controlled and

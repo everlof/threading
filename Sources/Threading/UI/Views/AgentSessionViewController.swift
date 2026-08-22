@@ -85,7 +85,7 @@ final class AgentSessionViewController: NSViewController {
     private var codexTranscriptURL: URL?
     private var codexInterruptionRefreshWorkItem: DispatchWorkItem?
     private var claudeTranscriptURL: URL?
-    private var claudeRefusalRefreshWorkItem: DispatchWorkItem?
+    private var claudeBoundaryRefreshWorkItem: DispatchWorkItem?
 
     // MARK: - Initialization
 
@@ -128,11 +128,15 @@ final class AgentSessionViewController: NSViewController {
             currentDirectory: { [weak terminalSession] in
                 terminalSession?.effectiveWorkingDirectory()
             },
-            text: { [weak terminalSession] in
-                guard let terminal = terminalSession?.terminalView.getTerminal() else { return "" }
-                return terminal.getRecentLogicalBufferText(
-                    maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes
+            text: { [weak terminalSession] since in
+                guard let terminalView = terminalSession?.terminalView else {
+                    return .empty
+                }
+                let read = terminalView.recentLogicalBufferText(
+                    maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes,
+                    sinceAbsoluteRow: since
                 )
+                return TerminalScanRead(text: read.text, nextAbsoluteRow: read.nextAbsoluteRow)
             },
             isEnabled: {
                 AppSettings.shared.detectsAttachmentReferences(for: agentSession.kind)
@@ -395,11 +399,10 @@ final class AgentSessionViewController: NSViewController {
     }
 
 #if DEBUG
-    /// Starts a deterministic PTY for the opt-in cross-client browser journey. It exercises the
-    /// shipping server, terminal mirror, WebSocket and composer without spending an agent turn
-    /// or depending on a developer's Claude/Codex account. The test host owns the controller and
-    /// removes the temporary project when the journey finishes.
-    func startRemoteBrowserE2EFixture() {
+    /// Starts an explicit deterministic command on the session's real PTY. Opt-in integration
+    /// harnesses use this instead of the ordinary provider launcher so they exercise the same
+    /// terminal mirror as a live agent without reading an account or spending a provider turn.
+    func startRemoteTerminalFixture(plan: AgentLaunchPlan) {
         guard !isRunning else { return }
         _ = view
         view.frame = NSRect(x: 0, y: 0, width: 900, height: 620)
@@ -408,7 +411,15 @@ final class AgentSessionViewController: NSViewController {
         isRunning = true
         activityTracker.markRunning()
         RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
-        session.start(plan: AgentLaunchPlan(
+        session.start(plan: plan)
+    }
+
+    /// Starts a deterministic PTY for the opt-in cross-client browser journey. It exercises the
+    /// shipping server, terminal mirror, WebSocket and composer without spending an agent turn
+    /// or depending on a developer's Claude/Codex account. The test host owns the controller and
+    /// removes the temporary project when the journey finishes.
+    func startRemoteBrowserE2EFixture() {
+        startRemoteTerminalFixture(plan: AgentLaunchPlan(
             executable: "/bin/sh",
             arguments: [
                 "-c",
@@ -548,8 +559,8 @@ final class AgentSessionViewController: NSViewController {
     private func startIfTerminalIsSized() {
         guard let plan = pendingLaunchPlan else { return }
 
-        let terminal = session.terminalView.getTerminal()
-        guard terminal.cols > 0, terminal.rows > 0 else {
+        let dimensions = session.terminalView.terminalDimensions
+        guard dimensions.cols > 0, dimensions.rows > 0 else {
             return  // Retried from the sizeChanged callback once layout settles.
         }
 
@@ -668,7 +679,6 @@ final class AgentSessionViewController: NSViewController {
 
         codexTranscriptURL = url
         scheduleCodexInterruptionRefresh()
-        scheduleClaudeRefusalRefresh()
     }
 
     /// A completed terminal turn has an intact provider message even when its TUI painted that
@@ -745,49 +755,84 @@ final class AgentSessionViewController: NSViewController {
         )
     }
 
-    /// Revalidates once after an output burst settles, for the boundary Claude omits when a
-    /// request fails outright.
+    /// Revalidates once after an output burst settles, for the two turn boundaries Claude omits:
+    /// a request that failed outright, and a turn the user interrupted.
+    ///
+    /// One quiet edge rather than one per fact. Both readers answer off the same tail of the same
+    /// file, both are asked by the same terminal-output callback, and both are Claude's; two
+    /// timers would only mean the same burst scheduling the same beat twice.
     ///
     /// Gated on a turn actually being in flight, so a session sitting at its prompt does no work
     /// at all: the tracker would refuse the result anyway, and this is a terminal-output callback.
     /// The generation is read inside the work item rather than when it is scheduled, which is as
-    /// late as it can be read and still be the turn the scan is about — narrowing the window this
-    /// guards to the background read itself.
-    private func scheduleClaudeRefusalRefresh() {
-        guard agentKind.supports(.transcriptRefusedTurnRecord),
+    /// late as it can be read and still be the turn the scans are about — narrowing the window
+    /// this guards to the background reads themselves.
+    private func scheduleClaudeBoundaryRefresh() {
+        guard agentKind.supports(.transcriptRefusedTurnRecord)
+                || agentKind.supports(.transcriptInterruptedMessageRecord),
               activityTracker.reportsOwnActivity,
               activityTracker.activity.hasTurnInFlight,
               let url = resolvedClaudeTranscriptURL() else {
             return
         }
 
-        claudeRefusalRefreshWorkItem?.cancel()
+        claudeBoundaryRefreshWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.claudeRefusalRefreshWorkItem = nil
+            self.claudeBoundaryRefreshWorkItem = nil
             let generation = self.activityTracker.turnGeneration
 
-            ClaudeTranscriptTurnRefusal.revalidate(at: url) { [weak self] refusal in
-                guard let self, self.isRunning, self.claudeTranscriptURL == url,
-                      let refusal,
-                      self.activityTracker.noteTurnRefused(turn: generation)
-                else { return }
-
-                ThreadingLogger.agent.info(
-                    "Recovered refused Claude turn (\(refusal.reason, privacy: .public)) from transcript"
-                )
-                EventLog.shared.record(.hooks, "Claude turn refusal recovered from transcript", [
-                    "session": self.sessionID.uuidString,
-                    "reason": refusal.reason,
-                    "message": refusal.message
-                ])
+            if self.agentKind.supports(.transcriptRefusedTurnRecord) {
+                self.readClaudeRefusal(at: url, turn: generation)
+            }
+            if self.agentKind.supports(.transcriptInterruptedMessageRecord) {
+                self.readClaudeInterruption(at: url, turn: generation)
             }
         }
-        claudeRefusalRefreshWorkItem = item
+        claudeBoundaryRefreshWorkItem = item
         DispatchQueue.main.asyncAfter(
             deadline: .now() + ClaudeRefusalDefaults.quietDelay,
             execute: item
         )
+    }
+
+    /// The boundary Claude omits when a request fails outright — an expired login, a dropped
+    /// connection. See `ClaudeTranscriptTurnRefusal`.
+    private func readClaudeRefusal(at url: URL, turn generation: Int) {
+        ClaudeTranscriptTurnRefusal.revalidate(at: url) { [weak self] refusal in
+            guard let self, self.isRunning, self.claudeTranscriptURL == url,
+                  let refusal,
+                  self.activityTracker.noteTurnRefused(turn: generation)
+            else { return }
+
+            ThreadingLogger.agent.info(
+                "Recovered refused Claude turn (\(refusal.reason, privacy: .public)) from transcript"
+            )
+            EventLog.shared.record(.hooks, "Claude turn refusal recovered from transcript", [
+                "session": self.sessionID.uuidString,
+                "reason": refusal.reason,
+                "message": refusal.message
+            ])
+        }
+    }
+
+    /// The boundary Claude omits when the user presses Escape. See `ClaudeTranscriptInterruption`.
+    private func readClaudeInterruption(at url: URL, turn generation: Int) {
+        ClaudeTranscriptInterruption.revalidate(at: url) { [weak self] interruption in
+            guard let self, self.isRunning, self.claudeTranscriptURL == url,
+                  let interruption,
+                  self.activityTracker.noteTurnInterrupted(turn: generation)
+            else { return }
+
+            ThreadingLogger.agent.info(
+                "Recovered interrupted Claude turn \(interruption.recordID, privacy: .public) from transcript"
+            )
+            EventLog.shared.record(.hooks, "Claude interruption recovered from transcript", [
+                "session": self.sessionID.uuidString,
+                "record": interruption.recordID,
+                "message": interruption.interruptedMessageID ?? ""
+            ])
+        }
     }
 
     /// Where this session's Claude transcript is, derived from the session's own record rather
@@ -823,8 +868,8 @@ final class AgentSessionViewController: NSViewController {
         codexInterruptionRefreshWorkItem?.cancel()
         codexInterruptionRefreshWorkItem = nil
         codexTranscriptURL = nil
-        claudeRefusalRefreshWorkItem?.cancel()
-        claudeRefusalRefreshWorkItem = nil
+        claudeBoundaryRefreshWorkItem?.cancel()
+        claudeBoundaryRefreshWorkItem = nil
         claudeTranscriptURL = nil
     }
 
@@ -983,10 +1028,16 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {
-        activityTracker.recordOutput(byteCount: byteCount)
+        if let acceptedByteCount = activityTracker.recordOutput(byteCount: byteCount) {
+            AgentWorkloadMonitor.shared.recordActivity(
+                sessionID: sessionID,
+                magnitude: AgentActivityPulse.output(byteCount: acceptedByteCount)
+            )
+        }
         attachmentObserver?.noteOutput()
         scheduleProviderTitleRefresh()
         scheduleCodexInterruptionRefresh()
+        scheduleClaudeBoundaryRefresh()
 
         // Grok and OpenCode do not create a record for a blank TUI. Output after the initial
         // discovery window may mean the first prompt landed; retry at a bounded cadence until

@@ -181,7 +181,9 @@ the turn closed is `needsAttention`, a turn nobody has read. They cost the user 
 and with ten sessions in the list only one of them is worth interrupting yourself for. The
 distinction is free: it is the pair of facts `settle()` already holds. It also disambiguates a
 report that used to be unreadable — Claude raises `Notification` both for a permission prompt and
-once its prompt has sat idle a while, and the turn is what tells those apart.
+once its prompt has sat idle a while, and the turn is what tells those apart. (The turn tells them
+apart as *marks*. What tells them apart as *evidence* is the payload's `notification_type`, which
+is a later fix — see "A pause the next notice quietly undid".)
 
 ### The trail a state change leaves
 
@@ -198,7 +200,7 @@ writes one `ThreadingLogger.session` line per change under `codes.threading:sess
 
 ```
 Activity idle -> needsAttention cause=turnFinished session=<uuid> visible=false turn=false
-awaits=true asks=0 park=none paused=false reports=true unattended=false
+awaits=true asks=0 park=none paused=none reports=true unattended=false
 ```
 
 Which is read back with, for a mark that appeared within the last half hour:
@@ -331,6 +333,76 @@ looking like a blocked turn. Two rules follow:
   own running work has said nothing for the user to read, so `noteTurnFinished` leaves
   `awaitsUser` down even off screen.
 
+**A pause the next notice quietly undid.** Keeping the flag down at the boundary is only half of
+it, because sixty seconds later the CLI raises one itself: `messageIdleNotifThresholdMs` is
+60 000 in 2.1.238, and when it expires Claude fires `Notification` saying *"Claude is waiting for
+your input"*. `noteAwaitingUser` raised `awaitsUser` for it, `settle()` ranks `awaitsUser` above
+`pausedOnOwnWork`, and the row therefore fell out of `working` into `needsAttention` for a session
+nobody was asking anything of. Reported as *"it showed no activity for 1–2 minutes, even if it had
+subagents working"*, and caught twice in one morning on the same session, whose child ran for
+eighteen minutes:
+
+```
+08:26:45 Activity working -> needsAttention cause=awaitingUserReported … turn=false paused=true
+08:27:54 Activity needsAttention -> working cause=seen                 … turn=false paused=true
+```
+
+`paused=true` on both edges is the whole defect: the app was holding the fact that knew better and
+let a notice that names no question outrank it. Opening the session was the only thing that
+cleared it — which is what made it look like a rendering fault rather than a state one — and it
+dropped again on the next quiet stretch. Off screen the same edge also spent an attention episode,
+so the session that had handed back nothing got an unread mark and a notification for it.
+
+**`settle()`'s ranking is not the bug and is not what changed.** A genuine question *should*
+outrank a pause: an agent stopped on a permission prompt is blocked whatever else it left running,
+and reordering the branches would bury a real ask behind a subagent. The wrong step is upstream of
+it — raising `awaitsUser` for a notice that never claimed anyone was being asked — so that is
+where the fix goes.
+
+**The fix reads the notice's type, and it refuses a notice only where refusing it cannot lose
+anything.** Two narrowings, both the same instinct:
+
+- **`idle_prompt` only, not every notice.** The payload has carried `notification_type` all along
+  — the 2.1.222 trace above recorded a `permission_prompt` in it — and nothing here read the
+  field, so an idle prompt and a permission prompt were the same fact to Threading.
+  `HookNotificationKind` recognises exactly `idle_prompt`; everything else, **including a payload
+  that names no type and a type a later CLI invents, is `.unspecified` and still flags**. The
+  asymmetry is the one `BackgroundWorkKind` already makes: a spurious mark is noise, while a
+  swallowed permission prompt is a session waiting for an answer nobody knows it wants — and a
+  terminal session has no other signal for one, since `blockingAskOpened` is scoped to the tools
+  that ask outright and a `Bash` approval is not among them.
+- **A `delegated` pause only, not every pause.** So the tracker keeps the pause's *kind*
+  (`TurnPause`) rather than a boolean, read straight off the same payload. A subagent is bounded
+  by construction: it ends, its result re-enters the conversation, and the row corrects itself
+  with nobody typing — so a suppressed notice costs nothing. Standing work promises none of that,
+  since `npm test` and `npm run dev` are the same entry, and a session parked on one is exactly
+  where a late *"nothing is happening here"* is worth keeping. `BackgroundWorkLedger` still owns
+  whether there is a pause at all; only the reason is new.
+
+So suppression is opt-in twice over, and a build that stopped recognising the field would behave
+exactly as every build did before it. The pause reason is on the trail line too — `paused=none` /
+`delegated` / `standing` where it used to be a boolean — because the boolean could not say which
+kind, and the rule above turns on exactly that.
+
+**A refused notice still leaves a line.** `noteAwaitingUser` settles either way, so the trail
+carries `cause=awaitingUserReported` with the state held where it was — because *"why did no mark
+appear"* is asked in the past tense exactly as often as its opposite, and a hook that arrives,
+changes nothing and is invisible afterwards is the shape this whole trail exists to stop. The
+unattended grace's refusals are now on the record for the same reason.
+
+`SessionActivityTracker.honoursAwaitingUserNotice` is that rule, and it is **one rule with two
+readers**: the tracker asks it before raising the flag, and `AgentRuntime` asks it before
+recording the notice as a reason to wake a snoozed session. A notice must not be too weak for the
+sidebar and loud enough to end a snooze at the same time. Folding the unattended grace into the
+same predicate keeps a restored session's idle prompt out of Snooze as well, which is what
+`SessionSnoozeCenter.record` already says it is for: a *new* edge, not old state a relaunch
+happened to re-read.
+
+The bell is not a second way in for Claude here, and deliberately stays untyped: Threading sets
+`TERM_PROGRAM=Threading`, which resolves Claude's notification channel to `no_method_available`,
+so nothing rings. `recordBell` therefore keeps flagging whatever the pause says — an unattributed
+BEL from some other program on the PTY is exactly the notice that should stay loud.
+
 **Being in flight is not enough, and `BackgroundWorkLedger` is why.** The obvious rule — any
 in-flight work keeps the session out of `idle` — is right for a test run and wrong for a dev
 server: a process that lives for hours would hold *every* later turn open behind it and silence
@@ -409,6 +481,19 @@ the user is not work in progress, and counting it would hold the beam lit for ex
 sessions where the user is the reason nothing is happening. The drawing side is
 `AgentActivityBeamView`; see [`design-system.md`](design-system.md) and
 [`dependencies.md`](dependencies.md).
+
+The same monitor owns a theme-independent `AgentIntensity` envelope for presentations that need
+more than the beam's stepped count. Its quiet floor is still exact workload — 30% for one
+`.working` session and 10% for each additional session, bounded at full scale. Meaningful live
+events then pulse into the headroom and decay exponentially: terminal sessions contribute only
+output bursts already admitted by `SessionActivityTracker` (not launch paint, resize/pointer
+repaint, echo below the working threshold, or a finished turn's redraw), while native sessions
+contribute text/thinking deltas and semantic assistant/tool/plan/background edges. Replay and turn
+receipts contribute nothing. Byte sizes are compressed logarithmically and no token count enters
+the model: provider token reporting arrives too late, is not universal, and would make verbosity
+look like compute power. A session must still be `.working` when its pulse arrives, and the
+envelope clears immediately when the final worker settles. `AgentIntensityDidChange` publishes
+that bounded presentation value alongside the exact count and top-effort fact.
 
 **An unfinished turn may also hold one process-wide idle-sleep assertion.**
 `ActiveTurnSleepInhibitor` is started with the other real-app activity consumers and follows
@@ -764,6 +849,42 @@ the output callback reads it when its background scan starts, and a result that 
 is refused. It settles exactly like `Stop` — a visible session goes `idle`, an off-screen one takes
 the unread mark. Not `limitReached`: nothing here says the account is spent, and a row claiming so
 sends the user to a usage dashboard to explain a login.
+
+**An interrupted turn is the same hole again, and Claude's is the fourth instance of it.** Measured
+on CLI 2.1.238 against this app's own session `a056a54c`: `UserPromptSubmit` fired, the user pressed
+Escape, and at 06:17:52.733Z the CLI appended one record and stopped —
+
+```json
+{"type":"user","uuid":"5ec9af64-…","interruptedMessageId":"msg_011CeFQXqQY5Z7Ur3FJfZckF",
+ "message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+```
+
+— and no `Stop` followed. The row was still drawing a spinner two hours later, for a conversation
+the user had stopped themselves. `.transcriptInterruptedMessageRecord` and
+`ClaudeTranscriptInterruption` close it, on `ClaudeTranscriptAPIError`'s newest-message walk and the
+generation match the refusal reader uses, settling exactly like `Stop`.
+
+It is deliberately **not** the same capability as Codex's `.transcriptInterruptedTurnRecord`,
+because the two records differ in the one way that matters to a late asynchronous read: Codex names
+the turn it aborted, so its reader can prove which turn the result belongs to, while Claude names
+only the assistant message it cut off — and names nothing at all when the interrupt beat the first
+token, measured on 2.1.222. So Claude's reader matches `turnGeneration` instead, and admits the
+marker sentence as well as `interruptedMessageId`: a reader insisting on the id declines every
+interrupt pressed before the model spoke, which is the interrupt a user is most likely to press.
+The cost of admitting the sentence is one shape it cannot tell apart — a user who types the marker
+verbatim as their own prompt — which ends that prompt's turn a beat early and leaves the session
+correctly idle.
+
+**Both of Claude's fallbacks are asked on the terminal-output quiet edge**, in one
+`scheduleClaudeBoundaryRefresh` rather than a timer per fact: the two readers answer off the same
+tail of the same file, for the same session, on the same burst. That is also the bug the fourth
+instance uncovered — the refusal fallback shipped wired to `noteReportedCodexTranscript`, behind a
+guard only Codex passes, so it had never run for a single Claude session. A fallback for a runtime
+that cannot reach its own entry point is worse than none, because the reader, the capability and
+the tests all pass while the hole stays open. The Claude schedulers hang off
+`terminalSession(_:didProduceOutputOf:)` beside Codex's, and both are gated on
+`reportsOwnActivity` and a turn actually being in flight, so a session sitting at its prompt does
+no work at all.
 
 - **Routing is by environment, not by file.** `MCPDefaults.portEnvironmentKey` and
   `sessionTokenEnvironmentKey` are exported by `routed(_:for:)` and read by the hook command,

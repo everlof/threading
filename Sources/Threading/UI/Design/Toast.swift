@@ -190,14 +190,35 @@ enum ToastDefaults {
 
 // MARK: - Request
 
-/// What a toast says, and the one thing it offers to do about it.
+/// A compact before/after table for facts that become hard to scan when written as prose.
 ///
-/// The action is what this type exists for. **An action that can be taken back does not have to
-/// be asked about first**: a confirmation stops the person who meant it every single time in
-/// order to catch the one who did not, while a receipt with a way back charges the mistake
-/// alone. `ConfirmationPrompt` is still the register for questions — this is the counterpart for
-/// the actions that turned out not to be questions, and archiving a session is the first of
-/// them.
+/// The comparison belongs to the shared toast vocabulary rather than to a feature view: callers
+/// supply only strings, while this layer owns alignment, numeric typography and theme ink.
+struct ToastComparison: Equatable {
+    let currentTitle: String
+    let targetTitle: String
+    let rows: [ToastComparisonRow]
+
+    fileprivate var announcement: String {
+        rows.map {
+            "\($0.label), \(currentTitle) \($0.currentValue), "
+                + "\(targetTitle) \($0.targetValue)"
+        }.joined(separator: ". ")
+    }
+}
+
+struct ToastComparisonRow: Equatable {
+    let label: String
+    let currentValue: String
+    let targetValue: String
+}
+
+/// What a toast says, and the one explicit response it may offer.
+///
+/// Most actions are ways back from a completed change. A bounded notification may instead offer
+/// the action that starts its work, as agent updates do; pressing that plainly titled button is
+/// the authorization, and the work stays visible after the toast leaves. `ConfirmationPrompt`
+/// remains the register for choices whose consequence is not fully named by that action.
 ///
 /// `detail` carries the consequence the verb does not: where the thing went, or what stopped
 /// along with it. Left out, the band is one line.
@@ -209,8 +230,11 @@ struct ToastRequest {
     /// The consequence, when there is one the message does not carry.
     var detail: String?
 
-    /// The way back. Titled by the caller, since "Undo" is right for an archive and wrong for
-    /// half the things a toast will report next.
+    /// Repeated current/target facts whose alignment carries meaning that body prose cannot.
+    var comparison: ToastComparison? = nil
+
+    /// The one response. Titled by the caller, since "Undo" is right for an archive and "Update"
+    /// is right for a release notice.
     var actionTitle: String?
     var action: (() -> Void)?
 
@@ -242,7 +266,7 @@ struct ToastRequest {
     /// What VoiceOver is told when the band arrives. The band is transient and takes no focus,
     /// so nothing else would ever read it out.
     var announcement: String {
-        [message, detail].compactMap { $0 }.joined(separator: " ")
+        [message, detail, comparison?.announcement].compactMap { $0 }.joined(separator: " ")
     }
 
     var hasAction: Bool { actionTitle != nil && action != nil }
@@ -268,7 +292,7 @@ enum ToastDeparture: Equatable {
 
 // MARK: - View
 
-/// A floating band that reports something already done and offers to take it back.
+/// A floating band that reports a time-sensitive fact and may offer one response.
 ///
 /// It draws on `elevated` — the role for a card above a pane — rather than on a translucent
 /// control surface: this floats over a list, and a see-through fill at 14% is how the git card
@@ -294,7 +318,7 @@ final class ToastView: NSView {
 
     // MARK: - Properties
 
-    /// Pressed the way back. The presenter dismisses the band; the caller undoes the work.
+    /// Pressed the action. The presenter dismisses the band; the caller performs the response.
     var onAction: (() -> Void)?
 
     /// Asked for the band to go now — the ✕, or a throw that carried far enough to commit.
@@ -338,6 +362,7 @@ final class ToastView: NSView {
 
     private let messageLabel: NSTextField
     private let detailLabel: NSTextField?
+    private let comparisonView: ToastComparisonView?
     private let actionButton: ThemedButton?
     private let progressBar: ThemedProgressBar?
 
@@ -368,6 +393,7 @@ final class ToastView: NSView {
         self.request = request
         messageLabel = NSTextField(wrappingLabelWithString: request.message)
         detailLabel = request.detail.map { NSTextField(wrappingLabelWithString: $0) }
+        comparisonView = request.comparison.map(ToastComparisonView.init)
         actionButton = request.hasAction
             ? ThemedButton(title: request.actionTitle ?? "", target: nil, action: nil)
             : nil
@@ -411,8 +437,12 @@ final class ToastView: NSView {
     @discardableResult
     func update(with request: ToastRequest) -> Bool {
         guard (detailLabel != nil) == (request.detail != nil),
+              (comparisonView != nil) == (request.comparison != nil),
               (actionButton != nil) == request.hasAction,
               (progressBar != nil) == (request.progress != nil) else { return false }
+
+        if let comparison = request.comparison,
+           comparisonView?.update(with: comparison) != true { return false }
 
         self.request = request
         messageLabel.stringValue = request.message
@@ -810,6 +840,7 @@ final class ToastView: NSView {
     private func installContent() {
         addSubview(messageLabel)
         detailLabel.map { addSubview($0) }
+        comparisonView.map { addSubview($0) }
         actionButton.map { addSubview($0) }
         progressBar.map { addSubview($0) }
         addSubview(closeButton)
@@ -893,6 +924,19 @@ final class ToastView: NSView {
             lastText = detailLabel
         }
 
+        if let comparisonView {
+            constraints += under(
+                lastText.bottomAnchor,
+                by: Design.Spacing.small,
+                clearingClose: lastText === messageLabel
+            )(comparisonView.topAnchor)
+            constraints += [
+                comparisonView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+                comparisonView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset)
+            ]
+            lastText = comparisonView
+        }
+
         if let progressBar {
             constraints += under(
                 lastText.bottomAnchor,
@@ -951,6 +995,127 @@ final class ToastView: NSView {
 
     @objc private func actionPressed() {
         onAction?()
+    }
+}
+
+// MARK: - Comparison
+
+/// Installed/available and similar pairs, aligned as data rather than typeset as sentences.
+private final class ToastComparisonView: NSView {
+    private let currentHeader: NSTextField
+    private let targetHeader: NSTextField
+    private let rowLabels: [NSTextField]
+    private let currentLabels: [NSTextField]
+    private let targetLabels: [NSTextField]
+    private let grid: NSGridView
+
+    init(_ comparison: ToastComparison) {
+        let builtCurrentHeader = Self.label(
+            comparison.currentTitle,
+            role: .caption,
+            ink: Design.Text.secondary
+        )
+        let builtTargetHeader = Self.label(
+            comparison.targetTitle,
+            role: .caption,
+            ink: Design.Text.secondary
+        )
+        let builtRowLabels = comparison.rows.map {
+            Self.label($0.label, role: .detail(weight: .medium), ink: Design.Text.label)
+        }
+        let builtCurrentLabels = comparison.rows.map {
+            Self.versionLabel($0.currentValue, emphasis: false)
+        }
+        let builtTargetLabels = comparison.rows.map {
+            Self.versionLabel($0.targetValue, emphasis: true)
+        }
+
+        currentHeader = builtCurrentHeader
+        targetHeader = builtTargetHeader
+        rowLabels = builtRowLabels
+        currentLabels = builtCurrentLabels
+        targetLabels = builtTargetLabels
+
+        var gridRows: [[NSView]] = [[NSView(), builtCurrentHeader, builtTargetHeader]]
+        for index in comparison.rows.indices {
+            gridRows.append([
+                builtRowLabels[index],
+                builtCurrentLabels[index],
+                builtTargetLabels[index]
+            ])
+        }
+        grid = NSGridView(views: gridRows)
+
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.rowSpacing = Design.Spacing.hairline
+        grid.columnSpacing = Design.Spacing.small
+        grid.column(at: 0).xPlacement = .leading
+        grid.column(at: 1).xPlacement = .trailing
+        grid.column(at: 2).xPlacement = .trailing
+        addSubview(grid)
+        NSLayoutConstraint.activate([
+            grid.topAnchor.constraint(equalTo: topAnchor),
+            grid.leadingAnchor.constraint(equalTo: leadingAnchor),
+            grid.trailingAnchor.constraint(equalTo: trailingAnchor),
+            grid.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+
+        setContentCompressionResistancePriority(
+            ToastDefaults.contentWidthPriority,
+            for: .horizontal
+        )
+        setContentHuggingPriority(ToastDefaults.contentWidthPriority, for: .horizontal)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(with comparison: ToastComparison) -> Bool {
+        guard comparison.rows.count == rowLabels.count else { return false }
+        currentHeader.stringValue = comparison.currentTitle
+        targetHeader.stringValue = comparison.targetTitle
+        for (index, row) in comparison.rows.enumerated() {
+            rowLabels[index].stringValue = row.label
+            currentLabels[index].stringValue = row.currentValue
+            currentLabels[index].toolTip = row.currentValue
+            targetLabels[index].stringValue = row.targetValue
+            targetLabels[index].toolTip = row.targetValue
+        }
+        return true
+    }
+
+    private static func label(
+        _ value: String,
+        role: Design.FontRole,
+        ink: NSColor
+    ) -> NSTextField {
+        let label = NSTextField(labelWithString: value)
+        label.applyFont(role)
+        label.textColor = ink
+        label.maximumNumberOfLines = 1
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(
+            ToastDefaults.contentWidthPriority,
+            for: .horizontal
+        )
+        label.setContentHuggingPriority(ToastDefaults.contentWidthPriority, for: .horizontal)
+        return label
+    }
+
+    private static func versionLabel(_ value: String, emphasis: Bool) -> NSTextField {
+        let label = self.label(
+            value,
+            role: .numericDetail(weight: emphasis ? .semibold : .regular),
+            ink: emphasis ? Design.Text.label : Design.Text.secondary
+        )
+        label.alignment = .right
+        label.lineBreakMode = .byTruncatingMiddle
+        label.toolTip = value
+        return label
     }
 }
 

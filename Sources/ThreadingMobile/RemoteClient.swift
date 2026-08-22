@@ -276,7 +276,7 @@ struct RemoteConnectionFailure: Equatable {
 
     /// iOS reports the denial as `NWError.posix` under whichever URL-loading error wraps it, so
     /// the POSIX code has to be read through a bounded chain rather than off the top error.
-    private static func hasNoRouteCode(_ error: Error) -> Bool {
+    static func hasNoRouteCode(_ error: Error) -> Bool {
         var current: NSError? = error as NSError
         var depth = 0
         while let candidate = current, depth < RemoteClientDefaults.underlyingErrorDepthLimit {
@@ -293,6 +293,70 @@ struct RemoteConnectionFailure: Equatable {
     private static let noRouteCodes: Set<Int32> = [
         EHOSTUNREACH, ENETUNREACH, ENETDOWN, EHOSTDOWN,
     ]
+}
+
+/// Why the rest of one door's sticky-port walk is not worth trying.
+///
+/// The walk exists for exactly one situation: the Mac's listener took another port of the sticky
+/// range because its configured one was busy, at the same address. Two different failures rule
+/// the remaining ports out, and they are not the same kind of fact.
+///
+/// - **The door answered.** An HTTP status, an authentication refusal, or a certificate that is
+///   not the pinned one all came from a server. The Mac has said what it has to say and nine
+///   more ports will not change it.
+/// - **The address cannot be reached.** DNS and explicit network-routing failures rule out every
+///   port at that address. A generic request timeout does not: one port may be filtered, or a
+///   server may have accepted the connection and stalled before producing a response. Without
+///   connection-phase evidence, the timeout belongs to that attempt rather than to the address.
+///
+/// A refusal is deliberately not on the list. `cannotConnectToHost` over a reachable address is
+/// what a Mac says about a port nothing is listening on, which is the walk's whole reason to
+/// exist — and it costs milliseconds rather than the timeout. When the same code arrives with a
+/// no-route POSIX error beneath it the chain, not the top code, is what decides.
+enum RemoteDoorWalk {
+
+    /// What ended a door, as a bounded token a support report can carry.
+    enum Ending: String {
+        /// Something on the other side answered; the Mac's answer is the answer.
+        case answered = "door.answered"
+        /// Nothing was reachable at that address, so no port of it is.
+        case unreachable = "door.unreachable"
+    }
+
+    /// The codes that belong to the address rather than to the port behind it.
+    private static let unreachableURLCodes: Set<URLError.Code> = [
+        .cannotFindHost,
+        .dnsLookupFailed,
+        .notConnectedToInternet,
+        .dataNotAllowed,
+        .internationalRoamingOff,
+    ]
+
+    /// Whether this failed attempt ends its door, and why. `nil` means keep walking the range.
+    ///
+    /// The address is deliberately not an input. `RemoteConnectionFailure` needs it because the
+    /// same no-route code means "grant Local Network access" on a private address and "that
+    /// machine is not answering" on a public one — but both of those mean the same thing to the
+    /// walk, and no port of an address the phone cannot reach is reachable either.
+    ///
+    /// The trust verdict is passed in rather than read here for the reason
+    /// `RemoteConnectionFailure.transport` takes it too: a cancelled server-trust challenge
+    /// arrives as `URLError(-999)` with nothing underneath naming the pin, so the delegate's own
+    /// verdict is the only place that reason exists.
+    static func ending(for error: Error, trustVerdict: RemoteTrustVerdict?) -> Ending? {
+        // The walk carries its failures wrapped in the address they were aimed at. That carrier
+        // bridges to an `NSError` of its own, so reading the chain off it would find nothing.
+        let failure = RemoteConnectionAttempt.underlying(error)
+        if failure is RemoteClientError { return .answered }
+        if trustVerdict == .rejectedFingerprintMismatch { return .answered }
+        if let url = failure as? URLError, unreachableURLCodes.contains(url.code) {
+            return .unreachable
+        }
+        // A Local Network denial and an absent machine arrive as the same POSIX code. Both mean
+        // this address is not reachable from here, so both end the walk.
+        if RemoteConnectionFailure.hasNoRouteCode(failure) { return .unreachable }
+        return nil
+    }
 }
 
 /// A named failure travelling as an error, for the two paths that hand one to a screen rather
@@ -323,6 +387,8 @@ struct RemoteConnectionAttempt: LocalizedError {
 }
 
 struct RemoteClient {
+    static let defaultRequestTimeout = RemoteClientDefaults.requestTimeoutSeconds
+
     let link: RemoteConnectionLink
     let requestTimeout: TimeInterval?
 
@@ -437,6 +503,17 @@ struct RemoteClient {
         _ = try validate(data: data, response: response, accepted: 200...299)
     }
 
+    func resumeTerminal(
+        terminalID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws {
+        var request = request(url: link.resumeTerminalURL(terminalID: terminalID))
+        request.httpMethod = "POST"
+        request.setValue(requestID, forHTTPHeaderField: "X-Threading-Request-ID")
+        let (data, response) = try await dataReplayingNetworkFailure(for: request)
+        _ = try validate(data: data, response: response, accepted: 200...299)
+    }
+
     func setAppTheme(
         themeID: String,
         requestID: String = UUID().uuidString.lowercased()
@@ -529,6 +606,30 @@ struct RemoteClient {
         )
     }
 
+    func moveSessionAccount(
+        sessionID: String,
+        accountID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteMoveSessionAccountRequestDTO(accountID: accountID),
+            to: link.sessionAccountURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
+    func setSessionLimitRecovery(
+        sessionID: String,
+        policy: RemoteLimitRecoveryPolicyDTO,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: policy),
+            to: link.sessionLimitRecoveryURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
     func registerNotifications(
         _ registration: RemoteNotificationRegistrationDTO,
         requestID: String = UUID().uuidString.lowercased()
@@ -574,6 +675,29 @@ struct RemoteClient {
         try await post(
             RemoteRevokeSharesRequestDTO(),
             to: link.sessionUnshareURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
+    func createTerminalShare(
+        terminalID: String,
+        capability: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteCreateShareResponseDTO {
+        try await postResponse(
+            RemoteCreateShareRequestDTO(capability: capability),
+            to: link.terminalShareURL(terminalID: terminalID),
+            requestID: requestID
+        )
+    }
+
+    func revokeTerminalShares(
+        terminalID: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteMeDTO {
+        try await post(
+            RemoteRevokeSharesRequestDTO(),
+            to: link.terminalUnshareURL(terminalID: terminalID),
             requestID: requestID
         )
     }
@@ -749,6 +873,13 @@ struct RemoteClient {
 
     func webSocketTask(sessionID: String) throws -> URLSessionWebSocketTask {
         guard let url = link.webSocketURL(sessionID: sessionID) else {
+            throw RemoteClientError.invalidResponse
+        }
+        return Self.socketSession.webSocketTask(with: url)
+    }
+
+    func terminalWebSocketTask(terminalID: String) throws -> URLSessionWebSocketTask {
+        guard let url = link.terminalWebSocketURL(terminalID: terminalID) else {
             throw RemoteClientError.invalidResponse
         }
         return Self.socketSession.webSocketTask(with: url)

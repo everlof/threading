@@ -53,6 +53,10 @@ enum MobileDiagnosticErrorDomain: String {
 }
 
 enum MobileDiagnostics {
+    private static let nanosecondsPerMillisecond: UInt64 = 1_000_000
+    private static let millisecondsPerSecond: Int64 = 1_000
+    private static let attosecondsPerMillisecond: Int64 = 1_000_000_000_000_000
+
     static let journal = RemoteDiagnosticJournal(
         directory: FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -76,11 +80,88 @@ enum MobileDiagnostics {
         }
     }
 
+    /// One opaque id for a complete connectivity operation. It is deliberately unrelated to a
+    /// request id, bearer, peer id, or URL and is therefore safe to carry through support logs.
+    static func connectivityTrace() -> String {
+        UUID().uuidString.lowercased()
+    }
+
+    static func monotonicNow() -> UInt64 {
+        DispatchTime.now().uptimeNanoseconds
+    }
+
+    static func elapsedMilliseconds(since startedAt: UInt64) -> String {
+        let now = monotonicNow()
+        return String(now >= startedAt ? (now - startedAt) / nanosecondsPerMillisecond : 0)
+    }
+
+    static func milliseconds(_ interval: TimeInterval) -> String {
+        String(max(Int64((interval * 1_000).rounded()), 0))
+    }
+
+    static func milliseconds(_ duration: Duration) -> String {
+        let components = duration.components
+        let value = components.seconds * millisecondsPerSecond
+            + components.attoseconds / attosecondsPerMillisecond
+        return String(max(value, 0))
+    }
+
+    /// Connectivity records go to both the bounded, share-safe journal and unified logging.
+    /// The latter intentionally repeats only the structural allowlist values: no host names,
+    /// URLs, error descriptions, invitation data, or user content can reach the public log.
+    static func recordConnectivity(
+        _ event: RemoteDiagnosticEvent,
+        level: RemoteDiagnosticLevel = .info,
+        fields: [RemoteDiagnosticField: String]
+    ) {
+        record(event, level: level, fields: fields)
+        let trace = machineToken(fields[.trace] ?? "none")
+        let peerToken = machineToken(fields[.peer] ?? "none")
+        let peer = isPseudonym(peerToken, prefixes: ["peer-", "device-"])
+            ? peerToken : "none"
+        let originToken = machineToken(fields[.origin] ?? "none")
+        let origin = isPseudonym(originToken, prefixes: ["origin-"])
+            ? originToken : "none"
+        let phase = machineToken(fields[.phase] ?? "none")
+        let transport = machineToken(fields[.transport] ?? "none")
+        let surface = machineToken(fields[.surface] ?? "none")
+        let result = machineToken(fields[.result] ?? "none")
+        let code = machineToken(fields[.code] ?? "none")
+        let status = machineToken(fields[.status] ?? "none")
+        let duration = machineToken(fields[.durationMS] ?? "none")
+        let timeout = machineToken(fields[.timeoutMS] ?? "none")
+        let delay = machineToken(fields[.delayMS] ?? "none")
+        let attempt = machineToken(fields[.attempt] ?? "none")
+        let total = machineToken(fields[.total] ?? "none")
+        switch level {
+        case .info:
+            mobileDiagnosticLogger.info(
+                "Connectivity event=\(event.rawValue, privacy: .public) trace=\(trace, privacy: .public) peer=\(peer, privacy: .public) origin=\(origin, privacy: .public) phase=\(phase, privacy: .public) transport=\(transport, privacy: .public) surface=\(surface, privacy: .public) result=\(result, privacy: .public) code=\(code, privacy: .public) status=\(status, privacy: .public) duration_ms=\(duration, privacy: .public) timeout_ms=\(timeout, privacy: .public) delay_ms=\(delay, privacy: .public) attempt=\(attempt, privacy: .public) total=\(total, privacy: .public)"
+            )
+        case .warning:
+            mobileDiagnosticLogger.warning(
+                "Connectivity event=\(event.rawValue, privacy: .public) trace=\(trace, privacy: .public) peer=\(peer, privacy: .public) origin=\(origin, privacy: .public) phase=\(phase, privacy: .public) transport=\(transport, privacy: .public) surface=\(surface, privacy: .public) result=\(result, privacy: .public) code=\(code, privacy: .public) status=\(status, privacy: .public) duration_ms=\(duration, privacy: .public) timeout_ms=\(timeout, privacy: .public) delay_ms=\(delay, privacy: .public) attempt=\(attempt, privacy: .public) total=\(total, privacy: .public)"
+            )
+        case .error:
+            mobileDiagnosticLogger.error(
+                "Connectivity event=\(event.rawValue, privacy: .public) trace=\(trace, privacy: .public) peer=\(peer, privacy: .public) origin=\(origin, privacy: .public) phase=\(phase, privacy: .public) transport=\(transport, privacy: .public) surface=\(surface, privacy: .public) result=\(result, privacy: .public) code=\(code, privacy: .public) status=\(status, privacy: .public) duration_ms=\(duration, privacy: .public) timeout_ms=\(timeout, privacy: .public) delay_ms=\(delay, privacy: .public) attempt=\(attempt, privacy: .public) total=\(total, privacy: .public)"
+            )
+        }
+    }
+
     /// Stable inside support reports without exposing the original host, session, or device id.
     static func pseudonym(_ value: String, prefix: String) -> String {
         let digest = SHA256.hash(data: Data(value.utf8))
         let short = digest.prefix(6).map { String(format: "%02x", $0) }.joined()
         return "\(prefix)-\(short)"
+    }
+
+    private static func isPseudonym(_ value: String, prefixes: [String]) -> Bool {
+        guard let prefix = prefixes.first(where: { value.hasPrefix($0) }) else { return false }
+        let digest = value.utf8.dropFirst(prefix.utf8.count)
+        return digest.count == 12 && digest.allSatisfy { byte in
+            (byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102)
+        }
     }
 
     /// The address this phone aimed at, as a value a report can carry.

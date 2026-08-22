@@ -140,9 +140,8 @@ final class ThemedCheckbox: ThemedControl {
         return true
     }
 
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
+    /// Box and label are one press, and the label is text — so the hand over both.
+    override var restingPointer: NSCursor? { .pointingHand }
 
     override func accessibilityRole() -> NSAccessibility.Role? { .checkBox }
     override func accessibilityTitle() -> String? { accessibilityOverride ?? title }
@@ -487,7 +486,7 @@ final class ThemedRadioButton: ThemedControl {
         return true
     }
 
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    override var restingPointer: NSCursor? { .pointingHand }
     override func accessibilityRole() -> NSAccessibility.Role? { .radioButton }
     override func accessibilityTitle() -> String? { accessibilityOverride ?? title }
     override func accessibilityValue() -> Any? { state == .on }

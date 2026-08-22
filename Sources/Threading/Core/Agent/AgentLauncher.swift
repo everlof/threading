@@ -419,7 +419,8 @@ enum AgentLauncher {
         for session: AgentSession,
         in project: Project
     ) -> AgentLaunchPlan {
-        var command = ShellCommand(word: AgentDefaults.codexExecutable)
+        var command = ShellCommand()
+        appendManagedCodexInvocation(to: &command)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
         appendCodexConversationOverrides(for: session, to: &command)
 
@@ -520,7 +521,7 @@ enum AgentLauncher {
         if let accountKey = AgentKind.codex.accountEnvironmentKey {
             command.append(flag: "-u", value: accountKey)
         }
-        command.append(word: AgentDefaults.codexExecutable)
+        appendManagedCodexInvocation(to: &command)
         appendCodexConfigOverride(
             AgentDefaults.codexReasoningEffortKey,
             string: AgentDefaults.codexResearchReasoningEffort,
@@ -608,7 +609,7 @@ enum AgentLauncher {
 
         case .codex:
             guard let endpointURL else { return nil }
-            command.append(word: AgentDefaults.codexExecutable)
+            appendManagedCodexInvocation(to: &command)
             appendCodexConfigOverride(
                 AgentDefaults.codexReasoningEffortKey,
                 string: AgentDefaults.codexResearchReasoningEffort,
@@ -699,7 +700,7 @@ enum AgentLauncher {
             command.append(flag: "--strict-mcp-config")
 
         case .codex:
-            command.append(word: AgentDefaults.codexExecutable)
+            appendManagedCodexInvocation(to: &command)
             command.append(
                 flag: AgentDefaults.codexSandboxFlag,
                 value: AgentDefaults.codexSandboxReadOnly
@@ -796,6 +797,23 @@ enum AgentLauncher {
         to command: inout ShellCommand
     ) {
         command.append(flag: AgentDefaults.codexConfigFlag, value: "\(key)=\(tomlValue)")
+    }
+
+    /// Starts one Codex invocation under the update policy Threading now owns.
+    ///
+    /// Codex documents `check_for_update_on_startup = false` for centrally managed updates.
+    /// Threading performs that check itself and offers the provider-authored updater in a visible
+    /// terminal, so leaving Codex's own checker enabled produces a second, blocking menu inside
+    /// every restored TUI — including sessions nobody opened this launch. A one-run override
+    /// keeps the user's `config.toml` untouched and also covers native and headless processes,
+    /// whose protocol streams must never acquire unsolicited startup output.
+    private static func appendManagedCodexInvocation(to command: inout ShellCommand) {
+        command.append(word: AgentDefaults.codexExecutable)
+        appendCodexConfigOverride(
+            AgentDefaults.codexCheckForUpdateOnStartupKey,
+            tomlValue: "false",
+            to: &command
+        )
     }
 
     /// A TOML basic-string literal for values supplied through Codex's `--config` flag.
@@ -1134,7 +1152,8 @@ enum AgentLauncher {
         for session: AgentSession,
         prompt: String?
     ) -> (ShellCommand, ResumeState) {
-        var command = ShellCommand(word: AgentDefaults.codexExecutable)
+        var command = ShellCommand()
+        appendManagedCodexInvocation(to: &command)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
         appendCodexConversationOverrides(for: session, to: &command)
         appendPermissionMode(for: session, to: &command)

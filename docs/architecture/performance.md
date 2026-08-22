@@ -145,6 +145,13 @@ not synchronously rebuild or relayout total content on the main actor. Unknown m
 - **Debounce as camouflage.** Coalescing is correct for redundant events only after one operation
   is bounded. It does not repair a resize tick that still reflows hidden history or invalidates
   every row.
+- **Autoreleased returns inside a long loop.** Foundation hands back autoreleased Objective-C
+  objects from ordinary-looking Swift calls: `FileHandle.read(upToCount:)` returns `NSData`, and
+  `JSONDecoder` leaves an `_NSJSONReader`. A loop over thousands of files drains no pool until it
+  returns, so peak memory becomes the *sum* of every iteration's transient bytes rather than the
+  largest one. This turned a 4.4 GB cache directory into 4.4 GB of live `NSData` in one usage scan
+  (see [`usage-dashboard.md`](usage-dashboard.md)). Per-item work that allocates through
+  Objective-C needs `autoreleasepool` at the per-item boundary.
 
 The heuristic is cardinality × row richness × mutation frequency. If two are non-trivial, use a
 value model, viewport ownership, stable identity, and a stress fixture by default. A small
@@ -202,6 +209,24 @@ structural invalidations are coalesced for 350 ms. The event socket has one boun
 recovery task (1–60 seconds), is torn down in the background, and is never accompanied by
 healthy-state REST polling.
 
+Standalone project terminals add one bounded summary per durable terminal to initial and
+structural catalogues. Their dashboard group is lazy and keeps no socket, emulator, polling task
+or timer per row. Selecting one opens exactly one terminal socket and one bounded replay. Starting
+a dormant shell is the only polling path: the selected detail performs at most 30 half-second
+catalogue checks, cancels when the host or screen changes, and stops as soon as that terminal is
+available; view-only capabilities never enter it.
+
+The project organization groups terminal and chat value summaries by the same project name before
+constructing lazy row groups; a project with only terminals still gets one section. The type
+organization materializes the same two groups in one of two persisted directions rather than
+copying or eagerly interleaving their rows. Both paths remain O(catalogue) preparation and
+O(visible) row construction.
+
+The pre-catalogue connection card is invariant at one current-operation row. Its activity
+treatment keeps one two-second timer, plays one bounded 650 ms LabelMorph fade, and invalidates
+the timer when that row is replaced, unmounted, or subject to Reduce Motion. Route cardinality
+never adds a view or another timer.
+
 Before this boundary, one visible dashboard issued `/api/me` every three seconds: 1,200 requests
 per hour and about 24,000 over 20 visible hours, even with no changes. The healthy steady state is
 now zero repeated REST requests: one activation/foreground snapshot, scoped deltas for row
@@ -255,6 +280,130 @@ measured at 5.3–8.5 ms per reapply in the simulator probe (26×24 grid at 24 p
 installs only a changed theme, and the same test file asserts an unchanged theme invalidates no
 rows. For reference the probe's grid-independent costs: a 512 KB ring replay parses in
 ~320–350 ms and the local-viewport reflow after it is 7–10 ms, at every font size.
+
+### Token-free iOS terminal wire lab, 2026-08-20
+
+A static ANSI fixture proves rendering but cannot benchmark the entry path that flickered: it
+bypasses the Mac PTY, capture ring, replay budget, WebSocket scheduling, phone-owned viewport
+lease, SIGWINCH and the TUI's resize repaint. Running a live provider for every comparison fixes
+that fidelity problem by introducing account state, network variance, private transcript data
+and paid turns. Neither is an acceptable performance baseline.
+
+`scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [simulator]` now runs the
+middle path under the shipping boundaries. An isolated hosted XCTest creates two real terminal
+sessions, starts the generated Codex- and Claude-shaped helpers on real raw-mode PTYs, and serves
+them through `RemoteAccessServer` and `RemoteSessionMirrorRegistry`. A Debug `-O` iOS build gets a
+loopback-only ephemeral pairing and uses the ordinary dashboard, session navigation,
+`RemoteSessionConnection`, WebSocket and SwiftTerm surface. The pairing, continuity, discovery
+and notification state are isolated from the simulator's ordinary app data. The bearer is a
+fixed test authority and no provider executable, credential, API or token is consulted.
+
+The two workloads deliberately disagree where provider behavior changes the cost model:
+
+- Codex leaves alternate screen, fills normal terminal scrollback, and on every real PTY width
+  change clears and re-emits the generated history. Ordinary one-finger movement measures local
+  scrollback.
+- Claude enters alternate screen with SGR mouse reporting, fills the host ring with previous
+  complete frames, redraws its composer while typing, and answers wheel reports and resize with
+  application-owned full-screen repaints. A swipe delivers several reports in one PTY read, so
+  its fixture parser removes each report by the distance from `Data.startIndex`, never by treating
+  an absolute `Data.Index` as a byte count; a regression drains one batch and then accepts the
+  next report.
+
+The opt-in probe is absent from Release builds. While this lab link is active it writes bounded
+`THREADING_PERF ios-terminal-*` records for connect→hello→first bytes→SwiftTerm feed→next display
+tick→quiet settle, viewport-message count, keystroke repaint cost, Return→stream settle, normal
+scroll event gaps, and alternate-screen wheel→response/display. It also counts clear-screen,
+clear-history and alternate-screen sequences during entry. The driver copies the metrics and a
+final real-shell screenshot into the run directory under `/tmp/threading-profiles` when Return is
+pressed in its terminal. Re-enter both chats in one run: successive `attempt` values are the
+push/pop comparison rather than separate process launches with different caches.
+
+The first real Codex run exposed the remaining flicker as scheduling, not parser cost. Its resize
+repair arrived in 154 binary frames over 2.0 seconds; SwiftTerm spent only 61 ms feeding them, but
+38 display-link ticks ran after some frames and before later ones. The phone was therefore drawing
+valid but temporary clear/reflow states. A busy-host run also paused 695 ms between the attach
+replay and the SIGWINCH repair, which proved that the former 250 ms probe quiet period — and a
+first 500 ms reveal experiment — could both declare the surface stable too early.
+
+Initial terminal entry is one presentation transaction, but network silence is no longer its
+commit signal. A host that advertises `terminalHydrationBoundary` receives a request id on each
+viewport generation sent before reveal. After applying that grid, the Mac observes the first
+local PTY output burst caused by SIGWINCH, closes it after 200 ms of *host-local* quiet, then
+queues one authoritative screen seed, the current mode seed, and `terminalReady(requestID:)` on the same
+connection. SwiftTerm still mounts and parses every earlier frame behind `Opening chat…`; the
+matching ordered boundary reveals it. Wi-Fi packet gaps can delay the whole transaction but can
+no longer restart a second phone-side quiet timer or expose the resize repaint. The Mac closes a
+TUI that does not repaint after one second and continuous output after three; the phone retains a
+four-second escape for a capable host that never sends its boundary. Earlier hosts keep the
+conservative one-second client-silence behavior. The request id prevents a delayed boundary for
+an old grid from revealing a newer transaction, and a boundary received before SwiftTerm mounts
+waits behind the buffered binary frames before it can reveal.
+
+The same optimized 2,400-row real-PTY lab on 2026-08-21 measured three push/pop entries per
+provider. Codex revealed in 759 ms cold and 560/606 ms warm (606 ms median), versus the corrected
+2.49-second run above: about 1.88 seconds, or 76%, off the median entry. Claude revealed in 397 ms
+cold and 336/353 ms warm (353 ms median). Codex still consumed 155–157 binary frames because its
+fixture deliberately re-emits all history at the new width; feed work was only 40–64 ms and stayed
+behind the boundary. Frame-by-frame inspection of the simulator recording shows only the loader
+followed by one complete, stable terminal for both providers. The run artifacts are
+`/tmp/threading-profiles/20260821T100838Z-ios-terminal-wire-lab`.
+
+A second instrumented pass found that those feed/settle numbers did not prove the placeholder's
+own lifetime. A viewport message used to install its new hydration request id while the message
+was *constructed*, before `send` rejected a duplicate grid. If layout crossed another cell count
+and settled back on the grid already leased, that unsent id replaced the generation actually on
+the wire. The Mac returned the correct ordered boundary, but the phone treated it as stale; since
+the host had advertised the boundary, the legacy one-second fallback was deliberately disabled
+and the visible loader survived until the four-second emergency timeout. Request-id ownership now
+moves only after the duplicate guard, beside the update of `lastSentTerminalViewport`.
+`testAnUnsentDuplicateViewportCannotReplaceTheHydrationGeneration` holds that exact return-to-the-
+same-grid case.
+
+The same pass removed transport callback amplification below the terminal protocol. SwiftTerm's
+`DispatchIO` read is 128 KB, but Darwin commonly delivered it as roughly 1 KB partial callbacks;
+each partial became a main-thread emulator feed, capture update and WebSocket frame. Adjacent
+fragments that are already waiting when the main-queue drain runs are now joined into bounded
+128 KB deliveries. There is no coalescing timer, so an isolated keystroke/output fragment is still
+delivered immediately; the existing time slice, generation checks and 4 MB/1 MB backpressure
+remain intact. The 8 MiB backpressure test still passes, and a new 512 KiB fixture asserts exact
+byte delivery with a bounded callback count.
+
+With both repairs, three entries per provider measured Codex at 742 ms cold and 553/542 ms warm
+(547 ms warm median) and Claude at 376 ms cold and 359/375 ms warm (367 ms warm median). Codex
+fell from 155–157 output frames to seven; Claude fell from seven to five. Every capable-host run
+sent one hydration request id and received one matching `terminalReady`; marker-to-reveal was
+0.04–0.07 ms. The warm Codex path was approximately 113 ms to hello, 15 ms from hello to the
+viewport, 235 ms for the resize repair to reach the phone, and 184 ms from its last repaint frame
+to the final seed. Warm Claude was approximately 116 ms to hello, 19 ms to the viewport, 37 ms to
+the repaint and 195 ms to the final seed. The last interval is the Mac's nominal 200 ms local
+quiet boundary. Observed repaint/final-seed gaps still reached 208 ms, so reducing that guard
+without a provider-owned repaint-complete signal would trade latency for the original partial
+reveal. Frame-by-frame inspection at 500 ms intervals again shows only the loader followed by one
+complete terminal. The measured artifacts are
+`/tmp/threading-profiles/20260821T131423Z-ios-terminal-wire-lab`.
+
+Starting a session socket from the row tap rather than the detail's task is not useful: the real
+view is created 9–12 ms after connection start, so it can recover only that small scheduling
+slice. Preconnecting dashboard rows would violate the catalogue scaling contract above by adding
+sockets, replay buffers and terminal capture per candidate.
+
+The separate bounded-cache experiment now ships as iOS session connection reuse. Pop sends
+`sessionPark`; the Mac runs the complete mirror detach path before acknowledging it, so the socket
+receives no PTY output or conversation deltas, owns no viewport or hydration transaction, leaves
+presence/input control, and retains no SwiftTerm renderer. Only the authenticated WebSocket stays
+warm. Push sends `sessionResume`, and the ordinary attach path supplies a new authoritative hello,
+bounded replay or conversation snapshot, collaboration state and hydration boundary. It therefore
+removes the roughly 110 ms TLS/WebSocket/auth handshake without letting stale output or a stale
+grid leak into the new view.
+
+Its scaling contract is explicit: the default is three parked transports for 60 seconds; the
+device setting is bounded to 0–8 transports and 5–300 seconds. Park, lookup and eviction do O(1)
+work at that bound, terminal history remains the one host-side per-session ring rather than a
+per-parked-client buffer, and parked clients are absent from subscriber fan-out. Telemetry is one
+fixed-size aggregate value—hits, misses, expiry/eviction causes, occupancy, totals/maxima and six
+age buckets—not an event or session history. Reducing either setting evicts excess state
+immediately; backgrounding or a memory warning drains it.
 
 ### Scaling audit, 2026-08-08
 
@@ -1108,6 +1257,72 @@ seven-point sweep kept all other main apply phases at or below 2.88 ms and warm 
 0.83 ms. Finally, the delayed transcript observer now enters through the same async scanned-record
 door as terminal and structured-message observation. It no longer resolves on a worker only to copy
 outside bytes synchronously when it returns to the main actor.
+
+### The buffer read, and the four instruments that missed it
+
+Everything above measures what happens to the text *after* the observer has it. Getting the text
+was the expensive half, and no number here described it until 2026-08-20.
+
+`SessionAttachmentDefaults.maximumTerminalScanBytes` bounds the text
+`Terminal.getRecentLogicalBufferText` **returns**. It cannot bound what that call **reads**. The
+walk goes backwards from the newest row and stops when the budget is spent, but a blank row costs
+one separator byte and real agent scrollback is mostly blank and short rows, so 3,473 rows yielded
+about 59 KB and the budget was never spent. The walk reached row zero every time, calling
+`BufferLine.translateToString` and `getTrimmedLength` on every row of every session's entire
+scrollback, on the thread the window draws on, roughly six times a second.
+
+A window left running for 25 hours with 24 live sessions was measured at a 10.3 GB physical
+footprint, 14.1 GB peak, holding 23,545,777 live `Swift.StringStorage` objects. `sample` put 91 of
+118 main-thread samples inside that walk. The recorder's own ring held 3,867 `attachments.scan`
+events out of 4,096 across a 640-second window: 6.0 scans per second, 219 MB of buffer text read,
+**one** attachment found.
+
+`sinceAbsoluteRow` bounds the read. A caller passes back the `nextAbsoluteRow` of its previous
+result and only rows produced since are translated again. Two rules keep that from being merely
+faster:
+
+- **The current screen is always re-read.** A full-screen agent TUI repaints rows in place without
+  producing a new row, so the screen is the one region that can change without moving the cursor.
+- **The cursor commits only when a scan is applied.** Advancing it at read time was tried first and
+  is wrong: a scan superseded by a newer generation is dropped, and its rows would have been
+  carried away unread with nothing to ever read them again. `TerminalIncrementalScanTests` pins
+  both, because both failures are silent.
+
+Rows above the screen have scrolled out of the cursor's reach and can no longer change, which is
+what makes skipping them safe rather than only cheap. `TerminalAttachmentObserver` also stopped
+keeping a set of every path anywhere in scrollback and now remembers a bounded
+`rememberedScannedPaths` of what it has already offered, which covers more history than the read
+window and is the first version of that set with an upper bound.
+
+**Four instruments were pointed at this feature and none of them saw it.** That is the part worth
+keeping:
+
+1. **The expensive phase was outside every span.** `attachments.scan` began *after* `text()`
+   returned, so the one recorded measurement of this feature described the worker round trip and
+   never the synchronous work that blocked the window. The read now has its own `attachments.read`
+   span. Instrument the phase you suspect is cheap; a span that starts after it proves nothing.
+2. **The stall heuristic could not tell a blocked thread from an `await`.** Requiring a span to
+   both begin and end on the main thread was meant to exclude cross-queue work, but an `await` that
+   resumes on the main actor satisfies both endpoints while occupying the thread for neither. So
+   `attachments.scan` tripped the 100 ms threshold on essentially every pass and the app exported a
+   trace every 30-second cooldown, continuously, for something that was never a stall. A signal
+   that fires constantly is worse than one that never fires: it reads as background noise, and it
+   crowded out the two genuine `main-thread.stall` events in the same window. Spans that cross
+   queues now pass `crossesQueues: true` and are excluded.
+3. **The stress fixture began after the expensive part.** `testStressAttachmentScanWhenEnabled`
+   hands the detector a ready-made `String`, so a whole-scrollback walk was structurally invisible
+   to it. `TerminalIncrementalScanTests.testStressTerminalBufferReadWhenEnabled` now sweeps the
+   read itself across scrollback depths, and `scripts/profile_threading.sh attachment-stress` runs
+   it first.
+4. **A bounded ring is a sampling window, and nothing said what filled it.** At 3,867 of 4,096
+   events, one span had evicted almost every other subsystem from the trace; read as a timeline
+   that is invisible. Every exported trace now carries `dominant_span`, `dominant_span_share`,
+   `ring_events`, `ring_distinct_spans` and `top_spans` in `otherData`, and the automatic-export
+   log line repeats them, so `log show` shows what is flooding the recorder without opening a file.
+
+The general rule, which is not specific to attachments: **a cap on output is not a cap on work.**
+A bound stated in bytes, rows or items returned says nothing about how much was examined to
+produce them, and the two diverge exactly when the content is sparse.
 
 ## Attachment preview-format stress target
 
@@ -2652,7 +2867,7 @@ row count, selection, and reveal assertions prevent a faster result from silentl
 expanded or addressable.
 
 `scripts/profile_threading.sh sidebar-stress` runs manual order at 500, 1,000, 2,000 and 5,000
-sessions, plus recent-activity and name order at 5,000, in fresh `xctest` processes.
+sessions, plus recent-activity, name and type order at 5,000, in fresh `xctest` processes.
 `THREADING_SIDEBAR_STRESS_ORDER`, `..._PROJECTS`, and `..._SESSIONS` narrow it to one point. The
 profiler's DerivedData lives inside that run's artifact directory: parallel developer builds cannot
 lock its build database, while the deterministic workloads in `full` reuse the same isolated

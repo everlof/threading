@@ -29,6 +29,28 @@ struct ScheduledMessageID: Hashable, Sendable, Codable, CustomStringConvertible 
     }
 }
 
+// MARK: - Scheduled Curfew Plan
+
+/// The end a scheduled start is already carrying, chosen while the user was writing the prompt.
+///
+/// Frozen for `ScheduledSessionPlan`'s reason and resolved for the opposite one. What the user
+/// picked is a decision — *this* moment, or whenever quiet hours next begin — and the decision is
+/// what has to survive the wait. The date behind `atQuietHours` must not: a plan that wrote down
+/// Tuesday's 04:00 and fired on Thursday would name a deadline two days before its own session
+/// started. So the choice is stored and the deadline is worked out when the start fires, against
+/// the quiet hours in force then.
+///
+/// `at` needs no resolving. A wall-clock time somebody named is its own reason, exactly as
+/// `ScheduledMessage.Anchor.wallClock` is.
+enum ScheduledCurfewPlan: Codable, Sendable, Equatable {
+
+    /// End the session at this moment, whatever the settings say by then.
+    case at(Date)
+
+    /// End it when quiet hours next begin, as they are configured at fire time.
+    case atQuietHours
+}
+
 // MARK: - Scheduled Session Plan
 
 /// Everything a session start needs, frozen at the moment it was scheduled.
@@ -60,6 +82,15 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
     /// Optional so schedules written before roles existed continue to decode as ordinary chats.
     let role: SessionRole?
 
+    /// The curfew this start arms once it is running, or nil for a session with no end.
+    ///
+    /// Optional for `role`'s reason: plans written before curfews existed decode as the endless
+    /// sessions they were. It stays a *plan* rather than a live rule for a second reason — the
+    /// waiting row is not under curfew, because a session that has not started has nothing to
+    /// wind down, hold or interrupt. The rule is armed when the session actually starts, so a
+    /// start that is cancelled leaves nothing behind for anyone to lift.
+    let curfew: ScheduledCurfewPlan?
+
     var accountHandle: AccountHandle { AccountHandle(storedName: accountHandleName) }
 
     init(
@@ -74,7 +105,8 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
         usesNativeUI: Bool,
         permissionMode: AgentPermissionMode?,
         managedWorkspacePlan: ManagedWorkspacePlan? = nil,
-        role: SessionRole = .chat
+        role: SessionRole = .chat,
+        curfew: ScheduledCurfewPlan? = nil
     ) {
         self.reservedSessionID = reservedSessionID
         self.projectID = projectID
@@ -88,6 +120,7 @@ struct ScheduledSessionPlan: Codable, Sendable, Equatable {
         self.permissionMode = permissionMode
         self.managedWorkspacePlan = managedWorkspacePlan
         self.role = role
+        self.curfew = curfew
     }
 }
 
@@ -141,9 +174,29 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
     /// Most schedules are user-authored. Limit recovery also rides this store, but it has
     /// different deduplication semantics: an ordinary reset preset must never suppress an
     /// automatic recovery, and a recovery for an older refusal must not suppress a newer one.
+    ///
+    /// A curfew's wrap-up is the third rider: the message filed at T − wind-down asking the
+    /// agent to end whatever loop it is running, commit what is safe and write the rest to a
+    /// handoff note. It carries two exemptions and no more. It is exempt from the curfew's own
+    /// hold — that hold exists to stop the session spending itself, and this one turn is what
+    /// buys back the work an interrupt is about to cut off — and it is **not** exempt from the
+    /// user's custom limit, which is a budget rather than a bedtime and is not the curfew's to
+    /// spend. It is never deduplicated against a user-authored record either: somebody having
+    /// scheduled their own message for 03:50 is not permission for the curfew to stay silent.
+    ///
+    /// **The `?? .userAuthored` decode below covers old files, not old builds**, and the
+    /// difference was measured rather than assumed. A record written before purposes existed
+    /// carries no `purpose` key, so `decodeIfPresent` answers nil and the fallback stands —
+    /// which is the direction this app actually reads in. The reverse is not a fallback at all:
+    /// `decodeIfPresent` throws `dataCorrupted` on a raw string it does not know, and
+    /// `ScheduledMessagesFile` is decoded whole, so a build predating this case that opens a
+    /// file containing it quarantines *every* scheduled send rather than skipping the wrap-up.
+    /// That is the cost of a downgrade, and the reason a new purpose is declared here rather
+    /// than smuggled through an existing one.
     enum Purpose: String, Codable, Sendable, Equatable {
         case userAuthored
         case limitRecovery
+        case curfewWindDown
     }
 
     // MARK: - Target

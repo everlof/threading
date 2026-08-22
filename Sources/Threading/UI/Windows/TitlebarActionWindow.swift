@@ -23,6 +23,11 @@ import AppKit
 /// intends.
 final class TitlebarActionWindow: NSWindow {
 
+    /// The strip has no resting affordance because its other job is ordinary window chrome.
+    /// This design-system view is mounted only when a drag proves it is carrying one reportable
+    /// image, then paints the accepted target without taking titlebar hit-testing from AppKit.
+    private let screenshotDropIndicator = ScreenshotReportDropTargetView()
+
     /// What a double-click performs, as a closure so a test can state the answer rather than
     /// inherit whichever setting the machine running it happens to carry — the gesture is only
     /// worth asserting against a known one.
@@ -87,6 +92,7 @@ final class TitlebarActionWindow: NSWindow {
         didSet {
             if onScreenshotDropped == nil {
                 unregisterDraggedTypes()
+                setScreenshotDropIndicatorPresented(false, animated: false)
             } else {
                 registerForDraggedTypes([.fileURL])
             }
@@ -94,17 +100,44 @@ final class TitlebarActionWindow: NSWindow {
     }
 
     func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        droppableScreenshot(in: sender) == nil ? [] : .copy
+        screenshotDragOperation(for: sender, animated: true)
     }
 
     func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        droppableScreenshot(in: sender) == nil ? [] : .copy
+        screenshotDragOperation(for: sender, animated: true)
+    }
+
+    func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        setScreenshotDropIndicatorPresented(false, animated: false)
+    }
+
+    func draggingEnded(_ sender: any NSDraggingInfo) {
+        setScreenshotDropIndicatorPresented(false, animated: false)
+    }
+
+    func concludeDragOperation(_ sender: (any NSDraggingInfo)?) {
+        setScreenshotDropIndicatorPresented(false, animated: false)
     }
 
     func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        guard let url = droppableScreenshot(in: sender) else { return false }
+        guard let url = droppableScreenshot(in: sender) else {
+            setScreenshotDropIndicatorPresented(false, animated: false)
+            return false
+        }
+        setScreenshotDropIndicatorPresented(false, animated: false)
         onScreenshotDropped?(url)
         return true
+    }
+
+    /// A render-test seam for the transient state. Production reaches the same method through
+    /// `draggingEntered`/`draggingUpdated`; no synthetic pasteboard or wall-clock animation is
+    /// needed to capture the real titlebar treatment at a stable frame.
+    func setScreenshotDropIndicatorPresentation(_ presented: Bool) {
+        setScreenshotDropIndicatorPresented(presented, animated: false)
+    }
+
+    var isScreenshotDropIndicatorPresented: Bool {
+        screenshotDropIndicator.isPresented
     }
 
     /// One image, dropped on the strip. Deliberately narrow on both counts: the strip is a target
@@ -123,6 +156,41 @@ final class TitlebarActionWindow: NSWindow {
         return url
     }
 
+    private func screenshotDragOperation(
+        for sender: any NSDraggingInfo,
+        animated: Bool
+    ) -> NSDragOperation {
+        let acceptsScreenshot = droppableScreenshot(in: sender) != nil
+        setScreenshotDropIndicatorPresented(acceptsScreenshot, animated: animated)
+        return acceptsScreenshot ? .copy : []
+    }
+
+    private func setScreenshotDropIndicatorPresented(_ presented: Bool, animated: Bool) {
+        guard presented else {
+            screenshotDropIndicator.setPresented(false, animated: false)
+            return
+        }
+        guard let contentView else { return }
+
+        let stripHeight = titlebarStripHeight
+        guard stripHeight > 0 else { return }
+
+        if screenshotDropIndicator.superview !== contentView {
+            screenshotDropIndicator.removeFromSuperview()
+            contentView.addSubview(screenshotDropIndicator, positioned: .above, relativeTo: nil)
+        }
+        // The full-size root reaches under the native titlebar, so its visible top edge is the
+        // stable placement reference. AppKit may restate `contentLayoutRect.origin` after this
+        // feedback view is mounted; neither this frame nor later drag updates depend on it.
+        screenshotDropIndicator.frame = NSRect(
+            x: contentView.bounds.minX,
+            y: contentView.bounds.maxY - stripHeight,
+            width: contentView.bounds.width,
+            height: stripHeight
+        )
+        screenshotDropIndicator.setPresented(true, animated: animated)
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard event.clickCount == TitlebarDoubleClick.clickCount,
               isInTitlebarStrip(event.locationInWindow) else {
@@ -137,11 +205,18 @@ final class TitlebarActionWindow: NSWindow {
     /// toolbar — the band that, under `.fullSizeContentView`, is drawn *over* the content view
     /// rather than above it.
     ///
-    /// `contentLayoutRect` is what the platform left for content, in the same coordinates as an
-    /// event's `locationInWindow`, so this is the whole test: everything above it is chrome, and
-    /// its height already accounts for the toolbar and for the style the toolbar is drawn in.
+    /// `contentLayoutRect.height` is what the platform left for content. Its origin is deliberately
+    /// not used: AppKit restates that origin after a transient view is mounted over the full-size
+    /// root, while the held-back height remains stable. Subtracting that height from the window
+    /// gives the strip on every toolbar style and leaves a frameless window with no strip at all.
     func isInTitlebarStrip(_ locationInWindow: NSPoint) -> Bool {
-        locationInWindow.y >= contentLayoutRect.maxY
+        let stripHeight = titlebarStripHeight
+        return stripHeight > 0 && locationInWindow.y >= frame.height - stripHeight
+    }
+
+    private var titlebarStripHeight: CGFloat {
+        guard styleMask.contains(.titled) else { return 0 }
+        return max(0, min(frame.height, frame.height - contentLayoutRect.height))
     }
 
     private func perform(_ action: TitlebarDoubleClick.Action) {

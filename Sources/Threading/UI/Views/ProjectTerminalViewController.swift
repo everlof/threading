@@ -69,7 +69,7 @@ final class ProjectTerminalViewController: NSViewController {
         appEvents.observe(ProfileDidChange.self) { [weak self] _ in self?.applyTheme() }
         appEvents.observe(ThemeAssignmentsDidChange.self) { [weak self] _ in self?.applyTheme() }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.applyTheme() }
-        // A cwd change may move this terminal under a differently themed project.
+        // Project mutations can change the owning project's inherited theme.
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in self?.applyTheme() }
     }
 
@@ -120,6 +120,23 @@ final class ProjectTerminalViewController: NSViewController {
             scriptID: invocation.script.id,
             workingDirectory: invocation.workingDirectory,
             previewURL: invocation.script.previewURL
+        )
+    }
+
+    /// Runs provider-authored updater commands in this visible terminal after the user pressed
+    /// the update toast's action. The plan is one shell command — several terminal lines, all of
+    /// them continuations the shell consumes before it runs anything — so a provider prompt
+    /// cannot consume a later provider's command as if the user had typed an answer.
+    func runAgentCLIUpdates(
+        _ plan: AgentCLIUpdateExecutionPlan
+    ) -> AgentCLIUpdateExecutionReceipt? {
+        startIfNeeded()
+        guard session.isRunning else { return nil }
+
+        session.insertText(plan.shellSource + "\n")
+        return AgentCLIUpdateExecutionReceipt(
+            terminalID: terminalID,
+            toolIDs: plan.updates.map(\.id)
         )
     }
 
@@ -185,6 +202,12 @@ final class ProjectTerminalViewController: NSViewController {
 extension ProjectTerminalViewController: TerminalSessionDelegate {
     func terminalSessionDidStart(_ session: TerminalSession) {
         startDirectoryTracking()
+        // The agent surfaces begin capturing at launch so the ring follows a live terminal
+        // before anybody attaches; a standalone shell is mirrored on the same terms, or a
+        // client joining later replays only what it happened to be present for.
+        if AppSettings.shared.remoteAccessEnabled {
+            RemoteSessionMirrorRegistry.shared.beginCapturing(terminalID: terminalID)
+        }
         notifyRunningState()
     }
 

@@ -162,10 +162,21 @@ final class RemoteConnectionFailureTests: XCTestCase {
             "The connect attempt itself must be recorded."
         )
         let terminal = try XCTUnwrap(records.last { $0.event == .socketFailed })
+        let connecting = try XCTUnwrap(records.last { $0.event == .socketConnecting })
         XCTAssertEqual(
             terminal.fields[RemoteDiagnosticField.reason.rawValue],
             RemoteConnectionFailure.Cause.helloTimeout.rawValue
         )
+        XCTAssertEqual(
+            terminal.fields[RemoteDiagnosticField.trace.rawValue],
+            connecting.fields[RemoteDiagnosticField.trace.rawValue]
+        )
+        XCTAssertEqual(
+            terminal.fields[RemoteDiagnosticField.timeoutMS.rawValue],
+            "400"
+        )
+        XCTAssertNotNil(terminal.fields[RemoteDiagnosticField.durationMS.rawValue])
+        XCTAssertEqual(terminal.fields[RemoteDiagnosticField.phase.rawValue], "hello")
     }
 
     /// `endpointKind` and a hash of the address, on both ends of the attempt. Without them

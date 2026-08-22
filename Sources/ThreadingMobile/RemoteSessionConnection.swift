@@ -32,6 +32,12 @@ private enum RemoteMobileConnectionDefaults {
     /// its fit for the same reason all along. The first grid of a lease still goes immediately,
     /// so entering a chat sizes the agent without waiting out a quiet window.
     static let viewportSettleDelay: Duration = .milliseconds(150)
+    /// Compatibility fallback for a host that predates the ordered terminal hydration boundary.
+    /// Initial replay and resize repair remain one presentation transaction, but only an older
+    /// host makes the phone infer its end from wire silence.
+    static let terminalHydrationQuietDelay: Duration = .seconds(1)
+    /// A chat that is already producing an unbounded stream must eventually become visible.
+    static let terminalHydrationMaximumDelay: Duration = .seconds(4)
 }
 
 enum MobileCollaborationPresentation {
@@ -93,6 +99,11 @@ enum MobileTerminalInputMode: Equatable {
     case none
 }
 
+enum RemoteLiveConnectionTarget: Equatable {
+    case session(String)
+    case projectTerminal(String)
+}
+
 struct RemotePromptSubmissionFeedback: Equatable {
     let requestID: String
     let text: String
@@ -109,6 +120,8 @@ private struct PendingRemoteSubmission {
     let requestID: String
     let messageType: String
     let text: String
+    let contextAttachments: [RemoteConversationContextAttachmentDTO]
+    let attachmentUploadIDs: [String]
     let createdAt: Date
 }
 
@@ -160,6 +173,13 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
 
+    private enum WarmTransportState: Equatable {
+        case active
+        case parking
+        case parked
+        case resuming
+    }
+
     @Published private(set) var phase: Phase = .connecting
     /// What the mirrored surface calls itself right now — a terminal's OSC title as the agent
     /// sent it, or the name the Mac put in `hello`. **Not the session's name**, which is the
@@ -175,6 +195,7 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var terminalTheme: RemoteTerminalThemeDTO?
     @Published private(set) var terminalColumns = 0
     @Published private(set) var terminalRows = 0
+    @Published private(set) var isTerminalHydrating: Bool
     @Published private(set) var conversationCanSend = false
     @Published private(set) var composerCapabilities: [RemoteComposerCapabilityDTO] = []
     @Published private(set) var presence: [String: RemotePresenceDTO] = [:]
@@ -183,10 +204,14 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var supportsAtomicTerminalSubmission = false
     @Published private(set) var supportsAttentionRequests = false
     @Published private(set) var supportsFocusedInputControl = false
+    @Published private(set) var supportsSessionConnectionParking = false
     /// Whether this connection may hand the Mac files to send with a prompt. False for a
     /// view-only or guest link, which the host never advertises the feature to — so the composer
     /// draws no attach button rather than one that would be refused.
     @Published private(set) var supportsComposerAttachmentUploads = false
+    /// Direct-input terminals use a separate negotiated mutation: uploaded files enter the
+    /// workspace and their paths are inserted at the TUI cursor without an implicit Return.
+    @Published private(set) var supportsTerminalAttachmentInsertion = false
     @Published private(set) var inputControl: RemoteInputControlStateDTO?
     @Published private(set) var inputControlEvents: [RemoteInputControlEventDTO] = []
     @Published private(set) var inputControlResult: RemoteInputControlResultDTO?
@@ -196,6 +221,7 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var attentionRequestFeedback: RemoteAttentionRequestFeedback?
 
     let session: RemoteSessionSummaryDTO
+    let target: RemoteLiveConnectionTarget
     let conversationStore = RemoteConversationStore()
     private var client: RemoteClient
     private let reconnectClient: (@MainActor () async -> RemoteClient?)?
@@ -208,16 +234,29 @@ final class RemoteSessionConnection: ObservableObject {
     private var helloDeadlineTask: Task<Void, Never>?
     private let helloDeadline: Duration
     private var reconnectAttempt = 0
+    private var reconnectSequence = 0
+    private var socketTrace: String?
+    private var socketStartedAt: UInt64?
+    private var socketAttempt = 1
     private var stopped = false
     private var connectionGeneration = 0
     private var pendingTerminalOutput = Data()
     private let pendingTerminalOutputLimit = 2 * 1_024 * 1_024
+    private let terminalHydrationQuietDelay: Duration
+    private let terminalHydrationMaximumDelay: Duration
+    private var terminalHydrationQuietTask: Task<Void, Never>?
+    private var terminalHydrationMaximumTask: Task<Void, Never>?
+    private var hasReceivedTerminalHydrationOutput = false
+    private var terminalHydrationRequestID: String?
+    private var pendingTerminalReady: RemoteTerminalReadyDTO?
     private var pendingViewport: (cols: Int, rows: Int)?
+    private var lastSentTerminalViewport: (cols: Int, rows: Int)?
     private let viewportSettleDelay: Duration
     private var viewportSettleTask: Task<Void, Never>?
     private var typingIdleTask: Task<Void, Never>?
     private var isReportingTyping = false
     private var serverFeatures: Set<String> = []
+    private var warmTransportState: WarmTransportState = .active
     private var pendingPromptSubmission: PendingRemoteSubmission?
     private var pendingAttentionRequest: PendingAttentionRequest?
     /// Non-nil only for the demo sentinel link: plays the Mac's half of the socket in-process,
@@ -228,7 +267,16 @@ final class RemoteSessionConnection: ObservableObject {
             guard let onTerminalOutput, !pendingTerminalOutput.isEmpty else { return }
             let buffered = pendingTerminalOutput
             pendingTerminalOutput.removeAll(keepingCapacity: true)
+            // Receiving and rendering buffered bytes are separate moments. Restart hydration's
+            // quiet boundary when the terminal actually takes the buffer so it cannot reveal
+            // before SwiftTerm has parsed output that arrived ahead of the view. The static UI
+            // fixtures enter through this same buffer instead of pretending to own a socket.
+            noteTerminalHydrationOutput()
             onTerminalOutput(buffered)
+            if let ready = pendingTerminalReady {
+                pendingTerminalReady = nil
+                completeTerminalHydration(ifMatching: ready)
+            }
         }
     }
     var onTerminalGridChange: ((Int, Int) -> Void)? {
@@ -238,6 +286,9 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
     var onWorkspaceChanged: ((RemoteWorkspaceChangedDTO) -> Void)?
+    /// Set only while the pool owns this connection. A transport that dies while no view is
+    /// mounted removes itself from the pool instead of starting an invisible reconnect loop.
+    var onPooledConnectionInvalidated: (() -> Void)?
 
     /// True while this session's agent is working on a turn — what the navigation title's orb
     /// is drawn for. See `MobileAgentTurnActivity` for why `canSend` is the signal.
@@ -259,6 +310,10 @@ final class RemoteSessionConnection: ObservableObject {
         )
     }
 
+    var isReadyForConnectionPool: Bool {
+        phase == .connected && task != nil && warmTransportState == .active
+    }
+
     func terminalInputMode(settingEnabled: Bool) -> MobileTerminalInputMode {
         MobileCollaborationPresentation.terminalInputMode(
             settingEnabled: settingEnabled,
@@ -272,18 +327,27 @@ final class RemoteSessionConnection: ObservableObject {
 
     init(
         session: RemoteSessionSummaryDTO,
+        target: RemoteLiveConnectionTarget? = nil,
         client: RemoteClient,
         reconnectClient: (@MainActor () async -> RemoteClient?)? = nil,
         helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline,
-        viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay
+        viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay,
+        terminalHydrationQuietDelay: Duration =
+            RemoteMobileConnectionDefaults.terminalHydrationQuietDelay,
+        terminalHydrationMaximumDelay: Duration =
+            RemoteMobileConnectionDefaults.terminalHydrationMaximumDelay
     ) {
         self.session = session
+        self.target = target ?? .session(session.id)
         self.client = client
         self.reconnectClient = reconnectClient
         self.helloDeadline = helloDeadline
         self.viewportSettleDelay = viewportSettleDelay
+        self.terminalHydrationQuietDelay = terminalHydrationQuietDelay
+        self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
         mirroredCaption = session.title
         surface = session.surface
+        isTerminalHydrating = session.surface == .terminal
         terminalTheme = session.terminalTheme
         deviceID = RemoteDeviceIdentity.current
         conversationStore.onCanSendChange = { [weak self] canSend in
@@ -294,18 +358,34 @@ final class RemoteSessionConnection: ObservableObject {
     func connect() {
         disconnect(markEnded: false)
         let generation = connectionGeneration
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.connectionStarted(session)
+#endif
         stopped = false
         phase = .connecting
+        beginTerminalHydration()
+        lastSentTerminalViewport = nil
         composerCapabilities = []
         serverFeatures.removeAll()
         supportsComposerAttachmentUploads = false
+        supportsTerminalAttachmentInsertion = false
         supportsAtomicTerminalSubmission = false
         supportsAttentionRequests = false
         supportsFocusedInputControl = false
+        supportsSessionConnectionParking = false
+        warmTransportState = .active
         inputControl = nil
         inputControlEvents = []
         attentionRecipients = []
-        MobileDiagnostics.record(.socketConnecting, fields: destinationFields.merging([
+        socketTrace = MobileDiagnostics.connectivityTrace()
+        socketStartedAt = MobileDiagnostics.monotonicNow()
+        socketAttempt = reconnectSequence + 1
+        MobileDiagnostics.recordConnectivity(.socketConnecting, fields: socketFields(
+            phase: "hello"
+        ).merging([
+            .result: "started",
+            .attempt: String(socketAttempt),
+            .timeoutMS: MobileDiagnostics.milliseconds(helloDeadline),
             .protocolVersion: String(RemoteProtocol.current),
             .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
         ]) { current, _ in current })
@@ -316,14 +396,21 @@ final class RemoteSessionConnection: ObservableObject {
 
         // The demo's canned Mac takes the socket's place; everything downstream of the wire —
         // the hello, snapshots, acknowledgements — still arrives through `handle`.
-        if let script = DemoSessionScript.forDemo(link: client.link, session: session) {
+        if case .session = target,
+           let script = DemoSessionScript.forDemo(link: client.link, session: session) {
             demoScript = script
             script.begin(on: self)
             return
         }
 
         do {
-            let task = try client.webSocketTask(sessionID: session.id)
+            let task: URLSessionWebSocketTask
+            switch target {
+            case .session(let sessionID):
+                task = try client.webSocketTask(sessionID: sessionID)
+            case .projectTerminal(let terminalID):
+                task = try client.terminalWebSocketTask(terminalID: terminalID)
+            }
             self.task = task
             task.resume()
             armHelloDeadline(generation: generation)
@@ -382,6 +469,11 @@ final class RemoteSessionConnection: ObservableObject {
 
     func disconnect(markEnded: Bool = true) {
         reportTyping(false)
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = nil
+        terminalHydrationMaximumTask?.cancel()
+        terminalHydrationMaximumTask = nil
+        isTerminalHydrating = false
         viewportSettleTask?.cancel()
         viewportSettleTask = nil
         if phase == .connected, capability == .interact, pendingViewport != nil {
@@ -398,6 +490,8 @@ final class RemoteSessionConnection: ObservableObject {
         reconnectTask = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
+        warmTransportState = .active
+        onPooledConnectionInvalidated = nil
         presence.removeAll()
         attentionRecipients = []
         pendingAttentionRequest = nil
@@ -405,11 +499,159 @@ final class RemoteSessionConnection: ObservableObject {
         conversationStore.cancelLoadingEarlier()
         if markEnded {
             phase = .ended(MobileL10n.string("Disconnected"))
-            MobileDiagnostics.record(.socketEnded, fields: [
-                .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
+            MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
+                phase: "session"
+            ).merging([
+                .result: "ended",
                 .reason: "user",
-            ])
+            ]) { current, _ in current })
         }
+    }
+
+    /// Turns a visible session connection into a transport-only warm entry.
+    ///
+    /// No renderer callback survives this boundary. The host's `sessionPark` removes the socket
+    /// from PTY fan-out, collaboration presence and viewport ownership; keeping those alive would
+    /// be a hidden terminal, not a connection pool.
+    @discardableResult
+    func parkForReuse() -> Bool {
+        guard phase == .connected,
+              supportsSessionConnectionParking,
+              case .session = target,
+              task != nil,
+              warmTransportState == .active else { return false }
+
+        reportTyping(false)
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = nil
+        terminalHydrationMaximumTask?.cancel()
+        terminalHydrationMaximumTask = nil
+        viewportSettleTask?.cancel()
+        viewportSettleTask = nil
+        isTerminalHydrating = false
+        pendingViewport = nil
+        lastSentTerminalViewport = nil
+        onTerminalOutput = nil
+        onTerminalGridChange = nil
+        onWorkspaceChanged = nil
+        warmTransportState = .parking
+        do {
+            try send(RemoteClientMessage(type: "sessionPark"))
+            return true
+        } catch {
+            warmTransportState = .active
+            return false
+        }
+    }
+
+    /// Reattaches a parked authenticated socket. The normal `hello` and bounded replay/snapshot
+    /// remain the synchronization boundary, so resuming cannot expose state accumulated while
+    /// the phone was away.
+    @discardableResult
+    func resumeFromPool() -> Bool {
+        guard phase == .connected,
+              supportsSessionConnectionParking,
+              task != nil,
+              warmTransportState == .parking || warmTransportState == .parked else {
+            return false
+        }
+        warmTransportState = .resuming
+        phase = .connecting
+        beginTerminalHydration()
+        lastSentTerminalViewport = nil
+        presence.removeAll()
+        attentionRecipients = []
+        pendingTerminalOutput.removeAll(keepingCapacity: true)
+        armHelloDeadline(generation: connectionGeneration)
+        do {
+            try send(RemoteClientMessage(type: "sessionResume"))
+            return true
+        } catch {
+            cancelHelloDeadline()
+            warmTransportState = .active
+            return false
+        }
+    }
+
+    private var isOwnedByConnectionPool: Bool {
+        warmTransportState == .parking || warmTransportState == .parked
+    }
+
+    private func invalidatePooledConnection() {
+        let invalidated = onPooledConnectionInvalidated
+        onPooledConnectionInvalidated = nil
+        disconnect(markEnded: false)
+        invalidated?()
+    }
+
+    private func beginTerminalHydration() {
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = nil
+        terminalHydrationMaximumTask?.cancel()
+        terminalHydrationMaximumTask = nil
+        hasReceivedTerminalHydrationOutput = false
+        terminalHydrationRequestID = nil
+        pendingTerminalReady = nil
+        isTerminalHydrating = session.surface == .terminal
+    }
+
+    private func noteTerminalHydrationOutput() {
+        guard isTerminalHydrating else { return }
+        hasReceivedTerminalHydrationOutput = true
+        if terminalHydrationMaximumTask == nil {
+            terminalHydrationMaximumTask = Task { [weak self, terminalHydrationMaximumDelay] in
+                try? await Task.sleep(for: terminalHydrationMaximumDelay)
+                guard !Task.isCancelled else { return }
+                self?.completeTerminalHydration()
+            }
+        }
+        scheduleTerminalHydrationCompletionIfReady()
+    }
+
+    private func noteTerminalHydrationViewportSent() {
+        scheduleTerminalHydrationCompletionIfReady()
+    }
+
+    private func scheduleTerminalHydrationCompletionIfReady() {
+        guard isTerminalHydrating, hasReceivedTerminalHydrationOutput else { return }
+        // A capable host puts an ordered boundary behind its post-SIGWINCH output and final
+        // screen seed. Its own PTY timing decides stability; packet gaps must not restart a
+        // second client-side timer. The maximum task remains the escape for a broken boundary.
+        guard !serverFeatures.contains(
+            RemoteWebSocketFeature.terminalHydrationBoundary.rawValue
+        ) else { return }
+        // An interactive terminal is not stable until its first phone-owned grid has reached
+        // the Mac. A view-only connection never leases a viewport and can reveal its replay.
+        guard capability != .interact || pendingViewport != nil else { return }
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = Task { [weak self, terminalHydrationQuietDelay] in
+            try? await Task.sleep(for: terminalHydrationQuietDelay)
+            guard !Task.isCancelled else { return }
+            self?.completeTerminalHydration()
+        }
+    }
+
+    private func completeTerminalHydration() {
+        guard isTerminalHydrating else { return }
+        terminalHydrationQuietTask?.cancel()
+        terminalHydrationQuietTask = nil
+        terminalHydrationMaximumTask?.cancel()
+        terminalHydrationMaximumTask = nil
+        isTerminalHydrating = false
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.terminalHydrationCompleted(session)
+#endif
+    }
+
+    private func completeTerminalHydration(ifMatching ready: RemoteTerminalReadyDTO) {
+        guard isTerminalHydrating else { return }
+        if capability == .interact {
+            guard let requestID = ready.requestID,
+                  requestID == terminalHydrationRequestID else { return }
+        } else {
+            guard ready.requestID == nil else { return }
+        }
+        completeTerminalHydration()
     }
 
     func sendTerminalInput(_ data: ArraySlice<UInt8>) {
@@ -435,12 +677,19 @@ final class RemoteSessionConnection: ObservableObject {
     /// it. The local renderer already followed each step; the Mac needs only where it ended.
     func updateTerminalViewport(cols: Int, rows: Int) {
         guard cols >= 20, rows >= 4 else { return }
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.viewportObserved(
+            columns: cols,
+            rows: rows,
+            session: session
+        )
+#endif
         if pendingViewport?.cols == cols, pendingViewport?.rows == rows { return }
         let isFirstGridOfLease = pendingViewport == nil
         pendingViewport = (cols, rows)
         guard phase == .connected, capability == .interact else { return }
         if isFirstGridOfLease {
-            try? send(RemoteClientMessage(type: "viewport", cols: cols, rows: rows))
+            try? send(terminalViewportMessage(cols: cols, rows: rows))
             return
         }
         viewportSettleTask?.cancel()
@@ -455,11 +704,32 @@ final class RemoteSessionConnection: ObservableObject {
         viewportSettleTask = nil
         guard !stopped, phase == .connected, capability == .interact,
               let pendingViewport else { return }
-        try? send(RemoteClientMessage(
-            type: "viewport",
+        try? send(terminalViewportMessage(
             cols: pendingViewport.cols,
             rows: pendingViewport.rows
         ))
+    }
+
+    private func terminalViewportMessage(cols: Int, rows: Int) -> RemoteClientMessage {
+        let requestID: String?
+        if isTerminalHydrating,
+           serverFeatures.contains(
+               RemoteWebSocketFeature.terminalHydrationBoundary.rawValue
+           ) {
+            // Every grid sent before reveal is a new presentation generation. A settled grid
+            // can supersede the immediate first lease while its repaint is still in flight;
+            // giving it a new id makes the earlier boundary harmless instead of revealing the
+            // newer resize half-painted.
+            requestID = UUID().uuidString.lowercased()
+        } else {
+            requestID = nil
+        }
+        return RemoteClientMessage(
+            type: "viewport",
+            cols: cols,
+            rows: rows,
+            requestID: requestID
+        )
     }
 
     func releaseTerminalViewport() {
@@ -467,6 +737,7 @@ final class RemoteSessionConnection: ObservableObject {
         viewportSettleTask = nil
         guard pendingViewport != nil else { return }
         pendingViewport = nil
+        lastSentTerminalViewport = nil
         guard phase == .connected, capability == .interact else { return }
         try? send(RemoteClientMessage(type: "viewportRelease"))
     }
@@ -502,10 +773,34 @@ final class RemoteSessionConnection: ObservableObject {
     /// Submits a device-local terminal draft as one PTY write. A host must advertise the
     /// capability because older hosts only understand shared raw keystrokes.
     @discardableResult
-    func submitTerminalLine(_ text: String) -> String? {
+    func submitTerminalLine(
+        _ text: String,
+        attachmentUploadIDs: [String] = []
+    ) -> String? {
         let line = text.trimmingCharacters(in: .newlines)
         guard supportsAtomicTerminalSubmission, inputControl?.canWrite != false else { return nil }
-        return sendSubmission(type: "terminalSubmit", text: line, permitsLegacyHost: false)
+        return sendSubmission(
+            type: "terminalSubmit",
+            text: line,
+            attachmentUploadIDs: attachmentUploadIDs,
+            permitsLegacyHost: false
+        )
+    }
+
+    /// Hands staged files to the session and inserts their quoted workspace paths at the live
+    /// terminal cursor. This deliberately does not send Return: the direct-input TUI still owns
+    /// editing and submission of the line.
+    @discardableResult
+    func insertTerminalAttachments(_ attachmentUploadIDs: [String]) -> String? {
+        guard supportsTerminalAttachmentInsertion,
+              inputControl?.canWrite != false,
+              !attachmentUploadIDs.isEmpty else { return nil }
+        return sendSubmission(
+            type: "terminalAttachmentInsert",
+            text: "",
+            attachmentUploadIDs: attachmentUploadIDs,
+            permitsLegacyHost: false
+        )
     }
 
     @discardableResult
@@ -550,6 +845,8 @@ final class RemoteSessionConnection: ObservableObject {
                 requestID: requestID,
                 messageType: type,
                 text: text,
+                contextAttachments: contextAttachments,
+                attachmentUploadIDs: attachmentUploadIDs,
                 createdAt: Date()
             )
             isPromptSubmissionPending = supportsAcknowledgement
@@ -680,6 +977,30 @@ final class RemoteSessionConnection: ObservableObject {
 
     private func send(_ message: RemoteClientMessage, generation: Int? = nil) throws {
         let expectedGeneration = generation ?? connectionGeneration
+        if message.type == "viewport", let cols = message.cols, let rows = message.rows {
+            if lastSentTerminalViewport?.cols == cols,
+               lastSentTerminalViewport?.rows == rows {
+                return
+            }
+            // The hydration generation belongs to the viewport that actually crosses the
+            // wire. Constructing a message is not sending it: a settled layout can return to
+            // the already-leased grid and hit the duplicate guard above. Recording its fresh
+            // request id before that guard would make the real host boundary look stale and
+            // leave the opening placeholder up until the emergency timeout.
+            if let requestID = message.requestID {
+                terminalHydrationRequestID = requestID
+            }
+            lastSentTerminalViewport = (cols, rows)
+            noteTerminalHydrationViewportSent()
+#if DEBUG
+            MobileTerminalWirePerformanceProbe.viewportSent(
+                columns: cols,
+                rows: rows,
+                hasHydrationRequestID: message.requestID != nil,
+                session: session
+            )
+#endif
+        }
         if let demoScript {
             guard expectedGeneration == connectionGeneration, !stopped else {
                 throw RemoteClientError.invalidResponse
@@ -695,6 +1016,10 @@ final class RemoteSessionConnection: ObservableObject {
             Task { @MainActor in
                 guard let self, self.connectionGeneration == expectedGeneration,
                       self.stopped == false, self.task === task else { return }
+                if self.isOwnedByConnectionPool {
+                    self.invalidatePooledConnection()
+                    return
+                }
                 self.fail(
                     with: RemoteConnectionFailure.transport(
                         error,
@@ -716,6 +1041,10 @@ final class RemoteSessionConnection: ObservableObject {
                 }
                 switch message {
                 case .data(let data):
+                    noteTerminalHydrationOutput()
+#if DEBUG
+                    MobileTerminalWirePerformanceProbe.outputReceived(data, session: session)
+#endif
                     if let onTerminalOutput {
                         onTerminalOutput(data)
                     } else {
@@ -736,6 +1065,10 @@ final class RemoteSessionConnection: ObservableObject {
             return
         } catch {
             guard !stopped, connectionGeneration == generation, self.task === task else { return }
+            if isOwnedByConnectionPool {
+                invalidatePooledConnection()
+                return
+            }
             fail(
                 with: RemoteConnectionFailure.transport(error, host: destinationHost),
                 httpStatus: Self.httpStatus(of: task)
@@ -768,6 +1101,7 @@ final class RemoteSessionConnection: ObservableObject {
     /// Synthesized terminal bytes, buffered exactly the way `receiveLoop` buffers real ones.
     func receiveDemoTerminalOutput(_ data: Data) {
         guard demoScript != nil else { return }
+        noteTerminalHydrationOutput()
         if let onTerminalOutput {
             onTerminalOutput(data)
         } else {
@@ -781,6 +1115,10 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
 #if DEBUG
+    var terminalHydrationRequestIDForTesting: String? {
+        terminalHydrationRequestID
+    }
+
     /// Drives the UI half of a reconnect performance fixture after the initial conversation has
     /// fully mounted. The socket's transport/hydration cost has its own host-side benchmark; this
     /// boundary deliberately exercises the same published phase changes and authoritative store
@@ -820,6 +1158,9 @@ final class RemoteSessionConnection: ObservableObject {
             guard let hello = try? JSONDecoder().decode(RemoteHelloDTO.self, from: data) else { return }
             mirroredCaption = hello.title.isEmpty ? mirroredCaption : hello.title
             surface = hello.surface
+            if surface != .terminal {
+                completeTerminalHydration()
+            }
             capability = RemoteCapability(rawValue: hello.capability) ?? .view
             theme = hello.theme ?? theme
             terminalTheme = hello.terminalTheme ?? terminalTheme
@@ -833,28 +1174,79 @@ final class RemoteSessionConnection: ObservableObject {
             supportsFocusedInputControl = serverFeatures.contains(
                 RemoteWebSocketFeature.focusedInputControl.rawValue
             )
+            supportsSessionConnectionParking = serverFeatures.contains(
+                RemoteWebSocketFeature.sessionConnectionParking.rawValue
+            )
             supportsComposerAttachmentUploads = serverFeatures.contains(
                 RemoteWebSocketFeature.composerAttachmentUploads.rawValue
             )
+            supportsTerminalAttachmentInsertion = serverFeatures.contains(
+                RemoteWebSocketFeature.terminalAttachmentInsertion.rawValue
+            )
             updateTerminalGrid(cols: hello.cols, rows: hello.rows)
             cancelHelloDeadline()
+            warmTransportState = .active
             phase = .connected
-            reconnectAttempt = 0
-            MobileDiagnostics.record(.socketConnected, fields: destinationFields.merging([
+#if DEBUG
+            MobileTerminalWirePerformanceProbe.helloReceived(
+                session,
+                supportsHydrationBoundary: serverFeatures.contains(
+                    RemoteWebSocketFeature.terminalHydrationBoundary.rawValue
+                )
+            )
+#endif
+            MobileDiagnostics.recordConnectivity(.socketConnected, fields: socketFields(
+                phase: "hello"
+            ).merging([
+                .result: "succeeded",
+                .attempt: String(socketAttempt),
                 .capability: hello.capability,
                 .surface: hello.surface.rawValue,
             ]) { current, _ in current })
-            if let pendingViewport, capability == .interact {
-                try? send(RemoteClientMessage(
-                    type: "viewport",
+            reconnectAttempt = 0
+            reconnectSequence = 0
+            if let pendingViewport, capability == .interact,
+               lastSentTerminalViewport == nil {
+                try? send(terminalViewportMessage(
                     cols: pendingViewport.cols,
                     rows: pendingViewport.rows
                 ))
             }
             resendPendingPromptIfSupported()
+        case "sessionParked":
+            // This frame is ordered after any PTY output already queued when the host detached
+            // us, and before a later resumed hello. Dropping the buffer here makes a fresh view's
+            // replay authoritative even when pop and push happen in consecutive gestures.
+            pendingTerminalOutput.removeAll(keepingCapacity: true)
+            pendingTerminalReady = nil
+            if warmTransportState == .parking {
+                warmTransportState = .parked
+            }
         case "resize":
             if let resize = try? JSONDecoder().decode(RemoteResizeDTO.self, from: data) {
                 updateTerminalGrid(cols: resize.cols, rows: resize.rows)
+            }
+        case "terminalReady":
+            guard let ready = try? JSONDecoder().decode(
+                RemoteTerminalReadyDTO.self,
+                from: data
+            ) else { return }
+#if DEBUG
+            MobileTerminalWirePerformanceProbe.terminalReadyReceived(
+                session,
+                hasRequestID: ready.requestID != nil,
+                matchesExpectedRequest: capability == .interact
+                    ? ready.requestID == terminalHydrationRequestID
+                    : ready.requestID == nil
+            )
+#endif
+            // Text and binary WebSocket messages are ordered, but SwiftTerm may not be mounted
+            // yet. Keep the boundary behind the buffered bytes in the renderer as well as on
+            // the socket or a fast host could reveal before the view parsed its final seed.
+            if onTerminalOutput == nil, !pendingTerminalOutput.isEmpty {
+                pendingTerminalReady = ready
+            } else {
+                completeTerminalHydration(ifMatching: ready)
             }
         case "theme":
             if let update = try? JSONDecoder().decode(RemoteThemeUpdateDTO.self, from: data) {
@@ -919,8 +1311,7 @@ final class RemoteSessionConnection: ObservableObject {
                 inputControl = update
                 if gainedControl, let pendingViewport,
                    surface == .terminal, capability == .interact {
-                    try? send(RemoteClientMessage(
-                        type: "viewport",
+                    try? send(terminalViewportMessage(
                         cols: pendingViewport.cols,
                         rows: pendingViewport.rows
                     ))
@@ -979,6 +1370,10 @@ final class RemoteSessionConnection: ObservableObject {
             )
         case "ended":
             let ended = try? JSONDecoder().decode(RemoteEndedDTO.self, from: data)
+            if isOwnedByConnectionPool {
+                invalidatePooledConnection()
+                return
+            }
             stopped = true
             switch ended?.reason {
             case "sessionClosed":
@@ -992,12 +1387,18 @@ final class RemoteSessionConnection: ObservableObject {
             default:
                 phase = .ended(MobileL10n.string("Session ended"))
             }
-            MobileDiagnostics.record(.socketEnded, fields: [
-                .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
-                .reason: ended?.reason ?? "server",
-            ])
+            MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
+                phase: "session"
+            ).merging([
+                .result: "ended",
+                .reason: MobileDiagnostics.machineToken(ended?.reason ?? "server"),
+            ]) { current, _ in current })
         case "error":
             let error = try? JSONDecoder().decode(RemoteErrorDTO.self, from: data)
+            if isOwnedByConnectionPool {
+                invalidatePooledConnection()
+                return
+            }
             if error?.code == "invalidConversationPage" {
                 conversationStore.cancelLoadingEarlier()
             }
@@ -1071,8 +1472,11 @@ final class RemoteSessionConnection: ObservableObject {
         code: String? = nil,
         httpStatus: Int? = nil
     ) {
+        let failedPhase = phase == .connected ? "session" : "hello"
         phase = .failed(failure)
-        var fields = destinationFields
+        var fields = socketFields(phase: failedPhase)
+        fields[.result] = "failed"
+        fields[.attempt] = String(socketAttempt)
         fields[.code] = code ?? "connection.\(failure.cause.rawValue)"
         fields[.reason] = failure.cause.rawValue
         // Whether the identity check passed, refused, or never ran. A token, never a
@@ -1086,13 +1490,28 @@ final class RemoteSessionConnection: ObservableObject {
         // gone, something on the path that could not reach it, and something else answering on
         // that address entirely.
         if let httpStatus { fields[.status] = String(httpStatus) }
-        MobileDiagnostics.record(.socketFailed, level: .error, fields: fields)
+        if failure.cause == .helloTimeout {
+            fields[.timeoutMS] = MobileDiagnostics.milliseconds(helloDeadline)
+        }
+        MobileDiagnostics.recordConnectivity(.socketFailed, level: .error, fields: fields)
     }
 
     private func recordSocketFailure(_ error: Error) {
-        var fields = destinationFields
+        var fields = socketFields(phase: "action")
+        fields[.result] = "failed"
+        fields[.attempt] = String(socketAttempt)
         fields[.code] = MobileDiagnostics.errorCode(error)
-        MobileDiagnostics.record(.socketFailed, level: .error, fields: fields)
+        MobileDiagnostics.recordConnectivity(.socketFailed, level: .error, fields: fields)
+    }
+
+    private func socketFields(phase: String) -> [RemoteDiagnosticField: String] {
+        var fields = destinationFields
+        fields[.phase] = phase
+        if let socketTrace { fields[.trace] = socketTrace }
+        if let socketStartedAt {
+            fields[.durationMS] = MobileDiagnostics.elapsedMilliseconds(since: socketStartedAt)
+        }
+        return fields
     }
 
     /// Which session, which kind of address, and which address, as a hash.
@@ -1127,7 +1546,15 @@ final class RemoteSessionConnection: ObservableObject {
         receiveTask = nil
         let attempt = reconnectAttempt
         reconnectAttempt = min(reconnectAttempt + 1, 4)
+        reconnectSequence &+= 1
         let delay = min(pow(2.0, Double(attempt)), 8.0)
+        MobileDiagnostics.recordConnectivity(.socketReconnectScheduled, fields: socketFields(
+            phase: "backoff"
+        ).merging([
+            .result: "scheduled",
+            .attempt: String(reconnectSequence + 1),
+            .delayMS: MobileDiagnostics.milliseconds(delay),
+        ]) { current, _ in current })
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self,
@@ -1165,11 +1592,22 @@ final class RemoteSessionConnection: ObservableObject {
             finishPendingPrompt(with: .unavailable)
             return
         }
+        if pending.messageType == "terminalAttachmentInsert",
+           !supportsTerminalAttachmentInsertion {
+            finishPendingPrompt(with: .unavailable)
+            return
+        }
         isPromptSubmissionPending = true
         try? send(RemoteClientMessage(
             type: pending.messageType,
             text: pending.text,
-            requestID: pending.requestID
+            requestID: pending.requestID,
+            contextAttachments: pending.contextAttachments.isEmpty
+                ? nil
+                : pending.contextAttachments,
+            attachmentUploadIDs: pending.attachmentUploadIDs.isEmpty
+                ? nil
+                : pending.attachmentUploadIDs
         ))
     }
 
@@ -1207,6 +1645,7 @@ final class RemoteSessionConnection: ObservableObject {
     static func demoTerminal() -> RemoteSessionConnection {
         let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
         let isCodexFixture = demoMode == "terminal-ansi"
+            || demoMode == "terminal-attachments"
             || demoMode == "terminal-codex-tui"
         let agentName = isCodexFixture ? "Codex" : "Claude Code"
         let session = RemoteSessionSummaryDTO(
@@ -1235,13 +1674,46 @@ final class RemoteSessionConnection: ObservableObject {
             : RemoteAppModel.demoTerminalTheme
         connection.terminalColumns = 48
         connection.terminalRows = 18
-        connection.serverFeatures = Set(RemoteWebSocketFeature.allCases.map(\.rawValue))
+        // This DEBUG-only snapshot fixture preloads bytes directly and has no demo script or
+        // remote host that can answer its first viewport with `terminalReady`. Advertising the
+        // ordered boundary here would promise a frame that can never arrive; the real in-app
+        // demo goes through `DemoSessionScript` and does advertise it.
+        connection.serverFeatures = Set(
+            RemoteWebSocketFeature.allCases
+                .filter { $0 != .terminalHydrationBoundary }
+                .map(\.rawValue)
+        )
         connection.supportsAtomicTerminalSubmission = true
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true
+        connection.supportsComposerAttachmentUploads = true
+        connection.supportsTerminalAttachmentInsertion = true
         connection.inputControl = ownerOnlyInputControlState()
         let lines: [String]
         switch demoMode {
+        case "terminal-selection":
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;35mClaude Code\u{1b}[0m",
+                "\u{1b}[2mSonnet · AnotherTerminal\u{1b}[0m",
+                "",
+                "\u{23FA} Bash(sudo nginx -t)",
+                "  \u{23BF}  nginx: the configuration file /etc/nginx/nginx.conf syntax is ok",
+                "",
+                "\u{1b}[31mnginx: [emerg] unknown directive \"serer_name\" in /etc/nginx/sites-enabled/app:12\u{1b}[0m",
+                "\u{1b}[31mnginx: configuration file /etc/nginx/nginx.conf test failed\u{1b}[0m",
+                "",
+                "\u{23FA} Read(/etc/nginx/sites-enabled/app)",
+                "  \u{23BF}  Read 41 lines",
+                "",
+                "❯ ",
+            ]
+        case "terminal-attachments":
+            lines = [
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;36mCodex\u{1b}[0m  AnotherTerminal",
+                "\u{1b}[2mDirect TUI input · attachment paths insert at the cursor\u{1b}[0m",
+                "",
+                "› Compare the screenshots in ",
+            ]
         case "terminal-ansi":
             lines = [
                 "\u{1b}[2J\u{1b}[H\u{1b}[1;36mCodex\u{1b}[0m  ANSI and Unicode fixture",

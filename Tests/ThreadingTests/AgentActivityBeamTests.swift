@@ -176,4 +176,49 @@ final class AgentActivityBeamTests: XCTestCase {
         let measured = AgentWorkload.measure(workingSessions: [unresolved]) { _, _ in nil }
         XCTAssertFalse(measured.anyAtTopEffort)
     }
+
+    // MARK: - The theme-independent intensity envelope
+
+    func testIntensityKeepsAWorkingFloorAndBoundsConcurrency() {
+        XCTAssertEqual(AgentIntensity.workloadFloor(for: 0), 0)
+        XCTAssertEqual(AgentIntensity.workloadFloor(for: 1), 0.30, accuracy: 0.0001)
+        XCTAssertEqual(AgentIntensity.workloadFloor(for: 3), 0.50, accuracy: 0.0001)
+        XCTAssertEqual(AgentIntensity.workloadFloor(for: 20), 1, accuracy: 0.0001)
+    }
+
+    func testRecentOutputPulsesDecayAboveTheWorkingFloor() {
+        let workload = AgentWorkload(workingCount: 2, anyAtTopEffort: false)
+        let baseline = AgentIntensity.none.updating(workload: workload, at: 10)
+        let pulsed = baseline.addingPulse(0.60, at: 10)
+
+        XCTAssertEqual(baseline.level(at: 10), 0.40, accuracy: 0.0001)
+        XCTAssertGreaterThan(pulsed.level(at: 10), baseline.level(at: 10))
+        XCTAssertGreaterThan(pulsed.level(at: 12), baseline.level(at: 12))
+        XCTAssertEqual(pulsed.level(at: 30), baseline.level(at: 30), accuracy: 0.0001)
+    }
+
+    func testRepeatedPulsesSaturateAndSettlingClearsImmediately() {
+        let workload = AgentWorkload(workingCount: 1, anyAtTopEffort: true)
+        let first = AgentIntensity.none
+            .updating(workload: workload, at: 5)
+            .addingPulse(0.8, at: 5)
+        let repeated = first.addingPulse(0.8, at: 5)
+
+        XCTAssertGreaterThan(repeated.recentActivity, first.recentActivity)
+        XCTAssertLessThanOrEqual(repeated.recentActivity, 1)
+
+        let settled = repeated.updating(workload: .none, at: 5.1)
+        XCTAssertEqual(settled.recentActivity, 0)
+        XCTAssertEqual(settled.level(at: 5.1), 0)
+    }
+
+    func testOutputWeightsCompressLargeBurstsInsteadOfCountingTokens() {
+        let small = AgentActivityPulse.output(byteCount: 64)
+        let large = AgentActivityPulse.output(byteCount: 64_000)
+
+        XCTAssertGreaterThan(small, 0)
+        XCTAssertGreaterThan(large, small)
+        XCTAssertLessThanOrEqual(large, 0.72)
+        XCTAssertLessThan(AgentActivityPulse.thinking(byteCount: 64), small)
+    }
 }

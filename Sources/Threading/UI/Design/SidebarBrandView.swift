@@ -12,9 +12,12 @@ import AppKit
 /// morphs it — the same character-by-character transition every session title makes, which is
 /// what makes changing chromes feel like the app changing clothes rather than flickering.
 ///
-/// One accessibility element. The mark is decorative and says so; the row reads as static
-/// text carrying the brand's name — the app's own when the theme hides the wordmark, because
-/// hiding the *drawn* name does not change what the row is.
+/// A spectrum material replaces those identity pixels with the app-wide workload analyzer. The
+/// selection is thematic, but the facts remain host-owned: exact working count, recent semantic
+/// activity, and whether any worker is at the top of its provider's effort ladder.
+///
+/// One accessibility element. Every child is decorative; the row reads as the brand in ordinary
+/// materials and states the workload in a spectrum material.
 final class SidebarBrandView: NSView, ThemedComponent {
 
     // MARK: - Properties
@@ -36,9 +39,11 @@ final class SidebarBrandView: NSView, ThemedComponent {
     /// A theme-supplied logo. Frameless and content-only — structural AppKit.
     private let customLogo = NSImageView()
     private let wordmark = MorphingTitleLabel()
+    private let workloadAnalyzer = AgentWorkloadAnalyzerView()
     private let stack = NSStackView()
     private let appEvents = AppEventObservations()
     private var pointerTracking: NSTrackingArea?
+    private var workloadIntensity = AgentWorkloadMonitor.shared.intensity
 
     /// What the row currently shows, kept so a theme change that moves nothing skips the
     /// morph — `AppThemeDidChange` also fires for font-override sweeps, and a wordmark that
@@ -61,6 +66,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
         stack.addArrangedSubview(mark)
         stack.addArrangedSubview(customLogo)
         stack.addArrangedSubview(wordmark)
+        stack.addArrangedSubview(workloadAnalyzer)
         addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -71,7 +77,9 @@ final class SidebarBrandView: NSView, ThemedComponent {
             mark.widthAnchor.constraint(equalToConstant: Layout.logoSide),
             mark.heightAnchor.constraint(equalToConstant: Layout.logoSide),
             customLogo.widthAnchor.constraint(equalToConstant: Layout.logoSide),
-            customLogo.heightAnchor.constraint(equalToConstant: Layout.logoSide)
+            customLogo.heightAnchor.constraint(equalToConstant: Layout.logoSide),
+            workloadAnalyzer.widthAnchor.constraint(equalToConstant: Design.WorkloadAnalyzer.size.width),
+            workloadAnalyzer.heightAnchor.constraint(equalToConstant: Design.WorkloadAnalyzer.size.height)
         ])
 
         mark.setAccessibilityElement(false)
@@ -84,6 +92,11 @@ final class SidebarBrandView: NSView, ThemedComponent {
 
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.configure(animated: true)
+        }
+        appEvents.observe(AgentIntensityDidChange.self) { [weak self] event in
+            guard let self else { return }
+            self.workloadIntensity = event.intensity
+            self.updateAccessibility()
         }
     }
 
@@ -119,10 +132,12 @@ final class SidebarBrandView: NSView, ThemedComponent {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        guard workloadAnalyzer.isHidden else { return }
         mark.setHovered(true)
     }
 
     override func mouseExited(with event: NSEvent) {
+        guard workloadAnalyzer.isHidden else { return }
         mark.setHovered(false)
     }
 
@@ -130,16 +145,27 @@ final class SidebarBrandView: NSView, ThemedComponent {
     /// it names the window rather than opening anything, and a logo that acknowledges being
     /// pressed is the whole of what was asked of it.
     override func mouseDown(with event: NSEvent) {
+        guard workloadAnalyzer.isHidden else { return }
         mark.playPress()
     }
 
     // MARK: - Public Methods
 
+    /// A stable held-hover frame for the product-shell evidence catalogue. Pointer interaction
+    /// still owns production state; this only lets a render show the real 24pt mark after its
+    /// dwell without racing Core Animation's clock.
+    func setHoverPresentation(weavePhase: CGFloat, heldHoverPhase: CGFloat) {
+        mark.setParticlePresentation(
+            phase: weavePhase,
+            heldHoverPhase: heldHoverPhase
+        )
+    }
+
     /// The launch flourish: the mark stitches itself in while the wordmark fades up under it.
     /// One-shot, host-invoked, and a no-op under Reduce Motion — the reduced launch is the
     /// finished row simply being there.
     func playLaunchAnimation() {
-        guard !Design.Motion.reducesMotion else { return }
+        guard workloadAnalyzer.isHidden, !Design.Motion.reducesMotion else { return }
 
         mark.playDrawIn()
 
@@ -159,6 +185,19 @@ final class SidebarBrandView: NSView, ThemedComponent {
 
     private func configure(animated: Bool) {
         let brand = SidebarAppearance.brand(for: effectiveAppearance)
+        let showsWorkloadAnalyzer = Design.Chart.style == .spectrum
+
+        workloadAnalyzer.setPresented(showsWorkloadAnalyzer)
+
+        if showsWorkloadAnalyzer {
+            mark.isHidden = true
+            mark.setHovered(false)
+            customLogo.isHidden = true
+            customLogo.image = nil
+            wordmark.isHidden = true
+            updateAccessibility()
+            return
+        }
 
         switch brand.logo {
         case .mark:
@@ -184,5 +223,29 @@ final class SidebarBrandView: NSView, ThemedComponent {
 
         // The row is the brand whichever parts of it are drawn.
         setAccessibilityLabel(brand.title ?? AppInfo.name)
+        setAccessibilityValue(nil)
+        toolTip = nil
+    }
+
+    private func updateAccessibility() {
+        guard Design.Chart.style == .spectrum else { return }
+
+        let count = workloadIntensity.workload.workingCount
+        let countSummary: String
+        switch count {
+        case 0:
+            countSummary = L10n.string("No agents working")
+        case 1:
+            countSummary = L10n.string("One agent working")
+        default:
+            countSummary = L10n.format("%lld agents working", Int64(count))
+        }
+        let summary = workloadIntensity.workload.anyAtTopEffort
+            ? L10n.format("%@, top effort active", countSummary)
+            : countSummary
+
+        setAccessibilityLabel(AppInfo.name)
+        setAccessibilityValue(summary)
+        toolTip = summary
     }
 }

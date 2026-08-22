@@ -373,14 +373,19 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentView?.addSubview(control)
+        // Settle the run's widths *after* it enters the window: the baseline render would
+        // otherwise be taken mid-layout, and the click is what happens to flush the pass. A
+        // segment 118 device pixels wide before and 119 after is not a focus ring, but it is
+        // exactly what comparing the two renders reports.
+        control.layoutSubtreeIfNeeded()
         let first = try XCTUnwrap(control.segment(at: 0))
 
-        let selected = try renderedPNG(of: first)
+        let selected = try renderedPixels(of: first)
         first.mouseDown(with: .init())
 
         XCTAssertTrue(window.firstResponder === first, "the click did not retain arrow-key focus")
         XCTAssertEqual(
-            try renderedPNG(of: first), selected,
+            try renderedPixels(of: first), selected,
             "pointer focus added a keyboard ring around the selected plate"
         )
 
@@ -7642,6 +7647,7 @@ final class ThemedControlTests: HostedStoreTestCase {
             [
                 "AgentActivityBeamView",
                 "AgentWorkSummaryView",
+                "AgentWorkloadAnalyzerView",
                 "AnnotatedImageView",
                 "BackdropOverlay",
                 "BackdropThemedControl",
@@ -7659,6 +7665,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ScheduledSessionPlaceholderView",
                 "ScheduledMessageStripView",
                 "ScheduledMessageRowView",
+                "ScreenshotReportDropTargetView",
                 "CompareInspectorView",
                 "CodeContextPreviewView",
                 "CommandPaletteViewController",
@@ -8305,6 +8312,31 @@ final class ThemedControlTests: HostedStoreTestCase {
         let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
         return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    }
+
+    /// The drawn pixels, canonicalised to sRGB samples, for the comparisons that assert two
+    /// renders are *the same*.
+    ///
+    /// `renderedPNG` is the right tool for asserting two renders differ, and the wrong one for
+    /// asserting they match: `representation(using: .png)` is not byte-stable across two reps of
+    /// one drawing. Rendering an untouched segment twice encodes to 4,639 bytes and then 4,646
+    /// while every one of its 118x52 pixels is identical, so a PNG comparison reported a focus
+    /// ring that no pixel contained and no person could see.
+    private func renderedPixels(of view: NSView) throws -> Data {
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+
+        var samples = Data(capacity: rep.pixelsWide * rep.pixelsHigh * 4)
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                let pixel = try XCTUnwrap(rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
+                samples.append(UInt8((pixel.redComponent * 255).rounded()))
+                samples.append(UInt8((pixel.greenComponent * 255).rounded()))
+                samples.append(UInt8((pixel.blueComponent * 255).rounded()))
+                samples.append(UInt8((pixel.alphaComponent * 255).rounded()))
+            }
+        }
+        return samples
     }
 
     private func resolvedLayerColor(_ color: NSColor) throws -> NSColor {

@@ -2,10 +2,14 @@ import Foundation
 import Security
 import ThreadingRemoteKit
 
-/// Durable accepted one-chat capabilities. Invitations and members are persisted together so
+/// Durable accepted one-target capabilities. Invitations and members are persisted together so
 /// the UI promise "until Stop Sharing" survives a Mac restart, while each bearer remains in a
 /// ThisDeviceOnly Keychain item rather than a preferences file.
 struct RemoteGuestShareRecord: Codable, Equatable, Sendable {
+    enum TargetKind: String, Codable, Equatable, Sendable {
+        case projectTerminal
+    }
+
     struct Member: Codable, Equatable, Sendable {
         let id: String
         let token: String
@@ -16,6 +20,8 @@ struct RemoteGuestShareRecord: Codable, Equatable, Sendable {
     }
 
     let id: String
+    /// Nil is the original one-chat record shape; terminal records opt in explicitly.
+    let targetKind: TargetKind?
     let sessionID: String
     var invitationToken: String?
     let capability: RemoteCapability
@@ -23,6 +29,28 @@ struct RemoteGuestShareRecord: Codable, Equatable, Sendable {
     let createdAt: Date
     let expiresAt: Date
     var members: [Member]
+
+    init(
+        id: String,
+        targetKind: TargetKind? = nil,
+        sessionID: String,
+        invitationToken: String?,
+        capability: RemoteCapability,
+        canApprovePermissions: Bool,
+        createdAt: Date,
+        expiresAt: Date,
+        members: [Member]
+    ) {
+        self.id = id
+        self.targetKind = targetKind
+        self.sessionID = sessionID
+        self.invitationToken = invitationToken
+        self.capability = capability
+        self.canApprovePermissions = canApprovePermissions
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.members = members
+    }
 }
 
 protocol RemoteGuestSharePersisting: AnyObject {
@@ -121,7 +149,9 @@ final class RemoteGuestShareKeychainStore: RemoteGuestSharePersisting {
               Set(members.map(\.id)).count == members.count,
               Set(members.map(\.token)).count == members.count else { return false }
         return shares.allSatisfy { share in
-            SessionID(uuidString: share.sessionID) != nil
+            (share.targetKind == .projectTerminal
+                ? TerminalID(uuidString: share.sessionID) != nil
+                : SessionID(uuidString: share.sessionID) != nil)
                 && !share.id.isEmpty
                 && share.invitationToken.map(RemoteInboundPolicy.acceptsBearerToken) ?? true
                 && share.members.allSatisfy { member in

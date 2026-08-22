@@ -194,6 +194,102 @@ final class AccountLimitsSectionTests: XCTestCase {
         )
     }
 
+    /// Exact inputs live one level below the presets so the primary menu stays readable at the
+    /// Settings window's compact height. Testing the real menu tree matters: a prompt factory can
+    /// exist and still be unreachable from the Add button.
+    func testCustomValuesSubmenuOffersEveryExactRoute() throws {
+        section.reload(accounts: [account])
+        let windows = section.templateEntriesForTesting(account: account)
+        guard case .item(let window) = try XCTUnwrap(windows.first),
+              let submenu = window.submenu else {
+            return XCTFail("the Add Limit menu built no window submenu")
+        }
+        let customValues = try XCTUnwrap(submenu.compactMap { entry -> ThemedMenuItem? in
+            guard case .item(let item) = entry else { return nil }
+            return item.title == AccountLimitsStrings.customValuesMenu ? item : nil
+        }.first)
+        let customEntries = try XCTUnwrap(customValues.submenu)
+        let titles = customEntries.compactMap { entry -> String? in
+            guard case .item(let item) = entry else { return nil }
+            return item.title
+        }
+
+        XCTAssertEqual(
+            titles,
+            AccountLimitCustomTemplate.allCases.map(\.menuTitle),
+            "the Custom values submenu does not expose every percentage-bearing rule"
+        )
+    }
+
+    /// The words "leave 37%" store the complement as the pace share: Threading may use 63% of
+    /// what the clock has released. That inversion is the subtle part of the feature and must
+    /// not be re-derived at the call site.
+    func testCustomValuesBecomeTheExactRuleThePromptDescribes() throws {
+        let windowID = UsageDefaults.weeklyWindowID
+
+        XCTAssertEqual(
+            try XCTUnwrap(AccountLimitCustomTemplate.alert.rule(
+                windowID: windowID,
+                values: [37]
+            )).bound,
+            0.37,
+            accuracy: 0.000_001
+        )
+
+        let repeating = try XCTUnwrap(AccountLimitCustomTemplate.repeatingAlert.rule(
+            windowID: windowID,
+            values: [17]
+        ))
+        XCTAssertEqual(repeating.thresholds, [0.17, 0.34, 0.51, 0.68, 0.85])
+
+        let synthetic = try XCTUnwrap(AccountLimitCustomTemplate.syntheticWindow.rule(
+            windowID: windowID,
+            values: [23, 12]
+        ))
+        XCTAssertEqual(synthetic.bound, 0.23, accuracy: 0.000_001)
+        XCTAssertEqual(synthetic.trailingSpan, 12 * 3_600)
+
+        let reserve = try XCTUnwrap(AccountLimitCustomTemplate.reserveShare.rule(
+            windowID: windowID,
+            values: [37]
+        ))
+        XCTAssertEqual(reserve.metric, .paceShare)
+        XCTAssertEqual(reserve.bound, 0.63, accuracy: 0.000_001)
+
+        XCTAssertNil(AccountLimitCustomTemplate.cap.rule(windowID: windowID, values: [0]))
+        XCTAssertNil(AccountLimitCustomTemplate.cap.rule(windowID: windowID, values: [100]))
+        XCTAssertNil(AccountLimitCustomTemplate.syntheticWindow.rule(
+            windowID: windowID,
+            values: [20, CustomLimitDefaults.maximumSyntheticWindowHours + 1]
+        ))
+    }
+
+    /// Invalid input stays in the real themed alert and replaces the standing range hint with a
+    /// concrete correction. This is the interaction that keeps a typo from looking like an Add
+    /// button that did nothing.
+    func testTheCustomPromptValidatesBeforeItDismisses() throws {
+        let request = AccountLimitCustomTemplate.alert.prompt(windowName: "Weekly")
+        let alert = IntegerPromptAlert.makeAlert(request)
+        let content = alert.makeContentView()
+        let fields = descendants(of: content).compactMap { $0 as? ThemedTextField }
+        let buttons = descendants(of: content).compactMap { $0 as? ThemedButton }
+        let add = try XCTUnwrap(buttons.first { $0.title == AccountLimitsStrings.addAlert })
+        let field = try XCTUnwrap(fields.first)
+
+        field.stringValue = "100"
+        add.performClick(nil)
+
+        let labels = descendants(of: content).compactMap { $0 as? NSTextField }
+        XCTAssertTrue(
+            labels.contains { $0.stringValue.contains("1") && $0.stringValue.contains("99") },
+            "the invalid percentage left no visible range correction"
+        )
+        XCTAssertTrue(
+            content.isDescendant(of: field) || field.isDescendant(of: content),
+            "validation replaced the prompt instead of keeping its field in place"
+        )
+    }
+
     // MARK: - Images
 
     /// Drawn light and dark, because the section is rows of quiet secondary text inside folds and
@@ -238,6 +334,84 @@ final class AccountLimitsSectionTests: XCTestCase {
         XCTAssertEqual(written, 2)
     }
 
+    /// The shipping Accounts page, its actual Add Limit submenu, the exact-value submenu, and
+    /// both shapes of custom authoring dialog, under System and the two deliberately opposed
+    /// authored themes used by the Settings evidence catalogue.
+    /// The page is scrolled to its limit folds; a top-only capture would render the account rows
+    /// and prove nothing about the feature being changed.
+    func testRendersCustomLimitAuthoringSurfaces() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        settings.addDefault(.everyStep(windowID: UsageDefaults.weeklyWindowID, step: 0.17))
+        settings.add(
+            .paceShare(windowID: UsageDefaults.weeklyWindowID, share: 0.63),
+            for: account.id,
+            store: accountStore
+        )
+
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+
+        let fixtures: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light", .system, .aqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua)
+        ]
+
+        var written = 0
+        for (name, theme, appearanceName) in fixtures {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            appearance.performAsCurrentDrawingAppearance {
+                AppThemePalette.set(theme)
+            }
+
+            var renderedPage: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                renderedPage = accountPageImage(appearance: appearance)
+            }
+            let page = try XCTUnwrap(renderedPage)
+            try page.write(to: directory.appendingPathComponent(
+                "account-limit-custom-settings-\(name).png"
+            ))
+            written += 1
+
+            let menu = try XCTUnwrap(customMenuImage(appearance: appearance))
+            try menu.write(to: directory.appendingPathComponent(
+                "account-limit-custom-menu-\(name).png"
+            ))
+            written += 1
+
+            let customValues = try XCTUnwrap(customValuesMenuImage(appearance: appearance))
+            try customValues.write(to: directory.appendingPathComponent(
+                "account-limit-custom-choices-\(name).png"
+            ))
+            written += 1
+
+            for (template, values, state) in [
+                (AccountLimitCustomTemplate.reserveShare, [37], "reserve"),
+                (AccountLimitCustomTemplate.syntheticWindow, [17, 12], "window")
+            ] {
+                var renderedPrompt: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    renderedPrompt = promptImage(
+                        template: template,
+                        values: values,
+                        appearance: appearance
+                    )
+                }
+                let prompt = try XCTUnwrap(renderedPrompt)
+                try prompt.write(to: directory.appendingPathComponent(
+                    "account-limit-custom-\(state)-\(name).png"
+                ))
+                written += 1
+            }
+        }
+
+        print("Rendered \(written) custom-limit authoring surfaces to \(directory.path)")
+        XCTAssertEqual(written, fixtures.count * 5)
+    }
+
     // MARK: - Helpers
 
     private func laidOut(_ view: NSView, width: CGFloat) -> NSView {
@@ -267,5 +441,129 @@ final class AccountLimitsSectionTests: XCTestCase {
         host.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
+    }
+
+    private func accountPageImage(appearance: NSAppearance) -> Data? {
+        let controller = AccountsPreferencesViewController(
+            accountsProvider: { [account = self.account] in [account] },
+            setupCoordinator: AgentAccountSetupCoordinator(),
+            limitSettings: settings,
+            accountStore: accountStore
+        )
+        _ = controller.view
+        controller.viewWillAppear()
+        controller.expandLimitsForTesting()
+
+        let host = NSView(frame: NSRect(
+            origin: .zero,
+            size: NSSize(width: Render.width, height: Render.height)
+        ))
+        host.appearance = appearance
+        controller.view.appearance = appearance
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(controller.view)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: host.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+
+        if let scroll = descendants(of: controller.view).compactMap({ $0 as? ThemedScrollView }).first,
+           let document = scroll.documentView {
+            let y = document.isFlipped
+                ? max(0, document.bounds.height - scroll.contentView.bounds.height)
+                : 0
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            host.layoutSubtreeIfNeeded()
+        }
+        return png(of: host)
+    }
+
+    private func promptImage(
+        template: AccountLimitCustomTemplate,
+        values: [Int],
+        appearance: NSAppearance
+    ) -> Data? {
+        let alert = IntegerPromptAlert.makeAlert(template.prompt(windowName: "Weekly"))
+        let content = alert.makeContentView()
+        content.appearance = appearance
+        for (field, value) in zip(
+            descendants(of: content).compactMap({ $0 as? ThemedTextField }),
+            values
+        ) {
+            field.stringValue = String(value)
+        }
+        AppThemeRefresh.repaint(content)
+        content.layoutSubtreeIfNeeded()
+        content.frame = NSRect(origin: .zero, size: content.fittingSize)
+        content.layoutSubtreeIfNeeded()
+        return png(of: content)
+    }
+
+    /// Presents the production submenu directly. The first level only chooses a provider
+    /// window; this is the second level the user showed, where the presets and new custom routes
+    /// have to coexist without clipping or losing their group structure.
+    private func customMenuImage(appearance: NSAppearance) -> Data? {
+        section.reload(accounts: [account])
+        guard let first = section.templateEntriesForTesting(account: account).first,
+              case .item(let window) = first,
+              let entries = window.submenu else { return nil }
+
+        return menuImage(entries: entries, appearance: appearance)
+    }
+
+    /// Presents the production Custom values submenu separately so the evidence proves that all
+    /// five exact inputs remain discoverable after keeping the preset menu compact.
+    private func customValuesMenuImage(appearance: NSAppearance) -> Data? {
+        section.reload(accounts: [account])
+        guard let first = section.templateEntriesForTesting(account: account).first,
+              case .item(let window) = first,
+              let entries = window.submenu,
+              let customValues = entries.compactMap({ entry -> ThemedMenuItem? in
+                  guard case .item(let item) = entry else { return nil }
+                  return item.title == AccountLimitsStrings.customValuesMenu ? item : nil
+              }).first,
+              let customEntries = customValues.submenu else { return nil }
+
+        return menuImage(entries: customEntries, appearance: appearance)
+    }
+
+    private func menuImage(entries: [ThemedMenuEntry], appearance: NSAppearance) -> Data? {
+        let canvas = NSSize(width: 440, height: 700)
+        var data: Data?
+        appearance.performAsCurrentDrawingAppearance {
+            let window = NSWindow(
+                contentRect: NSRect(origin: .zero, size: canvas),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.appearance = appearance
+
+            let root = ThemedSurfaceView()
+            root.frame = NSRect(origin: .zero, size: canvas)
+            root.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+            let source = NSView(frame: NSRect(x: 12, y: canvas.height - 24, width: 1, height: 1))
+            root.addSubview(source)
+            window.contentView = root
+
+            let token = ThemedMenuPresenter.present(
+                ThemedMenuPresentation(entries: entries, minimumWidth: 260),
+                from: source,
+                selectedEntryIndex: nil,
+                onChoose: { _, _ in },
+                onDismiss: {}
+            )
+            defer { ThemedMenuPresenter.dismiss(token) }
+
+            AppThemeRefresh.repaint(root)
+            root.layoutSubtreeIfNeeded()
+            data = png(of: root)
+        }
+        return data
     }
 }

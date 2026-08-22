@@ -206,7 +206,7 @@ final class TerminalSession: NSObject {
 
         // Sampled before the palette lands so the announcement below can tell a re-apply from
         // an actual change of page.
-        let previousBackground = terminalView.getTerminal().backgroundColor
+        let previousBackground = terminalView.terminalStateSnapshot().backgroundColor
 
         // The terminal is the one surface whose typeface comes from TerminalProfile rather
         // than the app/conversation typography stack. `profile.font` also owns the fallback
@@ -215,7 +215,7 @@ final class TerminalSession: NSObject {
 
         // Changing the font rebuilds SwiftTerm's TerminalOptions with their 500-line default,
         // so apply the user's history size afterwards on every profile refresh.
-        terminalView.getTerminal().changeHistorySize(max(0, profile.scrollbackLines))
+        terminalView.changeHistorySize(max(0, profile.scrollbackLines))
 
         // Install ANSI color palette
         let colors = profile.theme.asSwiftTermColors()
@@ -253,9 +253,8 @@ final class TerminalSession: NSObject {
         // itself — so it must be sent only after the palette above is in place, and it moves
         // nothing unless the answer to the re-ask has actually changed. Gated on the
         // background actually changing so font tweaks and re-applies stay silent.
-        let terminal = terminalView.getTerminal()
-        if terminal.backgroundColor != previousBackground {
-            terminal.reportColorSchemeChange(dark: profile.theme.hasDarkBackground)
+        if terminalView.terminalStateSnapshot().backgroundColor != previousBackground {
+            terminalView.reportColorSchemeChange(dark: profile.theme.hasDarkBackground)
             promptColorRereadThroughFocus()
         }
     }
@@ -315,7 +314,7 @@ final class TerminalSession: NSObject {
     }
 
     private func deliverFocusColorPrompt() {
-        terminalView.getTerminal().setTerminalFocus(true)
+        terminalView.setTerminalFocus(true)
     }
 
     private func swiftTermCursorStyle(from style: TerminalProfile.CursorStyle, blink: Bool) -> CursorStyle {
@@ -568,8 +567,8 @@ final class TerminalSession: NSObject {
     /// The terminal's current character grid, sent to a joining remote client so it sizes its
     /// own renderer to match rather than reflowing the shared PTY.
     var characterGrid: (cols: Int, rows: Int) {
-        let terminal = terminalView.getTerminal()
-        return (terminal.cols, terminal.rows)
+        let dimensions = terminalView.terminalDimensions
+        return (dimensions.cols, dimensions.rows)
     }
 
     /// The visible screen as plain text rows, for a reader matching words on it.
@@ -579,12 +578,7 @@ final class TerminalSession: NSObject {
     /// any caller compares text. Rows follow what is *displayed* (`getLine` is scroll-relative),
     /// which is the right frame for reading a prompt the user could answer.
     func visibleScreenLines() -> [String] {
-        let terminal = terminalView.getTerminal()
-        return (0..<terminal.rows).map { row in
-            guard let line = terminal.getLine(row: row) else { return "" }
-            return line.translateToString(trimRight: true)
-                .replacingOccurrences(of: "\u{0}", with: " ")
-        }
+        terminalView.terminalStateSnapshot().visibleRows.map(\.text)
     }
 
     /// Whether a program other than this session's own command holds the terminal **right now**.
@@ -752,9 +746,11 @@ extension TerminalSessionDelegate {
 
 extension TerminalSession: RemoteTerminalSurface {
     var remoteTerminalState: RemoteTerminalState {
-        let terminal = terminalView.getTerminal()
+        let terminal = terminalView.terminalStateSnapshot()
         return RemoteTerminalState(
-            grid: RemoteTerminalGrid(cols: terminal.cols, rows: terminal.rows),
+            grid: RemoteTerminalGrid(
+                cols: terminal.dimensions.cols,
+                rows: terminal.dimensions.rows),
             title: title,
             remoteViewport: remoteViewport.map {
                 RemoteTerminalGrid(cols: $0.cols, rows: $0.rows)
@@ -764,11 +760,20 @@ extension TerminalSession: RemoteTerminalSurface {
     }
 
     var remoteTerminalSnapshot: RemoteTerminalSnapshot {
-        let state = remoteTerminalState
+        let terminal = terminalView.terminalStateSnapshot()
+        let state = RemoteTerminalState(
+            grid: RemoteTerminalGrid(
+                cols: terminal.dimensions.cols,
+                rows: terminal.dimensions.rows),
+            title: title,
+            remoteViewport: remoteViewport.map {
+                RemoteTerminalGrid(cols: $0.cols, rows: $0.rows)
+            },
+            modes: RemoteTerminalModes(terminal))
         return RemoteTerminalSnapshot(
             grid: state.grid,
             title: state.title,
-            screenSeed: RemoteScreenSeed.repaint(of: terminalView.getTerminal()),
+            screenSeed: RemoteScreenSeed.repaint(of: terminal),
             remoteViewport: state.remoteViewport,
             modes: state.modes
         )

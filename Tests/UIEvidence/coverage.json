@@ -29,6 +29,27 @@
       }
     },
     {
+      "id": "brand-interactions",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "supporting",
+      "title": "Top-left brand interactions",
+      "description": "The real native window shell with the sidebar brand held at a deterministic 3D tumble pose, and with the titlebar accepting one external screenshot for a report.",
+      "states": ["Held brand tumble", "Screenshot drop target"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["520×160-point native shell"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/BrandInteractionRenderTests.swift",
+        "test": "ThreadingTests/BrandInteractionRenderTests/testRendersHeldTumbleAndScreenshotDropTargetInNativeShell"
+      },
+      "capture": {
+        "glob": "brand-interaction-*.png"
+      }
+    },
+    {
       "id": "app-theme-chrome-matrix",
       "kind": "surface",
       "status": "implemented",
@@ -110,6 +131,27 @@
       },
       "capture": {
         "glob": "sidebar-row-*.png"
+      }
+    },
+    {
+      "id": "sidebar-agent-update-toast",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Agent tool update toast",
+      "description": "The real 240-point sidebar update receipt with compact Now and Latest columns, three provider versions, and the explicit Update All action.",
+      "states": ["Current versions", "Latest versions", "Update All action"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist", "Claymorphism", "Win98"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["240-point sidebar"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ToastRenderTests.swift",
+        "test": "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastStorybook"
+      },
+      "capture": {
+        "glob": "toast-agent-updates-*.png"
       }
     },
     {
@@ -684,6 +726,27 @@
       }
     },
     {
+      "id": "custom-limit-authoring",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Custom limit authoring",
+      "description": "The production Accounts Settings page scrolled to its expanded limit folds, its real Add Limit submenu, the compact Custom values submenu with all five exact inputs, plus the themed numeric dialogs for a reserved share and a custom rolling window.",
+      "states": ["Expanded account limits", "Add Limit choices", "Custom values choices", "Custom reserved share", "Custom rolling window"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["System light", "Authored fixed-theme appearances"],
+        "sizes": ["Shared Settings width", "Themed alert"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AccountLimitsSectionTests.swift",
+        "test": "ThreadingTests/AccountLimitsSectionTests/testRendersCustomLimitAuthoringSurfaces"
+      },
+      "capture": {
+        "glob": "account-limit-custom-*.png"
+      }
+    },
+    {
       "id": "onboarding-layouts",
       "kind": "surface",
       "status": "implemented",
@@ -744,6 +807,27 @@
       },
       "capture": {
         "glob": "account-setup-*.png"
+      }
+    },
+    {
+      "id": "sidebar-workload-analyzer",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Classic Player workload analyzer",
+      "description": "The real sidebar header with its brand pixels replaced by the fixed-cost spectrum presentation of app-wide agent activity.",
+      "states": ["Three agents working", "Recent meaningful output", "Top effort active"],
+      "matrix": {
+        "themes": ["Classic Player"],
+        "appearances": ["Authored dark"],
+        "sizes": ["Sidebar header"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/PaneHeaderRenderTests.swift",
+        "test": "ThreadingTests/PaneHeaderRenderTests/testRendersClassicPlayerWorkloadAnalyzer"
+      },
+      "capture": {
+        "glob": "sidebar-workload-analyzer-*.png"
       }
     },
     {

@@ -128,11 +128,9 @@ enum TerminalNaming {
         return components.suffix(TerminalNamingDefaults.pathComponentsShown).joined(separator: "/")
     }
 
-    /// The same normalization `ProjectTerminalPlacement` uses, and deliberately so: that is what
-    /// decides which project a terminal is shown under, and a name stated relative to a project
-    /// must agree with it about what "under" means. A cwd arrives here already symlink-resolved
-    /// (`ProjectStore.updateTerminalLocation`) while a project folder is stored as the user
-    /// added it, so `/tmp/x` and `/private/tmp/x` would otherwise fail to match.
+    /// A cwd arrives here already symlink-resolved (`ProjectStore.updateTerminalLocation`) while
+    /// a project folder is stored as the user added it, so `/tmp/x` and `/private/tmp/x` would
+    /// otherwise fail to match when the terminal is named relative to its owning project.
     private static func normalized(_ path: String) -> String {
         let path = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return "" }
@@ -150,18 +148,15 @@ enum TerminalNaming {
 // MARK: - Standalone Terminals
 
 /// Gathers the two inputs `TerminalNaming` needs that a `ProjectTerminal` record does not hold:
-/// the project it is currently *shown* under, and the command running in it right now.
+/// the project that owns it, and the command running in it right now.
 ///
 /// Split from the rules themselves so the rules stay pure — they can be tested against a
 /// directory and a string without a process, a store or a window.
 @MainActor
 enum ProjectTerminalTitle {
 
-    /// The name to show when the caller already knows which project the terminal sits under.
-    ///
-    /// The sidebar must use this form. `ProjectTerminalPlacement` reads git metadata off disk
-    /// for every project to decide placement, and the tree builder has already paid that once
-    /// for the whole tree — a row that resolved it again would pay it per row, per reload.
+    /// The name to show when the caller already knows which project owns the terminal.
+    /// The sidebar uses this form because its tree already carries that project context.
     static func displayTitle(for terminal: ProjectTerminal, projectRoot: String?) -> String {
         TerminalNaming.displayTitle(
             custom: terminal.customTitle,
@@ -182,7 +177,7 @@ enum ProjectTerminalTitle {
         displayTitle(
             for: terminal,
             projectRoot: ProjectStore.shared
-                .displayProject(forTerminalID: terminal.id)?
+                .homeProject(forTerminalID: terminal.id)?
                 .folderPath
         )
     }

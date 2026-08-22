@@ -490,6 +490,61 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(BackgroundWorkKind(reportedType: nil), .standing)
     }
 
+    // MARK: - Notification Kind
+
+    /// The shape Claude 2.1.238 sends when its prompt has sat idle for
+    /// `messageIdleNotifThresholdMs`. The hook name is the same one a permission prompt arrives
+    /// under, so the type is the only thing that tells the two apart.
+    func testTheIdlePromptNoticeIsReadOffItsType() throws {
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .awaitingUser,
+            payload: [
+                "session_id": "abc-123",
+                "message": "Claude is waiting for your input",
+                "notification_type": "idle_prompt"
+            ]
+        ))
+
+        XCTAssertEqual(report.notification, .idlePrompt)
+    }
+
+    /// Every other notice is `.unspecified`, and that is the reading suppression is opt-in
+    /// against: a permission prompt, a type a later CLI invents, and a payload that names none
+    /// at all all stay loud. The list is 2.1.238's own, minus the one case above.
+    func testEveryOtherNoticeReadsAsOneWorthFlagging() {
+        for named in [
+            "permission_prompt", "worker_permission_prompt",
+            "agent_needs_input", "agent_completed",
+            "elicitation_complete", "elicitation_response",
+            "computer_use_enter", "computer_use_exit",
+            "auth_success", "push_notification",
+            "quota_auto_resume_disabled", "quota_auto_resume_fired", "quota_auto_resume_stale",
+            "something_a_later_cli_invents"
+        ] {
+            XCTAssertEqual(
+                HookNotificationKind(reportedType: named),
+                .unspecified,
+                "\(named) may be a real question, so it must not be quietly dropped"
+            )
+        }
+
+        XCTAssertEqual(HookNotificationKind(reportedType: nil), .unspecified)
+        XCTAssertEqual(HookNotificationKind(reportedType: ""), .unspecified)
+    }
+
+    /// A Codex report, and every event that is not a notice, carry no type — and must read the
+    /// same as a notice that named none, since only an exact match is ever treated as weak.
+    func testAnEventThatIsNotANoticeCarriesNoKind() throws {
+        let report = try XCTUnwrap(HookLifecycleReport(
+            sessionID: SessionID(),
+            event: .turnFinished,
+            payload: ["session_id": "codex-1"]
+        ))
+
+        XCTAssertEqual(report.notification, .unspecified)
+    }
+
     // MARK: - Query Parsing
 
     func testEventIsReadFromTheQueryString() {
@@ -1274,6 +1329,153 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .idle)
     }
 
+    // MARK: - Idle Prompts Against Work Left Running
+
+    /// The reported symptom, measured on CLI 2.1.238: "it showed no activity for 1–2 minutes,
+    /// even if it had subagents working".
+    ///
+    /// The ledger had the session right — its `Stop` named the child, so the row read `working`
+    /// — and then the CLI's own idle-prompt notice arrived 60s later and overwrote it with
+    /// `needsAttention`, for a session nobody was being asked anything by. It came back only
+    /// when the user opened the session, which is what made it look like a rendering fault
+    /// rather than a state one, and dropped again on the next quiet stretch.
+    ///
+    /// Off screen it also spent an attention episode: an unread mark and a "finished its turn"
+    /// notification for a turn whose child had not reported. `attentionCount` is here for that
+    /// half, which no assertion about `activity` alone would catch.
+    @MainActor
+    func testAnIdlePromptDoesNotUnmarkASessionWaitingOnItsOwnChild() {
+        let tracker = SessionActivityTracker()
+        var attentionCount = 0
+        tracker.onAttention = { attentionCount += 1 }
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-abac596acbf5c268f")])
+        XCTAssertEqual(tracker.activity, .working)
+
+        tracker.noteAwaitingUser(.idlePrompt)
+        XCTAssertEqual(tracker.activity, .working, "the prompt is idle because the child is not")
+        XCTAssertEqual(attentionCount, 0, "nothing has been handed back to read")
+        XCTAssertEqual(
+            tracker.lastCause,
+            .awaitingUserReported,
+            "a refused notice still names itself, or nothing can answer why no mark appeared"
+        )
+
+        // Looking at it must not be what fixes it — but it must not break it either.
+        tracker.isVisible = true
+        XCTAssertEqual(tracker.activity, .working)
+
+        // The child reported back, and the turn that outlives it is the one that finishes.
+        tracker.isVisible = false
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished()
+        XCTAssertEqual(tracker.activity, .needsAttention)
+        XCTAssertEqual(attentionCount, 1)
+    }
+
+    /// The fail-closed half, and the reason suppression is opt-in by exact name: a permission
+    /// prompt is a real question, and a terminal session has no other signal for one —
+    /// `blockingAskOpened` is scoped to the tools that ask outright, which a `Bash` approval is
+    /// not. Swallowing this notice would leave the agent waiting on an answer nobody knows it
+    /// wants, for as long as the child runs.
+    @MainActor
+    func testAPermissionPromptStillFlagsASessionPausedOnItsOwnChild() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-abac596acbf5c268f")])
+        tracker.noteAwaitingUser(HookNotificationKind(reportedType: "permission_prompt"))
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// The same fail-closed reading for a runtime that names no type at all — an older CLI, or
+    /// one whose payload changes shape. `.unspecified` is the default for exactly this reason,
+    /// so a build that stops recognising the field behaves as every build did before it.
+    @MainActor
+    func testAnUntypedNoticeStillFlagsASessionPausedOnItsOwnChild() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-abac596acbf5c268f")])
+        tracker.noteAwaitingUser()
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// The narrowing to delegated work, which is the other half of failing closed. A subagent
+    /// ends and reports back, so a suppressed notice costs nothing — the row corrects itself. A
+    /// backgrounded shell carries no such promise: `npm test` and `npm run dev` are the same
+    /// entry in the payload, so a session parked on one is exactly where a late "nothing is
+    /// happening here" is worth keeping.
+    @MainActor
+    func testAnIdlePromptStillFlagsASessionParkedOnAShellThatMayNeverEnd() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
+        XCTAssertEqual(tracker.activity, .working)
+
+        tracker.noteAwaitingUser(.idlePrompt)
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// An idle prompt on a session that left nothing running is untouched: the prompt really is
+    /// idle for want of the user, and that is the ordinary case this notice exists for.
+    @MainActor
+    func testAnIdlePromptStillFlagsASessionThatLeftNothingRunning() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished()
+        tracker.noteAwaitingUser(.idlePrompt)
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// `AgentRuntime` asks the same question before recording the notice as a reason to wake a
+    /// snoozed session, so the rule is asserted directly rather than only through its effect on
+    /// the row: a notice must not be too weak for the sidebar and loud enough to end a snooze.
+    @MainActor
+    func testOneRuleAnswersBothTheRowAndTheSnooze() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        XCTAssertTrue(tracker.honoursAwaitingUserNotice(.idlePrompt), "nothing is running yet")
+
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-abac596acbf5c268f")])
+        XCTAssertFalse(tracker.honoursAwaitingUserNotice(.idlePrompt))
+        XCTAssertTrue(tracker.honoursAwaitingUserNotice(.unspecified))
+
+        // A pause on standing work is not the same claim: it may never end, so the notice keeps
+        // its say. Same tracker, so this also pins that the pause is re-read per boundary.
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
+        XCTAssertTrue(tracker.honoursAwaitingUserNotice(.idlePrompt))
+
+        // The unattended grace refuses every notice, and refuses it for both readers — a
+        // restored session's idle prompt is the "request that predates Snooze" that
+        // `SessionSnoozeCenter.record` exists to keep out.
+        let restored = SessionActivityTracker()
+        restored.noteUnattendedLaunch()
+        restored.markRunning()
+        XCTAssertFalse(restored.honoursAwaitingUserNotice(.unspecified))
+        XCTAssertFalse(restored.honoursAwaitingUserNotice(.idlePrompt))
+    }
+
     // MARK: - Output Versus Reports
 
     /// The whole point of the latch. A working agent is *quiet* while it waits on the model and
@@ -1290,9 +1492,10 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .idle)
 
         // A burst of redraw after the turn ended must not read as new work.
-        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 10)
+        let admitted = tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 10)
 
         XCTAssertEqual(tracker.activity, .idle)
+        XCTAssertNil(admitted, "a finished turn's repaint must not pulse the analyzer")
     }
 
     /// A relaunched process has to earn belief again: the settings file carrying the hooks is
@@ -1321,10 +1524,11 @@ final class HookLifecycleTests: XCTestCase {
         let tracker = SessionActivityTracker()
         tracker.markRunning()
 
-        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold + 1)
+        let admitted = tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold + 1)
 
         XCTAssertEqual(tracker.activity, .working)
         XCTAssertFalse(tracker.reportsOwnActivity)
+        XCTAssertEqual(admitted, ActivityDefaults.workingByteThreshold + 1)
     }
 
     // MARK: - Asking Inside a Turn

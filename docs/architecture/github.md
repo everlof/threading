@@ -203,13 +203,18 @@ the one thing missing from the picture. macOS's own ⌘⇧4 has no such problem.
 So the report sheet accepts a file, through two doors that are both "the app icon" in the sense
 that matters: the Dock's icon (`application(_:open:)`, which already turned dropped folders into
 projects and now tells the two apart by declared type), and the titlebar strip beside the traffic
-lights (`TitlebarActionWindow.onScreenshotDropped`). Neither is discoverable by looking, and both
-are where a Mac user already drops a file.
+lights (`TitlebarActionWindow.onScreenshotDropped`). Neither advertises itself at rest — the strip
+is ordinary window chrome until a drag reaches it — and both are where a Mac user already drops a
+file.
 
 The strip is narrow on purpose: one file, an image, and only while the pointer is above
 `contentLayoutRect` — the same geometry that restores the window's double-click. Everything else
 falls through to whatever the content below does with it, because an invisible target that claims
-a drag a pane wanted is worse than no target.
+a drag a pane wanted is worse than no target. Once that exact drag is accepted,
+`ScreenshotReportDropTargetView` lays a quiet accent wash behind the native strip and says **Drop
+screenshot to report** beside the traffic lights. The view never hit-tests, appears only for the
+accepted state, and clears on exit, refusal, cancellation and drop; Reduce Motion skips its short
+arrival but keeps the complete feedback.
 
 What such a report loses is the geometry the inspector knows by construction. What it keeps is the
 picture and the marks put on it, which is what the sheet was worth opening for.

@@ -1695,6 +1695,12 @@ final class TerminalContainerViewController: NSViewController {
         controller.startIfNeeded()
     }
 
+    func resumeCurrentTerminalIfNeeded() {
+        guard let terminalID = currentTerminalID,
+              !ProjectTerminalRuntime.shared.isRunning(terminalID: terminalID) else { return }
+        resumeCurrentTerminal()
+    }
+
     private func showDormantState(for sessionID: SessionID) {
         guard let agentSession = ProjectStore.shared.session(withID: sessionID) else {
             showEmptyState()

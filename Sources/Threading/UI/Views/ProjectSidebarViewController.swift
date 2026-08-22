@@ -2457,6 +2457,9 @@ private extension ProjectSidebarViewController {
         for session in project.sessions {
             AgentRuntime.shared.discardDeletedSession(session.id)
         }
+        for terminal in project.terminals {
+            RemoteAccessCoordinator.shared.revokeTerminalShares(terminal.id)
+        }
         ProjectTerminalRuntime.shared.discard(terminalsIn: project)
         reload()
         delegate?.projectSidebarDidRemoveSessions(self)
@@ -2474,6 +2477,7 @@ private extension ProjectSidebarViewController {
             ))
             return
         }
+        RemoteAccessCoordinator.shared.revokeTerminalShares(terminalID)
         ProjectTerminalRuntime.shared.discard(terminalID: terminalID)
         delegate?.projectSidebar(self, didCloseTerminal: terminalID)
     }
@@ -2481,6 +2485,16 @@ private extension ProjectSidebarViewController {
     @objc private func closeTerminalClicked() {
         guard let terminalID = contextTerminalID() else { return }
         closeTerminal(terminalID)
+    }
+
+    @objc private func shareTerminalClicked() {
+        guard let terminalID = contextTerminalID() else { return }
+        ShareTerminalSheet.run(for: terminalID)
+    }
+
+    @objc private func stopSharingTerminalClicked() {
+        guard let terminalID = contextTerminalID() else { return }
+        RemoteAccessCoordinator.shared.revokeTerminalShares(terminalID)
     }
 
     /// Opens Storage, which reports every project rather than only this one.
@@ -2919,7 +2933,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 with: terminal,
                 running: ProjectTerminalRuntime.shared.isRunning(terminalID: terminal.id),
                 busy: ProjectTerminalRuntime.shared.isBusy(terminalID: terminal.id),
-                projectRoot: terminalNode.displayProjectFolderPath
+                projectRoot: terminalNode.projectFolderPath
             )
             cell.onAction = { [weak self] terminalID, anchor in
                 self?.showTerminalActions(for: terminalID, from: anchor)
@@ -3153,17 +3167,17 @@ extension ProjectSidebarViewController {
     }
 
     func terminalMenuEntries(for terminalID: TerminalID, row: Int) -> [ThemedMenuEntry] {
-        [
+        var entries: [ThemedMenuEntry] = [
             .item(ThemedMenuItem(
                 title: L10n.string("Rename Terminal…"),
                 onChoose: pinnedAction(row) { $0.renameClicked() }
             )),
             // The same fold the chat rows carry, holding the two facts a terminal can state:
-            // the id that names it to Threading, and the checkout it is standing in. Captured
+            // the id that names it to Threading, and the project that owns it. Captured
             // by id, not row-resolved — an id does not move when the tree reloads under the
             // open menu. The worktree is resolved on the click rather than at build, because
-            // `displayProject` costs git calls and the theme entry beside this one already
-            // answers *its* tier with the same cwd-derived project.
+            // from the store on the click so a project move or rename cannot leave stale data in
+            // a menu that was already open.
             .item(ThemedMenuItem(title: L10n.string("Copy"), submenu: [
                 .item(ThemedMenuItem(
                     title: L10n.string("Threading ID"),
@@ -3175,19 +3189,36 @@ extension ProjectSidebarViewController {
                     title: L10n.string("Worktree Path"),
                     onChoose: { [weak self] in
                         guard let project = self?.projectStore
-                            .displayProject(forTerminalID: terminalID) else { return }
+                            .homeProject(forTerminalID: terminalID) else { return }
                         Self.copyToPasteboard(project.folderPath)
                     }
                 ))
             ])),
             terminalThemeEntry(for: terminalID),
             terminalSoundEntry(for: terminalID),
+        ]
+        if AppSettings.shared.remoteAccessEnabled {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Share Terminal…"),
+                image: ThemedMenuIcon.symbol("square.and.arrow.up"),
+                onChoose: pinnedAction(row) { $0.shareTerminalClicked() }
+            )))
+            if RemoteAccessCoordinator.shared.hasTerminalShares(terminalID) {
+                entries.append(.item(ThemedMenuItem(
+                    title: L10n.string("Stop Sharing Terminal"),
+                    image: ThemedMenuIcon.symbol("eye.slash"),
+                    onChoose: pinnedAction(row) { $0.stopSharingTerminalClicked() }
+                )))
+            }
+        }
+        entries.append(contentsOf: [
             .separator,
             .item(ThemedMenuItem(
                 title: L10n.string("Close Terminal"),
                 onChoose: pinnedAction(row) { $0.closeTerminalClicked() }
             ))
-        ]
+        ])
+        return entries
     }
 
     /// Everything a project offers — its right-click and its `⋯` button alike. Sessions are

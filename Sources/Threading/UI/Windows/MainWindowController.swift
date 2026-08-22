@@ -378,7 +378,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return environment.projectStore.project(forSessionID: currentSessionID)?.id
         }
         if let currentTerminalID {
-            return environment.projectStore.displayProject(forTerminalID: currentTerminalID)?.id
+            return environment.projectStore.homeProject(forTerminalID: currentTerminalID)?.id
         }
         return containerViewController.currentComposerProjectID
     }
@@ -1512,6 +1512,31 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     // MARK: - Public Methods
 
+    /// Shows the completed background health check in the same sidebar lane as other receipts.
+    /// The checker and scheduler stay outside the window; this is presentation only.
+    ///
+    /// `didStart` is called only once a terminal is actually running the plan, which is what the
+    /// coordinator records against: a receipt that timed out unseen, or whose terminal refused to
+    /// open, leaves the same versions free to be offered again.
+    func presentAgentCLIUpdates(
+        _ updates: [AgentCLIUpdate],
+        didStart: @escaping @MainActor () -> Void
+    ) {
+        guard !updates.isEmpty else { return }
+        sidebarViewController.presentToast(AgentCLIUpdateToast.request(for: updates) {
+            [weak self] requestedUpdates in
+            guard let self else { return }
+            guard self.runAgentCLIUpdates(requestedUpdates) != nil else {
+                self.sidebarViewController.presentToast(ToastRequest(
+                    message: L10n.string("Couldn’t start agent updates"),
+                    detail: L10n.string("Threading couldn’t open the update terminal.")
+                ))
+                return
+            }
+            didStart()
+        })
+    }
+
     /// Restores the session that was selected when the app last quit.
     func restoreSelectedSession() {
         guard environment.settings.restoresLastSession,
@@ -1791,6 +1816,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return
         }
         sidebarViewController.select(sessionID: sessionID)
+    }
+
+    /// Starts a standalone shell through its ordinary sidebar selection path without making
+    /// Threading key on the Mac.
+    func resumeRemoteTerminal(_ terminalID: TerminalID) {
+        if containerViewController.currentTerminalID == terminalID {
+            containerViewController.resumeCurrentTerminalIfNeeded()
+            return
+        }
+        sidebarViewController.select(terminalID: terminalID)
     }
 
     @discardableResult
@@ -2897,6 +2932,40 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarViewController.select(terminalID: terminal.id)
         guard let controller = ProjectTerminalRuntime.shared.controller(for: terminal.id),
               let receipt = controller.runProjectScript(invocation) else {
+            environment.projectStore.removeTerminal(id: terminal.id)
+            return nil
+        }
+        return receipt
+    }
+
+    /// Opens a durable standalone terminal and hands it the update plan the user just approved.
+    ///
+    /// Agent updates are installation-wide rather than project-scoped, but standalone terminals
+    /// live under a project in Threading's model. The visible project's home is preferred; while
+    /// Settings is showing there is no page context, so the first project is the stable fallback.
+    func runAgentCLIUpdates(
+        _ updates: [AgentCLIUpdate]
+    ) -> AgentCLIUpdateExecutionReceipt? {
+        guard !RecoveryMode.isActive, !updates.isEmpty else { return nil }
+
+        let project = currentProjectID
+            .flatMap { environment.projectStore.project(withID: $0) }
+            ?? environment.projectStore.projects.first
+        guard let project,
+              let terminal = environment.projectStore.addTerminal(
+                  to: project.id,
+                  currentDirectory: project.folderPath
+              ) else { return nil }
+
+        let title = updates.count == 1
+            ? L10n.format("Update %@", updates[0].displayName)
+            : L10n.string("Agent Updates")
+        environment.projectStore.renameTerminal(id: terminal.id, to: title)
+
+        sidebarViewController.select(terminalID: terminal.id)
+        let plan = AgentCLIUpdateExecutionPlan(updates: updates)
+        guard let controller = ProjectTerminalRuntime.shared.controller(for: terminal.id),
+              let receipt = controller.runAgentCLIUpdates(plan) else {
             environment.projectStore.removeTerminal(id: terminal.id)
             return nil
         }

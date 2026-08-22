@@ -36,14 +36,16 @@ enum MobileSnoozePresets {
     }
 }
 
-private enum SessionOrganization: String, CaseIterable {
+enum SessionOrganization: String, CaseIterable {
     case project
     case recent
+    case type
 
     var title: String {
         switch self {
         case .project: return MobileL10n.string("By project")
         case .recent: return MobileL10n.string("Most recent")
+        case .type: return MobileL10n.string("By type")
         }
     }
 
@@ -51,6 +53,86 @@ private enum SessionOrganization: String, CaseIterable {
         switch self {
         case .project: return "folder"
         case .recent: return "clock.arrow.circlepath"
+        case .type: return "square.grid.2x2"
+        }
+    }
+}
+
+enum DashboardContentType: String, Hashable {
+    case chats
+    case terminals
+
+    /// The heading over a plate that holds only this kind, when the list is arranged by type.
+    var title: String {
+        switch self {
+        case .chats: return MobileL10n.string("Chats")
+        case .terminals: return MobileL10n.string("Terminals")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .chats: return "bubble.left.and.bubble.right"
+        case .terminals: return MobileTerminalMark.symbolName
+        }
+    }
+}
+
+/// One row of the dashboard list, whichever kind it is.
+///
+/// Chats and terminals stand in one list the way they do in the Mac sidebar, told apart by their
+/// mark rather than by separate plates and a heading over one of them. The dashboard builds the
+/// list as values in the order the arrangement asks for, and the plate draws each row lazily.
+enum DashboardRowItem: Identifiable, Equatable {
+    case chat(RemoteSessionSummaryDTO)
+    case terminal(RemoteProjectTerminalSummaryDTO)
+
+    /// Distinct across kinds: a chat and a terminal never share a row identity even if the Mac
+    /// ever handed both the same UUID.
+    var id: String {
+        switch self {
+        case .chat(let session): return "chat:\(session.id)"
+        case .terminal(let terminal): return "terminal:\(terminal.id)"
+        }
+    }
+
+    /// The rows of a plate, each kind in its own run, runs in the order given.
+    static func rows(
+        sessions: [RemoteSessionSummaryDTO],
+        terminals: [RemoteProjectTerminalSummaryDTO],
+        order: [DashboardContentType]
+    ) -> [DashboardRowItem] {
+        order.flatMap { type -> [DashboardRowItem] in
+            switch type {
+            case .chats: return sessions.map(DashboardRowItem.chat)
+            case .terminals: return terminals.map(DashboardRowItem.terminal)
+            }
+        }
+    }
+}
+
+enum SessionTypeDirection: String, CaseIterable {
+    case chatsFirst
+    case terminalsFirst
+
+    var title: String {
+        switch self {
+        case .chatsFirst: return MobileL10n.string("Chats first")
+        case .terminalsFirst: return MobileL10n.string("Terminals first")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .chatsFirst: return "bubble.left.and.bubble.right"
+        case .terminalsFirst: return "terminal"
+        }
+    }
+
+    var contentTypes: [DashboardContentType] {
+        switch self {
+        case .chatsFirst: return [.chats, .terminals]
+        case .terminalsFirst: return [.terminals, .chats]
         }
     }
 }
@@ -65,13 +147,24 @@ enum MobileDashboardChrome {
 
     static func connectionStatus(
         phase: RemoteAppModel.Phase,
-        connectionLabel: String?
+        connectionLabel: String?,
+        progress: RemoteAppModel.ConnectionProgress? = nil
     ) -> String {
         switch phase {
         case .idle, .offline:
             return MobileL10n.string("Not connected")
         case .connecting:
-            return MobileL10n.string("Connecting…")
+            switch progress {
+            case .tryingRoute(let kind, _, _, _):
+                return MobileL10n.string(
+                    "Trying %@",
+                    PairedRemoteHost.connectionLabelInSentence(forEndpointKind: kind)
+                )
+            case .loadingSessions:
+                return MobileL10n.string("Loading sessions")
+            case .preparingRoutes, .none:
+                return MobileL10n.string("Checking saved connections")
+            }
         case .online:
             return MobileL10n.string(
                 "Connected · %@",
@@ -80,6 +173,261 @@ enum MobileDashboardChrome {
         }
     }
 }
+
+struct MobileConnectionProgressPresentation: Equatable {
+    enum StepID: Equatable, Hashable {
+        case routes
+        case connection
+        case sessions
+    }
+
+    struct Step: Equatable {
+        let id: StepID
+        let title: String
+    }
+
+    let currentStep: Step
+
+    static func resolve(progress: RemoteAppModel.ConnectionProgress?) -> Self {
+        switch progress ?? .preparingRoutes {
+        case .preparingRoutes:
+            return MobileConnectionProgressPresentation(
+                currentStep: Step(
+                    id: .routes,
+                    title: MobileL10n.string("Checking saved connections")
+                )
+            )
+
+        case .tryingRoute(let kind, _, _, _):
+            let label = PairedRemoteHost.connectionLabelInSentence(forEndpointKind: kind)
+            return MobileConnectionProgressPresentation(
+                currentStep: Step(
+                    id: .connection,
+                    title: MobileL10n.string("Trying %@", label)
+                )
+            )
+
+        case .loadingSessions:
+            return MobileConnectionProgressPresentation(
+                currentStep: Step(
+                    id: .sessions,
+                    title: MobileL10n.string("Loading sessions")
+                )
+            )
+        }
+    }
+}
+
+/// The production dashboard card for the current operation in the bounded connection sequence.
+///
+/// Keeping the card independent of `SessionDashboard` lets the DEBUG component lab render the
+/// exact shipping hierarchy. The lab supplies a fixture value; the dashboard supplies the live
+/// transport value.
+struct MobileConnectionProgressCard: View {
+    let progress: RemoteAppModel.ConnectionProgress?
+    let freezesMotion: Bool
+
+    init(
+        progress: RemoteAppModel.ConnectionProgress?,
+        freezesMotion: Bool = false
+    ) {
+        self.progress = progress
+        self.freezesMotion = freezesMotion
+    }
+
+    var body: some View {
+        let presentation = MobileConnectionProgressPresentation.resolve(progress: progress)
+        ThemedRowGroup {
+            MobileConnectionProgressStepRow(
+                step: presentation.currentStep,
+                freezesMotion: freezesMotion
+            )
+            .padding(MobileDesign.Spacing.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+#if DEBUG
+/// One authored transport checkpoint shared by the lab's body and navigation previews.
+/// The list is deliberately fixed: adding a real progress case makes the lab and its test ask how
+/// that case should look, without building a view for every endpoint or retry.
+enum MobileConnectionProgressLabStory: String, CaseIterable, Identifiable {
+    case checking
+    case direct
+    case fallback
+    case lastRoute
+    case loadingSessions
+
+    static let defaultStory: Self = .fallback
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .checking: return MobileL10n.string("Checking routes")
+        case .direct: return MobileL10n.string("Direct · 1/3")
+        case .fallback: return MobileL10n.string("LAN · 2/3")
+        case .lastRoute: return MobileL10n.string("Tailscale · 3/3")
+        case .loadingSessions: return MobileL10n.string("Loading sessions")
+        }
+    }
+
+    var progress: RemoteAppModel.ConnectionProgress {
+        switch self {
+        case .checking:
+            return .preparingRoutes
+        case .direct:
+            return .tryingRoute(
+                kind: RemoteHostEndpointKind.hosted,
+                previousKind: nil,
+                number: 1,
+                total: 3
+            )
+        case .fallback:
+            return .tryingRoute(
+                kind: RemoteHostEndpointKind.lan,
+                previousKind: RemoteHostEndpointKind.hosted,
+                number: 2,
+                total: 3
+            )
+        case .lastRoute:
+            return .tryingRoute(
+                kind: RemoteHostEndpointKind.tailscale,
+                previousKind: RemoteHostEndpointKind.lan,
+                number: 3,
+                total: 3
+            )
+        case .loadingSessions:
+            return .loadingSessions(routeKind: RemoteHostEndpointKind.lan)
+        }
+    }
+
+    var navigationStatus: String {
+        MobileDashboardChrome.connectionStatus(
+            phase: .connecting,
+            connectionLabel: nil,
+            progress: progress
+        )
+    }
+}
+
+/// An interactive, DEBUG-only host for the two production connection-progress components.
+/// It is reachable from Settings > Developer and through the `connection-progress-lab` demo scene.
+struct MobileConnectionProgressLab: View {
+    private enum Surface: String, CaseIterable, Identifiable {
+        case both
+        case navigation
+        case body
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .both: return MobileL10n.string("Both")
+            case .navigation: return MobileL10n.string("Navigation bar")
+            case .body: return MobileL10n.string("Body")
+            }
+        }
+    }
+
+    private static let hostName = "David’s MacBook Pro"
+
+    @Environment(\.remoteTheme) private var theme
+    @State private var story = MobileConnectionProgressLabStory.defaultStory
+    @State private var surface = Surface.both
+
+    private var freezesAnimatedComponents: Bool {
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
+                VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                    Text("Connection progress")
+                        .font(.title2.bold())
+                        .foregroundStyle(theme.label)
+                    Text("Choose a connection step and see it in the dashboard card, the navigation bar, or both.")
+                        .font(.subheadline)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                ThemedRowGroup {
+                    pickerRow("State") {
+                        Picker("State", selection: $story) {
+                            ForEach(MobileConnectionProgressLabStory.allCases) { story in
+                                Text(story.title).tag(story)
+                            }
+                        }
+                    }
+                    ThemedRowDivider()
+                    pickerRow("Surface") {
+                        Picker("Surface", selection: $surface) {
+                            ForEach(Surface.allCases) { surface in
+                                Text(surface.title).tag(surface)
+                            }
+                        }
+                    }
+                }
+
+                if surface != .navigation {
+                    VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                        Text("Dashboard body")
+                            .font(.headline)
+                            .foregroundStyle(theme.label)
+                            .padding(.horizontal, MobileDesign.Spacing.inset)
+                        MobileConnectionProgressCard(
+                            progress: story.progress,
+                            freezesMotion: freezesAnimatedComponents
+                        )
+                    }
+                } else {
+                    Text("The navigation component is shown above. Choose another state to check its wording and transition.")
+                        .font(.footnote)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .padding(.horizontal, MobileDesign.Spacing.inset)
+                }
+            }
+            .padding(MobileDesign.Spacing.inset)
+        }
+        .background(theme.ground)
+        .navigationTitle(surface == .body ? "Component Lab" : "")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(theme.surface, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            if surface != .body {
+                ToolbarItem(placement: .principal) {
+                    MobileConnectionNavigationTitle(
+                        title: Self.hostName,
+                        status: story.navigationStatus,
+                        statusColor: theme.warning
+                    )
+                }
+            }
+        }
+    }
+
+    private func pickerRow<Control: View>(
+        _ title: LocalizedStringKey,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        HStack(spacing: MobileDesign.Spacing.medium) {
+            Text(title)
+                .foregroundStyle(theme.label)
+            Spacer(minLength: MobileDesign.Spacing.small)
+            control()
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .tint(theme.accent)
+        }
+        .padding(.horizontal, MobileDesign.Spacing.inset)
+        .padding(.vertical, MobileDesign.Spacing.small)
+    }
+}
+#endif
 
 /// The bounded, user-facing explanation for an owner dashboard that could not reach its Mac.
 ///
@@ -139,6 +487,7 @@ private struct DashboardProjectSection {
     let projectName: String
     let title: String
     let sessions: [RemoteSessionSummaryDTO]
+    let terminals: [RemoteProjectTerminalSummaryDTO]
 }
 
 private enum DashboardSessionAction {
@@ -173,6 +522,8 @@ struct SessionDashboard: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("sessionDashboardOrganization") private var organizationRaw =
         SessionOrganization.project.rawValue
+    @AppStorage("sessionDashboardTypeDirection") private var typeDirectionRaw =
+        SessionTypeDirection.chatsFirst.rawValue
     @State private var searchText = ""
     @State private var isConfirmingForget = false
     @State private var themeError: String?
@@ -211,11 +562,16 @@ struct SessionDashboard: View {
         SessionOrganization(rawValue: organizationRaw) ?? .project
     }
 
+    private var typeDirection: SessionTypeDirection {
+        SessionTypeDirection(rawValue: typeDirectionRaw) ?? .chatsFirst
+    }
+
     private var showsDemoBanner: Bool {
 #if DEBUG
         // This evidence fixture borrows demo data plumbing, but represents a real failed owner
         // connection. Suppressing the demo disclaimer keeps the captured state truthful.
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "sessions-offline" {
+        if let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"],
+           ["sessions-offline", "sessions-connecting"].contains(demoMode) {
             return false
         }
 #endif
@@ -242,13 +598,29 @@ struct SessionDashboard: View {
         }
     }
 
-    private var groupedSessions: [DashboardProjectSection] {
-        Dictionary(grouping: sessions, by: \.projectName)
-            .map {
+    private var terminals: [RemoteProjectTerminalSummaryDTO] {
+        guard !showsArchived, !showsSnoozed else { return [] }
+        let all = model.me?.terminals ?? []
+        let scoped = projectName.map { name in
+            all.filter { $0.projectName == name }
+        } ?? all
+        let filtered = searchText.isEmpty ? scoped : scoped.filter {
+            $0.title.localizedCaseInsensitiveContains(searchText)
+                || $0.projectName.localizedCaseInsensitiveContains(searchText)
+        }
+        return filtered.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
+    }
+
+    private var groupedProjects: [DashboardProjectSection] {
+        let sessionsByProject = Dictionary(grouping: sessions, by: \.projectName)
+        let terminalsByProject = Dictionary(grouping: terminals, by: \.projectName)
+        return Set(sessionsByProject.keys).union(terminalsByProject.keys)
+            .map { name in
                 DashboardProjectSection(
-                    projectName: $0.key,
-                    title: $0.key.isEmpty ? MobileL10n.string("Other") : $0.key,
-                    sessions: $0.value
+                    projectName: name,
+                    title: name.isEmpty ? MobileL10n.string("Other") : name,
+                    sessions: sessionsByProject[name] ?? [],
+                    terminals: terminalsByProject[name] ?? []
                 )
             }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
@@ -276,22 +648,22 @@ struct SessionDashboard: View {
                     if model.phase.failure == nil {
                         loadingCard
                     }
-                } else if sessions.isEmpty {
+                } else if sessions.isEmpty, terminals.isEmpty {
                     emptyCard
-                } else if projectName != nil {
-                    SessionRowGroup(
-                        sessions: sessions,
-                        isArchived: showsArchived,
-                        showsActions: model.canManageSessions,
-                        pendingActionSessionID: pendingActionSessionID,
-                        action: perform
-                    )
-                } else if organization == .project {
-                    ForEach(groupedSessions, id: \.projectName) { project in
-                        ProjectSessionGroup(
+                } else if organization == .type {
+                    // By type is the one arrangement that separates the kinds, so it is the one
+                    // that names them: a plate per kind, each under its heading, in the chosen
+                    // direction. Every other arrangement stands chats and terminals in one list.
+                    ForEach(typeDirection.contentTypes, id: \.self) { type in
+                        typeGroup(for: type)
+                    }
+                } else if projectName == nil, organization == .project {
+                    ForEach(groupedProjects, id: \.projectName) { project in
+                        ProjectWorkGroup(
                             projectName: project.projectName,
                             title: project.title,
                             sessions: project.sessions,
+                            terminals: project.terminals,
                             isArchived: showsArchived,
                             showsActions: model.canManageSessions,
                             pendingActionSessionID: pendingActionSessionID,
@@ -299,8 +671,14 @@ struct SessionDashboard: View {
                         )
                     }
                 } else {
-                    SessionRowGroup(
-                        sessions: sessions,
+                    // One list, a project's chats and then its terminals — the Mac's order.
+                    DashboardRowGroup(
+                        rows: DashboardRowItem.rows(
+                            sessions: sessions,
+                            terminals: terminals,
+                            order: [.chats, .terminals]
+                        ),
+                        showsProjectName: projectName == nil,
                         isArchived: showsArchived,
                         showsActions: model.canManageSessions,
                         pendingActionSessionID: pendingActionSessionID,
@@ -308,7 +686,11 @@ struct SessionDashboard: View {
                     )
                 }
 
-                if projectName == nil, notifications.shouldOfferOnboarding {
+                // Connection recovery owns the page until this Mac has answered. Asking about
+                // notifications underneath an unresolved route gives a first-run reader two
+                // unrelated setup stories at once, and notifications can be enabled just as
+                // safely after the catalogue arrives.
+                if projectName == nil, model.me != nil, notifications.shouldOfferOnboarding {
                     NotificationOnboardingCard()
                 }
             }
@@ -318,6 +700,28 @@ struct SessionDashboard: View {
             .padding(.top, MobileDesign.Spacing.large)
             .padding(.horizontal, MobileDesign.Spacing.large)
             .padding(.bottom, 36)
+        }
+    }
+
+    /// One kind's plate under its heading, for the by-type arrangement. Nothing is drawn for a
+    /// kind with no rows: a heading over an empty plate would announce an absence.
+    @ViewBuilder
+    private func typeGroup(for type: DashboardContentType) -> some View {
+        let rows = DashboardRowItem.rows(sessions: sessions, terminals: terminals, order: [type])
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                Label(type.title, systemImage: type.symbol)
+                    .font(.headline)
+                    .foregroundStyle(theme.label)
+                DashboardRowGroup(
+                    rows: rows,
+                    showsProjectName: projectName == nil,
+                    isArchived: showsArchived,
+                    showsActions: model.canManageSessions,
+                    pendingActionSessionID: pendingActionSessionID,
+                    action: perform
+                )
+            }
         }
     }
 
@@ -349,7 +753,7 @@ struct SessionDashboard: View {
     private var dashboardNavigation: some View {
         dashboardContent
         .refreshable { await model.refresh() }
-        .searchable(text: $searchText, prompt: "Search sessions")
+        .searchable(text: $searchText, prompt: "Search sessions and terminals")
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }
@@ -583,6 +987,23 @@ struct SessionDashboard: View {
                         }
                     }
 
+                    if organization == .type {
+                        Section("Direction") {
+                            ForEach(SessionTypeDirection.allCases, id: \.rawValue) { option in
+                                Button {
+                                    typeDirectionRaw = option.rawValue
+                                } label: {
+                                    Label(
+                                        option.title,
+                                        systemImage: typeDirection == option
+                                            ? "checkmark"
+                                            : option.symbol
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     if model.canManageSessions {
                         Section("Manage") {
                             Button {
@@ -811,20 +1232,15 @@ struct SessionDashboard: View {
     private var statusText: String {
         MobileDashboardChrome.connectionStatus(
             phase: model.phase,
-            connectionLabel: model.activeHost?.connectionLabel
+            connectionLabel: model.activeHost?.connectionLabel,
+            progress: model.connectionProgress
         )
     }
 
     private var loadingCard: some View {
-        HStack(spacing: 12) {
-            ProgressView()
-            Text("Loading sessions from your Mac…")
-                .foregroundStyle(theme.secondaryLabel)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(22)
-        .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
-        .remoteThemeGlow(theme)
+        MobileConnectionProgressCard(
+            progress: model.connectionProgress
+        )
     }
 
     private func connectionRecoveryCard(_ failure: RemoteConnectionFailure) -> some View {
@@ -1038,10 +1454,108 @@ struct SessionDashboard: View {
     }
 }
 
-private struct ProjectSessionGroup: View {
+private struct MobileConnectionProgressStepRow: View {
+    let step: MobileConnectionProgressPresentation.Step
+    let freezesMotion: Bool
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        MobileConnectionProgressStepTitle(
+            title: step.title,
+            textColor: theme.uiLabel,
+            groundColor: theme.uiPanel,
+            weight: .semibold,
+            freezesMotion: freezesMotion
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(MobileL10n.string("In progress"))
+    }
+}
+
+/// The active step keeps its words still and lets LabelMorph's fade wave carry activity.
+/// There is one bounded row and one timer while a connection is active.
+private struct MobileConnectionProgressStepTitle: UIViewRepresentable {
+    let title: String
+    let textColor: UIColor
+    let groundColor: UIColor
+    let weight: UIFont.Weight
+    let freezesMotion: Bool
+    @Environment(\.accessibilityReduceMotion) private var reducesMotion
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> MobileMorphingTitleLabel {
+        MobileMorphingTitleLabel()
+    }
+
+    func updateUIView(_ view: MobileMorphingTitleLabel, context: Context) {
+        view.configure(
+            title: title,
+            textStyle: .subheadline,
+            weight: weight,
+            textColor: textColor,
+            groundColor: groundColor,
+            alignment: .left,
+            // This label never morphs its words. Motion here is the separately scheduled fade.
+            reducesMotion: true,
+            role: .connectionProgress
+        )
+        context.coordinator.update(
+            view: view,
+            playsFade: !reducesMotion && !freezesMotion
+        )
+    }
+
+    static func dismantleUIView(_ view: MobileMorphingTitleLabel, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    @MainActor
+    final class Coordinator {
+        private weak var view: MobileMorphingTitleLabel?
+        private var timer: Timer?
+
+        func update(view: MobileMorphingTitleLabel, playsFade: Bool) {
+            self.view = view
+            guard playsFade else {
+                stop()
+                return
+            }
+            guard timer == nil else { return }
+
+            let timer = Timer(
+                timeInterval: MobileDesign.Motion.connectionProgressFadeCadence,
+                repeats: true
+            ) { [weak view] _ in
+                Task { @MainActor in
+                    view?.playFade()
+                }
+            }
+            timer.tolerance = 0.1
+            timer.fireDate = Date(timeIntervalSinceNow: 0.1)
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+        }
+
+        func stop() {
+            timer?.invalidate()
+            timer = nil
+            view?.stopFade()
+        }
+    }
+}
+
+/// A project's heading and, under it, its chats and terminals on one plate — the Mac sidebar's
+/// arrangement, where a project's terminals stand in the same list as its chats and are told
+/// apart by their mark. A "Terminals" heading used to sit over the terminals alone, so one kind
+/// was labelled inside the project and the other was not.
+private struct ProjectWorkGroup: View {
     let projectName: String
     let title: String
     let sessions: [RemoteSessionSummaryDTO]
+    let terminals: [RemoteProjectTerminalSummaryDTO]
     let isArchived: Bool
     let showsActions: Bool
     let pendingActionSessionID: String?
@@ -1052,10 +1566,16 @@ private struct ProjectSessionGroup: View {
         VStack(alignment: .leading, spacing: 10) {
             NavigationLink(value: MobileNavigationRoute.project(projectName)) {
                 HStack(spacing: MobileDesign.Spacing.small) {
+                    // One line, always. A project is a folder on the Mac, and a folder name can be
+                    // anything the Mac's filesystem allows - a managed workspace carries a UUID, so
+                    // the name ran to three wrapped lines and pushed the chats it heads down the
+                    // screen. The header names the group; the full name is still what VoiceOver
+                    // reads and what the project's own screen shows.
                     Label(title, systemImage: "folder")
                         .font(.headline)
                         .foregroundStyle(theme.label)
-                    Spacer()
+                        .lineLimit(1)
+                    Spacer(minLength: MobileDesign.Spacing.tight)
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(theme.tertiaryLabel)
@@ -1065,8 +1585,13 @@ private struct ProjectSessionGroup: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Shows this project’s sessions")
-            SessionRowGroup(
-                sessions: sessions,
+            DashboardRowGroup(
+                rows: DashboardRowItem.rows(
+                    sessions: sessions,
+                    terminals: terminals,
+                    order: [.chats, .terminals]
+                ),
+                showsProjectName: false,
                 isArchived: isArchived,
                 showsActions: showsActions,
                 pendingActionSessionID: pendingActionSessionID,
@@ -1076,41 +1601,53 @@ private struct ProjectSessionGroup: View {
     }
 }
 
-/// A project's chats — or, in the flat list, all of them — on one plate.
+/// The dashboard's rows — a project's, one kind's, or every one on the Mac — on one plate.
 ///
 /// Every chat used to be its own card: a border, a corner radius and eight points of air per row,
 /// which is a stack of panels rather than a list, and on a phone five of them filled the screen.
 /// The rows now sit on one `ThemedRowGroup` and are told apart by a hairline, the way iOS's own
 /// grouped tables are; the rule starts where the row's text starts, so it reads as belonging to
-/// the words rather than to the card, and runs to the card's trailing edge.
+/// the words rather than to the card, and runs to the card's trailing edge. Chats and terminals
+/// share the plate and the hairline, because they share the row.
 ///
-/// The rows are built lazily inside the plate. A project holds a handful of chats, but the flat
-/// list holds every chat on the Mac, and that list was lazy before it had a plate; the plate does
-/// not take that away.
-private struct SessionRowGroup: View {
-    let sessions: [RemoteSessionSummaryDTO]
+/// The rows are built lazily inside the plate. A project holds a handful of rows, but the flat
+/// list holds every chat and terminal on the Mac, and that list was lazy before it had a plate;
+/// the plate does not take that away. An empty list draws no plate.
+private struct DashboardRowGroup: View {
+    let rows: [DashboardRowItem]
+    let showsProjectName: Bool
     let isArchived: Bool
     let showsActions: Bool
     let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
 
     var body: some View {
-        ThemedRowGroup {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(sessions.enumerated()), id: \.element.id) { offset, session in
-                    if offset > 0 {
-                        ThemedRowDivider(
-                            leadingInset: SessionRow.textLeadingEdge,
-                            trailingInset: 0
-                        )
+        if !rows.isEmpty {
+            ThemedRowGroup {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { offset, row in
+                        if offset > 0 {
+                            ThemedRowDivider(
+                                leadingInset: DashboardRowMetrics.textLeadingEdge,
+                                trailingInset: 0
+                            )
+                        }
+                        switch row {
+                        case .chat(let session):
+                            SessionListItem(
+                                session: session,
+                                isArchived: isArchived,
+                                showsActions: showsActions,
+                                pendingActionSessionID: pendingActionSessionID,
+                                action: action
+                            )
+                        case .terminal(let terminal):
+                            TerminalListItem(
+                                terminal: terminal,
+                                showsProjectName: showsProjectName
+                            )
+                        }
                     }
-                    SessionListItem(
-                        session: session,
-                        isArchived: isArchived,
-                        showsActions: showsActions,
-                        pendingActionSessionID: pendingActionSessionID,
-                        action: action
-                    )
                 }
             }
         }
@@ -1183,23 +1720,42 @@ private struct SessionListItem: View {
     /// white or black platter under an authored theme, the slab this app keeps off its screens.
     /// So the preview restates the panel the row came from, at the width it was drawn at.
     private var liftedRow: some View {
-        SessionRow(session: session, showsChevron: false)
+        SessionRow(session: session)
             .frame(width: rowWidth)
             .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
     }
 
-    @ViewBuilder
     private var sessionRow: some View {
+        let row: AnyView
         if isArchived {
-            SessionRow(session: session, showsChevron: false)
+            row = AnyView(SessionRow(session: session))
         } else {
-            Button(action: openSession) {
-                SessionRow(session: session, showsChevron: false)
+            row = AnyView(Button(action: openSession) {
+                SessionRow(session: session)
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(.isLink)
-            .accessibilityRemoveTraits(.isButton)
+            .accessibilityRemoveTraits(.isButton))
         }
+        return AnyView(
+            row
+                .swipeActions(edge: .trailing, allowsFullSwipe: !isArchived) {
+                    if isArchived {
+                        Button {
+                            action(.restore, session)
+                        } label: {
+                            Label("Restore", systemImage: "arrow.uturn.backward")
+                        }
+                        .tint(theme.accent)
+                    } else if showsActions {
+                        Button(role: .destructive) {
+                            action(.archive, session)
+                        } label: {
+                            Label("Archive", systemImage: "archivebox")
+                        }
+                    }
+                }
+        )
     }
 
     private func openSession() {
@@ -1409,6 +1965,230 @@ enum MobileSessionAgeFormat {
     }
 }
 
+// MARK: - Dashboard Row
+
+enum DashboardRowMetrics {
+    /// Where a row's text begins: the leading inset, the mark and the gap after it. The hairline
+    /// between two rows starts here, so it underlines the words rather than the tile — and it is
+    /// the same edge for a chat and a terminal, because they are the same row.
+    static let textLeadingEdge = MobileDesign.Spacing.medium
+        + MobileDesign.Size.rowMark
+        + MobileDesign.Spacing.medium
+}
+
+/// The one shape every row in the dashboard list has: a mark, a one-line title over a caption of
+/// glyphs and words, and a trailing column.
+///
+/// A chat and a terminal are built from this rather than each drawing its own row. The terminal
+/// row used to be a separate view — a circle tile with an accent glyph, a `body`-weight semibold
+/// title beside the chats' `subheadline` medium, sixteen points of inset beside their twelve, a
+/// spelled state word and a disclosure chevron that no chat row had. Down one list that read as
+/// two products: the titles sat at two different x positions and two different ink weights, and
+/// one kind of row promised a push the other kind did not. The Mac sidebar draws both kinds
+/// through one row vocabulary; sharing the shape here is what keeps the phone from drifting
+/// back.
+///
+/// **No chevron, on either kind.** Every row on the plate opens something, so a disclosure arrow
+/// would say the same thing on every line; the Mac's rows do not carry one either. A chevron
+/// belongs to a row that navigates *away* from a list of peers — the project heading above.
+///
+/// **Two lines, always.** The title takes one line and the mark does not set the height, so the
+/// list is scannable and every row is the same height. The full title is one tap away.
+///
+/// **No plate.** The row sits on the plate its group paints, so its background is clear and its
+/// whole rectangle is still the tap: without a fill of its own, the air between the caption and
+/// the trailing column would otherwise fall through to nothing.
+private struct DashboardRow<Mark: View, Caption: View, Trailing: View>: View {
+    let title: String
+    @ViewBuilder let mark: () -> Mark
+    @ViewBuilder let caption: () -> Caption
+    @ViewBuilder let trailing: () -> Trailing
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.medium) {
+            mark()
+
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+                MobileMorphingTitle(
+                    title: title,
+                    textStyle: .subheadline,
+                    weight: .medium,
+                    textColor: theme.uiLabel,
+                    groundColor: theme.uiPanel,
+                    alignment: .left
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: MobileDesign.Spacing.tight) {
+                    caption()
+                }
+                .font(.caption2)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: MobileDesign.Spacing.tight)
+
+            HStack(spacing: MobileDesign.Spacing.tight) {
+                trailing()
+            }
+        }
+        .padding(.horizontal, MobileDesign.Spacing.medium)
+        .padding(.vertical, MobileDesign.Spacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+/// The caption's first glyph on every row: the laptop, green when the thing is running on the Mac
+/// and slashed when it is not. Green means connected and the slash means not; the glyph is the
+/// state, so it speaks the whole state for VoiceOver rather than hiding.
+private struct DashboardAvailabilityGlyph: View {
+    let isAvailable: Bool
+    let label: String
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Image(systemName: isAvailable ? "laptopcomputer" : "laptopcomputer.slash")
+            .foregroundStyle(isAvailable ? theme.positive : theme.secondaryLabel)
+            .accessibilityLabel(label)
+    }
+}
+
+/// The trailing column's working mark. Matches the Mac sidebar's compact working spinner: the
+/// orb remains available for the conversation title, but a list status mark should be quiet and
+/// scannable rather than a second, more expressive animation. Hidden from VoiceOver because the
+/// availability glyph already says "Working".
+private struct DashboardWorkingIndicator: View {
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Group {
+            if ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil {
+                Circle()
+                    .trim(from: 0, to: 0.72)
+                    .stroke(theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(theme.accent)
+            }
+        }
+        .frame(
+            width: MobileDesign.Size.rowWorkingOrb,
+            height: MobileDesign.Size.rowWorkingOrb
+        )
+        .accessibilityHidden(true)
+    }
+}
+
+/// The trailing column's age, set the way `MobileSessionAgeFormat` sets it.
+private struct DashboardAge: View {
+    let date: Date
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Text(MobileSessionAgeFormat.string(since: date))
+            .font(.caption2)
+            .foregroundStyle(theme.tertiaryLabel)
+            .fixedSize()
+    }
+}
+
+// MARK: - Terminal Row
+
+/// What a terminal row shows for the state the wire sends, resolved once so the row and its tests
+/// read the same answer.
+///
+/// The state is shown the way a chat's is, not spelled: the laptop glyph says running or not, the
+/// tile dims for a shell that is not running, and a busy shell shows the working mark in the
+/// trailing column. The words "Ready" and "Stopped" that used to sit in that column said what the
+/// glyph beside them already said; they survive as the whole state for VoiceOver.
+struct MobileTerminalRowPresentation: Equatable {
+    /// Foreground work in a running shell: the trailing column shows the working mark.
+    let isWorking: Bool
+    /// Not running on the Mac: the tile dims and the laptop is slashed.
+    let isDimmed: Bool
+    /// The whole state in words, for VoiceOver.
+    let availabilityLabel: String
+
+    static func resolve(state: String, isAvailable: Bool) -> Self {
+        let isWorking = isAvailable && state == "working"
+        let label: String
+        if isWorking {
+            label = MobileL10n.string("Working")
+        } else if isAvailable {
+            label = MobileL10n.string("Ready")
+        } else {
+            label = MobileL10n.string("Stopped")
+        }
+        return Self(isWorking: isWorking, isDimmed: !isAvailable, availabilityLabel: label)
+    }
+}
+
+/// One standalone terminal in the dashboard list: the same row as a chat, with the terminal mark
+/// where a chat shows its runtime's, and its project's name in the caption when the list spans
+/// projects. It has no login, no surface choice and no last-active time of its own, so its caption
+/// and trailing column carry only what it has.
+private struct TerminalRow: View {
+    let terminal: RemoteProjectTerminalSummaryDTO
+    let showsProjectName: Bool
+    @Environment(\.remoteTheme) private var theme
+
+    private var presentation: MobileTerminalRowPresentation {
+        .resolve(state: terminal.state, isAvailable: terminal.isAvailable)
+    }
+
+    var body: some View {
+        DashboardRow(title: terminal.title) {
+            MobileTerminalMark(isDimmed: presentation.isDimmed)
+        } caption: {
+            DashboardAvailabilityGlyph(
+                isAvailable: !presentation.isDimmed,
+                label: presentation.availabilityLabel
+            )
+            if showsProjectName {
+                Text(terminal.projectName)
+                    .foregroundStyle(theme.secondaryLabel)
+            }
+        } trailing: {
+            if presentation.isWorking {
+                DashboardWorkingIndicator()
+            }
+        }
+    }
+}
+
+/// The terminal row as a tap. A terminal transition cannot manufacture intermediate widths, so the
+/// push is immediate — the same answer `MobileSessionNavigationTransition` gives a chat on its
+/// terminal surface.
+private struct TerminalListItem: View {
+    let terminal: RemoteProjectTerminalSummaryDTO
+    let showsProjectName: Bool
+    @EnvironmentObject private var model: RemoteAppModel
+
+    var body: some View {
+        Button(action: openTerminal) {
+            TerminalRow(terminal: terminal, showsProjectName: showsProjectName)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isLink)
+        .accessibilityRemoveTraits(.isButton)
+        .accessibilityHint(MobileL10n.string("Opens this terminal on your Mac"))
+    }
+
+    private func openTerminal() {
+        guard model.navigationPath.last != .terminal(terminal.id) else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            model.navigationPath.append(.terminal(terminal.id))
+        }
+    }
+}
+
+// MARK: - Session Row
+
 /// One chat in the dashboard list.
 ///
 /// **The tile identifies the runtime, not the surface.** Every row used to draw `terminal`, because
@@ -1416,16 +2196,8 @@ enum MobileSessionAgeFormat {
 /// agent's own TUI mirrored from the Mac — so a list of Claude and Codex chats looked like a list of
 /// shells, and said nothing about which provider or which login each one was on. It now carries the
 /// same two facts the Mac sidebar carries, the same way: the provider's mark, with an alternate
-/// account's chip on its corner. `MobileAgentIdentity` holds that vocabulary.
-///
-/// **It is two lines high, and stays two lines high.** A three-line title plus a 46-point tile put
-/// rows between 74 and 110 points, which is a card, not a list row: five chats filled the screen.
-/// The title takes one line and the tile no longer sets the height, so the list is scannable and
-/// every row is the same height. The full title is one tap away in the session's own screen.
-///
-/// **It draws no plate.** The row sits on the plate its group paints (`SessionRowGroup`), so its
-/// background is clear and its whole rectangle is still the tap: without a fill of its own, the
-/// air between the caption and the age would otherwise fall through to nothing.
+/// account's chip on its corner. `MobileAgentIdentity` holds that vocabulary. The row's shape —
+/// two lines, no plate, no chevron — is `DashboardRow`'s, shared with the terminal row.
 ///
 /// **State is shown, not spelled.** The caption used to read "Working", "Connected",
 /// "Disconnected" beside a laptop that was already green or slashed, so every row said its state
@@ -1438,17 +2210,10 @@ enum MobileSessionAgeFormat {
 /// laptop carries the whole state for VoiceOver, so nothing a sighted reader sees is unsaid.
 private struct SessionRow: View {
     let session: RemoteSessionSummaryDTO
-    var showsChevron = true
     @Environment(\.remoteTheme) private var theme
 
-    /// Where the row's text begins: the leading inset, the mark and the gap after it. The hairline
-    /// between two rows starts here, so it underlines the words rather than the tile.
-    static let textLeadingEdge = MobileDesign.Spacing.medium
-        + MobileDesign.Size.rowMark
-        + MobileDesign.Spacing.medium
-
     var body: some View {
-        HStack(spacing: MobileDesign.Spacing.medium) {
+        DashboardRow(title: session.title) {
             MobileSessionMark(
                 agentKind: session.agentKind,
                 account: session.account,
@@ -1471,75 +2236,37 @@ private struct SessionRow: View {
                         )
                 }
             }
-
-            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
-                MobileMorphingTitle(
-                    title: session.title,
-                    textStyle: .subheadline,
-                    weight: .medium,
-                    textColor: theme.uiLabel,
-                    groundColor: theme.uiPanel,
-                    alignment: .left
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: MobileDesign.Spacing.tight) {
-                    // Green means connected and the slash means not; the glyph is the state now,
-                    // so it speaks the whole state for VoiceOver rather than hiding.
-                    Image(systemName: session.isAvailable
-                        ? "laptopcomputer"
-                        : "laptopcomputer.slash")
-                        .foregroundStyle(stateStyle)
-                        .accessibilityLabel(availabilityLabel)
-                    // The surface is a glyph and the runtime is the mark, because spelling both in
-                    // words cost about ninety points and truncated the one fact the row gained: the
-                    // line read "Connected · Claude Code UI · Ver…" while the tile was already
-                    // showing Claude's mark. `terminal` here means a terminal — the runtime's own
-                    // TUI, mirrored from the Mac — and the mark beside it says whose.
-                    Image(systemName: session.surface == .conversation
-                        ? "text.bubble"
-                        : "terminal")
-                        .foregroundStyle(theme.tertiaryLabel)
-                        .accessibilityLabel(surfaceLabel)
-                    if let metaText {
-                        metaText
-                    }
-                }
-                .font(.caption2)
-                .lineLimit(1)
+        } caption: {
+            DashboardAvailabilityGlyph(
+                isAvailable: session.isAvailable && !session.isArchived,
+                label: availabilityLabel
+            )
+            // The surface is a glyph and the runtime is the mark, because spelling both in
+            // words cost about ninety points and truncated the one fact the row gained: the
+            // line read "Connected · Claude Code UI · Ver…" while the tile was already
+            // showing Claude's mark. `terminal` here means a terminal — the runtime's own
+            // TUI, mirrored from the Mac — and the mark beside it says whose.
+            Image(systemName: session.surface == .conversation
+                ? "text.bubble"
+                : MobileTerminalMark.symbolName)
+                .foregroundStyle(theme.tertiaryLabel)
+                .accessibilityLabel(surfaceLabel)
+            if let metaText {
+                metaText
             }
-
-            Spacer(minLength: MobileDesign.Spacing.tight)
-
-            HStack(spacing: MobileDesign.Spacing.tight) {
-                if session.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.caption2)
-                        .foregroundStyle(theme.accent)
-                        .accessibilityLabel("Pinned")
-                }
-                if isWorking {
-                    // The laptop already says "Working" to VoiceOver; the orb is the picture of it.
-                    MobileWorkingOrb(diameter: MobileDesign.Size.rowWorkingOrb, theme: theme)
-                        .accessibilityHidden(true)
-                } else if let lastActiveAt = session.lastActiveAt {
-                    Text(MobileSessionAgeFormat.string(
-                        since: Date(timeIntervalSince1970: lastActiveAt)
-                    ))
-                        .font(.caption2)
-                        .foregroundStyle(theme.tertiaryLabel)
-                        .fixedSize()
-                }
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(theme.tertiaryLabel)
-                }
+        } trailing: {
+            if session.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.caption2)
+                    .foregroundStyle(theme.accent)
+                    .accessibilityLabel("Pinned")
+            }
+            if isWorking {
+                DashboardWorkingIndicator()
+            } else if let lastActiveAt = session.lastActiveAt {
+                DashboardAge(date: Date(timeIntervalSince1970: lastActiveAt))
             }
         }
-        .padding(.horizontal, MobileDesign.Spacing.medium)
-        .padding(.vertical, MobileDesign.Spacing.small)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
     }
 
     /// Mid-turn on a live surface. The Mac reports activity only for a session it is running, but
@@ -1564,10 +2291,6 @@ private struct SessionRow: View {
             // localization-ignore: punctuation between already-localized metadata fragments
             line + Text(verbatim: " · ").foregroundStyle(theme.secondaryLabel) + part
         }
-    }
-
-    private var stateStyle: Color {
-        session.isAvailable && !session.isArchived ? theme.positive : theme.secondaryLabel
     }
 
     private var stateLabel: String {

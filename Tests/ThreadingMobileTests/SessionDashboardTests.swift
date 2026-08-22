@@ -5,6 +5,18 @@ import XCTest
 final class SessionDashboardTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 2_000_000)
 
+    func testTypeDirectionNamesAndOrdersBothKinds() {
+        XCTAssertEqual(SessionTypeDirection.chatsFirst.contentTypes, [.chats, .terminals])
+        XCTAssertEqual(SessionTypeDirection.terminalsFirst.contentTypes, [.terminals, .chats])
+        XCTAssertEqual(SessionTypeDirection.chatsFirst.title, "Chats first")
+        XCTAssertEqual(SessionTypeDirection.terminalsFirst.title, "Terminals first")
+    }
+
+    func testDashboardOrganizationIncludesProjectRecentAndType() {
+        XCTAssertEqual(SessionOrganization.allCases, [.project, .recent, .type])
+        XCTAssertEqual(SessionOrganization.type.title, "By type")
+    }
+
     /// The age is one narrow unit, and never a signed quantity: `RelativeDateTimeFormatter`'s
     /// abbreviated Swedish wrote yesterday as `−1 d`, which is what a duration can never do.
     func testSwedishAgeIsOneNarrowUnitWithoutAMinusSign() {
@@ -106,6 +118,99 @@ final class SessionDashboardTests: XCTestCase {
         )
     }
 
+    func testConnectingNavigationStatusNamesTheRouteBeingTried() {
+        XCTAssertEqual(
+            MobileDashboardChrome.connectionStatus(
+                phase: .connecting,
+                connectionLabel: nil,
+                progress: .tryingRoute(
+                    kind: RemoteHostEndpointKind.lan,
+                    previousKind: RemoteHostEndpointKind.hosted,
+                    number: 2,
+                    total: 3
+                )
+            ),
+            MobileL10n.string(
+                "Trying %@",
+                MobileL10n.string("LAN")
+            )
+        )
+    }
+
+    /// The connection card shows only the operation happening now. Route history, future work and
+    /// failover instructions would turn a transient status back into a checklist.
+    func testConnectionProgressShowsOnlyTheActiveNamedRoute() {
+        let presentation = MobileConnectionProgressPresentation.resolve(
+            progress: .tryingRoute(
+                kind: RemoteHostEndpointKind.lan,
+                previousKind: RemoteHostEndpointKind.hosted,
+                number: 2,
+                total: 3
+            )
+        )
+
+        XCTAssertEqual(presentation.currentStep.id, .connection)
+        XCTAssertEqual(
+            presentation.currentStep.title,
+            MobileL10n.string(
+                "Trying %@",
+                MobileL10n.string("LAN")
+            )
+        )
+    }
+
+    func testConnectionProgressMovesToSessionLoadingAfterTheMacAnswers() {
+        let presentation = MobileConnectionProgressPresentation.resolve(
+            progress: .loadingSessions(routeKind: RemoteHostEndpointKind.lan)
+        )
+
+        XCTAssertEqual(presentation.currentStep.id, .sessions)
+        XCTAssertEqual(
+            presentation.currentStep.title,
+            MobileL10n.string("Loading sessions")
+        )
+    }
+
+#if DEBUG
+    func testConnectionProgressLabCoversEveryAuthoredTransportCheckpoint() {
+        XCTAssertEqual(
+            MobileConnectionProgressLabStory.allCases.map(\.progress),
+            [
+                .preparingRoutes,
+                .tryingRoute(
+                    kind: RemoteHostEndpointKind.hosted,
+                    previousKind: nil,
+                    number: 1,
+                    total: 3
+                ),
+                .tryingRoute(
+                    kind: RemoteHostEndpointKind.lan,
+                    previousKind: RemoteHostEndpointKind.hosted,
+                    number: 2,
+                    total: 3
+                ),
+                .tryingRoute(
+                    kind: RemoteHostEndpointKind.tailscale,
+                    previousKind: RemoteHostEndpointKind.lan,
+                    number: 3,
+                    total: 3
+                ),
+                .loadingSessions(routeKind: RemoteHostEndpointKind.lan),
+            ]
+        )
+        for story in MobileConnectionProgressLabStory.allCases {
+            XCTAssertEqual(
+                story.navigationStatus,
+                MobileDashboardChrome.connectionStatus(
+                    phase: .connecting,
+                    connectionLabel: nil,
+                    progress: story.progress
+                )
+            )
+        }
+    }
+#endif
+
     /// A route failure must replace the indeterminate loading card with an actionable state. The
     /// useful network facts are semantic route names; the address, port and raw timeout stay in
     /// diagnostics where they cannot turn the dashboard into a network inspector.
@@ -125,7 +230,7 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(presentation.lastConnection, MobileL10n.string("Tailscale"))
         XCTAssertEqual(
             Set(presentation.routesTried),
-            Set([MobileL10n.string("Tailscale"), MobileL10n.string("This network")])
+            Set([MobileL10n.string("Tailscale"), MobileL10n.string("LAN")])
         )
         XCTAssertEqual(
             presentation.identityCode?.count,
@@ -158,6 +263,105 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(presentation.primaryRecovery, .pairAgain)
         XCTAssertFalse(presentation.offersPairAgain)
         XCTAssertEqual(presentation.identityCode, host.pinnedFingerprintCode)
+    }
+
+    // MARK: - One list, one row
+
+    /// Chats and terminals stand on one plate in the order the arrangement asks for, each kind in
+    /// its own run — the Mac sidebar's reading, where a project's terminals follow its chats and
+    /// "Terminals first" turns that around. A row identity names its kind, so a chat and a
+    /// terminal the Mac happened to give the same UUID would still be two rows.
+    func testDashboardRowsFollowTheArrangementOrderAndKeepTheirKinds() {
+        let chat = session(id: "same", title: "Licensing strategy")
+        let shell = terminal(id: "same", title: "Development server", state: "idle")
+
+        let chatsFirst = DashboardRowItem.rows(
+            sessions: [chat], terminals: [shell], order: SessionTypeDirection.chatsFirst.contentTypes
+        )
+        XCTAssertEqual(chatsFirst, [.chat(chat), .terminal(shell)])
+
+        let terminalsFirst = DashboardRowItem.rows(
+            sessions: [chat], terminals: [shell],
+            order: SessionTypeDirection.terminalsFirst.contentTypes
+        )
+        XCTAssertEqual(terminalsFirst, [.terminal(shell), .chat(chat)])
+
+        XCTAssertEqual(Set(chatsFirst.map(\.id)).count, 2, "a chat and a terminal never share a row")
+        XCTAssertEqual(DashboardRowItem.rows(sessions: [chat], terminals: [shell], order: [.chats]),
+                       [.chat(chat)])
+    }
+
+    /// The hairline between rows starts where the text starts, for a chat and a terminal alike:
+    /// the inset, the tile and the gap after it — not a literal that only matched one of them.
+    func testTheRowDividerStartsWhereTheTextStarts() {
+        XCTAssertEqual(
+            DashboardRowMetrics.textLeadingEdge,
+            MobileDesign.Spacing.medium + MobileDesign.Size.rowMark + MobileDesign.Spacing.medium
+        )
+    }
+
+    /// A terminal's state is shown the way a chat's is — the laptop, the dimmed tile, the working
+    /// mark — and spelled only for VoiceOver. "Ready" and "Stopped" used to sit in the trailing
+    /// column where a chat shows its age.
+    func testTerminalRowShowsItsStateAndSpellsItOnlyForVoiceOver() {
+        let working = MobileTerminalRowPresentation.resolve(state: "working", isAvailable: true)
+        XCTAssertTrue(working.isWorking)
+        XCTAssertFalse(working.isDimmed)
+        XCTAssertEqual(working.availabilityLabel, MobileL10n.string("Working"))
+
+        let ready = MobileTerminalRowPresentation.resolve(state: "idle", isAvailable: true)
+        XCTAssertFalse(ready.isWorking)
+        XCTAssertFalse(ready.isDimmed)
+        XCTAssertEqual(ready.availabilityLabel, MobileL10n.string("Ready"))
+
+        let stopped = MobileTerminalRowPresentation.resolve(state: "dormant", isAvailable: false)
+        XCTAssertFalse(stopped.isWorking)
+        XCTAssertTrue(stopped.isDimmed)
+        XCTAssertEqual(stopped.availabilityLabel, MobileL10n.string("Stopped"))
+
+        // The Mac reports "working" only for a shell it is running; a stale word over a shell
+        // that is not available must not animate a mark that claims "moving right now".
+        let staleWorking = MobileTerminalRowPresentation.resolve(state: "working", isAvailable: false)
+        XCTAssertFalse(staleWorking.isWorking)
+        XCTAssertTrue(staleWorking.isDimmed)
+    }
+
+    /// The by-type headings name each kind with the symbol its direction picker uses, so the
+    /// heading over a plate and the choice that put it there read as the same thing.
+    func testTypeHeadingsMatchTheDirectionPickerSymbols() {
+        XCTAssertEqual(DashboardContentType.chats.symbol, SessionTypeDirection.chatsFirst.symbol)
+        XCTAssertEqual(
+            DashboardContentType.terminals.symbol,
+            SessionTypeDirection.terminalsFirst.symbol
+        )
+        XCTAssertEqual(DashboardContentType.terminals.symbol, MobileTerminalMark.symbolName)
+        XCTAssertEqual(DashboardContentType.chats.title, MobileL10n.string("Chats"))
+        XCTAssertEqual(DashboardContentType.terminals.title, MobileL10n.string("Terminals"))
+    }
+
+    private func session(id: String, title: String) -> RemoteSessionSummaryDTO {
+        RemoteSessionSummaryDTO(
+            id: id,
+            title: title,
+            agentKind: "claude",
+            surface: .terminal,
+            state: "idle",
+            projectName: "AnotherTerminal"
+        )
+    }
+
+    private func terminal(
+        id: String,
+        title: String,
+        state: String
+    ) -> RemoteProjectTerminalSummaryDTO {
+        RemoteProjectTerminalSummaryDTO(
+            id: id,
+            title: title,
+            projectName: "AnotherTerminal",
+            state: state,
+            isAvailable: state != "dormant"
+        )
     }
 
     private func pairedHost() throws -> PairedRemoteHost {

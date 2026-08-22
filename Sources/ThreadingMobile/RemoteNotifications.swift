@@ -49,7 +49,20 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
     private let notifications: RemoteNotificationManager
 
     override init() {
-        let continuity = MobileSessionContinuityStore()
+        let continuity: MobileSessionContinuityStore
+#if DEBUG
+        if MobileTerminalWireFixtureConfiguration.current != nil,
+           let defaults = UserDefaults(suiteName: "codes.threading.mobile.terminal-wire-fixture") {
+            // Simulator fixture drafts and viewport positions must not replace the developer's
+            // ordinary app continuity. The isolated suite is disposable on every lab launch.
+            defaults.removePersistentDomain(forName: "codes.threading.mobile.terminal-wire-fixture")
+            continuity = MobileSessionContinuityStore(defaults: defaults)
+        } else {
+            continuity = MobileSessionContinuityStore()
+        }
+#else
+        continuity = MobileSessionContinuityStore()
+#endif
         self.continuity = continuity
         keyboards = MobileTerminalKeyboardStore()
         model = RemoteAppModel(continuity: continuity)
@@ -1148,19 +1161,65 @@ final class RemoteNotificationManager: ObservableObject {
         with host: PairedRemoteHost
     ) async throws -> RemoteNotificationRegistrationResponseDTO {
         let requestID = UUID().uuidString.lowercased()
+        let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
         var lastError: Error = RemoteClientError.invalidResponse
         let candidates = host.candidateLinks
         for (index, link) in candidates.enumerated() {
+            let timeout = candidates.count > 1 && index < candidates.count - 1
+                ? 8
+                : RemoteClient.defaultRequestTimeout
+            let startedAt = MobileDiagnostics.monotonicNow()
+            let fields: [RemoteDiagnosticField: String] = [
+                .trace: requestID,
+                .peer: peer,
+                .transport: PairedRemoteHost.endpointKind(for: link.baseURL),
+                .origin: MobileDiagnostics.originDigest(link.baseURL),
+                .phase: "notificationRegistration.request",
+                .timeoutMS: MobileDiagnostics.milliseconds(timeout),
+                .attempt: String(index + 1),
+                .total: String(candidates.count),
+            ]
+            MobileDiagnostics.recordConnectivity(
+                .hostRouteStarted,
+                fields: fields.merging([.result: "started"]) { _, new in new }
+            )
             do {
-                let timeout: TimeInterval? = candidates.count > 1
-                    && index < candidates.count - 1 ? 8 : nil
-                return try await RemoteClient(
+                let response = try await RemoteClient(
                     link: link,
                     requestTimeout: timeout
                 ).registerNotifications(registration, requestID: requestID)
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    fields: fields.merging([
+                        .result: "succeeded",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    ]) { _, new in new }
+                )
+                return response
             } catch is CancellationError {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    fields: fields.merging([
+                        .result: "cancelled",
+                        .code: "swift.cancelled",
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    ]) { _, new in new }
+                )
                 throw CancellationError()
             } catch let error as RemoteClientError {
+                var failedFields = fields.merging([
+                    .result: "failed",
+                    .code: MobileDiagnostics.errorCode(error),
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                ]) { _, new in new }
+                if case .server(let status) = error {
+                    failedFields[.status] = String(status)
+                }
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: .warning,
+                    fields: failedFields
+                )
                 if case .server(let status) = error,
                    [502, 503, 504].contains(status) {
                     lastError = error
@@ -1168,6 +1227,15 @@ final class RemoteNotificationManager: ObservableObject {
                 }
                 throw error
             } catch {
+                MobileDiagnostics.recordConnectivity(
+                    .hostRouteEnded,
+                    level: .warning,
+                    fields: fields.merging([
+                        .result: "failed",
+                        .code: MobileDiagnostics.errorCode(error),
+                        .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
+                    ]) { _, new in new }
+                )
                 lastError = error
             }
         }

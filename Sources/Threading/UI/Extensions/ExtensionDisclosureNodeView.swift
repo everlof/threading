@@ -39,7 +39,7 @@ enum ExtensionDisclosureDefaults {
 /// its tree, and AppKit's `target` is weak, so a detail built later by something else would
 /// hand back buttons whose action goes nowhere.
 @MainActor
-final class ExtensionDisclosureNodeView: NSView {
+final class ExtensionDisclosureNodeView: NSView, PointerClaiming {
 
     // MARK: - Properties
 
@@ -270,8 +270,11 @@ final class ExtensionDisclosureNodeView: NSView {
         }
     }
 
+    /// The whole node is the press, and it is set in text. See `PointerClaiming`.
+    var restingPointer: NSCursor? { .pointingHand }
+
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
+        registerPointerClaims()
     }
 
     override func viewDidMoveToWindow() {
