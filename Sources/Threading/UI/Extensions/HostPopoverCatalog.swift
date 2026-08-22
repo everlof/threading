@@ -15,6 +15,7 @@ enum HostPopoverID: String, CaseIterable {
     case extensionNodeDetail = "extension.node-detail"
     case conversationChangedFileDiff = "conversation.changed-file-diff"
     case sessionCornerCardAttachment = "session.corner-card.attachment-preview"
+    case designHelp = "design.help"
 
     var exposure: HostPopoverExposure {
         switch self {
@@ -44,6 +45,16 @@ enum HostPopoverID: String, CaseIterable {
                     + "an extension to compose into — the body *is* the change — and the "
                     + "surface exists only while a reader is holding a row open, so its "
                     + "timing, placement, chrome and dismissal stay host-owned."
+            )
+        case .designHelp:
+            return .hostOnly(
+                reason: "The panel behind a \"?\" beside a control. Its body is the words the "
+                    + "surface it belongs to already published as its own copy — a way in's four "
+                    + "questions, an operation's cost — so there is nothing here for an extension "
+                    + "to compose into that it could not compose into that surface. What stays "
+                    + "host-owned is the affordance: the press, the placement, Escape, the focus "
+                    + "return, and the promise that the same words reach a screen reader from the "
+                    + "button whether or not the panel is ever opened."
             )
         case .sessionCornerCardAttachment:
             return .hostOnly(

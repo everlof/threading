@@ -2959,6 +2959,65 @@ repeat the fault. A press routed through from inside is swallowed and left inert
 uncovered strip above the surface remains the ordinary click-outside route. The rule belongs to
 `InWindowOverlay`, so the media and comparison inspectors share it.
 
+## 2026-08-21 — two constraints at 250 wanting opposite things is not a layout
+
+Reported as "it doesn't look as your image": the Remote Access render tests photographed a page
+whose answers stood beside their questions, and the shipped page put the questions on the leading
+edge with a narrow ragged answer column hard against the trailing one. Both pictures were of the
+same code.
+
+A wrapping `NSTextField` hugs horizontally at `.defaultLow`. That is exactly the priority a low
+hugging label column uses to claim its row's slack, and exactly the priority a layout guide was
+pulled narrow at to size a term column. Two constraints at 250 wanting opposite things is not a
+layout, it is a tie, and the engine spent it differently depending on how many passes the tree had
+been through. A page laid out once in a detached fixture came out one way; the same page in a
+window that moves came out the other. Neither is a bug in the engine and neither is reproducible
+by reading the code.
+
+Both halves are now stated wherever this shape occurs — `HelpPopoverText.lines(_:)`,
+`SettingsUI.row`'s label column, the Remote Access status columns. The wrapping label says
+outright that it has no opinion about its own width (hugging 1), and the column pins it at
+`defaultLow + 1` with a readable-measure floor above that. Either alone settles today's
+arrangement; together they leave nothing for a later pass to decide.
+
+Two rules follow from it:
+
+**A pin that can outrank a hidden view's collapse will crush the page.** A hidden view leaves an
+`NSStackView`'s layout while its constraints stay active. A fact row pinned `row.width ==
+column.width` at required therefore handed the column the row's *mark slot* — 14 points — the
+moment its label was hidden, and `NSStackView`'s required edge constraints carried that 14 up
+through the card, the section and the page. Every state without an announcement then laid out
+against a broken required constraint, which is a width nobody chose. Pins of this kind are
+preferences.
+
+**A fixture and its shell install a page through one function.** The shell centred a destination
+under `SettingsUIDefaults.pageWidth`; the fixtures pinned it to a bare view's four edges. Two
+arrangements written twice, and the difference was invisible because it was two lists of
+constraints in two files. `SettingsUI.install(page:in:top:)` is now the only place that
+arrangement exists, `check_architecture_boundaries.sh` fails the build on a second copy, and
+`RemoteAccessSettingsRenderTests.testTheFixtureAndTheAppLayThePageOutIdentically` holds a page
+laid out once against a page laid out in a window that resizes.
+
+The page also *fills* the pane and is capped, rather than preferring a width. Preferring it made
+the preference the lowest-priority constraint in the set, so a page whose content did not add up
+to the canvas got its own fitting width instead. Filling to the pane's margins states the width
+from the pane, so there is no fitting size left to fall back to.
+
+**A squeeze is answered at the control, not at the words — and a fixture that does not state its
+width cannot tell you which happened.** The readable-measure floor under a wrapping subtitle sits
+at `.defaultHigh`, which is deliberately *above* a control measure a page states as a preference:
+a 380-point run of two choices is a wish, and in a 320-point pane the sentence beside it is worth
+more than the wish. A control that genuinely must keep its width says `.required` and wins, and
+the row's own required edges are still free to break the floor rather than push it out of a card.
+
+Adding that floor failed three tests on pages this work never touched, and every one of them was
+the fixture rather than the page: `SettingsRowLayoutTests`'s long-title row, `GitHubSettingsRenderTests`'s
+`laidOut(_:width:height:)` and `DisplayPaneLayoutTests`'s 420-point pane each set a *frame* and
+pinned content inside it. A detached view is a flexible layout root, so Auto Layout resized the
+"pane" to suit the subtree: the corner of a 420-point display pane sat at 490, and a page reported
+as overflowing its pane had in fact been handed a wider one. CLAUDE.md already says this — "a
+detached fixture with a frame constrains nothing" — and all three now state their width with a
+constraint. The failures were real; they were just reported against the wrong object.
 ## 2026-08-21 — the caret's cursor claims the whole field, buttons and all
 
 Reported from Settings, pointing at the search field's own controls: *"shouldn't this be an arrow
