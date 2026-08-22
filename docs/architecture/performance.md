@@ -194,6 +194,19 @@ but hotspot, coupling, and ownership facets load only after explicit panel navig
 panel must virtualize repeated rows, while a semantic scene stays under its existing 500-mark
 contract.
 
+### Semantic-scene scaling contract
+
+An ordinary semantic scene has tens of marks; its public stress bound is 500, and resize, pointer
+movement and hierarchy focus can repeat after it mounts. Marks remain value geometry painted by
+one `SemanticSceneView` canvas, not one AppKit control, layer and tracking area per mark. Native
+accessibility children are lightweight virtual elements and are materialized only when AppKit asks
+for them. Pointer movement uses a fixed normalized-space index, layout and paint touch the marks
+that can contribute pixels, and one hierarchy child traversal plus one source-order scan replaces
+an ancestor walk for every mark. Branch navigation mutates the retained canvas and never holds an
+outgoing 500-mark view tree beside a replacement during animation.
+The iPhone projection builds the same branch by one child traversal and one source-order scan;
+it does not repeat a full ancestor walk for every SwiftUI mark on each focus-state render.
+
 ### Mobile remote dashboard scaling contract
 
 The dashboard catalogue scales with sessions and its invalidation source can burst when the Mac

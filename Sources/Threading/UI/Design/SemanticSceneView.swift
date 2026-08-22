@@ -5,8 +5,13 @@ import AppKit
 /// Callers supply normalized geometry and meaning, never drawing code. The same component can
 /// render treemaps, heatmaps, bars, timeline blocks, scatter points and bubbles while the design
 /// system owns colour, type, hover, focus, pointer behavior and accessibility.
+///
+/// An ordinary scene has tens of marks and the public contract permits 500. Marks therefore stay
+/// values drawn by one control rather than becoming one AppKit view, layer and tracking area each.
+/// Accessibility keeps one native virtual element per mark, created only when AppKit asks for the
+/// scene's children. Pointer movement consults a fixed spatial index instead of scanning the scene.
 @MainActor
-final class SemanticSceneView: NSView, ThemedComponent {
+final class SemanticSceneView: ThemedControl {
 
     struct Item {
         enum Shape {
@@ -70,25 +75,52 @@ final class SemanticSceneView: NSView, ThemedComponent {
         static let itemGap: CGFloat = 2
     }
 
-    private var themeRedraw: ThemeRedraw?
-    private let markViews: [SemanticSceneMarkControl]
+    private var items: [Item]
+    private var markFrames: [NSRect]
+    private var hitIndex: SemanticSceneHitIndex
+    private var actionableIndices: [Int]
+    private var accessibilityMarks: [SemanticSceneAccessibilityMark]?
+    private var movementTrackingArea: NSTrackingArea?
+    private var hoveredIndex: Int? {
+        didSet {
+            guard hoveredIndex != oldValue else { return }
+            toolTip = hoveredIndex.map(tooltip(at:))
+            refreshPointerClaims()
+            needsDisplay = true
+        }
+    }
+    private var pressedIndex: Int? {
+        didSet {
+            if pressedIndex != oldValue { needsDisplay = true }
+        }
+    }
+    private var pressOriginIndex: Int?
+    private var keyboardIndex: Int? {
+        didSet {
+            if keyboardIndex != oldValue { needsDisplay = true }
+        }
+    }
 
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { firstActionableIndex != nil }
+    override var restingPointer: NSCursor? {
+        guard let hoveredIndex, isActionable(hoveredIndex) else { return .arrow }
+        return .pointingHand
+    }
 
     init(accessibilityLabel: String, items: [Item]) {
-        markViews = items.map(SemanticSceneMarkControl.init(item:))
+        self.items = items
+        self.markFrames = Array(repeating: .zero, count: items.count)
+        self.hitIndex = SemanticSceneHitIndex(items: items)
+        self.actionableIndices = items.indices.filter {
+            items[$0].isEnabled && items[$0].onActivate != nil
+        }
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        themeRedraw = ThemeRedraw(self)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel(accessibilityLabel)
         setAccessibilityIdentifier("semantic-scene")
-
-        for mark in markViews {
-            addSubview(mark)
-        }
     }
 
     @available(*, unavailable)
@@ -98,8 +130,8 @@ final class SemanticSceneView: NSView, ThemedComponent {
 
     override func layout() {
         super.layout()
-        for mark in markViews {
-            let normalized = mark.item.normalizedFrame
+        markFrames = items.map { item in
+            let normalized = item.normalizedFrame
             let frame = NSRect(
                 x: normalized.minX * bounds.width,
                 y: normalized.minY * bounds.height,
@@ -110,8 +142,119 @@ final class SemanticSceneView: NSView, ThemedComponent {
                 Layout.itemGap / 2,
                 max(0, min(frame.width, frame.height) / 4)
             )
-            mark.frame = frame.insetBy(dx: inset, dy: inset)
+            return frame.insetBy(dx: inset, dy: inset)
         }
+        if hoveredIndex != nil {
+            guard isPointerInside, !isPointerCovered, let window else {
+                hoveredIndex = nil
+                return
+            }
+            hoveredIndex = markIndex(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        }
+    }
+
+    func update(items: [Item]) {
+        self.items = items
+        markFrames = Array(repeating: .zero, count: items.count)
+        hitIndex = SemanticSceneHitIndex(items: items)
+        actionableIndices = items.indices.filter {
+            items[$0].isEnabled && items[$0].onActivate != nil
+        }
+        accessibilityMarks = nil
+        hoveredIndex = nil
+        pressedIndex = nil
+        pressOriginIndex = nil
+        keyboardIndex = nil
+        needsLayout = true
+        needsDisplay = true
+        NSAccessibility.post(element: self, notification: .layoutChanged)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let movementTrackingArea { removeTrackingArea(movementTrackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        movementTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard let point = uncoveredPointerLocation(in: event) else {
+            hoveredIndex = nil
+            return
+        }
+        hoveredIndex = markIndex(at: point)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoveredIndex = nil
+        pressedIndex = nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let index = markIndex(at: convert(event.locationInWindow, from: nil))
+        guard let index, isActionable(index) else { return }
+        keyboardIndex = index
+        pressOriginIndex = index
+        pressedIndex = index
+        window?.makeFirstResponder(self)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let pressOriginIndex else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        pressedIndex = markFrames[pressOriginIndex].contains(point) ? pressOriginIndex : nil
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let pressOriginIndex else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        self.pressOriginIndex = nil
+        self.pressedIndex = nil
+        if markFrames[pressOriginIndex].contains(point) {
+            _ = activate(at: pressOriginIndex)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.charactersIgnoringModifiers {
+        case String(UnicodeScalar(NSLeftArrowFunctionKey)!),
+             String(UnicodeScalar(NSUpArrowFunctionKey)!):
+            moveKeyboardFocus(by: -1)
+        case String(UnicodeScalar(NSRightArrowFunctionKey)!),
+             String(UnicodeScalar(NSDownArrowFunctionKey)!):
+            moveKeyboardFocus(by: 1)
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted, keyboardIndex == nil { keyboardIndex = firstActionableIndex }
+        return accepted
+    }
+
+    override func performPrimaryAction() -> Bool {
+        guard let index = keyboardIndex ?? firstActionableIndex else { return false }
+        return activate(at: index)
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .group }
+    override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
+
+    override func accessibilityChildren() -> [Any]? {
+        if accessibilityMarks == nil {
+            accessibilityMarks = items.indices.map {
+                SemanticSceneAccessibilityMark(owner: self, index: $0)
+            }
+        }
+        return accessibilityMarks
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -120,6 +263,188 @@ final class SemanticSceneView: NSView, ThemedComponent {
             fill: Design.Surface.panel,
             border: Design.Surface.border,
             radius: Design.Radius.panel
+        )
+        for index in items.indices where markFrames.indices.contains(index) {
+            drawMark(at: index)
+        }
+    }
+
+    fileprivate func accessibilityFrame(at index: Int) -> NSRect {
+        guard markFrames.indices.contains(index), let window else { return .zero }
+        let frameInWindow = convert(markFrames[index], to: nil)
+        return window.convertToScreen(frameInWindow)
+    }
+
+    fileprivate func accessibilityItem(at index: Int) -> Item? {
+        items.indices.contains(index) ? items[index] : nil
+    }
+
+    fileprivate func accessibilityActivate(at index: Int) -> Bool {
+        keyboardIndex = index
+        return activate(at: index)
+    }
+
+    private var firstActionableIndex: Int? {
+        actionableIndices.first
+    }
+
+    private func isActionable(_ index: Int) -> Bool {
+        items.indices.contains(index) && items[index].isEnabled && items[index].onActivate != nil
+    }
+
+    private func activate(at index: Int) -> Bool {
+        guard isActionable(index), let action = items[index].onActivate else { return false }
+        action()
+        return true
+    }
+
+    private func moveKeyboardFocus(by delta: Int) {
+        guard !actionableIndices.isEmpty else { return }
+        guard let keyboardIndex,
+              let position = actionableIndices.firstIndex(of: keyboardIndex) else {
+            self.keyboardIndex = actionableIndices[
+                delta < 0 ? actionableIndices.count - 1 : 0
+            ]
+            return
+        }
+        let next = min(max(position + delta, 0), actionableIndices.count - 1)
+        self.keyboardIndex = actionableIndices[next]
+    }
+
+    private func markIndex(at point: NSPoint) -> Int? {
+        guard bounds.width > 0, bounds.height > 0 else { return nil }
+        let normalized = NSPoint(x: point.x / bounds.width, y: point.y / bounds.height)
+        for index in hitIndex.candidates(at: normalized).reversed()
+        where markFrames.indices.contains(index) && markFrames[index].contains(point) {
+            return index
+        }
+        return nil
+    }
+
+    private func tooltip(at index: Int) -> String {
+        let item = items[index]
+        return [
+            item.label ?? item.accessibilityLabel,
+            item.detail ?? item.accessibilityValue
+        ].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    private func drawMark(at index: Int) {
+        let item = items[index]
+        let frame = markFrames[index]
+        let base = color(for: item.color)
+        let emphasized = item.isSelected
+            || hoveredIndex == index
+            || pressedIndex == index
+            || (hasKeyboardFocus && keyboardIndex == index)
+        let fillAlpha: CGFloat = emphasized ? 0.28 : 0.16
+        let borderAlpha: CGFloat = emphasized ? 0.95 : 0.58
+        let path = shapePath(for: item.shape, in: frame)
+
+        base.withAlphaComponent(item.isEnabled ? fillAlpha : fillAlpha * 0.45).setFill()
+        path.fill()
+        base.withAlphaComponent(item.isEnabled ? borderAlpha : borderAlpha * 0.45).setStroke()
+        path.lineWidth = item.isSelected ? 2 : Design.Radius.border
+        path.stroke()
+
+        drawLabels(for: item, in: frame)
+        if keyboardIndex == index {
+            drawKeyboardFocus(
+                around: ThemedSurface.Shape(
+                    rect: frame,
+                    radius: cornerRadius(for: item.shape, in: frame)
+                ),
+                color: base
+            )
+        }
+    }
+
+    private func cornerRadius(for shape: Item.Shape, in frame: NSRect) -> CGFloat {
+        switch shape {
+        case .rectangle:
+            0
+        case .roundedRectangle:
+            Design.Radius.control(fitting: frame.size)
+        case .ellipse:
+            min(frame.width, frame.height) / 2
+        }
+    }
+
+    private func shapePath(for shape: Item.Shape, in frame: NSRect) -> NSBezierPath {
+        switch shape {
+        case .rectangle:
+            NSBezierPath(rect: frame)
+        case .roundedRectangle:
+            NSBezierPath(
+                roundedRect: frame,
+                xRadius: cornerRadius(for: shape, in: frame),
+                yRadius: cornerRadius(for: shape, in: frame)
+            )
+        case .ellipse:
+            NSBezierPath(ovalIn: frame)
+        }
+    }
+
+    private func color(for role: Item.Color) -> NSColor {
+        switch role {
+        case .neutral:
+            Design.Text.secondary
+        case .accent:
+            Design.Surface.accent
+        case .positive:
+            Design.Status.positive
+        case .warning:
+            Design.Status.warning
+        case .negative:
+            Design.Status.negative
+        case .category(let index):
+            Design.Categorical.hue(at: index).color
+        }
+    }
+
+    private func drawLabels(for item: Item, in frame: NSRect) {
+        guard frame.width >= 34, frame.height >= 22, let label = item.label else { return }
+        let inset = min(Design.Spacing.small, max(3, min(frame.width, frame.height) / 8))
+        let textRect = frame.insetBy(dx: inset, dy: inset)
+        guard textRect.width > 0, textRect.height > 0 else { return }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let labelFont = Design.Typography.control()
+        let labelHeight = ceil(labelFont.boundingRectForFont.height)
+        let labelRect = NSRect(
+            x: textRect.minX,
+            y: textRect.minY,
+            width: textRect.width,
+            height: min(labelHeight, textRect.height)
+        )
+        (label as NSString).draw(
+            in: labelRect,
+            withAttributes: [
+                .font: labelFont,
+                .foregroundColor: Design.Text.label,
+                .paragraphStyle: paragraph
+            ]
+        )
+
+        guard let detail = item.detail,
+              frame.height >= 42,
+              textRect.height > labelHeight + 2 else { return }
+        let detailFont = Design.Typography.detail()
+        let detailHeight = ceil(detailFont.boundingRectForFont.height)
+        let detailRect = NSRect(
+            x: textRect.minX,
+            y: labelRect.maxY + 2,
+            width: textRect.width,
+            height: detailHeight
+        )
+        (detail as NSString).draw(
+            in: detailRect,
+            withAttributes: [
+                .font: detailFont,
+                .foregroundColor: Design.Text.secondary,
+                .paragraphStyle: paragraph
+            ]
         )
     }
 }
@@ -136,7 +461,7 @@ final class SemanticHierarchySceneView: NSView, ThemedComponent {
     private let rootID: String
     private let items: [SemanticSceneView.Item]
     private let itemByID: [String: SemanticSceneView.Item]
-    private let childrenByParent: [String: [String]]
+    private let hierarchyIndex: SemanticSceneHierarchyIndex
     private let content = NSStackView()
     private let breadcrumb = NSStackView()
     private let canvasHost = NSView()
@@ -156,9 +481,7 @@ final class SemanticHierarchySceneView: NSView, ThemedComponent {
         self.rootID = rootID
         self.items = items
         self.itemByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
-        self.childrenByParent = Dictionary(grouping: items.compactMap { item in
-            item.parentID.map { ($0, item.id) }
-        }, by: \.0).mapValues { $0.map(\.1) }
+        self.hierarchyIndex = SemanticSceneHierarchyIndex(items: items)
         self.focusID = rootID
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -211,40 +534,38 @@ final class SemanticHierarchySceneView: NSView, ThemedComponent {
 
     private func renderFocus(animated: Bool) {
         guard let focus = itemByID[focusID] else { return }
-        let visible = items.enumerated().compactMap { index, item -> (Int, Int, SemanticSceneView.Item)? in
-            guard let depth = descendantDepth(of: item.id, from: focusID) else { return nil }
-            return (depth, index, transformed(item, relativeTo: focus, depth: depth))
-        }.sorted {
-            $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0
-        }.map(\.2)
-
-        let replacement = SemanticSceneView(
-            accessibilityLabel: accessibilityTitle,
-            items: visible
-        )
-        replacement.translatesAutoresizingMaskIntoConstraints = false
-        canvasHost.addSubview(replacement)
-        NSLayoutConstraint.activate([
-            replacement.topAnchor.constraint(equalTo: canvasHost.topAnchor),
-            replacement.bottomAnchor.constraint(equalTo: canvasHost.bottomAnchor),
-            replacement.leadingAnchor.constraint(equalTo: canvasHost.leadingAnchor),
-            replacement.trailingAnchor.constraint(equalTo: canvasHost.trailingAnchor)
-        ])
-
-        let outgoing = canvas
-        canvas = replacement
-        rebuildBreadcrumb()
-        guard animated, Design.Motion.standard > 0 else {
-            outgoing?.removeFromSuperview()
-            return
+        let visible = hierarchyIndex.traversal(focusedOn: focusID).visibleItems.map {
+            transformed(items[$0.index], relativeTo: focus, depth: $0.depth)
         }
-        replacement.alphaValue = 0
+
+        let renderedCanvas: SemanticSceneView
+        if let canvas {
+            canvas.update(items: visible)
+            renderedCanvas = canvas
+        } else {
+            let newCanvas = SemanticSceneView(
+                accessibilityLabel: accessibilityTitle,
+                items: visible
+            )
+            newCanvas.translatesAutoresizingMaskIntoConstraints = false
+            canvasHost.addSubview(newCanvas)
+            NSLayoutConstraint.activate([
+                newCanvas.topAnchor.constraint(equalTo: canvasHost.topAnchor),
+                newCanvas.bottomAnchor.constraint(equalTo: canvasHost.bottomAnchor),
+                newCanvas.leadingAnchor.constraint(equalTo: canvasHost.leadingAnchor),
+                newCanvas.trailingAnchor.constraint(equalTo: canvasHost.trailingAnchor)
+            ])
+            canvas = newCanvas
+            renderedCanvas = newCanvas
+        }
+        rebuildBreadcrumb()
+        guard animated, Design.Motion.standard > 0 else { return }
+        // Navigation changes the value model on the one retained canvas. A quiet fade confirms
+        // the zoom without retaining the outgoing 500-mark tree beside its replacement.
+        renderedCanvas.alphaValue = 0.72
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = Design.Motion.standard
-            replacement.animator().alphaValue = 1
-            outgoing?.animator().alphaValue = 0
-        }, completionHandler: {
-            outgoing?.removeFromSuperview()
+            renderedCanvas.animator().alphaValue = 1
         })
     }
 
@@ -261,7 +582,7 @@ final class SemanticHierarchySceneView: NSView, ThemedComponent {
             width: frame.width / focusFrame.width,
             height: frame.height / focusFrame.height
         )
-        let hasChildren = childrenByParent[item.id]?.isEmpty == false
+        let hasChildren = hierarchyIndex.hasChildren(item.id)
         let parentID = item.parentID
         let activation: (() -> Void)?
         if item.id == focusID {
@@ -291,18 +612,6 @@ final class SemanticHierarchySceneView: NSView, ThemedComponent {
             isSelected: item.isSelected || item.id == focusID,
             onActivate: activation
         )
-    }
-
-    private func descendantDepth(of itemID: String, from ancestorID: String) -> Int? {
-        var cursor = itemID
-        var depth = 0
-        for _ in 0...items.count {
-            if cursor == ancestorID { return depth }
-            guard let parentID = itemByID[cursor]?.parentID else { return nil }
-            cursor = parentID
-            depth += 1
-        }
-        return nil
     }
 
     private func focus(on itemID: String) {
@@ -368,35 +677,129 @@ final class SemanticHierarchySceneView: NSView, ThemedComponent {
     }
 }
 
-/// One scene mark is a real native control when it can act, and a real accessibility element
-/// when it cannot. It deliberately owns no extension types; the renderer translates the public
-/// wire vocabulary at the boundary.
+/// Fixed normalized-space buckets keep pointer movement proportional to the marks near the
+/// pointer. Buckets are a candidate index, not hit geometry; the canvas applies the exact inset
+/// frame before accepting a mark. Array order is retained so the last painted mark still wins.
 @MainActor
-private final class SemanticSceneMarkControl: ThemedControl {
+private struct SemanticSceneHitIndex {
+    private static let dimension = 16
+    private var buckets: [[Int]]
 
-    fileprivate let item: SemanticSceneView.Item
-    private var isPressed = false {
-        didSet { needsDisplay = true }
-    }
-
-    override var acceptsFirstResponder: Bool {
-        item.onActivate != nil && isEnabled
-    }
-
-    init(item: SemanticSceneView.Item) {
-        self.item = item
-        super.init(frame: .zero)
-        isEnabled = item.isEnabled
-        setAccessibilityIdentifier("semantic-scene.item.\(item.id)")
-        setAccessibilityLabel(item.accessibilityLabel)
-        if let value = item.accessibilityValue {
-            setAccessibilityValue(value)
+    init(items: [SemanticSceneView.Item]) {
+        buckets = Array(repeating: [], count: Self.dimension * Self.dimension)
+        for (index, item) in items.enumerated() {
+            let frame = item.normalizedFrame
+            let minimumColumn = Self.cell(for: frame.minX)
+            let maximumColumn = Self.cell(for: frame.maxX)
+            let minimumRow = Self.cell(for: frame.minY)
+            let maximumRow = Self.cell(for: frame.maxY)
+            for row in minimumRow...maximumRow {
+                for column in minimumColumn...maximumColumn {
+                    buckets[row * Self.dimension + column].append(index)
+                }
+            }
         }
-        setAccessibilitySelected(item.isSelected)
-        toolTip = [
-            item.label ?? item.accessibilityLabel,
-            item.detail ?? item.accessibilityValue
-        ].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    func candidates(at point: NSPoint) -> [Int] {
+        guard (0...1).contains(point.x), (0...1).contains(point.y) else { return [] }
+        let column = Self.cell(for: point.x)
+        let row = Self.cell(for: point.y)
+        return buckets[row * Self.dimension + column]
+    }
+
+    private static func cell(for coordinate: CGFloat) -> Int {
+        min(max(Int(floor(coordinate * CGFloat(dimension))), 0), dimension - 1)
+    }
+}
+
+/// The hierarchy's value index. Focus changes are explicit navigation rather than a hot callback,
+/// but the 500-mark stress case still gets one child traversal plus one source-order scan. The old
+/// implementation walked every mark's full ancestor path, making a deep hierarchy quadratic.
+@MainActor
+struct SemanticSceneHierarchyIndex {
+    struct VisibleItem {
+        let index: Int
+        let depth: Int
+    }
+
+    struct Traversal {
+        let visibleItems: [VisibleItem]
+        /// The exact number of item-sized steps, exposed so the stress test pins linear work.
+        let workCount: Int
+    }
+
+    private let items: [SemanticSceneView.Item]
+    private let indexByID: [String: Int]
+    private let childrenByParent: [String: [Int]]
+
+    init(items: [SemanticSceneView.Item]) {
+        self.items = items
+        self.indexByID = Dictionary(uniqueKeysWithValues: items.enumerated().map {
+            ($0.element.id, $0.offset)
+        })
+        self.childrenByParent = Dictionary(grouping: items.enumerated().compactMap {
+            index, item in item.parentID.map { ($0, index) }
+        }, by: \.0).mapValues { $0.map(\.1) }
+    }
+
+    func hasChildren(_ itemID: String) -> Bool {
+        childrenByParent[itemID]?.isEmpty == false
+    }
+
+    func traversal(focusedOn focusID: String) -> Traversal {
+        guard let focusIndex = indexByID[focusID] else {
+            return Traversal(visibleItems: [], workCount: 0)
+        }
+        var depths = Array(repeating: -1, count: items.count)
+        var stack = [(focusIndex, 0)]
+        var traversed = 0
+        var maximumDepth = 0
+
+        while let (index, depth) = stack.popLast() {
+            guard depths[index] < 0 else { continue }
+            depths[index] = depth
+            maximumDepth = max(maximumDepth, depth)
+            traversed += 1
+            let children = childrenByParent[items[index].id] ?? []
+            for child in children.reversed() {
+                stack.append((child, depth + 1))
+            }
+        }
+
+        var byDepth = Array(repeating: [VisibleItem](), count: maximumDepth + 1)
+        for index in items.indices {
+            let depth = depths[index]
+            if depth >= 0 { byDepth[depth].append(VisibleItem(index: index, depth: depth)) }
+        }
+        let visible = byDepth.flatMap { $0 }
+        return Traversal(
+            visibleItems: visible,
+            workCount: traversed + items.count + visible.count
+        )
+    }
+}
+
+/// A mark stays individually native to VoiceOver without becoming an AppKit view. Static semantic
+/// fields are captured when the canvas exposes its children; geometry remains live across layout.
+@MainActor
+private final class SemanticSceneAccessibilityMark: NSAccessibilityElement {
+    private weak var owner: SemanticSceneView?
+    private let index: Int
+
+    init(owner: SemanticSceneView, index: Int) {
+        self.owner = owner
+        self.index = index
+        super.init()
+        if let item = owner.accessibilityItem(at: index) {
+            setAccessibilityParent(owner)
+            setAccessibilityRole(item.onActivate == nil ? .group : .button)
+            setAccessibilityIdentifier("semantic-scene.item.\(item.id)")
+            setAccessibilityLabel(item.accessibilityLabel)
+            setAccessibilityValue(item.accessibilityValue)
+            setAccessibilityEnabled(item.isEnabled)
+            setAccessibilitySelected(item.isSelected)
+        }
     }
 
     @available(*, unavailable)
@@ -404,153 +807,15 @@ private final class SemanticSceneMarkControl: ThemedControl {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// A mark that acts is pressable geometry rather than a control's plate, so it takes the
-    /// hand; one that does not act is still opaque, so it takes the arrow. See `PointerClaiming`.
-    override var restingPointer: NSCursor? {
-        item.onActivate != nil && isEnabled ? .pointingHand : .arrow
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        guard item.onActivate != nil, isEnabled else { return }
-        isPressed = true
-        window?.makeFirstResponder(self)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard item.onActivate != nil, isEnabled else { return }
-        isPressed = bounds.contains(convert(event.locationInWindow, from: nil))
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        let shouldActivate = isPressed
-            && bounds.contains(convert(event.locationInWindow, from: nil))
-        isPressed = false
-        if shouldActivate { _ = performPrimaryAction() }
-    }
-
-    override func performPrimaryAction() -> Bool {
-        guard let onActivate = item.onActivate, isEnabled else { return false }
-        onActivate()
-        return true
-    }
-
-    override func accessibilityRole() -> NSAccessibility.Role? {
-        item.onActivate == nil ? .group : .button
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        performPrimaryAction()
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let base = color(for: item.color)
-        let emphasized = item.isSelected || isHovered || isPressed || hasKeyboardFocus
-        let fillAlpha: CGFloat = emphasized ? 0.28 : 0.16
-        let borderAlpha: CGFloat = emphasized ? 0.95 : 0.58
-        let path = shapePath()
-
-        base.withAlphaComponent(isEnabled ? fillAlpha : fillAlpha * 0.45).setFill()
-        path.fill()
-        base.withAlphaComponent(isEnabled ? borderAlpha : borderAlpha * 0.45).setStroke()
-        path.lineWidth = item.isSelected ? 2 : Design.Radius.border
-        path.stroke()
-
-        drawLabels()
-        drawKeyboardFocus(
-            around: ThemedSurface.Shape(
-                rect: bounds,
-                radius: cornerRadius
-            ),
-            color: base
-        )
-    }
-
-    private var cornerRadius: CGFloat {
-        switch item.shape {
-        case .rectangle:
-            0
-        case .roundedRectangle:
-            Design.Radius.control(fitting: bounds.size)
-        case .ellipse:
-            min(bounds.width, bounds.height) / 2
+    override nonisolated func accessibilityFrame() -> NSRect {
+        MainActor.assumeIsolated {
+            owner?.accessibilityFrame(at: index) ?? .zero
         }
     }
 
-    private func shapePath() -> NSBezierPath {
-        switch item.shape {
-        case .rectangle:
-            NSBezierPath(rect: bounds)
-        case .roundedRectangle:
-            NSBezierPath(
-                roundedRect: bounds,
-                xRadius: cornerRadius,
-                yRadius: cornerRadius
-            )
-        case .ellipse:
-            NSBezierPath(ovalIn: bounds)
+    override nonisolated func accessibilityPerformPress() -> Bool {
+        MainActor.assumeIsolated {
+            owner?.accessibilityActivate(at: index) ?? false
         }
-    }
-
-    private func color(for role: SemanticSceneView.Item.Color) -> NSColor {
-        switch role {
-        case .neutral:
-            Design.Text.secondary
-        case .accent:
-            Design.Surface.accent
-        case .positive:
-            Design.Status.positive
-        case .warning:
-            Design.Status.warning
-        case .negative:
-            Design.Status.negative
-        case .category(let index):
-            Design.Categorical.hue(at: index).color
-        }
-    }
-
-    private func drawLabels() {
-        guard bounds.width >= 34, bounds.height >= 22, let label = item.label else { return }
-        let inset = min(Design.Spacing.small, max(3, min(bounds.width, bounds.height) / 8))
-        let textRect = bounds.insetBy(dx: inset, dy: inset)
-        guard textRect.width > 0, textRect.height > 0 else { return }
-
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
-        let labelFont = Design.Typography.control()
-        let labelHeight = ceil(labelFont.boundingRectForFont.height)
-        let labelRect = NSRect(
-            x: textRect.minX,
-            y: textRect.maxY - labelHeight,
-            width: textRect.width,
-            height: min(labelHeight, textRect.height)
-        )
-        (label as NSString).draw(
-            in: labelRect,
-            withAttributes: [
-                .font: labelFont,
-                .foregroundColor: Design.Text.label,
-                .paragraphStyle: paragraph
-            ]
-        )
-
-        guard let detail = item.detail,
-              bounds.height >= 42,
-              textRect.height > labelHeight + 2 else { return }
-        let detailFont = Design.Typography.detail()
-        let detailHeight = ceil(detailFont.boundingRectForFont.height)
-        let detailRect = NSRect(
-            x: textRect.minX,
-            y: labelRect.minY - detailHeight - 2,
-            width: textRect.width,
-            height: detailHeight
-        )
-        (detail as NSString).draw(
-            in: detailRect,
-            withAttributes: [
-                .font: detailFont,
-                .foregroundColor: Design.Text.secondary,
-                .paragraphStyle: paragraph
-            ]
-        )
     }
 }

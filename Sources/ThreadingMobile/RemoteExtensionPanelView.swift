@@ -554,11 +554,65 @@ private struct RemoteExtensionImageView: View {
     }
 }
 
+/// The phone's semantic hierarchy projection has the same tens-of-marks expectation and 500-mark
+/// stress bound as the Mac. One child traversal plus one source-order scan replaces a full parent
+/// walk per mark whenever focus changes.
+struct RemoteExtensionSceneHierarchyIndex {
+    struct Traversal {
+        let visibleItems: [ExtensionSceneItem]
+        let workCount: Int
+    }
+
+    private let items: [ExtensionSceneItem]
+    private let indexByID: [String: Int]
+    private let childrenByParent: [String: [Int]]
+
+    init(items: [ExtensionSceneItem]) {
+        self.items = items
+        self.indexByID = Dictionary(uniqueKeysWithValues: items.enumerated().map {
+            ($0.element.id, $0.offset)
+        })
+        self.childrenByParent = Dictionary(grouping: items.enumerated().compactMap {
+            index, item in item.parentID.map { ($0, index) }
+        }, by: \.0).mapValues { $0.map(\.1) }
+    }
+
+    func traversal(focusedOn focusID: String) -> Traversal {
+        guard let focusIndex = indexByID[focusID] else {
+            return Traversal(visibleItems: [], workCount: 0)
+        }
+        var depths = Array(repeating: -1, count: items.count)
+        var stack = [(focusIndex, 0)]
+        var traversed = 0
+        var maximumDepth = 0
+        while let (index, depth) = stack.popLast() {
+            guard depths[index] < 0 else { continue }
+            depths[index] = depth
+            maximumDepth = max(maximumDepth, depth)
+            traversed += 1
+            for child in (childrenByParent[items[index].id] ?? []).reversed() {
+                stack.append((child, depth + 1))
+            }
+        }
+        var byDepth = Array(repeating: [ExtensionSceneItem](), count: maximumDepth + 1)
+        for index in items.indices {
+            let depth = depths[index]
+            if depth >= 0 { byDepth[depth].append(items[index]) }
+        }
+        let visible = byDepth.flatMap { $0 }
+        return Traversal(
+            visibleItems: visible,
+            workCount: traversed + items.count + visible.count
+        )
+    }
+}
+
 private struct RemoteExtensionSceneView: View {
     let scene: ExtensionScene
     let onEvent: (String, ExtensionJSONValue?) -> Void
     private let itemByID: [String: ExtensionSceneItem]
     private let parentIDs: Set<String>
+    private let hierarchyIndex: RemoteExtensionSceneHierarchyIndex
 
     @State private var focusID: String?
 
@@ -572,6 +626,7 @@ private struct RemoteExtensionSceneView: View {
         self.onEvent = onEvent
         self.itemByID = Dictionary(uniqueKeysWithValues: scene.items.map { ($0.id, $0) })
         self.parentIDs = Set(scene.items.compactMap(\.parentID))
+        self.hierarchyIndex = RemoteExtensionSceneHierarchyIndex(items: scene.items)
         _focusID = State(initialValue: scene.hierarchy?.rootID)
     }
 
@@ -651,16 +706,7 @@ private struct RemoteExtensionSceneView: View {
 
     private var visibleItems: [ExtensionSceneItem] {
         guard let focusID else { return scene.items }
-        var visible: [(depth: Int, index: Int, item: ExtensionSceneItem)] = []
-        visible.reserveCapacity(scene.items.count)
-        for (index, item) in scene.items.enumerated() {
-            guard let depth = descendantDepth(of: item.id, from: focusID) else { continue }
-            visible.append((depth: depth, index: index, item: item))
-        }
-        visible.sort { lhs, rhs in
-            lhs.depth == rhs.depth ? lhs.index < rhs.index : lhs.depth < rhs.depth
-        }
-        return visible.map(\.item)
+        return hierarchyIndex.traversal(focusedOn: focusID).visibleItems
     }
 
     private var focusPath: [ExtensionSceneItem] {
@@ -677,7 +723,7 @@ private struct RemoteExtensionSceneView: View {
 
     private func transformedFrame(for item: ExtensionSceneItem) -> ExtensionSceneRect {
         guard let focusID,
-              let focus = scene.items.first(where: { $0.id == focusID }) else {
+              let focus = itemByID[focusID] else {
             return item.frame
         }
         return ExtensionSceneRect(
@@ -686,18 +732,6 @@ private struct RemoteExtensionSceneView: View {
             width: item.frame.width / focus.frame.width,
             height: item.frame.height / focus.frame.height
         )
-    }
-
-    private func descendantDepth(of itemID: String, from ancestorID: String) -> Int? {
-        var cursor = itemID
-        var depth = 0
-        for _ in 0...scene.items.count {
-            if cursor == ancestorID { return depth }
-            guard let parentID = itemByID[cursor]?.parentID else { return nil }
-            cursor = parentID
-            depth += 1
-        }
-        return nil
     }
 
     private func isNavigable(_ item: ExtensionSceneItem) -> Bool {

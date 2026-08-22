@@ -97,18 +97,10 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTAssertEqual(picker.accessibilityTitle(), "Grouping")
     picker.chooseItem(at: 0)
 
-    let sceneItem = try XCTUnwrap(
-      allViews.first {
-        $0.accessibilityIdentifier() == "semantic-scene.item.build-products"
-      }
-    )
+    let sceneItem = try XCTUnwrap(sceneItem(withID: "build-products", in: host))
     XCTAssertEqual(sceneItem.accessibilityRole(), .button)
     XCTAssertTrue(sceneItem.accessibilityPerformPress())
-    let selectedSceneItem = try XCTUnwrap(
-      allViews.first {
-        $0.accessibilityIdentifier() == "semantic-scene.item.artifact-root"
-      }
-    )
+    let selectedSceneItem = try XCTUnwrap(sceneItem(withID: "artifact-root", in: host))
     XCTAssertTrue(selectedSceneItem.isAccessibilitySelected())
 
     XCTAssertEqual(
@@ -134,17 +126,9 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let hierarchy = try XCTUnwrap(
       descendants(in: host).compactMap { $0 as? SemanticHierarchySceneView }.first
     )
-    let root = try XCTUnwrap(
-      descendants(in: hierarchy).first {
-        $0.accessibilityIdentifier() == "semantic-scene.item.artifact-root"
-      }
-    )
+    let root = try XCTUnwrap(sceneItem(withID: "artifact-root", in: hierarchy))
     XCTAssertEqual(root.accessibilityRole(), .group)
-    let branch = try XCTUnwrap(
-      descendants(in: hierarchy).first {
-        $0.accessibilityIdentifier() == "semantic-scene.item.build"
-      }
-    )
+    let branch = try XCTUnwrap(sceneItem(withID: "build", in: hierarchy))
     XCTAssertTrue(branch.accessibilityPerformPress())
     XCTAssertEqual(events, [], "host-owned navigation must not round-trip to the extension")
     XCTAssertNotNil(
@@ -164,6 +148,15 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         $0.accessibilityIdentifier() == "semantic-scene.breadcrumb.artifact-root"
       }
     )
+  }
+
+  /// Scene marks are native accessibility children, but deliberately not 500 native views.
+  private func sceneItem(withID id: String, in root: NSView) -> NSAccessibilityElement? {
+    descendants(in: root)
+      .compactMap { $0 as? SemanticSceneView }
+      .flatMap { $0.accessibilityChildren() ?? [] }
+      .compactMap { $0 as? NSAccessibilityElement }
+      .first { $0.accessibilityIdentifier() == "semantic-scene.item.\(id)" }
   }
 
   func testHierarchySceneRequiresOneConnectedRoot() {
