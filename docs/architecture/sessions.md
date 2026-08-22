@@ -1388,6 +1388,13 @@ were doing; and it does not relaunch the agent, because archiving stopped it exa
 does and starting a process is a heavier thing than a click being taken back. The session
 returns dormant, with Resume on its placeholder.
 
+For a provider-backed archive, “took it off screen” is decided when the provider command commits,
+not when that potentially slow command began. A newer sidebar selection owns the pane and an older
+archive completion must not replace it with the empty state. The lifecycle event may already have
+cleared the archived page before the initiating coordinator receives completion; in that case the
+sidebar's still-selected session identity is the evidence Undo uses. If selection already names
+another session at that commit, neither the completion nor its Undo may move focus back.
+
 `ConfirmationPrompt.archiveRunningSession` was removed rather than left switched off: a case
 nobody asks still ships a Settings row for a question that no longer exists. The line the
 register now draws is written beside the remaining lifecycle cases — **a prompt is right where

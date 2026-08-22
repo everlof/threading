@@ -8,6 +8,12 @@ import AppKit
 @MainActor
 final class SessionCoordinator: SessionComposerViewControllerDelegate {
 
+    typealias ArchiveStateSetter = (
+        _ archived: Bool,
+        _ sessionID: SessionID,
+        _ completion: @escaping ProviderArchiveSync.Completion
+    ) -> Void
+
     /// Not private: `SessionCoordinator+ScheduledMessages` performs a due send against the same
     /// two surfaces every other lifecycle decision here goes through, and a scheduled start that
     /// reached for its own sidebar would be a second answer to "where does a session appear".
@@ -15,6 +21,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     let container: TerminalContainerViewController
     let environment: AppEnvironment
     let onPresentationChanged: () -> Void
+    private let archiveStateSetter: ArchiveStateSetter
 
     /// Consumed by the next selected session exactly once.
     private var pendingPrompt: String?
@@ -31,12 +38,20 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         sidebar: ProjectSidebarViewController,
         container: TerminalContainerViewController,
         environment: AppEnvironment,
-        onPresentationChanged: @escaping () -> Void
+        onPresentationChanged: @escaping () -> Void,
+        archiveStateSetter: @escaping ArchiveStateSetter = { archived, sessionID, completion in
+            ProviderArchiveSync.shared.setArchived(
+                archived,
+                for: sessionID,
+                completion: completion
+            )
+        }
     ) {
         self.sidebar = sidebar
         self.container = container
         self.environment = environment
         self.onPresentationChanged = onPresentationChanged
+        self.archiveStateSetter = archiveStateSetter
 
         // An agent asked to be done with its session, and its turn has now ended. It arrives as
         // an announcement rather than a call because `SessionArchiveScheduler` is in Core and
@@ -411,17 +426,23 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
               !session.isArchived else { return false }
 
         let wasRunning = environment.agentRuntime.isRunning(sessionID: sessionID)
-        let wasShowing = sessionID == container.currentSessionID
-
-        ProviderArchiveSync.shared.setArchived(true, for: sessionID) { [weak self] result in
+        archiveStateSetter(true, sessionID) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
-                if wasShowing {
+                let presentation = Self.archivePresentationResolution(
+                    archivedSessionID: sessionID,
+                    visibleSessionID: container.currentSessionID,
+                    selectedSessionID: environment.projectStore.selectedSessionID
+                )
+                if presentation.clearsVisibleSession {
                     container.show(sessionID: nil)
                 }
                 sidebar.presentToast(receipt(session, wasRunning) { [weak self] in
-                    self?.restore(sessionID, reselecting: wasShowing)
+                    self?.restore(
+                        sessionID,
+                        reselecting: presentation.reselectsOnUndo
+                    )
                 })
                 onArchived()
             case .failure(let failure):
@@ -434,6 +455,29 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
         }
         return true
+    }
+
+    /// Resolves navigation at the archive's commit edge, not when a potentially slow provider
+    /// command began. A newer selection owns the pane and must survive the older archive.
+    ///
+    /// The archive-state event can clear the target before this completion runs. In that case
+    /// the persisted sidebar selection is the evidence that this archive took the page away and
+    /// that Undo should restore it. An explicit move to another session updates that selection,
+    /// so the archived page cannot reclaim focus from its replacement.
+    static func archivePresentationResolution(
+        archivedSessionID: SessionID,
+        visibleSessionID: SessionID?,
+        selectedSessionID: SessionID?
+    ) -> (clearsVisibleSession: Bool, reselectsOnUndo: Bool) {
+        if visibleSessionID == archivedSessionID {
+            let stillSelected = selectedSessionID == nil
+                || selectedSessionID == archivedSessionID
+            return (stillSelected, stillSelected)
+        }
+        if visibleSessionID == nil, selectedSessionID == archivedSessionID {
+            return (false, true)
+        }
+        return (false, false)
     }
 
     /// Integration happens before provider filing because the process must still have reached
@@ -496,7 +540,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
         }
 
-        ProviderArchiveSync.shared.setArchived(false, for: sessionID) { [weak self] result in
+        archiveStateSetter(false, sessionID) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
