@@ -812,7 +812,7 @@ private final class SemanticSceneAccessibilityMark: NSAccessibilityElement {
     override nonisolated func accessibilityFrame() -> NSRect {
         let owner = owner
         let index = index
-        MainActor.assumeIsolated {
+        return MainActor.assumeIsolated {
             owner?.accessibilityFrame(at: index) ?? .zero
         }
     }
@@ -820,7 +820,7 @@ private final class SemanticSceneAccessibilityMark: NSAccessibilityElement {
     override nonisolated func accessibilityPerformPress() -> Bool {
         let owner = owner
         let index = index
-        MainActor.assumeIsolated {
+        return MainActor.assumeIsolated {
             owner?.accessibilityActivate(at: index) ?? false
         }
     }
