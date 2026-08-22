@@ -562,13 +562,14 @@ private struct SurfaceChangeRequest {
     let surface: RemoteSessionSurface
 }
 
-struct SharedSessionLink: Identifiable {
-    let id = UUID()
-    let sessionTitle: String
-    let url: URL
-    let capability: String
-    let canApprovePermissions: Bool
-    let expiresAt: Date
+/// The chat Share Chat was asked about, held for as long as its sheet is up.
+///
+/// Identified by the chat rather than by a fresh `UUID`, so re-asking about the same chat
+/// reuses the presentation instead of stacking a second one on it.
+struct ShareChatRequest: Identifiable {
+    let session: RemoteSessionSummaryDTO
+
+    var id: String { session.id }
 }
 
 struct SessionDashboard: View {
@@ -597,8 +598,7 @@ struct SessionDashboard: View {
     @State private var actionError: String?
     @State private var pendingActionSessionID: String?
     @State private var surfaceChangeRequest: SurfaceChangeRequest?
-    @State private var sharingSession: RemoteSessionSummaryDTO?
-    @State private var sharedLink: SharedSessionLink?
+    @State private var shareRequest: ShareChatRequest?
     @State private var showsUsage = false
     /// Once disclosed, recovery stays put while the next automatic attempt runs. Clearing it on
     /// `.connecting` made the full card and the compact progress card replace each other on every
@@ -856,9 +856,13 @@ struct SessionDashboard: View {
                 .environmentObject(model)
                 .mobileTheme(theme)
         }
-        .sheet(item: $sharedLink) { link in
-            SharedSessionLinkView(link: link)
-                .mobileTheme(theme)
+        .sheet(item: $shareRequest) { request in
+            ShareChatSheet(
+                chatTitle: request.session.title,
+                isChatRunning: request.session.isAvailable,
+                mint: { role in try await mintShareLink(for: request.session, role: role) }
+            )
+            .mobileTheme(theme)
         }
         .sheet(isPresented: $showsUsage) {
             if let link = model.activeHost?.link {
@@ -905,52 +909,7 @@ struct SessionDashboard: View {
                 get: { surfaceChangeRequest != nil },
                 set: { if !$0 { surfaceChangeRequest = nil } }
             ),
-            actions: [
-                ThemedDialogAction("Switch UI", systemImage: "rectangle.2.swap") {
-                    guard let request = surfaceChangeRequest else { return }
-                    surfaceChangeRequest = nil
-                    mutate(request.session) {
-                        try await model.setSurface(request.surface, for: request.session)
-                    }
-                },
-                ThemedDialogAction("Cancel", role: .cancel) {
-                    surfaceChangeRequest = nil
-                },
-            ]
-        )
-        .themedConfirmationDialog(
-            sharingSession.map {
-                MobileL10n.string("Share “%@”", $0.title)
-            } ?? "Share session",
-            message: sharingDialogMessage,
-            isPresented: Binding(
-                get: { sharingSession != nil },
-                set: { if !$0 { sharingSession = nil } }
-            ),
-            actions: [
-                ThemedDialogAction(
-                    "View only",
-                    systemImage: "eye",
-                    isEnabled: sharingSession?.isAvailable == true
-                ) {
-                    createShare(capability: "view")
-                },
-                ThemedDialogAction(
-                    "Allow collaboration",
-                    systemImage: "person.2"
-                ) {
-                    createShare(capability: "interact")
-                },
-                ThemedDialogAction(
-                    "Collaboration + approvals",
-                    systemImage: "checkmark.shield"
-                ) {
-                    createShare(capability: "interact", canApprovePermissions: true)
-                },
-                ThemedDialogAction("Cancel", role: .cancel) {
-                    sharingSession = nil
-                },
-            ]
+            actions: surfaceChangeActions(for: surfaceChangeRequest)
         )
         .themedAlert(
             "Rename session",
@@ -1194,44 +1153,52 @@ struct SessionDashboard: View {
             guard surface != session.surface else { return }
             surfaceChangeRequest = .init(session: session, surface: surface)
         case .share:
-            sharingSession = session
+            shareRequest = .init(session: session)
         case .stopSharing:
             mutate(session) { try await model.revokeShares(for: session) }
         }
     }
 
-    private func createShare(
-        capability: String,
-        canApprovePermissions: Bool = false
-    ) {
-        guard let session = sharingSession, pendingActionSessionID == nil else { return }
-        sharingSession = nil
-        pendingActionSessionID = session.id
-        Task {
-            defer { pendingActionSessionID = nil }
-            do {
-                let response = try await model.createShare(
-                    for: session,
-                    capability: capability,
-                    canApprovePermissions: canApprovePermissions
-                )
-                guard let url = URL(string: response.url) else {
-                    throw RemoteClientError.invalidResponse
+    /// The same capture, for the same reason, on the surface switch.
+    private func surfaceChangeActions(
+        for request: SurfaceChangeRequest?
+    ) -> [ThemedDialogAction] {
+        guard let request else { return [] }
+        return [
+            ThemedDialogAction("Switch UI") {
+                surfaceChangeRequest = nil
+                mutate(request.session) {
+                    try await model.setSurface(request.surface, for: request.session)
                 }
-                sharedLink = SharedSessionLink(
-                    sessionTitle: session.title,
-                    url: url,
-                    capability: response.capability,
-                    canApprovePermissions: response.canApprovePermissions,
-                    expiresAt: Date(timeIntervalSince1970: response.expiresAt)
-                )
-            } catch is CancellationError {
-                return
-            } catch {
-                MobileDiagnostics.logDegraded(.sessionAction, error: error)
-                actionError = error.localizedDescription
-            }
+            },
+            ThemedDialogAction("Cancel", role: .cancel) { surfaceChangeRequest = nil },
+        ]
+    }
+
+    /// Mints one invitation for the sheet's chosen grant.
+    ///
+    /// It throws rather than posting an error of its own: the sheet is the surface that asked,
+    /// so the sheet is where the failure has to appear. Reporting it on the dashboard behind an
+    /// open sheet is a message nobody can see.
+    private func mintShareLink(
+        for session: RemoteSessionSummaryDTO,
+        role: ShareChatRole
+    ) async throws -> SharedSessionLink {
+        let response = try await model.createShare(
+            for: session,
+            capability: role.capability.rawValue,
+            canApprovePermissions: role.canApprovePermissions
+        )
+        guard let url = URL(string: response.url) else {
+            throw RemoteClientError.invalidResponse
         }
+        return SharedSessionLink(
+            sessionTitle: session.title,
+            url: url,
+            capability: response.capability,
+            canApprovePermissions: response.canApprovePermissions,
+            expiresAt: Date(timeIntervalSince1970: response.expiresAt)
+        )
     }
 
     private func surfaceTitle(
@@ -1242,20 +1209,6 @@ struct SessionDashboard: View {
             return MobileL10n.string("Native (Experimental)")
         }
         return MobileAgentIdentity.resolve(session.agentKind).originalUITitle
-    }
-
-    private var sharingDialogMessage: String {
-        var result = MobileL10n.string(
-            "This single-use invitation opens only this chat and expires in 24 hours if unused. "
-                + "An accepted member stays until you stop sharing. Permission approval is a "
-                + "separate right for people you trust."
-        )
-        if sharingSession?.isAvailable == false {
-            result += MobileL10n.string(
-                " Start the chat first to create a view-only link."
-            )
-        }
-        return result
     }
 
     private func mutate(
@@ -1937,97 +1890,6 @@ private struct SessionListItem: View {
                 Label("Archive", systemImage: "archivebox")
             }
         }
-    }
-}
-
-struct SharedSessionLinkView: View {
-    let link: SharedSessionLink
-    @Environment(\.remoteTheme) private var theme
-    @Environment(\.dismiss) private var dismiss
-    @State private var copied = false
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 22) {
-                Image(systemName: link.capability == "interact"
-                    ? "person.2.badge.gearshape"
-                    : "person.2")
-                    .font(.system(size: 42, weight: .light))
-                    .foregroundStyle(theme.accent)
-
-                VStack(spacing: 7) {
-                    Text("Link ready")
-                        .font(.title2.bold())
-                    Text(link.sessionTitle)
-                        .font(.headline)
-                    Text(MobileL10n.string(link.capability == "interact"
-                        ? (link.canApprovePermissions
-                            ? "Can collaborate and approve requests"
-                            : "Can collaborate in this chat")
-                        : "Can view this chat"))
-                        .font(.subheadline)
-                        .foregroundStyle(theme.secondaryLabel)
-                    Text("Unused invite expires \(link.expiresAt.formatted(.relative(presentation: .named)))")
-                        .font(.caption)
-                        .foregroundStyle(theme.tertiaryLabel)
-                }
-                .multilineTextAlignment(.center)
-
-                ShareLink(item: link.url) {
-                    Label("Share link", systemImage: "square.and.arrow.up")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 56)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(theme.accentForeground)
-                .background(
-                    theme.accent,
-                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                )
-
-                Button {
-                    UIPasteboard.general.string = link.url.absoluteString
-                    copied = true
-                } label: {
-                    Label(MobileL10n.string(copied ? "Copied" : "Copy link"), systemImage: copied
-                        ? "checkmark"
-                        : "doc.on.doc")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(theme.label)
-                .padding(.horizontal, MobileDesign.Spacing.large)
-                .frame(minHeight: MobileDesign.Size.minimumTapTarget)
-                .background(
-                    theme.controlResting,
-                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: theme.controlRadius)
-                        .stroke(theme.border, lineWidth: theme.borderWidth)
-                }
-
-                Text(
-                    "The invite works once. After acceptance, access lasts until you stop "
-                        + "sharing and never extends to another chat."
-                )
-                    .font(.footnote)
-                    .foregroundStyle(theme.secondaryLabel)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(theme.ground)
-            .navigationTitle("Share chat")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium])
     }
 }
 

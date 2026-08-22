@@ -118,7 +118,16 @@ struct RootView: View {
                 RemoteDiagnosticsView()
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "shared-link" {
-                SharedSessionLinkView(link: Self.sharedLinkDemo)
+                SharedSessionLinkDemoHost(link: ShareChatDemo.link)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "share-chat-roles" {
+                ShareChatDemoHost(isChatRunning: true, choice: nil)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "share-chat-blocked" {
+                ShareChatDemoHost(isChatRunning: false, choice: nil)
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "share-chat-link" {
+                ShareChatDemoHost(isChatRunning: true, choice: .collaborateAndApprove)
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "session-settings",
                       let session = model.me?.sessions.first {
@@ -447,14 +456,6 @@ struct RootView: View {
         ),
     ]
 
-    private static let sharedLinkDemo = SharedSessionLink(
-        sessionTitle: "Remote access review",
-        url: URL(string: "https://threading.example/share/demo")!,
-        capability: "interact",
-        canApprovePermissions: true,
-        expiresAt: Date().addingTimeInterval(86_400)
-    )
-
     @MainActor
     private func openIssueReportDemoIfNeeded() async {
         let mode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
@@ -541,6 +542,74 @@ struct RootView: View {
         }
     }
 }
+
+#if DEBUG
+/// The link-ready sheet as it is actually met: presented over the screen that made it.
+///
+/// Held as a bare root it filled the display, which is the one shape the real surface never
+/// takes — and the shape it does take, a detent that stops part way up the screen, is what
+/// clipped its closing line for the whole of its life. A fixture that cannot show that defect
+/// cannot show the fix either.
+private struct SharedSessionLinkDemoHost: View {
+    @Environment(\.remoteTheme) private var theme
+    @State private var isPresented = false
+
+    let link: SharedSessionLink
+
+    var body: some View {
+        theme.ground
+            .ignoresSafeArea()
+            .sheet(isPresented: $isPresented) {
+                SharedSessionLinkView(link: link)
+                    .mobileTheme(theme)
+            }
+            .task {
+                try? await Task.sleep(for: .milliseconds(250))
+                isPresented = true
+            }
+    }
+}
+
+/// Share Chat as it is actually met, at whichever stage the fixture asks for.
+///
+/// The link stage is reached by *choosing a grant*, not by seeding the sheet with one, so the
+/// photograph proves the transition the owner asked for rather than the destination alone. The
+/// flow is held here rather than inside `ShareChatSheet`, which is what lets the fixture reach
+/// in and make that choice.
+private struct ShareChatDemoHost: View {
+    private enum Timing {
+        static let beforePresenting = 250
+        static let beforeChoosing = 400
+    }
+
+    @Environment(\.remoteTheme) private var theme
+    @StateObject private var flow: ShareChatFlow
+    @State private var isPresented = false
+
+    private let choice: ShareChatRole?
+
+    init(isChatRunning: Bool, choice: ShareChatRole?) {
+        _flow = StateObject(wrappedValue: ShareChatDemo.flow(isChatRunning: isChatRunning))
+        self.choice = choice
+    }
+
+    var body: some View {
+        theme.ground
+            .ignoresSafeArea()
+            .sheet(isPresented: $isPresented) {
+                ShareChatSheetContent(flow: flow)
+                    .mobileTheme(theme)
+            }
+            .task {
+                try? await Task.sleep(for: .milliseconds(Timing.beforePresenting))
+                isPresented = true
+                guard let choice else { return }
+                try? await Task.sleep(for: .milliseconds(Timing.beforeChoosing))
+                await flow.choose(choice)
+            }
+    }
+}
+#endif
 
 private struct WelcomeView: View {
     @EnvironmentObject private var model: RemoteAppModel

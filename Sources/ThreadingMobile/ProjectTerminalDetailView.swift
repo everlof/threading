@@ -107,14 +107,7 @@ struct ProjectTerminalDetailView: View {
                 get: { pendingShareCapability != nil },
                 set: { if !$0 { pendingShareCapability = nil } }
             ),
-            actions: [
-                ThemedDialogAction(MobileL10n.string("Create link"), systemImage: "link") {
-                    createShare()
-                },
-                ThemedDialogAction(MobileL10n.string("Cancel"), role: .cancel) {
-                    pendingShareCapability = nil
-                },
-            ]
+            actions: shareActions(for: pendingShareCapability)
         )
         .themedAlert(
             MobileL10n.string("Remote action failed"),
@@ -168,8 +161,22 @@ struct ProjectTerminalDetailView: View {
         }
     }
 
-    private func createShare() {
-        guard let capability = pendingShareCapability else { return }
+    /// The chosen grant is captured, not read back: the system action sheet clears its
+    /// presentation binding before the button's handler runs, and that binding is what holds
+    /// `pendingShareCapability`.
+    private func shareActions(for capability: String?) -> [ThemedDialogAction] {
+        guard let capability else { return [] }
+        return [
+            ThemedDialogAction(MobileL10n.string("Create link")) {
+                createShare(capability: capability)
+            },
+            ThemedDialogAction(MobileL10n.string("Cancel"), role: .cancel) {
+                pendingShareCapability = nil
+            },
+        ]
+    }
+
+    private func createShare(capability: String) {
         pendingShareCapability = nil
         isMutating = true
         Task {

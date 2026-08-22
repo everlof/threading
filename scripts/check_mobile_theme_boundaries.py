@@ -16,7 +16,12 @@ Two rules keep the row plate in one place:
 2. A `Section` inside a `List` or `Form` must be a `ThemedSettingsSection`. A bare `Section` is
    exactly the construct that reintroduces the grey plate, and it does so silently. `Section`
    inside a `Menu` or `Picker` is untouched: that is system menu chrome with no plate to paint.
-3. The palette is handed across a presentation boundary by `mobileTheme(_:)`, never by
+3. `confirmationDialog` belongs to `ThemedDialog.swift`. The bottom-anchored confirmation is
+   the operating system's action sheet now, for the same reason the share sheet and the
+   permission prompts are: presentation and trust belong to iOS there. Feature code still says
+   `themedConfirmationDialog`, so there is one component for these prompts and one place that
+   decides what they are made of.
+4. The palette is handed across a presentation boundary by `mobileTheme(_:)`, never by
    `environment(\\.remoteTheme,)` alone. A sheet is its own hosting scene and inherits neither
    the palette nor the four presentation values read from it, so re-stating only the palette
    left the sheet with a system-tinted switch, a blue accent and the wrong keyboard appearance
@@ -30,6 +35,7 @@ import sys
 MOBILE_SOURCE_ROOT = "Sources/ThreadingMobile"
 CHROME_FILE = "MobileSettingsChrome.swift"
 THEME_ENVIRONMENT_FILE = "MobileThemeEnvironment.swift"
+DIALOG_FILE = "ThemedDialog.swift"
 
 PALETTE_INJECTION = re.compile(r"environment\s*\(\s*\\\.remoteTheme\b")
 
@@ -38,6 +44,8 @@ RESERVED_MODIFIERS = (
     "listRowBackground",
     "listRowSeparatorTint",
 )
+
+SYSTEM_PRESENTATION = re.compile(r"\.confirmationDialog\s*\(")
 
 LIST_OPENER = re.compile(r"\bList\s*(\([^()]*\))?\s*$")
 FORM_OPENER = re.compile(r"\bForm\s*(\([^()]*\))?\s*$")
@@ -125,6 +133,14 @@ def check_file(path: pathlib.Path, relative: str, failures: list) -> None:
             failures.append(
                 f"{relative}:{line}: error: {modifier} belongs to {CHROME_FILE}; "
                 "use themedSettingsPage, themedSettingsRow or ThemedSettingsSection"
+            )
+
+    if path.name != DIALOG_FILE:
+        for match in SYSTEM_PRESENTATION.finditer(scrubbed):
+            line = scrubbed.count("\n", 0, match.start()) + 1
+            failures.append(
+                f"{relative}:{line}: error: confirmationDialog belongs to {DIALOG_FILE}; "
+                "use themedConfirmationDialog"
             )
 
     if path.name != THEME_ENVIRONMENT_FILE:
