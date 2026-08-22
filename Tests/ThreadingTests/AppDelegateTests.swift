@@ -66,6 +66,28 @@ final class AppDelegateTests: XCTestCase {
         )
     }
 
+    /// Launch Services decides whether a Dock icon can take a drag before the delegate sees it.
+    /// The handler below is therefore unreachable unless the built bundle declares both URL
+    /// classes it understands. Rank `None` is deliberately not absence: it means accept drops
+    /// without offering Threading as an app that opens every image or folder.
+    func testTheBundleAdvertisesTheDockIconInputsAsDropOnly() throws {
+        let declarations = try XCTUnwrap(
+            Bundle(for: AppDelegate.self).infoDictionary?["CFBundleDocumentTypes"]
+                as? [[String: Any]]
+        )
+        let dropDeclaration = try XCTUnwrap(declarations.first { declaration in
+            Set(declaration["LSItemContentTypes"] as? [String] ?? [])
+                == ["public.image", "public.folder"]
+        })
+
+        XCTAssertEqual(dropDeclaration["CFBundleTypeRole"] as? String, "Viewer")
+        XCTAssertEqual(
+            dropDeclaration["LSHandlerRank"] as? String,
+            "None",
+            "Dock drops must not make Threading an image or folder opener"
+        )
+    }
+
     func testClosingTheLastTestWindowDoesNotTerminateTheHostedRunner() {
         XCTAssertFalse(
             AppDelegate().applicationShouldTerminateAfterLastWindowClosed(NSApp)

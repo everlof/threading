@@ -205,7 +205,9 @@ that matters: the Dock's icon (`application(_:open:)`, which already turned drop
 projects and now tells the two apart by declared type), and the titlebar strip beside the traffic
 lights (`TitlebarActionWindow.onScreenshotDropped`). Neither advertises itself at rest — the strip
 is ordinary window chrome until a drag reaches it — and both are where a Mac user already drops a
-file.
+file. Launch Services sees `public.image` and `public.folder` in the app's document declarations
+with `LSHandlerRank = None`: Apple's drop-only rank lets the Dock deliver those URLs without
+offering Threading as an app that opens images or folders.
 
 The strip is narrow on purpose: one file, an image, and only while the pointer is above
 `contentLayoutRect` — the same geometry that restores the window's double-click. Everything else
