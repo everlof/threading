@@ -84,6 +84,9 @@ struct RemoteRouter {
     static let createSessionPath = "/api/session"
     static let notificationRegistrationPath = "/api/notifications"
     static let diagnosticUploadPath = "/api/diagnostics"
+#if DEBUG
+    static let mobileDebugCaptureUploadPath = "/api/debug/mobile-capture"
+#endif
     static let invitationAcceptancePath = "/api/invitations/accept"
     static let hostedDeviceCredentialPath = "/api/hosted-device-credential"
     static let appThemePath = "/api/theme"

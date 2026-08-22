@@ -75,6 +75,11 @@ struct RootView: View {
                     AdvancedConnectionSettingsView(pool: .evidenceFixture())
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                        == "debug-bridge-settings" {
+                NavigationStack {
+                    MobileDebugBridgeView()
+                }
+            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "notification-settings" {
                 NotificationSettingsView()
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
@@ -299,6 +304,9 @@ struct RootView: View {
         if requestedTheme == "threading" {
             return RemoteThemePalette(RemoteAppModel.demoThreadingTheme)
         }
+        if requestedTheme == "system-remote" {
+            return RemoteThemePalette(RemoteAppModel.demoSystemRemoteTheme)
+        }
         if let requestedTheme,
            let catalogTheme = RemoteAppModel.demoCatalogThemes.first(where: {
                $0.id == requestedTheme
@@ -453,6 +461,7 @@ struct RootView: View {
         let mode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
         guard mode == "report-preflight"
                 || mode == "report"
+                || mode == "report-receipt"
                 || mode == "report-screenshot" else {
             return
         }
@@ -460,7 +469,7 @@ struct RootView: View {
         switch mode {
         case "report-preflight":
             showsShakeReportOptions = true
-        case "report":
+        case "report", "report-receipt":
             issueReportRequest = MobileIssueReportRequest(
                 trigger: .diagnostics,
                 screenshot: nil,

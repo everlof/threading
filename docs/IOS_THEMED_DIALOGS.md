@@ -104,6 +104,9 @@ The shared primitive owns:
 - standard, cancel, destructive and disabled actions;
 - optional text input and keyboard focus;
 - resolved semantic colour, light/dark mode, border weight, radii and panel glow, for alerts;
+- an opaque `floating_surface` plate over live content (flattened over the theme ground if an
+  authored role carries alpha), never the ordinary `panel` role that System defines as a faint
+  wash, for alerts;
 - modal hit testing and VoiceOver announcement;
 - Dynamic Type layout and Reduce Motion transitions, for alerts;
 - outside-tap dismissal for confirmations, while alerts require an explicit action.

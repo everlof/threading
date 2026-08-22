@@ -161,13 +161,21 @@ final class EventLog: @unchecked Sendable {
     /// only a file that still carries this launch's own token.
     private var ownedMarker: [String: String]?
 
+    /// Where macOS leaves the `.ips` for a launch that did not come back. Injectable so the
+    /// matcher can be held to a directory of fixtures rather than to whatever the developer's
+    /// own machine crashed last.
+    private let diagnosticReportsDirectory: URL?
+
     // MARK: - Initialization
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, diagnosticReportsDirectory: URL? = nil) {
         self.directory = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(ProjectIconDefaults.applicationDirectoryName)
             .appendingPathComponent(EventLogDefaults.directoryName)
+        self.diagnosticReportsDirectory = diagnosticReportsDirectory
+            ?? FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first?
+                .appendingPathComponent(EventLogDefaults.diagnosticReportsPath)
     }
 
     // MARK: - Public Methods
@@ -254,7 +262,10 @@ final class EventLog: @unchecked Sendable {
                     // Only looked for on the branch that can have one. An `.ips` written by some
                     // other process and hung off a deliberate restart is the shape of mistake the
                     // pre-rename adoption already made once.
-                    let report = crashReport(matching: previous[EventLogDefaults.markerStartedAtKey])
+                    let report = crashReport(
+                        matching: previous[EventLogDefaults.markerStartedAtKey],
+                        previousPID: previous[EventLogDefaults.markerPIDKey]
+                    )
                     previousLaunchOutcomeStorage = .unclean(
                         crashReport: report.map { URL(fileURLWithPath: $0) }
                     )
@@ -378,8 +389,19 @@ final class EventLog: @unchecked Sendable {
     /// which reads as "the quit never happened" to anyone reconstructing the failure
     /// afterwards. `O_APPEND` moves the seek into the kernel, where it is atomic with the
     /// write, and `O_CREAT` is also what makes the file on a first launch.
+    ///
+    /// `O_CLOEXEC` because this handle is held for the process's lifetime and this process spawns
+    /// agent children through `forkpty`, which duplicates the whole descriptor table. An inherited
+    /// journal descriptor does not block anything the way an inherited `flock` does — see
+    /// `SingleInstanceLock` — but it does leak the app's diagnostics file into every agent CLI,
+    /// and it keeps the inode alive in orphans long after the launch that opened it. The rule here
+    /// is that a long-lived descriptor is closed on exec unless a child is meant to have it.
     private func openForAppending(_ url: URL) -> FileHandle? {
-        let descriptor = open(url.path, O_WRONLY | O_APPEND | O_CREAT, EventLogDefaults.fileMode)
+        let descriptor = open(
+            url.path,
+            O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC,
+            EventLogDefaults.fileMode
+        )
         guard descriptor >= 0 else {
             reportFailure(target: .journal, stage: "open", errnoCode: errno)
             return nil
@@ -533,33 +555,112 @@ final class EventLog: @unchecked Sendable {
         return detail
     }
 
-    /// The newest crash report macOS wrote for us at or after a launch's start.
-    private func crashReport(matching startedAt: String?) -> String? {
+    /// The crash report macOS wrote for the launch that did not come back.
+    ///
+    /// **The time window alone is not enough, and that is not theoretical.** The unit-test bundle
+    /// is hosted *in this app*, so a test that traps writes `Threading-<stamp>.ips` under the
+    /// same name as the shipping app — and a run of the suite while the real app is open puts
+    /// several of those into the window a genuine launch would match. The report then attached to
+    /// the user's launch is a stack from a test host, which is a worse answer than no report at
+    /// all: it is a plausible one.
+    ///
+    /// So a candidate is attached only when its own recorded pid is the pid the marker named. A
+    /// candidate whose pid parses and differs is skipped and the scan continues, because the real
+    /// report may be older than it. A candidate whose pid cannot be read is skipped too — fail
+    /// closed — and said out loud once, since a format change would otherwise turn every crash
+    /// silently unattributable.
+    ///
+    /// A marker with no pid predates the field. That launch keeps the old time-window behaviour
+    /// rather than losing its report: compatibility for one launch, not a standing exception.
+    private func crashReport(matching startedAt: String?, previousPID: String?) -> String? {
         guard let startedAt, let start = timestampFormatter.date(from: startedAt) else {
             return nil
         }
 
-        guard let reports = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent(EventLogDefaults.diagnosticReportsPath),
-            let contents = try? FileManager.default.contentsOfDirectory(
-                at: reports,
-                includingPropertiesForKeys: [.contentModificationDateKey]
-            )
+        guard let reports = diagnosticReportsDirectory,
+              let contents = try? FileManager.default.contentsOfDirectory(
+                  at: reports,
+                  includingPropertiesForKeys: [.contentModificationDateKey]
+              )
         else { return nil }
 
-        let ours = contents.filter {
+        let candidates = contents.filter {
             $0.lastPathComponent.hasPrefix(EventLogDefaults.crashReportPrefix)
                 && $0.pathExtension == EventLogDefaults.crashReportExtension
-        }
-
-        let newest = ours.compactMap { url -> (URL, Date)? in
+        }.compactMap { url -> (URL, Date)? in
             guard let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
                 .contentModificationDate, modified >= start else { return nil }
             return (url, modified)
-        }.max { $0.1 < $1.1 }
+        }.sorted { $0.1 > $1.1 }
 
-        return newest?.0.path
+        guard let wanted = previousPID.flatMap(Int32.init) else {
+            return candidates.first?.0.path
+        }
+
+        var reportedUnparseable = false
+        for candidate in candidates {
+            guard let pid = Self.recordedPID(in: candidate.0) else {
+                if !reportedUnparseable {
+                    reportedUnparseable = true
+                    append(line(
+                        category: .app,
+                        message: EventLogDefaults.unreadableCrashReportMessage,
+                        detail: ["report": candidate.0.lastPathComponent]
+                    ))
+                }
+                continue
+            }
+            if pid == wanted { return candidate.0.path }
+        }
+
+        return nil
+    }
+
+    /// The process id an `.ips` records, or `nil` for anything that cannot be believed.
+    ///
+    /// An `.ips` is one JSON header line followed by a JSON body, and the pid is a top-level key
+    /// of the body — about 400 bytes in, whatever the report's size. Only a bounded prefix is
+    /// read, which is why the body is parsed as JSON *if it fits* and scanned for the key if it
+    /// does not: a 40 MB spin report must not be loaded to answer a question the first kilobyte
+    /// already answers.
+    private static func recordedPID(in url: URL) -> Int32? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let prefix = try? handle.read(
+            upToCount: EventLogDefaults.maximumCrashReportPrefixBytes
+        ), let newline = prefix.firstIndex(of: UInt8(ascii: "\n")) else { return nil }
+
+        let body = prefix[prefix.index(after: newline)...]
+        if let object = try? JSONSerialization.jsonObject(with: Data(body)) as? [String: Any],
+           let pid = object["pid"] as? Int {
+            return Int32(exactly: pid)
+        }
+        return scannedPID(in: body)
+    }
+
+    /// The first `"pid" : <digits>` in a body that would not parse, which is the truncated case.
+    ///
+    /// The quoted key is what keeps this off `"byPid"` and every other key ending in the same
+    /// three letters, and the first occurrence is the top-level one in every report format macOS
+    /// writes today.
+    private static func scannedPID(in body: Data) -> Int32? {
+        guard let key = body.range(of: Data(EventLogDefaults.crashReportPIDKey.utf8)) else {
+            return nil
+        }
+
+        var cursor = key.upperBound
+        while cursor < body.endIndex,
+              body[cursor] == UInt8(ascii: " ") || body[cursor] == UInt8(ascii: ":") {
+            cursor = body.index(after: cursor)
+        }
+
+        var digits = ""
+        while cursor < body.endIndex, body[cursor] >= UInt8(ascii: "0"),
+              body[cursor] <= UInt8(ascii: "9") {
+            digits.append(Character(UnicodeScalar(body[cursor])))
+            cursor = body.index(after: cursor)
+        }
+        return digits.isEmpty ? nil : Int32(digits)
     }
 
     // MARK: - Housekeeping
@@ -766,8 +867,21 @@ enum EventLogDefaults {
     /// came back is a different bug report from one that says it was held.
     static let heldBackWorkspaceMessage = "Held the workspace back after an unclean exit"
 
+    /// Said once per launch when a report in the window could not be pinned to a pid. Without it
+    /// a format change turns every crash silently unattributable, which looks exactly like
+    /// "macOS wrote no report".
+    static let unreadableCrashReportMessage = "Skipped a crash report whose process id could not be read"
+
     /// Relative to `~/Library`.
     static let diagnosticReportsPath = "Logs/DiagnosticReports"
     static let crashReportPrefix = "Threading-"
     static let crashReportExtension = "ips"
+
+    /// The top-level key in an `.ips` body, quoted, so a scan cannot land on `"byPid"`.
+    static let crashReportPIDKey = "\"pid\""
+
+    /// Enough for the header line and the body's leading scalars, which is where the pid is in
+    /// every format macOS writes. A spin report runs to tens of megabytes and must not be read to
+    /// answer this.
+    static let maximumCrashReportPrefixBytes = 512 * 1_024
 }

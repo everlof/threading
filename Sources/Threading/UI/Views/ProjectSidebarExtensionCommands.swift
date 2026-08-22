@@ -24,9 +24,10 @@ extension ProjectSidebarViewController {
     ///
     /// Commands whose scope the row cannot satisfy are omitted rather than disabled: a
     /// project row never names a session, so a session-scoped command has nothing to say
-    /// there. Row menus never display key equivalents; the canonical menu-bar placement owns
-    /// the visible shortcut. Each command's closure carries the row's own identity, so a menu
-    /// built for one row can never dispatch with another row's.
+    /// there. Every placement draws the command's resolved shortcut: a chord is part of how an
+    /// action is learned, not decoration reserved for whichever menu-bar placement happens to
+    /// carry the actual key equivalent. Each command's closure carries the row's own identity,
+    /// so a menu built for one row can never dispatch with another row's.
     func extensionCommandEntries(
         placement: ExtensionMenuPlacement,
         context: ExtensionCommandContext,
@@ -46,6 +47,7 @@ extension ProjectSidebarViewController {
                 submenu: group.commands.map { command in
                     .item(ThemedMenuItem(
                         title: command.title,
+                        shortcut: ShortcutOverrideStore.shared.shortcut(for: command),
                         representedValue: RowExtensionCommandReference(
                             commandID: command.id,
                             context: context

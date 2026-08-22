@@ -272,6 +272,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }()
     private lazy var minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
 
+    /// The transcript normally starts at the pane's content edge. While a limit refusal stands,
+    /// the ribbon takes that edge and the transcript begins below it instead. Swapping the two
+    /// constraints keeps hidden composer geometry entirely out of this decision.
+    private lazy var transcriptBelowPaneTop = scrollView.topAnchor.constraint(
+        equalTo: view.safeAreaLayoutGuide.topAnchor
+    )
+    private lazy var transcriptBelowLimitRibbon = scrollView.topAnchor.constraint(
+        equalTo: limitEscapeStrip.bottomAnchor
+    )
+
     /// Which tool call the reader is currently inside, pinned to the top of the pane.
     private lazy var stickyStep: ConversationStickyStepView = {
         let header = ConversationStickyStepView()
@@ -464,6 +474,20 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// live on/off fast mode, offered on the same chip so the two providers read alike.
     private let speedChip = ChipView()
 
+    /// When this conversation stops being spent — **last on the row, and present only while a
+    /// curfew actually resolves.**
+    ///
+    /// The four chips before it answer *what the next reply is sent with*; this one answers *how
+    /// long there will be replies at all*, which is a different question and the reason it is not
+    /// mixed in among them. It is also the only one of the five that is usually absent: a chat
+    /// with no curfew is the ordinary case, and a chip reading "No curfew" on every conversation
+    /// forever would spend a permanent slot naming a rule nobody set.
+    ///
+    /// The schedule chevron beside the send stays "send later". Two clocks on one composer are
+    /// only confusable while they answer the same question, and these answer opposite ones —
+    /// when the next message goes out, and when the last one will.
+    let curfewChip = ChipView()
+
     /// The context meter — how full the model's window is, updated at each turn boundary.
     /// Distinct from the account usage pill, which is quota; this is the conversation's own
     /// weight. Hidden until the stream has reported a reading.
@@ -550,7 +574,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
     }
 
-    // MARK: - The Limit Escape Strip
+    // MARK: - The Limit Escape Ribbon
 
     /// Draws the escape offer from the store, and reports both gestures back to it.
     ///
@@ -591,15 +615,28 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             guard let self, event.sessionID == self.sessionID else { return }
             self.refreshLimitEscapeStrip()
         }
+        // Lifting is the one answer a curfew's strip carries, and it is the user's own rule
+        // ending rather than an exception being made to somebody else's — see
+        // `LimitEscapeStripView.Offer.Source`.
+        limitEscapeStrip.onLiftCurfew = { [weak self] in
+            guard let self else { return }
+            SessionCurfewCenter.shared.lift(sessionID: self.sessionID)
+        }
         // A curfew engaging or being lifted is the one thing that moves the queue's hold without
         // anything else changing: no usage reading moved, no suggestion arrived. Without this,
         // a lifted curfew would leave the messages behind it sitting until the next turn ended.
-        //
-        // The strip's own curfew line is not read here yet — `refreshLimitEscapeStrip` has no
-        // curfew source until the strip gains one, and this call site is where its refresh goes.
         appEvents.observe(CurfewDidChange.self) { [weak self] event in
             guard let self, event.sessionID == self.sessionID else { return }
             self.flushOutboxIfReady()
+            self.refreshLimitEscapeStrip()
+            self.refreshCurfewChip()
+        }
+        // The standing window is a curfew for every session that never answered for itself, so
+        // switching it on or moving it changes what this chat is under without any event naming
+        // this chat.
+        appEvents.observe(CurfewSettingsDidChange.self) { [weak self] _ in
+            self?.refreshLimitEscapeStrip()
+            self?.refreshCurfewChip()
         }
         refreshLimitEscapeStrip()
     }
@@ -610,20 +647,69 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // A provider refusal outranks a park, because it is the one the user cannot answer: with
         // both standing, telling somebody about their own line while the provider has stopped
         // them would be the smaller fact on top of the larger one.
-        if let offer = LimitEscapeSuggestionStore.shared.offer(for: sessionID) {
-            limitEscapeStrip.setOffer(LimitEscapeStripView.Offer(offer))
+        if let suggestion = LimitEscapeSuggestionStore.shared.offer(for: sessionID) {
+            applyLimitEscapeOffer(LimitEscapeStripView.Offer(suggestion))
             return
         }
 
+        // A park outranks a curfew for the same reason, one step down: a park is a line drawn
+        // against an account's spend that this conversation cannot move on its own, while a
+        // curfew is this conversation's own clock and the strip's Lift ends it. Both are the
+        // user's, so the ranking is which one the reader can do least about.
         let park = CustomLimitParkPolicy.hold(sessionID: sessionID)
-        guard let rule = park.rule else {
-            limitEscapeStrip.setOffer(nil)
+        if let rule = park.rule {
+            applyLimitEscapeOffer(LimitEscapeStripView.Offer(
+                source: .ownLimit,
+                resetHint: parkResetHint(for: rule)
+            ))
             return
         }
-        limitEscapeStrip.setOffer(LimitEscapeStripView.Offer(
-            source: .ownLimit,
-            resetHint: parkResetHint(for: rule)
+
+        applyLimitEscapeOffer(curfewOffer())
+    }
+
+    /// The strip's curfew state, or nil while nothing is holding this conversation.
+    ///
+    /// Only a **held** curfew draws. An armed one is a fact about tonight rather than a state the
+    /// pane is in, and a ribbon standing over the transcript all afternoon to say so would be the
+    /// loudest thing on screen for the least reason — the footer chip is where an armed curfew
+    /// belongs, and it says the same thing in the space a plan deserves.
+    ///
+    /// The hold carries its own resolution and state, so nothing here re-reads the record: a
+    /// sentence assembled from a second read could disagree with the decision that produced it.
+    func curfewOffer() -> LimitEscapeStripView.Offer? {
+        let now = Date()
+        guard case .held(_, let curfew, let state) = CurfewHoldPolicy.hold(
+            sessionID: sessionID,
+            at: now
+        ) else { return nil }
+
+        return .curfew(line: CurfewReceiptWords.stripSentence(
+            curfew: curfew,
+            state: state,
+            canTellWorking: SessionCurfewCenter.shared.canTellWorking(sessionID: sessionID),
+            now: now
         ))
+    }
+
+    /// Applies one resolved offer to both the ribbon and the pane geometry. Kept as the single
+    /// seam for the store path and rendered product-shell fixtures: appearance tests must be able
+    /// to reproduce the exited-conversation state without fabricating account discovery.
+    func applyLimitEscapeOffer(_ offer: LimitEscapeStripView.Offer?) {
+        limitEscapeStrip.setOffer(offer)
+
+        let isShowing = offer != nil
+        guard transcriptBelowLimitRibbon.isActive != isShowing else { return }
+
+        // Deactivate before activating the replacement: two top edges on the transcript are an
+        // unsatisfiable pair, and the refusal arriving should cause one deterministic resize.
+        if isShowing {
+            transcriptBelowPaneTop.isActive = false
+            transcriptBelowLimitRibbon.isActive = true
+        } else {
+            transcriptBelowLimitRibbon.isActive = false
+            transcriptBelowPaneTop.isActive = true
+        }
     }
 
     /// When the window a park is waiting on comes back, in the strip's own vocabulary.
@@ -1066,6 +1152,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         view.addSubview(scheduledStrip)
         view.addSubview(limitEscapeStrip)
 
+        // Install the pane's two alternative transcript top edges before the store can choose
+        // between them. Wiring the offer first would activate the ribbon edge and then install
+        // the ordinary edge beside it, leaving the transcript with two tops on first display.
+        setupConstraints()
+
         wireOutboxRail()
         wireScheduledStrip()
         wireLimitEscapeStrip()
@@ -1084,8 +1175,6 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // The preview hangs off the pane, not off the rail: it is wider than the rail and
         // would be clipped inside it, and it has to float over the conversation.
         minimap.attachPreview(to: view)
-
-        setupConstraints()
     }
 
     /// Wraps only the prompt's visual body. Stream state, permission cards, keyboard routing and
@@ -1197,12 +1286,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             self?.selectFastMode(choice.fastMode)
         }
 
+        // No `onSelect`: `CurfewMenu` builds rows that carry their own answer, so the choice is
+        // routed by the row rather than decoded back out of a represented value here.
+        curfewChip.itemsProvider = { [weak self] in self?.curfewMenuEntries() ?? [] }
+
         // The split divider owns the pane's width. These labels therefore truncate when all
         // four choices no longer fit, using `ChipView`'s tooltip and hover expansion to reveal
         // the full value. Marking every chip required made their combined fitting width a
         // 590-point minimum on the conversation pane, so a divider dragged past that point
         // sprang back even though the prompt box itself had already yielded.
-        for chip in [modelChip, modeChip, effortChip, speedChip] {
+        for chip in [modelChip, modeChip, effortChip, speedChip, curfewChip] {
             chip.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
 
@@ -1214,7 +1307,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // keeping those two slots identical across the two composers is the point. Effort and
         // speed follow in the same order on both.
         promptView.setFooterControls(
-            leading: [modelChip, modeChip, effortChip, speedChip],
+            leading: [modelChip, modeChip, effortChip, speedChip, curfewChip],
             trailing: [contextLabel]
         )
         refreshConversationControls()
@@ -1222,9 +1315,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     private func setupConstraints() {
         NSLayoutConstraint.activate([
-            // Pinned to the safe area, which the toolbar insets: anchoring to the view's own
-            // top would slide the first message under the toolbar.
-            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // Normally pinned to the safe area, which the toolbar insets. A standing limit
+            // ribbon swaps this for `transcriptBelowLimitRibbon` instead.
+            transcriptBelowPaneTop,
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(
@@ -1257,17 +1350,17 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 constant: -Design.Spacing.tight
             ),
 
-            // Above the schedule, on the same column: the offer that unblocks the conversation
-            // stands over everything the conversation is holding.
+            // The refusal is pane chrome, not another retained composer row. Full-width and
+            // top-anchored means the ordinary refusal path may hide the reply composer without
+            // moving this standing condition into the middle of the empty pane.
             limitEscapeStrip.leadingAnchor.constraint(
-                equalTo: promptContentContainer.leadingAnchor
+                equalTo: view.leadingAnchor
             ),
             limitEscapeStrip.trailingAnchor.constraint(
-                equalTo: promptContentContainer.trailingAnchor
+                equalTo: view.trailingAnchor
             ),
-            limitEscapeStrip.bottomAnchor.constraint(
-                equalTo: scheduledStrip.topAnchor,
-                constant: -Design.Spacing.tight
+            limitEscapeStrip.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor
             ),
 
             // Both edges pinned, not one: the line is a single truncating label now, and a row
@@ -3022,7 +3115,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
     }
 
-    private func handleExit(_ status: Int32) {
+    /// Kept internal so shipping-host renders can cross the same exit boundary as the stream
+    /// instead of reproducing its hidden-composer result by reaching into the view hierarchy.
+    func handleExit(_ status: Int32) {
         clearStreaming()
         // The process that owned those tasks is gone, and nothing will report them ending.
         backgroundWorkInFlight = []
@@ -3085,6 +3180,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     private func refreshConversationControls() {
         refreshInputControl()
+        // Ahead of the guards below, because a curfew is not a property of the model catalog: a
+        // runtime that publishes no models, and a conversation whose record has gone, both still
+        // have a clock — and both would otherwise return before this ran, freezing the chip on
+        // whatever it last said.
+        refreshCurfewChip()
         // The transport answers this, not the runtime: when a change lands is a property of
         // the wire protocol carrying it. See `ConversationStreamSession`.
         let canConfigure = stream.acceptsConfigurationChange

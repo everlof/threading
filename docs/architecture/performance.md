@@ -259,6 +259,15 @@ dismissed chat never resizes the Mac afterwards. The browser client has debounce
 `RemoteTerminalViewportLeaseTests` holds the boundary: a storm leases once, with the settled
 grid; the first grid is immediate; release cancels.
 
+The Mac's authoritative desktop grid is renderer input during attach, never a phone viewport
+lease. It may legitimately exceed the phone protocol's 240-column ceiling. SwiftTerm's
+`shouldReportSizeChange` hook must therefore guard the delegate notification inside its explicit
+`resize(cols:rows:)` path, while the resize still knows its authority. Checking ownership only
+after an asynchronous delegate hop is too late: the phone may have taken local ownership by then
+and echo a desktop grid such as 268×83 back to the Mac, which correctly refuses it and never
+produces the resize repaint the phone is waiting to reveal. The mobile scroll tests exercise the
+delegate itself so a present-but-unused suppression hook cannot satisfy this contract.
+
 The remaining grid-independent entry cost was the replay itself: the phone parsed the Mac's
 whole 512 KB ring and then trimmed nearly all of it, because its emulator keeps SwiftTerm's
 default 500-line scrollback. The client now states a 128 KB `replayBudget` in its auth frame and
@@ -280,6 +289,29 @@ measured at 5.3–8.5 ms per reapply in the simulator probe (26×24 grid at 24 p
 installs only a changed theme, and the same test file asserts an unchanged theme invalidates no
 rows. For reference the probe's grid-independent costs: a 512 KB ring replay parses in
 ~320–350 ms and the local-viewport reflow after it is 7–10 ms, at every font size.
+
+### Mobile host-recovery single-flight contract, 2026-08-22
+
+Host recovery is one operation per Mac, not one operation per socket. An iPhone report captured
+the terminal and dashboard event WebSockets losing the same transport within 6 ms. Both recovery
+loops then called `RemoteAppModel.refresh()`. Each call advanced `refreshGeneration`, so the
+second invalidated the first: a LAN route that answered after 4.0 seconds and a later Tailscale
+route that answered were both discarded as `refresh.generationChanged`. Repeated route races
+continued for nearly two minutes and live-session sockets reached their 15-second hello deadline
+while the Mac and agent processes remained healthy.
+
+The contract now: `MobileHostRefreshSingleFlight` owns at most one catalogue/route task for the
+active host. Dashboard recovery, explicit refreshes and any session that truly needs a route all
+await that task. Cancelling one screen's waiter does not cancel shared recovery; only a host or app
+lifecycle invalidation cancels it, and an old completion is fenced from clearing its replacement.
+A session socket first retries the last authenticated route when the catalogue is already online;
+it joins or starts host recovery only when a flight exists or the model lacks an authoritative
+catalogue. If only one session socket fails while the catalogue remains healthy, its first retry
+uses that authenticated route; a second failure escalates into shared host recovery, so an isolated
+socket failure cannot retry a stale route forever. The reconnect closure also captures the expected
+host id, so a host switch cannot hand an old session a client for the new Mac.
+`MobileHostRefreshSingleFlightTests` holds the escalation boundary, coalescing, waiter cancellation,
+explicit invalidation, late stale completion and fresh later refreshes.
 
 ### Token-free iOS terminal wire lab, 2026-08-20
 
@@ -404,6 +436,13 @@ per-parked-client buffer, and parked clients are absent from subscriber fan-out.
 fixed-size aggregate value—hits, misses, expiry/eviction causes, occupancy, totals/maxima and six
 age buckets—not an event or session history. Reducing either setting evicts excess state
 immediately; backgrounding or a memory warning drains it.
+
+The warm transport also means an outgoing and incoming SwiftTerm representable can briefly name
+the same `RemoteSessionConnection`. Terminal delivery and the viewport lease therefore belong to
+an explicit renderer identity. Mounting a replacement supersedes the old identity atomically;
+dismantling releases callbacks and the lease only if that renderer still owns them. An
+unconditional teardown can leave the new screen on a healthy socket with incoming repaint bytes
+buffered invisibly—the typing then appears only after another reopen flushes that buffer.
 
 ### Scaling audit, 2026-08-08
 
@@ -3371,7 +3410,7 @@ onto a file that grew over months.
 
 ### The settings field: a global broadcast per character
 
-The opening-message field wrote `AppSettings.shared.newChatOpeningMessage` on every
+The opening-message field wrote `AppSettings.shared.newChatOpeningSuffix` on every
 `controlTextDidChange`, and every write posts `AppSettingsDidChange`. Its observers then re-read
 each project's git control files (**1.95 ms** across ten projects, measured), rebuild both sound
 pop-ups — **0.41 ms** each, three directory scans and ~30 items apiece — and diff an extension
@@ -3384,6 +3423,12 @@ field rather than in the setting descriptor on purpose: a toggle or a pop-up is 
 the moment it is made and must still broadcast at once. Only free text arrives one keystroke at a
 time. `OpeningMessageCoalescingTests` asserts both halves — silence while typing, and one write on
 the way out.
+
+The field became two — a prefix and a suffix, either side of the task — and the flush settles only
+the half with unsettled typing in it. Writing both would cost two broadcasts for one settled
+sentence, and would push whatever the page last read into the half nobody touched, undoing a
+change made anywhere else while Settings stood open. The test asserts that too: typing in the
+prefix leaves the suffix as it was, and counts one broadcast rather than two.
 
 **Still open, and deliberately not changed here:** `ExtensionHostService.refreshSnapshotJournal()`
 does synchronous git control-file reads for every project on *any* settings change, and

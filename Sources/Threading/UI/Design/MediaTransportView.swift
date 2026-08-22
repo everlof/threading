@@ -63,12 +63,36 @@ final class MediaTransportView: NSView, ThemedComponent {
         didSet {
             playButton.isEnabled = isEnabled
             scrubber.isEnabled = isEnabled
+            muteButton.isEnabled = isEnabled
+        }
+    }
+
+    /// Whether this document can make a sound at all.
+    ///
+    /// Off by default, because every format the registry carried before movies is silent and a
+    /// control that cannot change anything is worse than no control: it reads as a muted document
+    /// rather than as a document with nothing to mute. The transport is one vocabulary item, so
+    /// the answer belongs here rather than in a second transport built beside this one.
+    var showsAudioControl: Bool = false {
+        didSet {
+            guard showsAudioControl != oldValue else { return }
+            muteButton.isHidden = !showsAudioControl
+        }
+    }
+
+    /// What the speaker glyph says. Assigning does not raise `onToggleMute`, for the reason
+    /// `isPlaying` does not raise `onPlayPause`: the player states its answer here.
+    var isMuted: Bool = false {
+        didSet {
+            guard isMuted != oldValue else { return }
+            applyAudioGlyph()
         }
     }
 
     var onPlayPause: (() -> Void)?
     var onScrub: ((Double) -> Void)?
     var onScrubEnd: ((Double) -> Void)?
+    var onToggleMute: (() -> Void)?
 
     // MARK: - Controls
 
@@ -80,6 +104,12 @@ final class MediaTransportView: NSView, ThemedComponent {
     )
     private let scrubber = ThemedScrubber(frame: .zero)
     private let readout = NSTextField(labelWithString: "")
+    private let muteButton = ThemedIconButton(
+        symbolName: "speaker.wave.2.fill",
+        accessibility: L10n.string("Mute"),
+        target: .inline,
+        inkSource: .chrome
+    )
     private var themeRedraw: ThemeRedraw?
 
     override init(frame frameRect: NSRect) {
@@ -108,13 +138,22 @@ final class MediaTransportView: NSView, ThemedComponent {
             self?.onScrubEnd?(value)
         }
 
+        muteButton.isHidden = true
+        muteButton.onPress = { [weak self] in
+            guard let self, self.isEnabled else { return }
+            self.onToggleMute?()
+        }
+
         readout.applyFont(.numericDetail())
         readout.textColor = Design.Text.secondary
         readout.alignment = .right
         readout.lineBreakMode = .byClipping
         readout.setAccessibilityIdentifier("media.transport.readout")
 
-        let stack = NSStackView(views: [playButton, scrubber, readout])
+        // The speaker sits after the reading rather than beside Play: the left of this row is the
+        // timeline and the right is what the timeline is doing, and a control that appears and
+        // disappears with the document may not shift the two controls a hand goes to by muscle.
+        let stack = NSStackView(views: [playButton, scrubber, readout, muteButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = Design.Spacing.small
@@ -147,9 +186,17 @@ final class MediaTransportView: NSView, ThemedComponent {
 
     var scrubberForTesting: ThemedScrubber { scrubber }
     var playButtonForTesting: ThemedIconButton { playButton }
+    var muteButtonForTesting: ThemedIconButton { muteButton }
     var readoutTextForTesting: String { readout.stringValue }
 
     // MARK: - Presentation
+
+    private func applyAudioGlyph() {
+        muteButton.setSymbol(
+            isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+            accessibility: isMuted ? L10n.string("Unmute") : L10n.string("Mute")
+        )
+    }
 
     private func applyPlaybackGlyph() {
         playButton.setSymbol(

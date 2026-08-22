@@ -126,25 +126,29 @@ final class AttentionAlertPolicyTests: XCTestCase {
 
     // MARK: - Which Alerts Are Wanted
 
-    /// The three kinds are separately switchable, and the raw values are stored preferences —
-    /// renaming one would silently re-enable a kind the user had switched off.
+    /// The kinds are separately switchable, and the raw values are stored preferences —
+    /// renaming one would silently re-enable a kind the user had switched off. The order is the
+    /// settings page's own: loudest first, with the curfew's give-up last because it is the
+    /// rarest and the only one that reports something Threading *tried*.
     func testEveryAlertKeepsItsStoredName() {
         XCTAssertEqual(
             AttentionAlert.allCases.map(\.rawValue),
-            ["blocked", "unread", "finished"]
+            ["blocked", "unread", "finished", "curfew"]
         )
     }
 
-    /// Of the three states, only the one holding a turn up sounds — but that is no longer a
-    /// property of the alert. It is the bottom of the resolution chain, where the two that
-    /// stay silent can be given a sound by name and the loud one can be quieted without
-    /// costing the banner that carries it.
-    func testOnlyTheBlockedStateAlertSoundsByDefault() {
+    /// Only the alerts a session is *stuck* behind sound — but that is no longer a property of
+    /// the alert. It is the bottom of the resolution chain, where the ones that stay silent can
+    /// be given a sound by name and the loud ones can be quieted without costing the banner that
+    /// carries them. A curfew that gave up shares `blocked`'s routing deliberately: it is the
+    /// same kind of event, a session standing still until the user decides something.
+    func testOnlyTheAlertsHoldingASessionUpSoundByDefault() {
         let sounding = AttentionAlert.allCases.filter {
             SoundResolution.resolve(SoundEvent($0), through: []) != .silent
         }
 
-        XCTAssertEqual(sounding, [.blocked])
+        XCTAssertEqual(sounding, [.blocked, .curfew])
+        XCTAssertEqual(SoundEvent(.curfew), SoundEvent(.blocked))
     }
 
     /// Every kind reads differently in both places it is named, so a settings row can be

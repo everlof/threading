@@ -317,12 +317,69 @@ SwiftTerm grid temporarily owns the shared PTY size. The Mac sends the ordinary 
 resize/SIGWINCH to the agent, which redraws its real TUI at mobile width; the iPhone renders the
 relayed ANSI stream locally rather than receiving a scaled screenshot. The Mac shows
 **Fit to iPhone · columns×rows** while this lease is active and explains that its desktop size
-returns when the remote view closes. Rotating the phone updates the lease, and disconnecting
-restores the newest natural Mac grid (or another phone that is still controlling the session).
+returns *shortly after* the remote view closes — see the grace period below. Rotating the phone
+updates the lease, and a departure that is not taken back restores the newest natural Mac grid
+(or another phone that is still controlling the session).
 In Focused mode only the controlling person's devices participate in that resize lease, so a
 watcher's narrow window cannot reflow the controller's TUI. Moving between advertised routes does
 not change the person's control identity; reconnecting receives the Mac's authoritative current
 mode before input is accepted.
+
+**A released lease is held for a grace period rather than dropped.** A lease change is a real
+`SIGWINCH` and a full TUI repaint, and backgrounding the iOS app drops the socket exactly as a
+deliberate close does — so a glance at a notification and a return cost a working agent two
+reflows in each direction. On release the lease becomes *expiring* and its grid still counts in
+`resolvedViewport`; a request from the same device inside the window cancels the expiry and
+applies **no** viewport change at all. On expiry the grid drops and the Mac restores exactly as
+it always did. The intersection rule below is untouched: this changes only *when* a lease ends.
+
+Keeping the last grid indefinitely — "the phone set it, so leave it there" — was considered and
+rejected. It trades a flap for a stuck state: a Mac pinned at iPhone width with no phone
+attached, a banner that is either a lie or has nothing left to close it, and no obvious way for
+the person to work out what happened. A grace gets the whole benefit for the case that hurts and
+ends on its own.
+
+Three properties make it safe:
+
+- **The pending lease is keyed by device, not by connection.** A reconnecting phone is a new
+  `RemoteConnection` object and would fail to match its own pending release, which is precisely
+  the case this exists for. Identity is the authenticated peer's `deviceID`; a connection that
+  authenticated without one cannot be recognised on its return, so its release stays immediate.
+- **The grace holds a grid, never a subscriber and never an authorization.** A held lease keeps
+  no socket subscribed, keeps no peer permitted, and never appears in `followers(of:)`. Discard,
+  archival (`closeUnavailableSessions`), turning Remote Access off, and any loss of write
+  permission drop it **immediately** rather than at expiry. The releasing peer's authorization
+  is kept on the expiring entry for exactly one question — may this device still write? — and a
+  `false` ends the lease; it never grants anything. In Focused mode that means the 30-second
+  `focusedControllerDisconnectGrace` ends a departed controller's viewport lease too, ahead of
+  the longer window, which is correct: once control is back with the Mac owner, the phone that
+  left is not a client whose grid the PTY answers to.
+- **A mirror that is being torn down cannot hold a grid**, because nothing would be left to
+  expire it. The last subscriber leaving a mirror that does not survive puts the terminal back
+  to its Mac frame before the mirror goes.
+
+Agent sessions and standalone project terminals share one implementation of all of this.
+`Remote viewport lease held` and `Remote viewport lease expired` are written to the event log
+beside the existing applied/released lines, with the surface, the grid and a pseudonymised
+device.
+
+**The window is a behavioural setting with no Settings row** — registered in
+`AppSettingDefinitions` with no `presentations`, so its `remotePolicy` is `.hidden` and it
+neither produces a row nor crosses to the phone's settings mirror. It defaults to **120 seconds**:
+long enough for a notification glance, an app switch, a lock and unlock or a walk between rooms,
+short enough that a phone genuinely put down leaves the Mac wrong for at most two minutes with a
+banner on screen saying why. It is read at release time, so a change takes effect without a
+relaunch:
+
+```bash
+defaults write codes.threading remoteViewportLeaseGraceSeconds -int 30
+defaults write codes.threading remoteViewportLeaseGraceSeconds -int 0   # kill switch
+```
+
+`0` is a legal value and means "release immediately", reproducing the behaviour the grace
+replaced. Validation **clamps** rather than refuses (0–900 seconds): the nearest allowed delay is
+what somebody typing a number meant, unlike a listener port, where the number *is* the meaning
+and a privileged one has to be refused.
 
 Pinching the iPhone terminal changes its monospaced font on a bounded 9–24 point, whole-point
 ladder and saves the result on that device. Whole-point crossings, rather than every gesture
@@ -443,8 +500,9 @@ size, and the Mac broadcasts every grid it applies to everybody watching, so las
 no fixed point: the client that could not display the new grid answered by re-asking for its own,
 the other answered that, and the agent was reflowed and repainted several times a second for as
 long as both stayed open. `RemoteSessionMirrorRegistry.resolvedViewport` takes the intersection —
-the smallest column and row count across every live lease — which every viewer can see whole and
-which does not depend on arrival order. A second viewer joining costs one resize.
+the smallest column and row count across every lease, live or inside its grace — which every
+viewer can see whole and which does not depend on arrival order. A second viewer joining costs
+one resize; a viewer leaving and coming straight back costs none.
 
 **A remote-controlled terminal is laid out at a pixel size that disagrees with its grid**, so
 every AppKit layout pass proposes a grid nobody asked for. Suppressing the PTY resize is not
@@ -460,9 +518,10 @@ SwiftTerm's original `resetFont()` called `resize` directly and therefore bypass
 answer. It now recomputes iOS cell dimensions through `processSizeChange`; a view-only renderer can
 refuse the grid change while still invalidating its glyph, accessibility and scroll geometry.
 
-Every applied grid is written to the event log as `Remote viewport applied` with the grid and the
-number of clients holding a lease. Diagnosing the argument above meant reading it out of
-screenshots, because nothing recorded what the clients had asked for.
+Every applied grid is written to the event log as `Remote viewport applied` with the grid, the
+number of clients holding a lease and the number of grids still held inside their grace.
+Diagnosing the argument above meant reading it out of screenshots, because nothing recorded what
+the clients had asked for.
 
 **Scrolling a mirrored TUI needed both halves of what the Mac does, and the phone had neither.**
 An agent's terminal is scrolled two different ways depending on who owns the wheel. When the
@@ -736,6 +795,26 @@ staggered pulse leaves the trailing `Book Pro` fully lit while the leading half 
 phrase stops reading as one line. Dashboard route progress, SwiftUI terminal chrome and UIKit
 Native-conversation chrome all enter through this same mobile design boundary. Reduce Motion
 lands the next phrase synchronously with no scroll or fade.
+
+The same boundary reserves LabelMorph's raster overflow inside its clipping frame. The package
+draws each glyph into a padded tile so overhanging ink survives; clipping the wrapper at the
+typographic advance instead cut the leading edge of the first character in the navigation bar.
+The connection dot fades out at its old position and back in at its new one on every phrase
+identity change, even when its colour did not change, because the centred dot-and-phrase row moves
+horizontally when the new phrase has a different width. Hiding the real dot during that reflow is
+what prevents the first frame from teleporting before an ordinary opacity animation could start.
+Reduce Motion lands both the dot and the phrase without that transition.
+
+An automatic dashboard reconnect does not present the full recovery card on its first transient
+route miss. While recovery is already scheduled, the existing compact connection card says
+“Connection interrupted. Trying again…” and the navigation line says “Trying again…”. Three
+consecutive complete route races make the failure settled enough to disclose the actionable
+recovery card. Once disclosed, that card remains stable through the next attempt and leaves only
+after success, rather than alternating page-sized progress and error surfaces on every backoff
+tick. Failures whose remedy is not another connection attempt — identity, permission, pairing or
+upgrade failures — remain immediate. Connection truth, retry policy, recovery actions and this
+presentation are host-owned; no extension may relabel a transient miss as success or a retry as a
+settled failure.
 
 **A chat has one name, wherever it is drawn.** The list draws the catalogue's
 `AgentSession.displayTitle` and so does every title on the screen that list opens —

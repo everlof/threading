@@ -145,6 +145,104 @@ final class MainWindowSizingTests: HostedStoreTestCase {
         XCTAssertEqual(MainWindowFrame.held(fits, within: Fixture.screen), fits)
     }
 
+    /// Relaunch keeps the size the user chose but starts the workspace in the display's centre.
+    func testARestoredSizeIsCenteredWithinItsDisplay() {
+        let saved = NSRect(x: 80, y: 70, width: 900, height: 600)
+
+        let centered = MainWindowFrame.centered(saved, within: Fixture.screen)
+
+        XCTAssertEqual(centered.size, saved.size)
+        XCTAssertEqual(centered.midX, Fixture.screen.midX)
+        XCTAssertEqual(centered.midY, Fixture.screen.midY)
+    }
+
+    /// The real controller enters through AppKit's frame autosave, retains those dimensions,
+    /// and replaces only the position. This is the shipping path rather than a helper-only claim.
+    func testTheControllerRestoresTheSavedSizeAtTheScreenCenter() throws {
+        let screen = try XCTUnwrap(NSScreen.main)
+        let bounds = screen.visibleFrame
+        let savedSize = NSSize(
+            width: min(900, bounds.width),
+            height: min(600, bounds.height)
+        )
+        let savedFrame = NSRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: savedSize.width,
+            height: savedSize.height
+        )
+        let source = NSWindow(
+            contentRect: .zero,
+            styleMask: WindowChromeCoordinator.nativeMask,
+            backing: .buffered,
+            defer: false
+        )
+        source.setFrame(savedFrame, display: false)
+        source.saveFrame(usingName: MainWindowDefaults.frameAutosaveName)
+
+        let controller = makeMainWindowController()
+        self.controller = controller
+        let restored = try XCTUnwrap(controller.window?.frame)
+
+        XCTAssertEqual(restored.size.width, savedSize.width, accuracy: 1)
+        XCTAssertEqual(restored.size.height, savedSize.height, accuracy: 1)
+        XCTAssertEqual(restored.midX, bounds.midX, accuracy: 1)
+        XCTAssertEqual(restored.midY, bounds.midY, accuracy: 1)
+    }
+
+    /// A force quit leaves the ordinary autosave behind, but that geometry is state from the
+    /// process that failed. The next launch starts from the product default instead of using it.
+    func testAnUncleanExitIgnoresTheSavedWindowGeometry() throws {
+        let screen = try XCTUnwrap(NSScreen.main)
+        let bounds = screen.visibleFrame
+        let savedSize = NSSize(
+            width: min(650, bounds.width),
+            height: min(450, bounds.height)
+        )
+        let source = NSWindow(
+            contentRect: .zero,
+            styleMask: WindowChromeCoordinator.nativeMask,
+            backing: .buffered,
+            defer: false
+        )
+        let storedGeometry = NSRect(origin: bounds.origin, size: savedSize)
+        source.setFrame(storedGeometry, display: false)
+        source.saveFrame(usingName: MainWindowDefaults.frameAutosaveName)
+
+        let plan = MainWindowInitialFramePlan(
+            previousLaunch: .unclean(crashReport: nil)
+        )
+        let controller = makeMainWindowController(initialFramePlan: plan)
+        self.controller = controller
+        let window = try XCTUnwrap(controller.window)
+        let frame = window.frame
+
+        XCTAssertEqual(frame.width, WindowDefaults.defaultWidth, accuracy: 1)
+        XCTAssertEqual(frame.height, WindowDefaults.defaultHeight, accuracy: 1)
+        XCTAssertNotEqual(frame.origin, storedGeometry.origin)
+    }
+
+    /// Unknown means first launch, and both intentional reasons name a restart the user asked
+    /// for. Only an unclean process makes its saved geometry suspect.
+    func testOnlyAnUncleanPreviousLaunchUsesTheDefaultFrame() {
+        XCTAssertEqual(
+            MainWindowInitialFramePlan(previousLaunch: .unclean(crashReport: nil)),
+            .useDefaultFrame
+        )
+        for outcome in [
+            EventLog.PreviousLaunchOutcome.clean,
+            .unknown,
+            .intentional(reason: .reset),
+            .intentional(reason: .recoveryRelaunch)
+        ] {
+            XCTAssertEqual(
+                MainWindowInitialFramePlan(previousLaunch: outcome),
+                .restoreSavedFrame,
+                "\(outcome) was treated as an unclean exit"
+            )
+        }
+    }
+
     /// Off the edge in each direction, the window is moved in rather than resized.
     func testAFrameOffTheEdgeIsMovedInsideAtItsOwnSize() {
         let offRight = MainWindowFrame.held(

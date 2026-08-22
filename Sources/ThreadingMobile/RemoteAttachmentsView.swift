@@ -172,6 +172,7 @@ private struct RemoteAttachmentRow: View {
         case "document": "doc.text"
         case "diagram": "point.3.connected.trianglepath.dotted"
         case "media": "play.rectangle"
+        case "video": "film"
         default: "photo"
         }
     }
@@ -269,7 +270,14 @@ struct RemoteAttachmentPreview: View {
             // office document, or diagram source, and downloading one only to say "the image
             // could not be decoded" spends the attachment byte cap on a file it was never
             // going to show.
-            if attachment.kind == "media" {
+            if attachment.kind == "video" {
+                // The Mac streams a movie off disk into a compositor layer; the phone would have
+                // to be *sent* it first, and the attachment route has one whole-file ceiling that
+                // a recording passes before it has finished recording. A sentence is the honest
+                // v1, exactly as it was for an animation — and the endpoint that would change
+                // that is the same one: frames, not files.
+                unavailable("This movie plays on your Mac.")
+            } else if attachment.kind == "media" {
                 // The renderer is host-owned, so the mirror is achievable — but a live player on
                 // the phone needs a poster-frame or frame-stream endpoint the remote surface does
                 // not have yet, and a silent blank card would be worse than a sentence.
@@ -333,7 +341,7 @@ struct RemoteAttachmentPreview: View {
     }
 
     private static let previewsOnMacOnly: Set<String> = [
-        "archive", "document", "diagram", "media"
+        "archive", "document", "diagram", "media", "video"
     ]
 
     private var unavailableIconName: String {
@@ -345,6 +353,7 @@ struct RemoteAttachmentPreview: View {
         case "document": "doc.text"
         case "diagram": "point.3.connected.trianglepath.dotted"
         case "media": "play.rectangle"
+        case "video": "film"
         default: "photo"
         }
     }
@@ -401,6 +410,8 @@ struct RemoteAttachmentPreviewDemo: View {
             .init(path: "exports/diagnostics.zip", name: "diagnostics.zip", kind: "archive", byteCount: 1_204_981, origin: "user")
         case "media":
             .init(path: "animations/loading.lottie", name: "loading.lottie", kind: "media", byteCount: 24_618, origin: "agent")
+        case "video":
+            .init(path: "recordings/keyboard-lifecycle.mp4", name: "keyboard-lifecycle.mp4", kind: "video", byteCount: 18_204_517, origin: "agent")
         case "text":
             .init(path: "artifacts/keyboard-lifecycle.txt", name: "keyboard-lifecycle.txt", kind: "text", byteCount: 1_284, origin: "agent")
         default:

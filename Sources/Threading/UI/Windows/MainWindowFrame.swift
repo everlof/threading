@@ -1,5 +1,24 @@
 import AppKit
 
+/// Whether the main window may use geometry written by the previous process.
+///
+/// An unclean exit is the one launch where the stored frame is evidence from a process that did
+/// not come back. It may be the cause rather than useful state, so that launch starts from the
+/// ordinary default size and position. First launches and deliberate relaunches are not crashes
+/// and keep the normal restoration path.
+enum MainWindowInitialFramePlan: Equatable {
+    case restoreSavedFrame
+    case useDefaultFrame
+
+    init(previousLaunch outcome: EventLog.PreviousLaunchOutcome) {
+        if case .unclean = outcome {
+            self = .useDefaultFrame
+        } else {
+            self = .restoreSavedFrame
+        }
+    }
+}
+
 /// Holding a window's frame on the screen it is on.
 ///
 /// AppKit does this for a titled window and only for a titled window: `constrainFrameRect(_:to:)`
@@ -44,6 +63,21 @@ enum MainWindowFrame {
         held.origin.x = min(max(held.minX, bounds.minX), bounds.maxX - held.width)
         held.origin.y = min(max(held.minY, bounds.minY), bounds.maxY - held.height)
         return held
+    }
+
+    /// `rect` fitted to `bounds` when necessary, then placed at its visual centre.
+    ///
+    /// The saved dimensions remain the user's launch choice; the saved origin does not. Starting
+    /// each launch at the display's centre keeps the workspace predictable without moving a
+    /// second-display window back to the primary screen. Fitting first preserves the existing
+    /// recovery contract for a frame saved larger than the display that now has to hold it.
+    static func centered(_ rect: NSRect, within bounds: NSRect) -> NSRect {
+        var centered = held(rect, within: bounds)
+        centered.origin = NSPoint(
+            x: bounds.midX - centered.width / 2,
+            y: bounds.midY - centered.height / 2
+        )
+        return centered
     }
 
     /// Where `rect` may be: the visible frame of the screen it already shares the most area with.

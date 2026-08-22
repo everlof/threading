@@ -881,8 +881,8 @@ enum AgentLauncher {
         return routed
     }
 
-    /// Exports the listener's port and the session's token, which is how a hook finds its way
-    /// back to the right session.
+    /// Exports the endpoints and the session's token, which is how a hook finds its way back to
+    /// the right session.
     ///
     /// Codex needs this: its `hooks.json` is shared by every session under an account, so the
     /// routing cannot live in the file. Claude is given the same variables even though its
@@ -890,16 +890,20 @@ enum AgentLauncher {
     /// the same way under both agents. While the hook integration is enabled, the pre-rename
     /// aliases keep already-approved Codex commands runnable without rewriting their text and
     /// invalidating Codex's trust hash.
+    ///
+    /// The socket word does not depend on the port. It used to: this function returned early
+    /// when the listener had none, so a session launched before the server was up got no
+    /// routing variables at all. A socket path answers before any listener binds, so the token
+    /// and the rendezvous are exported unconditionally and only the port word waits for a port.
     private static func appendHookEnvironment(
         for session: AgentSession,
         brokersPermissions: Bool,
         to command: inout ShellCommand
     ) {
-        guard let port = MCPServer.shared.port else { return }
         for word in hookEnvironmentWords(
             for: session,
             brokersPermissions: brokersPermissions,
-            port: port,
+            port: MCPServer.shared.port,
             includesLegacyAliases: AppSettings.shared.installsCodexHooks
         ) {
             command.append(word: word)
@@ -910,20 +914,30 @@ enum AgentLauncher {
     ///
     /// Internal so the compatibility contract can be pinned without starting the singleton
     /// listener in a unit test; production reaches it only through `appendHookEnvironment`.
+    ///
+    /// `THREADING_MCP_PORT` is still exported wherever there is a port. Nothing of ours reads it
+    /// any more — both hook generators moved to the socket — but a user's own hooks were told
+    /// about it, so it stays until the loopback endpoint itself retires.
     static func hookEnvironmentWords(
         for session: AgentSession,
         brokersPermissions: Bool,
-        port: UInt16,
+        port: UInt16?,
+        socketPath: String = MCPBridgeLocation.socketPath,
         includesLegacyAliases: Bool
     ) -> [String] {
         guard session.kind.supportsThreadingBridge else { return [] }
         let token = MCPSessionRegistry.token(for: session.id)
         var words = [
-            "\(MCPDefaults.portEnvironmentKey)=\(port)",
+            "\(MCPDefaults.socketEnvironmentKey)=\(socketPath)",
             "\(MCPDefaults.sessionTokenEnvironmentKey)=\(token)"
         ]
+        if let port {
+            words.append("\(MCPDefaults.portEnvironmentKey)=\(port)")
+        }
         if includesLegacyAliases {
-            words.append("\(MCPDefaults.legacyPortEnvironmentKey)=\(port)")
+            if let port {
+                words.append("\(MCPDefaults.legacyPortEnvironmentKey)=\(port)")
+            }
             words.append("\(MCPDefaults.legacySessionTokenEnvironmentKey)=\(token)")
         }
 
@@ -1154,11 +1168,21 @@ enum AgentLauncher {
     ) -> (ShellCommand, ResumeState) {
         var command = ShellCommand()
         appendManagedCodexInvocation(to: &command)
+        // Threading mirrors and remotely scrolls the terminal's retained buffer. Codex's
+        // alternate buffer has no terminal history, and DEC alternate-scroll translates a wheel
+        // into Up/Down keys that Codex assigns to composer history rather than its transcript.
+        // The CLI's supported inline mode gives scrollback one owner on Mac and iPhone alike.
+        command.append(flag: AgentDefaults.codexNoAlternateScreenFlag)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
         appendCodexConversationOverrides(for: session, to: &command)
         appendPermissionMode(for: session, to: &command)
         appendCodexHookFlags(for: session, to: &command)
 
+        // No preflight branch here on purpose. `codexResumeRefusal` is asked *before* a plan is
+        // built, by the surface that can show the answer — because the only thing this function
+        // could do with a refusal is fall through to a fresh launch, and silently starting a new
+        // conversation in place of the one the user asked to reopen is worse than any failure it
+        // would be avoiding.
         if let existingID = session.resumeState.transcriptID {
             command.append(word: "resume")
             command.append(word: existingID.rawValue)
@@ -1167,6 +1191,34 @@ enum AgentLauncher {
 
         appendPrompt(prompt, to: &command)
         return (command, .awaitingIdentifier)
+    }
+
+    /// Why this session's conversation must not be reopened, or nil to go ahead.
+    ///
+    /// Returns the failure rather than a bool so the caller that *reports* it — the launch path,
+    /// which records a `.preflight` `SessionLaunchFailure` — says the same thing the process
+    /// would have said, worked out in one place.
+    ///
+    /// Provider-neutral: `TranscriptResumeHealth` decides what "unusable" means per runtime, and
+    /// answers `usable` for every runtime that has no such check.
+    static func resumeRefusal(
+        for session: AgentSession,
+        in project: Project
+    ) -> SessionLaunchFailure? {
+        guard session.resumeState.transcriptID != nil,
+              let url = SessionTranscript.existingURL(for: session, in: project),
+              case .unusable(let reason, let cause) = TranscriptResumeHealth.verdict(
+                for: url,
+                kind: session.kind
+              )
+        else { return nil }
+
+        return SessionLaunchFailure(
+            origin: .preflight,
+            summary: reason,
+            transcriptPath: url.path,
+            knownCause: cause
+        )
     }
 
     /// OpenCode's interactive TUI resumes with `--session <ses_…>`. A fresh invocation creates

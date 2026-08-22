@@ -38,14 +38,26 @@ enum MCPDefaults {
     /// event field — Claude and Codex spell it differently.
     static let lifecycleEventParameter = "event"
 
-    /// Environment variables carrying the listener's port and the session's token into a hook.
+    /// The authority a `--unix-socket` request carries.
+    ///
+    /// curl still needs a URL to build a request line and a `Host:` header from, but with
+    /// `--unix-socket` it never resolves the authority — the connection is the socket. The name
+    /// is therefore arbitrary and deliberately not `host` above, which is a real address.
+    static let socketURLBase = "http://localhost"
+
+    /// Environment variables carrying the session's token, and the endpoints, into a hook.
     ///
     /// Codex reads one `hooks.json` per account, shared by every session, and refuses to run a
-    /// hook whose text has not been reviewed. Passing the port and token through the
-    /// environment answers both at once: one static file routes every session correctly, and
-    /// its text never changes — so a trust decision survives the next launch, which a file
-    /// carrying today's port would not.
+    /// hook whose text has not been reviewed. The token has to reach the hook through the
+    /// environment for that reason: one static file routes every session correctly, and its
+    /// text never changes — so a trust decision survives the next launch, which a file carrying
+    /// a per-session token would not.
+    ///
+    /// The *rendezvous* no longer needs the same treatment. A unix socket path is fixed per
+    /// user, so `hooks.json` now carries it as a literal and the port variable is exported only
+    /// for hooks the user wrote themselves against the loopback endpoint.
     static let portEnvironmentKey = "THREADING_MCP_PORT"
+    static let socketEnvironmentKey = "THREADING_MCP_SOCKET"
     static let sessionTokenEnvironmentKey = "THREADING_SESSION_TOKEN"
 
     /// Pre-rename aliases exported beside the current routing variables.

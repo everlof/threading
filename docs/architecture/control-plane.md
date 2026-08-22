@@ -361,6 +361,12 @@ implementing commands beside it. Invocation enumerates again before dispatch, so
 selection, missing surface, or disabled extension becomes an honest refusal with its current
 reason. `CommandRegistryDidChange` causes an open palette to discard removed extension rows.
 
+The palette removes its overlay and key monitor before invoking a command because that command
+may synchronously present a sheet, popover or another in-window surface. It retains its controller
+until the invocation returns: success finalizes dismissal, while a dynamic refusal refreshes and
+restores the palette. This ordering keeps two modal surfaces from competing without turning a
+last-moment availability change into a disappearing command UI.
+
 `WorkspaceFileSearchPlane` accepts a session id plus query and returns only bounded
 `WorkspaceFileReference` values. The Mac root resolver uses
 `ProjectStore.executionProject(forSessionID:)`, so a managed session resolves to its execution

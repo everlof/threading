@@ -134,6 +134,24 @@
 				<string>codes.threading.window</string>
 			</array>
 		</dict>
+		<!--
+			Launch Services otherwise refuses these files before NSApplicationDelegate can
+			see a Dock-icon drop. Rank None is the drop-only role: Threading accepts the
+			URLs without appearing as an image or folder opener.
+		-->
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Threading Drop Targets</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>None</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>public.folder</string>
+			</array>
+		</dict>
 	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>

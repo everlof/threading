@@ -151,7 +151,12 @@ enum MobileDashboardChrome {
         progress: RemoteAppModel.ConnectionProgress? = nil
     ) -> String {
         switch phase {
-        case .idle, .offline:
+        case .idle:
+            return MobileL10n.string("Not connected")
+        case .offline:
+            if case .waitingToRetry = progress {
+                return MobileL10n.string("Trying again…")
+            }
             return MobileL10n.string("Not connected")
         case .connecting:
             switch progress {
@@ -162,6 +167,8 @@ enum MobileDashboardChrome {
                 )
             case .loadingSessions:
                 return MobileL10n.string("Loading sessions")
+            case .waitingToRetry:
+                return MobileL10n.string("Trying again…")
             case .preparingRoutes, .none:
                 return MobileL10n.string("Checking saved connections")
             }
@@ -214,6 +221,14 @@ struct MobileConnectionProgressPresentation: Equatable {
                     title: MobileL10n.string("Loading sessions")
                 )
             )
+
+        case .waitingToRetry:
+            return MobileConnectionProgressPresentation(
+                currentStep: Step(
+                    id: .connection,
+                    title: MobileL10n.string("Connection interrupted. Trying again…")
+                )
+            )
         }
     }
 }
@@ -258,6 +273,7 @@ enum MobileConnectionProgressLabStory: String, CaseIterable, Identifiable {
     case fallback
     case lastRoute
     case loadingSessions
+    case retrying
 
     static let defaultStory: Self = .fallback
 
@@ -270,6 +286,7 @@ enum MobileConnectionProgressLabStory: String, CaseIterable, Identifiable {
         case .fallback: return MobileL10n.string("LAN · 2/3")
         case .lastRoute: return MobileL10n.string("Tailscale · 3/3")
         case .loadingSessions: return MobileL10n.string("Loading sessions")
+        case .retrying: return MobileL10n.string("Trying again…")
         }
     }
 
@@ -300,6 +317,8 @@ enum MobileConnectionProgressLabStory: String, CaseIterable, Identifiable {
             )
         case .loadingSessions:
             return .loadingSessions(routeKind: RemoteHostEndpointKind.lan)
+        case .retrying:
+            return .waitingToRetry(attempt: 1)
         }
     }
 
@@ -483,6 +502,43 @@ struct MobileConnectionRecoveryPresentation: Equatable {
     }
 }
 
+extension MobileConnectionRecoveryPolicy {
+    /// Failures with a different next step cannot improve through another route race and are
+    /// disclosed immediately. Ordinary reachability/hello misses stay in compact retry chrome
+    /// until repeated complete attempts make the full recovery surface truthful.
+    static func presentsFullRecovery(
+        for failure: RemoteConnectionFailure,
+        attempt: Int
+    ) -> Bool {
+        failure.recovery != .reconnect || attempt >= settledFailureAttempt
+    }
+}
+
+enum MobileConnectionRecoveryDisplay {
+    /// Presentation hysteresis for the page-sized recovery card.
+    ///
+    /// A disclosed failure survives `.connecting` because that is the automatic attempt already
+    /// promised by the status line. Only success (or leaving connection ownership altogether)
+    /// removes it; a new settled failure replaces its details in place.
+    static func updatedFailure(
+        current: RemoteConnectionFailure?,
+        phase: RemoteAppModel.Phase,
+        attempt: Int
+    ) -> RemoteConnectionFailure? {
+        switch phase {
+        case .online, .idle:
+            return nil
+        case .connecting:
+            return current
+        case .offline(let failure):
+            return MobileConnectionRecoveryPolicy.presentsFullRecovery(
+                for: failure,
+                attempt: attempt
+            ) ? failure : current
+        }
+    }
+}
+
 private struct DashboardProjectSection {
     let projectName: String
     let title: String
@@ -544,6 +600,10 @@ struct SessionDashboard: View {
     @State private var surfaceChangeRequest: SurfaceChangeRequest?
     @State private var shareRequest: ShareChatRequest?
     @State private var showsUsage = false
+    /// Once disclosed, recovery stays put while the next automatic attempt runs. Clearing it on
+    /// `.connecting` made the full card and the compact progress card replace each other on every
+    /// backoff tick — the page-sized flicker this state deliberately prevents.
+    @State private var disclosedConnectionFailure: RemoteConnectionFailure?
     private let projectName: String?
     let openSettings: () -> Void
     let reportConnectionIssue: () -> Void
@@ -636,16 +696,23 @@ struct SessionDashboard: View {
     private var dashboardContent: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
+                let visibleFailure = visibleConnectionFailure
+                let showsConnectionNotice = visibleFailure != nil || model.phase.failure != nil
+
                 if projectName == nil, showsDemoBanner {
                     demoBanner
                 }
 
-                if let failure = model.phase.failure {
+                if let failure = visibleFailure {
                     connectionRecoveryCard(failure)
+                } else if model.phase.failure != nil {
+                    // Automatic recovery is already scheduled. Keep the compact progress
+                    // anatomy and state that fact rather than flashing the full error card.
+                    loadingCard
                 }
 
                 if model.me == nil {
-                    if model.phase.failure == nil {
+                    if !showsConnectionNotice {
                         loadingCard
                     }
                 } else if sessions.isEmpty, terminals.isEmpty {
@@ -758,7 +825,17 @@ struct SessionDashboard: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }
         .task(id: model.activeHostID) { await model.activateDashboard() }
+        .onChange(of: model.phase) { _, _ in
+            updateConnectionFailurePresentation()
+        }
+        .onChange(of: model.connectionRecoveryAttempt) { _, _ in
+            updateConnectionFailurePresentation()
+        }
+        .onChange(of: model.activeHostID) { _, _ in
+            disclosedConnectionFailure = nil
+        }
         .onAppear {
+            updateConnectionFailurePresentation()
 #if DEBUG
             if model.isDemo,
                ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
@@ -1187,6 +1264,24 @@ struct SessionDashboard: View {
             phase: model.phase,
             connectionLabel: model.activeHost?.connectionLabel,
             progress: model.connectionProgress
+        )
+    }
+
+    private var visibleConnectionFailure: RemoteConnectionFailure? {
+        if let disclosedConnectionFailure { return disclosedConnectionFailure }
+        guard let failure = model.phase.failure,
+              MobileConnectionRecoveryPolicy.presentsFullRecovery(
+                for: failure,
+                attempt: model.connectionRecoveryAttempt
+              ) else { return nil }
+        return failure
+    }
+
+    private func updateConnectionFailurePresentation() {
+        disclosedConnectionFailure = MobileConnectionRecoveryDisplay.updatedFailure(
+            current: disclosedConnectionFailure,
+            phase: model.phase,
+            attempt: model.connectionRecoveryAttempt
         )
     }
 

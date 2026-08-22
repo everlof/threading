@@ -202,6 +202,23 @@ enum RemoteAccessDefaults {
     /// wide grid and the ask is more plausibly a mistake than an intention.
     static let minimumTerminalReplayBudgetBytes = 16 * 1024
 
+    /// How long a released viewport lease keeps holding its grid before the Mac's own frame
+    /// decides again.
+    ///
+    /// A lease change is a real `SIGWINCH` and a full TUI repaint, and backgrounding the iOS app
+    /// drops the socket exactly as a deliberate close does — so a glance at a notification used
+    /// to cost a working agent two reflows. Two minutes covers that glance, an app switch, a
+    /// lock and unlock, or a walk between rooms, and is short enough that a phone genuinely put
+    /// down leaves the Mac wrong for at most that long, with the banner on screen saying why.
+    static let viewportLeaseGraceSeconds = 120
+
+    /// The floor is zero and it is a real value: it means "release immediately", which is the
+    /// behaviour this grace replaced and therefore the one-line way back to it. The ceiling is
+    /// generous rather than exact — past a quarter of an hour a held grid stops being a
+    /// returning viewer and becomes a Mac stuck at phone width with nothing to explain it.
+    static let minimumViewportLeaseGraceSeconds = 0
+    static let maximumViewportLeaseGraceSeconds = 900
+
     // MARK: - Auth rate limiting
 
     /// Failed-auth attempts (bad token, unapproved device rejected) are counted per device and

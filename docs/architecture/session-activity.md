@@ -94,7 +94,12 @@ intercepting it would replace a working prompt with a second one. `UserPromptSub
 `Notification`, `SessionStart`, `SubagentStart`, and
 `SubagentStop` curl back to the listener
 (`MCPDefaults.lifecyclePathPrefix`), and `HookLifecycleRelay` hands each report to the session's
-tracker. Verified end to end against CLI 2.1.217: the three ordinary events arrive in order,
+tracker. The command is
+`curl -s --max-time N --unix-socket '<socket>' -H 'Content-Type: application/json'
+--data-binary @- 'http://localhost/lifecycle/<token>?event=…' >/dev/null 2>&1 || true` — over the
+rendezvous rather than the loopback port, so the session's address is the same one on the next
+launch. Both halves are quoted for reasons that bit: the path contains `Application Support`, and
+`?event=` is a shell glob where it sits. Verified end to end against CLI 2.1.217: the three ordinary events arrive in order,
 carrying the prompt text. Terminal sessions additionally carry a *tool-scoped, observational*
 `PreToolUse`/`PostToolUse` pair for the tools that ask the user outright — see "A runtime's own
 'I am waiting'" below, which is where the difference between that pair and the broker is drawn.
@@ -886,14 +891,27 @@ the tests all pass while the hole stays open. The Claude schedulers hang off
 `reportsOwnActivity` and a turn actually being in flight, so a session sitting at its prompt does
 no work at all.
 
-- **Routing is by environment, not by file.** `MCPDefaults.portEnvironmentKey` and
-  `sessionTokenEnvironmentKey` are exported by `routed(_:for:)` and read by the hook command,
-  which is what lets one shared file attribute every session correctly. Verified that a hook
-  inherits the launch environment.
-- **Which is also what keeps the file *stable*.** Codex pins a trusted hook by hashing its text,
-  so a URL carrying today's port would revoke the user's trust on every app launch.
-  `CodexHookInstaller` therefore rewrites only on a real change, and a second install returns
-  false.
+- **Session routing is by environment, not by file.** `MCPDefaults.sessionTokenEnvironmentKey`
+  is exported by `routed(_:for:)` and read by the hook command, which is what lets one shared
+  file attribute every session correctly. Verified that a hook inherits the launch environment.
+- **The rendezvous is a literal, because it never changes.** Both commands post over
+  `curl --unix-socket '<…/Threading/bridge/mcp.sock>'` to `http://localhost/lifecycle/$TOKEN`.
+  The path is a fixed property of the user's home directory, so writing it into the file costs
+  nothing in stability — where a *port* would have revoked the user's trust on every launch,
+  which is exactly why these commands used to interpolate `$THREADING_MCP_PORT`. The socket also
+  answers before any listener binds it, so a hook written for a session launched during startup
+  addresses something real. **Moving to it is a one-time trust renewal**: the text changed once,
+  so an existing Codex user approves their hooks again on the first launch past this change, and
+  the `EventLog` line at the rewrite ("Rewrote Codex hooks, trust must be renewed") is what
+  answers "these worked yesterday".
+- **Which is what keeps the file *stable* afterwards.** Codex pins a trusted hook by hashing its
+  text. `CodexHookInstaller` rewrites only on a real change, a second install returns false, and
+  a test asserts the bytes two consecutive launches leave are identical.
+- **`THREADING_MCP_PORT` is still exported wherever there is a port**, and nothing of ours reads
+  it any more. It stays because a user's own hooks were told about it; it retires with the
+  loopback endpoint. `THREADING_MCP_SOCKET` is exported beside it and does not wait for a
+  listener — the launch words used to be skipped wholesale when the port was missing, which left
+  that session unaddressable for its whole life.
 - **`CodexHookInstaller` merges rather than replaces**, marks its own entries with
   `MCPDefaults.hookMarker`, and removes only those on uninstall. This machine's own
   `~/.codex/hooks.json` was written by another tool, which is why that is a rule and not a
@@ -1027,7 +1045,13 @@ what a report weeks later would need:
   unrelated.
 - **A rewritten `hooks.json`**, because a rewrite is the moment the user's Codex trust decision
   stopped applying. It is the answer to "these worked yesterday".
-- **A launch with no listener port**, which silently disables the whole feature.
+- **An unreadable durable token file**, quarantined rather than overwritten. Every session on
+  that launch mints a fresh token, so a hook from a process started before it stops routing —
+  the one condition under which the durability claim above is not true.
+
+The line this list used to carry — "a launch with no listener port, which silently disables the
+whole feature" — is gone with the branch that produced it. Hooks address a socket path rather
+than a bound port, so there is no longer a launch that gets none.
 
 `HookOutcomeLog` covers the one failure the app cannot otherwise see: a hook that never
 *reaches* the listener leaves nothing here, because nothing arrived — while the agent sits on a

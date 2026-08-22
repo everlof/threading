@@ -6,6 +6,7 @@
     "custom",
     "custom-light",
     "fallback",
+    "system-remote",
     "threading",
     "editorial",
     "swiss-minimalist",
@@ -107,6 +108,7 @@
     {"id": "settings-app-icons-custom-dark", "entryID": "ios-settings", "demo": "app-icon-settings", "appearance": "dark", "theme": "custom"},
     {"id": "settings-collaboration-custom-dark", "entryID": "ios-settings", "demo": "collaboration-settings", "appearance": "dark", "theme": "custom"},
     {"id": "settings-advanced-connections-custom-dark", "entryID": "ios-settings", "demo": "advanced-connection-settings", "appearance": "dark", "theme": "custom"},
+    {"id": "settings-debug-bridge-custom-dark", "entryID": "ios-settings", "demo": "debug-bridge-settings", "appearance": "dark", "theme": "custom"},
     {"id": "settings-notifications-custom-dark", "entryID": "ios-settings", "demo": "notification-settings", "appearance": "dark", "theme": "custom"},
     {"id": "settings-terminal-keys-custom-dark", "entryID": "ios-settings", "demo": "terminal-key-settings", "appearance": "dark", "theme": "custom"},
     {"id": "settings-terminal-key-editor-custom-dark", "entryID": "ios-settings", "demo": "terminal-key-editor", "appearance": "dark", "theme": "custom"},
@@ -126,6 +128,7 @@
     {"id": "dialog-confirmation-custom-dark", "entryID": "ios-themed-dialogs", "demo": "themed-dialog-confirmation", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "issue-report-preflight-custom-dark", "entryID": "ios-issue-reporting", "demo": "report-preflight", "appearance": "dark", "theme": "custom"},
     {"id": "issue-report-form-custom-dark", "entryID": "ios-issue-reporting", "demo": "report", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "issue-report-receipt-system-dark", "entryID": "ios-issue-reporting", "demo": "report-receipt", "appearance": "dark", "theme": "system-remote", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "issue-report-keyboard-open-custom-dark", "entryID": "ios-issue-reporting", "demo": "report", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
     {"id": "issue-report-keyboard-dismissed-custom-dark", "entryID": "ios-issue-reporting", "demo": "report", "appearance": "dark", "theme": "custom", "keyboardState": "dismissed-after-open", "keyboardLayout": "origin", "captureMode": "app", "assertions": ["keyboardShownOnce", "keyboardHidden", "noFirstResponder", "safeAreaRestored", "editorOriginRestored"]}
   ],
@@ -372,8 +375,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Mobile settings",
-      "description": "General mobile preferences plus app icon, Mac appearance, collaboration, connection reuse, terminal-key, notification and diagnostics destinations.",
-      "states": ["General", "App icon", "Mac appearance", "Collaboration", "Connection reuse and metrics", "Terminal key agents", "Terminal key editor", "Notifications", "Diagnostics"],
+      "description": "General mobile preferences plus app icon, Mac appearance, collaboration, connection reuse, terminal-key, notification, diagnostics and Debug-bridge destinations.",
+      "states": ["General", "App icon", "Mac appearance", "Collaboration", "Connection reuse and metrics", "Debug bridge", "Terminal key agents", "Terminal key editor", "Notifications", "Diagnostics"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/settings-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
@@ -409,7 +412,7 @@
       "priority": "supporting",
       "title": "Issue reporting",
       "description": "The privacy preflight and report form that keep screenshot inclusion explicit and reviewable.",
-      "states": ["Screenshot consent", "Report form", "Keyboard open", "Keyboard dismissed and geometry restored"],
+      "states": ["Screenshot consent", "Report form", "Opaque receipt over a populated form", "Keyboard open", "Keyboard dismissed and geometry restored"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/issue-report-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}

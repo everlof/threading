@@ -15,6 +15,7 @@ final class CommandPaletteViewController: NSViewController {
     private var filterTask: Task<Void, Never>?
     nonisolated(unsafe) private var keyMonitor: Any?
     private var presentation: InWindowOverlay.Presentation?
+    private weak var presentationWindow: NSWindow?
     private let appEvents = AppEventObservations()
 
     var onDismiss: (() -> Void)?
@@ -108,6 +109,7 @@ final class CommandPaletteViewController: NSViewController {
 
     func present(in window: NSWindow) {
         _ = view
+        presentationWindow = window
         presentation = InWindowOverlay.install(view, in: window) { [weak self] in
             self?.dismiss()
         }
@@ -119,11 +121,16 @@ final class CommandPaletteViewController: NSViewController {
     }
 
     func dismiss() {
+        removePresentation()
+        presentationWindow = nil
+        onDismiss?()
+    }
+
+    private func removePresentation() {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
         presentation?.remove()
         presentation = nil
-        onDismiss?()
     }
 
     private func reloadCatalog() {
@@ -201,12 +208,22 @@ final class CommandPaletteViewController: NSViewController {
             SystemAlert.refuse()
             return
         }
+
+        // Commands may synchronously present their own sheet, popover or overlay. Remove the
+        // palette first so two modal surfaces never compete, while retaining this controller
+        // until the invocation outcome tells us whether a dynamic refusal needs restoration.
+        let window = presentationWindow
+        removePresentation()
         switch invoke(command.id) {
         case .invoked:
-            dismiss()
+            presentationWindow = nil
+            onDismiss?()
         case .refused:
             SystemAlert.refuse()
             reloadCatalog()
+            if let window {
+                present(in: window)
+            }
         }
     }
 
@@ -260,6 +277,7 @@ final class CommandPaletteViewController: NSViewController {
     }
 
     // Test seams exercise the exact keyboard state machine without synthesizing a global event.
+    var isPresentedForTesting: Bool { presentation != nil }
     var visibleCommandIDsForTesting: [String] { visibleCommands.map(\.id) }
     var selectedCommandIDForTesting: String? { selectedID }
     func setSearchQueryForTesting(_ query: String) {

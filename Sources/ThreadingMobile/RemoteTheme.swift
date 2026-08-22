@@ -150,6 +150,160 @@ enum MobileDesign {
     }
 }
 
+/// The connection mark fades out where it was and back in where the new phrase puts it.
+///
+/// The mark sits immediately before an intrinsically sized phrase. When that phrase changes
+/// width, the centred row gives the mark a new horizontal position in the same layout pass. A
+/// plain `Circle` therefore teleports even while the words themselves scroll. Merely animating
+/// the circle's opacity is too late: its frame has already jumped on the first animation frame.
+/// A short-lived copy fades at the old window position while the real mark stays invisible until
+/// layout has put it beside the new phrase, then fades back in. The transition is keyed to the
+/// status identity — not only to the colour — and the model colour is always the settled state,
+/// so SwiftUI and UIKit agree and an interrupted animation cannot strand the mark between states.
+final class MobileConnectionStatusIndicatorView: UIView {
+    private enum Animation {
+        static let transition = "threading.connection-status-indicator.transition"
+        static let departing = "threading.connection-status-indicator.departing"
+    }
+
+    private var targetColor: UIColor?
+    private var targetStatus: String?
+    private weak var departingIndicator: UIView?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = false
+        layer.cornerCurve = .continuous
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = min(bounds.width, bounds.height) / 2
+    }
+
+    func update(
+        color: UIColor,
+        status: String,
+        reducesMotion: Bool
+    ) {
+        let isFirstPresentation = targetStatus == nil
+        guard targetStatus != status || targetColor?.isEqual(color) != true else { return }
+
+        var visibleColor = UIColor(
+            cgColor: layer.presentation()?.backgroundColor
+                ?? layer.backgroundColor
+                ?? color.cgColor
+        )
+        var visibleOpacity = layer.presentation()?.opacity ?? layer.opacity
+        var departureFrame = window.map { convert(bounds, to: $0) }
+        if
+            let window,
+            let departingIndicator,
+            departingIndicator.superview === window
+        {
+            let departingOpacity = departingIndicator.layer.presentation()?.opacity
+                ?? departingIndicator.layer.opacity
+            if departingOpacity > visibleOpacity {
+                visibleColor = departingIndicator.backgroundColor ?? visibleColor
+                visibleOpacity = departingOpacity
+                departureFrame = departingIndicator.frame
+            }
+        }
+        targetColor = color
+        targetStatus = status
+
+        departingIndicator?.removeFromSuperview()
+        layer.removeAnimation(forKey: Animation.transition)
+        backgroundColor = color
+        layer.opacity = 1
+
+        guard
+            !isFirstPresentation,
+            !reducesMotion,
+            let window,
+            let departureFrame
+        else { return }
+
+        let departing = UIView(frame: departureFrame)
+        departing.isUserInteractionEnabled = false
+        departing.backgroundColor = visibleColor
+        departing.layer.cornerCurve = .continuous
+        departing.layer.cornerRadius = min(departureFrame.width, departureFrame.height) / 2
+        departing.layer.opacity = visibleOpacity
+        window.addSubview(departing)
+        departingIndicator = departing
+
+        let departure = CABasicAnimation(keyPath: "opacity")
+        departure.fromValue = visibleOpacity
+        departure.toValue = 0
+        departure.duration = MobileDesign.Motion.connectionStatusMorphDuration * 0.42
+        departure.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        departing.layer.opacity = 0
+        departing.layer.add(departure, forKey: Animation.departing)
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + MobileDesign.Motion.connectionStatusMorphDuration
+        ) { [weak self, weak departing] in
+            departing?.removeFromSuperview()
+            if self?.departingIndicator === departing {
+                self?.departingIndicator = nil
+            }
+        }
+
+        let opacity = CAKeyframeAnimation(keyPath: "opacity")
+        opacity.values = [0, 0, 1]
+        opacity.keyTimes = [0, 0.5, 1]
+        opacity.timingFunctions = [
+            CAMediaTimingFunction(name: .linear),
+            CAMediaTimingFunction(name: .easeOut),
+        ]
+
+        let transition = CAAnimationGroup()
+        transition.animations = [opacity]
+        transition.duration = MobileDesign.Motion.connectionStatusMorphDuration
+        transition.isRemovedOnCompletion = true
+        layer.add(transition, forKey: Animation.transition)
+    }
+
+    var isAnimatingTransitionForTesting: Bool {
+        layer.animation(forKey: Animation.transition) != nil
+    }
+
+    var transitionForTesting: CAAnimationGroup? {
+        layer.animation(forKey: Animation.transition) as? CAAnimationGroup
+    }
+
+    var departingIndicatorForTesting: UIView? {
+        departingIndicator
+    }
+}
+
+private struct MobileConnectionStatusIndicator: UIViewRepresentable {
+    let color: Color
+    let status: String
+    @Environment(\.accessibilityReduceMotion) private var reducesMotion
+
+    func makeUIView(context: Context) -> MobileConnectionStatusIndicatorView {
+        MobileConnectionStatusIndicatorView()
+    }
+
+    func updateUIView(
+        _ view: MobileConnectionStatusIndicatorView,
+        context: Context
+    ) {
+        view.update(
+            color: UIColor(color),
+            status: status,
+            reducesMotion: reducesMotion
+        )
+    }
+}
+
 /// The compact two-line title shared by remote surfaces and owner flows.
 ///
 /// The first line identifies the task or flow; the second always identifies connection state
@@ -175,8 +329,10 @@ struct MobileConnectionNavigationTitle: View {
             .frame(maxWidth: .infinity)
 
             HStack(spacing: MobileDesign.Spacing.tight) {
-                Circle()
-                    .fill(statusColor)
+                MobileConnectionStatusIndicator(
+                    color: statusColor,
+                    status: status
+                )
                     .frame(
                         width: MobileDesign.Size.navigationStatusIndicator,
                         height: MobileDesign.Size.navigationStatusIndicator
@@ -222,6 +378,14 @@ struct RemoteThemePalette: Equatable {
     var surface: Color { color("surface", fallback: "#1B1E24") }
     var panel: Color { color("panel", fallback: "#22252C") }
     var elevated: Color { color("elevated", fallback: "#292D35") }
+    /// The opaque semantic surface for a modal or other card floating over live content.
+    ///
+    /// System deliberately sends `panel` as a faint label wash. That is correct for an ordinary
+    /// card over the page ground and unreadable for a dialog over text, so mobile floating chrome
+    /// follows the Mac alert's `floating_surface` role instead. Older hosts did not send that
+    /// derived role; `elevated` is their closest opaque answer. Flattening against the ground also
+    /// keeps a custom translucent floating role from revealing the content beneath the modal.
+    var floatingSurface: Color { Color(uiFloatingSurface) }
     var controlResting: Color { color("control_resting", fallback: "#FFFFFF12") }
     var controlHover: Color { color("control_hover", fallback: "#FFFFFF20") }
     var border: Color { color("border", fallback: "#FFFFFF14") }
@@ -245,6 +409,12 @@ struct RemoteThemePalette: Equatable {
     var uiSurface: UIColor { uiColor("surface", fallback: "#1B1E24") }
     var uiPanel: UIColor { uiColor("panel", fallback: "#22252C") }
     var uiElevated: UIColor { uiColor("elevated", fallback: "#292D35") }
+    var uiFloatingSurface: UIColor {
+        let authored = source?.colors["floating_surface"]
+            .flatMap(UIColor.init(remoteHex:))
+            ?? uiElevated
+        return authored.remoteComposited(over: uiGround)
+    }
     var uiControlResting: UIColor { uiColor("control_resting", fallback: "#FFFFFF12") }
     var uiBorder: UIColor { uiColor("border", fallback: "#FFFFFF14") }
     var uiDivider: UIColor { uiColor("divider", fallback: "#FFFFFF0C") }
@@ -462,6 +632,47 @@ extension UIColor {
             green: CGFloat((value >> greenShift) & 0xff) / 255,
             blue: CGFloat((value >> blueShift) & 0xff) / 255,
             alpha: hasAlpha ? CGFloat(value & 0xff) / 255 : 1
+        )
+    }
+
+    /// Resolves a possibly translucent semantic role to the colour it has over the theme ground.
+    /// Floating chrome must keep that appearance without allowing arbitrary live content through.
+    fileprivate func remoteComposited(over ground: UIColor) -> UIColor {
+        var foregroundRed: CGFloat = 0
+        var foregroundGreen: CGFloat = 0
+        var foregroundBlue: CGFloat = 0
+        var foregroundAlpha: CGFloat = 0
+        var groundRed: CGFloat = 0
+        var groundGreen: CGFloat = 0
+        var groundBlue: CGFloat = 0
+        var groundAlpha: CGFloat = 0
+        guard getRed(
+            &foregroundRed,
+            green: &foregroundGreen,
+            blue: &foregroundBlue,
+            alpha: &foregroundAlpha
+        ), ground.getRed(
+            &groundRed,
+            green: &groundGreen,
+            blue: &groundBlue,
+            alpha: &groundAlpha
+        ) else { return self }
+
+        let alpha = foregroundAlpha + groundAlpha * (1 - foregroundAlpha)
+        guard alpha > 0 else { return .clear }
+
+        func composite(_ foreground: CGFloat, over background: CGFloat) -> CGFloat {
+            (
+                foreground * foregroundAlpha
+                    + background * groundAlpha * (1 - foregroundAlpha)
+            ) / alpha
+        }
+
+        return UIColor(
+            red: composite(foregroundRed, over: groundRed),
+            green: composite(foregroundGreen, over: groundGreen),
+            blue: composite(foregroundBlue, over: groundBlue),
+            alpha: alpha
         )
     }
 }

@@ -2278,11 +2278,17 @@ private extension ProjectSidebarViewController {
             [
                 .item(ThemedMenuItem(
                     title: L10n.string("Start New Project…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.newProject
+                    ),
                     image: ThemedMenuIcon.symbol("plus"),
                     onChoose: { [weak self] in self?.startNewProjectClicked() }
                 )),
                 .item(ThemedMenuItem(
                     title: L10n.string("Use an Existing Folder…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.addProject
+                    ),
                     image: ThemedMenuIcon.symbol("folder"),
                     onChoose: { [weak self] in self?.useExistingFolderClicked() }
                 )),
@@ -2615,11 +2621,17 @@ private extension ProjectSidebarViewController {
             [
                 .item(ThemedMenuItem(
                     title: L10n.string("New Chat…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.newSession
+                    ),
                     image: ThemedMenuIcon.symbol("bubble.left"),
                     onChoose: pinnedAction(row) { $0.newProjectChatClicked() }
                 )),
                 .item(ThemedMenuItem(
                     title: L10n.string("New Manager…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.newManager
+                    ),
                     image: ThemedMenuIcon.symbol("person.3"),
                     onChoose: pinnedAction(row) { $0.newProjectManagerClicked() }
                 )),
@@ -2701,6 +2713,7 @@ private extension ProjectSidebarViewController {
     private func branchGroupingEntry() -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Group Sessions by Branch"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.groupByBranch),
             isSelected: AppSettings.shared.groupsSessionsByBranch,
             onChoose: { [weak self] in self?.toggleBranchGroupingClicked() }
         ))
@@ -2711,6 +2724,7 @@ private extension ProjectSidebarViewController {
     private func loneBranchHeadingsEntry() -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Headings for Lone Branches"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.loneBranchHeadings),
             isSelected: AppSettings.shared.groupsLoneBranches,
             isEnabled: AppSettings.shared.groupsSessionsByBranch,
             onChoose: { [weak self] in self?.toggleLoneBranchHeadingsClicked() }
@@ -2723,6 +2737,7 @@ private extension ProjectSidebarViewController {
     private func compactTreeEntry() -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Compact Tree"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.compactTree),
             isSelected: AppSettings.shared.compactsSidebarTree,
             onChoose: { [weak self] in self?.toggleCompactTreeClicked() }
         ))
@@ -3255,6 +3270,9 @@ extension ProjectSidebarViewController {
             entries.append(projectChangeRequestEntry(for: projectID))
             entries.append(projectMuteEntry(for: projectID, row: row))
             entries.append(projectLimitRecoveryEntry(for: projectID, row: row))
+            if let curfew = projectCurfewEntry(for: projectID, row: row) {
+                entries.append(curfew)
+            }
         }
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Reclaim Disk Space…"),
@@ -3389,6 +3407,62 @@ extension ProjectSidebarViewController {
             image: ThemedMenuIcon.symbol(SessionActionMenuDefaults.limitRecoverySymbol),
             submenu: submenu
         ))
+    }
+
+    /// Whether this checkout's chats follow the standing quiet hours, one scope out from the
+    /// session fold that asks the same thing.
+    ///
+    /// **Two rows rather than the session's list, and absent entirely without a window.** A
+    /// checkout cannot name a moment — `ProjectStore.setCurfewRule(_:forProjectID:)` refuses
+    /// `.until`, because a wall-clock time written here would keep ending chats created weeks
+    /// later at an hour nobody chose — so the only thing left to say about a checkout is whether
+    /// its chats sit under the standing window. With no window configured there is no rule to
+    /// follow or be exempt from, and a fold offering both would name one that does not exist;
+    /// `CurfewMenu` collapses to "No curfew" for the same reason, which is an answer a *session*
+    /// can still meaningfully be shown and a checkout cannot act on.
+    private func projectCurfewEntry(for projectID: ProjectID, row: Int) -> ThemedMenuEntry? {
+        guard CurfewSettings.shared.preferences.quietHours.isEnabled else { return nil }
+
+        // The resolved answer, not the record: a checkout that says nothing while the window is
+        // on is going to hold its chats tonight, and an unmarked pair would state the opposite.
+        let answer = CurfewResolution.answer(forProjectID: projectID, in: projectStore)
+        let submenu: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("Follow quiet hours"),
+                representedValue: CurfewMenu.RowID.inherit,
+                isSelected: answer.scope == .app && answer.curfew != nil,
+                onChoose: pinnedAction(row) { $0.chooseProjectCurfew(nil) }
+            )),
+            .item(ThemedMenuItem(
+                title: L10n.string("Exempt from quiet hours"),
+                representedValue: CurfewMenu.RowID.exempt,
+                isSelected: answer.curfew == nil && answer.scope != .app,
+                onChoose: pinnedAction(row) { $0.chooseProjectCurfew(.exempt) }
+            ))
+        ]
+
+        return .item(ThemedMenuItem(
+            title: SessionActionMenuDefaults.curfewMenuTitle,
+            image: ThemedMenuIcon.symbol(CurfewDefaults.symbol),
+            submenu: submenu
+        ))
+    }
+
+    /// Nil where the answer already matches what would have been inherited, so a checkout keeps
+    /// following Settings and switching the window on later still reaches it — the rule
+    /// `chooseProjectLimitRecovery` above follows, and the reason the field is optional.
+    private func chooseProjectCurfew(_ rule: CurfewRule?) {
+        guard let projectID = contextProjectID() else { return }
+
+        let inherited = CurfewResolution.inherited(beyondProjectID: projectID)
+        let stored: CurfewRule? = rule == .exempt && inherited == nil ? nil : rule
+
+        guard projectStore.setCurfewRule(stored, forProjectID: projectID).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
+        reload()
     }
 
     private func chooseProjectLimitRecovery(_ policy: LimitRecoveryPolicy) {

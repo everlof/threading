@@ -158,6 +158,10 @@ final class AgentLaunchQuotingTests: XCTestCase {
             try value(for: MCPDefaults.portEnvironmentKey, in: terminal)
         )
         XCTAssertEqual(
+            try value(for: MCPDefaults.socketEnvironmentKey, in: terminal),
+            MCPBridgeLocation.socketPath
+        )
+        XCTAssertEqual(
             try value(for: MCPDefaults.legacySessionTokenEnvironmentKey, in: terminal),
             try value(for: MCPDefaults.sessionTokenEnvironmentKey, in: terminal)
         )
@@ -189,6 +193,34 @@ final class AgentLaunchQuotingTests: XCTestCase {
         })
         XCTAssertFalse(optedOut.contains {
             $0.hasPrefix("\(MCPDefaults.legacyBrokerEnvironmentKey)=")
+        })
+    }
+
+    /// A session launched before the listener has a port still gets its routing.
+    ///
+    /// The rendezvous and the token are properties of the user and the session, so neither
+    /// waits on a listener; only the port word does. The old code returned early on a missing
+    /// port and exported nothing at all, which left the launch unaddressable for its whole life.
+    func testRoutingWordsDoNotWaitForAListenerPort() throws {
+        let session = AgentSession(kind: .codex, title: "t")
+        let words = AgentLauncher.hookEnvironmentWords(
+            for: session,
+            brokersPermissions: false,
+            port: nil,
+            socketPath: "/tmp/threading tests/mcp.sock",
+            includesLegacyAliases: true
+        )
+
+        XCTAssertTrue(words.contains("\(MCPDefaults.socketEnvironmentKey)=/tmp/threading tests/mcp.sock"))
+        XCTAssertTrue(words.contains {
+            $0.hasPrefix("\(MCPDefaults.sessionTokenEnvironmentKey)=")
+        })
+        XCTAssertFalse(words.contains { $0.hasPrefix("\(MCPDefaults.portEnvironmentKey)=") })
+        XCTAssertFalse(words.contains {
+            $0.hasPrefix("\(MCPDefaults.legacyPortEnvironmentKey)=")
+        })
+        XCTAssertTrue(words.contains {
+            $0.hasPrefix("\(MCPDefaults.legacySessionTokenEnvironmentKey)=")
         })
     }
 
@@ -257,6 +289,33 @@ final class AgentLaunchQuotingTests: XCTestCase {
                 "a Threading-managed Codex process may not show its own update prompt: \(words)"
             )
         }
+    }
+
+    /// Codex's alternate buffer retains only its current frame. Its DEC alternate-scroll mode
+    /// turns a wheel into Up/Down keys, but Codex assigns those keys to composer history rather
+    /// than transcript navigation. Threading therefore asks the supported inline surface to put
+    /// the transcript in the terminal-owned scrollback that both Mac and iPhone mirror.
+    func testCodexTerminalLaunchesOwnRealScrollbackWhilePipeTransportsDoNotNeedIt() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        let transcriptID = TranscriptID("01a00000-0000-7000-8000-000000000000")
+        let fresh = AgentSession(kind: .codex, title: "fresh")
+        var resumed = AgentSession(kind: .codex, title: "resumed")
+        resumed.resumeState = .resumable(transcriptID)
+
+        for session in [fresh, resumed] {
+            let words = try Self.tokenizing(
+                XCTUnwrap(try AgentLauncher.plan(for: session, in: project).arguments.last)
+            )
+            XCTAssertEqual(
+                words.filter { $0 == AgentDefaults.codexNoAlternateScreenFlag },
+                [AgentDefaults.codexNoAlternateScreenFlag]
+            )
+        }
+
+        let nativeWords = try Self.tokenizing(
+            XCTUnwrap(try AgentLauncher.streamPlan(for: fresh, in: project).arguments.last)
+        )
+        XCTAssertFalse(nativeWords.contains(AgentDefaults.codexNoAlternateScreenFlag))
     }
 
     // MARK: - Against the CLI's own parser

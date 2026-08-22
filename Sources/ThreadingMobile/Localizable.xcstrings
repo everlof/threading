@@ -322,6 +322,9 @@
     "Checking saved connections": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollerar sparade anslutningar" } } }
     },
+    "Connection interrupted. Trying again…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anslutningen avbröts. Försöker igen…" } } }
+    },
     "In progress": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Pågår" } } }
     },
@@ -330,6 +333,9 @@
     },
     "Trying %@": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Provar %@" } } }
+    },
+    "Trying again…": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Försöker igen…" } } }
     },
     "Allow Local Network access": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tillåt åtkomst till lokalt nätverk" } } }
@@ -5472,6 +5478,7 @@
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använt" } } }
     },
     "This animation plays on your Mac.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här animationen spelas på din Mac."}}}},
+    "This movie plays on your Mac.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här filmen spelas på din Mac."}}}},
     "This file previews on your Mac.": {
       "localizations": {
         "sv": {

@@ -288,6 +288,37 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         XCTAssertFalse(connection.isTerminalHydrating)
     }
 
+    /// SwiftUI may mount a replacement representable before UIKit dismantles the outgoing one.
+    /// The old teardown must not clear the new renderer's callback or release its viewport: that
+    /// leaves a healthy socket buffering typed repaints until the chat is opened yet again.
+    @MainActor
+    func testStaleRendererTeardownCannotDetachItsReplacement() {
+        let connection = Self.demoConnection()
+        connection.connect()
+        let outgoing = NSObject()
+        let replacement = NSObject()
+        var replacementOutput = Data()
+
+        connection.mountTerminalRenderer(outgoing, output: { _ in }, gridChange: { _, _ in })
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+        connection.mountTerminalRenderer(
+            replacement,
+            output: { replacementOutput.append($0) },
+            gridChange: { _, _ in }
+        )
+
+        XCTAssertFalse(connection.unmountTerminalRenderer(outgoing))
+        XCTAssertTrue(connection.isTerminalRendererOwner(replacement))
+
+        let repaint = Data("typed repaint".utf8)
+        connection.receiveDemoTerminalOutput(repaint)
+
+        XCTAssertEqual(replacementOutput.suffix(repaint.count), repaint)
+    }
+
     /// `updateUIView` runs for every published change on the connection, and reinstalling an
     /// identical palette clears SwiftTerm's attribute caches and marks the whole screen dirty —
     /// a cold whole-grid repaint per presence or status tick, growing with cell count as the

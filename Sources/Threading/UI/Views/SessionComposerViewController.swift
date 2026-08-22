@@ -128,9 +128,11 @@ final class SessionComposerViewController: NSViewController {
         importButton.translatesAutoresizingMaskIntoConstraints = false
         startButton.translatesAutoresizingMaskIntoConstraints = false
         scheduleButton.translatesAutoresizingMaskIntoConstraints = false
+        curfewButton.translatesAutoresizingMaskIntoConstraints = false
         cancelEditButton.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(importButton)
         row.addSubview(cancelEditButton)
+        row.addSubview(curfewButton)
         row.addSubview(scheduleButton)
         row.addSubview(startButton)
 
@@ -156,10 +158,24 @@ final class SessionComposerViewController: NSViewController {
             importButton.heightAnchor.constraint(equalTo: startButton.heightAnchor),
 
             // The offer yields first: it is one line of quiet text, and the action beside it is
-            // the thing that must stay readable when the pane is narrow.
+            // the thing that must stay readable when the pane is narrow. Pinned to the *first*
+            // of the two icon buttons rather than to the clock, so adding the end beside the
+            // start moved the row's leading offer along with it instead of overlapping it.
             importButton.trailingAnchor.constraint(
-                lessThanOrEqualTo: scheduleButton.leadingAnchor,
+                lessThanOrEqualTo: curfewButton.leadingAnchor,
                 constant: -Design.Spacing.medium
+            ),
+
+            // When it ends, beside when it starts: two icon buttons at the same `small` spread
+            // the clock already keeps from the send, so the three read as one cluster about
+            // *time* rather than as three unrelated controls. On the outside of the pair rather
+            // than between them, because the clock is the primary's own alternative — send it
+            // now, send it later — and wedging a third decision into that pair would break the
+            // spread form the comment below calls the primary's split control.
+            curfewButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            curfewButton.trailingAnchor.constraint(
+                equalTo: scheduleButton.leadingAnchor,
+                constant: -Design.Spacing.small
             ),
 
             scheduleButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
@@ -185,7 +201,7 @@ final class SessionComposerViewController: NSViewController {
             cancelEditButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             cancelEditButton.heightAnchor.constraint(equalTo: startButton.heightAnchor),
             cancelEditButton.trailingAnchor.constraint(
-                lessThanOrEqualTo: scheduleButton.leadingAnchor,
+                lessThanOrEqualTo: curfewButton.leadingAnchor,
                 constant: -Design.Spacing.medium
             ),
 
@@ -229,6 +245,42 @@ final class SessionComposerViewController: NSViewController {
         button.setAccessibilityIdentifier("composer.session-start.schedule")
         return button
     }()
+
+    /// End it at a time: the other half of the question the clock beside it asks.
+    ///
+    /// The same gesture and the same shape as the schedule offer, because it is the same kind of
+    /// decision — a moment chosen now for something that happens without anybody watching — and
+    /// the two belong to each other. A press always opens the menu: unlike scheduling there is
+    /// nothing that can be in the way, since an end needs neither a project nor a brief to be a
+    /// coherent answer. Deliberately not a chip for `scheduleButton`'s reason; the chip appears
+    /// once an end has actually been chosen, which is when there is a value to show.
+    lazy var curfewButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: ComposerDefaults.curfewSymbol,
+            accessibility: ComposerDefaults.curfewAccessibility,
+            target: .besidePrimary
+        )
+        button.presentsMenu = true
+        button.onPress = { [weak self, weak button] in
+            guard let self, let button else { return }
+            self.presentCurfewMenu(from: button)
+        }
+        // The row's members may not resist compression, for `scheduleButton`'s reason: an icon
+        // button's width is a required constraint, and a row that cannot narrow is a minimum
+        // width on the whole column.
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        button.toolTip = ComposerDefaults.curfewAccessibility
+        button.setAccessibilityIdentifier("composer.session-start.curfew")
+        return button
+    }()
+
+    /// The end this draft has chosen, shown only once there is one.
+    ///
+    /// In the box's own footer rather than the row above it, beside the other things the session
+    /// is started *with* — and absent, rather than empty, while nothing has been chosen: a chip
+    /// permanently reading "No curfew" would answer a question nobody asked on every draft
+    /// anybody ever writes (`managedWorkspaceDeliveryChip`'s rule).
+    private let curfewChip = ChipView()
 
     /// What is already waiting to start in this project.
     lazy var scheduledStrip = ScheduledMessageStripView()
@@ -341,6 +393,20 @@ final class SessionComposerViewController: NSViewController {
     var selectedPermissionMode: AgentPermissionMode?
     var selectedManagedWorkspacePlan: ManagedWorkspacePlan?
     var selectedRole: SessionRole = .chat
+
+    /// When this session stops being spent, or nil for one with no end.
+    ///
+    /// A *plan* rather than a rule, and a plan is all the composer may hold: nothing is armed
+    /// here, because there is no session yet to arm anything on. The choice rides into
+    /// `ScheduledSessionPlan` with every other frozen decision and is turned into a deadline when
+    /// the session actually starts — which is the only moment at which "when quiet hours next
+    /// begin" has one answer.
+    var selectedCurfew: ScheduledCurfewPlan? {
+        didSet {
+            guard selectedCurfew != oldValue else { return }
+            refreshCurfewChip()
+        }
+    }
 
     weak var delegate: SessionComposerViewControllerDelegate?
 
@@ -623,7 +689,8 @@ final class SessionComposerViewController: NSViewController {
             (surfaceChip, ComposerDefaults.surfaceChipCompressionPriority),
             (speedChip, ComposerDefaults.speedChipCompressionPriority),
             (effortChip, ComposerDefaults.effortChipCompressionPriority),
-            (modeChip, ComposerDefaults.modeChipCompressionPriority)
+            (modeChip, ComposerDefaults.modeChipCompressionPriority),
+            (curfewChip, ComposerDefaults.curfewChipCompressionPriority)
         ] {
             chip.setContentCompressionResistancePriority(priority, for: .horizontal)
         }
@@ -632,6 +699,12 @@ final class SessionComposerViewController: NSViewController {
         effortChip.setAccessibilityIdentifier("composer.session-start.effort")
         speedChip.setAccessibilityIdentifier("composer.session-start.speed")
         surfaceChip.setAccessibilityIdentifier("composer.session-start.surface")
+        curfewChip.setAccessibilityIdentifier("composer.session-start.curfew.chosen")
+
+        // No `onSelect`: `CurfewMenu` builds rows carrying their own answer, so the choice is
+        // routed by the row rather than decoded back out of a represented value here — the
+        // arrangement the chat's own curfew chip uses, since it is the same menu.
+        curfewChip.itemsProvider = { [weak self] in self?.curfewEntries() ?? [] }
 
         // What the session will be run *with* on the leading side, what it has left to spend on
         // the trailing side beside the send — the reply composer's arrangement, because it is
@@ -641,10 +714,7 @@ final class SessionComposerViewController: NSViewController {
         // the box answers where and who and nothing else — a third chip there would be a third
         // question in a place that deliberately asks two — and *when this goes* belongs to the
         // message, exactly as the reply box's own chevron does. Beside the send either way.
-        promptView.setFooterControls(
-            leading: [modelChip, modeChip, effortChip, speedChip],
-            trailing: [usageLabel, surfaceChip]
-        )
+        setFooterControls()
 
         promptView.onSubmit = { [weak self] prompt in
             self?.start(with: prompt)
@@ -701,6 +771,44 @@ final class SessionComposerViewController: NSViewController {
         scheduleButton.toolTip = editingScheduledStartID != nil
             ? L10n.string("Change when it starts")
             : scheduleRefusalReason() ?? L10n.string("Start this session later")
+    }
+
+    /// The box's own control row, stated in one place because it has a member that comes and
+    /// goes: the chosen end joins the choices only while there is one. See `wirePrompt` for why
+    /// the row holds what it holds.
+    private func setFooterControls() {
+        promptView.setFooterControls(
+            leading: [modelChip, modeChip, effortChip, speedChip] + (
+                selectedCurfew == nil ? [] : [curfewChip]
+            ),
+            trailing: [usageLabel, surfaceChip]
+        )
+    }
+
+    /// Restates the chosen end, and puts the chip in or takes it out.
+    ///
+    /// **Attached and detached rather than hidden**, the `managedWorkspaceOptions` rule: a draft
+    /// that has chosen no end has no curfew surface at all, in the view hierarchy or in the
+    /// accessibility tree, rather than an invisible one somebody's screen reader can still find.
+    ///
+    /// The title is the glance and the tooltip is the ladder — "Until 04:00" is what somebody
+    /// needs while typing, and *when the wrap-up goes and when a turn still running is
+    /// interrupted* is what they need once they stop to ask.
+    func refreshCurfewChip() {
+        guard isViewLoaded else { return }
+        let attached = selectedCurfew != nil
+
+        if let title = CurfewMenu.title(
+            for: selectedCurfew,
+            quietHours: CurfewSettings.shared.preferences.quietHours
+        ) {
+            curfewChip.configure(symbolName: ComposerDefaults.curfewSymbol, title: title)
+            // `configure` puts the title on the tooltip, so the ladder has to be said after it.
+            curfewChip.toolTip = curfewLadderSentence() ?? title
+        }
+
+        guard attached != (curfewChip.superview != nil) else { return }
+        setFooterControls()
     }
 
     /// Keeps the outside primary action on the prompt's own submission answer.
@@ -892,6 +1000,7 @@ final class SessionComposerViewController: NSViewController {
         selectedBranch = nil
         selectedPermissionMode = nil
         selectedManagedWorkspacePlan = nil
+        selectedCurfew = nil
         selectedRole = .chat
         managedWorkspaceCheckbox.state = .off
         setManagedWorkspaceOptionsAttached(false)
@@ -1225,6 +1334,10 @@ final class SessionComposerViewController: NSViewController {
 
         refreshUsage(account: account)
         refreshManagedWorkspaceControls(project: project)
+        // Restated with the rest of the row, not only when it is chosen: an end that follows the
+        // standing quiet hours names a moment that moves, and the composer is often on screen
+        // across the night it names.
+        refreshCurfewChip()
     }
 
     /// Turns the isolated path on without inventing a name or publishing anything. Turning it
@@ -1957,7 +2070,10 @@ final class SessionComposerViewController: NSViewController {
             managedWorkspacePlan: selectedManagedWorkspacePlan,
             role: selectedRole,
             prompt: prompt,
-            attachmentPaths: attachmentPaths
+            attachmentPaths: attachmentPaths,
+            // Carried rather than armed here: there is no session to arm until the receiver has
+            // made one, and a curfew set on a start that failed would belong to nothing.
+            curfew: selectedCurfew
         ) ?? false
 
         // The composer is not rebuilt for the project it already holds, so what has just been
@@ -2112,6 +2228,10 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
     /// rather than being read back out of it: the session they belong to does not exist yet, so
     /// filing them is the receiver's job, and a path parsed back out of a sentence is a guess
     /// where this is a fact.
+    ///
+    /// `curfew` is the end the draft chose, and it is a **plan** for the same reason: the session
+    /// does not exist yet, so nothing can be armed on it here. The receiver turns it into a
+    /// deadline once it has one — see `ScheduledCurfewPlanResolution`.
     @discardableResult
     func sessionComposer(
         _ composer: SessionComposerViewController,
@@ -2127,7 +2247,8 @@ protocol SessionComposerViewControllerDelegate: AnyObject {
         managedWorkspacePlan: ManagedWorkspacePlan?,
         role: SessionRole,
         prompt: String,
-        attachmentPaths: [String]
+        attachmentPaths: [String],
+        curfew: ScheduledCurfewPlan?
     ) -> Bool
 
     func sessionComposer(
@@ -2243,6 +2364,16 @@ enum ComposerDefaults {
     /// offers behind it are times of day and window resets, not dates.
     static let scheduleSymbol = "clock"
 
+    /// The mark on the offer that ends it. The curfew's own mark wherever it appears — the
+    /// sidebar fold, the chat chip, the strip — so the same rule is recognisable in one glance
+    /// from any of them.
+    static let curfewSymbol = CurfewDefaults.symbol
+
+    /// What the end offer is called, on its tooltip and to a screen reader alike. "At a time"
+    /// rather than "later": the clock beside it already owns *later*, and these two must not read
+    /// as two spellings of one offer.
+    static var curfewAccessibility: String { L10n.string("End this session at a time") }
+
     /// The hero's mark: larger than the sidebar's 24 because it stands alone over a greeting,
     /// smaller than an app icon because it is a flourish, not the content.
     static let heroMarkSide: CGFloat = 40
@@ -2302,6 +2433,12 @@ enum ComposerDefaults {
     /// So a posture yields only after the model name and the usage reading have, and among
     /// themselves in a stated order: the surface first, the permission mode last, because it is
     /// the one posture that changes what a turn may do without asking.
+    /// Below every posture, above the model name. The chosen end is the shortest title on the
+    /// row — a time, four glyphs — so giving way early costs it almost nothing, and it is the
+    /// one chip on this row that is not always there: an addition to the footer may not become a
+    /// new minimum width on a column whose whole job is to fit the pane.
+    static let curfewChipCompressionPriority = NSLayoutConstraint.Priority(259)
+
     static let surfaceChipCompressionPriority = NSLayoutConstraint.Priority(260)
     static let speedChipCompressionPriority = NSLayoutConstraint.Priority(261)
     static let effortChipCompressionPriority = NSLayoutConstraint.Priority(262)
