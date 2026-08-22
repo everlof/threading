@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Threading
 
-/// The strip that offers a way past a spent usage limit.
+/// The pane ribbon that offers a way past a spent usage limit.
 ///
 /// What is pinned here is the contract a caller depends on — the press reaches the action, the ✕
 /// reaches the dismissal, a press already in flight cannot be pressed again — plus the two things
@@ -17,7 +17,7 @@ final class LimitEscapeStripTests: XCTestCase {
     // MARK: - Fixture
 
     private enum Fixture {
-        /// A composer column at a comfortable width, and one narrow enough that the strip has to
+        /// A pane at a comfortable width, and one narrow enough that the ribbon has to
         /// choose between its sentence and the button answering it.
         static let width: CGFloat = 620
         static let narrowWidth: CGFloat = 260
@@ -41,7 +41,7 @@ final class LimitEscapeStripTests: XCTestCase {
         super.tearDown()
     }
 
-    /// A host standing in for the composer's column: it states its size the way a split item
+    /// A host standing in for the pane: it states its size the way a split item
     /// does, rather than carrying a frame that constrains nothing, so a child measured in it is
     /// measured at a width it was actually asked to fit.
     @discardableResult
@@ -427,6 +427,20 @@ final class LimitEscapeStripTests: XCTestCase {
     }
 
     // MARK: - Layout
+
+    func testItUsesPaneRibbonGeometryRatherThanARoundedComposerCard() {
+        let strip = LimitEscapeStripView()
+        strip.setOffer(Fixture.offer)
+        host(strip)
+
+        XCTAssertEqual(strip.frame.height, PaneNoticeDefaults.bandHeight, accuracy: 0.5)
+        XCTAssertEqual(strip.layer?.cornerRadius ?? -1, 0, accuracy: 0.01)
+        XCTAssertEqual(
+            strip.subviews.compactMap { $0 as? SeparatorView }.count,
+            1,
+            "a pane ribbon needs one edge-to-edge closing rule"
+        )
+    }
 
     /// The sentence yields before the button does: a narrow pane truncates the explanation rather
     /// than squeezing the control that answers it off the row.

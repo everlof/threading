@@ -10,10 +10,11 @@ import AppKit
 /// their quota with nobody watching; here the press *is* the watching, so there is no second
 /// dialog to confirm what the button already says on its face — and no opt-in in front of it.
 ///
-/// **Not a `PaneNoticeView`.** That band is a condition the *pane* found — it spans the pane, it
-/// pushes the header apart from the content, and one of them at a time is chrome. This is a
-/// condition of one conversation, drawn on that conversation's own column beside what is waiting
-/// to be sent into it, which is where the answer to it belongs.
+/// This is the actionable form of a pane notice: it spans the pane, pushes the conversation or
+/// terminal beneath it, and keeps the refusal and its answers in one ribbon. It cannot belong to
+/// the reply composer's retained layout — the ordinary provider-refusal path exits the agent and
+/// hides that composer, which would leave this standing condition floating wherever the hidden
+/// input happened to measure.
 ///
 /// One direction, like `ScheduledMessageStripView`: the store is the truth, this draws what it is
 /// handed, and both gestures are reported back as intentions.
@@ -145,6 +146,20 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
     /// Holds whichever of the two answers this refusal actually has. Structural only: it chooses
     /// no styling, and both of its members are themed controls.
     private let actions = NSStackView()
+
+    /// The ribbon's pane-width closing rule. A rounded card inside the composer made this state
+    /// look like queued content and, once the composer disappeared, like an arbitrary floating
+    /// row. The edge-to-edge rule is what makes it pane chrome instead.
+    private let separator = SeparatorView()
+    private let contentAreaGuide = NSLayoutGuide()
+
+    private lazy var minimumHeightConstraint = heightAnchor.constraint(
+        greaterThanOrEqualToConstant: LimitEscapeStripDefaults.rowHeight
+    )
+    private lazy var preferredHeightConstraint = heightAnchor.constraint(
+        equalToConstant: LimitEscapeStripDefaults.rowHeight
+    )
+    private var appliedRowHeight: CGFloat?
 
     private lazy var dismissButton: ThemedIconButton = {
         let button = ThemedIconButton(
@@ -291,17 +306,31 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
         addSubview(messageLabel)
         addSubview(actions)
         addSubview(dismissButton)
+        addSubview(separator)
+        addLayoutGuide(contentAreaGuide)
+
+        preferredHeightConstraint.priority = .defaultLow
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(
-                greaterThanOrEqualToConstant: LimitEscapeStripDefaults.rowHeight
-            ),
+            minimumHeightConstraint,
+            preferredHeightConstraint,
+
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            // The closing rule is not part of the row's lower breathing room. Keeping the ink
+            // centred above it is subtle in a one-pixel theme and visible in a heavier one.
+            contentAreaGuide.topAnchor.constraint(equalTo: topAnchor),
+            contentAreaGuide.bottomAnchor.constraint(equalTo: separator.topAnchor),
+            contentAreaGuide.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentAreaGuide.trailingAnchor.constraint(equalTo: trailingAnchor),
 
             mark.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: LimitEscapeStripDefaults.contentInset
             ),
-            mark.centerYAnchor.constraint(equalTo: centerYAnchor),
+            mark.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor),
             // Exactly on top of the warning mark: only one is ever visible, and two marks that
             // sat in different places would move the sentence beside them between the two states.
             conductMark.leadingAnchor.constraint(equalTo: mark.leadingAnchor),
@@ -313,9 +342,9 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
                 equalTo: mark.trailingAnchor,
                 constant: Design.Spacing.small
             ),
-            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            messageLabel.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor),
 
-            actions.centerYAnchor.constraint(equalTo: centerYAnchor),
+            actions.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor),
             actions.leadingAnchor.constraint(
                 equalTo: messageLabel.trailingAnchor,
                 constant: Design.Spacing.medium
@@ -328,15 +357,15 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
             // states a taller control height than the row's floor must not push the button
             // through the edge it is centred in.
             actions.topAnchor.constraint(
-                greaterThanOrEqualTo: topAnchor,
+                greaterThanOrEqualTo: contentAreaGuide.topAnchor,
                 constant: Design.Spacing.tight
             ),
             actions.bottomAnchor.constraint(
-                lessThanOrEqualTo: bottomAnchor,
+                lessThanOrEqualTo: contentAreaGuide.bottomAnchor,
                 constant: -Design.Spacing.tight
             ),
 
-            dismissButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dismissButton.centerYAnchor.constraint(equalTo: contentAreaGuide.centerYAnchor),
             // Aligned by ink: a glyph button's frame carries its click target, and its edge is
             // not its mark — the rule `PaneNoticeView` states for the band above it.
             dismissButton.trailingAnchor.constraint(
@@ -360,10 +389,18 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
     // MARK: - Theme
 
     private func applyTheme() {
-        // Its own ground, for `PaneNoticeView`'s reason: the surface behind it may be the
-        // *terminal's* palette, which the app theme knows nothing about, so a transparent strip
-        // would put chrome ink on an unknown colour.
-        applySurface(fill: Design.Surface.panel, radius: .control)
+        // The pane-notice ground, not a rounded composer card. The surface behind this may be the
+        // terminal's palette, which the app theme knows nothing about, so the ribbon has to own an
+        // opaque pane-chrome ground and a closing rule.
+        applySurface(fill: Design.Surface.background, radius: .fixed(0))
+        let rowHeight = LimitEscapeStripDefaults.rowHeight
+        if appliedRowHeight != rowHeight {
+            appliedRowHeight = rowHeight
+            minimumHeightConstraint.constant = rowHeight
+            preferredHeightConstraint.constant = rowHeight
+            invalidateIntrinsicContentSize()
+            needsLayout = true
+        }
         messageLabel.textColor = offer?.problem == nil
             ? Design.Text.label
             : Design.Status.warning
@@ -469,12 +506,12 @@ final class LimitEscapeStripView: NSView, ThemedComponent, PointerClaiming {
 @MainActor
 enum LimitEscapeStripDefaults {
 
-    /// The scheduled strip's own row height, so the two strips that can stand together above one
-    /// composer read as the same kind of row.
-    static let rowHeight = ScheduledStripDefaults.rowHeight
+    /// Pane-ribbon height, including the theme's authored separator weight. The limit condition
+    /// is now pane chrome rather than one more queued row above a composer.
+    static var rowHeight: CGFloat { PaneNoticeDefaults.bandHeight }
 
-    /// Ink-to-edge distance inside the plate.
-    static let contentInset: CGFloat = Design.Spacing.small
+    /// The same ink-to-edge distance as the pane's other standing-condition ribbon.
+    static let contentInset: CGFloat = PaneNoticeDefaults.contentInset
 
     /// Below the controls', so a narrow column truncates the sentence rather than squashing the
     /// button that answers it. `PaneNoticeView`'s number, for the same reason it has one.

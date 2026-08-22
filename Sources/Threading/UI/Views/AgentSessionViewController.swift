@@ -57,23 +57,22 @@ final class AgentSessionViewController: NSViewController {
     private var nextIdentifierDiscoveryAt = Date.distantPast
     private let remoteViewportBanner = RemoteViewportBannerView()
 
-    /// The one-tap way past a spent usage limit, under the terminal rather than over it.
+    /// The one-tap way past a spent usage limit, in the pane's standing-condition ribbon.
     ///
-    /// A terminal pane has no composer of its own — the box is inside the TUI — so the strip
-    /// takes the place the composer occupies in a rendered conversation: the bottom of the
-    /// column, on the terminal's own margins, directly under where the user types. It **pushes**
-    /// rather than covers, the rule `PaneNoticeView` states: nothing it has to say is said over
-    /// output somebody is reading.
+    /// A terminal pane has no composer of its own — the box is inside the TUI — so the refusal
+    /// occupies the same pane-width slot as it does over a rendered conversation. It **pushes**
+    /// rather than covers: nothing it has to say is said over output somebody is reading.
     private lazy var limitEscapeStrip = LimitEscapeStripView()
 
-    /// The terminal's lower edge, which belongs to the pane until the strip stands under it.
-    private lazy var terminalAbovePane = session.terminalView.bottomAnchor.constraint(
-        equalTo: view.bottomAnchor,
-        constant: -TerminalPadding.bottom
+    /// The terminal normally starts at the pane's content edge; the ribbon takes that edge while
+    /// a refusal stands. The lower edge never moves, so only one dimension of the PTY changes.
+    private lazy var terminalBelowPaneTop = session.terminalView.topAnchor.constraint(
+        equalTo: view.topAnchor,
+        constant: TerminalPadding.top
     )
-    private lazy var terminalAboveStrip = session.terminalView.bottomAnchor.constraint(
-        equalTo: limitEscapeStrip.topAnchor,
-        constant: -Design.Spacing.small
+    private lazy var terminalBelowLimitRibbon = session.terminalView.topAnchor.constraint(
+        equalTo: limitEscapeStrip.bottomAnchor,
+        constant: TerminalPadding.top
     )
     private var attachmentObserver: TerminalAttachmentObserver?
     private var transcriptAttachmentObserver: TerminalTranscriptAttachmentObserver?
@@ -211,14 +210,12 @@ final class AgentSessionViewController: NSViewController {
         view.addSubview(remoteViewportBanner)
         view.addSubview(limitEscapeStrip)
 
-        let terminalAtTopConstraint = session.terminalView.topAnchor.constraint(
-            equalTo: view.topAnchor,
-            constant: TerminalPadding.top
-        )
-
         NSLayoutConstraint.activate([
-            terminalAtTopConstraint,
-            terminalAbovePane,
+            terminalBelowPaneTop,
+            session.terminalView.bottomAnchor.constraint(
+                equalTo: view.bottomAnchor,
+                constant: -TerminalPadding.bottom
+            ),
             session.terminalView.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor,
                 constant: TerminalPadding.leading
@@ -236,19 +233,17 @@ final class AgentSessionViewController: NSViewController {
                 constant: -Design.Spacing.large
             ),
 
-            // On the terminal's own margins, so the strip and the text it sits under share a
-            // column rather than reading as two differently indented things.
+            // Pane-wide and top-anchored, matching the rendered-conversation host. The ribbon's
+            // own content inset aligns its ink; its silhouette does not become a rounded terminal
+            // row floating inside the output column.
             limitEscapeStrip.leadingAnchor.constraint(
-                equalTo: view.leadingAnchor,
-                constant: TerminalPadding.leading
+                equalTo: view.leadingAnchor
             ),
             limitEscapeStrip.trailingAnchor.constraint(
-                equalTo: view.trailingAnchor,
-                constant: -TerminalPadding.trailing
+                equalTo: view.trailingAnchor
             ),
-            limitEscapeStrip.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor,
-                constant: -TerminalPadding.bottom
+            limitEscapeStrip.topAnchor.constraint(
+                equalTo: view.topAnchor
             )
         ])
 
@@ -303,20 +298,20 @@ final class AgentSessionViewController: NSViewController {
             .map(LimitEscapeStripView.Offer.init)
         limitEscapeStrip.setOffer(offer)
 
-        // The terminal gives up the rows the strip stands in rather than being drawn over, so
+        // The terminal gives up the rows the ribbon stands in rather than being drawn over, so
         // the PTY is resized exactly once as the offer appears and once as it leaves.
         let isShowing = offer != nil
-        guard terminalAboveStrip.isActive != isShowing else { return }
+        guard terminalBelowLimitRibbon.isActive != isShowing else { return }
 
-        // Deactivated before its replacement is activated, both ways round: two lower edges
+        // Deactivated before its replacement is activated, both ways round: two upper edges
         // active at once is an unsatisfiable pair, and AppKit says so in the log rather than
         // waiting for the next pass to sort it out.
         if isShowing {
-            terminalAbovePane.isActive = false
-            terminalAboveStrip.isActive = true
+            terminalBelowPaneTop.isActive = false
+            terminalBelowLimitRibbon.isActive = true
         } else {
-            terminalAboveStrip.isActive = false
-            terminalAbovePane.isActive = true
+            terminalBelowLimitRibbon.isActive = false
+            terminalBelowPaneTop.isActive = true
         }
     }
 

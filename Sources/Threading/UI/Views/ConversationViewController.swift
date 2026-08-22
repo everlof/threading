@@ -272,6 +272,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }()
     private lazy var minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
 
+    /// The transcript normally starts at the pane's content edge. While a limit refusal stands,
+    /// the ribbon takes that edge and the transcript begins below it instead. Swapping the two
+    /// constraints keeps hidden composer geometry entirely out of this decision.
+    private lazy var transcriptBelowPaneTop = scrollView.topAnchor.constraint(
+        equalTo: view.safeAreaLayoutGuide.topAnchor
+    )
+    private lazy var transcriptBelowLimitRibbon = scrollView.topAnchor.constraint(
+        equalTo: limitEscapeStrip.bottomAnchor
+    )
+
     /// Which tool call the reader is currently inside, pinned to the top of the pane.
     private lazy var stickyStep: ConversationStickyStepView = {
         let header = ConversationStickyStepView()
@@ -550,7 +560,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
     }
 
-    // MARK: - The Limit Escape Strip
+    // MARK: - The Limit Escape Ribbon
 
     /// Draws the escape offer from the store, and reports both gestures back to it.
     ///
@@ -610,20 +620,39 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // A provider refusal outranks a park, because it is the one the user cannot answer: with
         // both standing, telling somebody about their own line while the provider has stopped
         // them would be the smaller fact on top of the larger one.
-        if let offer = LimitEscapeSuggestionStore.shared.offer(for: sessionID) {
-            limitEscapeStrip.setOffer(LimitEscapeStripView.Offer(offer))
+        if let suggestion = LimitEscapeSuggestionStore.shared.offer(for: sessionID) {
+            applyLimitEscapeOffer(LimitEscapeStripView.Offer(suggestion))
             return
         }
 
         let park = CustomLimitParkPolicy.hold(sessionID: sessionID)
-        guard let rule = park.rule else {
-            limitEscapeStrip.setOffer(nil)
-            return
+        let offer = park.rule.map {
+            LimitEscapeStripView.Offer(
+                source: .ownLimit,
+                resetHint: parkResetHint(for: $0)
+            )
         }
-        limitEscapeStrip.setOffer(LimitEscapeStripView.Offer(
-            source: .ownLimit,
-            resetHint: parkResetHint(for: rule)
-        ))
+        applyLimitEscapeOffer(offer)
+    }
+
+    /// Applies one resolved offer to both the ribbon and the pane geometry. Kept as the single
+    /// seam for the store path and rendered product-shell fixtures: appearance tests must be able
+    /// to reproduce the exited-conversation state without fabricating account discovery.
+    func applyLimitEscapeOffer(_ offer: LimitEscapeStripView.Offer?) {
+        limitEscapeStrip.setOffer(offer)
+
+        let isShowing = offer != nil
+        guard transcriptBelowLimitRibbon.isActive != isShowing else { return }
+
+        // Deactivate before activating the replacement: two top edges on the transcript are an
+        // unsatisfiable pair, and the refusal arriving should cause one deterministic resize.
+        if isShowing {
+            transcriptBelowPaneTop.isActive = false
+            transcriptBelowLimitRibbon.isActive = true
+        } else {
+            transcriptBelowLimitRibbon.isActive = false
+            transcriptBelowPaneTop.isActive = true
+        }
     }
 
     /// When the window a park is waiting on comes back, in the strip's own vocabulary.
@@ -1066,6 +1095,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         view.addSubview(scheduledStrip)
         view.addSubview(limitEscapeStrip)
 
+        // Install the pane's two alternative transcript top edges before the store can choose
+        // between them. Wiring the offer first would activate the ribbon edge and then install
+        // the ordinary edge beside it, leaving the transcript with two tops on first display.
+        setupConstraints()
+
         wireOutboxRail()
         wireScheduledStrip()
         wireLimitEscapeStrip()
@@ -1084,8 +1118,6 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // The preview hangs off the pane, not off the rail: it is wider than the rail and
         // would be clipped inside it, and it has to float over the conversation.
         minimap.attachPreview(to: view)
-
-        setupConstraints()
     }
 
     /// Wraps only the prompt's visual body. Stream state, permission cards, keyboard routing and
@@ -1222,9 +1254,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     private func setupConstraints() {
         NSLayoutConstraint.activate([
-            // Pinned to the safe area, which the toolbar insets: anchoring to the view's own
-            // top would slide the first message under the toolbar.
-            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // Normally pinned to the safe area, which the toolbar insets. A standing limit
+            // ribbon swaps this for `transcriptBelowLimitRibbon` instead.
+            transcriptBelowPaneTop,
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(
@@ -1257,17 +1289,17 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 constant: -Design.Spacing.tight
             ),
 
-            // Above the schedule, on the same column: the offer that unblocks the conversation
-            // stands over everything the conversation is holding.
+            // The refusal is pane chrome, not another retained composer row. Full-width and
+            // top-anchored means the ordinary refusal path may hide the reply composer without
+            // moving this standing condition into the middle of the empty pane.
             limitEscapeStrip.leadingAnchor.constraint(
-                equalTo: promptContentContainer.leadingAnchor
+                equalTo: view.leadingAnchor
             ),
             limitEscapeStrip.trailingAnchor.constraint(
-                equalTo: promptContentContainer.trailingAnchor
+                equalTo: view.trailingAnchor
             ),
-            limitEscapeStrip.bottomAnchor.constraint(
-                equalTo: scheduledStrip.topAnchor,
-                constant: -Design.Spacing.tight
+            limitEscapeStrip.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor
             ),
 
             // Both edges pinned, not one: the line is a single truncating label now, and a row
@@ -3022,7 +3054,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
     }
 
-    private func handleExit(_ status: Int32) {
+    /// Kept internal so shipping-host renders can cross the same exit boundary as the stream
+    /// instead of reproducing its hidden-composer result by reaching into the view hierarchy.
+    func handleExit(_ status: Int32) {
         clearStreaming()
         // The process that owned those tasks is gone, and nothing will report them ending.
         backgroundWorkInFlight = []
