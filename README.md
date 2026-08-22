@@ -50,7 +50,7 @@ scripts/test.sh          # fast: everything that keeps windows off screen
 scripts/test.sh all      # the whole suite
 ```
 
-Targets macOS 13+. The submodules under `Packages/Vendor/` (`ThinkingOrbs`, `LabelMorph`, and
+Targets macOS 13+ on Apple silicon (arm64 only). The submodules under `Packages/Vendor/` (`ThinkingOrbs`, `LabelMorph`, and
 `BorderBeamKit`) are cloned with `git clone --recurse-submodules`; SwiftTerm is vendored beside
 them. First-party Swift packages live directly under `Packages/`, and auxiliary executables live
 under `Targets/`.

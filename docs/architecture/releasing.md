@@ -266,6 +266,49 @@ the delegate opts in — so "include beta updates" becomes a Settings toggle whe
 no separate feed and no separate versioning scheme. The `--channel beta` stamp exists so
 those builds wear their badge the day that arrives; until then nothing publishes it.
 
+## Apple silicon only
+
+Threading builds and ships for `arm64` alone. The decision is about what a person sees when they
+look at `Threading.app` in the Finder, not about CPUs: measured on master at `0fbd79f9` (Xcode
+26.5, `xcodebuild archive -configuration Release`, stripped, unsigned), the universal bundle was
+107 MB on disk and 46 MB as the zip Sparkle serves; the same bundle thinned to `arm64` is 54.5 MB
+and 24.5 MB. The second slice was half of the product, spread over every binary in it:
+
+| Component | universal | arm64 | compressed, universal → arm64 |
+|---|---|---|---|
+| `Threading` (stripped) | 59.0 MB | 28.4 MB | 25.3 → 12.1 MB |
+| `WebRTC.framework` (prebuilt; the app uses its data channel only) | 27.1 MB | 11.8 MB | 12.1 → 5.5 MB |
+| `Helpers` (`scc`, wasm runner, two extension helpers) | 10.9 MB | 5.3 MB | 4.2 → 2.0 MB |
+| `Resources` | 7.4 MB | 7.4 MB | 3.7 MB |
+| `Sparkle.framework` | 2.8 MB | 1.6 MB | 0.9 → 0.5 MB |
+
+Three things make it so, because any one of them alone would not:
+
+1. **`ARCHS[sdk=macosx*] = arm64` at the project level** builds every Mac target — the app and
+   its three helpers — for one slice, in every configuration; the iOS targets are untouched.
+   Swift packages built inside the workspace do not read the project's `ARCHS`, though: with
+   only the project setting, every package still compiled an `x86_64` slice the link then
+   discarded — 139 compiles in one archive. `release.sh` and `autoinstall.sh` therefore also
+   pass `ARCHS=arm64` on the command line, which reaches everything.
+2. **`scripts/thin_app_architectures.sh` runs on the archive's app before export.**
+   `WebRTC.xcframework` and `Sparkle.xcframework` arrive prebuilt and universal from their
+   packages, and the build copies what it is given. Thinning happens before export rather than
+   after because the export re-signs every nested binary with the Developer ID identity anyway,
+   so the seals thinning breaks are replaced for free; thinning the exported app instead would
+   mean re-signing Sparkle's five nested bundles inside-out by hand.
+3. **The gates refuse a second slice.** The per-binary export verification below checks
+   `lipo -archs` against `arm64` beside the four signing properties, and
+   `ReleaseArchitectureTests` reads the Mach-O headers of the host app's own executables in
+   every test run, so losing the project setting fails `fast` rather than the next release.
+
+The bundled `scc` is the official arm64 3.7.0 executable byte for byte rather than a
+`lipo`-combined pair, so it needs no thinning and its provenance is one checksum
+(`ThirdParty/scc/PROVENANCE.md`; `scripts/check_bundled_scc.sh` requires exactly that slice).
+
+What else was measured on the way — and why stripping, `-Osize`, on-demand resources and a
+slimmer WebRTC are not the next step — is in
+[`docs/decisions/bundle-size-levers.md`](../decisions/bundle-size-levers.md).
+
 ## The export is verified before it is uploaded
 
 Notarization rejects a bundle whose *nested* code is development-signed, untimestamped, or
@@ -279,6 +322,7 @@ server rejection into an immediate failure naming the binary:
 | `flags=…runtime` | the hardened runtime is a notarization precondition |
 | `Timestamp=` | a secure timestamp is required, and is *not* added by a plain `codesign` |
 | no `get-task-allow` | notarization rejects a debuggable binary outright |
+| `lipo -archs` is exactly `arm64` | a second slice is 20 MB that no supported Mac can run — see [Apple silicon only](#apple-silicon-only) |
 
 Nine binaries pass today: `Threading`, its three helpers, and Sparkle's five — `Sparkle`,
 `Autoupdate`, `Updater`, `Downloader` and `Installer`. The loop is a `find` over the bundle
@@ -346,7 +390,7 @@ phase was needed.
 check is a `find` over the bundle rather than a list of known binaries. With the bundled `scc`
 helper, the export signs all ten executables (five app-side, five Sparkle) as Developer ID,
 hardened and timestamped. The release gate separately verifies that `Contents/Helpers/scc` is
-the expected universal version after signing.
+the expected official arm64 build after signing.
 
 ### The UI is ours, with one documented exception
 
