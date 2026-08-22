@@ -11,6 +11,7 @@ enum HostPopoverID: String, CaseIterable {
     case sidebarProjectHoverCard = "sidebar.project-hover-card"
     case sidebarSessionHoverCard = "sidebar.session-hover-card"
     case toolbarAccountUsage = "toolbar.account-usage-popover"
+    case toolbarAllAccountUsage = "toolbar.all-account-usage-popover"
     case settingsAccountIconPicker = "settings.account-icon-picker"
     case extensionNodeDetail = "extension.node-detail"
     case conversationChangedFileDiff = "conversation.changed-file-diff"
@@ -25,6 +26,14 @@ enum HostPopoverID: String, CaseIterable {
             return .component(.sidebarSessionHoverCard)
         case .toolbarAccountUsage:
             return .component(.toolbarAccountUsagePopover)
+        case .toolbarAllAccountUsage:
+            return .hostOnly(
+                reason: "A live operational fleet over every enabled login. Refresh pacing, "
+                    + "stable account ordering, bounded scrolling, current-session migration "
+                    + "eligibility and dismissal remain host-owned; the public account-usage "
+                    + "component contract describes one account and cannot honestly replace "
+                    + "or compose this multi-account action surface."
+            )
         case .extensionNodeDetail:
             return .hostOnly(
                 reason: "The second level behind an extension's own summary. Its *body* is "

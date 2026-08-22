@@ -138,19 +138,93 @@ enum MCPSessionRegistry {
         return "http://\(MCPDefaults.host):\(port)\(MCPDefaults.pathPrefix)\(token(for: sessionID))"
     }
 
+    /// The command line that spawns this session's stdio bridge, or nil to use HTTP.
+    ///
+    /// Three conditions, and every one of them is a fallback rather than a failure. The setting
+    /// has to be on — the bridge is opt-in for the length of rollout step 2. The helper has to be
+    /// there and executable, because a `command` naming a file that will not run produces a CLI
+    /// that reports a broken MCP server rather than a session that quietly uses the port. And the
+    /// rendezvous has to be bindable: a socket that can never bind is a bridge that can never
+    /// connect, so a home directory long enough to overflow `sun_path` must fall back to HTTP
+    /// rather than ship a tool channel that refuses every call for the life of the session.
+    ///
+    /// `decision` is one injectable value rather than three parameters so a test can force each
+    /// of those three answers without touching the developer's defaults or bundle.
+    static func bridgeInvocation(
+        for sessionID: SessionID,
+        decision: MCPBridgeDecision = .current
+    ) -> MCPBridgeInvocation? {
+        guard decision.isEnabled else { return nil }
+
+        guard let socketPath = decision.socketPath else {
+            ThreadingLogger.mcp.error(
+                """
+                The MCP stdio bridge is enabled but the rendezvous cannot be bound; this \
+                launch uses the loopback endpoint instead
+                """
+            )
+            return nil
+        }
+
+        guard FileManager.default.isExecutableFile(atPath: decision.helperURL.path) else {
+            ThreadingLogger.mcp.error(
+                """
+                The MCP stdio bridge is enabled but \
+                \(MCPBridgeDefaults.helperName, privacy: .public) is not executable in this \
+                bundle; this launch uses the loopback endpoint instead
+                """
+            )
+            return nil
+        }
+
+        return MCPBridgeInvocation(
+            command: decision.helperURL.path,
+            arguments: [
+                MCPBridgeDefaults.socketArgument, socketPath,
+                MCPBridgeDefaults.tokenArgument, token(for: sessionID),
+                MCPBridgeDefaults.cacheArgument, bridgeCacheFile(for: sessionID).path
+            ]
+        )
+    }
+
+    /// How this launch reaches the MCP server: the helper it spawns, or the URL it resolves.
+    ///
+    /// One decision for all three transports. Claude writes it into a JSON file, Codex into
+    /// per-run TOML overrides and ACP into its `mcpServers` array — but which of the two forms
+    /// they are rendering is settled here, once, so the three cannot disagree about whether this
+    /// session has a bridge.
+    ///
+    /// Nil is "no MCP for this launch": the stdio form needs no port, so this only happens when
+    /// the bridge is unavailable *and* the listener has none.
+    static func binding(
+        for sessionID: SessionID,
+        decision: MCPBridgeDecision = .current
+    ) -> MCPServerBinding? {
+        if let invocation = bridgeInvocation(for: sessionID, decision: decision) {
+            return .stdio(invocation)
+        }
+        guard let url = endpointURL(for: sessionID) else { return nil }
+        return .http(url: url)
+    }
+
     /// Writes the Claude `--mcp-config` file for a session and returns its path.
     ///
-    /// Returns nil when the server is not listening, which leaves the launch to proceed
-    /// without MCP rather than failing outright.
-    static func writeConfiguration(for sessionID: SessionID) -> String? {
-        guard let url = endpointURL(for: sessionID) else { return nil }
+    /// Returns nil when there is nothing to write it about — which, once a bridge invocation is
+    /// available, no longer includes "the server is not listening". That independence is the
+    /// whole point of the shim: the stdio form names a helper rather than an address, so a
+    /// session can be launched before the listener is up, or while the app is closed, and still
+    /// hold a working tool channel. Without one it falls back to the HTTP form exactly as
+    /// before, nil when there is no port, leaving the launch to proceed without MCP rather than
+    /// failing outright.
+    static func writeConfiguration(
+        for sessionID: SessionID,
+        decision: MCPBridgeDecision = .current
+    ) -> String? {
+        guard let binding = binding(for: sessionID, decision: decision) else { return nil }
 
         let configuration: [String: Any] = [
             "mcpServers": [
-                MCPDefaults.serverName: [
-                    "type": "http",
-                    "url": url
-                ]
+                MCPDefaults.serverName: binding.claudeServerObject
             ]
         ]
 
@@ -196,20 +270,16 @@ enum MCPSessionRegistry {
     /// Claude launches when Threading chose Standard or Fast, and absent when speed belongs to
     /// the account's own settings.
     ///
-    /// `socketPath` is the rendezvous the hooks post to. It is injectable so a test can name a
-    /// path of its own, and it has no "not available yet" case: the path is a fixed property of
-    /// the user's home directory, knowable long before any listener binds it. That is what
-    /// deleted this function's worst branch — a session launched before the listener had a port
-    /// used to get no hooks at all, which silently cost it accurate activity and, if it was a
-    /// rendered session, blocked its tools outright with no card to approve them.
+    /// Hook commands read both routes from the launch environment. This file therefore stays
+    /// independent of listener timing, while a failed socket can retry the same payload over the
+    /// loopback port selected for that launch.
     static func writeHookSettings(
         for sessionID: SessionID,
         brokersPermissions: Bool,
         reportsLifecycle: Bool,
         remoteControl: Bool? = nil,
         fastMode: Bool? = nil,
-        statusLineOverride: String? = nil,
-        socketPath: String = MCPBridgeLocation.socketPath
+        statusLineOverride: String? = nil
     ) -> String? {
         let needsListener = brokersPermissions || reportsLifecycle
 
@@ -225,7 +295,6 @@ enum MCPSessionRegistry {
         if needsListener {
             appendHooks(
                 to: &hooks,
-                socketPath: socketPath,
                 token: token(for: sessionID),
                 brokersPermissions: brokersPermissions,
                 reportsLifecycle: reportsLifecycle
@@ -272,18 +341,15 @@ enum MCPSessionRegistry {
     /// The `curl` entries themselves, split out so the settings file can still be written for a
     /// session that asked for no hooks but has another launch override to state.
     ///
-    /// They post over the unix socket rather than the loopback port. The path is quoted because
-    /// it contains `Application Support`, and the URL is quoted because a lifecycle report's
-    /// `?event=` would otherwise be read as a shell glob.
+    /// They prefer the owner-only unix socket and retry the same buffered payload over the
+    /// loopback port when it cannot be reached. The shared builder owns that route for both
+    /// provider hook formats.
     private static func appendHooks(
         to hooks: inout [String: Any],
-        socketPath: String,
         token: String,
         brokersPermissions: Bool,
         reportsLifecycle: Bool
     ) {
-        let base = MCPDefaults.socketURLBase
-        let transport = "--unix-socket \(MCPBridgeLocation.shellQuoted(socketPath))"
         // Accumulated per hook name rather than assigned, because one name can carry entries
         // from both halves of this function: `PreToolUse` is how a native session brokers
         // permission *and* how a terminal session learns that a question tool opened. Assigning
@@ -291,10 +357,12 @@ enum MCPSessionRegistry {
         var groups: [String: [[String: Any]]] = [:]
 
         if brokersPermissions {
-            let url = "\(base)\(MCPDefaults.permissionPathPrefix)\(token)"
-            let command = "curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
-                + " \(transport)"
-                + " -H 'Content-Type: application/json' --data-binary @- '\(url)'"
+            let payload = "threading_hook_payload"
+            let command = "\(payload)=$(cat); " + MCPDefaults.hookPostCommand(
+                payloadVariable: payload,
+                endpointSuffix: "\(MCPDefaults.permissionPathPrefix)\(token)",
+                timeout: MCPDefaults.permissionTimeout
+            )
 
             // No matcher: every tool is offered, and `PermissionPolicy` decides which are
             // worth interrupting for. Policy in Swift beats policy in a glob.
@@ -306,9 +374,6 @@ enum MCPSessionRegistry {
                 let registration = event.claudeRegistration
                 guard registration.isSupported else { continue }
 
-                let url = "\(base)\(MCPDefaults.lifecyclePathPrefix)\(token)"
-                    + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)"
-
                 // Output is discarded and failure is swallowed, which is load-bearing rather
                 // than tidy. Claude feeds a `UserPromptSubmit` hook's stdout back to the model
                 // as extra context, treats a non-zero `Stop` hook as a reason to keep going, and
@@ -317,9 +382,13 @@ enum MCPSessionRegistry {
                 // only supposed to observe. This is what keeps the ask hooks *observational*:
                 // they sit on the same event a broker would, and say nothing back.
                 let timeout = MCPDefaults.lifecycleTimeout(for: event)
-                let command = "curl -s --max-time \(Int(timeout))"
-                    + " \(transport)"
-                    + " -H 'Content-Type: application/json' --data-binary @- '\(url)'"
+                let payload = "threading_hook_payload"
+                let command = "\(payload)=$(cat); " + MCPDefaults.hookPostCommand(
+                    payloadVariable: payload,
+                    endpointSuffix: "\(MCPDefaults.lifecyclePathPrefix)\(token)"
+                        + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)",
+                    timeout: timeout
+                )
                     + " >/dev/null 2>&1 || true"
 
                 for name in registration.eventNames {
@@ -522,6 +591,14 @@ enum MCPSessionRegistry {
 
     private static func settingsFile(for sessionID: SessionID) -> URL {
         supportFile(sessionID, in: MCPDefaults.settingsDirectoryName)
+    }
+
+    /// The catalogue cache the session's bridge keeps, named by the app rather than by the
+    /// helper. The helper has no path policy of its own, so socket, token and cache stay one
+    /// decision made beside the session's other per-session files — and one that every existing
+    /// revocation sweep already knows how to undo.
+    private static func bridgeCacheFile(for sessionID: SessionID) -> URL {
+        supportFile(sessionID, in: MCPDefaults.bridgeCacheDirectoryName)
     }
 
     /// Opting out must leave neither a launch argument nor an older token-bearing file behind.

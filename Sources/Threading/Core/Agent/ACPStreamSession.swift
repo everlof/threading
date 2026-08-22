@@ -347,15 +347,17 @@ final class ACPStreamSession:
         armHandshakeDeadline()
     }
 
+    /// Threading's own server, injected per session over the wire rather than written into any
+    /// provider's persistent configuration.
+    ///
+    /// Which of ACP's two `McpServer` shapes this is — the tagged `http` one or the untagged
+    /// stdio baseline — is `MCPSessionRegistry.binding`'s decision, the same one Claude's config
+    /// file and Codex's overrides are rendered from, so a session cannot have a bridge on one
+    /// transport and a URL on another.
     private func mcpServers() -> [[String: Any]] {
         guard !MCPToolCatalog.toolNames(for: sessionID).isEmpty,
-              let url = MCPSessionRegistry.endpointURL(for: sessionID) else { return [] }
-        return [[
-            "type": "http",
-            "name": MCPDefaults.serverName,
-            "url": url,
-            "headers": []
-        ]]
+              let binding = MCPSessionRegistry.binding(for: sessionID) else { return [] }
+        return [binding.acpServerObject(named: MCPDefaults.serverName)]
     }
 
     private func sendPendingPromptIfReady() {

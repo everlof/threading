@@ -2191,14 +2191,17 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
     }
 
-#if DEBUG
-    func testMobileDebugCaptureRouteRequiresOwnerIOSAndALiveRequest() throws {
+    func testMobileDiagnosticsCaptureRouteRequiresOptInOwnerIOSAndALiveRequest() throws {
+        let captureStore = MobileDiagnosticsCaptureStore.shared
+        let previousEnabled = captureStore.isEnabled
+        captureStore.setEnabled(false)
+        defer { captureStore.setEnabled(previousEnabled) }
         let now = Date()
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let timestamp = formatter.string(from: now)
         func makeBody(for requestID: String) throws -> Data {
-            let capture = RemoteMobileDebugCaptureDTO(
+            let capture = RemoteMobileDiagnosticsCaptureDTO(
                 captureID: UUID().uuidString.lowercased(),
                 requestID: requestID,
                 capturedAt: timestamp,
@@ -2222,7 +2225,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 screenshotKind: nil
             )
             return try JSONEncoder().encode(
-                RemoteMobileDebugCaptureUploadRequestDTO(capture: capture)
+                RemoteMobileDiagnosticsCaptureUploadRequestDTO(capture: capture)
             )
         }
 
@@ -2234,22 +2237,34 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         ]
 
         XCTAssertEqual(try XCTUnwrap(post(
-            RemoteRouter.mobileDebugCaptureUploadPath,
+            RemoteRouter.mobileDiagnosticsCaptureUploadPath,
             bearer: "goodtoken",
             body: body,
             headers: headers
-        )).status, 409, "an authenticated owner still needs a live, single-use request")
+        )).status, 403, "the shipping route stays inert until the Mac opt-in is on")
+
+        captureStore.setEnabled(true)
+        let enabledRequestID = UUID().uuidString.lowercased()
+        XCTAssertEqual(try XCTUnwrap(post(
+            RemoteRouter.mobileDiagnosticsCaptureUploadPath,
+            bearer: "goodtoken",
+            body: try makeBody(for: enabledRequestID),
+            headers: [
+                "X-Threading-Client": "Threading-iOS",
+                "X-Threading-Request-ID": enabledRequestID,
+            ]
+        )).status, 409, "an opted-in owner still needs a live, single-use request")
 
         let webRequestID = UUID().uuidString.lowercased()
         XCTAssertEqual(try XCTUnwrap(post(
-            RemoteRouter.mobileDebugCaptureUploadPath,
+            RemoteRouter.mobileDiagnosticsCaptureUploadPath,
             bearer: "goodtoken",
             body: try makeBody(for: webRequestID),
             headers: [
                 "X-Threading-Client": "Threading-Web",
                 "X-Threading-Request-ID": webRequestID,
             ]
-        )).status, 403, "only the native iOS client may use this Debug route")
+        )).status, 403, "only the native iOS client may use this diagnostics route")
 
         authority.set(
             RemoteAuthorization(
@@ -2261,16 +2276,15 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
         let guestRequestID = UUID().uuidString.lowercased()
         XCTAssertEqual(try XCTUnwrap(post(
-            RemoteRouter.mobileDebugCaptureUploadPath,
+            RemoteRouter.mobileDiagnosticsCaptureUploadPath,
             bearer: "guesttoken",
             body: try makeBody(for: guestRequestID),
             headers: [
                 "X-Threading-Client": "Threading-iOS",
                 "X-Threading-Request-ID": guestRequestID,
             ]
-        )).status, 403, "a session guest cannot upload host Debug custody")
+        )).status, 403, "a session guest cannot upload host diagnostics custody")
     }
-#endif
 
     func testInvitationAcceptanceIsIdempotentForAnExistingBearer() throws {
         let request = try JSONEncoder().encode(

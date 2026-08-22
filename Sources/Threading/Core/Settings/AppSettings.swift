@@ -851,6 +851,26 @@ final class AppSettings {
         }
     }
 
+    // MARK: - MCP Transport
+
+    /// Whether launches address the tool channel through `threading-mcp-bridge` rather than a
+    /// URL the CLI resolves once at startup.
+    ///
+    /// Hidden and off by default: this is rollout step 2 of
+    /// `docs/feature-drafts/durable-sessions.md` — the shim behind a setting, with HTTP still
+    /// the fallback while it settles. `defaults write codes.threading mcpStdioBridgeEnabled
+    /// -bool true` turns it on for the next launch of a session.
+    ///
+    /// `MCPBridgeDecision.current` reads the same key off the main actor, because launch files
+    /// are written from wherever a launch is being assembled. This accessor is for the app's own
+    /// main-actor code and for tests.
+    var usesMCPStdioBridge: Bool {
+        get { AppSettingDefinitions.usesMCPStdioBridge.read(from: defaults) ?? false }
+        set {
+            AppSettingDefinitions.usesMCPStdioBridge.write(newValue, to: defaults)
+        }
+    }
+
     // MARK: - Agent Hooks
 
     /// Whether Claude sessions report turn boundaries and subagent lifecycle back to Threading.
@@ -1011,6 +1031,18 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Local Diagnostics
+
+    /// Whether this Mac accepts bounded diagnostics requested from a paired owner iPhone.
+    /// Off by default and independent of Remote Access: the transport may be available while
+    /// this evidence path remains inert.
+    var localDiagnosticsEnabled: Bool {
+        get { AppSettingDefinitions.localDiagnosticsEnabled.read(from: defaults) ?? false }
+        set {
+            AppSettingDefinitions.localDiagnosticsEnabled.write(newValue, to: defaults)
+        }
+    }
+
     // MARK: - Remote Access
 
     /// Whether the remote-access server runs (and, once implemented, its tunnel). Off by
@@ -1068,6 +1100,9 @@ final class AppSettings {
         }
     }
 
+    /// How long a released remote viewport lease keeps holding its grid before the Mac's own
+    /// frame decides again.
+    ///
     /// Read at release time rather than cached, so a `defaults write` takes effect without a
     /// relaunch. `0` is a legal value and means "release immediately", which is the behaviour
     /// the grace replaced; the range clamps rather than refuses, because the nearest allowed
@@ -1239,9 +1274,9 @@ final class AppSettings {
     /// Carries the pre-rename choices that together made an already-installed integration run.
     ///
     /// Codex hooks are opt-in because they edit a user-owned file. Before the bundle-id rename,
-    /// that choice lived in `se.mjukis.Skalman`; losing it leaves the old `SKALMAN_*` hooks on
-    /// disk while Threading launches with `THREADING_*`, so no lifecycle report can pass its
-    /// guard and ordinary model-thinking gaps read as finished turns. A stored current value
+    /// that choice lived in `se.mjukis.Skalman`; losing it leaves a pre-rename installation on
+    /// disk that Threading is no longer authorised to maintain, so no lifecycle report can pass
+    /// its guard and ordinary model-thinking gaps read as finished turns. A stored current value
     /// always wins — including an explicit `false`. Only legacy `true` values are carried,
     /// because `false` is already the current default and writing it would distinguish nothing.
     ///

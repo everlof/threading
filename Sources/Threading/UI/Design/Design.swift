@@ -1123,7 +1123,6 @@ enum Design {
 
         static let coverageRowHeight: CGFloat = 54
         static let minimumContentWidth: CGFloat = 560
-        static let tabControlWidth: CGFloat = 280
         static let consumptionSummaryWidth: CGFloat = 300
         static let rangeControlWidth: CGFloat = 148
         static let metricControlWidth: CGFloat = 144
@@ -1131,6 +1130,24 @@ enum Design {
         /// last complete report is being refreshed, not built, and a full-width bar over it would
         /// claim the page is unusable while it runs.
         static let scanProgressWidth: CGFloat = 88
+    }
+
+    /// The live, all-account capacity run shared by Usage settings and the toolbar's expanded
+    /// fleet popover. Account count comes from provider discovery, so the list is a bounded
+    /// viewport rather than a retained stack; these values define that viewport and the maximum
+    /// amount of provider-shaped detail one recycled row may materialize.
+    enum AccountUsageFleet {
+        static let settingsMaximumHeight: CGFloat = 430
+        static let popoverMaximumHeight: CGFloat = 520
+        static let popoverWidth: CGFloat = 380
+        static let estimatedBaseRowHeight: CGFloat = 86
+        static let estimatedWindowRowHeight: CGFloat = 50
+        static let estimatedActionHeight: CGFloat = Size.chipHeight + Spacing.small
+        static let maximumWindowsPerAccount = 6
+        static let minimumViewportHeight: CGFloat = 112
+        static let providerIconSize: CGFloat = 18
+        static let accountCardInset = Spacing.inset
+        static let accountGap = Spacing.small
     }
 
     // MARK: - Surface

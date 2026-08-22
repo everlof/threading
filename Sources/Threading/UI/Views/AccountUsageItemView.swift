@@ -8,11 +8,12 @@ import ThreadingExtensionKit
 /// with its value — `5h 43% · 7d 73%` — because the two limits answer different questions
 /// (can I keep going now, and will the week hold). Monochrome while usage is comfortable,
 /// tinted only as a window approaches its limit — the toolbar is glanced at, not read, so
-/// colour is reserved for the moment it means something. Hovering opens the detail popover.
+/// colour is reserved for the moment it means something. Hovering opens the detail popover;
+/// clicking pins it, and Option-clicking opens the bounded all-account fleet.
 ///
 /// Hidden outright for sessions with no metered account (shells, nothing selected): a pill
 /// with nothing to say is noise in the one corner that is always visible.
-final class AccountUsageItemView: BackdropOverlay {
+final class AccountUsageItemView: BackdropThemedControl {
 
     // MARK: - Properties
 
@@ -22,8 +23,8 @@ final class AccountUsageItemView: BackdropOverlay {
     private let summaryLabel = NSTextField(labelWithString: "")
     private let appEvents = AppEventObservations()
 
-    private var trackingArea: NSTrackingArea?
-    private var isHovered = false { didSet { updateBackground() } }
+    private var isPressed = false { didSet { updateBackground() } }
+    private var pressModifiers: NSEvent.ModifierFlags = []
 
     private(set) var account: AgentAccount?
 
@@ -31,11 +32,19 @@ final class AccountUsageItemView: BackdropOverlay {
     /// *this* session's limits or another model's business.
     private(set) var model: String?
 
+    /// Other logins to which the shown conversation can safely resume. Kept separate from the
+    /// fleet's readings because migration eligibility belongs to the current session, not to an
+    /// account's capacity.
+    private(set) var handoffAccountIDs: Set<AccountID> = []
+
+    var onHandoff: ((AgentAccount) -> Void)?
+
     /// Re-asks the service on a short cadence; the service's own spacing decides whether a
     /// tick actually fetches, so the timer stays cheap.
     private let refreshTimer = MainRunLoopTimer()
 
     private var popover: ThemedPopover?
+    private var isPopoverPinned = false
 
     /// Decides when the popover opens and closes; what it shows stays the pill's business.
     /// The policy follows the content — `readingPopoverPolicy` while the popover is the
@@ -46,7 +55,10 @@ final class AccountUsageItemView: BackdropOverlay {
             policy: AccountUsageItemDefaults.readingPopoverPolicy
         )
         scheduler.onPresent = { [weak self] in self?.showPopover() }
-        scheduler.onDismiss = { [weak self] in self?.closePopover() }
+        scheduler.onDismiss = { [weak self] in
+            guard self?.isPopoverPinned == false else { return }
+            self?.closePopover()
+        }
         return scheduler
     }()
 
@@ -60,6 +72,10 @@ final class AccountUsageItemView: BackdropOverlay {
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
 
     // MARK: - Initialization
+
+    convenience init() {
+        self.init(frame: .zero)
+    }
 
     override init(frame frameRect: NSRect) {
         customizationLookup = {
@@ -111,6 +127,17 @@ final class AccountUsageItemView: BackdropOverlay {
         // A pill here left one rounded rect, one pill and three circles in a single strip.
         layer?.cornerRadius = Design.Radius.control
         updateBackground()
+
+        onHoverChange = { [weak self] hovering in
+            guard let self else { return }
+            if hovering {
+                popoverScheduler.pointerEntered()
+            } else {
+                popoverScheduler.pointerExited()
+            }
+        }
+        toolTip = L10n.string("Hover for this account · Option-click for all accounts")
+        setAccessibilityLabel(L10n.string("Account usage"))
 
         ringView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -164,13 +191,18 @@ final class AccountUsageItemView: BackdropOverlay {
     /// The model is part of the configuration rather than looked up here: the pill follows a
     /// session, and which limit binds that session depends on what it runs, not only on who
     /// pays for it.
-    func configure(account: AgentAccount?, model: String? = nil) {
-        if self.account?.id != account?.id {
+    func configure(
+        account: AgentAccount?,
+        model: String? = nil,
+        handoffAccountIDs: Set<AccountID> = []
+    ) {
+        if self.account?.id != account?.id || self.handoffAccountIDs != handoffAccountIDs {
             popoverScheduler.cancelPendingWork()
             closePopover()
         }
         self.account = account
         self.model = model
+        self.handoffAccountIDs = handoffAccountIDs
 
         if let account {
             AccountUsageService.shared.refresh(account)
@@ -281,43 +313,85 @@ final class AccountUsageItemView: BackdropOverlay {
 
     // MARK: - Interaction
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-
-        // The pill sits in the pane header, which slides sideways whenever a pane opens or
-        // closes — the move the pointer is never told about. See `NSView.hoverIsStale`.
-        if hoverIsStale(isHovered) {
-            isHovered = false
-            popoverScheduler.pointerExited()
-        }
+    override func hoverDidChange() {
+        updateBackground()
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        popoverScheduler.pointerEntered()
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled, account != nil else { return }
+        window?.makeFirstResponder(self)
+        pressModifiers = event.modifierFlags
+        isPressed = true
     }
 
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        popoverScheduler.pointerExited()
+    override func mouseDragged(with event: NSEvent) {
+        isPressed = bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let fires = isPressed && bounds.contains(convert(event.locationInWindow, from: nil))
+        let modifiers = pressModifiers
+        isPressed = false
+        pressModifiers = []
+        guard fires else { return }
+        presentClick(modifiers: modifiers)
+    }
+
+    override func performPrimaryAction() -> Bool {
+        guard isEnabled, account != nil else { return false }
+        presentClick(modifiers: [])
+        return true
+    }
+
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard account != nil else { return nil }
+        return [
+            NSAccessibilityCustomAction(name: L10n.string("Show all account usage")) {
+                [weak self] in
+                self?.showFleetPopover()
+                return self != nil
+            }
+        ]
+    }
+
+    enum ClickPresentation: Equatable {
+        case currentAccount
+        case allAccounts
+    }
+
+    static func clickPresentation(
+        for modifiers: NSEvent.ModifierFlags
+    ) -> ClickPresentation {
+        modifiers.intersection(.deviceIndependentFlagsMask).contains(.option)
+            ? .allAccounts
+            : .currentAccount
+    }
+
+    private func presentClick(modifiers: NSEvent.ModifierFlags) {
+        switch Self.clickPresentation(for: modifiers) {
+        case .currentAccount:
+            showCurrentPopover(pinned: true)
+        case .allAccounts:
+            showFleetPopover()
+        }
     }
 
     /// Opens the detail popover on hover; `popoverScheduler` decides when this is called and
     /// when the popover closes again.
     private func showPopover() {
-        guard let account, popover?.isShown != true else { return }
+        showCurrentPopover(pinned: false)
+    }
+
+    private func showCurrentPopover(pinned: Bool) {
+        guard let account else { return }
+        if popover?.isShown == true {
+            if pinned {
+                isPopoverPinned = true
+                popover?.behavior = .semitransient
+                popoverScheduler.cancelPendingWork()
+            }
+            return
+        }
 
         // Hovering is the moment the user cares; the service's floor keeps it polite.
         AccountUsageService.shared.refresh(account, force: true)
@@ -326,8 +400,40 @@ final class AccountUsageItemView: BackdropOverlay {
 
         let popover = HostPopoverFactory.make(.toolbarAccountUsage)
         popover.contentViewController = controller
-        popover.behavior = .transient
+        isPopoverPinned = pinned
+        popover.behavior = pinned ? .semitransient : .transient
         popover.animates = false
+        popover.onClose = { [weak self] in
+            self?.isPopoverPinned = false
+            self?.popover = nil
+        }
+        popover.show(relativeTo: bounds, of: self, preferredEdge: .minY)
+        self.popover = popover
+    }
+
+    private func showFleetPopover() {
+        guard let account else { return }
+        popoverScheduler.cancelPendingWork()
+        closePopover()
+
+        let controller = AccountUsageFleetPopoverViewController(
+            currentAccountID: account.id,
+            handoffAccountIDs: handoffAccountIDs
+        )
+        controller.onHandoff = { [weak self] destination in
+            self?.closePopover()
+            self?.onHandoff?(destination)
+        }
+
+        let popover = HostPopoverFactory.make(.toolbarAllAccountUsage)
+        popover.contentViewController = controller
+        popover.behavior = .semitransient
+        popover.animates = false
+        popover.onClose = { [weak self] in
+            self?.isPopoverPinned = false
+            self?.popover = nil
+        }
+        isPopoverPinned = true
         popover.show(relativeTo: bounds, of: self, preferredEdge: .minY)
         self.popover = popover
     }
@@ -402,12 +508,14 @@ final class AccountUsageItemView: BackdropOverlay {
     }
 
     private func closePopover() {
-        popover?.close()
+        let open = popover
         popover = nil
+        isPopoverPinned = false
+        open?.close()
     }
 
     private func updateBackground() {
         layer?.cornerRadius = Design.Radius.control
-        applyLayerBackground(isHovered ? ink.surfaceHover : ink.surface)
+        applyLayerBackground(isPressed || isHovered ? ink.surfaceHover : ink.surface)
     }
 }

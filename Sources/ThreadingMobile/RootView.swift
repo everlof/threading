@@ -75,9 +75,9 @@ struct RootView: View {
                     AdvancedConnectionSettingsView(pool: .evidenceFixture())
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "debug-bridge-settings" {
+                        == "local-diagnostics-settings" {
                 NavigationStack {
-                    MobileDebugBridgeView()
+                    MobileDiagnosticsView()
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "notification-settings" {

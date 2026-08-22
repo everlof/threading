@@ -88,41 +88,109 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     }
     let allViews = descendants(in: host)
 
-        let search = try XCTUnwrap(allViews.compactMap { $0 as? ThemedSearchField }.first)
-        XCTAssertEqual(search.accessibilityLabel(), "Filter artifacts")
-        search.stringValue = "dyld"
+    let search = try XCTUnwrap(allViews.compactMap { $0 as? ThemedSearchField }.first)
+    XCTAssertEqual(search.accessibilityLabel(), "Filter artifacts")
+    search.stringValue = "dyld"
     search.sendAction(search.action, to: search.target)
 
-        let picker = try XCTUnwrap(allViews.compactMap { $0 as? ThemedPopUp }.first)
-        XCTAssertEqual(picker.accessibilityTitle(), "Release")
-        picker.chooseItem(at: 0)
+    let picker = try XCTUnwrap(allViews.compactMap { $0 as? ThemedPopUp }.first)
+    XCTAssertEqual(picker.accessibilityTitle(), "Grouping")
+    picker.chooseItem(at: 0)
 
     let sceneItem = try XCTUnwrap(
       allViews.first {
-        $0.accessibilityIdentifier() == "semantic-scene.item.dyld-cache"
+        $0.accessibilityIdentifier() == "semantic-scene.item.build-products"
       }
     )
-        XCTAssertEqual(sceneItem.accessibilityRole(), .button)
-        XCTAssertTrue(sceneItem.accessibilityPerformPress())
-        let selectedSceneItem = try XCTUnwrap(
-            allViews.first {
-                $0.accessibilityIdentifier() == "semantic-scene.item.system-library"
-            }
-        )
-        XCTAssertTrue(selectedSceneItem.isAccessibilitySelected())
+    XCTAssertEqual(sceneItem.accessibilityRole(), .button)
+    XCTAssertTrue(sceneItem.accessibilityPerformPress())
+    let selectedSceneItem = try XCTUnwrap(
+      allViews.first {
+        $0.accessibilityIdentifier() == "semantic-scene.item.artifact-root"
+      }
+    )
+    XCTAssertTrue(selectedSceneItem.isAccessibilitySelected())
 
     XCTAssertEqual(
       events.map(\.0),
       [
         "filter-artifacts",
-        "select-release",
+        "select-grouping",
         "inspect-artifact",
       ])
     XCTAssertEqual(events[0].1, .string("dyld"))
-    XCTAssertEqual(events[1].1, .string("ios-26.4"))
-    XCTAssertEqual(events[2].1, .string("dyld-cache"))
-        XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
+    XCTAssertEqual(events[1].1, .string("folder"))
+    XCTAssertEqual(events[2].1, .string("build-products"))
+    XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
+  }
+
+  func testHierarchySceneZoomsLocallyAndExposesAHostOwnedBreadcrumb() throws {
+    Design.Motion.reduceMotionOverrideForTesting = true
+    defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+    var events: [String] = []
+    let panel = try XCTUnwrap(ExtensionExperimentFixture.registration.panels.first)
+    let host = try ExtensionNodeRenderer.render(panel.root) { events.append($0) }
+
+    let hierarchy = try XCTUnwrap(
+      descendants(in: host).compactMap { $0 as? SemanticHierarchySceneView }.first
+    )
+    let root = try XCTUnwrap(
+      descendants(in: hierarchy).first {
+        $0.accessibilityIdentifier() == "semantic-scene.item.artifact-root"
+      }
+    )
+    XCTAssertEqual(root.accessibilityRole(), .group)
+    let branch = try XCTUnwrap(
+      descendants(in: hierarchy).first {
+        $0.accessibilityIdentifier() == "semantic-scene.item.build"
+      }
+    )
+    XCTAssertTrue(branch.accessibilityPerformPress())
+    XCTAssertEqual(events, [], "host-owned navigation must not round-trip to the extension")
+    XCTAssertNotNil(
+      descendants(in: hierarchy).first {
+        $0.accessibilityIdentifier() == "semantic-scene.breadcrumb.artifact-root"
+      }
+    )
+
+    let rootBreadcrumb = try XCTUnwrap(
+      descendants(in: hierarchy).compactMap { $0 as? ThemedButton }.first {
+        $0.accessibilityIdentifier() == "semantic-scene.breadcrumb.artifact-root"
+      }
+    )
+    rootBreadcrumb.performClick()
+    XCTAssertNil(
+      descendants(in: hierarchy).first {
+        $0.accessibilityIdentifier() == "semantic-scene.breadcrumb.artifact-root"
+      }
+    )
+  }
+
+  func testHierarchySceneRequiresOneConnectedRoot() {
+    let scene = ExtensionScene(
+      accessibilityLabel: "Broken hierarchy",
+      hierarchy: ExtensionSceneHierarchy(rootID: "root"),
+      items: [
+        .init(
+          id: "root",
+          frame: .init(x: 0, y: 0, width: 1, height: 1),
+          label: "Root"
+        ),
+        .init(
+          id: "orphan",
+          parentID: "missing",
+          frame: .init(x: 0.1, y: 0.1, width: 0.2, height: 0.2),
+          label: "Orphan"
+        )
+      ]
+    )
+
+    XCTAssertThrowsError(try ExtensionPanel.nodeConstraints.validate(.scene(scene))) { error in
+      let messages = (error as? ExtensionValidationError)?.issues.map(\.message) ?? []
+      XCTAssertTrue(messages.contains("must match an item id"))
+      XCTAssertTrue(messages.contains("must form a branch rooted at 'root'"))
     }
+  }
 
     func testPickerWithNilSelectionRemainsUnselectedAndNamed() throws {
         let host = try ExtensionNodeRenderer.render(
@@ -582,8 +650,8 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     }
 
   /// The screenshot is the visual contract for the generic scene. Assertions can prove that
-  /// controls exist; only pixels reveal a crushed treemap, unreadable labels, or a theme that
-  /// stopped at the scene boundary.
+  /// controls exist; only pixels reveal crushed hierarchy geometry, unreadable labels, or a
+  /// theme that stopped at the scene boundary.
   func testArtifactSceneWritesAReviewableScreenshot() throws {
     AppThemeLibrary.apply(AppThemeStyles.cyberpunk)
     let panel = try XCTUnwrap(ExtensionExperimentFixture.registration.panels.first)

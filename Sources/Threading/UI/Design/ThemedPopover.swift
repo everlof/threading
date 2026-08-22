@@ -96,6 +96,12 @@ final class ThemedPopover {
             content: controller
         )
         panel.appearance = parent.appearance
+        // Content controllers are intentionally built before the panel is attached so their
+        // preferred size can drive placement. A parent window may pin an appearance that differs
+        // from NSApp, though, and layer-backed content freezes colours during that early build.
+        // Re-resolve the attached tree after the panel inherits its presenter so popover cards
+        // cannot keep Aqua surfaces under Dark Aqua text.
+        AppThemeRefresh.repaint(controller.view)
         self.panel = panel
 
         parent.addChildWindow(panel, ordered: .above)

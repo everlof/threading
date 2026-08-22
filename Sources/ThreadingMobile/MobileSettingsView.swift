@@ -85,7 +85,7 @@ struct MobileSettingsView: View {
                         SettingsNavigationRow(
                             symbol: "speedometer",
                             title: "Advanced",
-                            detail: "Connection reuse and metrics"
+                            detail: "Connection reuse, metrics and checkups"
                         ) {
                             AdvancedConnectionSettingsView()
                         }
@@ -102,22 +102,12 @@ struct MobileSettingsView: View {
                     }
 
 #if DEBUG
-                    // Keep ordinary DEBUG builds discoverable without putting developer chrome
-                    // into the canonical shipping-Settings evidence. The lab has its own direct
-                    // evidence scene below `RootView`.
+                    // Keep ordinary DEBUG labs discoverable without putting developer chrome
+                    // into the canonical shipping-Settings evidence.
                     if ProcessInfo.processInfo.environment[
                         "THREADING_MOBILE_UI_EVIDENCE_ID"
                     ] == nil {
                         settingsSection("Developer") {
-                            SettingsNavigationRow(
-                                symbol: "iphone.and.arrow.forward",
-                                title: "Debug bridge",
-                                detail: "Automatic paired-Mac checkups"
-                            ) {
-                                MobileDebugBridgeView()
-                            }
-
-                            ThemedRowDivider()
                             SettingsNavigationRow(
                                 symbol: "square.grid.2x2",
                                 title: "Connection progress",

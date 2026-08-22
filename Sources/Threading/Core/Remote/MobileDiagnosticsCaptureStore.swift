@@ -1,30 +1,30 @@
-#if DEBUG
 import Foundation
 import os
 import ThreadingRemoteKit
 
-struct MobileDebugStoredCapture: Codable, Equatable, Sendable {
+struct MobileDiagnosticsStoredCapture: Codable, Equatable, Sendable {
     let deviceID: String
     let deviceName: String
     let storedAt: String
-    let capture: RemoteMobileDebugCaptureDTO
+    let capture: RemoteMobileDiagnosticsCaptureDTO
 }
 
-struct MobileDebugDeviceSummary: Equatable, Sendable {
+struct MobileDiagnosticsDeviceSummary: Equatable, Sendable {
     let deviceID: String
     let deviceName: String
     let isConnected: Bool
-    let latestCapture: RemoteMobileDebugCaptureDTO?
+    let latestCapture: RemoteMobileDiagnosticsCaptureDTO?
     let storedAt: String?
 }
 
-/// Debug-only custody for evidence copied from a paired iPhone.
+/// Opt-in shipping custody for evidence copied from a paired iPhone.
 ///
-/// Live socket identities, pending request nonces, and the bounded disk cache share one lock so
-/// an upload can only consume a request minted for the same device. File reads happen once at
-/// construction; the hot list/inspect path is memory-only and bounded to forty captures.
-final class MobileDebugCaptureStore: @unchecked Sendable {
-    static let shared = MobileDebugCaptureStore()
+/// Live socket identities, pending request nonces, the enabled gate and the bounded disk cache
+/// share one lock. A phone may advertise while the Mac switch is off so enabling can take effect
+/// immediately, but no request is minted and no upload is accepted until the persisted Mac opt-in
+/// is on. Turning it off clears every outstanding nonce synchronously.
+final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
+    static let shared = MobileDiagnosticsCaptureStore()
 
     static let maximumCaptures = 40
     static let maximumCapturesPerDevice = 8
@@ -45,13 +45,16 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
     }
 
     private struct State {
-        var captures: [MobileDebugStoredCapture]
+        var isEnabled: Bool
+        var consentGeneration: UInt64 = 0
+        var captures: [MobileDiagnosticsStoredCapture]
         var connections: [String: ConnectionRecord] = [:]
         var pending: [String: PendingRequest] = [:]
         var lastAutomaticRequest: [String: Date] = [:]
     }
 
     enum StoreError: Error, Equatable {
+        case disabled
         case unsolicited
         case invalid
         case persistence
@@ -59,15 +62,47 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
 
     private let directory: URL
     private let lock: OSAllocatedUnfairLock<State>
+    private let beforePublishingCapture: (@Sendable () -> Void)?
+    private var settingsObserver: NSObjectProtocol?
 
-    init(directory: URL = FileManager.default
-        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Threading", isDirectory: true)
-        .appendingPathComponent("MobileDebugCaptures", isDirectory: true)) {
+    init(
+        directory: URL = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Threading", isDirectory: true)
+            .appendingPathComponent("MobileDiagnosticsCaptures", isDirectory: true),
+        isEnabled: Bool = MobileDiagnosticsCaptureStore.persistedFeatureEnabled(),
+        observesSettings: Bool = true,
+        beforePublishingCapture: (@Sendable () -> Void)? = nil
+    ) {
         self.directory = directory
+        self.beforePublishingCapture = beforePublishingCapture
         lock = OSAllocatedUnfairLock(initialState: State(
+            isEnabled: isEnabled,
             captures: Self.loadCaptures(from: directory)
         ))
+        if observesSettings {
+            settingsObserver = NotificationCenter.default.addObserver(
+                forName: AppSettingsDidChange.name,
+                object: nil,
+                queue: nil
+            ) { [weak self] _ in
+                self?.setEnabled(Self.persistedFeatureEnabled())
+            }
+        }
+    }
+
+    deinit {
+        if let settingsObserver {
+            NotificationCenter.default.removeObserver(settingsObserver)
+        }
+    }
+
+    var isEnabled: Bool {
+        lock.withLock { $0.isEnabled }
+    }
+
+    var captureCount: Int {
+        lock.withLock { $0.captures.count }
     }
 
     func register(_ connection: RemoteConnection, deviceID: String, deviceName: String?) {
@@ -82,23 +117,45 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
 
     func unregister(_ connection: RemoteConnection) {
         lock.withLock { state in
+            let removedDevices = Set(state.connections.compactMap { deviceID, record in
+                record.connection === connection ? deviceID : nil
+            })
             state.connections = state.connections.filter {
                 $0.value.connection !== connection
             }
+            state.pending = state.pending.filter { !removedDevices.contains($0.value.deviceID) }
+        }
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        let connectedDeviceIDs: [String] = lock.withLock { state in
+            guard state.isEnabled != enabled else { return [] }
+            state.isEnabled = enabled
+            state.consentGeneration &+= 1
+            state.pending.removeAll()
+            state.lastAutomaticRequest.removeAll()
+            return enabled ? Array(state.connections.keys) : []
+        }
+        for deviceID in connectedDeviceIDs {
+            _ = requestCapture(
+                deviceID: deviceID,
+                screenshotPolicy: .latestIncident,
+                automatic: true
+            )
         }
     }
 
     @discardableResult
     func requestCapture(
         deviceID: String,
-        screenshotPolicy: RemoteMobileDebugCaptureRequestDTO.ScreenshotPolicy,
+        screenshotPolicy: RemoteMobileDiagnosticsCaptureRequestDTO.ScreenshotPolicy,
         automatic: Bool,
         now: Date = Date()
     ) -> String? {
-        let result: (RemoteConnection, RemoteMobileDebugCaptureRequestDTO)? = lock.withLock {
+        let result: (RemoteConnection, RemoteMobileDiagnosticsCaptureRequestDTO)? = lock.withLock {
             state in
             state.pending = state.pending.filter { $0.value.expiresAt > now }
-            guard let live = state.connections[deviceID] else { return nil }
+            guard state.isEnabled, let live = state.connections[deviceID] else { return nil }
             if automatic,
                let last = state.lastAutomaticRequest[deviceID],
                now.timeIntervalSince(last) < Self.automaticRequestInterval {
@@ -112,43 +169,48 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
             )
             return (
                 live.connection,
-                RemoteMobileDebugCaptureRequestDTO(
+                RemoteMobileDiagnosticsCaptureRequestDTO(
                     requestID: requestID,
                     screenshotPolicy: screenshotPolicy
                 )
             )
         }
-        guard let result else { return nil }
-        guard let data = try? JSONEncoder().encode(result.1) else { return nil }
+        guard let result, let data = try? JSONEncoder().encode(result.1) else { return nil }
         result.0.sendText(String(decoding: data, as: UTF8.self))
         return result.1.requestID
     }
 
     func accept(
-        _ capture: RemoteMobileDebugCaptureDTO,
+        _ capture: RemoteMobileDiagnosticsCaptureDTO,
         from deviceID: String,
         deviceName: String?,
         now: Date = Date()
-    ) throws -> MobileDebugStoredCapture {
+    ) throws -> MobileDiagnosticsStoredCapture {
+        guard isEnabled else { throw StoreError.disabled }
         guard Self.accepts(capture, now: now) else { throw StoreError.invalid }
 
-        let authorization = lock.withLock { state -> (requested: Bool, deviceName: String) in
+        let authorization = lock.withLock {
+            state -> (requested: Bool, deviceName: String, consentGeneration: UInt64) in
+            guard state.isEnabled else { return (false, "", state.consentGeneration) }
             state.pending = state.pending.filter { $0.value.expiresAt > now }
-            guard let pending = state.pending.removeValue(forKey: capture.requestID) else {
-                return (false, "")
-            }
-            guard pending.deviceID == deviceID, pending.expiresAt > now else {
-                return (false, "")
+            guard let pending = state.pending.removeValue(forKey: capture.requestID),
+                  pending.deviceID == deviceID,
+                  pending.expiresAt > now else {
+                return (false, "", state.consentGeneration)
             }
             return (
                 true,
                 state.connections[deviceID]?.deviceName
-                    ?? Self.normalizedDeviceName(deviceName)
+                    ?? Self.normalizedDeviceName(deviceName),
+                state.consentGeneration
             )
         }
-        guard authorization.requested else { throw StoreError.unsolicited }
+        guard authorization.requested else {
+            if !isEnabled { throw StoreError.disabled }
+            throw StoreError.unsolicited
+        }
 
-        let stored = MobileDebugStoredCapture(
+        let stored = MobileDiagnosticsStoredCapture(
             deviceID: deviceID,
             deviceName: authorization.deviceName,
             storedAt: Self.timestamp(now),
@@ -156,15 +218,15 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
         )
         let data = try JSONEncoder().encode(stored)
         guard data.count <= Self.maximumEncodedCaptureBytes else { throw StoreError.invalid }
+        let destination = directory.appendingPathComponent("\(capture.captureID).json")
         do {
             try FileManager.default.createDirectory(
                 at: directory,
                 withIntermediateDirectories: true
             )
-            let destination = directory.appendingPathComponent("\(capture.captureID).json")
             try data.write(to: destination, options: [.atomic])
             let verified = try JSONDecoder().decode(
-                MobileDebugStoredCapture.self,
+                MobileDiagnosticsStoredCapture.self,
                 from: Data(contentsOf: destination, options: [.mappedIfSafe])
             )
             guard verified == stored else { throw StoreError.persistence }
@@ -172,7 +234,12 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
             throw StoreError.persistence
         }
 
-        let removed: [String] = lock.withLock { state in
+        beforePublishingCapture?()
+        let removed: [String]? = lock.withLock { state in
+            // The settings notification may arrive while the verified atomic write is in
+            // progress. Publish only under the exact consent generation that minted the nonce.
+            guard state.isEnabled,
+                  state.consentGeneration == authorization.consentGeneration else { return nil }
             var removed: [String] = []
             state.captures.removeAll { $0.capture.captureID == capture.captureID }
             state.captures.append(stored)
@@ -196,6 +263,10 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
             }
             return removed
         }
+        guard let removed else {
+            try? FileManager.default.removeItem(at: destination)
+            throw StoreError.disabled
+        }
         for captureID in Set(removed) {
             try? FileManager.default.removeItem(
                 at: directory.appendingPathComponent("\(captureID).json")
@@ -204,12 +275,12 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
         return stored
     }
 
-    func deviceSummaries() -> [MobileDebugDeviceSummary] {
+    func deviceSummaries() -> [MobileDiagnosticsDeviceSummary] {
         lock.withLock { state in
             let ids = Set(state.captures.map(\.deviceID)).union(state.connections.keys)
             return ids.map { deviceID in
                 let latest = state.captures.first { $0.deviceID == deviceID }
-                return MobileDebugDeviceSummary(
+                return MobileDiagnosticsDeviceSummary(
                     deviceID: deviceID,
                     deviceName: state.connections[deviceID]?.deviceName
                         ?? latest?.deviceName
@@ -218,29 +289,40 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
                     latestCapture: latest?.capture,
                     storedAt: latest?.storedAt
                 )
-            }.sorted {
-                ($0.storedAt ?? "") > ($1.storedAt ?? "")
-            }
+            }.sorted { ($0.storedAt ?? "") > ($1.storedAt ?? "") }
         }
     }
 
-    func latestCapture(deviceID: String? = nil) -> MobileDebugStoredCapture? {
+    func latestCapture(deviceID: String? = nil) -> MobileDiagnosticsStoredCapture? {
         lock.withLock { state in
-            if let deviceID {
-                return state.captures.first { $0.deviceID == deviceID }
-            }
+            if let deviceID { return state.captures.first { $0.deviceID == deviceID } }
             return state.captures.first
         }
     }
 
-    func capture(requestID: String) -> MobileDebugStoredCapture? {
+    func capture(requestID: String) -> MobileDiagnosticsStoredCapture? {
         lock.withLock { state in
             state.captures.first { $0.capture.requestID == requestID }
         }
     }
 
-    static func accepts(_ capture: RemoteMobileDebugCaptureDTO, now: Date) -> Bool {
-        guard capture.schemaVersion == RemoteMobileDebugCaptureDTO.currentSchemaVersion,
+    @discardableResult
+    func clearCaptures() -> Int {
+        let captureIDs = lock.withLock { state -> [String] in
+            let ids = state.captures.map { $0.capture.captureID }
+            state.captures.removeAll()
+            return ids
+        }
+        for captureID in captureIDs {
+            try? FileManager.default.removeItem(
+                at: directory.appendingPathComponent("\(captureID).json")
+            )
+        }
+        return captureIDs.count
+    }
+
+    static func accepts(_ capture: RemoteMobileDiagnosticsCaptureDTO, now: Date) -> Bool {
+        guard capture.schemaVersion == RemoteMobileDiagnosticsCaptureDTO.currentSchemaVersion,
               UUID(uuidString: capture.captureID) != nil,
               UUID(uuidString: capture.requestID) != nil,
               capture.appVersion.utf8.count <= 64,
@@ -259,10 +341,7 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
               !capture.diagnostics.isEmpty,
               capture.diagnostics.count <= maximumDiagnostics,
               RemoteDiagnosticUploadPolicy.accepts(
-                RemoteDiagnosticUploadRequestDTO(
-                    source: .iOSClient,
-                    records: capture.diagnostics
-                ),
+                RemoteDiagnosticUploadRequestDTO(source: .iOSClient, records: capture.diagnostics),
                 now: now
               ) else { return false }
 
@@ -279,7 +358,7 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
         return true
     }
 
-    private static func loadCaptures(from directory: URL) -> [MobileDebugStoredCapture] {
+    private static func loadCaptures(from directory: URL) -> [MobileDiagnosticsStoredCapture] {
         guard let urls = try? RemoteBoundedDirectoryReader.shallowContents(
             of: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
@@ -296,7 +375,7 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
                   let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
                   data.count <= maximumEncodedCaptureBytes,
                   let stored = try? JSONDecoder().decode(
-                    MobileDebugStoredCapture.self,
+                    MobileDiagnosticsStoredCapture.self,
                     from: data
                   ),
                   accepts(stored.capture, now: Date()) else { return nil }
@@ -305,6 +384,10 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
         .sorted { $0.storedAt > $1.storedAt }
         .prefix(maximumCaptures)
         .map { $0 }
+    }
+
+    private static func persistedFeatureEnabled() -> Bool {
+        AppSettingDefinitions.localDiagnosticsEnabled.read(from: .standard) ?? false
     }
 
     private static func normalizedDeviceName(_ value: String?) -> String {
@@ -319,4 +402,3 @@ final class MobileDebugCaptureStore: @unchecked Sendable {
         return formatter.string(from: date)
     }
 }
-#endif

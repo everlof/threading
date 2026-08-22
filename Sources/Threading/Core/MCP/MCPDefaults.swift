@@ -53,22 +53,40 @@ enum MCPDefaults {
     /// text never changes — so a trust decision survives the next launch, which a file carrying
     /// a per-session token would not.
     ///
-    /// The *rendezvous* no longer needs the same treatment. A unix socket path is fixed per
-    /// user, so `hooks.json` now carries it as a literal and the port variable is exported only
-    /// for hooks the user wrote themselves against the loopback endpoint.
+    /// Both endpoint values travel through the environment. The socket path is stable, while the
+    /// port is the fallback for the exact launch whose unix listener did not bind. Keeping both
+    /// out of Codex's shared `hooks.json` makes its reviewed command byte-stable across launches.
     static let portEnvironmentKey = "THREADING_MCP_PORT"
     static let socketEnvironmentKey = "THREADING_MCP_SOCKET"
     static let sessionTokenEnvironmentKey = "THREADING_SESSION_TOKEN"
 
-    /// Pre-rename aliases exported beside the current routing variables.
+    /// A shell fragment that posts the payload already stored in `payloadVariable` over the
+    /// stable unix rendezvous, then retries the same bytes over this launch's loopback listener
+    /// only when the socket could not be reached.
     ///
-    /// Existing Codex hooks were approved by the hash of their exact command text. Rewriting
-    /// `SKALMAN_*` to `THREADING_*` would invalidate that approval, so launches with the
-    /// integration enabled keep the old vocabulary alive while the installer recognises the
-    /// known-compatible old commands. These names carry the same per-process values and do not
-    /// broaden the endpoint's reach.
-    static let legacyPortEnvironmentKey = "SKALMAN_MCP_PORT"
-    static let legacySessionTokenEnvironmentKey = "SKALMAN_SESSION_TOKEN"
+    /// The endpoint suffix may contain the session-token environment expansion used by Codex.
+    /// Every other component is authored here, so Claude and Codex cannot drift into different
+    /// fallback behavior again.
+    static func hookPostCommand(
+        payloadVariable: String,
+        endpointSuffix: String,
+        timeout: TimeInterval
+    ) -> String {
+        let socket = "$\(socketEnvironmentKey)"
+        let port = "$\(portEnvironmentKey)"
+        let socketURL = "\(socketURLBase)\(endpointSuffix)"
+        let loopbackURL = "http://\(host):\(port)\(endpointSuffix)"
+        let common = "-s --max-time \(Int(timeout))"
+            + " -H 'Content-Type: application/json' --data-binary @-"
+
+        return "( { [ -n \"\(socket)\" ] &&"
+            + " printf '%s' \"$\(payloadVariable)\" |"
+            + " curl \(common) --unix-socket \"\(socket)\" \"\(socketURL)\"; }"
+            + " || { [ -n \"\(port)\" ] &&"
+            + " printf '%s' \"$\(payloadVariable)\" |"
+            + " curl \(common) \"\(loopbackURL)\"; } )"
+    }
+
 
     /// Set only for sessions Threading renders itself, and read by Codex's `PreToolUse` hook.
     ///
@@ -77,7 +95,6 @@ enum MCPDefaults {
     /// to one surface: a terminal session raises Codex's own approval prompt and must not be
     /// intercepted, so it simply does not export this.
     static let brokerEnvironmentKey = "THREADING_BROKER_TOOLS"
-    static let legacyBrokerEnvironmentKey = "SKALMAN_BROKER_TOOLS"
 
     /// Marks the entries in a shared `hooks.json` that belong to Threading.
     ///
@@ -118,11 +135,22 @@ enum MCPDefaults {
 
     /// Also cleaned up when a session is deleted. Kept alongside the retained tokens so a
     /// revoked endpoint leaves no settings file pointing at it.
-    static let cleanupDirectories = [configDirectoryName, settingsDirectoryName]
+    static let cleanupDirectories = [
+        configDirectoryName, settingsDirectoryName, bridgeCacheDirectoryName
+    ]
 
     /// Where per-session Claude `--mcp-config` files are written, under Application Support.
     static let configDirectoryName = "mcp"
     static let configFileExtension = "json"
+
+    /// Where each session's stdio bridge caches the catalogue it last fetched.
+    ///
+    /// Its own directory rather than a second file under `mcp`, because the writer is different:
+    /// the config file is ours and the cache is the helper's, written `0600` through a temporary
+    /// file and a rename. Being in `cleanupDirectories` is what makes it a per-session file
+    /// rather than a leak — every sweep that revokes a session (`retainOnly`, `remove`,
+    /// `endAdHoc`) already removes one file per directory named here.
+    static let bridgeCacheDirectoryName = "bridge-catalogues"
 
     /// Claude tools are allowlisted wholesale, or every image would raise a permission prompt.
     static let allowedToolsPattern = "mcp__\(serverName)__*"

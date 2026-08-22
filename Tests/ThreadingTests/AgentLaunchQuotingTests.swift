@@ -134,16 +134,34 @@ final class AgentLaunchQuotingTests: XCTestCase {
         XCTAssertEqual(plan.arguments.count, 3, "the shell was handed more than one command")
     }
 
-    /// The rename must not force a rewrite of already-approved Codex hook text. Both names
-    /// therefore carry the same routing values, while the permission scope stays absent from a
-    /// terminal launch and present under both names on a native launch.
-    func testHookEnvironmentKeepsPreRenameAliasesEquivalent() throws {
+    /// The pre-rename `SKALMAN_*` aliases are gone, and must not come back.
+    ///
+    /// They existed only to keep a Codex hook approved by the hash of its old command text
+    /// runnable across the rename. Nothing reads them now, and every launch was paying for
+    /// them in duplicated environment words, so this asserts their absence rather than their
+    /// equivalence — the test that used to stand here.
+    func testLaunchExportsNoPreRenameAliases() throws {
+        let session = AgentSession(kind: .codex, title: "t")
+        for brokering in [false, true] {
+            let words = AgentLauncher.hookEnvironmentWords(
+                for: session,
+                brokersPermissions: brokering,
+                port: 43210
+            )
+            XCTAssertFalse(
+                words.contains { $0.hasPrefix("SKALMAN_") },
+                "a pre-rename alias came back: \(words)"
+            )
+        }
+    }
+
+    /// The current routing words, which are what a hook actually reads.
+    func testHookEnvironmentCarriesTheCurrentRoutingWords() throws {
         let session = AgentSession(kind: .codex, title: "t")
         let terminal = AgentLauncher.hookEnvironmentWords(
             for: session,
             brokersPermissions: false,
-            port: 43210,
-            includesLegacyAliases: true
+            port: 43210
         )
 
         func value(for key: String, in words: [String]) throws -> String {
@@ -154,46 +172,20 @@ final class AgentLaunchQuotingTests: XCTestCase {
 
         XCTAssertEqual(try value(for: MCPDefaults.portEnvironmentKey, in: terminal), "43210")
         XCTAssertEqual(
-            try value(for: MCPDefaults.legacyPortEnvironmentKey, in: terminal),
-            try value(for: MCPDefaults.portEnvironmentKey, in: terminal)
-        )
-        XCTAssertEqual(
             try value(for: MCPDefaults.socketEnvironmentKey, in: terminal),
             MCPBridgeLocation.socketPath
         )
-        XCTAssertEqual(
-            try value(for: MCPDefaults.legacySessionTokenEnvironmentKey, in: terminal),
-            try value(for: MCPDefaults.sessionTokenEnvironmentKey, in: terminal)
-        )
-        XCTAssertFalse(terminal.contains { $0.hasPrefix("\(MCPDefaults.brokerEnvironmentKey)=") })
-        XCTAssertFalse(terminal.contains {
-            $0.hasPrefix("\(MCPDefaults.legacyBrokerEnvironmentKey)=")
-        })
+        XCTAssertFalse(terminal.isEmpty)
 
+        // The permission scope is what tells Codex's shared file which surface it is on, so it
+        // stays absent from a terminal launch and present on a native one.
+        XCTAssertFalse(terminal.contains { $0.hasPrefix("\(MCPDefaults.brokerEnvironmentKey)=") })
         let native = AgentLauncher.hookEnvironmentWords(
             for: session,
             brokersPermissions: true,
-            port: 43210,
-            includesLegacyAliases: true
+            port: 43210
         )
         XCTAssertEqual(try value(for: MCPDefaults.brokerEnvironmentKey, in: native), "1")
-        XCTAssertEqual(try value(for: MCPDefaults.legacyBrokerEnvironmentKey, in: native), "1")
-
-        let optedOut = AgentLauncher.hookEnvironmentWords(
-            for: session,
-            brokersPermissions: true,
-            port: 43210,
-            includesLegacyAliases: false
-        )
-        XCTAssertFalse(optedOut.contains {
-            $0.hasPrefix("\(MCPDefaults.legacyPortEnvironmentKey)=")
-        })
-        XCTAssertFalse(optedOut.contains {
-            $0.hasPrefix("\(MCPDefaults.legacySessionTokenEnvironmentKey)=")
-        })
-        XCTAssertFalse(optedOut.contains {
-            $0.hasPrefix("\(MCPDefaults.legacyBrokerEnvironmentKey)=")
-        })
     }
 
     /// A session launched before the listener has a port still gets its routing.
@@ -207,8 +199,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
             for: session,
             brokersPermissions: false,
             port: nil,
-            socketPath: "/tmp/threading tests/mcp.sock",
-            includesLegacyAliases: true
+            socketPath: "/tmp/threading tests/mcp.sock"
         )
 
         XCTAssertTrue(words.contains("\(MCPDefaults.socketEnvironmentKey)=/tmp/threading tests/mcp.sock"))
@@ -216,12 +207,6 @@ final class AgentLaunchQuotingTests: XCTestCase {
             $0.hasPrefix("\(MCPDefaults.sessionTokenEnvironmentKey)=")
         })
         XCTAssertFalse(words.contains { $0.hasPrefix("\(MCPDefaults.portEnvironmentKey)=") })
-        XCTAssertFalse(words.contains {
-            $0.hasPrefix("\(MCPDefaults.legacyPortEnvironmentKey)=")
-        })
-        XCTAssertTrue(words.contains {
-            $0.hasPrefix("\(MCPDefaults.legacySessionTokenEnvironmentKey)=")
-        })
     }
 
     func testHostedLaunchPlanTestsCannotMaintainTheDevelopersCodexHooks() {
@@ -274,7 +259,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
                     kind: .codex,
                     prompt: "find the setting",
                     mcpConfigPath: nil,
-                    endpointURL: endpoint
+                    binding: .http(url: endpoint)
                 )),
                 in: "/tmp/not-a-repository"
             ).source
@@ -509,7 +494,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
                 kind: kind,
                 prompt: "p",
                 mcpConfigPath: "/tmp/mcp.json",
-                endpointURL: "http://127.0.0.1:9/mcp/t"
+                binding: .http(url: "http://127.0.0.1:9/mcp/t")
             )
             XCTAssertEqual(
                 command != nil,
@@ -527,7 +512,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
             kind: .claude,
             prompt: "make it stop flashing",
             mcpConfigPath: "/tmp/scope.json",
-            endpointURL: nil
+            binding: nil
         ))
         let words = try Self.tokenizing(
             ShellCommand.executing(command, in: "/tmp/scratch").source
@@ -554,7 +539,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
             kind: .codex,
             prompt: "make it stop flashing",
             mcpConfigPath: nil,
-            endpointURL: "http://127.0.0.1:9/mcp/t"
+            binding: .http(url: "http://127.0.0.1:9/mcp/t")
         ))
         let words = try Self.tokenizing(
             ShellCommand.executing(command, in: "/tmp/scratch").source
@@ -576,6 +561,46 @@ final class AgentLaunchQuotingTests: XCTestCase {
         ])
     }
 
+    /// The same one-shot addressed through the stdio bridge: `command` and `args` where the URL
+    /// was, and **no** `url` at all. Codex's `mcp_servers` table takes either address, not both,
+    /// and a table carrying both would be asking it which of two places this server is.
+    func testCodexSettingsResearchNamesTheBridgeCommandInsteadOfAURL() throws {
+        let invocation = MCPBridgeInvocation(
+            command: "/Applications/Threading.app/Contents/Helpers/threading-mcp-bridge",
+            arguments: ["--socket", "/tmp/b/mcp.sock", "--token", "t0", "--cache", "/tmp/c.json"]
+        )
+        let command = try XCTUnwrap(AgentLauncher.settingsResearchCommand(
+            kind: .codex,
+            prompt: "make it stop flashing",
+            mcpConfigPath: nil,
+            binding: .stdio(invocation)
+        ))
+        let words = try Self.tokenizing(
+            ShellCommand.executing(command, in: "/tmp/scratch").source
+        )
+
+        XCTAssertEqual(words, [
+            "env", "-u", "CODEX_HOME",
+            AgentDefaults.codexExecutable,
+            "--config", "check_for_update_on_startup=false",
+            "--config", "model_reasoning_effort=\"low\"",
+            "--sandbox", "read-only",
+            "--config", "mcp_servers.threading.command=\"\(invocation.command)\"",
+            "--config", "mcp_servers.threading.args=[\"--socket\",\"/tmp/b/mcp.sock\","
+                + "\"--token\",\"t0\",\"--cache\",\"/tmp/c.json\"]",
+            "--config", "mcp_servers.threading.enabled_tools=[\"list_settings\"]",
+            "--config", "mcp_servers.threading.tools.list_settings.approval_mode=\"approve\"",
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--", "make it stop flashing"
+        ])
+        XCTAssertFalse(
+            words.contains { $0.hasPrefix("mcp_servers.threading.url=") },
+            "the stdio form must not also name a URL: \(words)"
+        )
+    }
+
     /// A research run without its MCP wiring has no catalogue to read, so it refuses to
     /// launch rather than spending a run to be told nothing.
     func testASettingsResearchRunWithoutItsEndpointRefusesToLaunch() {
@@ -583,13 +608,13 @@ final class AgentLaunchQuotingTests: XCTestCase {
             kind: .claude,
             prompt: "p",
             mcpConfigPath: nil,
-            endpointURL: "http://127.0.0.1:9/mcp/t"
+            binding: .http(url: "http://127.0.0.1:9/mcp/t")
         ))
         XCTAssertNil(AgentLauncher.settingsResearchCommand(
             kind: .codex,
             prompt: "p",
             mcpConfigPath: "/tmp/scope.json",
-            endpointURL: nil
+            binding: nil
         ))
     }
 

@@ -290,9 +290,11 @@ struct ExtensionLocalizationResolver: Sendable {
                 ExtensionScene(
                     accessibilityLabel: string(scene.accessibilityLabel),
                     preferredAspectRatio: scene.preferredAspectRatio,
+                    hierarchy: scene.hierarchy,
                     items: scene.items.map {
                         ExtensionSceneItem(
                             id: $0.id,
+                            parentID: $0.parentID,
                             frame: $0.frame,
                             shape: $0.shape,
                             color: $0.color,

@@ -26,13 +26,26 @@ enum MCPBridgeDefaults {
     /// write creates before the rename.
     static let filePermissions = 0o600
 
-    /// The rendezvous. One per user, byte-identical across launches, which is the entire point:
-    /// a literal that never changes can be written into Codex's shared `hooks.json` without
-    /// invalidating the trust hash the user approved it under.
+    /// The rendezvous. One per user, byte-identical across launches. Codex receives it through
+    /// the launch environment so its shared `hooks.json` stays byte-stable while retaining the
+    /// loopback route as a per-launch fallback.
     static let socketFileName = "mcp.sock"
 
     /// The durable per-session tokens.
     static let tokenFileName = "session-tokens.json"
+
+    /// The stdio shim shipped in `Contents/Helpers`, spawned per session by the CLI itself.
+    static let helperName = "threading-mcp-bridge"
+
+    /// Where the app bundle keeps its `product-type.tool` helpers, this one included.
+    static let helpersDirectoryPath = "Contents/Helpers"
+
+    /// The bridge's command line. All three are required and it exits `64` without them: every
+    /// path on that line is the app's decision, so a bridge pointed at nothing would look to
+    /// the user exactly like an app that was closed.
+    static let socketArgument = "--socket"
+    static let tokenArgument = "--token"
+    static let cacheArgument = "--cache"
 
     /// `sockaddr_un.sun_path` is a 104-byte array on Darwin and the path inside it is
     /// NUL-terminated, so 103 bytes is the most a bound path may carry.
@@ -144,5 +157,114 @@ enum MCPBridgeLocation {
     /// hook command.
     static func shellQuoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Where the stdio shim would be, whether or not it is there.
+    ///
+    /// Deliberately a *candidate*: existence and executability are checked by whoever is about
+    /// to build a command line, so one place decides the whole "can this launch use the bridge"
+    /// question rather than two that can disagree. `bundle` is injectable so a test can point at
+    /// a directory holding no helper and prove the launch falls back to HTTP.
+    static func helperURL(in bundle: Bundle = .main) -> URL {
+        bundle.bundleURL
+            .appendingPathComponent(MCPBridgeDefaults.helpersDirectoryPath, isDirectory: true)
+            .appendingPathComponent(MCPBridgeDefaults.helperName, isDirectory: false)
+    }
+}
+
+// MARK: - MCP Bridge Invocation
+
+/// The command line that spawns one session's stdio bridge.
+///
+/// A value rather than a formatted string because three transports render it three ways — a
+/// JSON `command`/`args` pair for Claude, TOML overrides for Codex, and an ACP server object —
+/// and a string would have to be re-split by each of them.
+struct MCPBridgeInvocation: Equatable, Sendable {
+    let command: String
+    let arguments: [String]
+}
+
+// MARK: - MCP Bridge Decision
+
+/// The three facts that decide whether a launch may address the tool channel through the bridge.
+///
+/// Gathered into one value so the decision is injectable: a test can force the setting on, name
+/// a helper that is not there, or name a socket path too long to bind, without touching the
+/// developer's own defaults or bundle.
+struct MCPBridgeDecision: Sendable {
+
+    /// The hidden opt-in. Off ships HTTP, exactly as before the bridge existed.
+    let isEnabled: Bool
+
+    /// Where the helper would be. Executability is checked at use, not here.
+    let helperURL: URL
+
+    /// The rendezvous, already through `addressableSocketPath` — nil when it cannot be bound.
+    let socketPath: String?
+
+    /// What this launch of this app would decide right now.
+    ///
+    /// The setting is read straight from the descriptor rather than through `AppSettings.shared`,
+    /// which is `@MainActor` while the launch files are written from wherever a launch is being
+    /// assembled. It is the same key, the same absence semantics and the same defaults domain.
+    static var current: MCPBridgeDecision {
+        MCPBridgeDecision(
+            isEnabled: AppSettingDefinitions.usesMCPStdioBridge.read(from: .standard) ?? false,
+            helperURL: MCPBridgeLocation.helperURL(),
+            // Startup does not release session restoration until both listener outcomes are
+            // known. A path that merely *could* bind is not a route; only the listener's
+            // published path may select the durable bridge.
+            socketPath: MCPServer.shared.socketPath
+        )
+    }
+}
+
+// MARK: - MCP Server Binding
+
+/// How one launch reaches Threading's MCP server.
+///
+/// The two cases differ in *when* the address is resolved, which is the whole point of the
+/// bridge. An HTTP URL is resolved by the CLI once, at startup, so a session that starts while
+/// Threading is closed spends the rest of its life with no Threading tools. A stdio server is
+/// resolved by spawning it, which moves the address inside a process we own, where it is
+/// retried.
+enum MCPServerBinding: Equatable, Sendable {
+    case http(url: String)
+    case stdio(MCPBridgeInvocation)
+
+    /// One entry of Claude's `--mcp-config` `mcpServers` object.
+    var claudeServerObject: [String: Any] {
+        switch self {
+        case .http(let url):
+            return ["type": "http", "url": url]
+        case .stdio(let invocation):
+            return [
+                "type": "stdio",
+                "command": invocation.command,
+                "args": invocation.arguments
+            ]
+        }
+    }
+
+    /// One entry of ACP's `mcpServers` array on `session/new` and `session/load`.
+    ///
+    /// The stdio variant carries **no** `type`: ACP's `McpServer` union tags only the extra
+    /// transports (`http`, `sse`) and stdio is the unconditional baseline, required to be
+    /// exactly `name`, `command`, `args` and `env`. Cursor's own `initialize` says as much —
+    /// it advertises `mcpCapabilities: {http: true, sse: true}` and does not mention stdio,
+    /// which reads as "http and sse *as well*"
+    /// (`docs/archive/research/CURSOR_ACP_FINDINGS.md` §3).
+    func acpServerObject(named name: String) -> [String: Any] {
+        switch self {
+        case .http(let url):
+            return ["type": "http", "name": name, "url": url, "headers": []]
+        case .stdio(let invocation):
+            return [
+                "name": name,
+                "command": invocation.command,
+                "args": invocation.arguments,
+                "env": []
+            ]
+        }
     }
 }

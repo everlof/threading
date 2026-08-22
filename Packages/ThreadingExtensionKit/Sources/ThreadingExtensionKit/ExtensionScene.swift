@@ -65,12 +65,27 @@ public enum ExtensionSceneColorRole: String, Codable, Equatable, Sendable {
     case category6
 }
 
+/// Host-owned navigation through marks that form one rooted hierarchy.
+///
+/// Geometry remains normalized scene geometry supplied by the producer. The hierarchy adds
+/// meaning to that geometry: Threading can zoom a branch, expose native breadcrumbs, and mirror
+/// the same navigation on another device without learning anything about files or artifacts.
+public struct ExtensionSceneHierarchy: Codable, Equatable, Sendable {
+    public let rootID: String
+
+    public init(rootID: String) {
+        self.rootID = rootID
+    }
+}
+
 /// One interactive or informative region in a host-rendered scene.
 ///
 /// Array order is paint order. When `actionID` is present, activating the mark raises that action
 /// and sends the mark's `id` as the correlated action value.
 public struct ExtensionSceneItem: Codable, Equatable, Sendable {
     public let id: String
+    /// The enclosing mark when the scene declares a hierarchy. Nil for that hierarchy's root.
+    public let parentID: String?
     public let frame: ExtensionSceneRect
     public let shape: ExtensionSceneShape
     public let color: ExtensionSceneColorRole
@@ -84,6 +99,7 @@ public struct ExtensionSceneItem: Codable, Equatable, Sendable {
 
     public init(
         id: String,
+        parentID: String? = nil,
         frame: ExtensionSceneRect,
         shape: ExtensionSceneShape = .roundedRectangle,
         color: ExtensionSceneColorRole = .neutral,
@@ -96,6 +112,7 @@ public struct ExtensionSceneItem: Codable, Equatable, Sendable {
         isSelected: Bool = false
     ) {
         self.id = id
+        self.parentID = parentID
         self.frame = frame
         self.shape = shape
         self.color = color
@@ -118,15 +135,19 @@ public struct ExtensionScene: Codable, Equatable, Sendable {
     public let accessibilityLabel: String
     /// Width divided by height.
     public let preferredAspectRatio: Double
+    /// Optional semantic navigation over the marks. Pixels and navigation remain host-owned.
+    public let hierarchy: ExtensionSceneHierarchy?
     public let items: [ExtensionSceneItem]
 
     public init(
         accessibilityLabel: String,
         preferredAspectRatio: Double = 1.6,
+        hierarchy: ExtensionSceneHierarchy? = nil,
         items: [ExtensionSceneItem]
     ) {
         self.accessibilityLabel = accessibilityLabel
         self.preferredAspectRatio = preferredAspectRatio
+        self.hierarchy = hierarchy
         self.items = items
     }
 
@@ -228,6 +249,105 @@ public struct ExtensionScene: Codable, Equatable, Sendable {
                 ))
             }
         }
+
+        issues.append(contentsOf: hierarchyValidationIssues(
+            path: path,
+            itemIDs: seenIDs
+        ))
         return issues
+    }
+
+    private func hierarchyValidationIssues(
+        path: String,
+        itemIDs: Set<String>
+    ) -> [ExtensionValidationIssue] {
+        guard let hierarchy else {
+            return items.enumerated().compactMap { index, item in
+                guard item.parentID != nil else { return nil }
+                return ExtensionValidationIssue(
+                    path: "\(path).items[\(index)].parentID",
+                    message: "requires scene.hierarchy"
+                )
+            }
+        }
+
+        var issues: [ExtensionValidationIssue] = []
+        guard itemIDs.contains(hierarchy.rootID) else {
+            return [ExtensionValidationIssue(
+                path: "\(path).hierarchy.rootID",
+                message: "must match an item id"
+            )]
+        }
+
+        var parentByID: [String: String] = [:]
+        var itemByID: [String: ExtensionSceneItem] = [:]
+        for item in items where parentByID[item.id] == nil {
+            if itemByID[item.id] == nil { itemByID[item.id] = item }
+            if let parentID = item.parentID {
+                parentByID[item.id] = parentID
+            }
+        }
+        if parentByID[hierarchy.rootID] != nil {
+            issues.append(.init(
+                path: "\(path).hierarchy.rootID",
+                message: "must name the one item without a parent"
+            ))
+        }
+
+        for (index, item) in items.enumerated() where item.id != hierarchy.rootID {
+            let itemPath = "\(path).items[\(index)].parentID"
+            guard let parentID = item.parentID else {
+                issues.append(.init(
+                    path: itemPath,
+                    message: "is required for every item except the hierarchy root"
+                ))
+                continue
+            }
+            if parentID == item.id {
+                issues.append(.init(path: itemPath, message: "must not name the item itself"))
+            } else if !itemIDs.contains(parentID) {
+                issues.append(.init(path: itemPath, message: "must match an item id"))
+            } else if let parent = itemByID[parentID],
+                      !parent.frame.contains(item.frame) {
+                issues.append(.init(
+                    path: "\(path).items[\(index)].frame",
+                    message: "must be contained by parent '\(parentID)'"
+                ))
+            }
+        }
+
+        // Every chain must reach the declared root. This catches cycles, disconnected roots and
+        // branches which only point at one another without recursively walking untrusted depth.
+        for (index, item) in items.enumerated() {
+            var cursor = item.id
+            var visited = Set<String>()
+            var reachedRoot = false
+            for _ in 0...items.count {
+                if cursor == hierarchy.rootID {
+                    reachedRoot = true
+                    break
+                }
+                guard visited.insert(cursor).inserted,
+                      let parent = parentByID[cursor] else { break }
+                cursor = parent
+            }
+            if !reachedRoot {
+                issues.append(.init(
+                    path: "\(path).items[\(index)].parentID",
+                    message: "must form a branch rooted at '\(hierarchy.rootID)'"
+                ))
+            }
+        }
+        return issues
+    }
+}
+
+private extension ExtensionSceneRect {
+    func contains(_ other: ExtensionSceneRect) -> Bool {
+        let epsilon = 0.000_000_1
+        return other.x + epsilon >= x
+            && other.y + epsilon >= y
+            && other.x + other.width <= x + width + epsilon
+            && other.y + other.height <= y + height + epsilon
     }
 }

@@ -1773,37 +1773,51 @@ private struct SessionListItem: View {
             .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
     }
 
+    /// The row is deliberately not a `Button`: a swipeable row's tap belongs to the swipe seam,
+    /// which fails it the moment the finger travels. A button would open this chat at the end of
+    /// every swipe — see ``View/mobileRowSwipeAction(_:allowsFullSwipe:activate:)``. The traits
+    /// the button used to publish are stated here instead, so VoiceOver still reads one row that
+    /// opens something.
     private var sessionRow: some View {
         let row: AnyView
         if isArchived {
             row = AnyView(SessionRow(session: session))
         } else {
-            row = AnyView(Button(action: openSession) {
+            row = AnyView(
                 SessionRow(session: session)
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(.isLink)
-            .accessibilityRemoveTraits(.isButton))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isLink)
+                    .accessibilityAction(.default) { openSession() }
+            )
+        }
+        var activate: (() -> Void)?
+        if !isArchived {
+            activate = { openSession() }
         }
         return AnyView(
-            row
-                .swipeActions(edge: .trailing, allowsFullSwipe: !isArchived) {
-                    if isArchived {
-                        Button {
-                            action(.restore, session)
-                        } label: {
-                            Label("Restore", systemImage: "arrow.uturn.backward")
-                        }
-                        .tint(theme.accent)
-                    } else if showsActions {
-                        Button(role: .destructive) {
-                            action(.archive, session)
-                        } label: {
-                            Label("Archive", systemImage: "archivebox")
-                        }
-                    }
-                }
+            row.mobileRowSwipeAction(
+                swipeAction,
+                allowsFullSwipe: !isArchived,
+                activate: activate
+            )
         )
+    }
+
+    /// The one action worth a swipe: the row's own opposite. Archiving is the destructive half
+    /// and can be swiped clean through; restoring is not, so it rests open and asks for the tap.
+    ///
+    /// `nil` for a share that may not manage sessions — the same right the long-press menu is
+    /// gated on, because a swipe must not reach past a menu that refuses.
+    private var swipeAction: MobileRowSwipeAction? {
+        guard showsActions else { return nil }
+        if isArchived {
+            return MobileRowSwipeAction("Restore", systemImage: "arrow.uturn.backward") {
+                action(.restore, session)
+            }
+        }
+        return MobileRowSwipeAction("Archive", systemImage: "archivebox", role: .destructive) {
+            action(.archive, session)
+        }
     }
 
     private func openSession() {

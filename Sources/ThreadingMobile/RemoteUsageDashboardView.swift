@@ -2,18 +2,6 @@ import Charts
 import SwiftUI
 import ThreadingRemoteKit
 
-private enum MobileUsageTab: String, CaseIterable {
-    case overview
-    case limits
-
-    var title: String {
-        switch self {
-        case .overview: return MobileL10n.string("Overview")
-        case .limits: return MobileL10n.string("Limit History")
-        }
-    }
-}
-
 private enum MobileUsageMetric: String, CaseIterable {
     case cost
     case tokens
@@ -23,6 +11,88 @@ private enum MobileUsageMetric: String, CaseIterable {
         case .cost: return MobileL10n.string("Cost")
         case .tokens: return MobileL10n.string("Tokens")
         }
+    }
+}
+
+private enum MobileUsageSection: Hashable {
+    case currentCapacity
+    case limitHistory
+    case consumption
+}
+
+enum MobileUsageFleetProjection {
+    struct Account: Equatable, Identifiable {
+        let runtimeName: String
+        let accountName: String
+        let windows: [RemoteUsageLimitSeriesSummaryDTO]
+
+        var id: String { "\(runtimeName)|\(accountName)" }
+    }
+
+    struct Summary: Equatable {
+        let accountCount: Int
+        let readyCount: Int
+        let constrainedCount: Int
+        let unknownCount: Int
+        let nextReset: Double?
+    }
+
+    static func accounts(
+        from series: [RemoteUsageLimitSeriesSummaryDTO]
+    ) -> [Account] {
+        Dictionary(grouping: series) { "\($0.runtimeName)|\($0.accountName)" }
+            .values
+            .map {
+                Account(
+                    runtimeName: $0[0].runtimeName,
+                    accountName: $0[0].accountName,
+                    windows: $0.sorted {
+                        if $0.windowLabel != $1.windowLabel {
+                            return $0.windowLabel.localizedStandardCompare($1.windowLabel)
+                                == .orderedAscending
+                        }
+                        return $0.id < $1.id
+                    }
+                )
+            }
+            .sorted {
+                let runtime = $0.runtimeName.localizedStandardCompare($1.runtimeName)
+                if runtime != .orderedSame { return runtime == .orderedAscending }
+                return $0.accountName.localizedStandardCompare($1.accountName) == .orderedAscending
+            }
+    }
+
+    static func summary(
+        for accounts: [Account],
+        referenceTime: Double
+    ) -> Summary {
+        var ready = 0
+        var constrained = 0
+        var unknown = 0
+        var resets: [Double] = []
+
+        for account in accounts {
+            let active = account.windows.filter { ($0.resetsAt ?? .greatestFiniteMagnitude) > referenceTime }
+            resets.append(contentsOf: active.compactMap(\.resetsAt))
+            let known = active.compactMap(\.currentFraction)
+            guard !known.isEmpty else {
+                unknown += 1
+                continue
+            }
+            if known.contains(where: { $0 >= 0.75 }) {
+                constrained += 1
+            } else {
+                ready += 1
+            }
+        }
+
+        return Summary(
+            accountCount: accounts.count,
+            readyCount: ready,
+            constrainedCount: constrained,
+            unknownCount: unknown,
+            nextReset: resets.min()
+        )
     }
 }
 
@@ -159,7 +229,7 @@ struct RemoteUsageDashboardView: View {
     @StateObject private var model: RemoteUsageDashboardModel
     private let isDemo: Bool
     private let demoShowsStaleSnapshot: Bool
-    @State private var tab = MobileUsageTab.overview
+    private let demoStartsAtLimitHistory: Bool
     @State private var overviewDays = 30
     @State private var limitDays = 30
     @State private var metric = MobileUsageMetric.cost
@@ -171,43 +241,41 @@ struct RemoteUsageDashboardView: View {
         let environment = ProcessInfo.processInfo.environment
         demoShowsStaleSnapshot = environment["THREADING_MOBILE_DEMO"] == "usage-stale"
             || environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?.contains("usage-stale") == true
+        demoStartsAtLimitHistory = environment["THREADING_MOBILE_DEMO"]?
+            .hasPrefix("usage-limit") == true
 #else
         demoShowsStaleSnapshot = false
+        demoStartsAtLimitHistory = false
 #endif
         _model = StateObject(
             wrappedValue: RemoteUsageDashboardModel(link: link, isDemo: isDemo)
         )
-#if DEBUG
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
-            .hasPrefix("usage-limit") == true {
-            _tab = State(initialValue: .limits)
-        }
-#endif
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.large) {
-                    Picker("Usage section", selection: $tab) {
-                        ForEach(MobileUsageTab.allCases, id: \.self) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    if tab == .overview {
-                        overviewContent
-                    } else {
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.large) {
+                        currentCapacity
+                            .id(MobileUsageSection.currentCapacity)
                         limitContent
+                            .id(MobileUsageSection.limitHistory)
+                        overviewContent
+                            .id(MobileUsageSection.consumption)
                     }
+                    .frame(maxWidth: 720)
+                    .padding(.horizontal, MobileDesign.Spacing.inset)
+                    .padding(.top, MobileDesign.Spacing.medium)
+                    .padding(.bottom, MobileDesign.Spacing.pane)
                 }
-                .frame(maxWidth: 720)
-                .padding(.horizontal, MobileDesign.Spacing.inset)
-                .padding(.top, MobileDesign.Spacing.medium)
-                .padding(.bottom, MobileDesign.Spacing.pane)
+                .refreshable { await model.refresh(selectedDays: limitDays) }
+                .task(id: model.dashboard?.preparedAt) {
+                    guard demoStartsAtLimitHistory, model.dashboard != nil else { return }
+                    await Task.yield()
+                    scrollProxy.scrollTo(MobileUsageSection.limitHistory, anchor: .top)
+                }
             }
-            .refreshable { await model.refresh(selectedDays: limitDays) }
             .background(theme.ground)
             .navigationTitle("Usage")
             .navigationBarTitleDisplayMode(.inline)
@@ -220,7 +288,7 @@ struct RemoteUsageDashboardView: View {
             }
             .task { await model.load() }
             .task(id: selectedLimitTaskID) {
-                guard tab == .limits, let id = model.selectedLimitID else { return }
+                guard let id = model.selectedLimitID else { return }
                 await model.loadLimit(seriesID: id, days: limitDays)
             }
             .onDisappear {
@@ -232,11 +300,173 @@ struct RemoteUsageDashboardView: View {
     }
 
     private var selectedLimitTaskID: String {
-        "\(tab.rawValue)|\(model.selectedLimitID ?? "none")|\(limitDays)"
+        "\(model.selectedLimitID ?? "none")|\(limitDays)"
+    }
+
+    @ViewBuilder
+    private var currentCapacity: some View {
+        let accounts = MobileUsageFleetProjection.accounts(from: model.limitSeries)
+        if accounts.isEmpty {
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                sectionTitle("Current capacity")
+                if model.isLoading {
+                    loadingCard("Loading current capacity…")
+                } else if let message = model.errorMessage {
+                    errorCard(message)
+                } else {
+                    emptyCard(
+                        title: "No current capacity",
+                        detail: "The Mac has not observed a provider limit window yet."
+                    )
+                }
+            }
+        } else {
+            let reference = model.dashboard?.preparedAt ?? Date().timeIntervalSince1970
+            let summary = MobileUsageFleetProjection.summary(
+                for: accounts,
+                referenceTime: reference
+            )
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                sectionTitle("Current capacity")
+                UsageCard {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                            Text(fleetTitle(summary))
+                                .font(.headline)
+                            Text(fleetStatus(summary))
+                                .font(.caption)
+                                .foregroundStyle(theme.secondaryLabel)
+                        }
+                        Spacer()
+                        if let reset = summary.nextReset {
+                            Text(MobileL10n.string("Next reset %@", relativeDate(reset)))
+                                .font(.caption2)
+                                .foregroundStyle(theme.tertiaryLabel)
+                        }
+                    }
+                }
+
+                ForEach(accounts) { account in
+                    capacityCard(account, referenceTime: reference)
+                }
+            }
+        }
+    }
+
+    private func capacityCard(
+        _ account: MobileUsageFleetProjection.Account,
+        referenceTime: Double
+    ) -> some View {
+        let activeWindows = account.windows.filter {
+            ($0.resetsAt ?? .greatestFiniteMagnitude) > referenceTime
+        }
+        return UsageCard {
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+                HStack {
+                    Label(account.runtimeName, systemImage: "sparkles")
+                        .font(.headline)
+                    Spacer()
+                    Text(account.accountName)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(theme.secondaryLabel)
+                }
+
+                ForEach(activeWindows) { window in
+                    Button {
+                        model.selectedLimitID = window.id
+                    } label: {
+                        VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                            HStack {
+                                Text(window.windowLabel)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(livePercent(window, referenceTime: referenceTime))
+                                    .font(.subheadline.weight(.semibold))
+                                    .monospacedDigit()
+                            }
+                            ProgressView(value: liveFraction(window, referenceTime: referenceTime))
+                                .tint(capacityColor(window, referenceTime: referenceTime))
+                            if let reset = window.resetsAt, reset > referenceTime {
+                                Text(MobileL10n.string(
+                                    "Resets %@ · %@",
+                                    relativeDate(reset),
+                                    exactDateTime(reset)
+                                ))
+                                .font(.caption2)
+                                .foregroundStyle(theme.tertiaryLabel)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows this window's history below")
+                }
+                if activeWindows.isEmpty {
+                    Text("No active windows")
+                        .font(.caption)
+                        .foregroundStyle(theme.tertiaryLabel)
+                }
+            }
+        }
+    }
+
+    private func fleetTitle(_ summary: MobileUsageFleetProjection.Summary) -> String {
+        if model.nextLimitCursor != nil {
+            return MobileL10n.string("Accounts · %lld loaded", summary.accountCount)
+        }
+        return MobileL10n.string("All Accounts · %lld", summary.accountCount)
+    }
+
+    private func fleetStatus(_ summary: MobileUsageFleetProjection.Summary) -> String {
+        var values: [String] = []
+        if summary.readyCount > 0 {
+            values.append(MobileL10n.string("%lld ready", summary.readyCount))
+        }
+        if summary.constrainedCount > 0 {
+            values.append(MobileL10n.string("%lld constrained", summary.constrainedCount))
+        }
+        if summary.unknownCount > 0 {
+            values.append(MobileL10n.string("%lld unknown", summary.unknownCount))
+        }
+        return values.joined(separator: " · ")
+    }
+
+    private func liveFraction(
+        _ window: RemoteUsageLimitSeriesSummaryDTO,
+        referenceTime: Double
+    ) -> Double {
+        guard (window.resetsAt ?? .greatestFiniteMagnitude) > referenceTime else { return 0 }
+        return min(max(window.currentFraction ?? 0, 0), 1)
+    }
+
+    private func livePercent(
+        _ window: RemoteUsageLimitSeriesSummaryDTO,
+        referenceTime: Double
+    ) -> String {
+        guard (window.resetsAt ?? .greatestFiniteMagnitude) > referenceTime,
+              let fraction = window.currentFraction else { return MobileL10n.string("Unavailable") }
+        return percent(fraction)
+    }
+
+    private func capacityColor(
+        _ window: RemoteUsageLimitSeriesSummaryDTO,
+        referenceTime: Double
+    ) -> Color {
+        let fraction = liveFraction(window, referenceTime: referenceTime)
+        if fraction >= 0.92 { return theme.negative }
+        if fraction >= 0.75 { return theme.warning }
+        return theme.positive
+    }
+
+    private func sectionTitle(_ title: LocalizedStringKey) -> some View {
+        Text(title)
+            .font(.headline)
+            .padding(.horizontal, MobileDesign.Spacing.small)
     }
 
     @ViewBuilder
     private var overviewContent: some View {
+        sectionTitle("Consumption")
         HStack(spacing: MobileDesign.Spacing.small) {
             rangePicker(selection: $overviewDays)
             Picker("Metric", selection: $metric) {
@@ -478,6 +708,7 @@ struct RemoteUsageDashboardView: View {
                 )
             }
         } else {
+            sectionTitle("Limit history")
             UsageCard {
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
                     Menu {

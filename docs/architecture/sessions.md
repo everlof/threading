@@ -683,11 +683,8 @@ inert invented name out of the one place this filter reads to decide what *not* 
 which are about a stream rather than a run — is in [`themes.md`](themes.md).
 
 The MCP routing variables are the deliberate exception to stripping an inherited agent
-identity: `AgentLauncher` creates them for the new child after filtering. With the hook
-integration enabled it exports both the current `THREADING_*` names and their pre-rename
-`SKALMAN_*` aliases with identical values, so a Codex hook already trusted by the hash of its old
-command keeps working without a rewrite. The aliases are per-process routing compatibility, not
-inherited state from the parent.
+identity: `AgentLauncher` creates them for the new child after filtering. They are per-process
+routing, not inherited state from the parent.
 
 Claude and Grok accept `--session-id <uuid>`, so the id is minted up front. Grok does not persist
 that id while its first-login browser authentication screen is open, so `GrokSessionDiscovery`

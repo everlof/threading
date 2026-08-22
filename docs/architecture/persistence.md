@@ -403,10 +403,8 @@ profiles and account preferences are still in the old domain. Overwriting live p
 different risk from adopting an unused directory, and it needs its own decision. There is one
 narrow carry: a legacy `installsCodexHooks = true` is copied only when the current domain has no
 value. That preference authorises maintenance of hooks the same product already wrote; without
-it, Codex falls back to the PTY quiet heuristic. Threading exports the old `SKALMAN_*` hook
-routing aliases beside `THREADING_*`, so an exact old hook remains runnable without rewriting
-its trusted command text. The old hook-trust bypass is carried too only when hook installation
-remains enabled: both were separate explicit choices before the rename, and current values win
+it, Codex falls back to the PTY quiet heuristic. The old hook-trust bypass is carried too only
+when hook installation remains enabled: both were separate explicit choices before the rename, and current values win
 independently. No other preference is imported by this migration.
 Like every startup migration, this import is disabled in the hosted XCTest process: that bundle
 runs inside the shipping app and sees the developer's real defaults domains, so importing there

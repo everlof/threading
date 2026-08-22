@@ -118,6 +118,42 @@ final class MCPSocketListenerTests: XCTestCase {
         return Reply(status: status, body: body)
     }
 
+    private func runHook(
+        _ command: String,
+        payload: String,
+        environment: [String: String]
+    ) {
+        let finished = expectation(description: "generated hook finished")
+        let status = OSAllocatedUnfairLock<Int32?>(initialState: nil)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", command]
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) {
+                _, replacement in replacement
+            }
+            let input = Pipe()
+            process.standardInput = input
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                input.fileHandleForWriting.write(Data(payload.utf8))
+                try? input.fileHandleForWriting.close()
+                process.waitUntilExit()
+                status.withLock { $0 = process.terminationStatus }
+            } catch {
+                status.withLock { $0 = -1 }
+            }
+            finished.fulfill()
+        }
+
+        wait(for: [finished], timeout: 30)
+        XCTAssertEqual(status.withLock { $0 }, 0)
+    }
+
     // MARK: - Routing
 
     /// A request over the rendezvous is attributed by its token exactly as one over the port is.
@@ -207,6 +243,64 @@ final class MCPSocketListenerTests: XCTestCase {
     }
 
     // MARK: - Binding
+
+    /// A listener refusal is one transport outcome, not a reason for hooks to disappear. Both
+    /// generated provider formats retry the same payload over the loopback listener selected for
+    /// this launch.
+    @MainActor
+    func testGeneratedHooksFallBackToTCPWhenTheUnixListenerCannotBind() throws {
+        let overlong = "/tmp/" + String(
+            repeating: "x",
+            count: MCPBridgeDefaults.maximumSocketPathBytes
+        ) + "/\(MCPBridgeDefaults.socketFileName)"
+        let server = startedServer(at: overlong)
+        defer { server.stop() }
+
+        XCTAssertNil(server.socketPath)
+        let port = try XCTUnwrap(server.port)
+        let sessionID = SessionID()
+        let token = MCPSessionRegistry.token(for: sessionID)
+        defer { MCPSessionRegistry.remove(sessionID: sessionID) }
+
+        let delivered = expectation(description: "both generated hooks reached the relay")
+        delivered.expectedFulfillmentCount = 2
+        let previousObserver = HookLifecycleRelay.observe
+        HookLifecycleRelay.observe = { report in
+            if report.sessionID == sessionID, report.event == .sessionStarted {
+                delivered.fulfill()
+            }
+        }
+        defer { HookLifecycleRelay.observe = previousObserver }
+
+        let environment = [
+            MCPDefaults.socketEnvironmentKey: overlong,
+            MCPDefaults.portEnvironmentKey: String(port),
+            MCPDefaults.sessionTokenEnvironmentKey: token
+        ]
+        let payload = #"{"session_id":"fallback-fixture"}"#
+
+        let settingsPath = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: sessionID,
+            brokersPermissions: false,
+            reportsLifecycle: true
+        ))
+        let settingsData = try Data(contentsOf: URL(fileURLWithPath: settingsPath))
+        let settings = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: settingsData) as? [String: Any]
+        )
+        let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        let groups = try XCTUnwrap(hooks["SessionStart"] as? [[String: Any]])
+        let registrations = try XCTUnwrap(groups.first?["hooks"] as? [[String: Any]])
+        let claudeCommand = try XCTUnwrap(registrations.first?["command"] as? String)
+
+        runHook(claudeCommand, payload: payload, environment: environment)
+        runHook(
+            CodexHookInstaller.command(for: .sessionStarted),
+            payload: payload,
+            environment: environment
+        )
+        wait(for: [delivered], timeout: 10)
+    }
 
     /// A crash never reaches `stop`, so there is always a leftover file to bind past.
     @MainActor

@@ -249,6 +249,13 @@ final class DisplayPaneController: NSViewController {
 
   private var tabsBySession: [SessionID: [DisplayTab]] = [:]
   private var activeTabIDBySession: [SessionID: UUID] = [:]
+  /// Monotonic, in-memory identity for what one session's panel has to present.
+  ///
+  /// The window snapshots this when the user hides the panel. A session switch can then keep
+  /// the same material hidden without mistaking a later chart, browser navigation, or attachment
+  /// for the content the user already dismissed. This is deliberately not persisted: the
+  /// dismissal it is compared with belongs to this window lifetime too.
+  private var contentRevisionBySession: [SessionID: UInt64] = [:]
   /// The browser the agent and user most recently selected. Kept separately from the visible
   /// panel tab because displaying a screenshot or document must not silently retarget the next
   /// browser action to the first browser in the strip.
@@ -333,6 +340,7 @@ final class DisplayPaneController: NSViewController {
     super.init(nibName: nil, bundle: nil)
 
     appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
+      self?.advanceContentRevision(for: event.sessionID)
       self?.ensureAttachmentsTab(for: event.sessionID)
     }
     appEvents.observe(ControlGrantsDidChange.self) { [weak self] event in
@@ -1419,6 +1427,7 @@ final class DisplayPaneController: NSViewController {
       tabs.insert(tab, at: 0)
       tabsBySession[sessionID] = tabs
       if activeTabIDBySession[sessionID] == nil { activeTabIDBySession[sessionID] = tab.id }
+      advanceContentRevision(for: sessionID)
       return
     }
 
@@ -1431,6 +1440,7 @@ final class DisplayPaneController: NSViewController {
     if let active = activeTabIDBySession[sessionID], removedIDs.contains(active) {
       activeTabIDBySession[sessionID] = tabs.first?.id
     }
+    advanceContentRevision(for: sessionID)
   }
 
   // MARK: - Public — Subagents Tab
@@ -1798,6 +1808,14 @@ final class DisplayPaneController: NSViewController {
     return !(tabsBySession[sessionID]?.isEmpty ?? true)
   }
 
+  /// O(1) identity for the panel content currently associated with a session.
+  ///
+  /// `hasContent(for:)` is called first on the session-switch path, so any lazy restore has
+  /// already completed before the window reads this value.
+  func contentRevision(for sessionID: SessionID) -> UInt64 {
+    contentRevisionBySession[sessionID] ?? 0
+  }
+
   /// Drops every session not in the given set, tearing down any live surface it held, so
   /// deleted sessions do not keep their tabs — and their web content processes — alive forever.
   func retainOnly(sessionIDs: Set<SessionID>) {
@@ -1810,6 +1828,9 @@ final class DisplayPaneController: NSViewController {
 
     tabsBySession = tabsBySession.filter { sessionIDs.contains($0.key) }
     activeTabIDBySession = activeTabIDBySession.filter { sessionIDs.contains($0.key) }
+    contentRevisionBySession = contentRevisionBySession.filter {
+      sessionIDs.contains($0.key)
+    }
     activeBrowserTabIDBySession = activeBrowserTabIDBySession.filter {
       sessionIDs.contains($0.key)
     }
@@ -1830,6 +1851,7 @@ final class DisplayPaneController: NSViewController {
     if syntheticOverview?.sessionID == sessionID { discardSyntheticOverview() }
     tabsBySession.removeValue(forKey: sessionID)?.forEach { teardownHosted($0) }
     activeTabIDBySession.removeValue(forKey: sessionID)
+    contentRevisionBySession.removeValue(forKey: sessionID)
     activeBrowserTabIDBySession.removeValue(forKey: sessionID)
     if currentSessionID == sessionID { currentSessionID = nil }
     render()
@@ -2587,6 +2609,7 @@ final class DisplayPaneController: NSViewController {
 
   /// Writes the session's current tabs and selection to disk.
   private func persist(_ sessionID: SessionID) {
+    advanceContentRevision(for: sessionID)
     let tabs = tabsBySession[sessionID] ?? []
     let persistedTabs = tabs.compactMap(persisted)
     let active =
@@ -2598,6 +2621,10 @@ final class DisplayPaneController: NSViewController {
       }
       ?? persistedTabs.first?.id
     DisplayPaneStore.shared.saveLayout(tabs: persistedTabs, activeID: active, for: sessionID)
+  }
+
+  private func advanceContentRevision(for sessionID: SessionID) {
+    contentRevisionBySession[sessionID, default: 0] &+= 1
   }
 
   private func persisted(_ tab: DisplayTab) -> PersistedTab? {

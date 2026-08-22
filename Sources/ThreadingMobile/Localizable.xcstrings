@@ -5752,7 +5752,75 @@
           }
         }
       }
-    }
+    },
+    "Agent prompt": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agentprompt" } } }
+    },
+    "Automatic error screenshots": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Automatiska skärmbilder vid fel" } } }
+    },
+    "Check up on my iOS app usage.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Kontrollera min användning av iOS-appen." } } }
+    },
+    "Clear error screenshots": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Rensa skärmbilder från fel" } } }
+    },
+    "Connection reuse, metrics and checkups": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Återanvändning, mätvärden och kontroller" } } }
+    },
+    "Device checkups": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Enhetskontroller" } } }
+    },
+    "Error screenshots require their own switch, capture only the foreground Threading window, and stay in a three-image ring. A current screenshot is taken only when you explicitly ask the agent for one. Prompts, terminal output, paths, credentials and notification text are not logged.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skärmbilder vid fel kräver en egen strömbrytare, fångar endast Threading-fönstret i förgrunden och sparas i en ring med tre bilder. En aktuell skärmbild tas bara när du uttryckligen ber agenten om en. Prompter, terminalutdata, sökvägar, inloggningsuppgifter och aviseringstext loggas inte." } } }
+    },
+    "Evidence": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Underlag" } } }
+    },
+    "Last failure": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Senaste fel" } } }
+    },
+    "Last upload": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Senaste överföring" } } }
+    },
+    "Local diagnostics": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lokal diagnostik" } } }
+    },
+    "Local diagnostics is off by default and also has to be enabled on the paired Mac. Turning it off stops new requests immediately.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lokal diagnostik är avstängd som standard och måste också aktiveras på den parkopplade Mac-datorn. Om du stänger av den stoppas nya förfrågningar omedelbart." } } }
+    },
+    "Not yet": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inte ännu" } } }
+    },
+    "Paired Mac · local network": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Parkopplad Mac · lokalt nätverk" } } }
+    },
+    "Route": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Väg" } } }
+    },
+    "Saved error screenshots": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparade skärmbilder från fel" } } }
+    },
+    "The agent will say whether it used fresh or cached phone evidence.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenten anger om den använde färskt eller cachelagrat underlag från telefonen." } } }
+    },
+    "When enabled on this iPhone and its paired Mac, Threading can send bounded connection evidence over the local network. Turning it off stops new requests immediately.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När funktionen är aktiverad på denna iPhone och dess parkopplade Mac kan Threading skicka begränsat anslutningsunderlag via det lokala nätverket. Om du stänger av den stoppas nya förfrågningar omedelbart." } } }
+    },
+    "%lld constrained": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld begränsade"}}}},
+    "%lld ready": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld redo"}}}},
+    "%lld unknown": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld okända"}}}},
+    "All Accounts · %lld": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Alla konton · %lld"}}}},
+    "Next reset %@": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nästa återställning %@"}}}},
+    "Resets %@ · %@": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställs %@ · %@"}}}},
+    "Shows this window's history below": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visar fönstrets historik nedan"}}}},
+    "Current capacity": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Aktuell kapacitet"}}}},
+    "Consumption": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förbrukning"}}}},
+    "Loading current capacity…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läser in aktuell kapacitet …"}}}},
+    "No current capacity": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen aktuell kapacitet"}}}},
+    "The Mac has not observed a provider limit window yet.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Mac-datorn har ännu inte observerat något gränsfönster från en leverantör."}}}},
+    "Accounts · %lld loaded": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Konton · %lld inlästa"}}}},
+    "No active windows": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga aktiva fönster"}}}}
   },
   "version": "1.2"
 }

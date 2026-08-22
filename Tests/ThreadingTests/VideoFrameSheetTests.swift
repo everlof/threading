@@ -311,6 +311,107 @@ final class VideoFrameSheetTests: XCTestCase {
         XCTAssertTrue(definition.description.contains(".mov"), definition.description)
     }
 
+    // MARK: - The wire
+
+    /// The call an agent really sends, decoded by the server's own decoder rather than by a
+    /// hand-written stand-in. A tool can be perfectly implemented and still be unreachable if
+    /// the arguments do not survive this step — which is the half a unit test of the engine
+    /// cannot see.
+    func testTheCallAnAgentSendsDecodesIntoTypedArguments() throws {
+        let data = Data(
+            #"{"name":"video_frames","arguments":{"path":"/tmp/clip.mov","from":1.5,"to":2.25,"frames":4,"crop":{"x":10,"y":20,"width":300,"height":200}}}"#
+                .utf8
+        )
+        let decoded = try JSONDecoder().decode(MCPToolCallParameters.self, from: data)
+        let arguments: VideoFramesArguments = try requireToolArguments(
+            decoded.call,
+            tool: .videoFrames
+        )
+
+        XCTAssertEqual(arguments.path, "/tmp/clip.mov")
+        XCTAssertEqual(arguments.from, 1.5)
+        XCTAssertEqual(arguments.to, 2.25)
+        XCTAssertEqual(arguments.frames, 4)
+        XCTAssertEqual(arguments.crop?.rect, CGRect(x: 10, y: 20, width: 300, height: 200))
+    }
+
+    /// The minimum call, since `path` is the only required argument and an agent that has just
+    /// been handed a path will send exactly this.
+    func testTheSmallestUsefulCallDecodes() throws {
+        let data = Data(#"{"name":"video_frames","arguments":{"path":"/tmp/clip.mov"}}"#.utf8)
+        let decoded = try JSONDecoder().decode(MCPToolCallParameters.self, from: data)
+        let arguments: VideoFramesArguments = try requireToolArguments(
+            decoded.call,
+            tool: .videoFrames
+        )
+        XCTAssertEqual(arguments.path, "/tmp/clip.mov")
+        XCTAssertNil(arguments.crop)
+        XCTAssertNil(arguments.from)
+    }
+
+    /// `tools/list` is what an agent reads before it can call anything, and admission is what
+    /// lets the call through. Both consume the same enabled definitions, so both are asserted
+    /// here rather than trusting the catalogue row alone.
+    @MainActor
+    func testTheServerAdvertisesAndAdmitsTheTool() throws {
+        let wasEnabled = AppSettings.shared.isToolGroupEnabled(MCPToolCatalog.display.id)
+        AppSettings.shared.setToolGroup(MCPToolCatalog.display.id, enabled: true)
+        defer { AppSettings.shared.setToolGroup(MCPToolCatalog.display.id, enabled: wasEnabled) }
+
+        XCTAssertTrue(
+            MCPToolCatalog.enabledDefinitions.contains { $0.name == "video_frames" },
+            "video_frames must appear in tools/list"
+        )
+
+        let call = try JSONDecoder().decode(
+            MCPToolCallParameters.self,
+            from: Data(#"{"name":"video_frames","arguments":{"path":"/tmp/clip.mov"}}"#.utf8)
+        ).call
+        XCTAssertTrue(MCPToolCatalog.admits(call))
+    }
+
+    /// Turning the Display group off has to take the tool with it, or the switch in Settings
+    /// is decorative for this one row.
+    @MainActor
+    func testDisablingTheDisplayGroupWithdrawsTheTool() {
+        let wasEnabled = AppSettings.shared.isToolGroupEnabled(MCPToolCatalog.display.id)
+        AppSettings.shared.setToolGroup(MCPToolCatalog.display.id, enabled: false)
+        defer { AppSettings.shared.setToolGroup(MCPToolCatalog.display.id, enabled: wasEnabled) }
+
+        XCTAssertFalse(
+            MCPToolCatalog.enabledDefinitions.contains { $0.name == "video_frames" }
+        )
+    }
+
+    /// The reply has to reach the agent as a real MCP image block. This is the second tool in
+    /// the app allowed to do that, so the encoding is asserted rather than assumed: a result
+    /// that carried only prose would leave the agent describing a picture it never saw.
+    func testTheResultReachesTheAgentAsAnImageBlock() throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47])
+        let encoded = try JSONEncoder().encode(
+            MCPToolResult.screenshot("Cell times — 1: 0.00s", pngData: png, includeImage: true)
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        let content = try XCTUnwrap(object["content"] as? [[String: Any]])
+        XCTAssertEqual(content.count, 2, "the text and the picture both travel")
+        XCTAssertEqual(content.first?["type"] as? String, "text")
+        XCTAssertEqual(content.last?["type"] as? String, "image")
+        XCTAssertEqual(content.last?["mimeType"] as? String, "image/png")
+        XCTAssertEqual(content.last?["data"] as? String, png.base64EncodedString())
+        XCTAssertEqual(object["isError"] as? Bool, false)
+    }
+
+    /// Claude pre-approves this server wholesale, so a new tool must not be the one that starts
+    /// asking for permission on every recording.
+    func testTheToolIsCoveredByTheLaunchPreapproval() {
+        XCTAssertTrue(
+            MCPDefaults.allowedToolName("video_frames")
+                .hasPrefix(MCPDefaults.allowedToolsPattern.replacingOccurrences(of: "*", with: ""))
+        )
+    }
+
     // MARK: - Fixtures
 
     /// Writes a real movie, one second per colour, so the decode path under test is the one

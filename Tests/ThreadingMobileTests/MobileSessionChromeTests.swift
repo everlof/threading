@@ -322,6 +322,205 @@ final class MobileSessionChromeTests: XCTestCase {
         XCTAssertFalse(ScreenEdgeSwipeGesture.isDeliberate(travel: CGPoint(x: -60, y: -200)))
     }
 
+    // MARK: - The dashboard row's trailing swipe
+
+    /// `.swipeActions` is a `List` modifier, and the dashboard's rows are on a `ThemedRowGroup`
+    /// plate inside a `LazyVStack`. SwiftUI ignores it there without a warning, so archive by
+    /// swipe was in the source and inert for everybody who tried it. These assert the rules the
+    /// replacement follows, which is the half a picture cannot check.
+
+    func testASidewaysDragIsASwipeAndAScrollIsNot() {
+        XCTAssertEqual(
+            MobileRowSwipe.drag(.undecided, translation: CGSize(width: -40, height: 6)),
+            .swiping(-40)
+        )
+        XCTAssertEqual(
+            MobileRowSwipe.drag(.undecided, translation: CGSize(width: -6, height: -90)),
+            .scrolling
+        )
+    }
+
+    /// The wobble at the start of a scroll must not move a row, and a drag too short to be
+    /// either yet must not commit the gesture to one of them.
+    func testATooShortDragDecidesNothingYet() {
+        XCTAssertEqual(
+            MobileRowSwipe.drag(.undecided, translation: CGSize(width: -4, height: 3)),
+            .undecided
+        )
+    }
+
+    /// A diagonal drag used to be re-judged on every event, which made the row follow the finger
+    /// and snap home again as the angle changed. A gesture answers once.
+    func testAGestureKeepsWhatItDecidedWhenTheAngleChanges() {
+        let swiping = MobileRowSwipe.drag(.undecided, translation: CGSize(width: -30, height: 2))
+        XCTAssertEqual(
+            MobileRowSwipe.drag(swiping, translation: CGSize(width: -32, height: -140)),
+            .swiping(-32)
+        )
+        let scrolling = MobileRowSwipe.drag(.undecided, translation: CGSize(width: 1, height: 60))
+        XCTAssertEqual(
+            MobileRowSwipe.drag(scrolling, translation: CGSize(width: -120, height: 61)),
+            .scrolling
+        )
+    }
+
+    /// The row starts under the finger, not twelve points behind it: the travel the gesture
+    /// needed to be recognised at all is taken back out.
+    func testTheRowStartsUnderTheFingerRatherThanBehindIt() {
+        XCTAssertEqual(MobileRowSwipe.travel(forTranslation: -12), 0)
+        XCTAssertEqual(MobileRowSwipe.travel(forTranslation: -50), -38)
+        XCTAssertEqual(MobileRowSwipe.travel(forTranslation: 50), 38)
+    }
+
+    func testAClosedRowDoesNotFollowAFingerTowardsTheTrailingEdge() {
+        XCTAssertEqual(
+            MobileRowSwipe.offset(
+                translation: 120,
+                resting: 0,
+                rowWidth: 340,
+                allowsFullSwipe: true
+            ),
+            0
+        )
+    }
+
+    /// A row that cannot be swiped through still follows the finger past the button, because a
+    /// row that stops dead reads as broken rather than as refusing.
+    func testARowWithNoFullSwipeResistsPastTheButtonInsteadOfStopping() {
+        let offset = MobileRowSwipe.offset(
+            translation: -212,
+            resting: 0,
+            rowWidth: 340,
+            allowsFullSwipe: false
+        )
+        XCTAssertGreaterThan(-offset, MobileRowSwipe.actionWidth)
+        XCTAssertLessThan(-offset, 140)
+    }
+
+    func testARowThatAllowsAFullSwipeFollowsTheFingerToItsOwnWidth() {
+        XCTAssertEqual(
+            MobileRowSwipe.offset(
+                translation: -1_000,
+                resting: 0,
+                rowWidth: 340,
+                allowsFullSwipe: true
+            ),
+            -340
+        )
+    }
+
+    func testLettingGoShortOfTheButtonSnapsShutAndPastItRestsOpen() {
+        XCTAssertEqual(
+            MobileRowSwipe.release(
+                offset: -20,
+                predictedOffset: -22,
+                rowWidth: 340,
+                allowsFullSwipe: true
+            ),
+            .closed
+        )
+        XCTAssertEqual(
+            MobileRowSwipe.release(
+                offset: -70,
+                predictedOffset: -80,
+                rowWidth: 340,
+                allowsFullSwipe: true
+            ),
+            .open
+        )
+    }
+
+    /// A flick opens the row. It does not archive a chat the finger never dragged that far:
+    /// only travel that actually happened can perform the action.
+    func testAFlickOpensTheRowButNeverArchivesThroughIt() {
+        XCTAssertEqual(
+            MobileRowSwipe.release(
+                offset: -30,
+                predictedOffset: -900,
+                rowWidth: 340,
+                allowsFullSwipe: true
+            ),
+            .open
+        )
+    }
+
+    func testDraggingPastMostOfTheRowPerformsTheActionOnRelease() {
+        XCTAssertEqual(
+            MobileRowSwipe.release(
+                offset: -260,
+                predictedOffset: -300,
+                rowWidth: 340,
+                allowsFullSwipe: true
+            ),
+            .performed
+        )
+    }
+
+    /// Restore is not destructive, so the row rests open and asks for the tap however far it is
+    /// dragged.
+    func testARowWithNoFullSwipeOnlyEverOpens() {
+        XCTAssertEqual(
+            MobileRowSwipe.release(
+                offset: -400,
+                predictedOffset: -400,
+                rowWidth: 340,
+                allowsFullSwipe: false
+            ),
+            .open
+        )
+    }
+
+    /// `rowWidth` is zero until the row has been laid out once. A threshold taken from that
+    /// would be zero too, and the first twelve points of any sideways drag would archive a chat.
+    func testAnUnmeasuredRowCannotBeSwipedThrough() {
+        XCTAssertFalse(
+            MobileRowSwipe.isArmed(offset: -30, rowWidth: 0, allowsFullSwipe: true)
+        )
+        XCTAssertEqual(
+            MobileRowSwipe.release(
+                offset: -30,
+                predictedOffset: -30,
+                rowWidth: 0,
+                allowsFullSwipe: true
+            ),
+            .closed
+        )
+    }
+
+    /// The plate under the row changes when letting go would archive rather than open, which is
+    /// the only warning a quiet strip gives before the row goes.
+    func testTheStripArmsItselfOnlyOnceTheRowIsMostlyPastTheFinger() {
+        XCTAssertFalse(
+            MobileRowSwipe.isArmed(offset: -150, rowWidth: 340, allowsFullSwipe: true)
+        )
+        XCTAssertTrue(
+            MobileRowSwipe.isArmed(offset: -200, rowWidth: 340, allowsFullSwipe: true)
+        )
+        XCTAssertFalse(
+            MobileRowSwipe.isArmed(offset: -320, rowWidth: 340, allowsFullSwipe: false)
+        )
+    }
+
+    /// Dragging an open row back towards its resting place closes it.
+    func testDraggingAnOpenRowBackClosesIt() {
+        let resting = -MobileRowSwipe.actionWidth
+        let offset = MobileRowSwipe.offset(
+            translation: 100,
+            resting: resting,
+            rowWidth: 340,
+            allowsFullSwipe: true
+        )
+        XCTAssertEqual(
+            MobileRowSwipe.release(
+                offset: offset,
+                predictedOffset: offset,
+                rowWidth: 340,
+                allowsFullSwipe: true
+            ),
+            .closed
+        )
+    }
+
     /// SwiftTerm fits its own esc/ctrl/tab/arrow accessory over the keyboard, which stacked a
     /// second row of the same keys under this app's own `TerminalKeyBar`. Both halves are
     /// asserted: that SwiftTerm still installs one, and that the app still takes it away.

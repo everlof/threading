@@ -14,6 +14,27 @@ final class ExtensionPackageStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    /// Lets an extension repository exercise Threading's complete static import gate against the
+    /// package it just assembled, without copying that package into a developer's Application
+    /// Support directory. Normal test runs skip this opt-in cross-repository acceptance check.
+    func testRequestedExternalPackagePassesFullStaticInspection() throws {
+        guard let path = ProcessInfo.processInfo.environment[
+            "THREADING_EXTENSION_PACKAGE_UNDER_TEST"
+        ], !path.isEmpty else {
+            throw XCTSkip("No external extension package was requested.")
+        }
+
+        let bundle = try ExtensionBundleInspector.inspect(
+            at: URL(fileURLWithPath: path, isDirectory: true)
+        )
+
+        XCTAssertFalse(bundle.manifest.identifier.isEmpty)
+        XCTAssertEqual(
+            bundle.rootURL.path,
+            URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        )
+    }
+
     func testImportCopiesIntoAppOwnedStorageAndLeavesTheExtensionDisabled() throws {
         let source = try makePackage()
         let root = temporaryDirectory("store")

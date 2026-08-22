@@ -88,10 +88,8 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case extensionDescribeComponent
   case extensionValidateComponentPatch
   case extensionPreviewComponentPatch
-#if DEBUG
-  case listIOSDebugDevices
-  case inspectIOSDebug
-#endif
+  case listIOSDiagnosticDevices
+  case inspectIOSDiagnostics
 
   enum Family: String, CaseIterable, Sendable {
     case continuation

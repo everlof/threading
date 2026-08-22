@@ -15,10 +15,14 @@ find its way back to the running app, when the app is already alive and already 
 routing table.
 
 - **A loopback TCP port** (`port: .any` on `127.0.0.1`), which is what `--mcp-config` and
-  Codex's one-run `mcp_servers` override carry. A CLI resolves that URL itself and cannot be
-  handed a socket, so this endpoint stays until the stdio shim replaces the tool channel.
+  Codex's one-run `mcp_servers` override carry when the stdio bridge below is not in use. A CLI
+  resolves that URL itself and cannot be handed a socket, so this endpoint retires once the
+  bridge is the default and nothing launches against the port — not on the day the bridge
+  exists. Today it is the fallback for every launch, and the only address for a launch the
+  bridge refuses.
 - **A unix socket** at `~/Library/Application Support/Threading/bridge/mcp.sock`, in a `0700`
-  directory, which is what the hooks post to. Two things follow from a path instead of a port,
+  directory, which is the route hooks try first. The same buffered payload retries over this
+  launch's TCP port if that connection cannot be made. Two things follow from a path instead of a port,
   and both are the point. It is **stable**: a port is minted per launch, so anything addressed
   by one — a hook command, a `hooks.json` Codex trusts by its text — was addressed to a single
   run of the app. And it is **tighter**: a loopback port is reachable by any local process that
@@ -52,6 +56,84 @@ to disk in readable places and the token is the only thing guarding the endpoint
 endpoint's token is deliberately never written down — a helper run is one run. A file this build
 cannot read is quarantined (`.unreadable-<uuid>`) and the launch mints fresh, rather than being
 interpreted as empty and overwritten; a single unparsable row is skipped and the rest still load.
+
+## The stdio bridge
+
+`--mcp-config` names an endpoint the CLI resolves **once, at startup**. Everything above survives
+a restart of the app; that one line does not. A session launched while Threading is closed fails
+its handshake and spends the rest of its life with no Threading tools, and a session whose app
+restarts mid-turn is left holding an address that no longer answers. The stable unix rendezvous
+does not fix this by itself: the CLI still resolved the address once, and the window it resolved
+it in is exactly the window where the app was not there.
+
+A stdio server is resolved by *spawning* it, which moves the address inside a process we own,
+where it can be retried. So the per-session configuration can name a helper instead of a URL:
+
+```json
+{"mcpServers": {"threading": {"type": "stdio",
+  "command": "…/Contents/Helpers/threading-mcp-bridge",
+  "args": ["--socket", "…/Threading/bridge/mcp.sock", "--token", "…",
+           "--cache", "…/bridge-catalogues/<session>.json"]}}}
+```
+
+**It is opt-in, and off.** This is step 2 of the rollout in
+[`durable-sessions.md`](../feature-drafts/durable-sessions.md) — the shim behind a setting, with
+HTTP still available as the fallback while it settles. `usesMCPStdioBridge` is a behavioural
+setting with no `presentations`, so `remotePolicy` resolves to `.hidden`: it produces no Settings
+row and does not cross to the phone's mirror. `defaults write codes.threading
+mcpStdioBridgeEnabled -bool true` turns it on for the next session launch, and a test injects it.
+
+**One decision, three transports.** `MCPSessionRegistry.binding(for:)` answers `.stdio` or
+`.http` once per launch, and Claude's config file, Codex's per-run overrides and ACP's
+`mcpServers` array are all rendered from that answer. Without a single owner the three could
+disagree about whether a session has a bridge, which is the kind of defect that shows up as one
+runtime silently losing its tools.
+
+**Three conditions have to hold, and each failure is a fallback rather than an error.**
+`bridgeInvocation` returns nil — leaving the launch on HTTP exactly as before the bridge existed
+— when the **setting is off**; when the **helper is missing or not executable** in
+`Contents/Helpers`, because a `command` naming a file that will not run produces a CLI reporting
+a broken MCP server, which is worse than the port; and when the **rendezvous did not bind**,
+because a socket without a ready listener is a bridge that can never connect. The startup gate
+waits for both listener outcomes, so this covers path-length refusal, directory preparation,
+listener failure, and cancellation rather than predicting only one failure mode. All three are
+held by `MCPBridgeLaunchIntegrationTests` and the real-listener socket tests.
+
+**The stdio form needs no port**, and that independence is the whole point. `writeConfiguration`
+used to return nil when the listener had none; with a bridge invocation it writes the file
+anyway, so a session configured before the listener is up — or while the app is closed — still
+holds a working tool channel. Without one it falls back to the HTTP form and to returning nil,
+unchanged.
+
+**The other two transports carry the same two shapes.** Codex's `mcp_servers` table takes either
+a `url` or a `command` plus `args`; they are alternatives, so the stdio form writes
+`mcp_servers.threading.command` and `mcp_servers.threading.args` and **no** `url` — a table
+carrying both would be asking Codex which of two places this server is. `enabled_tools` and the
+per-tool `approval_mode` overrides are unchanged either way, and the settings-research one-shot
+(below) takes the same binding rather than a URL, so its scoped line is pinned word-for-word in
+both forms. ACP's `McpServer` union tags only the extra transports: the HTTP entry keeps its
+`type: "http"`, `url` and `headers`, while the stdio entry is the untagged baseline — exactly
+`name`, `command`, `args` and `env` — because `type` is not a member the stdio variant defines.
+Cursor's `initialize` says the same thing from the other side: it advertises
+`mcpCapabilities: {http: true, sse: true}` and never mentions stdio, which reads as "http and sse
+*as well*".
+
+**The cache is a per-session file.** The bridge caches the catalogue it last fetched, which is
+what lets it answer `initialize` and `tools/list` with no app behind it; the app names that path
+(`bridge-catalogues/<session>.json`) rather than letting the helper choose one, so socket, token
+and cache stay one decision made beside the session's other per-session files. The directory is
+in `MCPDefaults.cleanupDirectories`, so every sweep that revokes a session — `retainOnly`,
+`remove`, `endAdHoc` — already removes it. A directory absent from that list is a directory that
+grows without bound.
+
+Nothing else about the bridge is the app's business: it forwards every frame verbatim to
+`POST /mcp/<token>`, answers the handshake from its cache while the socket is unreachable,
+refuses a `tools/call` in that window as a *result* (`isError`) rather than as a transport error
+the model would never see, and re-announces `notifications/tools/list_changed` after any
+reconnect. No tool name is compiled into it — the catalogue is only ever fetched and replayed,
+which is the answer to the drift a second copy of `MCPToolCatalog` would cause.
+
+<!-- MEASUREMENT -->
 
 Grok native Chat receives the same private endpoint through ACP's `mcpServers` member on
 `session/new` and `session/load`. This is per-process and per-session, so no `.mcp.json` or user
@@ -391,6 +473,14 @@ a chat's tabs and the global document is not one; the toggle stays, because the 
 either way. The sidebar at the other edge of the window has no equivalent — it is one column with
 one toggle, and the trailing panel is the pane that arrives unasked when an agent displays
 something, which is what earns it a way out where the eye already is.
+
+**Closing the panel dismisses the content revision, not the session's tabs.** The window records
+the panel controller's O(1), in-memory revision when the user hides it. Selecting another chat and
+returning compares that revision after the ordinary lazy restore: unchanged content stays hidden,
+while a new chart, navigation, attachment, or other panel mutation advances the revision and
+restores the automatic reveal. Session switching itself never advances or overwrites this choice,
+and deleting a session removes both sides of the comparison. A plain hidden bit was not enough:
+it would either resurrect the same chart on every return or keep genuinely new output invisible.
 
 **That corner control is the *same* toggle the session header holds, not a second one.**
 `DisplayPanelToggle` states the symbol (`sidebar.trailing`) and the copy once; the session
@@ -895,17 +985,17 @@ host has asked for it.
 `MCPServer` calls its handler on the main queue, because neither `ProjectStore`, `AgentRuntime`
 nor AppKit is thread-safe. Everything arriving off the network hops before touching them.
 
-The TCP listener must be ready before any launch, since `--mcp-config` reads the port — so
-`AppDelegate` defers `restoreSelectedSession()` to the `start` callback. That callback fires
-whether the listener came up or not: a failed server costs sessions their panel, not their
-launch (`mcpFlags` returns "" and the command line is unchanged).
+Both listener outcomes must be known before a launch. `--mcp-config` needs the TCP port, and the
+stdio decision may name the unix listener only if it actually reached `.ready`, so `AppDelegate`
+defers `restoreSelectedSession()` to the `start` callback. That callback fires once both listeners
+have either settled or failed: a failed server costs sessions their panel, not their launch
+(`mcpFlags` returns "" and the command line is unchanged).
 
-**The unix listener is deliberately outside that gate.** `start` kicks it off and does not wait
-for it, because nothing a launch writes depends on it having bound: the hooks are written from a
-path, not from a listener. That is what deleted `writeHookSettings`' worst branch — a session
-launched before the port arrived used to get *no hooks at all*, which silently cost it accurate
-activity and, for a rendered session, blocked its tools with no card to approve them. There is no
-longer a case where a session that asked for hooks does not get them.
+Hooks do not depend on either listener succeeding. They carry the stable socket candidate and the
+launch port through environment variables, buffer stdin once, try the socket, and retry the same
+bytes through TCP on connection failure. That is what deletes `writeHookSettings`' worst branch:
+a session that asked for hooks always gets them, and an unavailable preferred route is a transport
+choice rather than a lost lifecycle event or an invisible permission request.
 
 **Tab order belongs to the user's hand.** The strip is `ThemedTabStripView` (the design
 system's, shared with every tab host) and tabs reorder by drag or by the chip's

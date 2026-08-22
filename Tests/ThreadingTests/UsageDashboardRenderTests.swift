@@ -39,91 +39,78 @@ final class UsageDashboardRenderTests: XCTestCase {
         var files: [URL] = []
 
         for fixture in fixtures {
-            for tab in UsageDashboardView.DashboardTab.allCases {
-                AppThemePalette.set(fixture.theme)
-                let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
-                let dashboard = UsageDashboardView()
-                dashboard.update(
-                    report: report,
-                    limits: limitFixtures(),
-                    isBuilding: false,
-                    animated: false
-                )
-                if tab == .limitHistory {
-                    dashboard.selectLimitRangeForTesting(days: 7)
-                }
-                dashboard.selectTabForTesting(tab)
-                let host = laidOut(dashboard, appearance: appearance)
-                AppThemeRefresh.repaint(host)
-                host.layoutSubtreeIfNeeded()
+            AppThemePalette.set(fixture.theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            let dashboard = UsageDashboardView()
+            dashboard.update(
+                report: report,
+                limits: limitFixtures(),
+                isBuilding: false,
+                animated: false
+            )
+            dashboard.selectLimitRangeForTesting(days: 7)
+            let host = laidOut(dashboard, appearance: appearance)
+            AppThemeRefresh.repaint(host)
+            host.layoutSubtreeIfNeeded()
 
-                XCTAssertLessThanOrEqual(
-                    dashboard.usageRenderedPointCountForTesting,
-                    4 * Design.Chart.maximumRenderedPoints
-                )
-                XCTAssertLessThanOrEqual(
-                    dashboard.limitRenderedPointCountForTesting,
-                    Design.Chart.maximumRenderedPoints + 2
-                )
-                XCTAssertEqual(dashboard.visibleTabForTesting, tab)
-                XCTAssertEqual(dashboard.topToolCountForTesting, 4)
-                XCTAssertEqual(dashboard.usageChartCompositionForTesting, .stackedBands)
-                XCTAssertEqual(dashboard.limitChartCompositionForTesting, .independent)
-                if tab == .overview {
-                    XCTAssertGreaterThan(dashboard.breakdownVisibleSubviewCountForTesting, 0)
-                    XCTAssertLessThan(dashboard.breakdownVisibleSubviewCountForTesting, 20)
-                }
+            XCTAssertLessThanOrEqual(
+                dashboard.usageRenderedPointCountForTesting,
+                4 * Design.Chart.maximumRenderedPoints
+            )
+            XCTAssertLessThanOrEqual(
+                dashboard.limitRenderedPointCountForTesting,
+                Design.Chart.maximumRenderedPoints + 2
+            )
+            XCTAssertEqual(dashboard.topToolCountForTesting, 4)
+            XCTAssertEqual(dashboard.usageChartCompositionForTesting, .stackedBands)
+            XCTAssertEqual(dashboard.limitChartCompositionForTesting, .independent)
+            XCTAssertGreaterThan(dashboard.breakdownVisibleSubviewCountForTesting, 0)
+            XCTAssertLessThan(dashboard.breakdownVisibleSubviewCountForTesting, 20)
 
-                var payload: Data?
-                appearance.performAsCurrentDrawingAppearance {
-                    payload = png(of: host)
-                }
-                let tabName = tab == .overview ? "overview" : "limits"
-                let url = directory.appendingPathComponent(
-                    "usage-dashboard-\(tabName)-\(fixture.name).png"
-                )
-                try XCTUnwrap(payload, "No Usage \(tabName) render for \(fixture.name)")
-                    .write(to: url)
-                files.append(url)
-
-                // After the draw, deliberately: a column fits itself to the clip the scroll view
-                // settles during its own tile, so what the columns are is only finally true once
-                // the page has been asked to draw itself.
-                guard tab == .overview else { continue }
-                XCTAssertEqual(
-                    dashboard.breakdownColumnTitlesForTesting,
-                    [
-                        L10n.string("Model"),
-                        L10n.string("Cost"),
-                        L10n.string("Share"),
-                        L10n.string("Tokens"),
-                        L10n.string("Requests")
-                    ],
-                    "the wide page has room for every column, headed by the row's own subject"
-                )
-                XCTAssertGreaterThan(
-                    dashboard.breakdownProviderMarkCountForTesting,
-                    0,
-                    "every model in this fixture came through exactly one runtime"
-                )
-                print("usage-breakdown \(fixture.name) \(dashboard.breakdownDebugGeometryForTesting)")
-                let fit = dashboard.breakdownColumnFitForTesting
-                XCTAssertLessThanOrEqual(
-                    fit.occupied,
-                    fit.available + 0.5,
-                    "the breakdown's columns hang \(fit.occupied - fit.available)pt outside the table"
-                )
-                // The defect this page shipped was invisible to every other assertion in this
-                // file: a detail line one character too long for its fifth of the row.
-                XCTAssertTrue(
-                    dashboard.statBandDetailsFitForTesting,
-                    "a stat's detail line is truncated at the page's own width"
-                )
+            var payload: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                payload = png(of: host)
             }
+            let url = directory.appendingPathComponent(
+                "usage-dashboard-\(fixture.name).png"
+            )
+            try XCTUnwrap(payload, "No Usage render for \(fixture.name)").write(to: url)
+            files.append(url)
+
+            // After the draw, deliberately: a column fits itself to the clip the scroll view
+            // settles during its own tile, so what the columns are is only finally true once
+            // the page has been asked to draw itself.
+            XCTAssertEqual(
+                dashboard.breakdownColumnTitlesForTesting,
+                [
+                    L10n.string("Model"),
+                    L10n.string("Cost"),
+                    L10n.string("Share"),
+                    L10n.string("Tokens"),
+                    L10n.string("Requests")
+                ],
+                "the wide page has room for every column, headed by the row's own subject"
+            )
+            XCTAssertGreaterThan(
+                dashboard.breakdownProviderMarkCountForTesting,
+                0,
+                "every model in this fixture came through exactly one runtime"
+            )
+            print("usage-breakdown \(fixture.name) \(dashboard.breakdownDebugGeometryForTesting)")
+            let fit = dashboard.breakdownColumnFitForTesting
+            XCTAssertLessThanOrEqual(
+                fit.occupied,
+                fit.available + 0.5,
+                "the breakdown's columns hang \(fit.occupied - fit.available)pt outside the table"
+            )
+            XCTAssertTrue(
+                dashboard.statBandDetailsFitForTesting,
+                "a stat's detail line is truncated at the page's own width"
+            )
         }
 
         print("Rendered Usage dashboard fixtures to \(directory.path)")
-        XCTAssertEqual(files.count, fixtures.count * UsageDashboardView.DashboardTab.allCases.count)
+        XCTAssertEqual(files.count, fixtures.count)
     }
 
     func testLimitHistoryChartDoesNotStretchToALaterBankedResetExpiry() throws {
@@ -187,7 +174,7 @@ final class UsageDashboardRenderTests: XCTestCase {
             ("counting", nil, nil, true),
             ("reading", nil, reading, true),
             ("empty", nil, nil, false),
-            // A rescan behind a report says so beside the tabs and leaves the chart alone.
+            // A rescan behind a report says so beside the controls and leaves the chart alone.
             ("rescanning", reportFixture(), reading, true)
         ]
         let fixtures = [
@@ -280,7 +267,7 @@ final class UsageDashboardRenderTests: XCTestCase {
                 payload = png(of: host)
             }
             let url = directory.appendingPathComponent(
-                "usage-dashboard-overview-narrow-\(fixture.name).png"
+                "usage-dashboard-narrow-\(fixture.name).png"
             )
             try XCTUnwrap(payload, "No narrow Usage render for \(fixture.name)").write(to: url)
             files.append(url)
@@ -323,9 +310,19 @@ final class UsageDashboardRenderTests: XCTestCase {
         width: CGFloat = Design.Size.settingsContentWidth
     ) -> NSView {
         let dashboardWidth = width
+        let fleet = AccountUsageFleetView()
+        fleet.show(fleetFixture())
         dashboard.translatesAutoresizingMaskIntoConstraints = false
         dashboard.widthAnchor.constraint(equalToConstant: dashboardWidth).isActive = true
-        let dashboardHeight = dashboard.fittingSize.height
+        let section = SettingsUI.section("Current capacity", fleet)
+        let stack = NSStackView(views: [section, dashboard])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.large
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        dashboard.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        let dashboardHeight = stack.fittingSize.height
         let host = NSView(frame: NSRect(
             x: 0,
             y: 0,
@@ -337,16 +334,54 @@ final class UsageDashboardRenderTests: XCTestCase {
         appearance.performAsCurrentDrawingAppearance {
             host.layer?.backgroundColor = Design.Surface.ground.cgColor
         }
-        dashboard.appearance = appearance
-        host.addSubview(dashboard)
+        stack.appearance = appearance
+        host.addSubview(stack)
         NSLayoutConstraint.activate([
-            dashboard.topAnchor.constraint(equalTo: host.topAnchor, constant: Design.Spacing.large),
-            dashboard.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -Design.Spacing.large),
-            dashboard.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: Design.Spacing.large),
-            dashboard.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -Design.Spacing.large)
+            stack.topAnchor.constraint(equalTo: host.topAnchor, constant: Design.Spacing.large),
+            stack.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -Design.Spacing.large),
+            stack.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: Design.Spacing.large),
+            stack.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -Design.Spacing.large)
         ])
         host.layoutSubtreeIfNeeded()
         return host
+    }
+
+    private func fleetFixture() -> [AccountUsageFleetItem] {
+        let values: [(AgentKind, String, String, [Double?], Bool)] = [
+            (.claude, "default", "Default", [0.75, 0.38], true),
+            (.claude, "dblock", "dblock", [0.02, 0.20], false),
+            (.claude, "vlundborg", "vlundborg", [0.26, 0.03], false),
+            (.codex, "work", "Work", [0.41, nil], false),
+            (.codex, "personal", "Personal", [0.94, 0.67], false)
+        ]
+        return values.map { provider, handle, name, fractions, current in
+            let account = AgentAccount(
+                provider: provider,
+                handle: AccountHandle(storedName: handle),
+                configPath: "/tmp/usage-\(handle)",
+                displayName: name
+            )
+            let windows = fractions.enumerated().map { index, fraction in
+                AccountUsage.Window(
+                    id: index == 0 ? "5h" : "7d",
+                    label: index == 0 ? "5-hour" : "Weekly",
+                    fraction: fraction,
+                    resetsAt: now.addingTimeInterval(index == 0 ? 14_100 : 5 * 86_400),
+                    windowDuration: index == 0 ? 5 * 3_600 : 7 * 86_400
+                )
+            }
+            return AccountUsageFleetItem(
+                account: account,
+                reading: .current(AccountUsage(
+                    windows: windows,
+                    planLabel: provider == .claude ? "Max" : "Pro",
+                    observedAt: now,
+                    source: .api
+                )),
+                isCurrent: current,
+                allowsHandoff: !current && provider == .claude
+            )
+        }
     }
 
     private func png(of host: NSView) -> Data? {

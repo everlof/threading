@@ -41,6 +41,10 @@ final class AdvancedPreferencesViewController: NSViewController {
 
         let page = SettingsUI.page(title: "Advanced", sections: [
             SettingsUI.note(AdvancedStrings.explanation),
+            SettingsUI.section(
+                AdvancedStrings.localDiagnosticsSection,
+                SettingsCard(rows: localDiagnosticsRows())
+            ),
             SettingsUI.section(AdvancedStrings.locationsSection, SettingsCard(rows: locationRows())),
             SettingsUI.section(AdvancedStrings.tourSection, SettingsCard(rows: [
                 resetRow(
@@ -91,6 +95,37 @@ final class AdvancedPreferencesViewController: NSViewController {
             page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
+    }
+
+    private func localDiagnosticsRows() -> [NSView] {
+        let enabled = AppSettings.shared.localDiagnosticsEnabled
+        let toggle = SettingsUI.toggle(
+            isOn: enabled,
+            target: self,
+            action: #selector(localDiagnosticsChanged(_:))
+        )
+        toggle.setAccessibilityLabel(AdvancedStrings.localDiagnosticsTitle)
+
+        let clearButton = SettingsUI.button(
+            AdvancedStrings.clearDiagnosticsButton,
+            target: self,
+            action: #selector(clearLocalDiagnostics)
+        )
+        let count = MobileDiagnosticsCaptureStore.shared.captureCount
+        clearButton.isEnabled = count > 0
+
+        return [
+            SettingsUI.row(
+                title: AdvancedStrings.localDiagnosticsTitle,
+                subtitle: AdvancedStrings.localDiagnosticsDetail,
+                control: toggle
+            ),
+            row(
+                title: AdvancedStrings.localDiagnosticsCacheTitle,
+                detail: AdvancedStrings.localDiagnosticsCacheDetail(count: count),
+                button: clearButton
+            ),
+        ]
     }
 
     /// A path with a button that opens it. The path is the *detail*, not the title, because it
@@ -217,6 +252,15 @@ final class AdvancedPreferencesViewController: NSViewController {
         reveal(AppDataLocations.supportDirectory)
     }
 
+    @objc private func localDiagnosticsChanged(_ sender: ThemedToggle) {
+        AppSettings.shared.localDiagnosticsEnabled = sender.state == .on
+    }
+
+    @objc private func clearLocalDiagnostics() {
+        MobileDiagnosticsCaptureStore.shared.clearCaptures()
+        rebuild()
+    }
+
     /// Selects the item in its parent rather than opening it: a preferences plist opened is a
     /// plist editor nobody asked for, and the point is to show where the thing is.
     private func reveal(_ url: URL) {
@@ -320,6 +364,29 @@ enum AdvancedStrings {
     static var explanation: String {
         L10n.string("Where Threading keeps your settings and your work, and how to start over.")
     }
+
+    static var localDiagnosticsSection: String { L10n.string("Local Diagnostics") }
+    static var localDiagnosticsTitle: String {
+        L10n.string("Allow paired-iPhone checkups")
+    }
+    static var localDiagnosticsDetail: String {
+        L10n.string(
+            "Accepts bounded connection evidence from a paired owner iPhone over the local "
+                + "network. The iPhone has its own independent switch."
+        )
+    }
+    static var localDiagnosticsCacheTitle: String { L10n.string("Saved iPhone evidence") }
+    static func localDiagnosticsCacheDetail(count: Int) -> String {
+        switch count {
+        case 0:
+            return L10n.string("No bounded captures stored on this Mac.")
+        case 1:
+            return L10n.string("1 bounded capture stored on this Mac.")
+        default:
+            return L10n.format("%lld bounded captures stored on this Mac.", count)
+        }
+    }
+    static var clearDiagnosticsButton: String { L10n.string("Clear Evidence") }
 
     static var locationsSection: String { L10n.string("Locations") }
     static var outboxLocationTitle: String { L10n.string("Report Outbox") }

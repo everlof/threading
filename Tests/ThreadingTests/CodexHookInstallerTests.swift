@@ -48,6 +48,22 @@ final class CodexHookInstallerTests: XCTestCase {
         }
     }
 
+    private func runShell(_ command: String, environment: [String: String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        process.environment = environment
+        let input = Pipe()
+        process.standardInput = input
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+
+        try process.run()
+        try input.fileHandleForWriting.close()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+    }
+
     /// One foreign entry, shaped exactly like the file this machine already had.
     private func foreignDocument() -> [String: Any] {
         [
@@ -59,16 +75,19 @@ final class CodexHookInstallerTests: XCTestCase {
         ]
     }
 
-    /// The exact text written by the last pre-rename installer. Keeping the fixture here makes
-    /// the compatibility claim independent of the current generator it is testing.
+    /// The exact text written by the last pre-rename installer, spelled out in literals.
+    ///
+    /// Deliberately not built from `MCPDefaults`: this is a record of what is sitting in a
+    /// real file on a machine that installed the old build, and it must keep saying that after
+    /// the constants it was once derived from have been deleted.
     private func legacyCommand(for event: HookLifecycleEvent) -> String {
-        let url = "http://\(MCPDefaults.host):$\(MCPDefaults.legacyPortEnvironmentKey)"
+        let url = "http://\(MCPDefaults.host):$SKALMAN_MCP_PORT"
             + "\(MCPDefaults.lifecyclePathPrefix)"
-            + "$\(MCPDefaults.legacySessionTokenEnvironmentKey)"
+            + "$SKALMAN_SESSION_TOKEN"
             + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)"
 
         return "skalman_payload=$(cat);"
-            + " [ -n \"$\(MCPDefaults.legacySessionTokenEnvironmentKey)\" ] &&"
+            + " [ -n \"$SKALMAN_SESSION_TOKEN\" ] &&"
             + " printf '%s' \"$skalman_payload\" |"
             + " curl -s --max-time \(Int(MCPDefaults.lifecycleTimeout))"
             + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\""
@@ -76,12 +95,12 @@ final class CodexHookInstallerTests: XCTestCase {
     }
 
     private func legacyPermissionCommand() -> String {
-        let url = "http://\(MCPDefaults.host):$\(MCPDefaults.legacyPortEnvironmentKey)"
+        let url = "http://\(MCPDefaults.host):$SKALMAN_MCP_PORT"
             + "\(MCPDefaults.permissionPathPrefix)"
-            + "$\(MCPDefaults.legacySessionTokenEnvironmentKey)"
+            + "$SKALMAN_SESSION_TOKEN"
 
         return "skalman_payload=$(cat);"
-            + " [ -n \"$\(MCPDefaults.legacyBrokerEnvironmentKey)\" ] &&"
+            + " [ -n \"$SKALMAN_BROKER_TOOLS\" ] &&"
             + " printf '%s' \"$skalman_payload\" |"
             + " curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
             + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\";"
@@ -195,9 +214,9 @@ final class CodexHookInstallerTests: XCTestCase {
         XCTAssertEqual(first, second)
     }
 
-    /// An arbitrary command with our old marker is still ours, but it is not one of the exact
-    /// commands made compatible by the launch aliases. Replace it rather than trusting a stale
-    /// shape forever; foreign entries remain untouched.
+    /// A command carrying our old marker is ours, and is replaced rather than left to rot.
+    /// Foreign entries remain untouched. This is why the pre-rename marker is still admitted:
+    /// stop recognising it and this entry would be stranded in the user's file for ever.
     func testInstallReplacesUnknownPreRenameEntriesAndKeepsForeignHooks() throws {
         let legacyCommand = "skalman_payload=$(cat); true # skalman-lifecycle"
         try write([
@@ -229,26 +248,32 @@ final class CodexHookInstallerTests: XCTestCase {
         )
     }
 
-    /// Codex trusts a hook by its exact command text. A complete installation from before the
-    /// product rename remains runnable through launch aliases, so installing must leave the
-    /// entire document byte-for-byte alone rather than revoking that existing trust decision.
-    func testInstallPreservesKnownPreRenameHooksWithoutRewriting() throws {
+    /// A complete pre-rename installation is now replaced, not preserved.
+    ///
+    /// It used to be kept byte-for-byte, because the launch exported `SKALMAN_*` aliases that
+    /// kept the old text runnable and its Codex trust hash intact. Those aliases are gone, so
+    /// the old command would call an address nothing answers on — a hook that is trusted and
+    /// broken is worse than one the user is asked to approve again.
+    func testInstallReplacesACompletePreRenameInstallation() throws {
         try write(legacyDocument())
-        let before = try Data(contentsOf: hooksFile)
 
-        XCTAssertFalse(CodexHookInstaller.install(inCodexHome: codexHome.path))
-        XCTAssertEqual(try Data(contentsOf: hooksFile), before)
+        XCTAssertTrue(CodexHookInstaller.install(inCodexHome: codexHome.path))
 
         for event in HookLifecycleEvent.allCases {
             let registration = event.codexRegistration
             guard registration.isSupported else { continue }
             for name in registration.eventNames {
                 let commands = try commands(forEvent: name)
-                XCTAssertTrue(commands.contains(legacyCommand(for: event)))
-                XCTAssertFalse(commands.contains { $0.contains(MCPDefaults.hookMarker) })
+                XCTAssertFalse(
+                    commands.contains(legacyCommand(for: event)),
+                    "a pre-rename \(name) hook survived and now points nowhere"
+                )
+                XCTAssertTrue(commands.contains { $0.contains(MCPDefaults.hookMarker) })
             }
         }
-        XCTAssertTrue(try commands(forEvent: "PreToolUse").contains(legacyPermissionCommand()))
+        let preToolUse = try commands(forEvent: "PreToolUse")
+        XCTAssertFalse(preToolUse.contains(legacyPermissionCommand()))
+        XCTAssertTrue(preToolUse.contains { $0.contains(MCPDefaults.hookMarker) })
     }
 
     /// Codex trusts a hook by hashing its text, so an unnecessary rewrite would revoke the
@@ -261,9 +286,8 @@ final class CodexHookInstallerTests: XCTestCase {
         )
     }
 
-    /// The token reaches the hook through the environment, and the rendezvous is a literal
-    /// because a unix socket path is fixed per user. If a literal *port* ever comes back here,
-    /// trust breaks on every app launch — which is what the socket replaced.
+    /// Every launch-specific value reaches the hook through the environment, keeping the shared
+    /// reviewed command byte-stable while still admitting a loopback fallback.
     func testCommandCarriesNoLaunchSpecificValues() {
         var commands = HookLifecycleEvent.allCases.map(CodexHookInstaller.command(for:))
         commands.append(CodexHookInstaller.permissionCommand())
@@ -271,25 +295,17 @@ final class CodexHookInstallerTests: XCTestCase {
         for command in commands {
             XCTAssertTrue(command.contains("$\(MCPDefaults.sessionTokenEnvironmentKey)"))
             XCTAssertTrue(command.contains(MCPDefaults.hookMarker))
-            XCTAssertTrue(
-                command.contains(
-                    "--unix-socket \(MCPBridgeLocation.shellQuoted(MCPBridgeLocation.socketPath))"
-                ),
-                "the hook does not post over the rendezvous: \(command)"
-            )
-            XCTAssertFalse(
-                command.contains(MCPDefaults.portEnvironmentKey),
-                "a per-launch port came back into a file Codex trusts by its text: \(command)"
-            )
-            XCTAssertFalse(command.contains("http://\(MCPDefaults.host):"))
+            XCTAssertTrue(command.contains("--unix-socket \"$\(MCPDefaults.socketEnvironmentKey)\""))
+            XCTAssertTrue(command.contains("http://\(MCPDefaults.host):$\(MCPDefaults.portEnvironmentKey)"))
+            XCTAssertFalse(command.contains(MCPBridgeLocation.socketPath))
         }
     }
 
     /// The trust-hash claim, asserted on the bytes rather than on the generator.
     ///
     /// Codex pins a trusted hook by hashing its command text, so two consecutive "launches"
-    /// must leave the file byte-for-byte identical. Everything in the command is fixed at
-    /// compile time except the socket path, and that is fixed per user.
+    /// must leave the file byte-for-byte identical. Every launch-specific value is supplied by
+    /// the child-process environment rather than baked into this file.
     func testTheFileWrittenByTwoLaunchesIsByteIdentical() throws {
         XCTAssertTrue(CodexHookInstaller.install(inCodexHome: codexHome.path))
         let first = try Data(contentsOf: hooksFile)
@@ -303,9 +319,30 @@ final class CodexHookInstallerTests: XCTestCase {
 
     /// The file is read by every Codex run under the account, including ones the user starts
     /// themselves. Those carry no token and must not spawn a request per turn.
-    func testCommandSkipsItselfWithoutASessionToken() {
-        let command = CodexHookInstaller.command(for: .turnStarted)
-        XCTAssertTrue(command.contains("[ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ]"))
+    func testCommandsMakeNoRequestWithoutTheirScopeVariables() throws {
+        let fakeBin = codexHome.appendingPathComponent("fake-bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: fakeBin, withIntermediateDirectories: true)
+        let marker = codexHome.appendingPathComponent("curl-was-called")
+        let curl = fakeBin.appendingPathComponent("curl")
+        try Data("#!/bin/sh\nprintf called > \"$FAKE_CURL_MARKER\"\n".utf8).write(to: curl)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: curl.path
+        )
+        let environment = [
+            "PATH": "\(fakeBin.path):/usr/bin:/bin",
+            "FAKE_CURL_MARKER": marker.path,
+            MCPDefaults.socketEnvironmentKey: "/unreachable/threading.sock",
+            MCPDefaults.portEnvironmentKey: "65535"
+        ]
+
+        try runShell(CodexHookInstaller.command(for: .turnStarted), environment: environment)
+        try runShell(CodexHookInstaller.permissionCommand(), environment: environment)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: marker.path),
+            "an out-of-scope Codex process reached a Threading transport"
+        )
     }
 
     /// Every command reads stdin *before* its guard.

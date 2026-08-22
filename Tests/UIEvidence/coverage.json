@@ -733,13 +733,34 @@
       }
     },
     {
+      "id": "advanced-local-diagnostics",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Advanced local diagnostics consent",
+      "description": "The real Advanced Settings page with the paired-iPhone evidence switch visibly off and on, plus the bounded-cache clear row.",
+      "states": ["Opted out", "Opted in"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Shared settings width × 900 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AdvancedSettingsRenderTests.swift",
+        "test": "ThreadingTests/AdvancedSettingsRenderTests/testRendersLocalDiagnosticsOptInStates"
+      },
+      "capture": {
+        "glob": "advanced-local-diagnostics-*.png"
+      }
+    },
+    {
       "id": "remaining-settings-destinations",
       "kind": "surface",
       "status": "planned",
       "priority": "important",
       "title": "Remaining Settings destinations",
       "description": "Deterministic fixture seams and complete-page captures for the remaining data-backed Settings pages, without reading developer accounts, profiles, projects or installed extensions.",
-      "states": ["Keyboard", "Terminal profile", "Storage", "Archived", "Advanced", "Search results"],
+      "states": ["Keyboard", "Terminal profile", "Storage", "Archived", "Search results"],
       "matrix": {
         "themes": ["System", "Two contrasting authored themes"],
         "appearances": ["Light", "Dark"],
@@ -857,8 +878,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Usage dashboard",
-      "description": "The Overview and Limits tabs with bounded chart data and the real virtualized breakdown under four contrasting materials.",
-      "states": ["Overview", "Limits"],
+      "description": "The one-page current-capacity, Limit History and Consumption hierarchy with bounded chart data and real virtualized account and breakdown tables under contrasting materials.",
+      "states": ["Current capacity", "Limit History", "Consumption"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Neo Brutalism", "Classic Player"],
         "appearances": ["Theme representative appearance"],
@@ -870,6 +891,27 @@
       },
       "capture": {
         "glob": "usage-dashboard-*.png"
+      }
+    },
+    {
+      "id": "account-usage-fleet-popover",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "All-account usage fleet popover",
+      "description": "The shipping controller opened by Option-clicking the toolbar usage pill, with current account, mixed provider pressure and eligible move actions inside its bounded virtual viewport.",
+      "states": ["Current account first", "Ready and constrained accounts", "Move to Account actions"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk"],
+        "appearances": ["Dark"],
+        "sizes": ["380-point pinned popover"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AccountUsageFleetTests.swift",
+        "test": "ThreadingTests/AccountUsageFleetTests/testRendersPinnedAllAccountFleetPopoverSurface"
+      },
+      "capture": {
+        "glob": "account-usage-fleet-popover-*.png"
       }
     },
     {

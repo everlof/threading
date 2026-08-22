@@ -759,6 +759,12 @@ express treemaps, heatmaps, bars, timelines, scatter plots, and bubbles without 
 view per extension idea. See [`DECLARATIVE_UI.md`](DECLARATIVE_UI.md) for the complete contract,
 examples, limits, and architecture diagram.
 
+When those marks form one nested map, declare
+`hierarchy: ExtensionSceneHierarchy(rootID: "...")` and give every non-root item a `parentID`.
+Threading owns branch zoom, breadcrumbs, keyboard and accessibility navigation on Mac and iPhone;
+leaf `actionID` values still return to the extension. All marks remain inside the same 500-mark
+scene budget.
+
 These richer nodes are available in full panels. Compact component surfaces disallow them unless
 their published constraint vocabulary explicitly opts in. Read the contract rather than assuming
 that a node legal in a panel is legal in a sidebar row, toolbar, or annotation.

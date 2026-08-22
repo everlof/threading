@@ -3,6 +3,7 @@ import SwiftUI
 struct AdvancedConnectionSettingsView: View {
     @Environment(\.remoteTheme) private var theme
     @ObservedObject private var pool: MobileSessionConnectionPool
+    @ObservedObject private var diagnostics = MobileDiagnosticsStatus.shared
     @State private var confirmsReset = false
 
     @MainActor
@@ -13,6 +14,51 @@ struct AdvancedConnectionSettingsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
+                settingsSection(
+                    "Device checkups",
+                    footer: MobileL10n.string(
+                        "Local diagnostics is off by default and also has to be enabled on the "
+                            + "paired Mac. Turning it off stops new requests immediately."
+                    )
+                ) {
+                    NavigationLink {
+                        MobileDiagnosticsView()
+                    } label: {
+                        HStack(spacing: MobileDesign.Spacing.small) {
+                            Image(systemName: "iphone.and.arrow.forward")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(theme.accent)
+                                .frame(
+                                    width: MobileDesign.Size.minimumTapTarget,
+                                    height: MobileDesign.Size.minimumTapTarget
+                                )
+                                .background(
+                                    theme.accentMuted,
+                                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                                )
+                            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
+                                Text("Local diagnostics")
+                                    .foregroundStyle(theme.label)
+                                Text(
+                                    diagnostics.isEnabled
+                                        ? MobileL10n.string("On")
+                                        : MobileL10n.string("Off")
+                                )
+                                    .font(.caption)
+                                    .foregroundStyle(theme.secondaryLabel)
+                            }
+                            Spacer(minLength: MobileDesign.Spacing.small)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(theme.tertiaryLabel)
+                        }
+                        .padding(.horizontal, MobileDesign.Spacing.inset)
+                        .padding(.vertical, MobileDesign.Spacing.small)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 settingsSection(
                     "Connection reuse",
                     footer: MobileL10n.string(

@@ -514,8 +514,8 @@ enum MCPToolCatalog {
     instruction: settingsInstruction
   )
 
-  /// The Debug-only iOS evidence tools sit in this group, so their sequencing is stated here
-  /// rather than in the decision prefix. A checkup is something the user asks for in words, so a
+  /// The opt-in iOS evidence tools sit in this group, so their sequencing is stated here rather
+  /// than in the decision prefix. A checkup is something the user asks for in words, so a
   /// missed route costs one clarifying turn — and the prefix has no room for it: the shipping
   /// sentences already spend all but a dozen of the 512 characters an MCP client is guaranteed
   /// to read.
@@ -527,15 +527,14 @@ enum MCPToolCatalog {
       guessing. It describes Threading's Settings only, never the agent CLI's own \
       configuration files.
       """
-#if DEBUG
     text += """
 
 
-      For an iOS usage checkup, call inspect_ios_debug, and say whether the evidence you \
-      report is fresh or cached. When more than one Debug phone is paired, \
-      list_ios_debug_devices names their ids and you ask which one to inspect.
+      For an iOS usage checkup, call inspect_ios_diagnostics, and say whether the evidence you \
+      report is fresh or cached. When more than one phone is paired, \
+      list_ios_diagnostic_devices names their ids and you ask which one to inspect. If Local \
+      diagnostics is off, give the Settings path reported by the tool.
       """
-#endif
     return text
   }()
 

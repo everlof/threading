@@ -557,18 +557,63 @@ private struct RemoteExtensionImageView: View {
 private struct RemoteExtensionSceneView: View {
     let scene: ExtensionScene
     let onEvent: (String, ExtensionJSONValue?) -> Void
+    private let itemByID: [String: ExtensionSceneItem]
+    private let parentIDs: Set<String>
+
+    @State private var focusID: String?
 
     @Environment(\.remoteTheme) private var theme
 
+    init(
+        scene: ExtensionScene,
+        onEvent: @escaping (String, ExtensionJSONValue?) -> Void
+    ) {
+        self.scene = scene
+        self.onEvent = onEvent
+        self.itemByID = Dictionary(uniqueKeysWithValues: scene.items.map { ($0.id, $0) })
+        self.parentIDs = Set(scene.items.compactMap(\.parentID))
+        _focusID = State(initialValue: scene.hierarchy?.rootID)
+    }
+
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                ForEach(Array(scene.items.enumerated()), id: \.offset) { _, item in
-                    sceneItem(item, size: geometry.size)
+        VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+            if scene.hierarchy != nil {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: MobileDesign.Spacing.tight) {
+                        ForEach(Array(focusPath.enumerated()), id: \.element.id) { index, item in
+                            if index > 0 {
+                                // localization-ignore: Semantic breadcrumb separator, not prose.
+                                Text("›")
+                                    .font(.caption)
+                                    .foregroundStyle(theme.tertiaryLabel)
+                                    .accessibilityHidden(true)
+                            }
+                            if item.id == focusID {
+                                Text(item.label ?? item.accessibilityLabel ?? item.id)
+                                    .font(.callout.weight(.medium))
+                                    .lineLimit(1)
+                                    .accessibilityIdentifier("semantic-scene.breadcrumb.current")
+                            } else {
+                                Button(item.label ?? item.accessibilityLabel ?? item.id) {
+                                    focusID = item.id
+                                }
+                                .buttonStyle(.plain)
+                                .font(.callout)
+                                .accessibilityIdentifier("semantic-scene.breadcrumb.\(item.id)")
+                            }
+                        }
+                    }
                 }
             }
+            GeometryReader { geometry in
+                ZStack(alignment: .topLeading) {
+                    ForEach(visibleItems, id: \.id) { item in
+                        sceneItem(item, size: geometry.size)
+                    }
+                }
+            }
+            .aspectRatio(scene.preferredAspectRatio, contentMode: .fit)
         }
-        .aspectRatio(scene.preferredAspectRatio, contentMode: .fit)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(scene.accessibilityLabel)
         .accessibilityIdentifier("extension.scene")
@@ -576,15 +621,16 @@ private struct RemoteExtensionSceneView: View {
 
     @ViewBuilder
     private func sceneItem(_ item: ExtensionSceneItem, size: CGSize) -> some View {
+        let normalized = transformedFrame(for: item)
         let frame = CGRect(
-            x: size.width * item.frame.x,
-            y: size.height * item.frame.y,
-            width: size.width * item.frame.width,
-            height: size.height * item.frame.height
+            x: size.width * normalized.x,
+            y: size.height * normalized.y,
+            width: size.width * normalized.width,
+            height: size.height * normalized.height
         )
-        if let actionID = item.actionID, item.isEnabled {
+        if item.isEnabled, isNavigable(item) || item.actionID != nil {
             Button {
-                onEvent(actionID, .string(item.id))
+                activate(item)
             } label: {
                 mark(item)
             }
@@ -600,6 +646,72 @@ private struct RemoteExtensionSceneView: View {
                 .accessibilityElement()
                 .accessibilityLabel(item.accessibilityLabel ?? item.label ?? item.id)
                 .accessibilityValue(item.accessibilityValue ?? item.detail ?? "")
+        }
+    }
+
+    private var visibleItems: [ExtensionSceneItem] {
+        guard let focusID else { return scene.items }
+        var visible: [(depth: Int, index: Int, item: ExtensionSceneItem)] = []
+        visible.reserveCapacity(scene.items.count)
+        for (index, item) in scene.items.enumerated() {
+            guard let depth = descendantDepth(of: item.id, from: focusID) else { continue }
+            visible.append((depth: depth, index: index, item: item))
+        }
+        visible.sort { lhs, rhs in
+            lhs.depth == rhs.depth ? lhs.index < rhs.index : lhs.depth < rhs.depth
+        }
+        return visible.map(\.item)
+    }
+
+    private var focusPath: [ExtensionSceneItem] {
+        guard var cursor = focusID else { return [] }
+        var result: [ExtensionSceneItem] = []
+        for _ in 0...scene.items.count {
+            guard let item = itemByID[cursor] else { break }
+            result.append(item)
+            guard let parentID = item.parentID else { break }
+            cursor = parentID
+        }
+        return result.reversed()
+    }
+
+    private func transformedFrame(for item: ExtensionSceneItem) -> ExtensionSceneRect {
+        guard let focusID,
+              let focus = scene.items.first(where: { $0.id == focusID }) else {
+            return item.frame
+        }
+        return ExtensionSceneRect(
+            x: (item.frame.x - focus.frame.x) / focus.frame.width,
+            y: (item.frame.y - focus.frame.y) / focus.frame.height,
+            width: item.frame.width / focus.frame.width,
+            height: item.frame.height / focus.frame.height
+        )
+    }
+
+    private func descendantDepth(of itemID: String, from ancestorID: String) -> Int? {
+        var cursor = itemID
+        var depth = 0
+        for _ in 0...scene.items.count {
+            if cursor == ancestorID { return depth }
+            guard let parentID = itemByID[cursor]?.parentID else { return nil }
+            cursor = parentID
+            depth += 1
+        }
+        return nil
+    }
+
+    private func isNavigable(_ item: ExtensionSceneItem) -> Bool {
+        if item.id == focusID { return item.parentID != nil }
+        return parentIDs.contains(item.id)
+    }
+
+    private func activate(_ item: ExtensionSceneItem) {
+        if item.id == focusID, let parentID = item.parentID {
+            focusID = parentID
+        } else if parentIDs.contains(item.id) {
+            focusID = item.id
+        } else if let actionID = item.actionID {
+            onEvent(actionID, .string(item.id))
         }
     }
 

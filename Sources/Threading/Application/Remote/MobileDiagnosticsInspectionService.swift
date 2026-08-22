@@ -1,42 +1,42 @@
-#if DEBUG
 import Foundation
 import ThreadingRemoteKit
 
 @MainActor
-protocol MobileDebugToolProviding: AnyObject {
-    var mobileDebugInspection: MobileDebugInspectionService { get }
+protocol MobileDiagnosticsToolProviding: AnyObject {
+    var mobileDiagnosticsInspection: MobileDiagnosticsInspectionService { get }
 }
 
 @MainActor
-extension MobileDebugToolProviding {
-    func listIOSDebugDevices() -> MCPToolResult {
-        mobileDebugInspection.listDevices()
+extension MobileDiagnosticsToolProviding {
+    func listIOSDiagnosticDevices() -> MCPToolResult {
+        mobileDiagnosticsInspection.listDevices()
     }
 
-    func inspectIOSDebug(
-        _ arguments: IOSDebugInspectionArguments,
+    func inspectIOSDiagnostics(
+        _ arguments: IOSDiagnosticsInspectionArguments,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
-        mobileDebugInspection.inspect(arguments, completion: completion)
+        mobileDiagnosticsInspection.inspect(arguments, completion: completion)
     }
 }
 
-/// Application-owned formatter/request coordinator for the Debug iPhone evidence cache.
+/// Application-owned formatter/request coordinator for the shipping opt-in iPhone evidence cache.
 /// The MCP adapter supplies this injected capability and owns none of its storage or policy.
 @MainActor
-final class MobileDebugInspectionService {
-    private let captures: MobileDebugCaptureStore
+final class MobileDiagnosticsInspectionService {
+    private let captures: MobileDiagnosticsCaptureStore
 
-    init(captures: MobileDebugCaptureStore) {
+    init(captures: MobileDiagnosticsCaptureStore) {
         self.captures = captures
     }
 
     func listDevices() -> MCPToolResult {
+        guard captures.isEnabled else { return disabledResult() }
         let devices = captures.deviceSummaries()
         guard !devices.isEmpty else {
             return .success(
-                "No iOS Debug evidence is cached. Open the Debug iOS app on the same local "
-                    + "network as its paired Mac, then try again."
+                "No iOS diagnostic evidence is cached. Enable Local diagnostics on the paired "
+                    + "iPhone, open it on the same local network, then try again."
             )
         }
         let rows = devices.map { device -> String in
@@ -45,20 +45,24 @@ final class MobileDebugInspectionService {
             return "- \(device.deviceName) — id \(device.deviceID); \(connection); "
                 + "newest capture \(captured)"
         }
-        return .success((["iOS Debug devices:"] + rows).joined(separator: "\n"))
+        return .success((["iOS diagnostic devices:"] + rows).joined(separator: "\n"))
     }
 
     func inspect(
-        _ arguments: IOSDebugInspectionArguments,
+        _ arguments: IOSDiagnosticsInspectionArguments,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
+        guard captures.isEnabled else {
+            completion(disabledResult())
+            return
+        }
         let devices = captures.deviceSummaries()
-        let selected: MobileDebugDeviceSummary?
+        let selected: MobileDiagnosticsDeviceSummary?
         if let deviceID = arguments.deviceID {
             selected = devices.first { $0.deviceID == deviceID }
             guard selected != nil else {
                 completion(.failure(
-                    "device_id is unknown. Call list_ios_debug_devices and use an exact id."
+                    "device_id is unknown. Call list_ios_diagnostic_devices and use an exact id."
                 ))
                 return
             }
@@ -69,8 +73,9 @@ final class MobileDebugInspectionService {
                         + (device.isConnected ? "connected" : "cached only")
                 }.joined(separator: "\n")
                 completion(.failure(
-                    "More than one iPhone has Debug evidence. Call list_ios_debug_devices, "
-                        + "choose one device_id, then retry:\n\(candidates)"
+                    "More than one iPhone has diagnostic evidence. Call "
+                        + "list_ios_diagnostic_devices, choose one device_id, then retry:\n"
+                        + candidates
                 ))
                 return
             }
@@ -78,13 +83,13 @@ final class MobileDebugInspectionService {
         }
         guard let selected else {
             completion(.failure(
-                "No iOS Debug evidence is available yet. Open the Debug iOS app on the same "
-                    + "local network as its paired Mac, then try again."
+                "No iOS diagnostic evidence is available yet. Enable Local diagnostics on the "
+                    + "paired iPhone, open it on the same local network, then try again."
             ))
             return
         }
 
-        let screenshotPolicy: RemoteMobileDebugCaptureRequestDTO.ScreenshotPolicy
+        let screenshotPolicy: RemoteMobileDiagnosticsCaptureRequestDTO.ScreenshotPolicy
         switch arguments.screenshot ?? "incident" {
         case "none": screenshotPolicy = .none
         case "incident": screenshotPolicy = .latestIncident
@@ -96,7 +101,7 @@ final class MobileDebugInspectionService {
 
         guard arguments.fresh ?? true else {
             guard let cached = captures.latestCapture(deviceID: selected.deviceID) else {
-                completion(.failure("This iPhone has no cached Debug evidence yet."))
+                completion(.failure("This iPhone has no cached diagnostic evidence yet."))
                 return
             }
             completion(result(cached, freshness: "cached"))
@@ -110,7 +115,7 @@ final class MobileDebugInspectionService {
         ) else {
             guard let cached = captures.latestCapture(deviceID: selected.deviceID) else {
                 completion(.failure(
-                    "The iPhone is offline and no cached Debug evidence exists yet."
+                    "The iPhone is offline and no cached diagnostic evidence exists yet."
                 ))
                 return
             }
@@ -122,6 +127,10 @@ final class MobileDebugInspectionService {
             guard let self else { return }
             for _ in 0..<40 {
                 try? await Task.sleep(for: .milliseconds(200))
+                guard self.captures.isEnabled else {
+                    completion(self.disabledResult())
+                    return
+                }
                 if let fresh = self.captures.capture(requestID: requestID) {
                     completion(self.result(fresh, freshness: "fresh"))
                     return
@@ -134,19 +143,26 @@ final class MobileDebugInspectionService {
                 ))
             } else {
                 completion(.failure(
-                    "The connected iPhone did not return Debug evidence within 8 seconds."
+                    "The connected iPhone did not return diagnostic evidence within 8 seconds."
                 ))
             }
         }
     }
 
+    private func disabledResult() -> MCPToolResult {
+        .failure(
+            "Local diagnostics is off on this Mac. Enable Settings > Advanced > Local "
+                + "Diagnostics, then enable it independently on the paired iPhone."
+        )
+    }
+
     private func result(
-        _ stored: MobileDebugStoredCapture,
+        _ stored: MobileDiagnosticsStoredCapture,
         freshness: String
     ) -> MCPToolResult {
         let capture = stored.capture
         var lines = [
-            "iOS Debug checkup (\(freshness); \(Self.age(capture.capturedAt)))",
+            "iOS checkup (\(freshness); \(Self.age(capture.capturedAt)))",
             "Device: \(stored.deviceName) — \(capture.deviceModel)",
             "App: \(capture.appVersion) (\(capture.appBuild)); OS: \(capture.operatingSystem)",
             "State: app \(capture.applicationState); connection \(capture.connectionState); "
@@ -164,17 +180,15 @@ final class MobileDebugInspectionService {
             return "- \(record.timestamp) [\(record.level.rawValue)] "
                 + "\(record.event.rawValue)\(fields.isEmpty ? "" : " \(fields)")"
         })
-        let screenshot = capture.screenshotJPEGBase64.flatMap { encoded in
-            Data(base64Encoded: encoded)
-        }
+        let screenshot = capture.screenshotJPEGBase64.flatMap { Data(base64Encoded: $0) }
         lines.append(screenshot == nil
             ? "Screenshot: none in this capture."
-            : "Screenshot: attached (\(capture.screenshotKind ?? "debug evidence")).")
+            : "Screenshot: attached (\(capture.screenshotKind ?? "diagnostic evidence")).")
         lines.append(
             "Privacy boundary: no prompts, terminal output, paths, credentials, or notification "
                 + "text are represented in these diagnostics."
         )
-        return .debugEvidence(lines.joined(separator: "\n"), jpegData: screenshot)
+        return .diagnosticEvidence(lines.joined(separator: "\n"), jpegData: screenshot)
     }
 
     private static func age(_ timestamp: String) -> String {
@@ -192,4 +206,3 @@ final class MobileDebugInspectionService {
         return "\(seconds / 86_400)d old"
     }
 }
-#endif

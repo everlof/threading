@@ -64,6 +64,14 @@ reshuffling it is a line move.
   profiles without importing credentials, with route-safe account support and a gated GLM path.
   The account-profile slice is ready once its persistence downgrade guard lands; the API/GLM
   slices wait on upstream redacted metadata.
+- [Analytics and crash reporting](analytics.md) — answer counterfactual engineering questions
+  (the activation-prewarm pool question) and feature-usage/failure reality with Go-shaped
+  local-first counters: on-device aggregation, upload strictly by consent, no stable
+  identifiers, a published and build-gated schema, browsable reports, first-party ingest on the
+  existing control plane, and ask-at-the-moment crash reporting. The local counter slice is
+  implementable now with no consent surface; the upload backend shares the
+  [hosted remote service](hosted-remote-service.md)'s deployment gate, and the whole feature is
+  gated on the brand decision it is designed to keep true: nothing leaves without your action.
 
 ### Gated — blocked on something named
 
@@ -116,6 +124,10 @@ reshuffling it is a line move.
 - [Cross-platform Usage dashboard](cross-platform-usage-dashboard.md) — **shipped** 2026-08-11;
   the file deliberately remains as the delivery plan and decision record beside
   [`usage-dashboard.md`](../architecture/usage-dashboard.md).
+- [Curfew](curfew.md) — **shipped** 2026-08-22; a pointer remains. A scheduled end for a
+  session — the deadline's three moments, the hold at every seam, the bounded-interrupt ladder
+  with the opt-in stop-agent escalation, quiet hours and the receipts — is recorded in
+  [`curfew.md`](../architecture/curfew.md), with its owed Escape measurement and follow-ups.
 - [Scoped sound overrides](scoped-sound-overrides.md) — **shipped**; a pointer remains. The
   durable decisions moved to
   [`session-activity.md`](../architecture/session-activity.md).

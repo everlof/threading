@@ -123,6 +123,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private(set) lazy var displayPaneController = DisplayPaneController()
     private lazy var displayItem = NSSplitViewItem(viewController: displayPaneController)
 
+    /// The panel content revision each session was showing when the user hid it.
+    ///
+    /// Tabs persist independently. Remembering the revision rather than just a hidden bit keeps
+    /// returning to the same chat from resurrecting dismissed content, while a new chart or
+    /// other panel update still earns the panel's usual automatic reveal.
+    private var dismissedDisplayPaneRevisionBySession: [SessionID: UInt64] = [:]
+
     /// Where a session's browser is, across every pane that can hold one. Window-owned for the
     /// same reason `tabTransfer` is: only the window sees all the hosts. Panel first — it is
     /// where a browser is built and where a session with none gets one.
@@ -1369,11 +1376,23 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// would animate a change of subject as if it were a change of state.
     func setDisplayPaneVisible(
         _ visible: Bool,
-        animated: Bool = true
+        animated: Bool = true,
+        remembersSessionChoice: Bool = true
     ) {
 #if DEBUG
         let requestStarted = DispatchTime.now().uptimeNanoseconds
 #endif
+        // The pane is the authority here. During a session transition the terminal container
+        // and the panel can briefly name different sessions, while the close gesture always
+        // applies to the content the user can actually see in the panel.
+        if remembersSessionChoice, let sessionID = displayPaneController.currentSessionID {
+            if visible {
+                dismissedDisplayPaneRevisionBySession.removeValue(forKey: sessionID)
+            } else {
+                dismissedDisplayPaneRevisionBySession[sessionID] =
+                    displayPaneController.contentRevision(for: sessionID)
+            }
+        }
         if !visible {
             displayPaneController.hideCurrentTheme()
         }
@@ -1495,7 +1514,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// and a session with nothing to show closes it rather than leaving the last image up.
     /// Unanimated throughout: a switch swaps the whole workspace at once, and the panel
     /// sliding beside an instant page change would single it out as the one thing "moving".
-    private func syncDisplayPane(to sessionID: SessionID?) {
+    func syncDisplayPane(to sessionID: SessionID?) {
         displayPaneController.showSession(sessionID)
 
         // A session's detached windows come back when the session does. The panes restore on
@@ -1511,16 +1530,41 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // session must not close it. Its agent attribution remains whichever conversation is in
         // the main pane; only the inspector itself is global.
         if displayPaneController.isShowingCurrentTheme {
-            setDisplayPaneVisible(true, animated: false)
+            setDisplayPaneVisible(
+                true,
+                animated: false,
+                remembersSessionChoice: false
+            )
             return
         }
 
         guard let sessionID, displayPaneController.hasContent(for: sessionID) else {
-            setDisplayPaneVisible(false, animated: false)
+            setDisplayPaneVisible(
+                false,
+                animated: false,
+                remembersSessionChoice: false
+            )
             return
         }
 
-        setDisplayPaneVisible(true, animated: false)
+        let revision = displayPaneController.contentRevision(for: sessionID)
+        if dismissedDisplayPaneRevisionBySession[sessionID] == revision {
+            setDisplayPaneVisible(
+                false,
+                animated: false,
+                remembersSessionChoice: false
+            )
+            return
+        }
+
+        // A content change supersedes the dismissal it differs from. Drop the stale snapshot so
+        // later automatic closes cannot make it relevant again.
+        dismissedDisplayPaneRevisionBySession.removeValue(forKey: sessionID)
+        setDisplayPaneVisible(
+            true,
+            animated: false,
+            remembersSessionChoice: false
+        )
     }
 
     /// Forwards a pane's loading state to the row it belongs to.
@@ -2815,6 +2859,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func updateAccountUsageItem(session: AgentSession?) {
         guard let session else {
             if materializedAccountUsageItemView?.account != nil {
+                materializedAccountUsageItemView?.onHandoff = nil
                 materializedAccountUsageItemView?.configure(account: nil)
             }
             return
@@ -2830,18 +2875,37 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         guard let account else {
             if materializedAccountUsageItemView?.account != nil {
+                materializedAccountUsageItemView?.onHandoff = nil
                 materializedAccountUsageItemView?.configure(account: nil)
             }
             return
         }
 
         let usageItem = accountUsageItemView
+        let destinations: [AgentAccount]
+        if let project = environment.projectStore.executionProject(forSessionID: session.id),
+           SessionMigration.canMigrate(session, in: project) {
+            destinations = SessionMigration.destinations(for: session)
+        } else {
+            destinations = []
+        }
+        let destinationIDs = Set(destinations.map(\.id))
+        usageItem.onHandoff = { [weak self] destination in
+            self?.sessionCoordinator.moveSession(session.id, to: destination)
+        }
 
         // Re-configured when either half changes: switching model inside a session moves which
-        // limit binds it, without the account moving at all.
-        guard usageItem.account?.id != accountID || usageItem.model != model else { return }
+        // limit binds it, without the account moving at all. Migration eligibility moves too:
+        // the first persisted transcript can make the same account/model movable.
+        guard usageItem.account?.id != accountID
+                || usageItem.model != model
+                || usageItem.handoffAccountIDs != destinationIDs else { return }
 
-        usageItem.configure(account: account, model: model)
+        usageItem.configure(
+            account: account,
+            model: model,
+            handoffAccountIDs: destinationIDs
+        )
     }
 
     /// Opens Settings, or does nothing if already open. What a *door* to a page needs — see
@@ -4063,6 +4127,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         // Release live surfaces first. The one persisted panel document belongs to both panel
         // hosts and is deleted only after neither host can write it back during teardown.
         displayPaneController.removeSession(sessionID)
+        dismissedDisplayPaneRevisionBySession.removeValue(forKey: sessionID)
         containerViewController.removeDrawerSession(sessionID)
         SessionAttachmentStore.shared.removeSession(sessionID)
         DisplayPaneStore.shared.removeSession(sessionID)
@@ -4100,6 +4165,9 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         let liveSessionIDs = Set(environment.projectStore.projects.flatMap { $0.sessions.map(\.id) })
         let liveTerminalIDs = Set(environment.projectStore.projects.flatMap { $0.terminals.map(\.id) })
         displayPaneController.retainOnly(sessionIDs: liveSessionIDs)
+        dismissedDisplayPaneRevisionBySession = dismissedDisplayPaneRevisionBySession.filter {
+            liveSessionIDs.contains($0.key)
+        }
         containerViewController.retainDrawerSessions(liveSessionIDs)
         MCPSessionRegistry.retainOnly(sessionIDs: liveSessionIDs)
         GitTurnBaselineStore.shared.retainOnly(sessionIDs: liveSessionIDs)

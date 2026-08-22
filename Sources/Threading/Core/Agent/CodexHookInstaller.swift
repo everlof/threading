@@ -13,8 +13,8 @@ import Foundation
 /// - **Merge, never replace.** Other tools' entries are read back and written out untouched.
 /// - **Mark what is ours** (`MCPDefaults.hookMarker`), because on the next install there is no
 ///   other way to tell an entry to update from an entry to leave alone. The marker from before
-///   the product rename is ours too. Its known commands stay byte-for-byte intact because a
-///   Threading launch exports their `SKALMAN_*` aliases; an unknown old command is replaced.
+///   the product rename is ours too, so an entry left by that installation is recognised and
+///   replaced rather than stranded in the user's file for ever.
 /// - **Rewrite only on a real change.** Codex pins a trusted hook by hashing its text, so an
 ///   identical rewrite is not merely wasteful — a changed file is an untrusted file, and the
 ///   hooks would silently stop running until the user reviewed them again.
@@ -22,11 +22,9 @@ import Foundation
 /// That last rule is what the session token's environment variable is for. A URL carrying a
 /// per-session token would change every launch and invalidate the trust every launch.
 ///
-/// **The rendezvous is now a literal, and that is a one-time trust renewal.** These commands
-/// used to interpolate `$THREADING_MCP_PORT` for the same stability reason, because a loopback
-/// port is minted per launch. The unix socket is a fixed path under this user's Application
-/// Support, so it is written into the file directly — after which the text stops changing
-/// again. A user upgrading past this change has to approve their Codex hooks once more; the
+/// Both rendezvous routes are environment values. The unix socket is preferred and this launch's
+/// loopback port is its fallback; neither value changes the reviewed command text. A user
+/// upgrading past the command-shape change has to approve their Codex hooks once more; the
 /// `EventLog` line at the rewrite says so.
 enum CodexHookInstaller {
     static let maximumHooksBytes = 4 * 1024 * 1024
@@ -162,8 +160,8 @@ enum CodexHookInstaller {
     /// is the *unrouted* sessions, the user's own, that would take that cost. Reading first also
     /// keeps the two paths identical in what they consume.
     static func command(for event: HookLifecycleEvent) -> String {
-        let url = "\(MCPDefaults.socketURLBase)"
-            + "\(MCPDefaults.lifecyclePathPrefix)$\(MCPDefaults.sessionTokenEnvironmentKey)"
+        let endpoint = "\(MCPDefaults.lifecyclePathPrefix)"
+            + "$\(MCPDefaults.sessionTokenEnvironmentKey)"
             + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)"
 
         // Output is discarded and failure swallowed for the same reason as Claude's: a
@@ -171,10 +169,11 @@ enum CodexHookInstaller {
         let timeout = MCPDefaults.lifecycleTimeout(for: event)
         return "\(Key.payloadVariable)=$(cat);"
             + " [ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] &&"
-            + " printf '%s' \"$\(Key.payloadVariable)\" |"
-            + " curl -s --max-time \(Int(timeout))"
-            + " \(socketTransport)"
-            + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\""
+            + " " + MCPDefaults.hookPostCommand(
+                payloadVariable: Key.payloadVariable,
+                endpointSuffix: endpoint,
+                timeout: timeout
+            )
             + " >/dev/null 2>&1; true \(MCPDefaults.hookMarker)"
     }
 
@@ -190,25 +189,17 @@ enum CodexHookInstaller {
     /// answer. Exporting the variable for one surface and not the other is what scopes a shared
     /// file to a single surface. Saying nothing leaves Codex's normal flow untouched.
     static func permissionCommand() -> String {
-        let url = "\(MCPDefaults.socketURLBase)"
-            + "\(MCPDefaults.permissionPathPrefix)$\(MCPDefaults.sessionTokenEnvironmentKey)"
+        let endpoint = "\(MCPDefaults.permissionPathPrefix)"
+            + "$\(MCPDefaults.sessionTokenEnvironmentKey)"
 
         return "\(Key.payloadVariable)=$(cat);"
             + " [ -n \"$\(MCPDefaults.brokerEnvironmentKey)\" ] &&"
-            + " printf '%s' \"$\(Key.payloadVariable)\" |"
-            + " curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
-            + " \(socketTransport)"
-            + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\";"
+            + " " + MCPDefaults.hookPostCommand(
+                payloadVariable: Key.payloadVariable,
+                endpointSuffix: endpoint,
+                timeout: MCPDefaults.permissionTimeout
+            ) + ";"
             + " true \(MCPDefaults.hookMarker)"
-    }
-
-    /// The `--unix-socket` word both commands carry.
-    ///
-    /// Quoted, because the path contains `Application Support`. This is the only part of the
-    /// text that is not fixed at compile time, and it is fixed for a given user — which is what
-    /// keeps `hooks.json` stable across launches.
-    private static var socketTransport: String {
-        "--unix-socket \(MCPBridgeLocation.shellQuoted(MCPBridgeLocation.socketPath))"
     }
 
     static func hooksFile(inCodexHome codexHome: String) -> URL {
@@ -217,24 +208,9 @@ enum CodexHookInstaller {
 
     // MARK: - Private Methods
 
-    /// Builds the merged document: every foreign entry kept, every current Threading entry
-    /// rewritten, and every known-compatible pre-rename entry retained byte-for-byte.
+    /// Builds the merged document: every foreign entry kept, every Threading entry rewritten.
     private static func merging(into existing: [String: Any]) -> [String: Any] {
         var hooks = existing[Key.hooks] as? [String: Any] ?? [:]
-
-        var compatibleLegacyCommands: [String: Set<String>] = [:]
-        for event in HookLifecycleEvent.allCases {
-            let registration = event.codexRegistration
-            guard registration.isSupported else { continue }
-            for name in registration.eventNames {
-                compatibleLegacyCommands[name, default: []].insert(
-                    legacyCommand(for: event)
-                )
-            }
-        }
-        compatibleLegacyCommands[Key.preToolUse, default: []].insert(
-            legacyPermissionCommand()
-        )
 
         // Entries accumulate per hook name: one event can register under two names, and two
         // events can share one — so each name is rebuilt from the foreign entries once and
@@ -246,16 +222,10 @@ enum CodexHookInstaller {
             guard registration.isSupported else { continue }
 
             let timeout = MCPDefaults.lifecycleTimeout(for: event)
-            let compatibleCommand = legacyCommand(for: event)
 
             for name in registration.eventNames {
-                let retained = entriesRetainedDuringInstall(
-                    in: hooks[name],
-                    compatibleLegacyCommands: compatibleLegacyCommands[name] ?? []
-                )
-                if installed[name] == nil { installed[name] = retained }
+                if installed[name] == nil { installed[name] = foreignEntries(in: hooks[name]) }
 
-                guard !containsCommand(compatibleCommand, in: hooks[name]) else { continue }
                 installed[name, default: []].append(entry(
                     command: command(for: event),
                     timeout: timeout,
@@ -271,18 +241,12 @@ enum CodexHookInstaller {
         // Through the same accumulator as the lifecycle entries, so that a runtime whose ask
         // hooks land on `PreToolUse` keeps both: this line used to assign, which would have
         // dropped them.
-        let retainedPermissionEntries = entriesRetainedDuringInstall(
-            in: hooks[Key.preToolUse],
-            compatibleLegacyCommands: compatibleLegacyCommands[Key.preToolUse] ?? []
-        )
         if installed[Key.preToolUse] == nil {
-            installed[Key.preToolUse] = retainedPermissionEntries
+            installed[Key.preToolUse] = foreignEntries(in: hooks[Key.preToolUse])
         }
-        if !containsCommand(legacyPermissionCommand(), in: hooks[Key.preToolUse]) {
-            installed[Key.preToolUse, default: []].append(
-                entry(command: permissionCommand(), timeout: MCPDefaults.permissionTimeout)
-            )
-        }
+        installed[Key.preToolUse, default: []].append(
+            entry(command: permissionCommand(), timeout: MCPDefaults.permissionTimeout)
+        )
 
         for (name, entries) in installed {
             hooks[name] = entries
@@ -315,27 +279,6 @@ enum CodexHookInstaller {
         return entries.filter { !isThreadingEntry($0) }
     }
 
-    /// The entries retained while installing, including exact commands written before the
-    /// rename. Their text is already trusted by Codex and remains runnable because launches
-    /// export the old routing aliases. Anything else carrying our old marker is stale and gets
-    /// replaced by the current command.
-    private static func entriesRetainedDuringInstall(
-        in value: Any?,
-        compatibleLegacyCommands: Set<String>
-    ) -> [Any] {
-        guard let entries = value as? [Any] else { return [] }
-        return entries.filter { entry in
-            guard isThreadingEntry(entry) else { return true }
-            let commands = commands(in: entry)
-            return commands.count == 1 && compatibleLegacyCommands.contains(commands[0])
-        }
-    }
-
-    private static func containsCommand(_ command: String, in value: Any?) -> Bool {
-        guard let entries = value as? [Any] else { return false }
-        return entries.contains { commands(in: $0).contains(command) }
-    }
-
     private static func commands(in entry: Any) -> [String] {
         guard let entry = entry as? [String: Any],
               let hooks = entry[Key.hooks] as? [Any] else {
@@ -353,42 +296,13 @@ enum CodexHookInstaller {
         }
     }
 
-    /// The exact command the pre-rename installer wrote. This is compatibility recognition,
-    /// not a second current generator: equality is what lets us preserve the old hook's trust
-    /// hash without treating an arbitrary old marked command as safe or current.
-    private static func legacyCommand(for event: HookLifecycleEvent) -> String {
-        let url = "http://\(MCPDefaults.host):$\(MCPDefaults.legacyPortEnvironmentKey)"
-            + "\(MCPDefaults.lifecyclePathPrefix)"
-            + "$\(MCPDefaults.legacySessionTokenEnvironmentKey)"
-            + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)"
-
-        return "\(Key.legacyPayloadVariable)=$(cat);"
-            + " [ -n \"$\(MCPDefaults.legacySessionTokenEnvironmentKey)\" ] &&"
-            + " printf '%s' \"$\(Key.legacyPayloadVariable)\" |"
-            + " curl -s --max-time \(Int(MCPDefaults.lifecycleTimeout))"
-            + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\""
-            + " >/dev/null 2>&1; true \(Key.legacyHookMarker)"
-    }
-
-    private static func legacyPermissionCommand() -> String {
-        let url = "http://\(MCPDefaults.host):$\(MCPDefaults.legacyPortEnvironmentKey)"
-            + "\(MCPDefaults.permissionPathPrefix)"
-            + "$\(MCPDefaults.legacySessionTokenEnvironmentKey)"
-
-        return "\(Key.legacyPayloadVariable)=$(cat);"
-            + " [ -n \"$\(MCPDefaults.legacyBrokerEnvironmentKey)\" ] &&"
-            + " printf '%s' \"$\(Key.legacyPayloadVariable)\" |"
-            + " curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
-            + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\";"
-            + " true \(Key.legacyHookMarker)"
-    }
-
     /// Every marker this product has written into the user's shared Codex configuration.
     ///
-    /// The rename changed both the marker and the environment-variable vocabulary. Admission by
-    /// either exact marker keeps update and uninstall narrow: commands from other tools remain
-    /// foreign even if they happen to mention the old app name elsewhere. Compatibility of an
-    /// old command is the stricter exact-text check above; the marker alone only proves ownership.
+    /// The rename changed the marker, and an installation predating it can still be sitting in
+    /// the user's shared file. The old marker stays admitted so such an entry is recognised as
+    /// ours and replaced — dropping it would not remove that entry, it would strand it as
+    /// foreign for ever. Admission by exact marker keeps update and uninstall narrow: another
+    /// tool's command stays foreign even if it mentions the old app name elsewhere.
     private static let ownedMarkers = [
         MCPDefaults.hookMarker,
         Key.legacyHookMarker
@@ -417,7 +331,8 @@ enum CodexHookInstaller {
 
         /// Holds the event while the guard is evaluated, so stdin is drained either way.
         static let payloadVariable = "threading_payload"
-        static let legacyPayloadVariable = "skalman_payload"
+
+        /// Recognised, never written: see `ownedMarkers`.
         static let legacyHookMarker = "# skalman-lifecycle"
     }
 }

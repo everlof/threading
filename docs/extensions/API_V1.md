@@ -23,7 +23,8 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   whose invocation context is the row's own identity; the rows' native actions stay
   host-owned.
 - Host-rendered panels with optional generation-scoped load actions, native text/search input,
-  native single-choice pickers, and bounded semantic scenes for interactive visualizations;
+  native single-choice pickers, and bounded semantic scenes for interactive visualizations,
+  including host-navigated hierarchies over producer-supplied normalized geometry;
   complete Settings pages and built-in Settings sections.
 - Validated `ui.workspace-navigation` registrations describing a complete semantic navigator
   interior with virtualized list, outline, and grid snapshots, optional initial load actions,

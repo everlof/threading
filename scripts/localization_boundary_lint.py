@@ -548,6 +548,7 @@ def load_translated_catalog(
 
 
 MOBILE_LOCALIZING_CALLS: dict[str, tuple[str | int, ...]] = {
+    "MobileRowSwipeAction": (0,),
     "ThemedDialogAction": (0,),
     "ThemedDialogTextField": (0,),
     "themedAlert": (0, "message"),
@@ -589,6 +590,7 @@ MOBILE_MACHINE_LITERALS = {
 }
 
 MOBILE_DYNAMIC_LOCALIZATION_BOUNDARIES: dict[str, set[str]] = {
+    "Sources/ThreadingMobile/MobileRowSwipe.swift": {"title"},
     "Sources/ThreadingMobile/RemoteAttachmentsView.swift": {"message"},
     "Sources/ThreadingMobile/RemoteConversationTimelineViewController.swift": {"title"},
     "Sources/ThreadingMobile/RemoteDiagnostics.swift": {"title"},

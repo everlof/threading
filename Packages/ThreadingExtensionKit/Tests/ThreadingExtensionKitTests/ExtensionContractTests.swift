@@ -675,6 +675,77 @@ final class ExtensionContractTests: XCTestCase {
         }
     }
 
+    func testSceneHierarchyRoundTripsAndRequiresAConnectedRoot() throws {
+        let scene = ExtensionScene(
+            accessibilityLabel: "Artifact hierarchy",
+            preferredAspectRatio: 1,
+            hierarchy: ExtensionSceneHierarchy(rootID: "root"),
+            items: [
+                .init(
+                    id: "root",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    shape: .ellipse,
+                    label: "Root"
+                ),
+                .init(
+                    id: "child",
+                    parentID: "root",
+                    frame: .init(x: 0.1, y: 0.1, width: 0.4, height: 0.4),
+                    shape: .ellipse,
+                    label: "Child",
+                    actionID: "inspect"
+                )
+            ]
+        )
+
+        XCTAssertNoThrow(try ExtensionPanel.nodeConstraints.validate(.scene(scene)))
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionScene.self,
+                from: JSONEncoder().encode(scene)
+            ),
+            scene
+        )
+
+        let orphan = ExtensionScene(
+            accessibilityLabel: "Broken hierarchy",
+            hierarchy: ExtensionSceneHierarchy(rootID: "root"),
+            items: [
+                scene.items[0],
+                .init(
+                    id: "orphan",
+                    parentID: "missing",
+                    frame: .init(x: 0.6, y: 0.6, width: 0.2, height: 0.2),
+                    label: "Orphan"
+                )
+            ]
+        )
+        XCTAssertThrowsError(try ExtensionPanel.nodeConstraints.validate(.scene(orphan))) {
+            let messages = ($0 as? ExtensionValidationError)?.issues.map(\.message) ?? []
+            XCTAssertTrue(messages.contains("must match an item id"))
+            XCTAssertTrue(messages.contains("must form a branch rooted at 'root'"))
+        }
+    }
+
+    func testFlatSceneRejectsParentMetadataWithoutHierarchyNavigation() {
+        let scene = ExtensionScene(
+            accessibilityLabel: "Ambiguous scene",
+            items: [
+                .init(
+                    id: "child",
+                    parentID: "root",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    label: "Child"
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(try ExtensionPanel.nodeConstraints.validate(.scene(scene))) {
+            let messages = ($0 as? ExtensionValidationError)?.issues.map(\.message) ?? []
+            XCTAssertTrue(messages.contains("requires scene.hierarchy"))
+        }
+    }
+
     func testComposableWindowHookRequiresExactlyOneProceedAndRoundTrips() throws {
         let contract = ThreadingComponentCatalog.applicationMainWindow
         let hook = ExtensionComponentPatch(

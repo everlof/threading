@@ -727,6 +727,61 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         XCTAssertTrue(pane.hasContent(for: sessionID), "hiding the panel discarded its tabs")
     }
 
+    /// Hiding is a decision about the content currently in this chat, not an instruction to
+    /// discard it and not a state that session selection may infer from the tabs existing.
+    /// Returning to that unchanged content keeps it hidden; new content supersedes the dismissal
+    /// and earns the panel's ordinary automatic reveal.
+    func testAHiddenPanelStaysHiddenAcrossSessionSwitchesUntilItsContentChanges() throws {
+        let controller = makeMainWindowController()
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1400, height: 800))
+        let pane = controller.displayPaneController
+        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.last)
+        let firstSessionID = SessionID()
+        let otherSessionID = SessionID()
+        defer {
+            DisplayPaneStore.shared.removeSession(firstSessionID)
+            DisplayPaneStore.shared.removeSession(otherSessionID)
+        }
+        pane.addContentTab(
+            DisplayContent(
+                body: .chart(chartSpec()),
+                title: "Chart",
+                subtitle: "2 series · 3 categories"
+            ),
+            for: firstSessionID
+        )
+
+        controller.syncDisplayPane(to: firstSessionID)
+        XCTAssertFalse(item.isCollapsed, "the chart did not reveal its panel")
+
+        controller.toggleDisplayPane()
+        settle()
+        XCTAssertTrue(item.isCollapsed, "the user's close did not hide the panel")
+
+        controller.syncDisplayPane(to: otherSessionID)
+        controller.syncDisplayPane(to: firstSessionID)
+        XCTAssertTrue(
+            item.isCollapsed,
+            "returning to the chat resurrected the unchanged chart"
+        )
+
+        controller.syncDisplayPane(to: otherSessionID)
+        pane.addContentTab(
+            DisplayContent(
+                body: .chart(chartSpec()),
+                title: "New chart",
+                subtitle: "2 series · 3 categories"
+            ),
+            for: firstSessionID
+        )
+        controller.syncDisplayPane(to: firstSessionID)
+        XCTAssertFalse(
+            item.isCollapsed,
+            "new panel content remained hidden behind the earlier dismissal"
+        )
+    }
+
     /// The global theme document takes the row from the controls that act on *this chat's* tabs.
     /// The toggle is not one of them: it acts on the pane, and the pane is on screen either way.
     func testTheToggleStaysWhileTheGlobalDocumentTakesTheRow() throws {

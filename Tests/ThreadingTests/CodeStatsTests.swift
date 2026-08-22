@@ -182,6 +182,26 @@ final class CodeStatsTests: XCTestCase {
         XCTAssertGreaterThan(stats.totalCode, 0)
     }
 
+    func testBundledSCCDoesNotCountClaudeWorktreesInsideAProject() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Threading-CodeStats-Worktrees-\(UUID().uuidString)", isDirectory: true)
+        let worktree = directory
+            .appendingPathComponent(CodeStatsDefaults.claudeWorktreesDirectory, isDirectory: true)
+            .appendingPathComponent("agent-fixture", isDirectory: true)
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try Data("struct ProjectSource {}\n".utf8)
+            .write(to: directory.appendingPathComponent("ProjectSource.swift"))
+        try Data("struct NestedWorktreeCopy {}\n".utf8)
+            .write(to: worktree.appendingPathComponent("NestedWorktreeCopy.swift"))
+
+        let stats = try XCTUnwrap(CodeStatsRunner.measure(folder: directory.path))
+        let swift = try XCTUnwrap(stats.languages.first { $0.name == "Swift" })
+        XCTAssertEqual(swift.files, 1)
+        XCTAssertEqual(swift.code, 1)
+    }
+
     func testBundledSCCSkipsAFolderThatDisappeared() {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("Threading-CodeStats-Missing-\(UUID().uuidString)")

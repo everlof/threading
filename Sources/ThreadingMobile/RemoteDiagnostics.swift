@@ -77,11 +77,9 @@ enum MobileDiagnostics {
         let record = journal.record(event, level: level, fields: fields)
         Task { @MainActor in
             sharing.enqueue(record)
-#if DEBUG
             if level == .error {
-                MobileDebugIncidentRecorder.shared.captureIfNeeded()
+                MobileDiagnosticsIncidentRecorder.shared.captureIfNeeded()
             }
-#endif
         }
     }
 

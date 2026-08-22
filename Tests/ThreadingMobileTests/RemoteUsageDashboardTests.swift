@@ -68,4 +68,56 @@ final class RemoteUsageDashboardTests: XCTestCase {
             "a later banked-reset expiry compressed the selected history into the chart's edge"
         )
     }
+
+    func testFleetProjectionGroupsProviderWindowsByAccount() {
+        let accounts = MobileUsageFleetProjection.accounts(from: [
+            series("weekly", runtime: "Claude", account: "Work", window: "Weekly"),
+            series("five-hour", runtime: "Claude", account: "Work", window: "5-hour"),
+            series("codex", runtime: "Codex", account: "Personal", window: "Weekly")
+        ])
+
+        XCTAssertEqual(accounts.map(\.id), ["Claude|Work", "Codex|Personal"])
+        XCTAssertEqual(accounts[0].windows.map(\.id), ["five-hour", "weekly"])
+    }
+
+    func testFleetSummaryNamesAccountStatesAndUsesRealActiveResetTimes() {
+        let reference = 1_800_000_000.0
+        let accounts = MobileUsageFleetProjection.accounts(from: [
+            series("ready", account: "Ready", fraction: 0.20, resetsAt: reference + 7_200),
+            series("constrained", account: "Busy", fraction: 0.75, resetsAt: reference + 3_600),
+            series("unknown", account: "Unknown", fraction: nil, resetsAt: reference + 1_800),
+            series("expired", account: "Expired", fraction: 0.99, resetsAt: reference - 60)
+        ])
+
+        let summary = MobileUsageFleetProjection.summary(
+            for: accounts,
+            referenceTime: reference
+        )
+
+        XCTAssertEqual(summary.accountCount, 4)
+        XCTAssertEqual(summary.readyCount, 1)
+        XCTAssertEqual(summary.constrainedCount, 1)
+        XCTAssertEqual(summary.unknownCount, 2)
+        XCTAssertEqual(summary.nextReset, reference + 1_800)
+    }
+
+    private func series(
+        _ id: String,
+        runtime: String = "Claude",
+        account: String = "Default",
+        window: String = "5-hour",
+        fraction: Double? = 0.20,
+        resetsAt: Double = 1_800_003_600
+    ) -> RemoteUsageLimitSeriesSummaryDTO {
+        RemoteUsageLimitSeriesSummaryDTO(
+            id: id,
+            runtimeName: runtime,
+            accountName: account,
+            windowLabel: window,
+            currentFraction: fraction,
+            resetsAt: resetsAt,
+            bankedResetCount: nil,
+            nextBankedResetExpiresAt: nil
+        )
+    }
 }

@@ -1576,6 +1576,45 @@ its name. It appears only for settings that change what Threading does while you
 — this one and muted notifications — never for a theme or a sound, which announce themselves by
 being seen and heard. Hover the row and the card spells out which ("Continues at reset").
 
+### Curfew: ending a session at a time
+
+A curfew is the opposite of a scheduled start: the moment Threading stops spending a session on
+its own. The case it was built for is the overnight one — your 5-hour window resets at 04:00
+while you sleep, you want a session to use what is left of *this* window (say, with the agent's
+own `/loop` or `/goal`), and you do not want it eating into the fresh one. `/loop` and `/goal`
+have no clock of their own; the curfew is the clock.
+
+**Setting one.** When writing a new session, the moon beside the clock (**End this session at a
+time**) offers the same kind of choices the clock does — *In an hour*, *In 3 hours*, *Tonight at
+23:00*, **Until the 5h window resets** (exactly at the reset, not a minute past), *At quiet hours*
+when you have them, or a custom time. The choice becomes a chip in the footer ("Until 04:00";
+hover it for the whole plan) and is armed the moment the session starts — never while a scheduled
+start is still waiting. For a session that is already running, the row's menu has a **Curfew**
+fold, and a native chat shows the same chip while a curfew applies.
+
+**What happens.** Three moments, with margins you set once in Settings:
+
+- **Ten minutes before**, if the agent is mid-turn, Threading sends it a wrap-up: end any loop,
+  commit what is safe, write a handoff note, then stop. An idle session gets nothing — waking it
+  would spend the very thing the curfew protects.
+- **At the time**, Threading stops sending the session anything on its own: queued messages wait,
+  scheduled sends stand aside, other agents' messages are refused. Your keyboard still works.
+- **Five minutes after**, a turn still running is interrupted — Stop on a native chat, Escape on a
+  terminal. A loop that keeps restarting is interrupted again, but only when nobody is watching
+  (a turn you start in front of the session is yours), and at most three times; after that the
+  curfew gives up and tells you, or — if you chose **Stop the agent** in Settings — stops the
+  agent, keeping the conversation on screen so **Resume Session** picks it up where it left off.
+
+The row wears the small "has its own settings" mark while held, and the strip above the composer
+reads like a ledger in the morning: *Curfew since 04:00 · wrap-up sent 03:50 · interrupted 04:05
+×2*. **Lift Curfew** is always there, because the rule is yours. Terminals whose agent cannot be
+interrupted safely get the hold only, and the strip says so.
+
+**Quiet hours** (Settings ▸ Usage Windows) are a curfew every session follows nightly — 04:00 to
+08:00 by default — unless a project or a session is marked **Exempt from quiet hours**; lifting
+one night's curfew lifts it for that night only. A curfew never deletes or closes anything:
+the conversation stays in the pane, and what it did is written to the diagnostics journal.
+
 ### Continuing on another login, in one press
 
 When a session stops at its limit and you have another login for the same agent with room left,
@@ -2656,6 +2695,21 @@ then join the Mac's share-safe support timeline until the timer expires, you sto
 client closes. Raw logs, messages, prompts, terminal output, paths, URLs, notification text and
 credentials are never sent, and one-chat guest links do not get this control.
 
+For ongoing agent-assisted checkups, **Local diagnostics** is a separate opt-in. Turn on **Allow
+paired-iPhone checkups** under **Settings > Advanced > Local Diagnostics** on the Mac, then turn
+on **Local diagnostics** under **Settings > Advanced > Device checkups** on the iPhone. Both are
+off by default and either switch stops new requests immediately. The iPhone's **Automatic error
+screenshots** is a third, narrower switch: it keeps at most three foreground Threading-window
+images and is not needed for ordinary connection evidence. The Mac keeps at most 40 bounded
+captures until **Clear Evidence** is pressed.
+
+Then ask an agent: **“Check up on my iOS app usage. Use the newest cached evidence if my phone is
+offline, and tell me whether the evidence is fresh or cached.”** The shorter **“Check up on my
+iOS app usage”** also works. Add **“include a screenshot of the current screen”** only when that
+is what you want. These checkups contain fixed connection and app-state fields rather than
+prompts, terminal output, paths, credentials or notification text. They use the paired local
+network route; that does not prove both devices are on the same physical Wi-Fi access point.
+
 Every link is a password, but an owner pairing code is much more powerful than a one-chat guest
 link. It is a one-time bootstrap exchanged for a unique device credential kept in Keychain on
 both Mac and iPhone. Turning Remote Access off or quitting closes every connection and suspends
@@ -2714,7 +2768,8 @@ page, where no session is selected yet, the toggle and the menu item are unavail
 the panel is shut; press it and the panel opens *underneath* it, so the same button — now filled,
 beside the panel's **+** — is what shuts it again. There is only ever one of it. The ✕ on a tab
 is a different thing: it closes that tab. Your tabs are kept when the panel closes, and the panel
-reopens the next time the agent displays something.
+stays closed if you switch to another chat and come back. It reopens when the agent displays
+something new, or when you open a panel surface yourself.
 
 The tabs are yours to arrange: drag one along the strip to reorder it, middle-click one to
 close it, or use its secondary-click menu — **Close Tab**, **Close Other Tabs**,
@@ -4466,6 +4521,14 @@ account says what it is doing right now (`A window is open until 12:00, 3h from 
 every poke that has actually run is listed with what came of it.
 
 Claude only, and the page says why.
+
+**Quiet Hours & Curfews** lives on the same page: how long before a curfew the wrap-up goes out,
+how long after it a running turn is interrupted, the wrap-up message itself (`{time}` is replaced
+by the curfew's time), what to do when a session keeps working after three interrupts (notify, or
+stop the agent), and the nightly quiet-hours window. A *Tonight* line under the rows states the
+plan those values produce — "Wrap-up at 03:50 · held from 04:00 · a turn still running at 04:05 is
+interrupted · lifts 08:00" — so the ladder is readable before anything runs. See
+[Curfew](#curfew-ending-a-session-at-a-time).
 
 ### Storage
 Build output your projects can make again, and a button that removes it. Also reachable from a

@@ -19,6 +19,10 @@
         "value" : "$(THREADING_LOTTIE_CORPUS)"
       },
       {
+        "key" : "THREADING_EXTENSION_PACKAGE_UNDER_TEST",
+        "value" : "$(THREADING_EXTENSION_PACKAGE_UNDER_TEST)"
+      },
+      {
         "key" : "THREADING_RENDER_OUT",
         "value" : "$(THREADING_RENDER_OUT)"
       },

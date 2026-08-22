@@ -44,6 +44,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case capturesPageBeforeAgentActions
     case disabledToolGroupIDs
     case usesContainedExtensionLauncher
+    case usesMCPStdioBridge
     case workspaceNavigatorSelection
     case reportsClaudeLifecycleEvents
     case installsCodexHooks
@@ -54,6 +55,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case claudeStartupSpeed
     case codexStartupSpeed
     case defaultPermissionMode
+    case localDiagnosticsEnabled
     case remoteAccessEnabled
     case remoteAccessDoorMigration
     case remoteAccessTailscaleEnabled
@@ -931,6 +933,23 @@ enum AppSettingDefinitions {
         persistenceKey: "usesContainedExtensionLauncher",
         absence: .falseValue
     )
+    /// Whether a launch addresses Threading's tool channel through the stdio bridge.
+    ///
+    /// Behavioural rather than presented: no `presentations`, so `remotePolicy` resolves to
+    /// `.hidden` and this produces no Settings row and does not cross to the phone's mirror.
+    /// `defaults write codes.threading mcpStdioBridgeEnabled -bool true` turns it on.
+    ///
+    /// **Off by default on purpose, and only for now.** The bridge is rollout step 2 of
+    /// `docs/feature-drafts/durable-sessions.md` (§3c, §9): the shim ships behind a setting with
+    /// HTTP still available as the fallback while it settles, and the TCP endpoint retires in
+    /// step 3 once the bridge is the default and nothing launches against the port. Until then
+    /// the two forms have to be reachable side by side, and the person choosing between them is
+    /// whoever is testing the rollout — which is exactly the shape of a hidden key.
+    static let usesMCPStdioBridge = AppSettingDescriptor<Bool>(
+        identity: .usesMCPStdioBridge,
+        persistenceKey: "mcpStdioBridgeEnabled",
+        absence: .falseValue
+    )
     static let workspaceNavigatorSelection = AppSettingDescriptor<Data>(
         identity: .workspaceNavigatorSelection,
         persistenceKey: "workspaceNavigatorSelection",
@@ -1008,6 +1027,16 @@ enum AppSettingDefinitions {
         validation: .allowedStrings(Set(AgentPermissionMode.allCases.map(\.rawValue))),
         presentations: [row("general", 24, "Permission Mode", "New sessions start in",
                             ["permission mode", "ask before"])]
+    )
+
+    static let localDiagnosticsEnabled = AppSettingDescriptor<Bool>(
+        identity: .localDiagnosticsEnabled,
+        persistenceKey: "localDiagnosticsEnabled",
+        absence: .falseValue,
+        presentations: [row(
+            "advanced", 0, "Local Diagnostics", "Allow paired-iPhone checkups",
+            ["iPhone", "device checkup", "diagnostics", "local network", "agent"]
+        )]
     )
 
     static let remoteAccessEnabled = AppSettingDescriptor<Bool>(
@@ -1235,11 +1264,13 @@ enum AppSettingDefinitions {
         .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
         .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
+        .init(usesMCPStdioBridge),
         .init(workspaceNavigatorSelection), .init(reportsClaudeLifecycleEvents),
         .init(installsCodexHooks), .init(readsClaudeLoginFromKeychain),
         .init(suppressesClaudeStatusLine), .init(bypassesCodexHookTrust),
         .init(claudeRemoteControl), .init(claudeStartupSpeed), .init(codexStartupSpeed),
-        .init(defaultPermissionMode), .init(remoteAccessEnabled),
+        .init(defaultPermissionMode), .init(localDiagnosticsEnabled),
+        .init(remoteAccessEnabled),
         .init(remoteAccessDoorMigration),
         .init(remoteAccessListenerPort),
         .init(remoteViewportLeaseGraceSeconds),
@@ -1313,21 +1344,21 @@ enum AppSettingDefinitions {
         surfaced("privacy.screenRecording", pageID: "privacy", order: 3,
                   section: "System Permissions", title: "Screen Recording",
                   "permissions", "TCC", "grant"),
-        surfaced("advanced.settingsLocation", pageID: "advanced", order: 0,
+        surfaced("advanced.settingsLocation", pageID: "advanced", order: 1,
                   section: "Locations", title: "Settings",
                   "preferences file", "where", "location", "reveal"),
-        surfaced("advanced.applicationSupportLocation", pageID: "advanced", order: 1,
+        surfaced("advanced.applicationSupportLocation", pageID: "advanced", order: 2,
                   section: "Locations", title: "Projects, sessions and caches",
                   "application support", "location", "reveal"),
-        surfaced("advanced.welcomeTour", pageID: "advanced", order: 2,
+        surfaced("advanced.welcomeTour", pageID: "advanced", order: 3,
                   section: "Welcome Tour", title: "First-launch walkthrough",
                   "onboarding", "welcome tour"),
-        surfaced("advanced.runWelcomeTour", pageID: "advanced", order: 3,
+        surfaced("advanced.runWelcomeTour", pageID: "advanced", order: 4,
                   section: "Welcome Tour", title: "Run at next launch", "onboarding", "flag"),
-        surfaced("advanced.resetSettings", pageID: "advanced", order: 4,
+        surfaced("advanced.resetSettings", pageID: "advanced", order: 5,
                   section: "Start Over", title: "Reset settings",
                   "reset", "start over", "fresh"),
-        surfaced("advanced.resetEverything", pageID: "advanced", order: 5,
+        surfaced("advanced.resetEverything", pageID: "advanced", order: 6,
                   section: "Start Over", title: "Reset everything",
                   "erase", "corrupt", "start over")
     ]

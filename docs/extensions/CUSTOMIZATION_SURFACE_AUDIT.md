@@ -35,8 +35,11 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Mobile terminal key bar | — | host-only | PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
 | Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
+| Local iOS diagnostics settings | — | host-only | independent consent, pairing and authorization, request nonces, evidence allowlist, screenshot policy and bounded custody | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
+| All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, bounded scrolling and popover lifecycle | Host-only |
+| Curfew surfaces (draft moon button and chip, chat chip, sidebar Curfew fold, strip source, Settings section) | — | host-only | the deadline and its instance identity, hold admission, the wind-down record, interrupt/stop decisions and their receipts, the watched-turn rule, Lift | Host-only |
 | Account setup and reconnect | — | host-only | provider identity, isolated-home routing, child-process lifecycle, login verification, credential non-capture, native failure and installation fallback | Host-only |
 | Custom-limit authoring | — | host-only | account/window identity, numeric validation, rule semantics, persistence, bounded history work, keyboard and accessibility contract | Host-only |
 | Start composer accessories | `composer.session-start@1` | protected horizontal hook | text input, submission, keyboard, drafts | Implemented |
@@ -95,6 +98,13 @@ capacity bounds, and the privacy boundary of the aggregate counters. An extensio
 or relabel this page and claim a socket is cheap, parked, reused or private when the host lifecycle
 does not say so.
 
+Local iOS diagnostics settings are host-only because the switches are the visible consent
+boundary for a content-bearing evidence route. Threading must keep each device's opt-in paired
+with owner authorization, the selected LAN route, single-use request ids, the fixed structural
+allowlist, screenshot provenance and bounded custody. An extension may not replace or relabel
+these settings and claim evidence or an error screenshot is disabled when the host would still
+accept or collect it.
+
 The sidebar workload analyzer is deliberately not a second extension component around the brand
 row. It is one presentation of an existing theme-owned slot: any installed theme may select the
 spectrum material, while `SidebarBrandView` keeps the exact operational facts and accessible
@@ -117,6 +127,13 @@ share to its complementary pace allowance, bounds rolling history to one week, p
 and retains the keyboard, focus and accessibility contract of the modal. An extension may present
 its own settings, but cannot replace this surface and visually claim that Threading will enforce a
 different bound from the one the host stored.
+
+The all-account usage fleet remains host-only for its first contract because it is an operational
+surface rather than one account's replaceable reading. The host owns enabled-account discovery,
+provider refresh pacing, which login is current, the bounded virtual viewport, and the exact
+`SessionMigration` eligibility and move action for the conversation under the toolbar. Publishing
+its presentation requires a typed, bounded multi-account usage contract; the existing
+`toolbar.account-usage-popover@1` remains the customization point for one account's reading.
 
 Session Overview is host-only because its two sections expose host-owned operational truth rather
 than a presentation-only document: exact versus observed work attribution, transcript-accounted

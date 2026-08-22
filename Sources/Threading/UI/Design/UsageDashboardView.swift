@@ -33,25 +33,13 @@ private extension UsageDashboardBreakdownKind {
 
 // MARK: - Dashboard
 
-/// The retained Usage dashboard. It owns one chart per subject and updates their models in
-/// place, so range/metric/provider changes morph fluidly instead of replacing the view tree.
-/// All potentially long breakdowns live in a recycling table; provider and coverage rows are
-/// bounded by the runtime/route set.
+/// The retained history-and-consumption half of the one-page Usage surface. It owns one chart per
+/// subject and updates their models in place, so range/metric/provider changes morph fluidly
+/// instead of replacing the view tree. All potentially long breakdowns live in a recycling
+/// table; provider and coverage rows are bounded by the runtime/route set.
 final class UsageDashboardView: NSView, ThemedComponent {
     private typealias Metric = UsageDashboardMetric
     private typealias Breakdown = UsageDashboardBreakdownKind
-
-    enum DashboardTab: Int, CaseIterable {
-        case overview
-        case limitHistory
-
-        var title: String {
-            switch self {
-            case .overview: return L10n.string("Overview")
-            case .limitHistory: return L10n.string("Limit history")
-            }
-        }
-    }
 
     private var overview: UsageDashboardOverviewProjection?
     private var limits: [UsageLimitDashboardSeries] = []
@@ -60,7 +48,6 @@ final class UsageDashboardView: NSView, ThemedComponent {
     private var selectedDays = 30
     private var selectedMetric = Metric.cost
     private var selectedBreakdown = Breakdown.models
-    private var selectedTab = DashboardTab.overview
     private var selectedLimitDays = 30
     private var selectedLimitID: String?
     private var hasPresentedUsage = false
@@ -71,7 +58,6 @@ final class UsageDashboardView: NSView, ThemedComponent {
         return formatter
     }()
 
-    private let tabControl = ThemedSegmentedControl()
     private let scanStatusLabel = NSTextField(labelWithString: "")
     private let scanProgressBar = ThemedProgressBar()
     private let scanStatus = NSStackView()
@@ -142,7 +128,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
         showPlaceholderHero()
     }
 
-    /// Whether a rescan is announced beside the tabs, and how far it has got.
+    /// Whether a rescan is announced beside the consumption controls, and how far it has got.
     private func applyScanStatus() {
         let announces = isBuilding && overview != nil
         scanStatus.isHidden = !announces
@@ -208,18 +194,11 @@ final class UsageDashboardView: NSView, ThemedComponent {
     var breakdownDebugGeometryForTesting: String { breakdownTable.debugGeometryForTesting }
     /// How many breakdown rows are wearing a provider mark.
     var breakdownProviderMarkCountForTesting: Int { breakdownTable.providerMarkCountForTesting }
-    /// The rescan strip beside the tabs: whether it is up, and the fraction it is showing.
+    /// The rescan strip beside the consumption controls: whether it is up, and its fraction.
     var scanStripForTesting: (isVisible: Bool, progress: Double?) {
         (!scanStatus.isHidden, scanProgressBar.isHidden ? nil : scanProgressBar.progress)
     }
     var topToolCountForTesting: Int { consumptionHero.toolCount }
-    var visibleTabForTesting: DashboardTab { selectedTab }
-
-    func selectTabForTesting(_ tab: DashboardTab) {
-        tabControl.selectedIndex = tab.rawValue
-        select(tab: tab, animated: false)
-    }
-
     func selectLimitRangeForTesting(days: Int) {
         guard let index = UsageDashboardProjectionDefaults.overviewRanges.firstIndex(of: days) else {
             return
@@ -253,18 +232,9 @@ final class UsageDashboardView: NSView, ThemedComponent {
             content.detachesHiddenViews = true
         }
 
-        tabControl.configure(titles: DashboardTab.allCases.map(\.title), selectedIndex: 0)
-        tabControl.widthAnchor.constraint(
-            equalToConstant: Design.UsageDashboard.tabControlWidth
-        ).isActive = true
-        tabControl.setAccessibilityLabel(L10n.string("Usage section"))
-        tabControl.onSelect = { [weak self] index in
-            guard let tab = DashboardTab(rawValue: index) else { return }
-            self?.select(tab: tab, animated: true)
-        }
         // The rescan strip. A page that already has its last complete report on screen says a new
-        // scan is running here, beside the tabs, rather than in the chart: the chart is showing
-        // real numbers and a status over them would be covering the thing being refreshed.
+        // scan is running beside the consumption controls rather than in the chart: the chart is
+        // showing real numbers and a status over them would cover the thing being refreshed.
         scanStatusLabel.applyFont(.detail())
         scanStatusLabel.textColor = Design.Text.secondary
         scanStatusLabel.stringValue = L10n.string("Reading usage sources…")
@@ -278,15 +248,6 @@ final class UsageDashboardView: NSView, ThemedComponent {
         scanStatus.addArrangedSubview(scanStatusLabel)
         scanStatus.addArrangedSubview(scanProgressBar)
         scanStatus.isHidden = true
-
-        let tabSpacer = NSView()
-        tabSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        scanStatus.setContentHuggingPriority(.required, for: .horizontal)
-        let tabRow = NSStackView(views: [tabControl, tabSpacer, scanStatus])
-        tabRow.orientation = .horizontal
-        tabRow.alignment = .centerY
-        tabRow.distribution = .fill
-        column.addArrangedSubview(tabRow)
 
         rangeControl.configure(titles: ["7d", "30d", "90d"], selectedIndex: 1)
         rangeControl.widthAnchor.constraint(
@@ -309,7 +270,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
             self?.refreshUsage(animated: true)
         }
 
-        let overviewControls = NSStackView(views: [rangeControl, metricControl])
+        let overviewControls = NSStackView(views: [scanStatus, rangeControl, metricControl])
         overviewControls.orientation = .horizontal
         overviewControls.spacing = Design.Spacing.medium
         overviewColumn.addArrangedSubview(sectionHeader(
@@ -370,8 +331,8 @@ final class UsageDashboardView: NSView, ThemedComponent {
         limitColumn.addArrangedSubview(limitCardStack)
         limitColumn.addArrangedSubview(limitChart)
 
-        column.addArrangedSubview(overviewColumn)
         column.addArrangedSubview(limitColumn)
+        column.addArrangedSubview(overviewColumn)
 
         for view in column.arrangedSubviews {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -383,39 +344,6 @@ final class UsageDashboardView: NSView, ThemedComponent {
                 view.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
             }
         }
-        applyTabVisibility()
-    }
-
-    private func select(tab: DashboardTab, animated: Bool) {
-        guard tab != selectedTab else { return }
-        selectedTab = tab
-        applyTabVisibility()
-
-        let incoming = tab == .overview ? overviewColumn : limitColumn
-        if animated, !Design.Motion.reducesMotion {
-            incoming.alphaValue = 0
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Design.Motion.standard
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                incoming.animator().alphaValue = 1
-            }
-        } else {
-            incoming.alphaValue = 1
-        }
-
-        switch tab {
-        case .overview: refreshUsage(animated: animated)
-        case .limitHistory: refreshLimits(animated: animated)
-        }
-    }
-
-    private func applyTabVisibility() {
-        overviewColumn.isHidden = selectedTab != .overview
-        limitColumn.isHidden = selectedTab != .limitHistory
-        overviewColumn.alphaValue = selectedTab == .overview ? 1 : 0
-        limitColumn.alphaValue = selectedTab == .limitHistory ? 1 : 0
-        invalidateIntrinsicContentSize()
-        needsLayout = true
     }
 
     private func limitControls() -> NSView {

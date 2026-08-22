@@ -178,8 +178,13 @@ without taking over provider authentication.
 The toolbar's trailing pill (`AccountUsageItemView`) shows the selected session's account
 rate-limit pressure: a ring gauging the peak window beside every window's own value
 (`5h 43% · 7d 73%` — Claude's own status-line vocabulary), monochrome until 75%, orange then
-red past 92%, each value tinted by its own window's severity; clicking opens per-window bars
-with reset countdowns. `AccountUsageService` caches
+red past 92%, each value tinted by its own window's severity. Hovering opens the compact current-
+account reading, a plain click pins it, and Option-click opens the pinned, scrollable all-account
+fleet also used at the top of Usage settings. Option is deliberate: Control-click remains the
+platform's secondary-click convention. The fleet shows active windows only and, when the current
+conversation passes `SessionMigration`'s provider/transcript safety checks, offers the existing
+Move to Account operation on eligible destinations; presentation never broadens migration rules.
+`AccountUsageService` caches
 per account and keeps the last good reading through failed refreshes. The credential posture
 mirrors `~/repo/claudex`: read the short-lived tokens the official CLIs already keep, use
 them read-only, never refresh them.
@@ -556,7 +561,10 @@ resolutions:
   popover, where the pane's height is not at stake.
 
 `UsageWindowRow` and `UsageBarView` belong to the toolbar's popover and the usage settings page
-now. `AccountUsage.readings` is the structured reading every tinting surface consumes — the
+now. `AccountUsageFleetView` composes those rows into a current-first, virtualized multi-account
+surface shared by Settings and the toolbar's Option-click popover. Its aggregate reports account
+states and the next reset, never an average across incompatible windows. `AccountUsage.readings`
+is the structured reading every tinting surface consumes — the
 pill's attributed build and both menus' toned segments — and `AccountUsage.compactSummary` is
 the same list joined plain, for the surfaces that cannot tint: the tooltips and the composer's
 line inside the prompt box.

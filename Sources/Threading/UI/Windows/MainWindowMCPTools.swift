@@ -158,9 +158,7 @@ struct AgentToolDependencies {
   /// The typed session control plane — scope and refusal rules for every cross-session
   /// operation, whoever the caller is. Handlers own wording only.
   let control: WorkspaceControlPlane
-#if DEBUG
-  let mobileDebugInspection = MobileDebugInspectionService(captures: .shared)
-#endif
+  let mobileDiagnosticsInspection = MobileDiagnosticsInspectionService(captures: .shared)
   /// The project's durable visual baselines. Injected rather than reached for as a singleton from
   /// the handler, so a test drives its own directory instead of the developer's.
   let baselines: BrowserBaselineStore

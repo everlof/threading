@@ -478,10 +478,11 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
         }
     }
 
-    private func makeScene(_ scene: ExtensionScene) -> SemanticSceneView {
+    private func makeScene(_ scene: ExtensionScene) -> NSView {
         let items = scene.items.map { item in
             SemanticSceneView.Item(
                 id: item.id,
+                parentID: item.parentID,
                 normalizedFrame: NSRect(
                     x: item.frame.x,
                     y: item.frame.y,
@@ -503,14 +504,27 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
                 }
             )
         }
-        let view = SemanticSceneView(
-            accessibilityLabel: scene.accessibilityLabel,
-            items: items
-        )
-        view.heightAnchor.constraint(
-            equalTo: view.widthAnchor,
-            multiplier: 1 / scene.preferredAspectRatio
-        ).isActive = true
+        let view: NSView
+        if let hierarchy = scene.hierarchy {
+            view = SemanticHierarchySceneView(
+                accessibilityLabel: scene.accessibilityLabel,
+                rootID: hierarchy.rootID,
+                preferredAspectRatio: scene.preferredAspectRatio,
+                items: items
+            )
+        } else {
+            view = SemanticSceneView(
+                accessibilityLabel: scene.accessibilityLabel,
+                items: items
+            )
+        }
+        view.translatesAutoresizingMaskIntoConstraints = false
+        if scene.hierarchy == nil {
+            view.heightAnchor.constraint(
+                equalTo: view.widthAnchor,
+                multiplier: 1 / scene.preferredAspectRatio
+            ).isActive = true
+        }
         view.setAccessibilityIdentifier("extension.scene")
         return view
     }

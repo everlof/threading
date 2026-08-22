@@ -1,10 +1,11 @@
 import AppKit
 
-/// Hosts the retained Usage dashboard and coordinates its two independent data feeds:
-/// transcript accounting and provider limit observations. Neither filesystem scanning nor the
-/// 180-day journal is read on the main actor while the page is opening.
+/// Hosts the retained Usage page and coordinates its three independent data feeds: live account
+/// capacity, provider-limit history, and transcript accounting. Neither filesystem scanning nor
+/// the 180-day journal is read on the main actor while the page is opening.
 final class UsagePreferencesViewController: NSViewController {
     private let appEvents = AppEventObservations()
+    private let liveCapacity = AccountUsageFleetView()
     private let dashboard = UsageDashboardView()
     private var overviewProjection: UsageDashboardOverviewProjection?
     private var limitSeries: [UsageLimitDashboardSeries] = []
@@ -21,7 +22,11 @@ final class UsagePreferencesViewController: NSViewController {
             title: UsageStrings.title,
             summary: UsageStrings.summary,
             actions: [rebuild],
-            sections: [dashboard, SettingsUI.note(UsageStrings.footnote)],
+            sections: [
+                SettingsUI.section(UsageStrings.currentCapacity, liveCapacity),
+                dashboard,
+                SettingsUI.note(UsageStrings.footnote)
+            ],
             hostPage: .usage
         )
     }
@@ -38,17 +43,24 @@ final class UsagePreferencesViewController: NSViewController {
             )
         }
         appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
+            self?.reloadLiveCapacity()
             self?.loadLimitHistory(animated: true)
+        }
+        appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
+            self?.reloadLiveCapacity()
+            self?.refreshAuthoritativeLimits(force: false)
         }
         appEvents.observe(UsageLimitHistoryDidChange.self) { [weak self] _ in
             self?.loadLimitHistory(animated: true)
         }
         prepareOverview(animated: false)
+        reloadLiveCapacity()
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
         prepareOverview(animated: false)
+        reloadLiveCapacity()
         loadLimitHistory(animated: false)
         TranscriptUsageService.shared.refresh()
         refreshAuthoritativeLimits(force: false)
@@ -121,6 +133,18 @@ final class UsagePreferencesViewController: NSViewController {
         accounts.forEach { AccountUsageService.shared.refresh($0, force: force) }
     }
 
+    private func reloadLiveCapacity() {
+        let accounts = AgentKind.allCases.flatMap { AgentAccountDiscovery.accounts(for: $0) }
+        liveCapacity.show(accounts.map {
+            AccountUsageFleetItem(
+                account: $0,
+                reading: AccountUsageService.shared.reading(for: $0),
+                isCurrent: false,
+                allowsHandoff: false
+            )
+        })
+    }
+
     @objc private func rebuildClicked() {
         TranscriptUsageService.shared.refresh(force: true)
         refreshAuthoritativeLimits(force: true)
@@ -132,8 +156,9 @@ final class UsagePreferencesViewController: NSViewController {
 private enum UsageStrings {
     static var title: String { L10n.string("Usage") }
     static var summary: String {
-        L10n.string("Cost, tokens, provider coverage, and 180 days of observed limit history.")
+        L10n.string("Live capacity, observed limit history, cost, tokens, and provider coverage.")
     }
+    static var currentCapacity: String { L10n.string("Current capacity") }
     static var rebuild: String { L10n.string("Rebuild") }
     static var footnote: String {
         L10n.format(

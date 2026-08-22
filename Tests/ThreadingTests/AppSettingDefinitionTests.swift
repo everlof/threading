@@ -91,6 +91,18 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertFalse(AppSettingDefinitions.sessionRestorePolicy.accepts("forever"))
     }
 
+    func testLocalDiagnosticsIsAbsentAndOffUntilThePersonOptsIn() throws {
+        let suiteName = "AppSettingDefinitionTests.localDiagnostics.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertNil(defaults.object(forKey: "localDiagnosticsEnabled"))
+        XCTAssertEqual(AppSettingDefinitions.localDiagnosticsEnabled.read(from: defaults), false)
+
+        XCTAssertTrue(AppSettingDefinitions.localDiagnosticsEnabled.write(true, to: defaults))
+        XCTAssertEqual(AppSettingDefinitions.localDiagnosticsEnabled.read(from: defaults), true)
+    }
+
     func testEveryPersistedIdentityKeepsItsStableKeyAndValueType() {
         let expected: [AppSettingIdentity: PersistenceCompatibility] = [
             .defaultAgentKind: .init(key: "defaultAgentKind", valueType: .string),
@@ -171,6 +183,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "usesContainedExtensionLauncher",
                 valueType: .boolean
             ),
+            .usesMCPStdioBridge: .init(
+                key: "mcpStdioBridgeEnabled",
+                valueType: .boolean
+            ),
             .workspaceNavigatorSelection: .init(
                 key: "workspaceNavigatorSelection",
                 valueType: .data
@@ -193,6 +209,10 @@ final class AppSettingDefinitionTests: XCTestCase {
             .claudeStartupSpeed: .init(key: "claudeStartupSpeed", valueType: .string),
             .codexStartupSpeed: .init(key: "codexStartupSpeed", valueType: .string),
             .defaultPermissionMode: .init(key: "defaultPermissionMode", valueType: .string),
+            .localDiagnosticsEnabled: .init(
+                key: "localDiagnosticsEnabled",
+                valueType: .boolean
+            ),
             .remoteAccessEnabled: .init(key: "remoteAccessEnabled", valueType: .boolean),
             .remoteAccessDoorMigration: .init(
                 key: "didMigrateRemoteAccessDoors",
@@ -355,6 +375,9 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertNil(defaults["remoteAccessAllowsOwnerRelayFallback"])
         XCTAssertNil(defaults["remoteAccessKeepsRelayReady"])
         XCTAssertEqual(defaults["remoteAccessTailscaleServeEnabled"] as? Bool, false)
+        // Opt-in false is an absence semantic, not a seeded key: the person's first write is
+        // distinguishable from a registered default.
+        XCTAssertNil(defaults["localDiagnosticsEnabled"])
         // The LAN door is the shipped exposure now that the listener presents a pinned
         // identity, and the seed is what makes an existing install pick it up.
         XCTAssertEqual(
@@ -376,7 +399,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 76)
+        XCTAssertEqual(authoredRows.count, 77)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -449,8 +472,9 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Live usage from your Claude login"
         ])
         XCTAssertEqual(actual["advanced"], [
-            "Settings", "Projects, sessions and caches", "First-launch walkthrough",
-            "Run at next launch", "Reset settings", "Reset everything"
+            "Allow paired-iPhone checkups", "Settings", "Projects, sessions and caches",
+            "First-launch walkthrough", "Run at next launch", "Reset settings",
+            "Reset everything"
         ])
     }
 

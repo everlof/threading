@@ -563,7 +563,7 @@ enum AgentLauncher {
             kind: kind,
             prompt: prompt,
             mcpConfigPath: MCPSessionRegistry.writeConfiguration(for: sessionID),
-            endpointURL: MCPSessionRegistry.endpointURL(for: sessionID)
+            binding: MCPSessionRegistry.binding(for: sessionID)
         ) else { return nil }
 
         return launchPlan(command: command, in: folder, resumeState: .unavailable)
@@ -571,13 +571,14 @@ enum AgentLauncher {
 
     /// Internal for the tests: the command line is the contract with two CLIs, and the
     /// capability pairing test proves a plan exists exactly where `.headlessResearch` is
-    /// claimed. The MCP config path (Claude) and endpoint URL (Codex) arrive as parameters so
-    /// the pairing holds without a live listener.
+    /// claimed. The MCP config path (Claude) and the server binding (Codex) arrive as parameters
+    /// so the pairing holds without a live listener — and, since the binding is a value rather
+    /// than a URL, so does the stdio form without a live helper.
     static func settingsResearchCommand(
         kind: AgentKind,
         prompt: String,
         mcpConfigPath: String?,
-        endpointURL: String?
+        binding: MCPServerBinding?
     ) -> ShellCommand? {
         guard kind.supports(.headlessResearch) else { return nil }
 
@@ -608,7 +609,7 @@ enum AgentLauncher {
             )
 
         case .codex:
-            guard let endpointURL else { return nil }
+            guard let binding else { return nil }
             appendManagedCodexInvocation(to: &command)
             appendCodexConfigOverride(
                 AgentDefaults.codexReasoningEffortKey,
@@ -621,10 +622,10 @@ enum AgentLauncher {
             )
             let server = "mcp_servers.\(MCPDefaults.serverName)"
             let tool = MCPBuiltInTool.listSettings.rawValue
-            appendCodexConfigOverride("\(server).url", string: endpointURL, to: &command)
+            appendCodexServerAddress(binding, under: server, to: &command)
             appendCodexConfigOverride(
                 "\(server).enabled_tools",
-                tomlValue: "[\(tomlString(tool))]",
+                tomlValue: tomlArray([tool]),
                 to: &command
             )
             appendCodexConfigOverride(
@@ -747,19 +748,16 @@ enum AgentLauncher {
             command.append(flag: "--allowedTools", value: MCPDefaults.allowedToolsPattern)
 
         case .codex:
-            guard let url = MCPSessionRegistry.endpointURL(for: session.id) else {
+            guard let binding = MCPSessionRegistry.binding(for: session.id) else {
                 return
             }
 
             let server = "mcp_servers.\(MCPDefaults.serverName)"
-            let toolList = enabledTools
-                .map(tomlString)
-                .joined(separator: ",")
 
-            appendCodexConfigOverride("\(server).url", string: url, to: &command)
+            appendCodexServerAddress(binding, under: server, to: &command)
             appendCodexConfigOverride(
                 "\(server).enabled_tools",
-                tomlValue: "[\(toolList)]",
+                tomlValue: tomlArray(enabledTools),
                 to: &command
             )
 
@@ -779,6 +777,31 @@ enum AgentLauncher {
             // `mcpServers` array of their ACP `session/new`, which touches nothing on disk.
             break
 
+        }
+    }
+
+    /// Names the MCP server's address under `mcp_servers.<name>`, in whichever of Codex's two
+    /// documented shapes this launch resolved to.
+    ///
+    /// Codex's `mcp_servers` table takes either a `url` (Streamable HTTP) or a `command` plus
+    /// `args` (stdio). They are alternatives, not a pair: a table carrying both would be asking
+    /// Codex to decide which of two addresses this session is at, so the stdio form writes no
+    /// `url` at all.
+    private static func appendCodexServerAddress(
+        _ binding: MCPServerBinding,
+        under server: String,
+        to command: inout ShellCommand
+    ) {
+        switch binding {
+        case .http(let url):
+            appendCodexConfigOverride("\(server).url", string: url, to: &command)
+        case .stdio(let invocation):
+            appendCodexConfigOverride("\(server).command", string: invocation.command, to: &command)
+            appendCodexConfigOverride(
+                "\(server).args",
+                tomlValue: tomlArray(invocation.arguments),
+                to: &command
+            )
         }
     }
 
@@ -814,6 +837,11 @@ enum AgentLauncher {
             tomlValue: "false",
             to: &command
         )
+    }
+
+    /// A TOML array of basic strings, for the two list-valued `mcp_servers` keys.
+    private static func tomlArray(_ values: [String]) -> String {
+        "[\(values.map(tomlString).joined(separator: ","))]"
     }
 
     /// A TOML basic-string literal for values supplied through Codex's `--config` flag.
@@ -903,8 +931,7 @@ enum AgentLauncher {
         for word in hookEnvironmentWords(
             for: session,
             brokersPermissions: brokersPermissions,
-            port: MCPServer.shared.port,
-            includesLegacyAliases: AppSettings.shared.installsCodexHooks
+            port: MCPServer.shared.port
         ) {
             command.append(word: word)
         }
@@ -922,8 +949,7 @@ enum AgentLauncher {
         for session: AgentSession,
         brokersPermissions: Bool,
         port: UInt16?,
-        socketPath: String = MCPBridgeLocation.socketPath,
-        includesLegacyAliases: Bool
+        socketPath: String = MCPBridgeLocation.socketPath
     ) -> [String] {
         guard session.kind.supportsThreadingBridge else { return [] }
         let token = MCPSessionRegistry.token(for: session.id)
@@ -934,21 +960,11 @@ enum AgentLauncher {
         if let port {
             words.append("\(MCPDefaults.portEnvironmentKey)=\(port)")
         }
-        if includesLegacyAliases {
-            if let port {
-                words.append("\(MCPDefaults.legacyPortEnvironmentKey)=\(port)")
-            }
-            words.append("\(MCPDefaults.legacySessionTokenEnvironmentKey)=\(token)")
-        }
-
         // Exported only for the surface that needs brokering, which is what scopes Codex's
         // shared `hooks.json` to a single surface. Absent, its `PreToolUse` entry says nothing
         // and Codex's own approval flow runs untouched.
         if brokersPermissions {
             words.append("\(MCPDefaults.brokerEnvironmentKey)=1")
-            if includesLegacyAliases {
-                words.append("\(MCPDefaults.legacyBrokerEnvironmentKey)=1")
-            }
         }
         return words
     }

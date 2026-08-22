@@ -688,17 +688,15 @@ struct RemoteClient {
         )
     }
 
-#if DEBUG
-    func uploadMobileDebugCapture(
-        _ capture: RemoteMobileDebugCaptureDTO
-    ) async throws -> RemoteMobileDebugCaptureUploadResponseDTO {
+    func uploadMobileDiagnosticsCapture(
+        _ capture: RemoteMobileDiagnosticsCaptureDTO
+    ) async throws -> RemoteMobileDiagnosticsCaptureUploadResponseDTO {
         try await postResponse(
-            RemoteMobileDebugCaptureUploadRequestDTO(capture: capture),
-            to: link.mobileDebugCaptureUploadURL,
+            RemoteMobileDiagnosticsCaptureUploadRequestDTO(capture: capture),
+            to: link.mobileDiagnosticsCaptureUploadURL,
             requestID: capture.requestID
         )
     }
-#endif
 
     func createShare(
         sessionID: String,

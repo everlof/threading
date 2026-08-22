@@ -128,6 +128,7 @@ between zero and one, independent of the eventual panel width:
 Each mark declares:
 
 - a stable ID and normalized rectangle;
+- an optional parent ID when the scene declares one rooted hierarchy;
 - a host-owned shape: rectangle, rounded rectangle, or ellipse;
 - a semantic colour role: neutral, accent, status, or one of six peer categories;
 - optional visible label and detail;
@@ -137,6 +138,18 @@ Each mark declares:
 Activating a mark raises its `actionID` with the mark ID as the correlated string value. A mark
 without an action remains an informative accessibility element. Array order is paint order, so
 overlapping marks can express scatter and bubble plots as well as non-overlapping treemaps.
+
+A producer which already has nested geometry may add
+`hierarchy: ExtensionSceneHierarchy(rootID:)` and set every non-root mark's `parentID`. Threading
+then owns branch navigation: activating a mark with children zooms it locally, the current path is
+shown as native breadcrumbs, and activating the focused backdrop or an ancestor breadcrumb moves
+back out. Leaf actions keep the ordinary action-ID round trip. The complete hierarchy still
+spends the scene's 500-mark budget; zooming does not ask the extension to publish another tree.
+
+This is a public extension primitive, not ArtifactKit-specific presentation. Extensions own the
+semantic hierarchy, normalized geometry, labels, details, and leaf actions. Threading keeps
+focus, breadcrumbs, zoom behavior, motion reduction, theme resolution, and accessibility
+host-owned on both Mac and iPhone.
 
 ## A document that varies over time
 

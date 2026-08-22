@@ -470,12 +470,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
-#if DEBUG
-        if request.method == "POST", path == RemoteRouter.mobileDebugCaptureUploadPath {
-            handleMobileDebugCaptureUpload(request, respond: respond)
+        if request.method == "POST", path == RemoteRouter.mobileDiagnosticsCaptureUploadPath {
+            handleMobileDiagnosticsCaptureUpload(request, respond: respond)
             return
         }
-#endif
 
         if request.method == "POST", path == RemoteRouter.invitationAcceptancePath {
             handleAcceptInvitation(request, respond: respond)
@@ -757,22 +755,22 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             )
         case "conversationResync":
             handleConversationResync(connection)
-#if DEBUG
-        case "mobileDebugHello":
-            handleMobileDebugSignal(
+        case "mobileDiagnosticsHello":
+            handleMobileDiagnosticsSignal(
                 connection,
                 routeKind: parsed.state,
                 screenshotPolicy: .latestIncident,
                 automatic: true
             )
-        case "mobileDebugIncident":
-            handleMobileDebugSignal(
+        case "mobileDiagnosticsIncident":
+            handleMobileDiagnosticsSignal(
                 connection,
                 routeKind: parsed.state,
                 screenshotPolicy: .latestIncident,
                 automatic: false
             )
-#endif
+        case "mobileDiagnosticsDisabled":
+            handleMobileDiagnosticsDisabled(connection, routeKind: parsed.state)
         default:
             break
         }
@@ -785,9 +783,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         DispatchQueue.main.async {
             self.services.mirrors.detach(connection)
         }
-#if DEBUG
-        services.mobileDebugCaptures.unregister(connection)
-#endif
+        services.mobileDiagnosticsCaptures.unregister(connection)
     }
 
     // MARK: - REST
@@ -1167,20 +1163,19 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         )))
     }
 
-#if DEBUG
-    private func handleMobileDebugCaptureUpload(
+    private func handleMobileDiagnosticsCaptureUpload(
         _ request: HTTPRequest,
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard authorization.canManageHost,
               request.header(RemoteRouter.clientHeader)?.lowercased() == "threading-ios",
-              request.body.count <= MobileDebugCaptureStore.maximumEncodedCaptureBytes,
+              request.body.count <= MobileDiagnosticsCaptureStore.maximumEncodedCaptureBytes,
               let deviceID = RemoteInboundPolicy.normalizedDeviceID(
                 request.header(RemoteRouter.deviceHeader)
               ),
               let upload = try? JSONDecoder().decode(
-                RemoteMobileDebugCaptureUploadRequestDTO.self,
+                RemoteMobileDiagnosticsCaptureUploadRequestDTO.self,
                 from: request.body
               ),
               upload.capture.requestID == request.header(RemoteRouter.requestIDHeader) else {
@@ -1189,35 +1184,65 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         do {
-            let stored = try services.mobileDebugCaptures.accept(
+            let stored = try services.mobileDiagnosticsCaptures.accept(
                 upload.capture,
                 from: deviceID,
                 deviceName: nil
             )
-            services.eventLog.recordRemoteEvent("iOS Debug evidence cached", [
+            services.eventLog.recordRemoteEvent("iOS local diagnostics cached", [
                 "device": MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
                 "records": String(upload.capture.diagnostics.count),
                 "screenshot": upload.capture.screenshotJPEGBase64 == nil ? "none" : "included",
             ])
             respond(.respond(RemoteRouter.json(
-                RemoteMobileDebugCaptureUploadResponseDTO(
+                RemoteMobileDiagnosticsCaptureUploadResponseDTO(
                     captureID: stored.capture.captureID,
                     storedAt: stored.storedAt
                 )
             )))
-        } catch MobileDebugCaptureStore.StoreError.unsolicited {
+        } catch MobileDiagnosticsCaptureStore.StoreError.disabled {
+            respond(.respond(RemoteRouter.error(403, "Local Diagnostics Disabled")))
+        } catch MobileDiagnosticsCaptureStore.StoreError.unsolicited {
             respond(.respond(RemoteRouter.error(409, "Capture Not Requested")))
         } catch {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
         }
     }
 
-    private func handleMobileDebugSignal(
+    private func handleMobileDiagnosticsSignal(
         _ connection: RemoteConnection,
         routeKind: String?,
-        screenshotPolicy: RemoteMobileDebugCaptureRequestDTO.ScreenshotPolicy,
+        screenshotPolicy: RemoteMobileDiagnosticsCaptureRequestDTO.ScreenshotPolicy,
         automatic: Bool
     ) {
+        guard let (deviceID, deviceName) = mobileDiagnosticsPeer(
+            connection,
+            routeKind: routeKind
+        ) else { return }
+        services.mobileDiagnosticsCaptures.register(
+            connection,
+            deviceID: deviceID,
+            deviceName: deviceName
+        )
+        _ = services.mobileDiagnosticsCaptures.requestCapture(
+            deviceID: deviceID,
+            screenshotPolicy: screenshotPolicy,
+            automatic: automatic
+        )
+    }
+
+    private func handleMobileDiagnosticsDisabled(
+        _ connection: RemoteConnection,
+        routeKind: String?
+    ) {
+        guard mobileDiagnosticsPeer(connection, routeKind: routeKind) != nil else { return }
+        services.mobileDiagnosticsCaptures.unregister(connection)
+    }
+
+    private func mobileDiagnosticsPeer(
+        _ connection: RemoteConnection,
+        routeKind: String?
+    ) -> (deviceID: String, deviceName: String?)? {
         guard routeKind == RemoteHostEndpointKind.lan,
               connection.routedSessionID == RemoteRouter.themeEventsRouteID,
               let peer = connection.authenticatedPeer,
@@ -1225,20 +1250,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               authorizer?.isCurrent(peer.authorization) == true,
               let deviceID = peer.deviceID else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
-            return
+            return nil
         }
-        services.mobileDebugCaptures.register(
-            connection,
-            deviceID: deviceID,
-            deviceName: peer.deviceName
-        )
-        _ = services.mobileDebugCaptures.requestCapture(
-            deviceID: deviceID,
-            screenshotPolicy: screenshotPolicy,
-            automatic: automatic
-        )
+        return (deviceID, peer.deviceName)
     }
-#endif
 
     private static func diagnosticSource(
         forClientHeader header: String?

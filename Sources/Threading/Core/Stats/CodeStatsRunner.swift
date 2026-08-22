@@ -72,10 +72,17 @@ enum CodeStatsRunner {
 
 enum CodeStatsDefaults {
     static let executableName = "scc"
+    static let claudeWorktreesDirectory = ".claude/worktrees"
 
     /// `--no-min-gen` keeps vendored minified bundles and generated files from dominating a
     /// bar that exists to describe what was written here; COCOMO is a number nobody asked for.
-    static let arguments = ["--format", "json", "--no-cocomo", "--no-min-gen"]
+    /// Claude's default worktree root holds complete nested checkouts rather than more project
+    /// source. The count stays correct before a repository adds Claude's recommended ignore rule,
+    /// and when a local exclusion exists only in `.git/info/exclude`, which scc does not read.
+    static let arguments = [
+        "--format", "json", "--no-cocomo", "--no-min-gen",
+        "--exclude-dir", claudeWorktreesDirectory
+    ]
 
     static let timeout: TimeInterval = 30
     static let maximumOutputBytes = 32 * 1_024 * 1_024

@@ -2,10 +2,10 @@
 
 The Usage settings page joins two local, provider-neutral stories: transcript accounting answers
 what was consumed and what it cost; observed limit history answers how quickly an account's real
-provider windows are moving. They share a retained presentation boundary but live in separate
-Overview and Limit History tabs, with independent date controls and provenance. An estimated
-transcript cost must never become a provider limit, and an observed limit percentage must never
-be presented as tokens.
+provider windows are moving. Live capacity now leads both in one vertical reading order: current
+account windows, observed history, then transcript consumption. Each layer keeps its own controls
+and provenance. An estimated transcript cost must never become a provider limit, and an observed
+limit percentage must never be presented as tokens.
 
 ## Independent implementation boundary
 
@@ -22,11 +22,12 @@ third-party file in this change that needs an MIT notice or source header. If a 
 copy MIT-licensed implementation text, its copyright and permission notice travels with that
 copy; this note is not permission to blur that boundary later.
 
-## Two feeds, two tabs
+## Three layers, one page
 
-`UsagePreferencesViewController` owns one retained `UsageDashboardView` and coordinates the feeds.
-The Overview tab presents transcript accounting; Limit History owns the account-window chooser,
-projection summary and observed-history chart:
+`UsagePreferencesViewController` owns one bounded `AccountUsageFleetView` followed by one retained
+`UsageDashboardView` and coordinates the feeds. There is no page-local tab switch: current
+capacity answers whether work can continue now, Limit History explains how the selected window
+arrived there, and Consumption accounts for cost and tokens below it:
 
 - `TranscriptUsageService` scans on its utility queue, persists a rebuildable 90-day report, and
   posts `TranscriptUsageDidChange` when the completed report can replace the previous one.
@@ -37,6 +38,15 @@ projection summary and observed-history chart:
   for accounts with that capability instead of switching on provider names. Claude and Codex have
   routable authoritative sources today; Grok and OpenCode stay visible in coverage rather than
   acquiring invented limit data.
+
+`AccountUsageFleetView` is shared with the toolbar's Option-click popover. It orders the current
+account first, then provider/name, and summarizes ready, constrained and unknown accounts plus the
+next real active-window reset. It deliberately never averages unlike provider windows: a five-hour
+percentage and a weekly or model-scoped percentage do not form a capacity providers enforce.
+Expired windows are absent. Each account renders at most six active windows and each account card
+is an `NSTableView` row, so opening five or five hundred discovered accounts constructs only the
+viewport. The viewport itself is height-bounded and hands scrolling to the Settings page at its
+content ends.
 
 The dashboard receives immutable report and limit-series values. It does not read transcripts,
 launch CLIs, call provider endpoints or perform journal I/O.
@@ -130,8 +140,8 @@ because a rubber band *is* movement, so an elastic viewport never reports that i
 
 macOS and iOS share `UsageDashboardProjector` values, not a view hierarchy. AppKit keeps the
 desktop chart renderer, pointer inspection and theme-specific motion. The iPhone uses a native
-SwiftUI sheet and Swift Charts over the already bounded values, with the same Overview and Limit
-History subjects. Both renderers present banked-reset inventory as three distinct states:
+SwiftUI sheet and Swift Charts over the already bounded values, with the same capacity, history,
+then consumption order. Both renderers present banked-reset inventory as three distinct states:
 positive, authoritative zero, and unavailable (`nil`). Historical `.bankedCredit` evidence and
 the next current-credit expiry remain separately typed markers.
 
@@ -341,7 +351,7 @@ inspection walk only retained geometry, not a provider-sized array.
 
 Changing range, metric or limit series morphs from the geometry currently on screen. An
 interruption therefore continues from its presentation state instead of snapping to the last
-target. Switching tabs crossfades the incoming retained surface. A cubic ease is driven by
+target. A cubic ease is driven by
 `CADisplayLink` on macOS 14+, with a 60 Hz common-mode timer on macOS 13. Reduce Motion makes both
 paths land synchronously, and a detached chart stops its driver. Hover tooltips, Left/Right Arrow
 inspection, a group role, summary value and value-change announcements provide the pointerless and
@@ -380,7 +390,7 @@ own progress:
   each of them.
 
 A rescan behind a report that is already on screen is a different situation and gets a different
-answer: a short strip beside the tabs, never a status over the chart. The page keeps its last
+answer: a short strip beside the consumption controls, never a status over the chart. The page keeps its last
 complete snapshot visible by design, so covering it would hide the very thing being refreshed —
 and until this existed, pressing **Rebuild** produced no visible change at all until the new
 report swapped in. The strip carries the same fraction and disappears when the scan ends.
@@ -494,14 +504,16 @@ still alive when the next file opened.
 - `ThemedTimeSeriesChartTests`: independent and stacked geometry, extrema/segment preservation,
   hostile boundary budgets, two-edge stacked interpolation, interrupted presentation geometry,
   Reduce Motion and accessibility.
-- `UsageDashboardRenderTests`: separate Overview and Limit History renders under System dark,
-  Cyberpunk dark, Neo Brutalism light and Classic Player, with all five coverage rows, top-three
-  plus Other chart bounds, selected-tab checks and virtualized breakdown assertions.
+- `UsageDashboardRenderTests`: the combined capacity, history and consumption page under System
+  dark/light, Cyberpunk, Neo Brutalism and Classic Player, with all five coverage rows, top-three
+  plus Other chart bounds and virtualized breakdown assertions.
+- `AccountUsageFleetTests`: status truth without unlike-window averages, stable current-first
+  ordering, the bounded virtual viewport and the Option-click modifier contract.
 - `UsageDashboardPerformanceTests`: default regression sizes and the opt-in stress contracts above.
 - `UsageDashboardProjectionTests`: range equality, capped breakdown conservation, nil-versus-zero
   banked-reset inventory, remote encoded-size/page ceilings and three matched 100k/250k/50k
   projection passes.
 - `RemoteProtocolTests` and `RemoteServerIntegrationTests`: additive DTO compatibility, owner-only
   feature and route authorization, URL construction and response ceilings.
-- `RemoteUsageDashboardTests`: deterministic mobile range/chart budgets plus positive, zero and
-  unavailable banked-reset states.
+- `RemoteUsageDashboardTests`: deterministic mobile range/chart budgets, fleet grouping/status,
+  plus positive, zero and unavailable banked-reset states.

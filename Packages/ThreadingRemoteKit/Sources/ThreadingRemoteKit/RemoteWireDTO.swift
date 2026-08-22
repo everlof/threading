@@ -2123,13 +2123,12 @@ public struct RemoteAppThemeUpdateDTO: Codable, Equatable, Sendable {
     }
 }
 
-#if DEBUG
-/// Debug-build-only request sent over the already-authenticated app-events socket.
+/// Local-diagnostics request sent over the already-authenticated app-events socket.
 ///
 /// The request id binds the following REST upload to the paired device that owns this socket.
 /// `screenshotPolicy` is deliberately a closed vocabulary so the phone never accepts an
 /// arbitrary capture instruction from the network.
-public struct RemoteMobileDebugCaptureRequestDTO: Codable, Equatable, Sendable {
+public struct RemoteMobileDiagnosticsCaptureRequestDTO: Codable, Equatable, Sendable {
     public enum ScreenshotPolicy: String, Codable, Equatable, Sendable {
         case none
         case latestIncident
@@ -2141,7 +2140,7 @@ public struct RemoteMobileDebugCaptureRequestDTO: Codable, Equatable, Sendable {
     public let screenshotPolicy: ScreenshotPolicy
 
     public init(requestID: String, screenshotPolicy: ScreenshotPolicy) {
-        self.type = "mobileDebugCaptureRequest"
+        self.type = "mobileDiagnosticsCaptureRequest"
         self.requestID = requestID
         self.screenshotPolicy = screenshotPolicy
     }
@@ -2151,8 +2150,9 @@ public struct RemoteMobileDebugCaptureRequestDTO: Codable, Equatable, Sendable {
 ///
 /// This intentionally reuses the content-free diagnostic record vocabulary. It does not carry
 /// prompts, terminal output, paths, URLs, bearer tokens, notification text, or arbitrary log
-/// strings. The screenshot is the sole visual-content exception and exists only in Debug builds.
-public struct RemoteMobileDebugCaptureDTO: Codable, Equatable, Sendable {
+/// strings. The screenshot is the sole visual-content exception and requires the phone's
+/// separate automatic-screenshot opt-in when it comes from an error boundary.
+public struct RemoteMobileDiagnosticsCaptureDTO: Codable, Equatable, Sendable {
     public static let currentSchemaVersion = 1
 
     public let schemaVersion: Int
@@ -2209,15 +2209,15 @@ public struct RemoteMobileDebugCaptureDTO: Codable, Equatable, Sendable {
     }
 }
 
-public struct RemoteMobileDebugCaptureUploadRequestDTO: Codable, Equatable, Sendable {
-    public let capture: RemoteMobileDebugCaptureDTO
+public struct RemoteMobileDiagnosticsCaptureUploadRequestDTO: Codable, Equatable, Sendable {
+    public let capture: RemoteMobileDiagnosticsCaptureDTO
 
-    public init(capture: RemoteMobileDebugCaptureDTO) {
+    public init(capture: RemoteMobileDiagnosticsCaptureDTO) {
         self.capture = capture
     }
 }
 
-public struct RemoteMobileDebugCaptureUploadResponseDTO: Codable, Equatable, Sendable {
+public struct RemoteMobileDiagnosticsCaptureUploadResponseDTO: Codable, Equatable, Sendable {
     public let captureID: String
     public let storedAt: String
 
@@ -2226,8 +2226,6 @@ public struct RemoteMobileDebugCaptureUploadResponseDTO: Codable, Equatable, Sen
         self.storedAt = storedAt
     }
 }
-#endif
-
 /// A scoped session-catalogue change. Row-only mutations carry one already-authorised summary so
 /// clients can update in O(changed) work. Structural mutations leave both delta fields nil and
 /// ask the client to fetch its own authoritative `/api/me` snapshot.

@@ -241,13 +241,11 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func extensionPreviewComponentPatch(
     _ arguments: ExtensionComponentPatchArguments, for sessionID: SessionID
   ) -> MCPToolResult
-#if DEBUG
-  func listIOSDebugDevices() -> MCPToolResult
-  func inspectIOSDebug(
-    _ arguments: IOSDebugInspectionArguments,
+  func listIOSDiagnosticDevices() -> MCPToolResult
+  func inspectIOSDiagnostics(
+    _ arguments: IOSDiagnosticsInspectionArguments,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
-#endif
 }
 
 // MARK: - Conversation Repair

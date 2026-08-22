@@ -254,11 +254,9 @@ final class RemoteAppModel: ObservableObject {
     private static let sessionDeltaCoalescingDelay = Duration.milliseconds(50)
     private static let themeEventsHelloDeadline = Duration.seconds(15)
     private static let maximumThemeEventsRecoveryDelay: TimeInterval = 60
-#if DEBUG
-    var mobileDebugAuthenticatedEventsTask: URLSessionWebSocketTask? {
+    var mobileDiagnosticsAuthenticatedEventsTask: URLSessionWebSocketTask? {
         themeEventsDidReceiveHello ? themeEventsTask : nil
     }
-#endif
 
     init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
         self.continuity = continuity
@@ -381,9 +379,7 @@ final class RemoteAppModel: ObservableObject {
         }
         activeHostID = restoredHostID ?? loaded.first?.id
         continuity.setActiveHostID(activeHostID)
-#if DEBUG
-        MobileDebugIncidentRecorder.shared.attach(self)
-#endif
+        MobileDiagnosticsIncidentRecorder.shared.attach(self)
     }
 
     // MARK: - The demo
@@ -2473,9 +2469,7 @@ final class RemoteAppModel: ObservableObject {
                             .attempt: String(connectionRecoveryAttempt + 1),
                         ]) { _, new in new }
                     )
-#if DEBUG
-                    sendMobileDebugHello(on: task)
-#endif
+                    sendMobileDiagnosticsHello(on: task)
                 }
                 if connectionRecoveryAttempt != 0 {
                     connectionRecoveryAttempt = 0
@@ -2511,15 +2505,13 @@ final class RemoteAppModel: ObservableObject {
                     ) {
                         RemoteNotificationBridge.received(event, connectionID: hostID)
                     }
-#if DEBUG
-                case "mobileDebugCaptureRequest":
+                case "mobileDiagnosticsCaptureRequest":
                     if let request = try? JSONDecoder().decode(
-                        RemoteMobileDebugCaptureRequestDTO.self,
+                        RemoteMobileDiagnosticsCaptureRequestDTO.self,
                         from: data
                     ) {
-                        await performMobileDebugCapture(request, hostID: hostID)
+                        await performMobileDiagnosticsCapture(request, hostID: hostID)
                     }
-#endif
                 default:
                     continue
                 }

@@ -1595,8 +1595,7 @@ struct SessionCostArguments: Codable, Sendable {
   }
 }
 
-#if DEBUG
-struct IOSDebugInspectionArguments: Codable, Sendable {
+struct IOSDiagnosticsInspectionArguments: Codable, Sendable {
   let deviceID: String?
   let fresh: Bool?
   let screenshot: String?
@@ -1612,7 +1611,6 @@ struct IOSDebugInspectionArguments: Codable, Sendable {
     self.screenshot = screenshot
   }
 }
-#endif
 
 struct ResumeSessionArguments: Codable, Sendable {
   let sessionID: String?
@@ -2040,8 +2038,7 @@ struct MCPToolResult: Encodable, Sendable {
     return MCPToolResult(content: content, isError: false, structuredContent: nil)
   }
 
-#if DEBUG
-  static func debugEvidence(_ text: String, jpegData: Data?) -> MCPToolResult {
+  static func diagnosticEvidence(_ text: String, jpegData: Data?) -> MCPToolResult {
     var content: [Content] = [.text(text)]
     if let jpegData {
       content.append(
@@ -2050,7 +2047,6 @@ struct MCPToolResult: Encodable, Sendable {
     }
     return MCPToolResult(content: content, isError: false, structuredContent: nil)
   }
-#endif
 
   private enum CodingKeys: String, CodingKey {
     case content, isError, structuredContent
@@ -2488,10 +2484,8 @@ enum MCPTools {
     MCPBuiltInTool.extensionValidateComponentPatch.rawValue
   static let extensionPreviewComponentPatch =
     MCPBuiltInTool.extensionPreviewComponentPatch.rawValue
-#if DEBUG
-  static let listIOSDebugDevices = MCPBuiltInTool.listIOSDebugDevices.rawValue
-  static let inspectIOSDebug = MCPBuiltInTool.inspectIOSDebug.rawValue
-#endif
+  static let listIOSDiagnosticDevices = MCPBuiltInTool.listIOSDiagnosticDevices.rawValue
+  static let inspectIOSDiagnostics = MCPBuiltInTool.inspectIOSDiagnostics.rawValue
 
   static let continuationTools = names(in: .continuation)
   static let displayTools = names(in: .display)
@@ -7151,11 +7145,10 @@ enum MCPTools {
       )
     ),
   ]
-#if DEBUG
     declarations.append(contentsOf: [
     MCPToolDefinition(
-      tool: .listIOSDebugDevices,
-      name: "list_ios_debug_devices",
+      tool: .listIOSDiagnosticDevices,
+      name: "list_ios_diagnostic_devices",
       groupID: "settings-directory",
       family: .settings,
       annotations: MCPToolAnnotations(
@@ -7164,7 +7157,7 @@ enum MCPTools {
         idempotentHint: true,
         openWorldHint: false
       ),
-      title: "List iOS Debug devices",
+      title: "List iOS diagnostic devices",
       detail: "See live and cached paired-iPhone checkup evidence.",
       symbol: "iphone.gen3.radiowaves.left.and.right",
       decodeArguments: { container in
@@ -7173,19 +7166,20 @@ enum MCPTools {
       },
       observesPanel: false,
       executeArguments: { handler, _, _, completion in
-        completion(handler.listIOSDebugDevices())
+        completion(handler.listIOSDiagnosticDevices())
       },
       description: """
-        List paired iPhones known to the Debug evidence bridge. Reports whether each phone is \
+        List paired iPhones known to the opt-in Local diagnostics bridge. Reports whether each \
+        phone is \
         currently connected over its authenticated app-events socket and the timestamp of its \
-        newest bounded evidence capture. Use this before inspect_ios_debug when more than one \
-        iPhone is available. This tool exists only in Debug builds.
+        newest bounded evidence capture. Use this before inspect_ios_diagnostics when more than \
+        one iPhone is available. When the Mac switch is off, explain where the user can enable it.
         """,
       inputSchema: MCPInputSchema(properties: [:], required: [])
     ),
     MCPToolDefinition(
-      tool: .inspectIOSDebug,
-      name: "inspect_ios_debug",
+      tool: .inspectIOSDiagnostics,
+      name: "inspect_ios_diagnostics",
       groupID: "settings-directory",
       family: .settings,
       annotations: MCPToolAnnotations(
@@ -7194,16 +7188,16 @@ enum MCPTools {
         idempotentHint: false,
         openWorldHint: false
       ),
-      title: "Check iOS Debug evidence",
+      title: "Check iOS diagnostics",
       detail: "Inspect fresh or cached iPhone state, diagnostics, and error evidence.",
       symbol: "stethoscope",
       decodeArguments: { container in
-        try container.decodeIfPresent(IOSDebugInspectionArguments.self, forKey: .arguments)
-          ?? IOSDebugInspectionArguments()
+        try container.decodeIfPresent(IOSDiagnosticsInspectionArguments.self, forKey: .arguments)
+          ?? IOSDiagnosticsInspectionArguments()
       },
       observesPanel: false,
       executeArguments: { handler, arguments, _, completion in
-        handler.inspectIOSDebug(arguments, completion: completion)
+        handler.inspectIOSDiagnostics(arguments, completion: completion)
       },
       description: """
         Check up on Threading iOS usage using bounded evidence copied to this Mac by a paired \
@@ -7211,15 +7205,16 @@ enum MCPTools {
         newest cached capture if it is offline or does not answer. Always state whether the \
         result is fresh or cached and how old it is. Diagnostics contain structural connection \
         events, never prompts, terminal output, paths, credentials, or notification text. \
-        screenshot may be "incident" (the default and privacy-preserving), "current" (capture \
+        A screenshot may be "incident" (the default and privacy-preserving), "current" (capture \
         the visible screen now), or "none". Only request "current" when the user explicitly asks \
-        for a current screenshot. This tool exists only in Debug builds.
+        for a current screenshot. Local diagnostics must be enabled independently on the Mac and \
+        iPhone; if either side is off, explain the exact Settings path instead of guessing.
         """,
       inputSchema: MCPInputSchema(
         properties: [
           "device_id": MCPPropertySchema(
             type: .string,
-            description: "Optional device id from list_ios_debug_devices."
+            description: "Optional device id from list_ios_diagnostic_devices."
           ),
           "fresh": MCPPropertySchema(
             type: .boolean,
@@ -7234,7 +7229,6 @@ enum MCPTools {
       )
     ),
     ])
-#endif
     return declarations
   }()
 

@@ -916,14 +916,16 @@ no work at all.
   `MCPDefaults.hookMarker`, and removes only those on uninstall. This machine's own
   `~/.codex/hooks.json` was written by another tool, which is why that is a rule and not a
   nicety.
-- **The pre-rename marker is ours too, but a known old command is not rewritten.** The product
-  rename changed the launch environment from `SKALMAN_*` to `THREADING_*` and the marker from
-  `# skalman-lifecycle` to `# threading-lifecycle`. Codex trusts the hash of the command text,
-  so replacing a working old command would revoke the approval needed to fix the activity bug.
-  Launches with the integration enabled export both vocabularies with identical values instead;
-  the installer recognises the exact commands the old release generated and leaves them
-  byte-for-byte intact. An unknown
-  command carrying the old marker is still replaced, and uninstall removes either generation.
+- **The pre-rename marker is ours too, and everything carrying it is replaced.** The rename
+  changed the marker from `# skalman-lifecycle` to `# threading-lifecycle`. For a while the
+  launch also exported `SKALMAN_*` aliases beside `THREADING_*` so that an old command, trusted
+  by the hash of its text, kept working without a rewrite. Those aliases are gone: nothing read
+  them any more, and every launch paid for them in duplicated environment words. So an old
+  command now points at an address nothing answers on, and is rewritten to the current one —
+  a hook that is trusted and broken is worse than one the user re-approves. The old marker
+  stays *admitted*, though, because that is what makes such an entry recognisable as ours;
+  stop admitting it and it is stranded in the user's file for ever. Uninstall removes either
+  generation.
   `AppSettings` carries the old install opt-in only when the current domain has no choice. It
   also carries an old trust-bypass `true` while installation remains enabled: that is the same
   explicit launch posture the user chose before the bundle-id rename, not a new default. Any

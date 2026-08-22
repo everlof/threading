@@ -169,9 +169,9 @@ struct JSONRPCResponse: Encodable, Sendable {
 /// hopping to main, and the cross-queue values (`port`, `socketPath`) have their own locks.
 ///
 /// **Two endpoints, one handler.** A loopback TCP port carries `--mcp-config`, because a CLI
-/// resolves that URL itself and cannot be handed a socket. A unix socket in an owner-only
-/// directory carries the hooks, because a hook command is *ours* and a socket path is the one
-/// address that survives a restart. Both accept the same requests through the same
+/// resolves that URL itself and cannot be handed a socket. Hooks prefer a unix socket in an
+/// owner-only directory, because a hook command is *ours* and a socket path is the one address
+/// that survives a restart; they retry TCP when it is unavailable. Both accept requests through the same
 /// `MCPConnection`, which speaks HTTP over an `NWConnection` and neither knows nor cares which
 /// transport carried it. The TCP endpoint retires once the stdio shim replaces `--mcp-config`.
 final class MCPServer: @unchecked Sendable {
@@ -232,9 +232,9 @@ final class MCPServer: @unchecked Sendable {
 
     /// The unix rendezvous this server is bound to, or nil when it is not listening on one.
     ///
-    /// Deliberately not the address hooks are written against — that is
+    /// Deliberately not the address hooks receive as their preferred route — that is
     /// `MCPBridgeLocation.socketPath`, which answers before anything binds. This says what the
-    /// listener actually got, which is a different question and only a test asks it.
+    /// listener actually got, and is the only value allowed to select the stdio bridge.
     var socketPath: String? {
         socketPathStorage.withLock { $0 }
     }
@@ -266,11 +266,19 @@ final class MCPServer: @unchecked Sendable {
             return
         }
 
-        let completionState = OSAllocatedUnfairLock<Bool>(initialState: false)
-        let finish: @Sendable () -> Void = {
-            let shouldFinish = completionState.withLock { hasCompleted in
-                guard !hasCompleted else { return false }
-                hasCompleted = true
+        struct StartupState {
+            var tcpSettled = false
+            var socketSettled = false
+            var completionDelivered = false
+        }
+        let completionState = OSAllocatedUnfairLock(initialState: StartupState())
+        let settle: @Sendable (_ tcp: Bool) -> Void = { tcp in
+            let shouldFinish = completionState.withLock { state in
+                if tcp { state.tcpSettled = true } else { state.socketSettled = true }
+                guard state.tcpSettled, state.socketSettled, !state.completionDelivered else {
+                    return false
+                }
+                state.completionDelivered = true
                 return true
             }
             guard shouldFinish else { return }
@@ -297,14 +305,14 @@ final class MCPServer: @unchecked Sendable {
             ThreadingLogger.mcp.info(
                 "MCP server listening on port \(listener.port?.rawValue ?? 0, privacy: .public)"
             )
-                    finish()
+                    settle(true)
 
                 case .failed(let error):
             ThreadingLogger.mcp.error(
                 "MCP server failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
                     self?.portStorage.withLock { $0 = nil }
-                    finish()
+                    settle(true)
 
                 default:
                     break
@@ -320,13 +328,13 @@ final class MCPServer: @unchecked Sendable {
             ThreadingLogger.mcp.error(
                 "MCP server could not start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            finish()
+            settle(true)
         }
 
-        // Deliberately not tied to `completion`. The socket is the hooks' address and the hooks
-        // are written from a path, not from a bound listener, so a launch has nothing to wait
-        // for here — and a rendezvous that could not be bound must not hold up the window.
-        startSocketListener()
+        // A launch chooses stdio only from the path this listener actually published. Waiting for
+        // the outcome, not for success, keeps failure non-blocking while making the transport
+        // decision truthful.
+        startSocketListener { settle(false) }
     }
 
     @MainActor
@@ -367,14 +375,33 @@ final class MCPServer: @unchecked Sendable {
     /// that cannot be created, a bind that is refused — each logs and returns, leaving the TCP
     /// listener carrying the whole surface exactly as it did before this endpoint existed.
     @MainActor
-    private func startSocketListener() {
-        guard socketListener == nil else { return }
+    private func startSocketListener(settled: @escaping @Sendable () -> Void) {
+        guard socketListener == nil else {
+            settled()
+            return
+        }
+
+        let settledState = OSAllocatedUnfairLock<Bool>(initialState: false)
+        let finish: @Sendable () -> Void = {
+            let shouldFinish = settledState.withLock { delivered in
+                guard !delivered else { return false }
+                delivered = true
+                return true
+            }
+            if shouldFinish { settled() }
+        }
 
         let requested = configuredSocketPath ?? MCPBridgeLocation.socketPath
-        guard let path = MCPBridgeLocation.addressableSocketPath(requested) else { return }
+        guard let path = MCPBridgeLocation.addressableSocketPath(requested) else {
+            finish()
+            return
+        }
 
         let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
-        guard MCPBridgeLocation.prepareDirectory(directory) else { return }
+        guard MCPBridgeLocation.prepareDirectory(directory) else {
+            finish()
+            return
+        }
 
         // A bind fails outright against a leftover file, and after a crash there is always one.
         // Removing it is safe because `SingleInstanceLock` means the only process that could be
@@ -394,12 +421,17 @@ final class MCPServer: @unchecked Sendable {
                 case .ready:
                     self?.socketPathStorage.withLock { $0 = path }
                     ThreadingLogger.mcp.info("MCP server listening on its unix rendezvous")
+                    finish()
 
                 case .failed(let error):
                     ThreadingLogger.mcp.error(
                         "MCP unix listener failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
                     )
                     self?.socketPathStorage.withLock { $0 = nil }
+                    finish()
+
+                case .cancelled:
+                    finish()
 
                 default:
                     break
@@ -416,6 +448,7 @@ final class MCPServer: @unchecked Sendable {
                 "MCP unix listener could not start: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             socketListener = nil
+            finish()
         }
     }
 
