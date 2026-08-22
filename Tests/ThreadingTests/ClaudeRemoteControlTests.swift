@@ -140,26 +140,23 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: SessionID(),
             brokersPermissions: false,
             reportsLifecycle: true,
-            fastMode: nil,
-            listenerPort: 4_321
+            fastMode: nil
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
         XCTAssertNil(try settingsJSON(at: path)["fastMode"])
     }
 
-    /// Deferring writes no key at all. Asserted through whatever the file turns out to be, since
-    /// a host with no MCP listener writes nothing for a session with nothing else to say.
+    /// Deferring writes no key at all — while the hooks the session did ask for are written
+    /// regardless, because their address is a socket path rather than a bound listener.
     func testDeferringWritesNoKey() throws {
         let sessionID = SessionID()
-        let path = MCPSessionRegistry.writeHookSettings(
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
             for: sessionID,
             brokersPermissions: false,
             reportsLifecycle: true,
             remoteControl: nil
-        )
-
-        guard let path else { return }
+        ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
         let settings = try settingsJSON(at: path)
@@ -174,8 +171,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: sessionID,
             brokersPermissions: true,
             reportsLifecycle: true,
-            remoteControl: false,
-            listenerPort: 4_321
+            remoteControl: false
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
@@ -193,8 +189,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: sessionID,
             brokersPermissions: false,
             reportsLifecycle: true,
-            statusLineOverride: "{ bridge ; } >/dev/null 2>&1",
-            listenerPort: 4_321
+            statusLineOverride: "{ bridge ; } >/dev/null 2>&1"
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
@@ -241,8 +236,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: sessionID,
             brokersPermissions: false,
             reportsLifecycle: true,
-            remoteControl: false,
-            listenerPort: 4_321
+            remoteControl: false
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
@@ -251,8 +245,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: sessionID,
             brokersPermissions: false,
             reportsLifecycle: false,
-            remoteControl: nil,
-            listenerPort: 4_321
+            remoteControl: nil
         ))
         XCTAssertFalse(FileManager.default.fileExists(atPath: path))
     }
@@ -276,8 +269,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: SessionID(),
             brokersPermissions: true,
             reportsLifecycle: false,
-            remoteControl: false,
-            listenerPort: 4_321
+            remoteControl: false
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
@@ -291,8 +283,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: SessionID(),
             brokersPermissions: false,
             reportsLifecycle: true,
-            remoteControl: false,
-            listenerPort: 4_321
+            remoteControl: false
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
@@ -314,8 +305,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: SessionID(),
             brokersPermissions: false,
             reportsLifecycle: true,
-            remoteControl: false,
-            listenerPort: 4_321
+            remoteControl: false
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
@@ -343,8 +333,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: SessionID(),
             brokersPermissions: true,
             reportsLifecycle: true,
-            remoteControl: false,
-            listenerPort: 4_321
+            remoteControl: false
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
@@ -370,8 +359,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
             for: SessionID(),
             brokersPermissions: false,
             reportsLifecycle: true,
-            remoteControl: false,
-            listenerPort: 4_321
+            remoteControl: false
         ))
         addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
 
@@ -387,6 +375,70 @@ final class ClaudeRemoteControlTests: XCTestCase {
                 "\(name) must report the ask closing"
             )
         }
+    }
+
+    /// Every hook posts over the unix rendezvous, quoted on both halves.
+    ///
+    /// The path is quoted because it contains `Application Support`; the URL is quoted because a
+    /// lifecycle report's `?event=` is a shell glob character where it sits. And no hook may
+    /// name the loopback host any more — the socket is the address that survives a restart.
+    func testHooksPostOverTheUnixSocketRatherThanTheLoopbackPort() throws {
+        let socketPath = "/tmp/threading tests/mcp.sock"
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: true,
+            reportsLifecycle: true,
+            socketPath: socketPath
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let hooks = try XCTUnwrap(try settingsJSON(at: path)["hooks"] as? [String: Any])
+        let commands = hooks.values
+            .compactMap { $0 as? [[String: Any]] }
+            .flatMap { $0.flatMap(commands(in:)) }
+
+        XCTAssertFalse(commands.isEmpty)
+        for command in commands {
+            XCTAssertTrue(
+                command.contains("--unix-socket '\(socketPath)'"),
+                "a hook did not post over the rendezvous: \(command)"
+            )
+            XCTAssertTrue(command.contains("'\(MCPDefaults.socketURLBase)"))
+            XCTAssertFalse(
+                command.contains("http://\(MCPDefaults.host):"),
+                "a hook still addresses the per-launch loopback port: \(command)"
+            )
+        }
+    }
+
+    /// The branch this replaced: a session used to launch with **no hooks at all** when the
+    /// listener had not bound a port yet, which silently cost it accurate activity and, for a
+    /// rendered session, blocked its tools with no card to approve them. A socket path answers
+    /// before any listener exists, so there is nothing left to be unavailable.
+    func testHooksAreWrittenWithNoListenerAtAll() throws {
+        // The hosted test process starts no listener of its own; another class may have left
+        // one running, in which case this says nothing and skips rather than passing hollowly.
+        try XCTSkipUnless(MCPServer.shared.port == nil, "an MCP listener is already bound")
+
+        let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: true,
+            reportsLifecycle: true
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+        let hooks = try XCTUnwrap(try settingsJSON(at: path)["hooks"] as? [String: Any])
+        XCTAssertFalse(hooks.isEmpty)
+        XCTAssertNotNil(hooks["PreToolUse"])
+    }
+
+    /// Writing hooks unconditionally must not turn "no hooks requested" into a file.
+    func testNothingRequestedStillWritesNothing() {
+        XCTAssertNil(MCPSessionRegistry.writeHookSettings(
+            for: SessionID(),
+            brokersPermissions: false,
+            reportsLifecycle: false
+        ))
     }
 
     /// The commands one `hooks` entry runs.

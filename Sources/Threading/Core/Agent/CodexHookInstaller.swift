@@ -19,8 +19,15 @@ import Foundation
 ///   identical rewrite is not merely wasteful — a changed file is an untrusted file, and the
 ///   hooks would silently stop running until the user reviewed them again.
 ///
-/// That last rule is what the environment variables in the command are for. A URL carrying
-/// today's port would change every launch and invalidate the trust every launch.
+/// That last rule is what the session token's environment variable is for. A URL carrying a
+/// per-session token would change every launch and invalidate the trust every launch.
+///
+/// **The rendezvous is now a literal, and that is a one-time trust renewal.** These commands
+/// used to interpolate `$THREADING_MCP_PORT` for the same stability reason, because a loopback
+/// port is minted per launch. The unix socket is a fixed path under this user's Application
+/// Support, so it is written into the file directly — after which the text stops changing
+/// again. A user upgrading past this change has to approve their Codex hooks once more; the
+/// `EventLog` line at the rewrite says so.
 enum CodexHookInstaller {
     static let maximumHooksBytes = 4 * 1024 * 1024
 
@@ -155,7 +162,7 @@ enum CodexHookInstaller {
     /// is the *unrouted* sessions, the user's own, that would take that cost. Reading first also
     /// keeps the two paths identical in what they consume.
     static func command(for event: HookLifecycleEvent) -> String {
-        let url = "http://\(MCPDefaults.host):$\(MCPDefaults.portEnvironmentKey)"
+        let url = "\(MCPDefaults.socketURLBase)"
             + "\(MCPDefaults.lifecyclePathPrefix)$\(MCPDefaults.sessionTokenEnvironmentKey)"
             + "?\(MCPDefaults.lifecycleEventParameter)=\(event.rawValue)"
 
@@ -166,6 +173,7 @@ enum CodexHookInstaller {
             + " [ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] &&"
             + " printf '%s' \"$\(Key.payloadVariable)\" |"
             + " curl -s --max-time \(Int(timeout))"
+            + " \(socketTransport)"
             + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\""
             + " >/dev/null 2>&1; true \(MCPDefaults.hookMarker)"
     }
@@ -182,15 +190,25 @@ enum CodexHookInstaller {
     /// answer. Exporting the variable for one surface and not the other is what scopes a shared
     /// file to a single surface. Saying nothing leaves Codex's normal flow untouched.
     static func permissionCommand() -> String {
-        let url = "http://\(MCPDefaults.host):$\(MCPDefaults.portEnvironmentKey)"
+        let url = "\(MCPDefaults.socketURLBase)"
             + "\(MCPDefaults.permissionPathPrefix)$\(MCPDefaults.sessionTokenEnvironmentKey)"
 
         return "\(Key.payloadVariable)=$(cat);"
             + " [ -n \"$\(MCPDefaults.brokerEnvironmentKey)\" ] &&"
             + " printf '%s' \"$\(Key.payloadVariable)\" |"
             + " curl -s --max-time \(Int(MCPDefaults.permissionTimeout))"
+            + " \(socketTransport)"
             + " -H 'Content-Type: application/json' --data-binary @- \"\(url)\";"
             + " true \(MCPDefaults.hookMarker)"
+    }
+
+    /// The `--unix-socket` word both commands carry.
+    ///
+    /// Quoted, because the path contains `Application Support`. This is the only part of the
+    /// text that is not fixed at compile time, and it is fixed for a given user — which is what
+    /// keeps `hooks.json` stable across launches.
+    private static var socketTransport: String {
+        "--unix-socket \(MCPBridgeLocation.shellQuoted(MCPBridgeLocation.socketPath))"
     }
 
     static func hooksFile(inCodexHome codexHome: String) -> URL {

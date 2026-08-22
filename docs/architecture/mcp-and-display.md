@@ -8,16 +8,50 @@ Threading hosts an MCP server and registers it with each Claude or Codex session
 which is how an agent reaches the GUI it is running inside. The terminal stays the input
 surface; the display panel becomes the output surface for anything the terminal renders badly.
 
-The transport is HTTP over a loopback port (`NWListener`, no dependency, no entitlement — the
-app is unsandboxed already). stdio was the alternative and is worse here: it spawns a child
-that would then have to find its way back to the running app, when the app is already alive
-and already owns the routing table.
+The transport is HTTP (`NWListener`, no dependency, no entitlement — the app is unsandboxed
+already) over **two endpoints that share one handler**. stdio was the alternative for the tool
+channel and is worse as the *only* transport here: it spawns a child that would then have to
+find its way back to the running app, when the app is already alive and already owns the
+routing table.
+
+- **A loopback TCP port** (`port: .any` on `127.0.0.1`), which is what `--mcp-config` and
+  Codex's one-run `mcp_servers` override carry. A CLI resolves that URL itself and cannot be
+  handed a socket, so this endpoint stays until the stdio shim replaces the tool channel.
+- **A unix socket** at `~/Library/Application Support/Threading/bridge/mcp.sock`, in a `0700`
+  directory, which is what the hooks post to. Two things follow from a path instead of a port,
+  and both are the point. It is **stable**: a port is minted per launch, so anything addressed
+  by one — a hook command, a `hooks.json` Codex trusts by its text — was addressed to a single
+  run of the app. And it is **tighter**: a loopback port is reachable by any local process that
+  guesses a token, while an owner-only directory is not.
+
+`MCPBridgeLocation` owns both the socket path and the token file beside it, and resolves them
+through `StateManager`'s hosted-test redirect, so a test bundle running inside the shipping app
+neither binds the developer's socket nor rewrites their tokens. A path over 103 bytes cannot fit
+`sockaddr_un.sun_path`; that case logs, skips the unix listener, and leaves TCP carrying
+everything, because an app broken by a long user name would be worse than the bug the rendezvous
+fixes. `MCPServer.socketPath` reports what actually bound — a different question from
+`MCPBridgeLocation.socketPath`, which answers before any listener exists and is what the hooks
+are written against.
 
 **Session routing is the whole design.** `MCPSessionRegistry` mints a per-session token and
 `AgentLauncher` passes a URL embedding it through Claude's `--mcp-config` file or Codex's
 one-run `mcp_servers` overrides, so a tool call arrives already attributed — the URL *is* the
 identity. `AgentSession.id` is the key, not
 `agentSessionID`, which is nil for Codex until discovery.
+
+**The token is durable**, and that is what makes a hook's address outlive one launch. It used to
+live in an in-memory dictionary documented as stable for the app's lifetime, so a report arriving
+after a restart — or during one, before the listener was up — carried a token nothing recognised
+and was dropped. `MCPSessionTokenStore` persists the map to
+`…/Threading/bridge/session-tokens.json`, `0600` inside the `0700` directory, loaded once on the
+first registry call and rewritten on every mint and every revocation. A token is minted once per
+session and rotated only when the session is deleted; `retainOnly` runs with the live session set
+and *replaces* the file, which is also what bounds it. It stays a random UUID rather than
+anything derived from the session id, for the reason the registry header gives: the id is written
+to disk in readable places and the token is the only thing guarding the endpoint. An ad-hoc
+endpoint's token is deliberately never written down — a helper run is one run. A file this build
+cannot read is quarantined (`.unreadable-<uuid>`) and the launch mints fresh, rather than being
+interpreted as empty and overwritten; a single unparsable row is skipped and the rest still load.
 
 Grok native Chat receives the same private endpoint through ACP's `mcpServers` member on
 `session/new` and `session/load`. This is per-process and per-session, so no `.mcp.json` or user
@@ -861,10 +895,17 @@ host has asked for it.
 `MCPServer` calls its handler on the main queue, because neither `ProjectStore`, `AgentRuntime`
 nor AppKit is thread-safe. Everything arriving off the network hops before touching them.
 
-The listener must be ready before any launch, since a launch reads the port — so
+The TCP listener must be ready before any launch, since `--mcp-config` reads the port — so
 `AppDelegate` defers `restoreSelectedSession()` to the `start` callback. That callback fires
 whether the listener came up or not: a failed server costs sessions their panel, not their
 launch (`mcpFlags` returns "" and the command line is unchanged).
+
+**The unix listener is deliberately outside that gate.** `start` kicks it off and does not wait
+for it, because nothing a launch writes depends on it having bound: the hooks are written from a
+path, not from a listener. That is what deleted `writeHookSettings`' worst branch — a session
+launched before the port arrived used to get *no hooks at all*, which silently cost it accurate
+activity and, for a rendered session, blocked its tools with no card to approve them. There is no
+longer a case where a session that asked for hooks does not get them.
 
 **Tab order belongs to the user's hand.** The strip is `ThemedTabStripView` (the design
 system's, shared with every tab host) and tabs reorder by drag or by the chip's

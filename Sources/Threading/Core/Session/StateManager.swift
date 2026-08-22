@@ -61,14 +61,18 @@ final class StateManager {
     /// tests reach through `ProjectStore.shared`, exactly as `PreferenceStore` covers
     /// `UserDefaults.standard`. The redirect is deliberately unconditional rather than opt-in: a
     /// test that has to remember to isolate itself is one crash away from taking the store with it.
-    static let isHostedTest = NSClassFromString("XCTestCase") != nil
+    ///
+    /// `nonisolated` because the redirect has to answer from wherever state is resolved, and not
+    /// all of it is resolved on main: `MCPBridgeLocation` reads it from the MCP queue while a
+    /// hook's token is being looked up.
+    nonisolated static let isHostedTest = NSClassFromString("XCTestCase") != nil
 
     /// The per-process scratch directory a hosted test gets instead of the user's state.
     ///
     /// Keyed by pid because several test runs share this machine — this repository is worked on
     /// by concurrent agents — and two runs sharing one store would reintroduce the very
     /// two-writer race this redirect exists to remove.
-    private static var hostedTestDirectoryName: String {
+    nonisolated private static var hostedTestDirectoryName: String {
         "Threading-HostedTestState-\(ProcessInfo.processInfo.processIdentifier)"
     }
 
@@ -148,7 +152,7 @@ final class StateManager {
 
     // MARK: - Hosted Test State
 
-    static func hostedTestDirectory(fileManager: FileManager = .default) -> URL {
+    nonisolated static func hostedTestDirectory(fileManager: FileManager = .default) -> URL {
         fileManager.temporaryDirectory
             .appendingPathComponent(hostedTestDirectoryName, isDirectory: true)
     }
