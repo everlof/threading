@@ -357,6 +357,23 @@ struct MobileIssueReportView: View {
                         ),
                         dismissReport: true
                     )
+                case .saved:
+                    MobileDiagnostics.record(
+                        .issueReportSubmissionDeferred,
+                        fields: [
+                            .reason: request.trigger.rawValue,
+                            .result: "saved",
+                            .surface: "developerInbox",
+                        ]
+                    )
+                    notice = Notice(
+                        title: MobileL10n.string("Report saved"),
+                        message: MobileL10n.string(
+                            "This build has no report service configured. The report is saved "
+                                + "securely on this device; use Share report to send it."
+                        ),
+                        dismissReport: true
+                    )
                 }
             } catch {
                 MobileDiagnostics.record(
@@ -543,6 +560,9 @@ private enum MobileIssueReportError: LocalizedError {
     case outboxFull
     case unreadableResponse
     case serviceRejected(Int)
+    /// This build states no intake, so nothing is posted. Reached only by a caller that asked to
+    /// deliver anyway; the ordinary paths return `saved` before they get here.
+    case deliveryNotConfigured
 
     var errorDescription: String? {
         switch self {
@@ -560,12 +580,16 @@ private enum MobileIssueReportError: LocalizedError {
             return MobileL10n.string("The report service returned an unreadable response.")
         case .serviceRejected(let status):
             return MobileL10n.string("The report service returned HTTP %lld.", status)
+        case .deliveryNotConfigured:
+            return MobileL10n.string(
+                "This build has no report service configured, so the report was kept on this device."
+            )
         }
     }
 
     var shouldRemainQueued: Bool {
         switch self {
-        case .unreadableResponse:
+        case .unreadableResponse, .deliveryNotConfigured:
             return true
         case .serviceRejected(let status):
             return status == 408 || status == 429 || status >= 500
@@ -628,6 +652,9 @@ private extension UIImage {
 fileprivate enum MobileIssueReportDeliveryResult {
     case delivered(PublicIssueReportReceiptDTO)
     case queued
+    /// Written and kept, with no attempt made: this build states no intake. Distinct from
+    /// `queued`, which means an attempt was made and will be repeated.
+    case saved
 }
 
 /// A disk-backed handoff between the consent screen and the public intake.
@@ -657,7 +684,7 @@ actor MobileIssueReportOutbox {
     private static let maximumRetryDelay: TimeInterval = 15 * 60
 
     private let directory: URL
-    private let endpoint: URL
+    private let endpoint: URL?
     private var activeReportIDs: Set<String> = []
     private var retryAttempts: [String: Int] = [:]
     private var retryAfter: [String: Date] = [:]
@@ -672,16 +699,35 @@ actor MobileIssueReportOutbox {
             .appendingPathComponent("Threading", isDirectory: true)
             .appendingPathComponent("IssueReports", isDirectory: true)
             .appendingPathComponent("Outbox", isDirectory: true),
-        endpoint: URL? = nil
+        endpoint: URL? = nil,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
     ) {
         self.directory = directory
-        let configuredEndpoint = Bundle.main.object(
-            forInfoDictionaryKey: "ThreadingReportIntakeURL"
-        ) as? String
-        self.endpoint = endpoint
-            ?? configuredEndpoint.flatMap { $0.isEmpty ? nil : URL(string: $0) }
-            ?? URL(string: "https://remote.threading.codes/v1/reports")!
+        self.endpoint = endpoint ?? Self.configuredEndpoint(infoDictionary: infoDictionary)
     }
+
+    /// The intake this build states, or nothing.
+    ///
+    /// **An endpoint is stated or absent, never assumed**, which is the rule the Mac already
+    /// follows and the one this side was breaking. It carried a compiled-in
+    /// `https://remote.threading.codes/v1/reports` fallback, and that host is not serving the
+    /// intake: its DNS is the registrar's parking record, and the address behind it answers a TLS
+    /// ClientHello with a handshake_failure alert and no certificate at all. That is `url.-1200`,
+    /// in a few hundred milliseconds, on every network — which is exactly what the 2026-08-21
+    /// report contains, 250 times, with not one success anywhere in the journal.
+    ///
+    /// So the fallback was not a safety net; it was a guess that could only ever fail, and it
+    /// spent the phone's radio and the report's own bounded journal ring proving it. A build that
+    /// states no endpoint now writes its record and posts nothing, and setting the Info.plist key
+    /// is a release-checklist item exactly as it is for the Mac.
+    nonisolated static func configuredEndpoint(
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
+    ) -> URL? {
+        (infoDictionary?["ThreadingReportIntakeURL"] as? String)
+            .flatMap { $0.isEmpty ? nil : URL(string: $0) }
+    }
+
+    nonisolated static var isDeliveryConfigured: Bool { configuredEndpoint() != nil }
 
     fileprivate func enqueueAndDeliver(
         _ submission: PublicIssueReportSubmissionDTO
@@ -699,6 +745,7 @@ actor MobileIssueReportOutbox {
 
         let encoded = try JSONEncoder().encode(submission)
         try encoded.write(to: destination, options: [.atomic, .completeFileProtection])
+        guard endpoint != nil else { return .saved }
         do {
             // A person tapping Send is a fresh instruction, so this attempt is made now whatever
             // an automatic retry is currently waiting out.
@@ -732,6 +779,9 @@ actor MobileIssueReportOutbox {
     /// Best-effort retry used at launch and whenever the app becomes active. Unknown delivery is
     /// not surfaced here; the next retry uses the same report id and receives the same reference.
     func flush() async {
+        // Nothing to flush towards. A build that states no intake keeps its records and makes no
+        // attempt, rather than posting them at an address nobody chose.
+        guard endpoint != nil else { return }
         do {
             try prepareDirectory()
         } catch {
@@ -848,6 +898,7 @@ actor MobileIssueReportOutbox {
     ) async throws -> PublicIssueReportReceiptDTO {
         // Encoding is local preparation, not a network attempt. Complete it before emitting the
         // started record so every started delivery has exactly one terminal connectivity record.
+        guard let endpoint else { throw MobileIssueReportError.deliveryNotConfigured }
         let body = try JSONEncoder().encode(submission)
         let timeout: TimeInterval = 30
         let startedAt = MobileDiagnostics.monotonicNow()

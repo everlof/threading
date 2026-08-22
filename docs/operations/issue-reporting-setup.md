@@ -27,6 +27,15 @@ production Cloudflare account has been inspected.
   and confirm a release build reports a receipt rather than **saved**. There is deliberately no
   compiled-in fallback: a build that states no endpoint writes its record and posts nothing, so
   omitting this key ships an app whose reports never leave the user's Mac.
+- [ ] Do the same for `Sources/ThreadingMobile-Info.plist`. The iPhone app follows the identical
+  rule and has no fallback either. It used to have one, aimed at `remote.threading.codes` before
+  that host was serving anything, and the 2026-08-21 support report is 250 deliveries that could
+  only ever fail against a parked domain's TLS.
+- [ ] Confirm the intake host actually resolves to the Worker before shipping a build that names
+  it: `openssl s_client -connect <host>:443 -servername <host>` must present a certificate.
+  A registrar parking record answers a ClientHello with `handshake_failure` and no certificate,
+  which reaches the app as `URLError(-1200)` and is indistinguishable in a report from a genuine
+  TLS problem on the user's network.
 
 ## Abuse and availability
 

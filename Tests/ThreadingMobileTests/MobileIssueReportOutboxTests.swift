@@ -167,6 +167,66 @@ final class MobileIssueReportOutboxTests: XCTestCase {
         )
     }
 
+    /// An endpoint is stated or absent, never assumed. This side carried a compiled-in
+    /// `remote.threading.codes` fallback, and that host is not serving the intake: its DNS is the
+    /// registrar's parking record and the address behind it answers a TLS ClientHello with a
+    /// handshake_failure alert and no certificate. That is the `url.-1200` in the 2026-08-21
+    /// report, 250 times, with not one delivery anywhere in the journal.
+    func testAnIntakeIsStatedOrAbsentAndNeverAssumed() {
+        XCTAssertNil(
+            MobileIssueReportOutbox.configuredEndpoint(infoDictionary: [:]),
+            "no compiled-in fallback: a build that states no endpoint delivers nothing"
+        )
+        XCTAssertNil(
+            MobileIssueReportOutbox.configuredEndpoint(
+                infoDictionary: ["ThreadingReportIntakeURL": ""]
+            ),
+            "an empty key states nothing"
+        )
+        XCTAssertEqual(
+            MobileIssueReportOutbox.configuredEndpoint(
+                infoDictionary: ["ThreadingReportIntakeURL": "https://intake.example/v1/reports"]
+            ),
+            URL(string: "https://intake.example/v1/reports")
+        )
+    }
+
+    /// A build with no intake keeps its record and makes no attempt, rather than spending
+    /// handshakes and journal records on an address nobody chose.
+    func testWithNoIntakeTheReportIsKeptAndNothingIsAttempted() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "mobile-issue-outbox-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let reportID = UUID().uuidString.lowercased()
+        try JSONEncoder().encode(try submission(id: reportID, directory: directory)).write(
+            to: directory.appendingPathComponent("\(reportID).json"),
+            options: .atomic
+        )
+        let outbox = MobileIssueReportOutbox(
+            directory: directory,
+            endpoint: nil,
+            infoDictionary: [:]
+        )
+
+        await outbox.flush()
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("\(reportID).json").path
+            ),
+            "the report is kept, exportable, and not thrown away"
+        )
+        XCTAssertTrue(
+            MobileDiagnostics.journal.records().allSatisfy {
+                $0.fields[RemoteDiagnosticField.trace.rawValue] != reportID
+            },
+            "no attempt was made, so there is no delivery record to write"
+        )
+    }
+
     func testShareArchiveContainsEveryPreparedReportFile() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "mobile-issue-archive-\(UUID().uuidString)",

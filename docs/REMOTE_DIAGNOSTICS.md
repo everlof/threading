@@ -55,8 +55,12 @@ LAN and VPN each use one lane; Tailscale may use two so IPv4 and IPv6 doors do n
 other. A door and its ten-port sticky range remain one sequential bounded walk inside a lane.
 Paired `hostRouteStarted` / `hostRouteEnded` records own each lifecycle;
 bounded `hostRouteProgress` records name the coarse hosted stages. Each route records `phase`,
-`attempt`/`total`, configured
-`timeoutMS`, monotonic `durationMS`, structural error/status, and terminal result. A walk that
+`attempt`/`total`, `wave`, configured
+`timeoutMS`, monotonic `durationMS`, structural error/status, and terminal result. `wave` is one of
+three fixed tokens — `route`, `address`, `port` — naming which pass of the walk the attempt belongs
+to. `attempt` alone cannot say why a walk was long: twenty attempts against one address nothing was
+listening at, and twenty attempts against twenty addresses, look identical without it, and telling
+them apart was the whole of the 2026-08-21 diagnosis. A walk that
 abandons the rest of a door adds one `hostRouteEnded` with `result: skipped`, the `reason` it
 ended (`door.answered` or `door.unreachable`), the failure code behind it, and in `detail` the number of
 attempts it stood in for — one record per door, never one per skipped port, so an early stop reads
