@@ -1,13 +1,18 @@
 # Durable sessions
 
-> Status: **feature draft, low priority** (2026-08-21). Nothing scheduled. The durability work is in
-> two parts and only the second is expensive: a **reconnectable bridge** that stops a session's
-> hooks, permissions and MCP tools from being bound to one app launch, and a **PTY host** that
-> lets the agent process outlive the app entirely. Part one stands alone, is small, and fixes
-> real degradation today; part two is a new always-on process and a rewrite of how
-> `TerminalSession` owns its child, and should not start until part one has shipped and settled.
-> A third slice — the viewport lease's grace period (§5) — depends on neither and is the
-> cheapest thing here: a timer and a device key in the mirror registry.
+> Status: **part one shipped, part two a draft** (2026-08-22). Shipped, each on its own commit:
+> the viewport lease's grace period (§5, `2eae9053`); durable per-session tokens and the unix
+> rendezvous (§3a–b, `9484d12d`); the `threading-mcp-bridge` stdio shim (§3c, `20b47f97`) and its
+> launch wiring for Claude, Codex and ACP behind the hidden `mcpStdioBridgeEnabled` setting,
+> **default off** (`4b87cd52`, `0508a42d`). Two decisions moved as they landed, and the
+> architecture documents carry them: hooks take both routes from the environment
+> (`MCPDefaults.hookPostCommand` — the socket first, the loopback port as the retry) rather than a
+> literal path, and `MCPServer.start` settles both listener outcomes so a launch selects the bridge
+> only from the path that actually bound. The second hop was measured rather than assumed
+> ([`performance.md`](../architecture/performance.md)): a small reply costs 0.4 ms through the
+> bridge; the 234 KB `tools/list` costs 30 ms against 5 ms direct, once or twice per session.
+> Next is step 3 of §9 — make the bridge the default, then retire the TCP endpoint. The **PTY
+> host** (§4) remains unscheduled and should not start until the bridge has settled.
 
 Part of the [drafts index](README.md). Read alongside
 [`crash-recovery.md`](../architecture/crash-recovery.md) (what a launch decides and what it
@@ -388,11 +393,14 @@ The reason the second part is worth its cost is not only the reboot case.
 ## 9. Rollout
 
 0. **The lease grace period** (§5) — independent of everything below, and the only slice here a
-   user would notice next week.
+   user would notice next week. **Shipped** (`2eae9053`).
 1. **(a) + (b)** — durable tokens and the unix listener, both endpoints live. Small, invisible,
-   removes a degradation branch.
+   removes a degradation branch. **Shipped** (`9484d12d`).
 2. **(c)** — the shim, behind a setting, HTTP still available as the fallback while it settles.
-3. **Retire the TCP endpoint** once nothing launches against it.
+   **Shipped** (`20b47f97`, wired in `4b87cd52`/`0508a42d`); `defaults write codes.threading
+   mcpStdioBridgeEnabled -bool true` opts a Mac in.
+3. **Make the bridge the default, then retire the TCP endpoint** once nothing launches against
+   it. Not started.
 4. **The daemon**, off by default and per-session opt-in first, with the Recovery Mode exception
    landing ahead of it. Native conversations decided at this point, not later.
 5. **Then, and only then**, the things §6 lists — scheduled work without a window, phone

@@ -45,6 +45,14 @@ final class MCPBridge: @unchecked Sendable {
 
     private let stateLock = NSLock()
     private var snapshot = CatalogueSnapshot()
+    /// What is actually on disk, so an unchanged catalogue is not written again.
+    ///
+    /// The comparison cannot be made on the raw reply — every reply carries a different JSON-RPC
+    /// `id`, so the bytes differ on every call even when the catalogue has not moved. It is made
+    /// on the `result` alone, canonicalised with sorted keys so that two encodings of the same
+    /// catalogue compare equal. A *failed* store leaves this unchanged, so the next reply retries
+    /// rather than remembering a write that never landed.
+    private var storedSnapshot = CatalogueSnapshot()
     /// Set whenever the app could not be reached, and read-and-cleared by the next successful
     /// event-stream connect. It is what turns "the app came back" into a `tools/list_changed`.
     private var announceOnNextConnect = false
@@ -68,6 +76,7 @@ final class MCPBridge: @unchecked Sendable {
     /// means "shut down", and there is no other exit path to keep in step with it.
     func run() -> Never {
         snapshot = cache.load()
+        storedSnapshot = snapshot
 
         let stream = Thread { [weak self] in self?.runEventStream() }
         stream.name = "codes.threading.mcp-bridge.events"
@@ -198,21 +207,37 @@ final class MCPBridge: @unchecked Sendable {
     }
 
     /// Caches the two answers a handshake needs, so the next launch has them with no app running.
+    ///
+    /// **Only when the catalogue changed.** A catalogue is answered identically every time it is
+    /// asked for — the app announces `notifications/tools/list_changed` when it genuinely moves —
+    /// so writing on every reply meant rewriting a quarter-megabyte file with the bytes already
+    /// in it, once per `tools/list`, for the life of the session.
+    ///
+    /// The `result` is canonicalised with sorted keys before it is compared or stored, because
+    /// `JSONSerialization` does not promise a key order and an unstable encoding would make every
+    /// catalogue look new. The comparison is against what was last successfully *stored*, so a
+    /// write that failed is retried by the next reply instead of being remembered as done.
     private func remember(replyTo method: String, body: Data) {
         guard method == BridgeMethod.initialize || method == BridgeMethod.toolsList else { return }
         guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               let result = object["result"] as? [String: Any],
-              let data = JSONRPCLine.encode(object: result) else { return }
+              let data = try? JSONSerialization.data(
+                  withJSONObject: result,
+                  options: [.sortedKeys]
+              ) else { return }
 
-        let updated: CatalogueSnapshot = stateLock.withLock {
+        let updated: CatalogueSnapshot? = stateLock.withLock {
             if method == BridgeMethod.initialize {
                 snapshot.initializeResult = data
             } else {
                 snapshot.toolsListResult = data
             }
-            return snapshot
+            return snapshot == storedSnapshot ? nil : snapshot
         }
-        cache.store(updated)
+        guard let updated else { return }
+
+        guard cache.store(updated) else { return }
+        stateLock.withLock { storedSnapshot = updated }
     }
 
     // MARK: - Private Methods — answering without the app

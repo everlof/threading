@@ -101,12 +101,15 @@ reshuffling it is a line move.
   evaluation; no format support committed.
 - [Durable sessions](durable-sessions.md) — stop a restart from killing every running turn, by
   first making a session's bridge outlive one app launch (durable tokens, a unix socket, an MCP
-  stdio shim) and then moving PTY ownership into a small always-on host. **Low priority and
-  nothing scheduled.** Part one is small, ships alone and fixes degradation today; part two is
-  gated on it having shipped and settled, because until the bridge is reconnectable durability
-  only buys a live process nothing can address. Carries one slice that depends on neither: a
-  grace period on the remote viewport lease, so a phone re-entering a chat stops reflowing the
-  agent.
+  stdio shim) and then moving PTY ownership into a small always-on host. **Part one shipped
+  2026-08-22** — the lease grace period, durable tokens, the unix rendezvous and the stdio bridge
+  behind the hidden `mcpStdioBridgeEnabled` setting, default off, with the hop measured in
+  `performance.md`; the durable decisions are in `mcp-and-display.md`, `session-activity.md`,
+  `persistence.md` and `REMOTE_ACCESS.md`. Making the bridge the default and retiring the TCP
+  endpoint is next. Part two, the PTY host, is unscheduled and gated on the bridge having
+  settled, because until the bridge is reconnectable durability only buys a live process nothing
+  can address. The one slice that depended on neither — a grace period on the remote viewport
+  lease, so a phone re-entering a chat stops reflowing the agent — shipped with part one.
 
 ### Shipped — pointers remain
 

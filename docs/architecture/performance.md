@@ -3448,3 +3448,90 @@ does synchronous git control-file reads for every project on *any* settings chan
 `GeneralPreferencesViewController` rebuilds both sound menus — six directory scans — on any
 settings change including its own. Coalescing the field hides that from typing; it does not make
 either operation bounded, and both are still per-event filesystem work on the main actor.
+
+## The MCP tool channel's second hop
+
+`durable-sessions.md` (§3c) proposed the stdio bridge with one cost stated and deliberately not
+measured: "the hop is a local socket and is not expected to be measurable, which is a claim the
+rollout should check rather than assume." This is that check.
+
+`MCPBridgeLaunchIntegrationTests.testStressTheBridgeHopAgainstTheDirectPortWhenEnabled` is the
+fixture. It is gated by `THREADING_MCP_BRIDGE_HOP_STRESS=1` and, because a test plan sanitizes the
+environment it launches with, it is run through the bundle directly:
+
+```bash
+xcodebuild -project Threading.xcodeproj -scheme Threading -testPlan Threading-Fast \
+  -destination platform=macOS -configuration Debug -derivedDataPath <dd> build-for-testing
+THREADING_MCP_BRIDGE_HOP_STRESS=1 \
+  DYLD_LIBRARY_PATH="<dd>/Build/Products/Debug/Threading.app/Contents/MacOS" \
+  DYLD_FRAMEWORK_PATH="<dd>/Build/Products/Debug/Threading.app/Contents/Frameworks" \
+  xcrun xctest -XCTest \
+    ThreadingTests.MCPBridgeLaunchIntegrationTests/testStressTheBridgeHopAgainstTheDirectPortWhenEnabled \
+    "<dd>/Build/Products/Debug/Threading.app/Contents/PlugIns/ThreadingTests.xctest"
+```
+
+One `MCPServer` serves all five series, so every number below answers the *same* `tools/list` for
+the same session. N = 200 per series; Debug; M-series; matched build, fixture and initial state.
+
+### Measured, 2026-08-22, Debug, M-series
+
+| Series | Median | p95 |
+|---|---|---|
+| Loopback port, `URLSession`, connection reused | 4.95 ms | 5.40 ms |
+| Loopback port, new connection per request | 5.70 ms | 6.20 ms |
+| **Unix rendezvous, raw POST, no bridge** | **4.78 ms** | **5.23 ms** |
+| **Through the bridge** | **30.35 ms** | **31.47 ms** |
+| Through the bridge, small reply (a forwarded `ping`) | 0.37 ms | 0.55 ms |
+
+**The rendezvous is not the cost.** A raw unix POST of the identical request, opening a fresh
+connection each time exactly as the bridge does, is 4.78 ms against the port's 4.95 ms. The socket
+is as fast as the port, and connection setup is 0.75 ms of either. Whatever the bridge adds, it
+does not add it by being a socket.
+
+**The size of the reply is the cost.** `tools/list` is 234 KB — the whole catalogue with every
+tool's schema — and it is the largest message this transport ever carries. A forwarded `ping`, at
+39 bytes, costs **0.37 ms end to end through the bridge**, which is the "not measurable" the draft
+predicted. A `tools/call` result is a sentence and behaves like the `ping`, not like the
+catalogue.
+
+Attributed with a temporary in-bridge probe around each phase of `forward` (removed afterwards),
+for the 234 KB reply, medians:
+
+| Phase | Before | After |
+|---|---|---|
+| Connect to the rendezvous | 0.044 ms | 0.039 ms |
+| Send, then read the response head (the app's own work) | 4.69 ms | 4.56 ms |
+| Read the 234 KB body | 2.04 ms | 2.00 ms |
+| Write the 234 KB reply to stdout | 10.51 ms | **8.50 ms** |
+| Cache the catalogue | 6.07 ms | **3.34 ms** |
+
+Two fixes, both in `Targets/MCPBridge/`:
+
+1. **The catalogue was written to disk on every reply.** `remember` re-encoded the result and ran
+   `CatalogueCache.store` — a temporary file, a `chmod` and a `rename` — for each `initialize` and
+   each `tools/list`, even though the answer is identical every time and the app announces
+   `notifications/tools/list_changed` when it genuinely moves. It now compares against what was
+   last successfully stored and writes only on a change. The comparison cannot be made on the raw
+   reply, because every reply carries a different JSON-RPC `id`; it is made on the `result`
+   canonicalised with `.sortedKeys`, and `CatalogueCache` writes and reloads in the same
+   canonical form so a snapshot loaded at launch compares equal to the same catalogue fetched
+   again. A failed store leaves the marker unchanged, so the next reply retries rather than
+   remembering a write that never landed.
+2. **stdout paid a per-element scan and a whole-message copy.** `BridgeOutput.writeLine` called
+   `Data.contains(where:)` over the entire payload to look for a newline, then appended one byte
+   to it — copying a quarter of a megabyte for that byte. The scan is now two `memchr` calls and
+   the newline is a second `write(2)` under the same lock, which is what made the framing atomic
+   in the first place.
+
+**Bridge median 35.92 ms → 30.35 ms** for the catalogue listing; p95 36.79 ms → 31.47 ms. The
+small-reply path was already 0.4 ms and is unchanged.
+
+**The hop remains measurable for `tools/list`, and that is stated rather than rounded away.**
+30.35 ms against 4.95 ms is a real six-fold difference on that one method. What is left is not the
+socket: it is 8.5 ms to push 234 KB through a pipe, 3.3 ms to notice the catalogue has not changed,
+and the client's own parse of the same 234 KB — costs a stdio MCP server pays by construction, and
+which a client pays once or twice per session rather than per tool call. Moving the cache
+comparison off the reply path was tried and reverted: it saves 3.3 ms on a once-per-session call
+and breaks the invariant `MCPBridgeTests` asserts, that a reply implies the cache behind it is on
+disk. If `tools/list` ever becomes hot, the fix is to stop re-parsing 234 KB to detect an unchanged
+catalogue — compare the raw `result` slice of the reply instead — not to move the work later.

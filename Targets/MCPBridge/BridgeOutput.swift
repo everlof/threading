@@ -36,12 +36,17 @@ final class BridgeOutput: @unchecked Sendable {
     /// `message` is sanitised first: a stray newline inside a payload would split one message
     /// into two malformed ones, and the client's parser has no way back from that.
     func writeLine(_ message: Data) {
-        var line = Self.singleLine(message)
-        line.append(Self.newline)
+        let line = Self.singleLine(message)
 
+        // The newline is written as its own `write(2)` under the same lock rather than appended
+        // to the payload. Appending copies the whole message for one byte, and a `tools/list`
+        // reply is the largest message this transport ever carries — a quarter of a megabyte,
+        // measured. Holding the lock across both writes is what keeps the framing atomic, not
+        // the fact that they were one buffer.
         lock.lock()
         defer { lock.unlock() }
         Self.writeAll(line, to: standardOutput)
+        Self.writeAll(Self.newline, to: standardOutput)
     }
 
     /// A bounded diagnostic. Never carries a message body — the bridge sees a session's whole
@@ -70,10 +75,18 @@ final class BridgeOutput: @unchecked Sendable {
     /// A reply the app encoded with `JSONEncoder` never contains a raw newline, so this normally
     /// costs one scan and returns the original bytes. The re-encode is the fallback for anything
     /// that does, because dropping the message would be worse than reformatting it.
+    ///
+    /// The scan is two `memchr` calls rather than `contains(where:)`. That is not premature: this
+    /// runs on every reply, the largest reply is a quarter-megabyte catalogue, and a per-element
+    /// predicate over `Data` is generic iteration where this is a library routine over a flat
+    /// buffer. It was the larger half of the measured stdout cost.
     static func singleLine(_ message: Data) -> Data {
-        guard message.contains(where: { $0 == lineFeed || $0 == carriageReturn }) else {
-            return message
+        let containsBreak = message.withUnsafeBytes { raw -> Bool in
+            guard let base = raw.baseAddress, raw.count > 0 else { return false }
+            return memchr(base, Int32(lineFeed), raw.count) != nil
+                || memchr(base, Int32(carriageReturn), raw.count) != nil
         }
+        guard containsBreak else { return message }
         if let object = try? JSONSerialization.jsonObject(with: message, options: [.fragmentsAllowed]),
            let compact = try? JSONSerialization.data(
                withJSONObject: object,

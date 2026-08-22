@@ -95,11 +95,14 @@ intercepting it would replace a working prompt with a second one. `UserPromptSub
 `SubagentStop` curl back to the listener
 (`MCPDefaults.lifecyclePathPrefix`), and `HookLifecycleRelay` hands each report to the session's
 tracker. The command is
-`curl -s --max-time N --unix-socket '<socket>' -H 'Content-Type: application/json'
---data-binary @- 'http://localhost/lifecycle/<token>?event=…' >/dev/null 2>&1 || true` — over the
-rendezvous rather than the loopback port, so the session's address is the same one on the next
-launch. Both halves are quoted for reasons that bit: the path contains `Application Support`, and
-`?event=` is a shell glob where it sits. Verified end to end against CLI 2.1.217: the three ordinary events arrive in order,
+`MCPDefaults.hookPostCommand`: the event is read from stdin into a shell variable once, POSTed
+over `--unix-socket "$THREADING_MCP_SOCKET"`, and — only if that connection could not be made —
+the same buffered bytes are POSTed again to `http://127.0.0.1:$THREADING_MCP_PORT`. The
+rendezvous is preferred because a path is the same address on the next launch where a port is
+not; the loopback retry is what makes the preference free, since a launch whose unix listener did
+not bind still reports. Buffering is what makes the retry possible at all: stdin can only be read
+once. Both endpoints arrive through the environment rather than as literals, and the URL is
+quoted because `?event=` is a shell glob where it sits. Verified end to end against CLI 2.1.217: the three ordinary events arrive in order,
 carrying the prompt text. Terminal sessions additionally carry a *tool-scoped, observational*
 `PreToolUse`/`PostToolUse` pair for the tools that ask the user outright — see "A runtime's own
 'I am waiting'" below, which is where the difference between that pair and the broker is drawn.
@@ -894,24 +897,29 @@ no work at all.
 - **Session routing is by environment, not by file.** `MCPDefaults.sessionTokenEnvironmentKey`
   is exported by `routed(_:for:)` and read by the hook command, which is what lets one shared
   file attribute every session correctly. Verified that a hook inherits the launch environment.
-- **The rendezvous is a literal, because it never changes.** Both commands post over
-  `curl --unix-socket '<…/Threading/bridge/mcp.sock>'` to `http://localhost/lifecycle/$TOKEN`.
-  The path is a fixed property of the user's home directory, so writing it into the file costs
-  nothing in stability — where a *port* would have revoked the user's trust on every launch,
-  which is exactly why these commands used to interpolate `$THREADING_MCP_PORT`. The socket also
-  answers before any listener binds it, so a hook written for a session launched during startup
-  addresses something real. **Moving to it is a one-time trust renewal**: the text changed once,
-  so an existing Codex user approves their hooks again on the first launch past this change, and
-  the `EventLog` line at the rewrite ("Rewrote Codex hooks, trust must be renewed") is what
-  answers "these worked yesterday".
+- **Both addresses arrive through the environment, so the text never moves.** Both commands are
+  `MCPDefaults.hookPostCommand`: try `--unix-socket "$THREADING_MCP_SOCKET"`, and on a connection
+  failure retry the same buffered bytes at `http://127.0.0.1:$THREADING_MCP_PORT`. Neither value
+  is written into the file. That is the whole trust argument: a port interpolated as a literal
+  would have revoked the user's approval on every launch, and a *path* written as a literal
+  would be stable but would also make the file's text a second place the rendezvous is decided.
+  Keeping both in the environment leaves exactly one shell fragment, authored once here, that
+  Claude and Codex cannot drift apart on. **Moving to it is a one-time trust renewal**: the text
+  changed once, so an existing Codex user approves their hooks again on the first launch past
+  this change, and the `EventLog` line at the rewrite ("Rewrote Codex hooks, trust must be
+  renewed") is what answers "these worked yesterday".
 - **Which is what keeps the file *stable* afterwards.** Codex pins a trusted hook by hashing its
   text. `CodexHookInstaller` rewrites only on a real change, a second install returns false, and
   a test asserts the bytes two consecutive launches leave are identical.
-- **`THREADING_MCP_PORT` is still exported wherever there is a port**, and nothing of ours reads
-  it any more. It stays because a user's own hooks were told about it; it retires with the
-  loopback endpoint. `THREADING_MCP_SOCKET` is exported beside it and does not wait for a
-  listener — the launch words used to be skipped wholesale when the port was missing, which left
-  that session unaddressable for its whole life.
+- **`THREADING_MCP_PORT` is exported wherever there is a port, and it is now load-bearing
+  again** — it is the fallback half of every hook command, not just a courtesy to hooks the user
+  wrote themselves. It retires with the loopback endpoint. `THREADING_MCP_SOCKET` is exported
+  beside it and does not wait for a listener, because it is a candidate path rather than a bound
+  one: the launch words used to be skipped wholesale when the port was missing, which left that
+  session unaddressable for its whole life. (The *stdio bridge* makes the opposite choice and
+  may name only the path that actually bound — see
+  [`mcp-and-display.md`](mcp-and-display.md) — because a hook that guesses wrong retries over
+  TCP and a bridge has nothing to fall back to.)
 - **`CodexHookInstaller` merges rather than replaces**, marks its own entries with
   `MCPDefaults.hookMarker`, and removes only those on uninstall. This machine's own
   `~/.codex/hooks.json` was written by another tool, which is why that is a rule and not a

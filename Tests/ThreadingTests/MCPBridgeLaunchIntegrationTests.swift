@@ -669,7 +669,9 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
                 }
                 done.signal()
             }.resume()
-            done.wait()
+            guard done.wait(timeout: .now() + Fixture.replyTimeout) == .success else {
+                throw BridgeLaunchFailure("a direct sample never came back")
+            }
             if let message = failure.withLock({ $0 }) {
                 throw BridgeLaunchFailure("direct sample failed: \(message)")
             }
@@ -707,9 +709,11 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
         return samples
     }
 
-    /// Connect, write, read until the peer stops, close. Deliberately the crudest possible
-    /// client: anything cleverer would be a second implementation of the bridge, measuring
-    /// itself rather than the endpoint.
+    /// Connect, write, read the head and exactly the declared body, close.
+    ///
+    /// Reading to end of file would hang: `MCPConnection` answers `Connection: keep-alive` and
+    /// leaves the socket open, so the client is the side that decides a response is finished —
+    /// which is also exactly what the bridge does, and what makes this series comparable to it.
     private static func oneUnixExchange(path: String, request: Data) throws {
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw BridgeLaunchFailure("socket() failed") }
@@ -748,14 +752,35 @@ final class MCPBridgeLaunchIntegrationTests: XCTestCase {
             }
         }
 
-        var buffer = [UInt8](repeating: 0, count: 8_192)
-        var received = 0
+        let terminator = Data("\r\n\r\n".utf8)
+        var chunk = [UInt8](repeating: 0, count: 8_192)
+        var received = Data()
+        var bodyLength: Int?
+        var headEnd: Int?
+
         while true {
-            let read = Darwin.read(descriptor, &buffer, buffer.count)
-            if read <= 0 { break }
-            received += read
+            if headEnd == nil, let range = received.range(of: terminator) {
+                headEnd = range.upperBound - received.startIndex
+                let head = String(decoding: received[received.startIndex..<range.lowerBound],
+                                  as: UTF8.self)
+                bodyLength = head
+                    .components(separatedBy: "\r\n")
+                    .first { $0.lowercased().hasPrefix("content-length:") }
+                    .flatMap {
+                        Int($0.drop { $0 != ":" }.dropFirst()
+                            .trimmingCharacters(in: .whitespaces))
+                    }
+            }
+            if let headEnd, let bodyLength, received.count - headEnd >= bodyLength { break }
+
+            let read = chunk.withUnsafeMutableBytes { raw in
+                Darwin.read(descriptor, raw.baseAddress, raw.count)
+            }
+            guard read > 0 else {
+                throw BridgeLaunchFailure("the endpoint closed before answering")
+            }
+            received.append(contentsOf: chunk[0..<read])
         }
-        guard received > 0 else { throw BridgeLaunchFailure("the endpoint answered nothing") }
     }
 
     private static func milliseconds(_ nanoseconds: UInt64) -> Double {

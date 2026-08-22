@@ -83,7 +83,10 @@ final class CatalogueCache: @unchecked Sendable {
            let value = try? JSONSerialization.jsonObject(with: toolsListResult) {
             object[Key.toolsListResult] = value
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: object, options: []) else {
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        ) else {
             return false
         }
 
@@ -132,8 +135,12 @@ final class CatalogueCache: @unchecked Sendable {
 
     /// Turns a decoded JSON value back into the bytes the bridge repeats. Only an object is
     /// accepted, because both cached values are JSON-RPC `result` objects.
+    ///
+    /// Sorted keys, matching how a freshly fetched result is canonicalised. Without that a
+    /// loaded snapshot could never compare equal to the same catalogue fetched again, and every
+    /// launch would rewrite this file once for nothing.
     private static func reserialize(_ value: Any?) -> Data? {
         guard let object = value as? [String: Any] else { return nil }
-        return try? JSONSerialization.data(withJSONObject: object, options: [])
+        return try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 }

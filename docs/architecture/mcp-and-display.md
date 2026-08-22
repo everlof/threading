@@ -33,9 +33,18 @@ through `StateManager`'s hosted-test redirect, so a test bundle running inside t
 neither binds the developer's socket nor rewrites their tokens. A path over 103 bytes cannot fit
 `sockaddr_un.sun_path`; that case logs, skips the unix listener, and leaves TCP carrying
 everything, because an app broken by a long user name would be worse than the bug the rendezvous
-fixes. `MCPServer.socketPath` reports what actually bound — a different question from
-`MCPBridgeLocation.socketPath`, which answers before any listener exists and is what the hooks
-are written against.
+fixes.
+
+**Two socket paths, and the difference decides a transport.** `MCPBridgeLocation.socketPath` is
+the *candidate* — a fixed property of the user's home directory, knowable before anything binds,
+which is what a hook is handed (through `$THREADING_MCP_SOCKET`) so it has a route to try
+whatever the listener did. `MCPServer.socketPath` is what actually bound. Only the bound path may
+select the stdio bridge (`MCPBridgeDecision.live(settings:server:bundle:)` reads `server.socketPath`,
+never the candidate), because a hook that tries the wrong route retries over TCP and a bridge
+pointed at a socket nothing is listening on has nothing to fall back to. That is also why
+`MCPServer.start` settles *both* listener outcomes — ready or failed — before it calls its
+completion: a launch that ran before the rendezvous had answered would choose HTTP for a session
+that could have had a durable bridge, or stdio for one that could not.
 
 **Session routing is the whole design.** `MCPSessionRegistry` mints a per-session token and
 `AgentLauncher` passes a URL embedding it through Claude's `--mcp-config` file or Codex's
