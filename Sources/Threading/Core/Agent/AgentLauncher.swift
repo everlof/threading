@@ -1154,6 +1154,11 @@ enum AgentLauncher {
     ) -> (ShellCommand, ResumeState) {
         var command = ShellCommand()
         appendManagedCodexInvocation(to: &command)
+        // Threading mirrors and remotely scrolls the terminal's retained buffer. Codex's
+        // alternate buffer has no terminal history, and DEC alternate-scroll translates a wheel
+        // into Up/Down keys that Codex assigns to composer history rather than its transcript.
+        // The CLI's supported inline mode gives scrollback one owner on Mac and iPhone alike.
+        command.append(flag: AgentDefaults.codexNoAlternateScreenFlag)
         appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
         appendCodexConversationOverrides(for: session, to: &command)
         appendPermissionMode(for: session, to: &command)

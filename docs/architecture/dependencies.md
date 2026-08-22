@@ -153,7 +153,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     the press-and-drag it used to send, which is a selection gesture and moved nothing at all.
     Both pans live on the one scroll view and two of them cannot both recognise, so mouse
     tracking gives one finger to the program and keeps two for the local scrollback, which is
-    this device's option-wheel. `RemoteTerminalScrollTests` covers both rules.
+    this device's option-wheel. Xterm Alternate Scroll Mode remains cursor-key translation, not a
+    promise that every TUI uses those keys for history; Codex uses them for composer history and
+    is therefore launched in its supported inline mode so the terminal owns its transcript
+    scrollback. `RemoteTerminalScrollTests` covers the emulator rules; `AgentLaunchQuotingTests`
+    holds the Codex launch boundary.
   - **`pasteText` is ours.** Upstream reaches bracketed paste only through `paste(_:)`, which
     reads `NSPasteboard.general` — so text that never came from the clipboard could only be sent
     as typing, or by writing over the user's clipboard first. A drop is a paste, and the markers

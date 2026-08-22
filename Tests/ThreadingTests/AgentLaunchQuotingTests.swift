@@ -259,6 +259,33 @@ final class AgentLaunchQuotingTests: XCTestCase {
         }
     }
 
+    /// Codex's alternate buffer retains only its current frame. Its DEC alternate-scroll mode
+    /// turns a wheel into Up/Down keys, but Codex assigns those keys to composer history rather
+    /// than transcript navigation. Threading therefore asks the supported inline surface to put
+    /// the transcript in the terminal-owned scrollback that both Mac and iPhone mirror.
+    func testCodexTerminalLaunchesOwnRealScrollbackWhilePipeTransportsDoNotNeedIt() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        let transcriptID = TranscriptID("01a00000-0000-7000-8000-000000000000")
+        let fresh = AgentSession(kind: .codex, title: "fresh")
+        var resumed = AgentSession(kind: .codex, title: "resumed")
+        resumed.resumeState = .resumable(transcriptID)
+
+        for session in [fresh, resumed] {
+            let words = try Self.tokenizing(
+                XCTUnwrap(try AgentLauncher.plan(for: session, in: project).arguments.last)
+            )
+            XCTAssertEqual(
+                words.filter { $0 == AgentDefaults.codexNoAlternateScreenFlag },
+                [AgentDefaults.codexNoAlternateScreenFlag]
+            )
+        }
+
+        let nativeWords = try Self.tokenizing(
+            XCTUnwrap(try AgentLauncher.streamPlan(for: fresh, in: project).arguments.last)
+        )
+        XCTAssertFalse(nativeWords.contains(AgentDefaults.codexNoAlternateScreenFlag))
+    }
+
     // MARK: - Against the CLI's own parser
 
     /// A prompt that begins with `-` is a prompt, not a flag.

@@ -215,11 +215,11 @@ final class RemoteTerminalScrollTests: XCTestCase {
         XCTAssertTrue(recorder.text.contains("<65;"), "expected wheel-down reports, got \(recorder.text)")
     }
 
-    /// Codex uses the alternate screen without enabling mouse tracking. That buffer deliberately
-    /// has no scrollback, so letting UIScrollView own the finger only drags its current screen
-    /// into blank space. xterm Alternate Scroll Mode instead translates the wheel to cursor keys,
-    /// which asks Codex to repaint the older conversation itself.
-    func testAlternateScreenWithoutMouseTrackingTurnsAFingerDragIntoCursorKeys() {
+    /// An alternate buffer deliberately has no local scrollback, so letting UIScrollView own the
+    /// finger only drags its current screen into blank space. xterm Alternate Scroll Mode defines
+    /// the wheel as cursor keys; whether an application assigns those keys to content is its own
+    /// contract. Threading launches Codex inline because Codex assigns them to composer history.
+    func testXtermAlternateScrollModeTurnsAFingerDragIntoCursorKeys() {
         let view = makeView(feeding: Fixture.shortRun)
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder

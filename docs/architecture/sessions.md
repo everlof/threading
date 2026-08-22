@@ -697,6 +697,17 @@ rollout file it writes under `~/.codex/sessions/`. OpenCode also assigns its own
 its supported `opencode session list --format json` command and selects the newest record for
 the launching checkout. This intentionally avoids its private storage schema.
 
+**A Threading-owned Codex terminal runs with `--no-alt-screen`.** Codex's default alternate
+buffer deliberately has no terminal scrollback. It enables DEC alternate-scroll, but that mode
+translates a wheel into Up/Down keys and Codex assigns those keys to composer history, not the
+conversation transcript. On iPhone the visible frame therefore moved away to empty alternate-
+buffer rows while the older conversation existed only in Codex's retained model. The CLI's
+supported inline mode puts the rendered transcript in Threading's terminal-owned scrollback,
+which is the same bounded record the Mac view and remote terminal protocol already mirror. The
+flag belongs only to interactive terminal launches; native app-server and headless pipe transports
+have no terminal buffer to configure. An already-running Codex process must be relaunched before
+the launch contract can affect it.
+
 **An identifier is not a conversation, so the resume branch asks the filesystem — and the
 encoding it asks with is load-bearing.** Claude's id is minted before anything is written, so
 `AgentLauncher` emits `--resume` only when `ClaudeTranscript.exists` finds the file and otherwise
