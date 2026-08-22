@@ -72,6 +72,15 @@
 		F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000009 /* ThreadingRemoteKit */; };
 		F1000001000000000000042 /* BorderBeamKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000011 /* BorderBeamKit */; };
+		7C000003000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B001 /* main.swift */; };
+		7C000003000000000000A002 /* BridgeDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B002 /* BridgeDefaults.swift */; };
+		7C000003000000000000A003 /* BridgeOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B003 /* BridgeOutput.swift */; };
+		7C000003000000000000A004 /* UnixHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B004 /* UnixHTTPClient.swift */; };
+		7C000003000000000000A005 /* ServerSentEventReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B005 /* ServerSentEventReader.swift */; };
+		7C000003000000000000A006 /* JSONRPCLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B006 /* JSONRPCLine.swift */; };
+		7C000003000000000000A007 /* CatalogueCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B007 /* CatalogueCache.swift */; };
+		7C000003000000000000A008 /* MCPBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B008 /* MCPBridge.swift */; };
+		7C000003000000000000A009 /* threading-mcp-bridge in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B011 /* threading-mcp-bridge */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -124,6 +133,13 @@
 			remoteGlobalIDString = F6000001000000000000001;
 			remoteInfo = Threading;
 		};
+		7C000003000000000000C004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7C000003000000000000C003;
+			remoteInfo = ThreadingMCPBridge;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -137,6 +153,7 @@
 				B81F7A1E07A694FFB193A1BD /* threading-extension-helper in Embed Extension Helpers */,
 				89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */,
 				7A0000010000000000000003 /* threading-wasm-extension-runner in Embed Extension Helpers */,
+				7C000003000000000000A009 /* threading-mcp-bridge in Embed Extension Helpers */,
 			);
 			name = "Embed Extension Helpers";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -198,6 +215,17 @@
 		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		F2000001000000000000038 /* Threading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threading.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F446C4C52994905237C3BE9B /* threading-extension-helper-network.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-extension-helper-network.entitlements"; sourceTree = "<group>"; };
+		7C000003000000000000B001 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		7C000003000000000000B002 /* BridgeDefaults.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BridgeDefaults.swift; sourceTree = "<group>"; };
+		7C000003000000000000B003 /* BridgeOutput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BridgeOutput.swift; sourceTree = "<group>"; };
+		7C000003000000000000B004 /* UnixHTTPClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UnixHTTPClient.swift; sourceTree = "<group>"; };
+		7C000003000000000000B005 /* ServerSentEventReader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ServerSentEventReader.swift; sourceTree = "<group>"; };
+		7C000003000000000000B006 /* JSONRPCLine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JSONRPCLine.swift; sourceTree = "<group>"; };
+		7C000003000000000000B007 /* CatalogueCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CatalogueCache.swift; sourceTree = "<group>"; };
+		7C000003000000000000B008 /* MCPBridge.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MCPBridge.swift; sourceTree = "<group>"; };
+		7C000003000000000000B009 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		7C000003000000000000B010 /* threading-mcp-bridge.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-mcp-bridge.entitlements"; sourceTree = "<group>"; };
+		7C000003000000000000B011 /* threading-mcp-bridge */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-mcp-bridge"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -460,6 +488,7 @@
 				C0D100010000000000000003 /* Tests/ThreadingUITests */,
 				DEBA3EC0E0E1A6C00C62BAE7 /* Extension Helper */,
 				7A0000010000000000000041 /* Wasm Runner */,
+				7C000003000000000000C001 /* MCP Bridge */,
 			);
 			sourceTree = "<group>";
 		};
@@ -479,8 +508,27 @@
 				C20CE9CA503B8DC639CAB992 /* threading-extension-helper */,
 				543E83291094AE2E9DCA09FB /* threading-extension-helper-network */,
 				7A0000010000000000000014 /* threading-wasm-extension-runner */,
+				7C000003000000000000B011 /* threading-mcp-bridge */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		7C000003000000000000C001 /* MCP Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				7C000003000000000000B001 /* main.swift */,
+				7C000003000000000000B002 /* BridgeDefaults.swift */,
+				7C000003000000000000B003 /* BridgeOutput.swift */,
+				7C000003000000000000B004 /* UnixHTTPClient.swift */,
+				7C000003000000000000B005 /* ServerSentEventReader.swift */,
+				7C000003000000000000B006 /* JSONRPCLine.swift */,
+				7C000003000000000000B007 /* CatalogueCache.swift */,
+				7C000003000000000000B008 /* MCPBridge.swift */,
+				7C000003000000000000B009 /* Info.plist */,
+				7C000003000000000000B010 /* threading-mcp-bridge.entitlements */,
+			);
+			name = "MCP Bridge";
+			path = Targets/MCPBridge;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -674,6 +722,7 @@
 				A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */,
 				0B537AA731F40F54768A22BD /* PBXTargetDependency */,
 				7A0000010000000000000022 /* PBXTargetDependency */,
+				7C000003000000000000C005 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				63D8F4952EE47C9A007F49BD /* Sources */,
@@ -695,6 +744,21 @@
 			productName = Threading;
 			productReference = F2000001000000000000038 /* Threading.app */;
 			productType = "com.apple.product-type.application";
+		};
+		7C000003000000000000C003 /* ThreadingMCPBridge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7C000003000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingMCPBridge" */;
+			buildPhases = (
+				7C000003000000000000C002 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ThreadingMCPBridge;
+			productName = ThreadingMCPBridge;
+			productReference = 7C000003000000000000B011 /* threading-mcp-bridge */;
+			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -766,6 +830,7 @@
 				DB14898531F8EFBEA7892331 /* ThreadingExtensionHelper */,
 				1459DEBF5B7709D7DCD407A2 /* ThreadingExtensionHelperNetwork */,
 				7A0000010000000000000051 /* ThreadingWasmExtensionRunner */,
+				7C000003000000000000C003 /* ThreadingMCPBridge */,
 			);
 		};
 /* End PBXProject section */
@@ -1033,6 +1098,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7C000003000000000000C002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7C000003000000000000A001 /* main.swift in Sources */,
+				7C000003000000000000A002 /* BridgeDefaults.swift in Sources */,
+				7C000003000000000000A003 /* BridgeOutput.swift in Sources */,
+				7C000003000000000000A004 /* UnixHTTPClient.swift in Sources */,
+				7C000003000000000000A005 /* ServerSentEventReader.swift in Sources */,
+				7C000003000000000000A006 /* JSONRPCLine.swift in Sources */,
+				7C000003000000000000A007 /* CatalogueCache.swift in Sources */,
+				7C000003000000000000A008 /* MCPBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -1077,6 +1157,12 @@
 			name = Threading;
 			target = F6000001000000000000001 /* Threading */;
 			targetProxy = D2E000010000000000000007 /* PBXContainerItemProxy */;
+		};
+		7C000003000000000000C005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = ThreadingMCPBridge;
+			target = 7C000003000000000000C003 /* ThreadingMCPBridge */;
+			targetProxy = 7C000003000000000000C004 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1674,6 +1760,52 @@
 			};
 			name = Release;
 		};
+		7C000003000000000000C006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Targets/MCPBridge/threading-mcp-bridge.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Targets/MCPBridge/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.mcp-bridge";
+				PRODUCT_NAME = "threading-mcp-bridge";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7C000003000000000000C007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Targets/MCPBridge/threading-mcp-bridge.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Targets/MCPBridge/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.mcp-bridge";
+				PRODUCT_NAME = "threading-mcp-bridge";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1763,6 +1895,15 @@
 			buildConfigurations = (
 				F7000001000000000000006 /* Debug */,
 				F7000001000000000000007 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7C000003000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingMCPBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7C000003000000000000C007 /* Release */,
+				7C000003000000000000C006 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
