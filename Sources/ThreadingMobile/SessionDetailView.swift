@@ -491,17 +491,19 @@ struct SessionDetailView: View {
             return
         }
 #endif
-        if let hostID = model.activeHostID {
-            let pool = MobileSessionConnectionPool.shared
-            pool.discardEntries(exceptHostID: hostID)
-            let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
-            if let warmed = pool.take(key) as? RemoteSessionConnection {
-                warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
-                    workspaceActivity?.receive(event)
-                }
-                connection = warmed
-                return
+        guard let hostID = model.activeHostID else {
+            launchError = RemoteClientError.invalidResponse.localizedDescription
+            return
+        }
+        let pool = MobileSessionConnectionPool.shared
+        pool.discardEntries(exceptHostID: hostID)
+        let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
+        if let warmed = pool.take(key) as? RemoteSessionConnection {
+            warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
+                workspaceActivity?.receive(event)
             }
+            connection = warmed
+            return
         }
         do {
             // A UI switch deliberately tears down the old process. Always ask readiness from
@@ -516,9 +518,8 @@ struct SessionDetailView: View {
             let made = RemoteSessionConnection(
                 session: current,
                 client: client,
-                reconnectClient: {
-                    await model.refresh()
-                    return model.client
+                reconnectClient: { attempt in
+                    await model.clientForSessionReconnect(hostID: hostID, attempt: attempt)
                 }
             )
             made.onWorkspaceChanged = { [weak workspaceActivity] event in

@@ -290,6 +290,29 @@ installs only a changed theme, and the same test file asserts an unchanged theme
 rows. For reference the probe's grid-independent costs: a 512 KB ring replay parses in
 ~320–350 ms and the local-viewport reflow after it is 7–10 ms, at every font size.
 
+### Mobile host-recovery single-flight contract, 2026-08-22
+
+Host recovery is one operation per Mac, not one operation per socket. An iPhone report captured
+the terminal and dashboard event WebSockets losing the same transport within 6 ms. Both recovery
+loops then called `RemoteAppModel.refresh()`. Each call advanced `refreshGeneration`, so the
+second invalidated the first: a LAN route that answered after 4.0 seconds and a later Tailscale
+route that answered were both discarded as `refresh.generationChanged`. Repeated route races
+continued for nearly two minutes and live-session sockets reached their 15-second hello deadline
+while the Mac and agent processes remained healthy.
+
+The contract now: `MobileHostRefreshSingleFlight` owns at most one catalogue/route task for the
+active host. Dashboard recovery, explicit refreshes and any session that truly needs a route all
+await that task. Cancelling one screen's waiter does not cancel shared recovery; only a host or app
+lifecycle invalidation cancels it, and an old completion is fenced from clearing its replacement.
+A session socket first retries the last authenticated route when the catalogue is already online;
+it joins or starts host recovery only when a flight exists or the model lacks an authoritative
+catalogue. If only one session socket fails while the catalogue remains healthy, its first retry
+uses that authenticated route; a second failure escalates into shared host recovery, so an isolated
+socket failure cannot retry a stale route forever. The reconnect closure also captures the expected
+host id, so a host switch cannot hand an old session a client for the new Mac.
+`MobileHostRefreshSingleFlightTests` holds the escalation boundary, coalescing, waiter cancellation,
+explicit invalidation, late stale completion and fresh later refreshes.
+
 ### Token-free iOS terminal wire lab, 2026-08-20
 
 A static ANSI fixture proves rendering but cannot benchmark the entry path that flickered: it

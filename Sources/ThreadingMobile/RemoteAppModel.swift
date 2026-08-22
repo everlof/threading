@@ -33,6 +33,71 @@ enum MobileNavigationRoute: Hashable {
 /// without flashing the full recovery surface between every backoff attempt.
 enum MobileConnectionRecoveryPolicy {
     static let settledFailureAttempt = 3
+
+    /// A single socket reset is often transient and should first retry the authenticated route.
+    /// If that retry also fails, the route itself is suspect and the session joins host recovery.
+    static func sessionReconnectNeedsHostRecovery(attempt: Int) -> Bool {
+        attempt > 0
+    }
+}
+
+/// Owns the one catalogue/route recovery allowed for a Mac at a time.
+///
+/// A terminal socket and the dashboard event socket can discover the same transport loss within
+/// milliseconds. Before this gate, both called `RemoteAppModel.refresh()`, and every call advanced
+/// the model's generation. A later caller could therefore invalidate an earlier route race after
+/// it had already found the Mac. The callers then repeated the same LAN/Tailscale work until one
+/// happened to survive long enough to deliver a WebSocket hello.
+///
+/// The task is deliberately unstructured. Cancelling one screen's waiter must not cancel recovery
+/// for every other socket. Only ``invalidate()`` — an app/host lifecycle decision owned by the
+/// model — cancels the shared work. The monotonically increasing identifier prevents an old
+/// flight's completion from clearing a replacement installed after invalidation.
+@MainActor
+final class MobileHostRefreshSingleFlight {
+    typealias Operation = @MainActor @Sendable () async -> Void
+
+    private struct Flight {
+        let id: Int
+        let hostID: String
+        let task: Task<Void, Never>
+    }
+
+    private var nextID = 0
+    private var flight: Flight?
+
+    func hasFlight(for hostID: String) -> Bool {
+        flight?.hostID == hostID
+    }
+
+    func run(hostID: String, operation: @escaping Operation) async {
+        if let flight, flight.hostID == hostID {
+            await flight.task.value
+            return
+        }
+
+        // A host transition normally calls `invalidate()` before changing identity. Keep this
+        // defensive branch so a missed call can never join recovery for the wrong Mac.
+        flight?.task.cancel()
+        flight = nil
+
+        nextID &+= 1
+        let id = nextID
+        let task = Task { @MainActor in
+            await operation()
+        }
+        flight = Flight(id: id, hostID: hostID, task: task)
+
+        await task.value
+        if flight?.id == id {
+            flight = nil
+        }
+    }
+
+    func invalidate() {
+        flight?.task.cancel()
+        flight = nil
+    }
 }
 
 @MainActor
@@ -148,6 +213,7 @@ final class RemoteAppModel: ObservableObject {
     private var catalogueRevision = 0
     private var catalogueRefreshInFlightGeneration: Int?
     private var refreshGeneration = 0
+    private let hostRefreshSingleFlight = MobileHostRefreshSingleFlight()
     private var activeHostedLink: RemoteConnectionLink?
     private var activeHostedHostID: String?
     /// Provisioning is a low-frequency control-plane operation. A service outage must not turn
@@ -708,15 +774,41 @@ final class RemoteAppModel: ObservableObject {
 
     func refresh() async {
         guard !isDemo else { return }
-        discardPendingSessionDeltas()
-        refreshGeneration &+= 1
-        let generation = refreshGeneration
         guard let host = activeHost else {
+            discardPendingSessionDeltas()
+            invalidateRefreshes()
             discardHostedConnection()
             me = nil
             phase = .idle
             return
         }
+        let hostID = host.id
+        await hostRefreshSingleFlight.run(hostID: hostID) { [weak self] in
+            guard let self, self.activeHostID == hostID else { return }
+            await self.performRefresh(from: host)
+        }
+    }
+
+    /// Returns a route for a live-session reconnect without turning one broken session socket
+    /// into a full catalogue race. If dashboard recovery already owns that race, the session
+    /// joins it; if the model has no authoritative catalogue, it starts it. Otherwise the last
+    /// authenticated route is exactly the route that should get the first inexpensive retry.
+    func clientForSessionReconnect(hostID: String, attempt: Int) async -> RemoteClient? {
+        guard activeHostID == hostID else { return nil }
+        if hostRefreshSingleFlight.hasFlight(for: hostID)
+            || phase != .online
+            || me == nil
+            || MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(attempt: attempt) {
+            await refresh()
+        }
+        guard activeHostID == hostID else { return nil }
+        return client
+    }
+
+    private func performRefresh(from host: PairedRemoteHost) async {
+        discardPendingSessionDeltas()
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
         let hostID = host.id
         let refreshTrace = MobileDiagnostics.connectivityTrace()
         let refreshStartedAt = MobileDiagnostics.monotonicNow()
@@ -2067,6 +2159,7 @@ final class RemoteAppModel: ObservableObject {
     }
 
     private func invalidateRefreshes() {
+        hostRefreshSingleFlight.invalidate()
         refreshGeneration &+= 1
         connectionProgress = nil
     }

@@ -224,7 +224,7 @@ final class RemoteSessionConnection: ObservableObject {
     let target: RemoteLiveConnectionTarget
     let conversationStore = RemoteConversationStore()
     private var client: RemoteClient
-    private let reconnectClient: (@MainActor () async -> RemoteClient?)?
+    private let reconnectClient: (@MainActor (_ attempt: Int) async -> RemoteClient?)?
     private let deviceID: String
     private var task: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -367,7 +367,7 @@ final class RemoteSessionConnection: ObservableObject {
         session: RemoteSessionSummaryDTO,
         target: RemoteLiveConnectionTarget? = nil,
         client: RemoteClient,
-        reconnectClient: (@MainActor () async -> RemoteClient?)? = nil,
+        reconnectClient: (@MainActor (_ attempt: Int) async -> RemoteClient?)? = nil,
         helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline,
         viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay,
         terminalHydrationQuietDelay: Duration =
@@ -1602,7 +1602,7 @@ final class RemoteSessionConnection: ObservableObject {
             guard !Task.isCancelled, let self,
                   self.connectionGeneration == generation,
                   let reconnectClient = self.reconnectClient,
-                  let client = await reconnectClient() else { return }
+                  let client = await reconnectClient(attempt) else { return }
             guard !Task.isCancelled, self.connectionGeneration == generation else { return }
             self.client = client
             self.reconnectTask = nil
