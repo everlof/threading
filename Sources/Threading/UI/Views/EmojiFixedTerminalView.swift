@@ -457,6 +457,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
                 entries: [
                     .item(ThemedMenuItem(
                         title: L10n.string("Copy"),
+                        shortcut: ShortcutOverrideStore.shared.shortcut(forID: "system.copy"),
                         onChoose: { [weak self] in
                             guard let self else { return }
                             self.copy(self)
@@ -464,6 +465,7 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
                     )),
                     .item(ThemedMenuItem(
                         title: L10n.string("Paste"),
+                        shortcut: ShortcutOverrideStore.shared.shortcut(forID: "system.paste"),
                         onChoose: { [weak self] in
                             guard let self else { return }
                             self.paste(self)
@@ -472,6 +474,9 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
                     .separator,
                     .item(ThemedMenuItem(
                         title: L10n.string("Rename Session…"),
+                        shortcut: ShortcutOverrideStore.shared.shortcut(
+                            forID: AppCommands.ID.renameSession
+                        ),
                         onChoose: { [weak self] in self?.renameSession(nil) }
                     ))
                 ],

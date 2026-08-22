@@ -1180,8 +1180,8 @@ Turn the follow behaviour off entirely under
 **Settings > General > Name sessions after the agent's own title** — sessions then keep their
 first-prompt names.
 
-Rename via right-click in the sidebar, or right-click inside the terminal and choose
-**Rename Session…**.
+Rename with **Project > Rename Session…** (**Cmd+R**), via right-click in the sidebar, or by
+right-clicking inside the terminal and choosing **Rename Session…**.
 
 **Terminals name themselves after where they are and what they are doing.** A standalone
 terminal's row, and each shell tab in the drawer, shows the command currently running in it —
@@ -4596,6 +4596,7 @@ screen says so and leads with the offers further down the list instead.
 | Start the session being composed (Return breaks the line, unless you changed Settings ▸ Keyboard ▸ Composer) | Cmd+Return |
 | Add Existing Project | Cmd+Shift+N |
 | Open in External App (this checkout, in the app you last chose) | Cmd+O |
+| Rename Session | Cmd+R |
 | Close Tab (the focused drawer/panel tab, else the page on screen; never stops the agent) | Cmd+W |
 | Close Session (stops the agent) | unbound by default — assign one in Settings ▸ Keyboard |
 
@@ -4666,6 +4667,7 @@ Option is otherwise left to the keyboard layout rather than claimed as a Meta ke
 **Settings ▸ Keyboard** lists every command and the keys it answers to. Click a shortcut and
 press the combination you want; Escape cancels and Delete removes the shortcut entirely. A
 change takes effect immediately — the menu bar is updated in place rather than at next launch.
+Dropdown and right-click menu actions show that same live binding in a trailing shortcut column.
 
 Threading's own commands can be rebound. The system ones (Quit, Cut, Copy, Paste, Full Screen and
 the like) are listed but fixed, so the page can answer "what already owns this key" without

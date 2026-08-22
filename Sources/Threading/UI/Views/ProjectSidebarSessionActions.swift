@@ -824,8 +824,11 @@ extension ProjectSidebarViewController {
         })
 
         if AgentRuntime.shared.isRunning(sessionID: sessionID) {
-            entries.append(action(L10n.string("Close Session"), symbol: "stop.circle") {
-                [weak self] in
+            entries.append(action(
+                L10n.string("Close Session"),
+                symbol: "stop.circle",
+                shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.closeSession)
+            ) { [weak self] in
                 self?.closeSessionClicked()
             })
         }
@@ -855,7 +858,11 @@ extension ProjectSidebarViewController {
            let openIn = OpenInMenu.submenuEntry(for: .folder(project.folderURL)) {
             entries.append(openIn)
         }
-        entries.append(action(L10n.string("Rename Session…"), symbol: "pencil") { [weak self] in
+        entries.append(action(
+            L10n.string("Rename Session…"),
+            symbol: "pencil",
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.renameSession)
+        ) { [weak self] in
             self?.renameSessionClicked()
         })
         // Absent rather than disabled when the agent is mid-turn or has no naming tool: a
@@ -889,11 +896,13 @@ extension ProjectSidebarViewController {
         }
         if let move = moveToAccountEntry(for: session) { entries.append(move) }
         if let cont = continueWithProviderEntry(for: session) { entries.append(cont) }
+        let isManager = ControlGrantStore.shared.isManager(sessionID)
         entries.append(action(
-            ControlGrantStore.shared.isManager(sessionID)
-                ? L10n.string("Revoke Manager Role")
-                : L10n.string("Make Manager"),
-            symbol: ControlGrantStore.shared.isManager(sessionID) ? "person.3.sequence.fill" : "person.3"
+            isManager ? L10n.string("Revoke Manager Role") : L10n.string("Make Manager"),
+            symbol: isManager ? "person.3.sequence.fill" : "person.3",
+            shortcut: ShortcutOverrideStore.shared.shortcut(
+                forID: isManager ? AppCommands.ID.revokeManager : AppCommands.ID.makeManager
+            )
         ) { [weak self] in self?.toggleManagerRoleClicked() })
 
         appendGroupSeparator(&entries)
@@ -958,10 +967,12 @@ extension ProjectSidebarViewController {
     private func action(
         _ title: String,
         symbol: String? = nil,
+        shortcut: KeyboardShortcut? = nil,
         _ body: @escaping () -> Void
     ) -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: title,
+            shortcut: shortcut,
             image: symbol.flatMap(ThemedMenuIcon.symbol),
             onChoose: body
         ))
@@ -1565,8 +1576,16 @@ extension ProjectSidebarViewController {
     }
 
     @objc private func renameSessionClicked() {
-        guard let sessionID = actionSessionID,
-              let session = projectStore.session(withID: sessionID) else { return }
+        guard let sessionID = actionSessionID else { return }
+        promptToRenameSession(sessionID)
+    }
+
+    /// Presents the one session-rename path for the row menu and the app command.
+    ///
+    /// The command names the selected chat while a row action names the row whose menu is open,
+    /// but both must keep the same clear-to-follow-agent behavior and persistence failure path.
+    func promptToRenameSession(_ sessionID: SessionID) {
+        guard let session = projectStore.session(withID: sessionID) else { return }
 
         promptRename(
             title: L10n.string("Rename Session"),

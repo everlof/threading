@@ -3277,6 +3277,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         return sidebarViewController.sessionActionEntries(for: session)
     }
 
+    /// Opens the rename prompt for the chat currently shown in the main pane.
+    func renameCurrentSession() {
+        guard let currentSessionID else { return }
+        sidebarViewController.promptToRenameSession(currentSessionID)
+    }
+
     /// The dedicated header button always points to the surface not currently on screen.
     /// The coordinator owns the actual switch so this path keeps the same running-agent
     /// confirmation and relaunch behavior as the Interface menu.

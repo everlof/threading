@@ -1771,6 +1771,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // carries the same action beside a chevron that picks the app; this is the menu-bar
         // half of it, and the reason the chord exists at all.
         menu.addItem(commandItem(AppCommands.ID.openIn, action: #selector(openInExternalApp)))
+        menu.addItem(commandItem(
+            AppCommands.ID.renameSession,
+            action: #selector(performHostMenuCommand(_:))
+        ))
 
         let scriptsSeparator = NSMenuItem.separator()
         scriptsSeparator.isHidden = true
@@ -2335,6 +2339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.revokeManager: mainWindowController?.revokeCurrentManagerRole()
         case AppCommands.ID.newProject: mainWindowController?.newProject()
         case AppCommands.ID.addProject: mainWindowController?.addProject()
+        case AppCommands.ID.renameSession: mainWindowController?.renameCurrentSession()
         case AppCommands.ID.closeSession: mainWindowController?.closeCurrentSession()
         case AppCommands.ID.closeTab: mainWindowController?.closeActiveTab()
         case AppCommands.ID.find: mainWindowController?.showFind()

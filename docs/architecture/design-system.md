@@ -1632,6 +1632,14 @@ pointer is anywhere in the chain. A menu item's destination is one algebraic val
 action, or submenu — because a row carrying both would answer a press with the action and hover
 with the submenu. Callers still depend on a named boundary rather than constructing their chrome.
 
+An action row that mirrors a registered command carries its resolved `KeyboardShortcut` on
+`ThemedMenuItem`; callers rebuild menus on open and read `ShortcutOverrideStore`, so the trailing
+column says what the command answers to *now*. `ThemedMenuMetrics` measures one right-aligned
+column from the widest complete chord, including every modifier and named key, rather than
+assuming every row is ⌘ plus one character. The historical grammars remain authored: an ordinary
+command chord is `Ctrl+R` in Win98 and the Amiga-key cap plus `R` in Workbench, while chords those
+grammars did not define use the complete macOS glyph spelling instead of hiding modifiers.
+
 Nine bugs are worth keeping, because each is a trap the next drawn control will walk into:
 
 - **`NSImage.draw` states its own compositing, so a blend mode set on the context beneath it

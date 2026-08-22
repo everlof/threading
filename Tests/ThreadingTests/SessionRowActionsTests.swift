@@ -457,6 +457,15 @@ final class SessionRowActionsTests: XCTestCase {
         )
         let options = try sessionOptions(in: entries)
 
+        let rename = try XCTUnwrap(
+            entries.compactMap(\.item).first { $0.title == L10n.string("Rename Session…") }
+        )
+        XCTAssertEqual(
+            rename.shortcut,
+            ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.renameSession),
+            "the row and pane-header menus must show the live binding for their rename action"
+        )
+
         XCTAssertNotNil(
             options.first { $0.item?.title == SessionActionMenuDefaults.attachmentsTitle }
         )

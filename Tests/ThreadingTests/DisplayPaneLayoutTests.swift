@@ -764,6 +764,14 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         )
         let review = try XCTUnwrap(entries.firstIndex { $0.itemTitle == "Review" })
         XCTAssertGreaterThan(theme, review, "the global document led the chat's own surfaces")
+        XCTAssertEqual(
+            entries[review].item?.shortcut,
+            ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.review)
+        )
+        XCTAssertEqual(
+            entries[theme].item?.shortcut,
+            ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.currentTheme)
+        )
         guard case .separator = entries[theme - 1] else {
             return XCTFail("Current Theme reads as another of this chat's tabs")
         }

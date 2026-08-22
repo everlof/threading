@@ -2278,11 +2278,17 @@ private extension ProjectSidebarViewController {
             [
                 .item(ThemedMenuItem(
                     title: L10n.string("Start New Project…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.newProject
+                    ),
                     image: ThemedMenuIcon.symbol("plus"),
                     onChoose: { [weak self] in self?.startNewProjectClicked() }
                 )),
                 .item(ThemedMenuItem(
                     title: L10n.string("Use an Existing Folder…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.addProject
+                    ),
                     image: ThemedMenuIcon.symbol("folder"),
                     onChoose: { [weak self] in self?.useExistingFolderClicked() }
                 )),
@@ -2615,11 +2621,17 @@ private extension ProjectSidebarViewController {
             [
                 .item(ThemedMenuItem(
                     title: L10n.string("New Chat…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.newSession
+                    ),
                     image: ThemedMenuIcon.symbol("bubble.left"),
                     onChoose: pinnedAction(row) { $0.newProjectChatClicked() }
                 )),
                 .item(ThemedMenuItem(
                     title: L10n.string("New Manager…"),
+                    shortcut: ShortcutOverrideStore.shared.shortcut(
+                        forID: AppCommands.ID.newManager
+                    ),
                     image: ThemedMenuIcon.symbol("person.3"),
                     onChoose: pinnedAction(row) { $0.newProjectManagerClicked() }
                 )),
@@ -2701,6 +2713,7 @@ private extension ProjectSidebarViewController {
     private func branchGroupingEntry() -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Group Sessions by Branch"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.groupByBranch),
             isSelected: AppSettings.shared.groupsSessionsByBranch,
             onChoose: { [weak self] in self?.toggleBranchGroupingClicked() }
         ))
@@ -2711,6 +2724,7 @@ private extension ProjectSidebarViewController {
     private func loneBranchHeadingsEntry() -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Headings for Lone Branches"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.loneBranchHeadings),
             isSelected: AppSettings.shared.groupsLoneBranches,
             isEnabled: AppSettings.shared.groupsSessionsByBranch,
             onChoose: { [weak self] in self?.toggleLoneBranchHeadingsClicked() }
@@ -2723,6 +2737,7 @@ private extension ProjectSidebarViewController {
     private func compactTreeEntry() -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Compact Tree"),
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.compactTree),
             isSelected: AppSettings.shared.compactsSidebarTree,
             onChoose: { [weak self] in self?.toggleCompactTreeClicked() }
         ))

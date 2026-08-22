@@ -118,6 +118,7 @@ enum AppCommands {
         static let newProject = "project.new"
         static let addProject = "project.add"
         static let closeSession = "session.close"
+        static let renameSession = "session.rename"
         static let closeTab = "tab.close"
         static let find = "edit.find"
         static let openIn = "session.openIn"
@@ -197,6 +198,9 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "w", modifiers: .command), isEditable: true),
         AppCommand(id: ID.closeSession, group: .session, title: "Close Session",
                    defaultShortcut: nil, isEditable: true, scope: .session),
+        AppCommand(id: ID.renameSession, group: .session, title: "Rename Session…",
+                   defaultShortcut: KeyboardShortcut(key: "r", modifiers: .command),
+                   isEditable: true, scope: .session),
         AppCommand(id: ID.find, group: .session, title: "Find…",
                    defaultShortcut: KeyboardShortcut(key: "f", modifiers: .command), isEditable: true),
         AppCommand(id: ID.commandPalette, group: .view, title: "Command Palette…",

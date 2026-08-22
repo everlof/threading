@@ -196,6 +196,31 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertFalse(delegate.validateMenuItem(lone))
     }
 
+    func testProjectMenuCarriesTheLiveRenameSessionShortcut() throws {
+        let previousMainMenu = NSApp.mainMenu
+        let previousWindowsMenu = NSApp.windowsMenu
+        let previousHelpMenu = NSApp.helpMenu
+        defer {
+            NSApp.mainMenu = previousMainMenu
+            NSApp.windowsMenu = previousWindowsMenu
+            NSApp.helpMenu = previousHelpMenu
+        }
+
+        let delegate = AppDelegate()
+        delegate.setupMenuBar()
+
+        let projectMenu = try XCTUnwrap(
+            NSApp.mainMenu?.items.compactMap(\.submenu).first {
+                $0.title == MenuIdentifiers.projectMenu
+            }
+        )
+        let rename = try XCTUnwrap(projectMenu.item(withTitle: L10n.string("Rename Session…")))
+        let expected = ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.renameSession)
+        XCTAssertEqual(rename.representedObject as? String, AppCommands.ID.renameSession)
+        XCTAssertEqual(rename.keyEquivalent, expected?.key ?? "")
+        XCTAssertEqual(rename.keyEquivalentModifierMask, expected?.modifiers ?? [])
+    }
+
     /// The global silence gate's third surface. It sits in the application menu rather than
     /// under View because it is the app's own voice rather than a view of anything — and
     /// because that menu is present with no window open, which is the state the app is most
