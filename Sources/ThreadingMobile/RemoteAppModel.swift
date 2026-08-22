@@ -58,6 +58,23 @@ final class RemoteAppModel: ObservableObject {
         case loadingSessions(routeKind: String)
     }
 
+    /// Which route a walk is on right now, for a surface that would otherwise show only a spinner.
+    ///
+    /// Separate from `ConnectionProgress`, which belongs to the dashboard's initial connection.
+    /// This one exists for every walk, including the one behind opening a chat: the 2026-08-21
+    /// incident's phone showed "Opening chat…" and nothing else for ninety seconds, so the person
+    /// watching it had no way to tell a stuck app from an app working through a dead LAN.
+    ///
+    /// `followsFailure` is why this is a value rather than a route name. A first attempt normally
+    /// answers in well under a second, and naming the route that fast reads as a stutter; naming
+    /// it *after* something failed is the answer to "what is it doing now".
+    struct RouteWalkStatus: Equatable, Sendable {
+        let kind: String
+        let attempt: Int
+        let total: Int
+        let followsFailure: Bool
+    }
+
     @Published private(set) var hosts: [PairedRemoteHost] {
         didSet {
             guard hosts != oldValue else { return }
@@ -82,6 +99,7 @@ final class RemoteAppModel: ObservableObject {
         }
     }
     @Published private(set) var connectionProgress: ConnectionProgress?
+    @Published private(set) var routeWalkStatus: RouteWalkStatus?
     @Published private(set) var activeHostID: String?
     @Published private(set) var storageIssue: String? = nil
     @Published private(set) var notificationOpenRequest: RemoteNotificationOpenRequest?
@@ -132,6 +150,11 @@ final class RemoteAppModel: ObservableObject {
     private var catalogueRevision = 0
     private var catalogueRefreshInFlightGeneration: Int?
     private var refreshGeneration = 0
+    /// How many attempts of the walk in progress have failed. One counter rather than one per
+    /// walk: a refresh and a mutation can overlap, and what the spinner needs to know is whether
+    /// *something* has already failed, not which walk it belonged to.
+    private var routeWalkFailures = 0
+    private var routeWalksInFlight = 0
     private var activeHostedLink: RemoteConnectionLink?
     private var activeHostedHostID: String?
     /// Provisioning is a low-frequency control-plane operation. A service outage must not turn
@@ -715,94 +738,52 @@ final class RemoteAppModel: ObservableObject {
             connectionProgress = .preparingRoutes
         }
         do {
-            let connection = try await fetchMe(
-                from: host,
-                reportsProgress: !wasOnline,
-                trace: refreshTrace
-            )
-            let response = connection.response
-            let successfulLink = connection.link
-            guard activeHostID == hostID, refreshGeneration == generation else {
-                MobileDiagnostics.recordConnectivity(
-                    .hostRefreshFailed,
-                    level: .warning,
-                    fields: refreshBaseFields.merging([
-                        .result: "discarded",
-                        .code: "refresh.generationChanged",
-                        .durationMS: MobileDiagnostics.elapsedMilliseconds(
-                            since: refreshStartedAt
-                        ),
-                    ]) { current, _ in current }
-                )
-                return
-            }
-            me = response
-            phase = .online
-            restoreRouteIfPossible(hostID: hostID, response: response)
-            MobileDiagnostics.recordConnectivity(
-                .hostRefreshSucceeded,
-                fields: refreshBaseFields.merging([
-                    .result: "succeeded",
-                    .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
-                    .transport: connection.kind,
-                    .origin: MobileDiagnostics.originDigest(successfulLink.baseURL),
-                    .protocolVersion: String(response.serverProtocol.version),
-                    .minimumProtocolVersion: String(response.serverProtocol.minimumSupported),
-                ]) { current, _ in current }
-            )
-            if isEphemeralTerminalWireFixture {
-                // Keep the loopback door exact and in memory. The real server still supplies
-                // the catalogue and event stream; its advertised Mac routes and identity are
-                // production state that do not belong in this synthetic pairing.
-                ensureThemeEvents(for: host)
-            } else if let index = hosts.firstIndex(where: { $0.id == hostID }) {
-                let old = hosts[index]
-                var updated = old
-                // A pin is refined or followed only on the word of a channel that proved the
-                // pinned key; over anything else the response may still be adopted where the
-                // record allows it, and a foreign identity is refused and said so.
-                let overPinnedChannel = !connection.isHosted
-                    && successfulLink.baseURL.host.map {
-                        RemoteHostTrust.liveVerdict($0.lowercased()) == .accepted
-                    } == true
-                let pinOutcome = updated.merge(
-                    identity: response.host,
-                    successfulLink: successfulLink,
-                    isHosted: connection.isHosted,
-                    overPinnedChannel: overPinnedChannel
-                )
-                if pinOutcome == .refused {
-                    MobileDiagnostics.logDegraded(.hostTrust, code: .pinChangeRefused)
+            // The walk has a ceiling, and a walk that reaches it stops being something to make a
+            // person wait for rather than being abandoned. If a slower route answers afterwards
+            // it is adopted exactly as a timely one would have been.
+            let connection = try await RemoteRouteWalkDeadline.run(
+                ceiling: RemoteRouteWalkBudget.ceiling(
+                    forCandidateCount: host.candidates(
+                        preferring: discoveredAddresses[host.id]
+                    ).count
+                ),
+                walk: { [weak self] in
+                    guard let self else { throw CancellationError() }
+                    return try await self.fetchMe(
+                        from: host,
+                        reportsProgress: !wasOnline,
+                        trace: refreshTrace
+                    )
+                },
+                lateSuccess: { [weak self] late in
+                    await self?.applyRefreshSuccess(
+                        late,
+                        host: host,
+                        hostID: hostID,
+                        generation: generation,
+                        wasOnline: wasOnline,
+                        trace: refreshTrace,
+                        baseFields: refreshBaseFields,
+                        startedAt: refreshStartedAt
+                    )
+                },
+                exceeded: {
+                    RemoteConnectionAttempt(
+                        underlying: URLError(.timedOut),
+                        host: host.link.baseURL.host
+                    )
                 }
-                let metadataChanged = old.name != updated.name
-                    || old.link != updated.link
-                    || old.endpoints != updated.endpoints
-                    || old.connectionPolicy != updated.connectionPolicy
-                    || old.activeEndpointKind != updated.activeEndpointKind
-                    || old.pinnedFingerprint != updated.pinnedFingerprint
-                    || old.nextPinnedFingerprint != updated.nextPinnedFingerprint
-                // Persist only a real connection transition or identity change, rather than
-                // rewriting the credential-bearing Keychain item after every event-driven
-                // catalogue refresh.
-                if !wasOnline || metadataChanged {
-                    hosts[index] = updated
-                    _ = persistHosts()
-                }
-                // A pin the Mac just announced covers every address it flagged, including the
-                // ones this phone has not used yet. That is what lets a phone paired on the
-                // couch use the tailnet address from the train with no further ceremony.
-                RemoteHostTrust.register([updated])
-                ensureThemeEvents(for: updated)
-            }
-            if !isEphemeralTerminalWireFixture {
-                await reconcileHostedCredential(
-                    hostID: hostID,
-                    response: response,
-                    successfulLink: successfulLink,
-                    generation: generation,
-                    trace: refreshTrace
-                )
-            }
+            )
+            await applyRefreshSuccess(
+                connection,
+                host: host,
+                hostID: hostID,
+                generation: generation,
+                wasOnline: wasOnline,
+                trace: refreshTrace,
+                baseFields: refreshBaseFields,
+                startedAt: refreshStartedAt
+            )
         } catch is CancellationError {
             MobileDiagnostics.recordConnectivity(
                 .hostRefreshFailed,
@@ -846,6 +827,106 @@ final class RemoteAppModel: ObservableObject {
                 fields[.detail] = verdict
             }
             MobileDiagnostics.recordConnectivity(.hostRefreshFailed, level: .error, fields: fields)
+        }
+    }
+
+    /// Adopts a successful walk, whether it answered inside the walk budget or after it.
+    ///
+    /// Extracted so a late success takes exactly the path a timely one takes. A second copy of
+    /// this would be the place a late connection quietly stopped persisting its pins or starting
+    /// its event socket.
+    private func applyRefreshSuccess(
+        _ connection: SuccessfulConnection,
+        host: PairedRemoteHost,
+        hostID: String,
+        generation: Int,
+        wasOnline: Bool,
+        trace refreshTrace: String,
+        baseFields refreshBaseFields: [RemoteDiagnosticField: String],
+        startedAt refreshStartedAt: UInt64
+    ) async {
+        let response = connection.response
+        let successfulLink = connection.link
+        guard activeHostID == hostID, refreshGeneration == generation else {
+            MobileDiagnostics.recordConnectivity(
+                .hostRefreshFailed,
+                level: .warning,
+                fields: refreshBaseFields.merging([
+                    .result: "discarded",
+                    .code: "refresh.generationChanged",
+                    .durationMS: MobileDiagnostics.elapsedMilliseconds(
+                        since: refreshStartedAt
+                    ),
+                ]) { current, _ in current }
+            )
+            return
+        }
+        me = response
+        phase = .online
+        restoreRouteIfPossible(hostID: hostID, response: response)
+        MobileDiagnostics.recordConnectivity(
+            .hostRefreshSucceeded,
+            fields: refreshBaseFields.merging([
+                .result: "succeeded",
+                .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
+                .transport: connection.kind,
+                .origin: MobileDiagnostics.originDigest(successfulLink.baseURL),
+                .protocolVersion: String(response.serverProtocol.version),
+                .minimumProtocolVersion: String(response.serverProtocol.minimumSupported),
+            ]) { current, _ in current }
+        )
+        if isEphemeralTerminalWireFixture {
+            // Keep the loopback door exact and in memory. The real server still supplies
+            // the catalogue and event stream; its advertised Mac routes and identity are
+            // production state that do not belong in this synthetic pairing.
+            ensureThemeEvents(for: host)
+        } else if let index = hosts.firstIndex(where: { $0.id == hostID }) {
+            let old = hosts[index]
+            var updated = old
+            // A pin is refined or followed only on the word of a channel that proved the
+            // pinned key; over anything else the response may still be adopted where the
+            // record allows it, and a foreign identity is refused and said so.
+            let overPinnedChannel = !connection.isHosted
+                && successfulLink.baseURL.host.map {
+                    RemoteHostTrust.liveVerdict($0.lowercased()) == .accepted
+                } == true
+            let pinOutcome = updated.merge(
+                identity: response.host,
+                successfulLink: successfulLink,
+                isHosted: connection.isHosted,
+                overPinnedChannel: overPinnedChannel
+            )
+            if pinOutcome == .refused {
+                MobileDiagnostics.logDegraded(.hostTrust, code: .pinChangeRefused)
+            }
+            let metadataChanged = old.name != updated.name
+                || old.link != updated.link
+                || old.endpoints != updated.endpoints
+                || old.connectionPolicy != updated.connectionPolicy
+                || old.activeEndpointKind != updated.activeEndpointKind
+                || old.pinnedFingerprint != updated.pinnedFingerprint
+                || old.nextPinnedFingerprint != updated.nextPinnedFingerprint
+            // Persist only a real connection transition or identity change, rather than
+            // rewriting the credential-bearing Keychain item after every event-driven
+            // catalogue refresh.
+            if !wasOnline || metadataChanged {
+                hosts[index] = updated
+                _ = persistHosts()
+            }
+            // A pin the Mac just announced covers every address it flagged, including the
+            // ones this phone has not used yet. That is what lets a phone paired on the
+            // couch use the tailnet address from the train with no further ceremony.
+            RemoteHostTrust.register([updated])
+            ensureThemeEvents(for: updated)
+        }
+        if !isEphemeralTerminalWireFixture {
+            await reconcileHostedCredential(
+                hostID: hostID,
+                response: response,
+                successfulLink: successfulLink,
+                generation: generation,
+                trace: refreshTrace
+            )
         }
     }
 
@@ -1353,6 +1434,10 @@ final class RemoteAppModel: ObservableObject {
         /// abandoned once that door has answered. Nil for the hosted route, which is one
         /// rendezvous rather than an address with ports on it.
         let doorID: String?
+        /// Which pass of the walk this attempt belongs to, which decides both what it is given
+        /// and what a support report can say about why a walk was long. Nil for the hosted route,
+        /// which is a rendezvous rather than one of the Mac's own addresses.
+        let wave: RemoteRouteWave?
         /// Original position in the complete candidate list. Lanes retain it so concurrent
         /// diagnostics still reconstruct the host's full route plan rather than four local lists.
         let diagnosticAttempt: Int?
@@ -1363,6 +1448,7 @@ final class RemoteAppModel: ObservableObject {
             isHosted: Bool,
             kind: String,
             doorID: String?,
+            wave: RemoteRouteWave? = nil,
             diagnosticAttempt: Int? = nil,
             diagnosticTotal: Int? = nil
         ) {
@@ -1370,6 +1456,7 @@ final class RemoteAppModel: ObservableObject {
             self.isHosted = isHosted
             self.kind = kind
             self.doorID = doorID
+            self.wave = wave
             self.diagnosticAttempt = diagnosticAttempt
             self.diagnosticTotal = diagnosticTotal
         }
@@ -1387,6 +1474,8 @@ final class RemoteAppModel: ObservableObject {
         reportsProgress: Bool,
         trace: String
     ) async throws -> SuccessfulConnection {
+        beginRouteWalk()
+        defer { endRouteWalk() }
         let expectedRouteCount = max(host.connectionOptionLabels.count, 1)
         let remoteCandidates = host.candidates(preferring: discoveredAddresses[host.id])
         let diagnosticPositions = Dictionary(uniqueKeysWithValues: remoteCandidates.enumerated().map {
@@ -1399,6 +1488,7 @@ final class RemoteAppModel: ObservableObject {
                     isHosted: false,
                     kind: $0.kind,
                     doorID: $0.doorID,
+                    wave: $0.wave,
                     diagnosticAttempt: diagnosticPositions[$0.link],
                     diagnosticTotal: remoteCandidates.count
                 )
@@ -1468,6 +1558,49 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
+    // MARK: - What a walk is doing
+
+    /// Opens a walk, so the words on screen belong to this one rather than to the last one.
+    private func beginRouteWalk() {
+        routeWalksInFlight += 1
+        guard routeWalksInFlight == 1 else { return }
+        routeWalkFailures = 0
+        routeWalkStatus = nil
+    }
+
+    /// Closes a walk. The status goes with it: a spinner that is gone has nothing to say.
+    private func endRouteWalk() {
+        routeWalksInFlight = max(0, routeWalksInFlight - 1)
+        guard routeWalksInFlight == 0 else { return }
+        routeWalkFailures = 0
+        routeWalkStatus = nil
+    }
+
+    /// Records which route is being tried right now.
+    ///
+    /// Lanes race, so several attempts are in flight and the most recently started one is the one
+    /// named. That is deliberate: the question a person is asking is "is it still doing
+    /// something", and the newest attempt is the truest answer to it.
+    private func noteRouteAttempt(_ candidate: ConnectionCandidate) {
+        routeWalkStatus = RouteWalkStatus(
+            kind: candidate.kind,
+            attempt: candidate.diagnosticAttempt ?? 1,
+            total: candidate.diagnosticTotal ?? 1,
+            followsFailure: routeWalkFailures > 0
+        )
+    }
+
+    private func noteRouteFailure() {
+        routeWalkFailures += 1
+        guard let status = routeWalkStatus, !status.followsFailure else { return }
+        routeWalkStatus = RouteWalkStatus(
+            kind: status.kind,
+            attempt: status.attempt,
+            total: status.total,
+            followsFailure: true
+        )
+    }
+
     /// Walks one bounded race lane in its established order. A sticky LAN port range stays in one
     /// lane and stops as soon as its door has answered or proved unreachable.
     private func fetchMeSequentially(
@@ -1475,9 +1608,10 @@ final class RemoteAppModel: ObservableObject {
         trace: String
     ) async throws -> SuccessfulConnection {
         try await Self.walk(candidates, trace: trace, phase: "request") { index, candidate in
-            let timeout = candidates.count > 1 && index < candidates.count - 1
-                ? 4
-                : RemoteClient.defaultRequestTimeout
+            let timeout = RemoteRouteWalkBudget.timeout(
+                for: candidate.wave,
+                isOnlyCandidate: candidates.count == 1
+            )
             return try await self.fetchMe(
                 candidate: candidate,
                 trace: trace,
@@ -1638,7 +1772,9 @@ final class RemoteAppModel: ObservableObject {
                 .durationMS: MobileDiagnostics.elapsedMilliseconds(since: preparedAt),
             ]) { current, _ in current }
         )
-        let timeout = racesPrivateRoute ? 4 : RemoteClient.defaultRequestTimeout
+        let timeout = racesPrivateRoute
+            ? RemoteRouteWalkBudget.routeAttemptTimeout
+            : RemoteClient.defaultRequestTimeout
         do {
             return try await fetchMe(
                 candidate: ConnectionCandidate(
@@ -1666,7 +1802,7 @@ final class RemoteAppModel: ObservableObject {
         timeout: TimeInterval
     ) async throws -> SuccessfulConnection {
         let startedAt = MobileDiagnostics.monotonicNow()
-        let baseFields: [RemoteDiagnosticField: String] = [
+        var baseFields: [RemoteDiagnosticField: String] = [
             .trace: trace,
             .transport: candidate.kind,
             .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
@@ -1676,6 +1812,8 @@ final class RemoteAppModel: ObservableObject {
             .total: String(total),
             .timeoutMS: MobileDiagnostics.milliseconds(timeout),
         ]
+        if let wave = candidate.wave { baseFields[.wave] = wave.rawValue }
+        noteRouteAttempt(candidate)
         MobileDiagnostics.recordConnectivity(
             .hostRouteStarted,
             fields: baseFields.merging([.result: "started"]) { current, _ in current }
@@ -1697,6 +1835,7 @@ final class RemoteAppModel: ObservableObject {
             )
         } catch {
             let cancelled = error is CancellationError || Task.isCancelled
+            if !cancelled { noteRouteFailure() }
             var fields = baseFields.merging([
                 .result: cancelled ? "cancelled" : "failed",
                 .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
@@ -1726,6 +1865,8 @@ final class RemoteAppModel: ObservableObject {
         guard let host = hosts.first(where: { $0.id == hostID }) else {
             throw CancellationError()
         }
+        beginRouteWalk()
+        defer { endRouteWalk() }
         let requestID = UUID().uuidString.lowercased()
         let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
         let preparedAt = MobileDiagnostics.monotonicNow()
@@ -1752,12 +1893,12 @@ final class RemoteAppModel: ObservableObject {
         var closedDoors: Set<String> = []
         for (index, candidate) in prepared.candidates.enumerated() {
             if let doorID = candidate.doorID, closedDoors.contains(doorID) { continue }
-            let timeout = prepared.candidates.count > 1
-                && index < prepared.candidates.count - 1
-                ? 8
-                : RemoteClient.defaultRequestTimeout
+            let timeout = RemoteRouteWalkBudget.mutationTimeout(
+                for: candidate.wave,
+                isOnlyCandidate: prepared.candidates.count == 1
+            )
             let startedAt = MobileDiagnostics.monotonicNow()
-            let routeFields: [RemoteDiagnosticField: String] = [
+            var routeFields: [RemoteDiagnosticField: String] = [
                 .trace: requestID,
                 .peer: peer,
                 .transport: candidate.kind,
@@ -1768,6 +1909,8 @@ final class RemoteAppModel: ObservableObject {
                 .total: String(prepared.candidates.count),
                 .timeoutMS: MobileDiagnostics.milliseconds(timeout),
             ]
+            if let wave = candidate.wave { routeFields[.wave] = wave.rawValue }
+            noteRouteAttempt(candidate)
             MobileDiagnostics.recordConnectivity(.hostRouteStarted, fields: routeFields)
             do {
                 let response = try await operation(
@@ -1807,6 +1950,7 @@ final class RemoteAppModel: ObservableObject {
                 )
                 throw CancellationError()
             } catch let error as RemoteClientError {
+                noteRouteFailure()
                 var failedFields = routeFields.merging([
                     .result: "failed",
                     .code: MobileDiagnostics.errorCode(error),
@@ -1841,6 +1985,7 @@ final class RemoteAppModel: ObservableObject {
                 if candidate.isHosted { await hostedConnectionFailed(hostID: host.id) }
                 throw error
             } catch {
+                noteRouteFailure()
                 MobileDiagnostics.recordConnectivity(
                     .hostRouteEnded,
                     level: .warning,
@@ -1903,7 +2048,8 @@ final class RemoteAppModel: ObservableObject {
                 link: candidate.link,
                 isHosted: false,
                 kind: candidate.kind,
-                doorID: candidate.doorID
+                doorID: candidate.doorID,
+                wave: candidate.wave
             ))
         }
         return (candidates, preparationError)

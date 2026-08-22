@@ -110,24 +110,19 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// A discovered address is where it is *now*, so it leads, and the rest of the list follows
     /// unchanged as the fallback.
     ///
+    /// Leading also makes it the address that carries its route's sticky-port walk, which is the
+    /// right one to carry it for the same reason: the walk asks which port the Mac's listener
+    /// took, and the address it was just found at is the one that can answer.
+    ///
     /// **The policy still decides.** The discovered address goes through the same fail-closed
     /// endpoint selection as an advertised one, as the `lan` kind it is, so a record that admits
     /// no private-network endpoint does not acquire one because something answered a broadcast.
     func candidates(preferring discovered: URL?) -> [RemoteHostConnectionCandidate] {
-        let advertised = candidates
-        guard let discovered, admitsLAN(discovered) else { return advertised }
-
-        var result = RemoteHostConnectionCandidate.attempts(
-            baseURL: discovered,
-            kind: RemoteHostEndpointKind.lan,
-            token: link.token,
-            doorID: discovered.absoluteString
+        guard let discovered, admitsLAN(discovered) else { return candidates }
+        return Self.candidates(
+            forAddressesInOrder: [(RemoteHostEndpointKind.lan, discovered)] + advertisedAddresses,
+            token: link.token
         )
-        var seen = Set(result.map(\.link.baseURL))
-        for candidate in advertised where seen.insert(candidate.link.baseURL).inserted {
-            result.append(candidate)
-        }
-        return result
     }
 
     /// Whether this record's connection policy admits a `lan` address at all.
@@ -151,38 +146,58 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// ports of that range as further attempts, and an answer from any of them (an HTTP status,
     /// an authentication refusal, a certificate that is not the pinned one) ends that door.
     /// Continuing to knock on nine more ports after the Mac has spoken finds nothing.
+    ///
+    /// The order across doors is `RemoteRouteWave`'s, not the endpoint list's: every route gets
+    /// its own address tried before any route gets a second attempt.
     var candidates: [RemoteHostConnectionCandidate] {
-        // `nil` is a legacy record from before hosts advertised routes, and it is also what a
-        // guest capability holds: a one-chat share is told the door it was minted against and no
-        // others. An explicitly empty list is different: the Mac currently authorizes no endpoint
-        // under its policy, so falling back to a remembered address here would violate it.
+        Self.candidates(forAddressesInOrder: advertisedAddresses, token: link.token)
+    }
+
+    /// The addresses this record admits, in the policy's deterministic order.
+    ///
+    /// `nil` endpoints is a legacy record from before hosts advertised routes, and it is also what
+    /// a guest capability holds: a one-chat share is told the door it was minted against and no
+    /// others. An explicitly empty list is different: the Mac currently authorizes no endpoint
+    /// under its policy, so falling back to a remembered address here would violate it.
+    private var advertisedAddresses: [(kind: String, baseURL: URL)] {
         guard let endpoints else {
-            return RemoteHostConnectionCandidate.attempts(
-                baseURL: link.baseURL,
-                kind: Self.endpointKind(for: link.baseURL),
-                token: link.token,
-                doorID: link.baseURL.absoluteString
-            )
+            return [(Self.endpointKind(for: link.baseURL), link.baseURL)]
         }
         guard !endpoints.isEmpty else { return [] }
-        let ordered = RemoteHostEndpointSelection.ordered(
+        return RemoteHostEndpointSelection.ordered(
             endpoints,
             policy: connectionPolicy ?? .privateOnly,
             currentBaseURL: link.baseURL
-        )
+        ).map { ($0.kind, $0.baseURL) }
+    }
+
+    /// Turns an ordered list of addresses into the attempts they contribute, wave by wave.
+    ///
+    /// The first address of each route leads it: that address is the one whose attempt answers
+    /// "does this way in exist at all", and it is the one that carries the route's sticky-port
+    /// walk. Every other address of a route already represented contributes itself and nothing
+    /// else. Each address is still attempted exactly once, whichever wave first claimed it.
+    private static func candidates(
+        forAddressesInOrder addresses: [(kind: String, baseURL: URL)],
+        token: String
+    ) -> [RemoteHostConnectionCandidate] {
+        var leadingKinds: Set<String> = []
         var seen: Set<URL> = []
-        var result: [RemoteHostConnectionCandidate] = []
-        for endpoint in ordered {
+        var byWave: [RemoteRouteWave: [RemoteHostConnectionCandidate]] = [:]
+        for address in addresses {
+            let leads = leadingKinds.insert(address.kind).inserted
             for candidate in RemoteHostConnectionCandidate.attempts(
-                baseURL: endpoint.baseURL,
-                kind: endpoint.kind,
-                token: link.token,
-                doorID: endpoint.baseURL.absoluteString
+                baseURL: address.baseURL,
+                kind: address.kind,
+                token: token,
+                doorID: address.baseURL.absoluteString,
+                wave: leads ? .route : .address,
+                walksStickyPorts: leads
             ) where seen.insert(candidate.link.baseURL).inserted {
-                result.append(candidate)
+                byWave[candidate.wave, default: []].append(candidate)
             }
         }
-        return result
+        return RemoteRouteWave.allCases.flatMap { byWave[$0] ?? [] }
     }
 
     /// What this connection is called on screen.
@@ -340,6 +355,40 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// Which pass of the route walk one attempt belongs to, and therefore how early it is tried.
+///
+/// The walk used to be one flat list in endpoint order, and the 2026-08-21 incident is what that
+/// costs. A Mac advertising two `lan` addresses contributed twenty attempts — two addresses times
+/// the ten sticky ports — and every one of them was tried, at four seconds each, before the
+/// tailnet address that was working the whole time. Ninety seconds of bare spinner for a route
+/// that answered in 818 ms once it finally got its turn.
+///
+/// So attempts are ordered by what each one is evidence *about*:
+///
+/// - `route` — one address per way in. Only this attempt can say whether that way in exists at
+///   all from where the phone is standing, so every route contributes one before any route
+///   contributes a second.
+/// - `address` — the Mac's other addresses on a route already represented. Worth trying, but a
+///   second address of a dead LAN is not news while a tailnet address is still untried.
+/// - `port` — the sticky-port range. It asks which port the Mac's listener took, which is a fact
+///   about the Mac rather than about each of its addresses, so it is carried once per route by
+///   the address that leads it.
+enum RemoteRouteWave: String, CaseIterable, Comparable, Sendable {
+    case route
+    case address
+    case port
+
+    private var order: Int {
+        switch self {
+        case .route: return 0
+        case .address: return 1
+        case .port: return 2
+        }
+    }
+
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.order < rhs.order }
+}
+
 /// One address the phone will try, and the door it belongs to.
 struct RemoteHostConnectionCandidate: Equatable, Sendable {
     let link: RemoteConnectionLink
@@ -349,9 +398,12 @@ struct RemoteHostConnectionCandidate: Equatable, Sendable {
     /// Attempts sharing this identifier are the same advertised door at another port of the
     /// sticky range. An answer from one of them ends the walk over the rest.
     let doorID: String
+    /// Which pass of the walk this attempt belongs to, which is what orders the whole list.
+    let wave: RemoteRouteWave
+
     /// True for the ports the walk added, which is what makes them skippable as a group without
     /// also skipping the address the Mac actually advertised.
-    let isPortWalk: Bool
+    var isPortWalk: Bool { wave == .port }
 
     /// The attempts one advertised address contributes.
     ///
@@ -360,11 +412,18 @@ struct RemoteHostConnectionCandidate: Equatable, Sendable {
     /// collision must not cost a re-pair. Bounded by the range and deterministic: ten addresses
     /// tried one after another, never in parallel. Every other kind contributes itself alone,
     /// because a tailnet name and a VPN address are not ports somebody guessed.
+    ///
+    /// `walksStickyPorts` is how one route pays for that range once rather than once per address.
+    /// Ten ports answer "which port did this Mac's listener take", and the answer does not change
+    /// between two addresses of the same Mac; the incident paid for it twice and reached the
+    /// working route ninety seconds late.
     static func attempts(
         baseURL: URL,
         kind: String,
         token: String,
-        doorID: String
+        doorID: String,
+        wave: RemoteRouteWave = .route,
+        walksStickyPorts: Bool = true
     ) -> [RemoteHostConnectionCandidate] {
         var result: [RemoteHostConnectionCandidate] = []
         if let link = RemoteConnectionLink(baseURL: baseURL, token: token) {
@@ -373,11 +432,12 @@ struct RemoteHostConnectionCandidate: Equatable, Sendable {
                     link: link,
                     kind: kind,
                     doorID: doorID,
-                    isPortWalk: false
+                    wave: wave
                 )
             )
         }
-        guard kind == RemoteHostEndpointKind.lan,
+        guard walksStickyPorts,
+              kind == RemoteHostEndpointKind.lan,
               let port = baseURL.port.flatMap({ UInt16(exactly: $0) }),
               RemoteListenerPorts.fallbackRange.contains(port) else {
             return result
@@ -392,7 +452,7 @@ struct RemoteHostConnectionCandidate: Equatable, Sendable {
                     link: link,
                     kind: kind,
                     doorID: doorID,
-                    isPortWalk: true
+                    wave: .port
                 )
             )
         }

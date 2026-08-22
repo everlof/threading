@@ -55,6 +55,31 @@ enum MobileSessionChrome {
         catalogTitle.isEmpty ? (liveTitle ?? catalogTitle) : catalogTitle
     }
 
+    /// What the screen says while a chat is being opened.
+    ///
+    /// Ordinarily "Opening chat…", because ordinarily the first route answers and a route name
+    /// flashed for two hundred milliseconds is a stutter rather than information. Once something
+    /// has failed the walk is going to take a while, and then the route it is on is the only
+    /// honest thing to say: the 2026-08-21 incident's phone showed this placeholder and nothing
+    /// else for ninety seconds while a dead LAN was worked through, which is why the person
+    /// watching it filed a support report about a frozen app.
+    ///
+    /// The words are the connection status's own — "Trying LAN", "Trying Tailscale" — so a route
+    /// is named the same way here as on the dashboard.
+    static func openingStatus(
+        isAvailable: Bool,
+        routeWalk: RemoteAppModel.RouteWalkStatus?
+    ) -> String {
+        guard isAvailable else { return MobileL10n.string("Resuming on your Mac…") }
+        guard let routeWalk, routeWalk.followsFailure else {
+            return MobileL10n.string("Opening chat…")
+        }
+        return MobileL10n.string(
+            "Trying %@",
+            PairedRemoteHost.connectionLabelInSentence(forEndpointKind: routeWalk.kind)
+        )
+    }
+
     /// The same rule, resolved against the catalogue as it stands now rather than against the
     /// summary a screen was opened with.
     ///
@@ -161,8 +186,9 @@ struct SessionDetailView: View {
                     }
                 }
             } else {
-                MobileLoadingPlaceholder(MobileL10n.string(
-                    session.isAvailable ? "Opening chat…" : "Resuming on your Mac…"
+                MobileLoadingPlaceholder(MobileSessionChrome.openingStatus(
+                    isAvailable: session.isAvailable,
+                    routeWalk: model.routeWalkStatus
                 ))
             }
         }
@@ -896,8 +922,11 @@ struct TerminalRemoteView: View {
         .opacity(connection.isTerminalHydrating ? 0 : 1)
         .overlay {
             if connection.isTerminalHydrating {
-                MobileLoadingPlaceholder(MobileL10n.string("Opening chat…"))
-                    .background(terminalBackground)
+                MobileLoadingPlaceholder(MobileSessionChrome.openingStatus(
+                    isAvailable: true,
+                    routeWalk: model.routeWalkStatus
+                ))
+                .background(terminalBackground)
             }
         }
         .background(terminalBackground)

@@ -639,9 +639,28 @@ actor MobileIssueReportOutbox {
 
     private static let maximumPendingReports = 20
     private static let maximumDirectoryEntries = maximumPendingReports * 4
+
+    /// How long an automatic retry waits after a delivery that failed, and how far that grows.
+    ///
+    /// The 2026-08-21 journal carries 251 delivery attempts and 250 deferrals for a single report,
+    /// every one of them the same TLS refusal answered in under a second. `flush()` runs at
+    /// launch, on every foreground, and on every path update the monitor calls satisfied — and a
+    /// phone moving between a dead Wi-Fi and a tailnet produces those constantly. Nothing stood
+    /// between an endpoint that was not going to answer and an unbounded number of handshakes.
+    ///
+    /// The second cost is the one that hurt the investigation: those 500 records were written into
+    /// the same bounded journal ring the report exists to carry, so the report's own retries were
+    /// pushing out the route events somebody needed to read. Thirty seconds doubling to a quarter
+    /// of an hour turns a dead endpoint into a handful of attempts instead of hundreds, and a
+    /// person who taps Send is never made to wait for it.
+    private static let firstRetryDelay: TimeInterval = 30
+    private static let maximumRetryDelay: TimeInterval = 15 * 60
+
     private let directory: URL
     private let endpoint: URL
     private var activeReportIDs: Set<String> = []
+    private var retryAttempts: [String: Int] = [:]
+    private var retryAfter: [String: Date] = [:]
     private var connectivityMonitor: NWPathMonitor?
     private let connectivityQueue = DispatchQueue(
         label: "codes.threading.mobile.issue-report-connectivity"
@@ -681,7 +700,12 @@ actor MobileIssueReportOutbox {
         let encoded = try JSONEncoder().encode(submission)
         try encoded.write(to: destination, options: [.atomic, .completeFileProtection])
         do {
-            guard let receipt = try await deliverExclusively(submission) else {
+            // A person tapping Send is a fresh instruction, so this attempt is made now whatever
+            // an automatic retry is currently waiting out.
+            guard let receipt = try await deliverExclusively(
+                submission,
+                honoursBackoff: false
+            ) else {
                 return .queued
             }
             do {
@@ -721,6 +745,9 @@ actor MobileIssueReportOutbox {
             MobileDiagnostics.logFailure(.issueReportDelivery, error: error)
             return
         }
+        retainRetryState(forPending: Set(
+            urls.map { $0.deletingPathExtension().lastPathComponent }
+        ))
         for url in urls {
             guard let submission = PublicIssueReportPolicy.submission(at: url) else {
                 MobileDiagnostics.logFailure(.issueReportDelivery, code: .decode)
@@ -776,16 +803,48 @@ actor MobileIssueReportOutbox {
 
     /// Actor methods are re-entrant while URLSession is suspended. Track ids across that await so
     /// a foreground retry cannot race an in-flight manual send of the same outbox file.
+    ///
+    /// `honoursBackoff` is the difference between the two callers. An automatic flush waits out
+    /// the delay a failed delivery earned; a person tapping Send is a fresh instruction and is
+    /// never made to wait for one.
     private func deliverExclusively(
-        _ submission: PublicIssueReportSubmissionDTO
+        _ submission: PublicIssueReportSubmissionDTO,
+        honoursBackoff: Bool = true
     ) async throws -> PublicIssueReportReceiptDTO? {
+        if honoursBackoff, let after = retryAfter[submission.id], after > Date() { return nil }
         guard activeReportIDs.insert(submission.id).inserted else { return nil }
         defer { activeReportIDs.remove(submission.id) }
-        return try await deliver(submission)
+        let attempt = retryAttempts[submission.id, default: 0] + 1
+        let delay = Self.retryDelay(afterAttempt: attempt)
+        do {
+            let receipt = try await deliver(submission, attempt: attempt, nextRetryDelay: delay)
+            retryAttempts[submission.id] = nil
+            retryAfter[submission.id] = nil
+            return receipt
+        } catch {
+            retryAttempts[submission.id] = attempt
+            retryAfter[submission.id] = Date().addingTimeInterval(delay)
+            throw error
+        }
+    }
+
+    /// The wait an automatic retry owes after `attempt` failed deliveries, doubling to a ceiling.
+    static func retryDelay(afterAttempt attempt: Int) -> TimeInterval {
+        let doublings = max(0, min(attempt - 1, 16))
+        return min(maximumRetryDelay, firstRetryDelay * pow(2, Double(doublings)))
+    }
+
+    /// Forgets the retry state of reports that are no longer queued, so the bookkeeping stays as
+    /// bounded as the outbox itself.
+    private func retainRetryState(forPending ids: Set<String>) {
+        retryAttempts = retryAttempts.filter { ids.contains($0.key) }
+        retryAfter = retryAfter.filter { ids.contains($0.key) }
     }
 
     private func deliver(
-        _ submission: PublicIssueReportSubmissionDTO
+        _ submission: PublicIssueReportSubmissionDTO,
+        attempt: Int,
+        nextRetryDelay: TimeInterval
     ) async throws -> PublicIssueReportReceiptDTO {
         // Encoding is local preparation, not a network attempt. Complete it before emitting the
         // started record so every started delivery has exactly one terminal connectivity record.
@@ -797,6 +856,7 @@ actor MobileIssueReportOutbox {
             .transport: "https",
             .phase: "report.delivery",
             .timeoutMS: MobileDiagnostics.milliseconds(timeout),
+            .attempt: String(attempt),
         ]
         MobileDiagnostics.recordConnectivity(
             .issueReportSubmissionStarted,
@@ -811,7 +871,7 @@ actor MobileIssueReportOutbox {
 
         var responseStatus: Int?
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await RemoteClient.deliverIssueReport(request)
             guard let http = response as? HTTPURLResponse else {
                 throw MobileIssueReportError.unreadableResponse
             }
@@ -845,6 +905,9 @@ actor MobileIssueReportOutbox {
             }
             let deferred = (error as? URLError) != nil
                 || (error as? MobileIssueReportError)?.shouldRemainQueued == true
+            if deferred {
+                terminalFields[.delayMS] = MobileDiagnostics.milliseconds(nextRetryDelay)
+            }
             MobileDiagnostics.recordConnectivity(
                 deferred ? .issueReportSubmissionDeferred : .issueReportSubmissionFailed,
                 level: deferred ? .warning : .error,

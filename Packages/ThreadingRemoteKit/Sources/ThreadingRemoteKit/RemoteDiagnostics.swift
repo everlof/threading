@@ -135,6 +135,13 @@ public enum RemoteDiagnosticField: String, CaseIterable, Sendable {
     /// One-based position in a bounded attempt set, and that set's fixed upper bound.
     case attempt
     case total
+    /// Which pass of a bounded walk an attempt belongs to, as a fixed token such as `route`,
+    /// `address` or `port`.
+    ///
+    /// `attempt` alone cannot say why a walk was long: twenty attempts against one address it had
+    /// already been told nothing was listening at, and twenty against twenty addresses, look
+    /// identical in a support report. This separates them.
+    case wave
     case reason
     /// A truncated hash of the address a client aimed at, or that a host advertised.
     ///

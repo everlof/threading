@@ -127,6 +127,7 @@ const diagnosticFields = new Set([
   "delayMS",
   "attempt",
   "total",
+  "wave",
   "reason",
   "origin",
   "detail",
