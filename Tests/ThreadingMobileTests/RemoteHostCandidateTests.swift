@@ -121,6 +121,448 @@ final class RemoteHostCandidateTests: XCTestCase {
         XCTAssertEqual(ports.count, RemoteListenerPorts.fallbackRange.count)
     }
 
+    // MARK: - Which pass an attempt belongs to
+
+    /// The ordering rule the 2026-08-21 incident is about. Every route contributes one address
+    /// before any route contributes a second, so a phone whose LAN has gone silent finds out
+    /// about the tailnet within one timeout rather than after twenty.
+    func testEveryRouteGetsItsOwnAddressBeforeAnyRouteGetsASecondAttempt() {
+        let host = pairedHost(endpoints: [
+            endpoint(.lan, "https://192.168.1.42:8760/"),
+            endpoint(.lan, "https://mac-two.local:8760/"),
+            endpoint(.tailscale, "https://mac.tail1234.ts.net:8760/"),
+            endpoint(.vpn, "https://10.8.0.3:8760/"),
+        ], policy: .privateOnly)
+
+        let candidates = host.candidates
+        let leading = candidates.prefix(while: { $0.wave == .route })
+
+        XCTAssertEqual(
+            Set(leading.map(\.kind)),
+            [
+                RemoteHostEndpointKind.lan,
+                RemoteHostEndpointKind.tailscale,
+                RemoteHostEndpointKind.vpn,
+            ],
+            "the first wave is one address per route, and every route is in it"
+        )
+        XCTAssertEqual(leading.count, 3, "one address each, not one attempt each")
+        XCTAssertEqual(
+            candidates.map(\.wave),
+            candidates.map(\.wave).sorted(),
+            "attempts are ordered by wave, never interleaved back into endpoint order"
+        )
+        XCTAssertTrue(
+            candidates.allSatisfy { $0.wave != .route || !$0.isPortWalk },
+            "a guessed port is never part of the first wave"
+        )
+    }
+
+    /// The first wave keeps the endpoint policy's own deterministic order. Interleaving is about
+    /// *which* attempt comes next, not about inventing a preference between private kinds.
+    func testTheFirstWaveKeepsThePolicysDeterministicOrder() {
+        let host = pairedHost(endpoints: [
+            endpoint(.tailscale, "https://mac.tail1234.ts.net:8760/"),
+            endpoint(.vpn, "https://10.8.0.3:8760/"),
+            endpoint(.lan, "https://192.168.1.42:8760/"),
+        ], policy: .privateOnly)
+
+        let ordered = RemoteHostEndpointSelection.ordered(
+            host.endpoints ?? [],
+            policy: .privateOnly,
+            currentBaseURL: host.link.baseURL
+        )
+        let leading = host.candidates.filter { $0.wave == .route }
+
+        XCTAssertEqual(
+            leading.map(\.link.baseURL),
+            ordered.map(\.baseURL),
+            "one per route, in the order the shared kit already fixes"
+        )
+    }
+
+    /// Ten ports answer "which port did this Mac's listener take". The answer does not change
+    /// between two addresses of the same Mac, and the incident paid for it twice: twenty LAN
+    /// attempts for two addresses, eighty seconds, before another route was tried at all.
+    func testTheStickyRangeIsWalkedOncePerRouteRatherThanOncePerAddress() {
+        let host = pairedHost(endpoints: [
+            endpoint(.lan, "https://192.168.1.181:8760/"),
+            endpoint(.lan, "https://mac.local:8760/"),
+        ], policy: .privateOnly)
+
+        let candidates = host.candidates
+        let walked = candidates.filter(\.isPortWalk)
+
+        XCTAssertEqual(
+            candidates.count,
+            RemoteListenerPorts.fallbackRange.count + 1,
+            "two addresses and one range, not two ranges"
+        )
+        XCTAssertEqual(walked.count, RemoteListenerPorts.fallbackRange.count - 1)
+        XCTAssertEqual(
+            Set(walked.map(\.doorID)).count,
+            1,
+            "the range belongs to the one address that carries it"
+        )
+        XCTAssertEqual(
+            walked.first?.link.baseURL.host,
+            "192.168.1.181",
+            "the address that leads the route is the one that carries its range"
+        )
+        XCTAssertEqual(
+            candidates.first { $0.link.baseURL.host == "mac.local" }?.wave,
+            .address,
+            "the Mac's other LAN address is tried, and it is tried before any guessed port"
+        )
+    }
+
+    /// A second address of a route already represented is still tried. Skipping it would trade
+    /// one incident for another: a Mac that moved between two of its own LAN addresses.
+    func testASecondAddressOfARouteIsStillTriedAheadOfTheRange() {
+        let host = pairedHost(endpoints: [
+            endpoint(.lan, "https://192.168.1.181:8760/"),
+            endpoint(.lan, "https://mac.local:8760/"),
+        ], policy: .privateOnly)
+
+        let hosts = host.candidates.compactMap(\.link.baseURL.host)
+
+        XCTAssertEqual(hosts.prefix(2), ["192.168.1.181", "mac.local"])
+        XCTAssertTrue(hosts.dropFirst(2).allSatisfy { $0 == "192.168.1.181" })
+    }
+
+    /// Discovery's address is where the Mac is now, so it leads its route and it is the one that
+    /// carries the range. The advertised LAN address the record remembers is still tried, once.
+    func testTheDiscoveredAddressLeadsItsRouteAndCarriesTheRange() throws {
+        let host = pairedHost(endpoints: [
+            endpoint(.lan, "https://192.168.1.42:8760/"),
+            endpoint(.tailscale, "https://mac.tail1234.ts.net:8760/"),
+        ], policy: .privateOnly)
+        let discovered = try XCTUnwrap(URL(string: "https://192.168.1.99:8760/"))
+
+        let candidates = host.candidates(preferring: discovered)
+
+        XCTAssertEqual(candidates.first?.link.baseURL.host, "192.168.1.99")
+        XCTAssertTrue(
+            candidates.filter(\.isPortWalk).allSatisfy {
+                $0.link.baseURL.host == "192.168.1.99"
+            },
+            "one range, carried by the address the Mac was just found at"
+        )
+        XCTAssertEqual(
+            candidates.first { $0.link.baseURL.host == "192.168.1.42" }?.wave,
+            .address
+        )
+        XCTAssertEqual(
+            candidates.first { $0.kind == RemoteHostEndpointKind.tailscale }?.wave,
+            .route,
+            "a discovered LAN address does not push another route out of the first wave"
+        )
+    }
+
+    // MARK: - What a walk may spend
+
+    /// A guessed port is worth less than a route's own address, because it is a guess. A Mac on
+    /// this network refuses a port nothing is listening on immediately; a port that neither
+    /// answers nor refuses is behind the same silence as the address itself.
+    func testAGuessedPortIsGivenLessThanARoutesOwnAddress() {
+        XCTAssertEqual(
+            RemoteRouteWalkBudget.timeout(for: .route, isOnlyCandidate: false),
+            RemoteRouteWalkBudget.routeAttemptTimeout
+        )
+        XCTAssertEqual(
+            RemoteRouteWalkBudget.timeout(for: .address, isOnlyCandidate: false),
+            RemoteRouteWalkBudget.routeAttemptTimeout
+        )
+        XCTAssertEqual(
+            RemoteRouteWalkBudget.timeout(for: .port, isOnlyCandidate: false),
+            RemoteRouteWalkBudget.portAttemptTimeout
+        )
+        XCTAssertLessThan(
+            RemoteRouteWalkBudget.portAttemptTimeout,
+            RemoteRouteWalkBudget.routeAttemptTimeout
+        )
+    }
+
+    /// A walk of one is not a walk. There is no other route to get on with, so cutting it short
+    /// would only turn a slow success into a failure.
+    func testASingleCandidateKeepsTheOrdinaryRequestTimeoutAndNoCeiling() {
+        XCTAssertEqual(
+            RemoteRouteWalkBudget.timeout(for: .route, isOnlyCandidate: true),
+            RemoteClient.defaultRequestTimeout
+        )
+        XCTAssertEqual(
+            RemoteRouteWalkBudget.ceiling(forCandidateCount: 1),
+            RemoteClient.defaultRequestTimeout
+        )
+        XCTAssertEqual(
+            RemoteRouteWalkBudget.ceiling(forCandidateCount: 2),
+            RemoteRouteWalkBudget.walkCeiling
+        )
+        XCTAssertLessThan(
+            RemoteRouteWalkBudget.walkCeiling,
+            15,
+            "the ceiling ends the wait inside the span after which a person concludes it is broken"
+        )
+    }
+
+    /// The ceiling answers the caller; it does not abandon the walk. A route that comes back after
+    /// it is adopted exactly as a timely one would have been, which is what makes twelve seconds
+    /// safe to set.
+    @MainActor
+    func testTheCeilingAnswersTheCallerAndALateSuccessStillLands() async {
+        let adopted = expectation(description: "the late success is delivered")
+        var late: String?
+
+        do {
+            _ = try await RemoteRouteWalkDeadline.run(
+                ceiling: 0.05,
+                walk: {
+                    try await Task.sleep(for: .milliseconds(200))
+                    return "tailnet"
+                },
+                lateSuccess: { value in
+                    late = value
+                    adopted.fulfill()
+                },
+                exceeded: { URLError(.timedOut) }
+            )
+            XCTFail("the caller is answered at the ceiling")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .timedOut)
+        }
+
+        await fulfillment(of: [adopted], timeout: 2)
+        XCTAssertEqual(late, "tailnet", "nothing was abandoned, only stopped being waited on")
+    }
+
+    /// The ordinary case is unchanged: a walk that answers inside its ceiling is the caller's
+    /// answer, and nothing is reported late.
+    @MainActor
+    func testAWalkInsideTheCeilingIsTheCallersAnswer() async throws {
+        var lateCount = 0
+
+        let value = try await RemoteRouteWalkDeadline.run(
+            ceiling: 5,
+            walk: { "lan" },
+            lateSuccess: { _ in lateCount += 1 },
+            exceeded: { URLError(.timedOut) }
+        )
+
+        XCTAssertEqual(value, "lan")
+        XCTAssertEqual(lateCount, 0)
+    }
+
+    /// The failure the caller sees at the ceiling is the walk's ordinary named transport failure,
+    /// so the offline screen keeps naming a cause and offering the step it already offered.
+    @MainActor
+    func testTheCeilingSurfacesTheOrdinaryNamedTransportFailure() async {
+        do {
+            _ = try await RemoteRouteWalkDeadline.run(
+                ceiling: 0.05,
+                walk: {
+                    try await Task.sleep(for: .seconds(30))
+                    return "never"
+                },
+                lateSuccess: { _ in },
+                exceeded: {
+                    RemoteConnectionAttempt(
+                        underlying: URLError(.timedOut),
+                        host: "192.168.1.181"
+                    )
+                }
+            )
+            XCTFail("the ceiling answers")
+        } catch {
+            let failure = RemoteConnectionFailure.transport(
+                error,
+                host: "192.168.1.181",
+                trustVerdict: nil
+            )
+            XCTAssertEqual(failure.recovery, .reconnect)
+            XCTAssertEqual(
+                MobileDiagnostics.errorCode(RemoteConnectionAttempt.underlying(error)),
+                "url.\(URLError.Code.timedOut.rawValue)"
+            )
+        }
+    }
+
+    /// Four lanes is the resource contract, whatever a host advertises. A lane walks its own
+    /// candidates one at a time, so the number of sockets in flight is the number of lanes and
+    /// not the number of candidates.
+    func testTheWalkNeverPutsMoreAttemptsInFlightThanTheLaneBound() async throws {
+        let host = Self.incidentHost()
+        let lanes = PrivateNetworkRouteRacePlan.lanes(host.candidates)
+        let peak = InFlightPeak()
+        let attempts: [FirstSuccessfulTaskRace.Attempt<String>] = lanes.enumerated().map {
+            index, lane in
+            .init(id: "lane.\(index)", failurePriority: index) {
+                for candidate in lane {
+                    await peak.enter()
+                    try await Task.sleep(for: .milliseconds(20))
+                    await peak.leave()
+                    if candidate.link.baseURL.host == Self.incidentTailnetName {
+                        return candidate.link.baseURL.absoluteString
+                    }
+                }
+                throw URLError(.timedOut)
+            }
+        }
+
+        _ = try await FirstSuccessfulTaskRace.run(attempts)
+
+        let observed = await peak.peak
+        XCTAssertGreaterThan(observed, 1, "the lanes really did overlap")
+        XCTAssertLessThanOrEqual(observed, PrivateNetworkRouteRacePlan.maximumConcurrentLanes)
+        XCTAssertLessThanOrEqual(
+            lanes.count,
+            PrivateNetworkRouteRacePlan.maximumConcurrentLanes
+        )
+    }
+
+    // MARK: - The 2026-08-21 incident, replayed
+
+    /// The report's own candidate list, walked twice: in the order the journal shows and in the
+    /// order this code now produces.
+    ///
+    /// The journal's traces name 23 candidates, `total: "23"`, at `timeoutMS: "4000"` each. The
+    /// origin digests in it are unsalted SHA-256 of `scheme://host:port`, so the addresses behind
+    /// them are recoverable: attempts 2 through 11 are `192.168.1.181` on 8760 through 8769 and
+    /// attempts 12 through 21 are `davids-macbook-pro.local` on the same ten ports. Twenty LAN
+    /// attempts for two addresses. The tailnet name answered at attempt 22 in 818 ms.
+    ///
+    /// This replays that on a clock that advances by what each attempt was given, so ninety
+    /// seconds of a person's evening costs the suite nothing.
+    @MainActor
+    func testTheIncidentsWalkReachesTheTailnetFiveAttemptsInInsteadOfTwentyTwo() async {
+        let host = Self.incidentHost()
+
+        let before = await replay(
+            Self.incidentCandidatesInJournalOrder(),
+            timeout: { _ in RemoteRouteWalkBudget.routeAttemptTimeout }
+        )
+        let after = await replay(
+            connectionCandidates(host),
+            timeout: {
+                RemoteRouteWalkBudget.timeout(for: $0.wave, isOnlyCandidate: false)
+            }
+        )
+
+        XCTAssertEqual(before.candidateCount, 23, "the report's own total")
+        XCTAssertEqual(before.winningAttempt, 22, "the report's own attempt number")
+        XCTAssertGreaterThan(
+            before.elapsed,
+            60,
+            "twenty LAN attempts at four seconds each, ahead of the route that worked"
+        )
+
+        XCTAssertEqual(after.candidateCount, 14, "one sticky range instead of two")
+        XCTAssertEqual(after.winningAttempt, 5)
+        XCTAssertEqual(after.winner?.host, Self.incidentTailnetName)
+        XCTAssertLessThan(after.elapsed, before.elapsed / 5)
+    }
+
+    /// What the phone actually does with that list, which is race it. Every route's own address
+    /// starts at once, so the tailnet answers in its own 818 ms rather than behind anything.
+    @MainActor
+    func testTheIncidentsRacedWalkAnswersWellInsideTheCeiling() async throws {
+        let host = Self.incidentHost()
+        let lanes = PrivateNetworkRouteRacePlan.lanes(host.candidates)
+
+        var firstSuccess: TimeInterval?
+        for lane in lanes {
+            let outcome = await replay(
+                lane.map {
+                    RemoteAppModel.ConnectionCandidate(
+                        link: $0.link,
+                        isHosted: false,
+                        kind: $0.kind,
+                        doorID: $0.doorID,
+                        wave: $0.wave
+                    )
+                },
+                timeout: {
+                    RemoteRouteWalkBudget.timeout(for: $0.wave, isOnlyCandidate: lane.count == 1)
+                }
+            )
+            guard outcome.winner != nil else { continue }
+            firstSuccess = min(firstSuccess ?? .greatestFiniteMagnitude, outcome.elapsed)
+        }
+
+        let reached = try XCTUnwrap(firstSuccess, "some lane reaches the Mac")
+        XCTAssertLessThan(
+            reached,
+            RemoteRouteWalkBudget.walkCeiling,
+            "a dead LAN with a live tailnet connects inside the walk's ceiling"
+        )
+        XCTAssertLessThan(reached, 2, "in the tailnet's own 818 ms, behind nothing")
+    }
+
+    // MARK: - What the walk says while it runs
+
+    /// A first attempt normally answers in well under a second, and a route name flashed for two
+    /// hundred milliseconds is a stutter rather than information.
+    func testOpeningAChatSaysOpeningUntilSomethingHasFailed() {
+        XCTAssertEqual(
+            MobileSessionChrome.openingStatus(isAvailable: true, routeWalk: nil),
+            "Opening chat…"
+        )
+        XCTAssertEqual(
+            MobileSessionChrome.openingStatus(
+                isAvailable: true,
+                routeWalk: RemoteAppModel.RouteWalkStatus(
+                    kind: RemoteHostEndpointKind.lan,
+                    attempt: 1,
+                    total: 14,
+                    followsFailure: false
+                )
+            ),
+            "Opening chat…"
+        )
+    }
+
+    /// Once something has failed the walk is going to take a while, and the route it is on is the
+    /// only honest thing to say. The words are the connection status's own.
+    func testOnceARouteHasFailedTheScreenNamesTheOneItIsTrying() {
+        XCTAssertEqual(
+            MobileSessionChrome.openingStatus(
+                isAvailable: true,
+                routeWalk: RemoteAppModel.RouteWalkStatus(
+                    kind: RemoteHostEndpointKind.tailscale,
+                    attempt: 5,
+                    total: 14,
+                    followsFailure: true
+                )
+            ),
+            MobileDashboardChrome.connectionStatus(
+                phase: .connecting,
+                connectionLabel: nil,
+                progress: .tryingRoute(
+                    kind: RemoteHostEndpointKind.tailscale,
+                    previousKind: nil,
+                    number: 5,
+                    total: 14
+                )
+            )
+        )
+    }
+
+    /// A dormant session is being woken on the Mac rather than reached over a route, so the route
+    /// walk has nothing to say about it.
+    func testAResumingSessionKeepsItsOwnSentence() {
+        XCTAssertEqual(
+            MobileSessionChrome.openingStatus(
+                isAvailable: false,
+                routeWalk: RemoteAppModel.RouteWalkStatus(
+                    kind: RemoteHostEndpointKind.lan,
+                    attempt: 3,
+                    total: 14,
+                    followsFailure: true
+                )
+            ),
+            "Resuming on your Mac…"
+        )
+    }
+
     // MARK: - What the connection is called
 
     func testTheLabelComesFromTheDoorTheMacNamedRatherThanFromTheAddress() {
@@ -359,12 +801,12 @@ final class RemoteHostCandidateTests: XCTestCase {
 
     // MARK: - What the walk actually attempts
 
-    /// A timeout is deliberately scoped to one attempt. The read-only caller races independent
-    /// private-network families, so a slow LAN lane does not hold a viable Tailscale lane behind
-    /// it; the sequential walk can preserve its reason for existing and still try a listener on
-    /// a later port of this address.
+    /// A timeout is deliberately scoped to one attempt. It advances the walk without ruling the
+    /// address out, so the rest of the sticky range is still tried — but only after every other
+    /// route has had its own address tried, because a route nobody has knocked on yet is better
+    /// evidence than a ninth guess at a port on an address that is not answering.
     @MainActor
-    func testATimedOutPortStillWalksTheRestOfTheRange() async {
+    func testATimedOutPortStillWalksTheRestOfTheRangeAfterTheOtherRoutes() async {
         let host = pairedHost(endpoints: [
             endpoint(.lan, "https://192.168.1.42:8760/"),
             endpoint(.tailscale, "https://mac.tail1234.ts.net:8760/"),
@@ -372,8 +814,45 @@ final class RemoteHostCandidateTests: XCTestCase {
         let candidates = connectionCandidates(host)
         var attempted: [URL] = []
 
-        let reached: URL? = try? await RemoteAppModel.walk(
+        _ = try? await RemoteAppModel.walk(
             candidates,
+            trace: "walk",
+            phase: "request"
+        ) { _, candidate -> URL in
+            attempted.append(candidate.link.baseURL)
+            throw URLError(.timedOut)
+        }
+
+        XCTAssertEqual(
+            candidates.count,
+            RemoteListenerPorts.fallbackRange.count + 1,
+            "the LAN address and its ports, plus the tailnet name"
+        )
+        XCTAssertEqual(
+            attempted.count,
+            RemoteListenerPorts.fallbackRange.count + 1,
+            "a request timeout is not enough evidence to discard the other ports"
+        )
+        XCTAssertEqual(
+            attempted.prefix(2).compactMap(\.host),
+            ["192.168.1.42", "mac.tail1234.ts.net"],
+            "each route's own address leads; the port walk is not in front of another route"
+        )
+        XCTAssertEqual(attempted.dropFirst(2).compactMap(\.host).first, "192.168.1.42")
+    }
+
+    /// The same two doors, with the tailnet answering. It is reached second rather than eleventh,
+    /// which is the whole of the 2026-08-21 fix stated on the smallest host that can show it.
+    @MainActor
+    func testAWorkingTailnetIsReachedBeforeADeadLansPortWalk() async {
+        let host = pairedHost(endpoints: [
+            endpoint(.lan, "https://192.168.1.42:8760/"),
+            endpoint(.tailscale, "https://mac.tail1234.ts.net:8760/"),
+        ], policy: .privateOnly)
+        var attempted: [URL] = []
+
+        let reached: URL? = try? await RemoteAppModel.walk(
+            connectionCandidates(host),
             trace: "walk",
             phase: "request"
         ) { _, candidate -> URL in
@@ -384,18 +863,8 @@ final class RemoteHostCandidateTests: XCTestCase {
             return candidate.link.baseURL
         }
 
-        XCTAssertEqual(
-            candidates.count,
-            RemoteListenerPorts.fallbackRange.count + 1,
-            "ten ports of the LAN address, then the tailnet name"
-        )
-        XCTAssertEqual(
-            attempted.count,
-            RemoteListenerPorts.fallbackRange.count + 1,
-            "a request timeout is not enough evidence to discard the other ports"
-        )
-        XCTAssertEqual(attempted.last?.host, "mac.tail1234.ts.net")
         XCTAssertEqual(reached?.host, "mac.tail1234.ts.net")
+        XCTAssertEqual(attempted.count, 2)
     }
 
     /// The other half of the same rule: a refusal is what a Mac on this network says about a port
@@ -479,7 +948,7 @@ final class RemoteHostCandidateTests: XCTestCase {
     // MARK: - Fixtures
 
     /// The same mapping `RemoteAppModel` makes before it walks: one attempt per candidate, each
-    /// still naming the door it belongs to.
+    /// still naming the door it belongs to and which pass it belongs to.
     private func connectionCandidates(
         _ host: PairedRemoteHost
     ) -> [RemoteAppModel.ConnectionCandidate] {
@@ -488,9 +957,164 @@ final class RemoteHostCandidateTests: XCTestCase {
                 link: $0.link,
                 isHosted: false,
                 kind: $0.kind,
-                doorID: $0.doorID
+                doorID: $0.doorID,
+                wave: $0.wave
             )
         }
+    }
+
+    /// How many attempts of one walk overlapped at their peak.
+    private actor InFlightPeak {
+        private var current = 0
+        private(set) var peak = 0
+
+        func enter() {
+            current += 1
+            peak = max(peak, current)
+        }
+
+        func leave() { current -= 1 }
+    }
+
+    /// The Mac the 2026-08-21 report was filed against, as its journal describes it.
+    ///
+    /// Four advertised addresses over three routes. The digests in the report recover the two LAN
+    /// addresses exactly; the tailnet pair and the VPN address are reconstructed from the order
+    /// the walk visited them in, which the shared kit fixes as plain URL order — a `100.x` tailnet
+    /// address sorts ahead of `192.168.…`, and a `.ts.net` name sorts behind `.local`. That is
+    /// what put the working route at attempt 22 out of 23.
+    private static let incidentTailnetName = "davids-macbook-pro.tail9c21e.ts.net"
+
+    private static func incidentHost() -> PairedRemoteHost {
+        PairedRemoteHost(
+            id: "mac",
+            hostID: "mac",
+            shareID: "my-devices",
+            scope: "all",
+            name: "Mac",
+            link: RemoteConnectionLink(
+                baseURL: URL(string: "https://192.168.1.181:8760/")!,
+                token: bearer
+            )!,
+            lastConnectedAt: Date(),
+            endpoints: [
+                RemoteHostEndpointDTO(
+                    kind: RemoteHostEndpointKind.tailscale,
+                    baseURL: URL(string: "https://100.83.41.7:8760/")!,
+                    isStable: true,
+                    identity: RemoteHostEndpointIdentity.pinned
+                ),
+                RemoteHostEndpointDTO(
+                    kind: RemoteHostEndpointKind.lan,
+                    baseURL: URL(string: "https://192.168.1.181:8760/")!,
+                    isStable: true,
+                    identity: RemoteHostEndpointIdentity.pinned
+                ),
+                RemoteHostEndpointDTO(
+                    kind: RemoteHostEndpointKind.lan,
+                    baseURL: URL(string: "https://davids-macbook-pro.local:8760/")!,
+                    isStable: true,
+                    identity: RemoteHostEndpointIdentity.pinned
+                ),
+                RemoteHostEndpointDTO(
+                    kind: RemoteHostEndpointKind.tailscale,
+                    baseURL: URL(string: "https://\(incidentTailnetName):443/")!,
+                    isStable: true
+                ),
+                RemoteHostEndpointDTO(
+                    kind: RemoteHostEndpointKind.vpn,
+                    baseURL: URL(string: "https://vpn-mac.internal:8760/")!,
+                    isStable: true,
+                    identity: RemoteHostEndpointIdentity.pinned
+                ),
+            ],
+            connectionPolicy: .privateOnly
+        )
+    }
+
+    /// The 23 attempts in the order the journal records them: one flat list, each LAN address
+    /// carrying its own copy of the ten-port range.
+    private static func incidentCandidatesInJournalOrder()
+    -> [RemoteAppModel.ConnectionCandidate] {
+        var urls = ["https://100.83.41.7:8760/"]
+        for address in ["192.168.1.181", "davids-macbook-pro.local"] {
+            for port in RemoteListenerPorts.candidates(preferred: RemoteListenerPorts.defaultPort) {
+                urls.append("https://\(address):\(port)/")
+            }
+        }
+        urls.append("https://\(incidentTailnetName):443/")
+        urls.append("https://vpn-mac.internal:8760/")
+        return urls.compactMap { string in
+            guard let url = URL(string: string),
+                  let link = RemoteConnectionLink(baseURL: url, token: bearer) else { return nil }
+            let kind: String
+            switch url.host {
+            case "100.83.41.7", incidentTailnetName: kind = RemoteHostEndpointKind.tailscale
+            case "vpn-mac.internal": kind = RemoteHostEndpointKind.vpn
+            default: kind = RemoteHostEndpointKind.lan
+            }
+            return RemoteAppModel.ConnectionCandidate(
+                link: link,
+                isHosted: false,
+                kind: kind,
+                doorID: "\(url.scheme ?? "")://\(url.host ?? "")",
+                wave: .route
+            )
+        }
+    }
+
+    /// What one attempt of the incident's walk did, on the evidence in the journal.
+    ///
+    /// The tailnet name answered in 818 ms. The direct tailnet address failed TLS in 303 ms. Every
+    /// LAN attempt, and the VPN address, returned nothing at all and therefore cost exactly the
+    /// timeout each was given: that is what "every LAN SYN silently dropped" looks like from here.
+    private static func incidentOutcome(
+        for url: URL,
+        timeout: TimeInterval
+    ) -> (spent: TimeInterval, error: Error?) {
+        switch url.host {
+        case incidentTailnetName: return (0.818, nil)
+        case "100.83.41.7": return (0.303, URLError(.secureConnectionFailed))
+        default: return (timeout, URLError(.timedOut))
+        }
+    }
+
+    private struct ReplayedWalk {
+        let elapsed: TimeInterval
+        let winner: URL?
+        let winningAttempt: Int?
+        let candidateCount: Int
+    }
+
+    /// Walks a candidate list through the production `walk`, on a clock that advances by what each
+    /// attempt was given rather than by waiting for it.
+    @MainActor
+    private func replay(
+        _ candidates: [RemoteAppModel.ConnectionCandidate],
+        timeout: (RemoteAppModel.ConnectionCandidate) -> TimeInterval
+    ) async -> ReplayedWalk {
+        var elapsed: TimeInterval = 0
+        var winningAttempt: Int?
+        let winner: URL? = try? await RemoteAppModel.walk(
+            candidates,
+            trace: "replay",
+            phase: "request"
+        ) { index, candidate -> URL in
+            let outcome = Self.incidentOutcome(
+                for: candidate.link.baseURL,
+                timeout: timeout(candidate)
+            )
+            elapsed += outcome.spent
+            if let error = outcome.error { throw error }
+            winningAttempt = index + 1
+            return candidate.link.baseURL
+        }
+        return ReplayedWalk(
+            elapsed: elapsed,
+            winner: winner,
+            winningAttempt: winningAttempt,
+            candidateCount: candidates.count
+        )
     }
 
     private func pairedHost(
