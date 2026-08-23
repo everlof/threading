@@ -254,7 +254,21 @@ enum LabelLegibility {
             )
         }
 
-        return cached(
+        // The identity path first: building the value key below means resolving eight dynamic
+        // colours and converting each to sRGB, and a rung is asked for once per label per draw —
+        // a list of a few hundred rows would pay that for every one of them, every frame, to
+        // arrive at the same ladder. A theme, an appearance and a contrast setting decide it
+        // together, and `AppThemeRefresh.generation` covers the one case those three miss: a
+        // custom theme edited in place, which keeps its id.
+        let stamp = Stamp(
+            theme: palette.id,
+            appearance: appearance.name,
+            increased: increased,
+            generation: AppThemeRefresh.generation
+        )
+        if let remembered = stamps[stamp] { return remembered }
+
+        let answer = cached(
             inks: (
                 label: palette.resolved(.label, appearance: appearance),
                 secondary: ink(.secondary),
@@ -264,7 +278,20 @@ enum LabelLegibility {
             grounds: chromeGrounds,
             increased: increased
         )
+        if stamps.count >= Defaults.cacheLimit { stamps.removeAll(keepingCapacity: true) }
+        stamps[stamp] = answer
+        return answer
     }
+
+    /// What decides a ladder, as cheap values rather than as resolved colours.
+    private struct Stamp: Hashable {
+        let theme: AppThemeID
+        let appearance: NSAppearance.Name
+        let increased: Bool
+        let generation: UInt64
+    }
+
+    private static var stamps: [Stamp: Ladder] = [:]
 
     /// The three held rungs, by name.
     struct Ladder {
@@ -308,7 +335,11 @@ enum LabelLegibility {
 
     // MARK: - Cache
 
-    /// `computeLadder`, remembered.
+    /// `computeLadder`, remembered **by value**.
+    ///
+    /// The correctness layer, under the identity stamp in `ladder(under:)`: two themes that
+    /// resolve to the same inks over the same grounds are the same ladder however they were
+    /// reached, and nothing here has to remember to invalidate anything.
     ///
     /// The walk costs up to twenty-four candidates against four grounds per rung, and a rung is
     /// asked for once per label per draw — a list of file rows resolves one a few hundred times in
@@ -360,5 +391,6 @@ enum LabelLegibility {
     /// identity. Production never needs this — see `cached` for why.
     static func forgetCachedTiersForTesting() {
         cache.removeAll()
+        stamps.removeAll()
     }
 }

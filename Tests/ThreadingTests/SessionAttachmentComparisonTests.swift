@@ -657,7 +657,9 @@ final class SessionAttachmentComparisonTests: XCTestCase {
                 pane.view.layer?.backgroundColor = Design.Surface.background.cgColor
                 AppThemeRefresh.repaint(pane.view)
                 pane.view.layoutSubtreeIfNeeded()
-                measured = (0...1).compactMap { try? timestampContrast(ofRow: $0, in: table) }
+                measured = (0...1).compactMap {
+                    try? timestampContrast(ofRow: $0, in: table, drawnBy: pane.view)
+                }
             }
 
             XCTAssertEqual(measured.count, 2, "\(name): the list drew no rows to measure")
@@ -675,7 +677,7 @@ final class SessionAttachmentComparisonTests: XCTestCase {
     /// The contrast between a row's **timestamp** and the ground it was drawn on, taken off the
     /// raster.
     ///
-    /// The label is *located* rather than guessed at: its frame is converted into the table's
+    /// The label is *located* rather than guessed at: its frame is converted into the pane's
     /// coordinates and the scan runs inside it, with the ground read from a column just outside
     /// its leading edge at the same height. A first version of this swept a band and a quarter of
     /// the width instead, and reported 1.43:1 on a row whose timestamp is plainly legible in the
@@ -685,7 +687,11 @@ final class SessionAttachmentComparisonTests: XCTestCase {
     /// The value returned is the *strongest* pixel in the label, because a glyph's stem is
     /// antialiased down toward the ground at its edges and only its core carries the colour that
     /// was actually asked for.
-    private func timestampContrast(ofRow row: Int, in table: NSTableView) throws -> CGFloat {
+    private func timestampContrast(
+        ofRow row: Int,
+        in table: NSTableView,
+        drawnBy host: NSView
+    ) throws -> CGFloat {
         let cell = try XCTUnwrap(
             table.view(atColumn: 0, row: row, makeIfNecessary: true) as? SessionAttachmentRowView,
             "the list built no row \(row)"
@@ -699,26 +705,42 @@ final class SessionAttachmentComparisonTests: XCTestCase {
         )
         let frame = cell.convert(clock.bounds, from: clock)
 
-        table.display()
-        let rep = try XCTUnwrap(table.bitmapImageRepForCachingDisplay(in: table.bounds))
-        table.cacheDisplay(in: table.bounds, to: rep)
+        // Drawn through the **pane**, not the bare list. `ThemedTableView` is transparent by
+        // design — every table in this app sits on a surface the theme already painted — so a
+        // raster taken from the table has nothing behind an unselected row, and the ground read
+        // beside a word came back fully clear. `ThemeContrast.ratio` ignores alpha, so clear
+        // measures as black, and the assertion then compared dark text against imaginary black
+        // paper. The pane has the opaque surface under it, which is what a person is looking at.
+        host.layoutSubtreeIfNeeded()
+        host.display()
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
 
         // The rep is backing-scaled, so a point coordinate has to be taken through the same scale
         // the raster was made at rather than used as a pixel index.
-        let scale = CGFloat(rep.pixelsWide) / table.bounds.width
-        let inTable = table.convert(frame, from: cell)
+        let scale = CGFloat(rep.pixelsWide) / host.bounds.width
+        let inHost = host.convert(frame, from: cell)
+        // `NSBitmapImageRep` indexes from the top-left. A view controller's view is not flipped,
+        // so its own coordinates run the other way, and reading them as pixel indices samples the
+        // mirror image of the row — empty pane, which measures as a flat 1.00:1 and reads as a
+        // catastrophic failure rather than as a fixture pointed at the wrong place.
         func pixel(_ x: CGFloat, _ y: CGFloat) -> NSColor? {
-            rep.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB)
+            let down = host.isFlipped ? y : host.bounds.height - y
+            return rep.colorAt(x: Int(x * scale), y: Int(down * scale))?.usingColorSpace(.sRGB)
         }
 
         let ground = try XCTUnwrap(
-            pixel(inTable.minX - Design.Spacing.small, inTable.midY),
+            pixel(inHost.minX - Design.Spacing.small, inHost.midY),
             "nothing was drawn beside row \(row)'s time"
+        )
+        XCTAssertGreaterThan(
+            ground.alphaComponent, 0.99,
+            "row \(row)'s time was measured against a transparent ground"
         )
 
         var strongest: CGFloat = 1
-        for y in stride(from: inTable.minY, to: inTable.maxY, by: 1 / scale) {
-            for x in stride(from: inTable.minX, to: inTable.maxX, by: 1 / scale) {
+        for y in stride(from: inHost.minY, to: inHost.maxY, by: 1 / scale) {
+            for x in stride(from: inHost.minX, to: inHost.maxX, by: 1 / scale) {
                 guard let ink = pixel(x, y) else { continue }
                 strongest = max(strongest, ThemeContrast.ratio(ink, ground))
             }
@@ -815,6 +837,55 @@ final class SessionAttachmentComparisonTests: XCTestCase {
             )
         }
         print("Rendered the drop affordance to \(directory.path)")
+    }
+
+    /// **The chronology at rest, selected row and all — the picture this pane is reviewed by.**
+    ///
+    /// The pane's whole reason for existing is that the files are in time order, and the two
+    /// things that say so are the trailing time and the origin mark under it. Both are set in the
+    /// quietest label tier, and in dark System that tier was white at 10%: the words were drawn,
+    /// occupied their space, passed every assertion about their content, and could not be read —
+    /// 1.34:1 on the panel and 1.20:1 on the selected row.
+    ///
+    /// No assertion anyone would have written catches that, which is why it is rendered. The
+    /// selected row is in the picture deliberately: it was the worse of the two, and it is the one
+    /// state a screenshot of a working pane will almost always be in.
+    func testRendersTheChronology() throws {
+        let pane = try laidOutPane(showing: [
+            try writePNG(named: "timeline.png", color: .systemTeal),
+            try writePNG(named: "shots/contact.png", color: .systemOrange),
+            try writePNG(named: "screenshot.png", color: .systemPurple)
+        ])
+        let table = try table(of: pane)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+
+        let directory = renderDirectory
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true
+        )
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            var data: Data?
+            NSAppearance(named: appearanceName)?.performAsCurrentDrawingAppearance {
+                let view = pane.view
+                view.appearance = NSAppearance(named: appearanceName)
+                // The pane draws no ground of its own — it sits on the panel's.
+                view.wantsLayer = true
+                view.layer?.backgroundColor = Design.Surface.background.cgColor
+                AppThemeRefresh.repaint(view)
+                view.layoutSubtreeIfNeeded()
+
+                guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                data = rep.representation(using: .png, properties: [:])
+            }
+
+            let image = try XCTUnwrap(data, "the pane rendered nothing in \(name)")
+            try image.write(
+                to: directory.appendingPathComponent("attachments-chronology-\(name).png")
+            )
+        }
+        print("Rendered the attachments chronology to \(directory.path)")
     }
 
     private var renderDirectory: URL {

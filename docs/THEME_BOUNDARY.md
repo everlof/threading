@@ -150,6 +150,22 @@ records why it cannot be removed.
 18. Read contrast-sensitive colours and focus geometry through `Design.Surface`, `Design.Text`,
    and `Design.Accessibility`. Increase Contrast must strengthen faint borders, dividers,
    controls, secondary ink, and focus without replacing the active theme.
+
+   **A label tier is a floor, not a fraction.** `Design.Text`'s quiet tiers state how far back a
+   word sits *and* hold a measured contrast floor against the grounds they land on
+   (`LabelLegibility`) — they used to state only the first, and a timestamp shipped at 1.34:1.
+   Never re-derive a quiet ink by hand: `label.withAlphaComponent(…)` at a call site is a tier
+   nobody measured, and `NSColor.legible(on:)` will not catch it, because `ThemeContrast.ratio`
+   ignores alpha and a translucent ink measures as the colour it is a fraction of.
+
+   **A view drawn on a ground the chrome does not own asks that ground for its ink.** Over a
+   terminal backdrop that is `Design.Text.on(resolvedGround())`; inside a selected list row it is
+   `ThemedTableRowView.contentInk`, because the row is the only thing that knows whether it
+   painted the theme's accent, AppKit's, a held-back wash, or nothing. A cell that wants to hear
+   about selection at all must be an `NSTableCellView` — AppKit propagates
+   `interiorBackgroundStyle` to those and to nothing else — and an ink baked from a ground is
+   `ThemeDerivedContent`, since the theme sweep re-resolves recorded surfaces, layer colours and
+   fonts, and a baked foreground is none of those.
 19. Add behavior tests and render the component under at least System plus two deliberately
    different app themes. Include focus, selection and disabled states when applicable. A claim
    about balance, alignment or legibility is checked by looking at a render, not by asserting

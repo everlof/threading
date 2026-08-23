@@ -1764,3 +1764,34 @@ unstated bold is the foreground.
 | threading | #F7EFE6 | #D9D1C8 | #FFFFFF | 16.7 | bright cyan 26.4 | 19.9:1 | 13.2:1 |
 | cyberpunk | (unchanged) | #E0E0E0 | #FCEE0A | 91.5 | yellow 37.3 | 16.3:1 | 15.0:1 |
 | swiss-minimalist | #111111 | #333333 | #111111 | 16.2 | cyan 42.8 | 18.9:1 | 12.6:1 |
+
+## 2026-08-23 — a theme authors three label tiers and is held to a floor on the quietest two
+
+A theme states `label` and the three tiers below it are **derived** — 0.70, 0.45 and 0.25 of that
+ink (`AppTheme.derive`), which is what keeps a theme document to a dozen values. Those fractions
+are an aesthetic, and they were also, unintentionally, a legibility claim: nothing composited them
+against a ground, so a theme with a strong `label` could produce a `quaternaryLabel` that measured
+1.34:1 on its own panel.
+
+`LabelLegibility` now holds the derived tiers to a contrast floor — 4.5:1 for `secondary` and
+`tertiary`, 3.0:1 for `quaternary` — measured over the four grounds a chrome label lands on
+(`ground`, `surface`, `panel`, `elevated`, each composited down to an opaque colour). What this
+means for a theme author, including an agent writing one through `create_app_theme`:
+
+- **A tier a theme states outright is kept, if it reads.** The rule raises only what fails, and
+  only as far as it must, so a palette authored with care is never second-guessed. This is the
+  same promise `SelectionSurface.quiet` and `NSColor.legible(on:)` make.
+- **A failing tier is corrected rather than refused.** Distinct from
+  `testAThemeWhoseSyntaxVanishesAgainstItsGroundIsRefused`: a syntax role that vanishes is a
+  document the author got wrong and should hear about, while a derived tier that vanishes is
+  arithmetic the *app* chose on their behalf. Refusing a theme over a value it never wrote would
+  be blaming the author for our own default.
+- **`label` is never touched.** It is the theme's primary decision about its own ground, and it is
+  the ceiling the other three are measured up to — a moving ceiling would make the ladder
+  unresolvable.
+- A theme whose `elevated` sits far from its `ground` will see its tiers raised for the harder of
+  the two and therefore clearing the floor by more than they need on the other. One token, four
+  grounds; the alternative is a tier that is only correct on the surface it was authored against.
+
+See `docs/architecture/design-system.md` (2026-08-23) for the defect, the measurements and the
+ladder rule.

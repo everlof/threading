@@ -2351,7 +2351,7 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
 /// is how the pane's quietest tier came to draw at 1.20:1 on a selected row, *worse* than the
 /// 1.34:1 it drew at unselected. Adopting the class is how the row gets to say what it painted;
 /// `ThemedTableRowView.contentInk` is what it says.
-final class SessionAttachmentRowView: NSTableCellView {
+final class SessionAttachmentRowView: NSTableCellView, ThemeDerivedContent {
 
     /// A drag is over this row and would open a comparison against it.
     ///
@@ -2403,6 +2403,14 @@ final class SessionAttachmentRowView: NSTableCellView {
     }
 
     private func applyInk() {
+        // Resolved in *this view's* appearance rather than the ambient one, for the reason
+        // `SelectionSurface.dynamic` gives: the ground and the ink underneath are dynamic, and
+        // reading them under whichever appearance happens to be drawing is how a light variant's
+        // ink is measured against a dark variant's ground.
+        effectiveAppearance.performAsCurrentDrawingAppearance { applyResolvedInk() }
+    }
+
+    private func applyResolvedInk() {
         let ink = (superview as? ThemedTableRowView)?.contentInk ?? .chrome
         nameLabel?.textColor = ink.label
         pathLabel?.textColor = ink.tertiary
@@ -2420,6 +2428,28 @@ final class SessionAttachmentRowView: NSTableCellView {
     /// keeps a restored selection from drawing chrome ink over an accent.
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
+        applyInk()
+    }
+
+    /// **The ink on a selected row is baked, so it has to be baked again.**
+    ///
+    /// `Design.Ink` is a struct of resolved colours, not a set of dynamic ones: `Design.Text.on`
+    /// measures black and white against the ground it is *handed*, which is a question no colour
+    /// provider can be asked later. So the value assigned to `textColor` here is the answer for
+    /// the appearance that was current when the row joined the list, and it stays that answer
+    /// through a theme switch and a light/dark flip — the sweep re-resolves recorded surfaces,
+    /// layer colours and fonts, and a baked foreground is none of those.
+    ///
+    /// Caught by rendering the pane in both appearances in one process: three of the four cases
+    /// measured cleanly and the selected row in dark came back at 1.74:1, wearing the ink it had
+    /// been given in light. Exactly the failure `ThemeDerivedContent` exists for — see the note
+    /// on the protocol, and `SessionRowView`, which bakes its agent mark the same way.
+    func rederiveThemedContent() {
+        applyInk()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
         applyInk()
     }
 

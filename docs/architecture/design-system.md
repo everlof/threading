@@ -3218,3 +3218,98 @@ which is what a fix looks like when the house pattern already exists and one com
 from it. The regression boundary states its host's width at `.defaultLow`, and that is the whole
 point of the test: a fixture that pins its host at `.required` is stronger than the pull and
 cannot see this defect at all.
+
+## 2026-08-23 — a label tier said how quiet a word was, never whether it could be read
+
+Reported as **"the contrast on these timestamps to the right is BAD"**, on the attachments pane.
+Measured off the reported screenshot: the trailing time and origin mark drew at **1.34:1** on the
+panel, and at **1.20:1** on the selected row. 1.0:1 is the same colour twice. The words were drawn,
+occupied their space, were announced correctly by VoiceOver, and could not be read.
+
+Not a call site's mistake. `Design.Text.quaternary` is exactly what a timestamp should ask for; the
+**token** was wrong. Every tier below `label` is an alpha — a styled theme derives them at 0.70,
+0.45 and 0.25 of its own label ink (`AppTheme.derive`), and under System they are AppKit's own,
+which in dark mode is white at 0.55, 0.25 and **0.10**. Nothing had ever composited one against a
+ground.
+
+**Four contrast gates already existed and every one of them was looking somewhere else.**
+
+| gate | what it holds | why it missed this |
+|---|---|---|
+| `ThemeContrast.isLegible` | a terminal palette, 3.0:1 | somebody else's document; never sees the chrome |
+| `SelectionSurface.quiet` | `Design.Text.label` on a selection fill | tier one, deliberately |
+| `Design.Status.readable` | eight status hues on ground and surface | this rule, applied to the roles that are hues |
+| `NSColor.legible(on:)` | any ink on any ground | **`ThemeContrast.ratio` ignores alpha** |
+
+The last row is the load-bearing one. A tier *is* an alpha, and white at 10% measures as white —
+15.9:1 against `#1E1E1E` — so every tier in the app passed a check that never composited it.
+
+### The rule
+
+A tier is *the label's ink, quieter*, so a failing tier gives back **as little of its own
+transparency as the floor requires** and nothing else about it moves. `LabelLegibility` is the
+mirror image of `SelectionSurface.quiet`: that walks a **fill** down until the ink on it reads,
+this walks an **ink** up until it reads on the fill. A tier that already reads is returned
+untouched.
+
+Two floors, both already named in this codebase rather than invented:
+
+- **read** — `readingRatio`, WCAG AA for body text, the value `SelectionSurface` already holds a
+  selected row's title to. `secondary` and `tertiary`: subtitles, paths, a time inside a sentence.
+- **glanced at** — `glanceRatio`, WCAG AA for large text and the floor a terminal palette is
+  already held to. `quaternary`: stamps, counts, marks.
+
+`label` is not held. A label that cannot be read on its own ground is a broken theme rather than a
+tier that drifted, and it is the ceiling the rest of the ladder is measured up to.
+
+**Held as a ladder, top down, in one pass** — because a rung's ceiling is the rung above it *after*
+it has been held. Held independently they inverted: under System light, `secondary` passed
+untouched at 4.87:1 while `tertiary`, walking up toward the *label's* strength, cleared its floor at
+5.03:1 and came out **louder than the tier it sits under**. Amiga Workbench did it one rung further
+down. Six themes at once, from the rule meant to preserve the ladder.
+
+Measured on drawn pixels, the attachments pane under the house theme:
+
+| | label | tertiary | quaternary |
+|---|---|---|---|
+| before, dark | 16.09:1 | 8.11:1 | **3.87:1** |
+| after, dark | 16.09:1 | 9.82:1 | 6.44:1 |
+| before, light selected | — | — | **2.46:1** |
+| after, light selected | — | — | 6.03:1 |
+
+The honest cost: the ladder compresses, and under some themes `tertiary` lands nearer `secondary`
+than it did. That is the correct trade, because the range it compresses out of was one whose bottom
+rung was invisible — and hierarchy here is carried by size, weight and position as much as by ink.
+A tier is also raised for the **hardest** of the four grounds a single token lands on (backdrop,
+sidebar, panel, popover), so on the other three it clears its floor by more than it strictly needs;
+that is inherent to one value serving four grounds and is the same trade `Design.Status.readable`
+already makes.
+
+### The other half: a selected row's cell was inking against a ground that was no longer there
+
+`quiet`'s promise covers tier one, for cells that cannot ask. Under **System** it covers nothing at
+all — `ThemedTableRowView.drawSelection` hands the highlight back to AppKit, an opaque accent lands
+under cells still reading `Design.Text`, and the pane's timestamps went from 1.34:1 to **1.20:1**
+when a row was clicked. Selecting a row made its own metadata harder to read.
+
+`ThemedTableRowView.contentInk` is the seam: the row is the only thing that knows what it painted,
+so the row is what says so — the argument `Design.Ink.primaryAction` already makes one control
+further in. `selectionGround` is vended beside it so a **test** asserts against the row's own answer
+rather than recomputing the fill; `isEmphasized` is not simply what it was set to
+(`ListSelectionStrength`), and a fixture that rebuilt it by hand measured ink against a ground the
+row had never painted and reported a failure the code did not have.
+
+A cell that asks is an `NSTableCellView`, because AppKit propagates `interiorBackgroundStyle` to
+cell views and to nothing else — `SessionAttachmentRowView` was a plain `NSView` and was therefore
+never told its row had been selected at all. It also conforms to `ThemeDerivedContent`:
+`Design.Ink` is a struct of **resolved** colours, not dynamic ones, so the ink is baked and the
+sweep — which re-resolves recorded surfaces, layer colours and fonts — does not reach a baked
+foreground. Rendering the pane in both appearances in one process is what caught it: three of the
+four cases measured cleanly and the selected row in dark came back at 1.74:1, still wearing the ink
+it had been given in light.
+
+`LabelLegibilityTests` states the whole thing over every stock theme × every appearance it ships ×
+both contrast settings, **System included** — unlike the selection sweep next door, because a label
+tier is drawn under System exactly as it is under a styled theme, and System is where the worst of
+these numbers was. `SessionAttachmentComparisonTests.testARowsQuietestWordsReadOnTheirOwnRowSelectedOrNot`
+measures the same claim on the raster, and `testRendersTheChronology` is the picture.
