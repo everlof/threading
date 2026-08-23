@@ -732,6 +732,25 @@ resolves the directory — and the per-session `mcp/` and `settings/` files besi
 `StateManager`'s hosted-test redirect, so a test bundle hosted in the shipping app writes none of
 this into the developer's own Application Support.
 
+**`Threading/pty/` is the second owner-only subdirectory, and a deliberate sibling of the first.**
+It is `0700` for the same argument — a unix socket inside it is reachable only by this user's
+processes, and the directory's permissions are the boundary, not the endpoint's — and it holds
+`ptyd.sock`, the `threading-ptyd` rendezvous, plus the daemon's own `sessions.jsonl` and its dated
+journal. `PTYHostLocation` resolves all of it through the same hosted-test redirect, with a
+sharper reason than tidiness: a test bundle runs inside the shipping app, so without the redirect
+a test that started a daemon would bind the socket the developer's running app is listening on and
+the two would fight over the same PTY children. Sibling rather than room-mate because the two
+directories are owned by processes with different lifetimes, and a daemon that could write
+`session-tokens.json` would be a daemon holding an authorization — which is precisely what the
+daemon's safety argument says it never does. The **app only resolves paths and creates the
+directory**; unlinking a stale socket and binding a new one belong to the daemon, since it is the
+only process that may be listening there. The journal is in `pty/` and never in `Logs/`, because
+`EventLog` prunes any `.jsonl` in that directory past the retention window and because its
+descriptor is `O_APPEND` exactly on account of more than one process writing it — an interleaving
+that has already cost one day's journal 23 unparseable lines. The app reads a bounded tail of the
+daemon's journal through a `journalTail` frame rather than sharing the file. See
+[`pty-host.md`](pty-host.md).
+
 Security capabilities are the deliberate third category. Native owner-device records, including
 their 256-bit bearers, live in one versioned login-Keychain item with
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`; the paired iPhone keeps its side in its own

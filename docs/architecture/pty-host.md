@@ -1,9 +1,11 @@
 # The PTY host
 
-Status: **design landed, daemon not yet built.** `Packages/ThreadingPTYHostKit` holds the whole
-wire contract between Threading and the future `threading-ptyd`; nothing speaks it yet. The
-feature it serves — sessions that outlive the app — is `docs/feature-drafts/durable-sessions.md`
-§4.
+Status: **the wire, the daemon and the app's client exist; nothing in the product uses them yet.**
+`Packages/ThreadingPTYHostKit` holds the contract, `Targets/PTYHost` is the daemon, and
+`Sources/Threading/Core/PTYHost` can connect to it, refuse an incompatible one and say why it
+did not. No session's PTY has moved: `TerminalSession` still calls `forkpty` in-process, and
+`AppSettings.ptyHostEnabled` is off. The feature it serves — sessions that outlive the app — is
+`docs/feature-drafts/durable-sessions.md` §4.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -223,9 +225,122 @@ path **immediately** so a new binary can bind it, keep serving already-attached 
 `exit(0)` when the last session ends. Killing the old daemon on a bundle change is not an option
 under consideration — that is killing working agents, which is the bug the feature exists to fix.
 
+## Availability and degradation
+
+Registration is attempted and never required, so **every way the host can be missing has to be a
+value the app can act on**, and there is exactly one of them: `PTYHostAvailability`, either
+`.available(socketPath:)` or `.unavailable(PTYHostUnavailability)`. Every unavailable case
+degrades to the same thing — today's in-process `forkpty`, unchanged — which is what makes §7's
+"removing it must degrade to today's behaviour rather than to a broken app" structural rather than
+a promise. The reasons are separate anyway, because a journal, the Advanced page and a support
+report all need to *say* which one it was, and a `Bool` is how a feature that quietly stopped
+working becomes unexplainable.
+
+| Reason | What it means | Degrades to |
+|---|---|---|
+| `disabled` | `AppSettings.ptyHostEnabled` is off | in-process PTY |
+| `socketPathTooLong(bytes:)` | the rendezvous does not fit `sockaddr_un.sun_path` | in-process PTY |
+| `helperMissing` | no `Contents/Helpers/threading-ptyd` in the bundle | in-process PTY |
+| `notRunning` | no socket file, or the kernel refused the connect | in-process PTY |
+| `protocolMismatch(_)` | a daemon answered and the gate refused it | in-process PTY |
+| `notRegistered` | launchd knows the label and the service is off | in-process PTY |
+| `notFound` | launchd has never seen the label | in-process PTY |
+
+The last two are **set by registration, not by the probe**. `PTYHostAvailability.resolve` has no
+`SMAppService` and deliberately none — a launch-path call into a framework that can block is not
+what a probe is for — so they are spelled out now and filled in by the registration slice. They
+are two cases rather than one because P2 measured the difference: launchd binds a registration to
+a *path*, so "seen, currently off" and "never seen" want different fixes and only one of them is
+re-registering.
+
+**The order is the design, not tidiness.** `disabled` is decided first and touches nothing at all
+— while the feature is off, which is every launch until R1 is answered, asking costs a
+`UserDefaults` read the app has already taken. The path bound is arithmetic on a string. The
+helper is one `stat`. Only after all three does anything open a socket. `PTYHostAvailabilityTests`
+asserts the probe is *not called* on each of the first three, because an ordering claim nobody
+checks is an ordering claim that drifts.
+
+The split is also a concurrency boundary. `PTYHostDecision.live(settings:bundle:)` is
+`@MainActor` and reads only values — the setting, the bundle's helper path, the rendezvous, the
+build string — in `MCPBridgeDecision.live`'s shape, every dependency named by the caller and
+nothing recovered from a singleton inside. `PTYHostAvailability.resolve(_:probing:)` is not
+main-actor isolated and is where the connect happens. A caller that wants both in one call has
+`PTYHostAvailability.live(settings:bundle:probe:)`, and the probe is still the caller's, because
+`PTYHostProbe.connecting()` blocks for up to `connectTimeout + helloTimeout`.
+
+`pty/` is `0700` and is a **sibling** of `bridge/`, not a room-mate: the two are owned by
+different processes with different lifetimes, and a daemon able to write `session-tokens.json`
+would be a daemon holding an authorization. The app only ever *resolves* paths there and creates
+the directory; unlinking a stale socket and binding a new one are the daemon's, because it is the
+only process that may be listening. Under a hosted test bundle the whole directory redirects
+through `StateManager.isHostedTest`, for the reason `MCPBridgeLocation` gives one line further
+down the same argument: a test that started a daemon on the real rendezvous would be a second
+listener at the address the developer's running app is using.
+
+## The client
+
+One `PTYHostClient` is one connection, and **one connection is one session**. After a successful
+`spawn` or `attach` it is bound, which is what lets output and input travel as bare bytes with no
+envelope and no id — a terminal's hot path must not pay for a header the socket already implies.
+The client enforces the binding locally as well as trusting the daemon to: a second `attach`
+answers `PTYHostClientError.alreadyBound`, a `resize` naming another session answers
+`sessionMismatch`, and raw input before any binding answers `notBound`, because input carries no
+id and guessing would type into somebody else's agent.
+
+**The client speaks first.** `hello` goes out before a byte is read, carrying the protocol pair,
+this build's version string and `getpid()`. Speaking first is what makes a wrong-version daemon
+cheap: the app has committed to nothing when the answer arrives, so a refusal is a close rather
+than an unwind. The gate is `PTYHostProtocol.evaluate`, and its three answers do three different
+things:
+
+- `compatible` — ready. The daemon's `build` is recorded and journalled; it is never compared for
+  admission.
+- `peerTooOld` — the daemon is behind. It is sent `retire` and the connection closes. `retire`
+  unlinks the socket immediately so the new binary can bind, drains what is attached, and exits;
+  `KeepAlive` then starts the current binary, which is the upgrade. Killing it instead would be
+  killing working agents.
+- `selfTooOld` — this app is behind. **Nothing further is sent.** Retiring a daemon newer than us
+  would take working agents down in order to install an older host.
+
+A `helloRefused` is the daemon having evaluated *us*, so its answer is the mirror of ours — its
+`peerTooOld` is our `selfTooOld` — and the client flips it at the boundary so no caller has to
+know which side did the arithmetic. This is the same trap `updateTarget(evaluatedBy:)` exists to
+avoid, one process further out.
+
+After the gate a `DispatchIO` read loop on the client's own serial queue feeds
+`PTYHostFrameDecoder`, and **every delivery happens on that queue and never on main**. The
+coalescing hop to main belongs to the caller, in `installProcessOutputObserver`'s existing shape;
+a client that hopped per frame would put a terminal's whole output rate on the main queue, which
+is the shape that makes a mirror slow. The handshake itself blocks — with a `poll` deadline on the
+connect and another on the `hello`, so it is bounded — and therefore runs off the main actor too.
+
+**A frame this build does not know is logged and ignored.** The protocol is additive, so a
+well-framed control frame with an unrecognised `type` means a peer the gate already admitted has
+something new to say; reading past it is the only correct move, and it is what lets a frame be
+added without every older app refusing the connection. Only a `PTYHostFramingRefusal` closes,
+because once a length or a `kind` is wrong there is no resynchronisation point to skip to.
+
+**The write queue is bounded and closes rather than grows.** `DispatchIO` accepts whatever it is
+given and reports completion later, so how much is unwritten is a number only the caller can keep;
+without it, a daemon that stopped reading would drive an unbounded allocation in the app from
+outside. Past `PTYHostDefaults.maximumQueuedWriteBytes` — four frames of the 1 MiB wire maximum —
+the connection closes with `writeQueueOverflow`, and the session degrades like any other
+unavailability. A queue that grows quietly is the failure this refuses.
+
+`EventLog` sees lifecycle edges only, in `.session`: connected (with the peer's build), the
+compatibility answer and whether the daemon was retired, a reported `lost` set, a framing refusal,
+a write-queue overflow, and the close. Never a frame. The daemon has its own journal in `pty/` and
+the app pulls a bounded tail of it through `journalTail` rather than sharing a file — `EventLog`'s
+descriptor is `O_APPEND` precisely because more than one process writes it and interleaving has
+damaged it once already.
+
+`PTYHostClientTests` drives all of this against an in-process fake that binds a real unix socket
+and speaks the real codec: no daemon binary, no `SMAppService`, no PTY, no window.
+`PTYHostDaemonIntegrationTests` is the thin layer above it that meets the real
+`threading-ptyd`, and skips when the helper is not in the bundle.
+
 ## What is not decided here
 
-The daemon itself, its socket location under `Application Support/Threading/pty/`, its journal,
-its registration and retirement, the app-side client, the `TerminalSession` host-backed mode, and
-the visibility surface (the quit question, the launch band, the Background Sessions list) are all
-later slices. When they land, each adds its section here rather than a new document.
+Registration and retirement, the `TerminalSession` host-backed mode, and the visibility surface
+(the quit question, the launch band, the Background Sessions list) are later slices. When they
+land, each adds its section here rather than a new document.

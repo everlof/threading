@@ -7,14 +7,18 @@ import XCTest
 
 /// The client against the real `threading-ptyd`.
 ///
-/// **Skipped until the daemon ships.** `Targets/PTYHost` is a later slice, so
-/// `Contents/Helpers/threading-ptyd` is not in the bundle yet and every case here reports as
-/// skipped. That is deliberate: the alternative is either no coverage of the real binary, or a
-/// red suite for work that has not been done. When the daemon's copy phase lands, these start
-/// running with no edit.
+/// **Skips when the helper is not in the bundle**, rather than failing. The daemon is its own
+/// target and its own copy phase, and a build that has not embedded it yet — a bisect, a
+/// partially applied tree, a configuration that skips helpers — must report "not here" rather
+/// than "broken". When it is there, this is the only place the app's client meets a real
+/// `forkpty` child.
 ///
 /// Everything else about the client is covered against the in-process fake in
-/// `PTYHostClientTests`, which needs no binary, no `SMAppService` and no window.
+/// `PTYHostClientTests`, which needs no binary, no `SMAppService` and no window. This class is
+/// deliberately thin for that reason: it proves the two processes agree, not what either does.
+///
+/// It never uses `PTYHostLocation.socketPath`. A test that started a daemon on the real
+/// rendezvous would be a second listener at the address the developer's running app uses.
 final class PTYHostDaemonIntegrationTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -75,7 +79,7 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
                 id: session,
                 channel: .pty(grid: PTYHostGrid(cols: 80, rows: 24, xpixel: 640, ypixel: 384)),
                 executable: "/bin/sh",
-                // Slice 4 owns the argv contract; if it differs, this is the one line to change.
+                // `arguments` excludes argv[0]; the daemon inserts `execName ?? executable`.
                 arguments: ["-c", "printf hi"],
                 environment: ["TERM=xterm-256color", "PATH=/usr/bin:/bin"],
                 cwd: NSTemporaryDirectory()
@@ -162,7 +166,10 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
 
         let process = Process()
         process.executableURL = PTYHostLocation.helperURL(in: .main)
-        process.arguments = [MCPBridgeDefaults.socketArgument, socketPath]
+        process.arguments = [
+            PTYHostDefaults.socketArgument, socketPath,
+            PTYHostDefaults.stateArgument, scratch.path
+        ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -174,8 +181,8 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
         XCTAssertTrue(
             bound,
             """
-            \(PTYHostDefaults.helperName) did not bind \(socketPath). Slice 4 owns its command \
-            line; this test expects `\(MCPBridgeDefaults.socketArgument) <path>`.
+            \(PTYHostDefaults.helperName) did not bind \(socketPath). Its command line is \
+            `\(PTYHostDefaults.socketArgument) <path> \(PTYHostDefaults.stateArgument) <dir>`.
             """
         )
         return socketPath

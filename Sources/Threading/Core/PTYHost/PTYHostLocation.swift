@@ -43,6 +43,14 @@ enum PTYHostDefaults {
     /// Where the app bundle keeps its `product-type.tool` helpers, this one included.
     static let helpersDirectoryPath = "Contents/Helpers"
 
+    /// The daemon's command line. Both are required and it exits `64` without them: the daemon
+    /// has no path policy of its own, because where the rendezvous and the state live is one
+    /// decision made here beside the other owner-only directories. A daemon that derived either
+    /// would be a second place for that decision to be wrong — and a daemon listening somewhere
+    /// nobody is looking is indistinguishable from one that never started.
+    static let socketArgument = "--socket"
+    static let stateArgument = "--state"
+
     /// `sockaddr_un.sun_path` is a 104-byte array on Darwin and the path inside it is
     /// NUL-terminated, so 103 bytes is the most a bound path may carry.
     ///

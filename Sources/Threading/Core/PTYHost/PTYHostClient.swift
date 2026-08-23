@@ -403,7 +403,10 @@ final class PTYHostClient: @unchecked Sendable {
             build: build,
             pid: getpid()
         )
-        try Self.writeAll(descriptor: connected, try encode(.hello(mine)))
+        try Self.writeAll(
+            descriptor: connected,
+            try PTYHostFraming.framed(kind: .control, payload: try encode(.hello(mine)))
+        )
 
         let deadline = Date().addingTimeInterval(helloTimeout)
         var pending: [PTYHostFrame] = []
@@ -480,7 +483,10 @@ final class PTYHostClient: @unchecked Sendable {
             // The daemon is behind. Ask it to retire: it unlinks the socket immediately so the
             // new binary can bind, keeps serving what is already attached, and exits when its
             // last session ends. Killing it instead would be killing working agents.
-            if let retirement = try? encode(.retire) {
+            if let retirement = try? PTYHostFraming.framed(
+                kind: .control,
+                payload: try encode(.retire)
+            ) {
                 try? Self.writeAll(descriptor: descriptor, retirement)
             }
             _ = Darwin.shutdown(descriptor, SHUT_WR)

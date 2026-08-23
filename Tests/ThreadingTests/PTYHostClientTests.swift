@@ -703,10 +703,22 @@ final class PTYHostClientTests: XCTestCase {
     }
 
     func testAnOversizeHeaderFromTheDaemonClosesWithTheTypedRefusal() throws {
-        let daemon = try makeDaemon(
-            onFrame: Self.greetingDaemon { daemon in
+        let daemon = try makeDaemon { frame, daemon in
+            guard frame.kind == .control,
+                  let control = try? JSONDecoder().decode(PTYHostFrame.self, from: frame.payload)
+            else { return }
+            switch control {
+            case .hello:
+                daemon.send(
+                    Self.hello(
+                        protocolVersion: PTYHostProtocol.current,
+                        minimum: PTYHostProtocol.minimumSupported
+                    )
+                )
+            case .list:
                 // A header claiming 2 MiB, past `maximumPayloadBytes`, and not one payload byte
-                // behind it: the refusal has to come from the header alone.
+                // behind it: the refusal has to come from the header alone. Sent after the gate
+                // so it reaches the running pump rather than the handshake.
                 var header = Data([PTYHostFrameKind.output.rawValue, 0, 0, 0])
                 let length = UInt32(2 * 1024 * 1024)
                 header.append(UInt8(truncatingIfNeeded: length))
@@ -714,11 +726,15 @@ final class PTYHostClientTests: XCTestCase {
                 header.append(UInt8(truncatingIfNeeded: length >> 16))
                 header.append(UInt8(truncatingIfNeeded: length >> 24))
                 daemon.sendRaw(header)
+            default:
+                break
             }
-        )
+        }
         let recorder = PTYHostEventRecorder()
         let client = makeClient(socketPath: daemon.socketPath, events: recorder.events)
         try client.connect()
+
+        try client.list()
 
         XCTAssertTrue(recorder.waitForClose())
         XCTAssertEqual(recorder.closings.count, 1)
@@ -727,6 +743,32 @@ final class PTYHostClientTests: XCTestCase {
             .framing(.oversizePayload(length: 2 * 1024 * 1024))
         )
         XCTAssertFalse(client.isReady)
+    }
+
+    func testAnOversizeHeaderDuringTheHandshakeRefusesTheConnectItself() throws {
+        let daemon = try makeDaemon { frame, daemon in
+            guard frame.kind == .control else { return }
+            var header = Data([PTYHostFrameKind.control.rawValue, 0, 0, 0])
+            let length = UInt32(2 * 1024 * 1024)
+            header.append(UInt8(truncatingIfNeeded: length))
+            header.append(UInt8(truncatingIfNeeded: length >> 8))
+            header.append(UInt8(truncatingIfNeeded: length >> 16))
+            header.append(UInt8(truncatingIfNeeded: length >> 24))
+            daemon.sendRaw(header)
+        }
+        let recorder = PTYHostEventRecorder()
+        let client = makeClient(socketPath: daemon.socketPath, events: recorder.events)
+
+        XCTAssertThrowsError(try client.connect()) { error in
+            XCTAssertEqual(
+                error as? PTYHostClientError,
+                .framing(.oversizePayload(length: 2 * 1024 * 1024))
+            )
+        }
+        XCTAssertTrue(
+            recorder.closings.isEmpty,
+            "a connect that throws is its own report"
+        )
     }
 
     func testTheWriteQueueBoundClosesTheConnectionRatherThanGrowing() throws {

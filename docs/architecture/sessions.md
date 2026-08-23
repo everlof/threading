@@ -871,6 +871,22 @@ child's own serial queue, cancelling the source inside the handler — the arran
 of 22 July 2026 established, where a manual `waitpid` racing a still-registered source made
 libdispatch treat `EV_VANISHED` as a fatal client bug.
 
+**The background host is behind one hidden key, and it is off.** `AppSettings.ptyHostEnabled`
+(`defaults write codes.threading ptyHostEnabled -bool true`) is registered in
+`AppSettingDefinitions` with **no `presentations`**, so `remotePolicy` resolves `.hidden`: it
+produces no Settings row and does not cross to the phone's settings mirror — the
+`remoteViewportLeaseGraceSeconds` shape, reachable by `defaults write` and by a test. Off is §9
+step 4 of `docs/feature-drafts/durable-sessions.md`, and there is a second, harder gate on top of
+the rollout one. A launchd agent is **not** a supervised child of Threading, and macOS attributes
+file access by directly spawned, supervised children (see [`permissions.md`](permissions.md)); the
+one measured launchd datapoint in this repository is negative *and silent*. Whether an agent
+spawned by `threading-ptyd` inherits Threading's grants is unanswerable on the machine the design
+was written on, because `csrutil status` is disabled there and every arm of the experiment passed
+trivially. Until that experiment has been run on a **SIP-enabled** Mac and the answer written into
+`permissions.md`, defaulting this on risks agents that silently cannot read the user's files —
+which reads to the user as the app breaking, not as a feature. Turning it on today still changes
+nothing on its own: no session's PTY has moved yet. See [`pty-host.md`](pty-host.md).
+
 ### The sessions that come back on their own
 
 Quitting with agents running keeps the records and loses the processes — that is the app's
