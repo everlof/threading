@@ -45,6 +45,52 @@ development-signed bundle carrying `get-task-allow`. That is fine — it is not 
 anyone ships — but it means "did the entitlement change work?" cannot be answered by looking at
 a local Release build. See [`permissions.md`](permissions.md).
 
+## A Developer ID build still needs a provisioning profile
+
+Developer ID distribution usually needs no profile at all, which is why this went unnoticed until
+the pipeline was first exercised on 23 August 2026. Threading ships
+`com.apple.developer.applesignin` — Sign in with Apple, genuinely used by the hosted-access flow
+(`RemoteHostedAppleSignIn`, `HostedServiceSignInButton`) — and a restricted `com.apple.developer.*`
+entitlement has to be authorised by a profile whatever the distribution method. So the export
+needs one, and the entitlement cannot simply be dropped.
+
+`scripts/release.sh` used to ask for `signingStyle = automatic`, which mints a profile by asking
+the Apple ID signed into Xcode. That can work on a developer's Mac and can *never* work in
+Actions: the runner is given the certificate and no account whatsoever. The first tagged release
+would have spent a full archive to arrive at
+
+```
+error: exportArchive Cannot create a Developer ID provisioning profile for "codes.threading".
+error: exportArchive No profiles for 'codes.threading' were found
+```
+
+which reads like a missing certificate and is not. Signing is now `manual` with the profile named
+explicitly (`THREADING_PROVISIONING_PROFILE`, default `Threading Provisioning Profile`), so the
+export uses what is installed in `~/Library/MobileDevice/Provisioning Profiles` and asks no
+account anything. The workflow writes it there from the `APPLE_PROVISIONING_PROFILE` secret, and
+deletes it afterwards beside the Sparkle key.
+
+**A profile is a snapshot, not a live view.** The first profile issued for `codes.threading`
+carried `aps-environment` but not `applesignin`, because Push had been enabled on the App ID and
+Sign in with Apple had not yet been. Ticking the capability afterwards does not reach a profile
+that already exists — it must be re-issued — and the App ID page shows the capability enabled
+either way, so the identifier looks correct while every signing attempt refuses:
+
+```
+error: exportArchive Provisioning profile "Threading Provisioning Profile" doesn't include
+       the com.apple.developer.applesignin entitlement.
+```
+
+That is the trap: the portal shows the truth about the *identifier* and tells you nothing about
+the *profile*. Whenever a capability is added, re-issue the profile and re-upload the secret.
+
+`release.sh` therefore checks the installed profile before it archives — it must exist, be a
+Developer ID profile (`ProvisionsAllDevices`), match `TEAM.bundle-id`, and carry every
+`com.apple.developer.*` key the entitlements file asks for. Only those: `com.apple.security.cs.*`
+are hardened-runtime flags a profile never mentions, and demanding them would fail every build.
+It is the same bargain as the embedded-binary sweep further down — the check costs nothing where
+it stands and saves a ten-minute archive when it fires.
+
 ## Keeping /Applications on master
 
 `scripts/autoinstall.sh` rebuilds and installs Threading every time a commit lands on master. The

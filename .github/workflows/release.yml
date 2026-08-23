@@ -11,6 +11,12 @@
 #   APPLE_CERTIFICATE_P12       base64 of a .p12 export of the Developer ID Application
 #                               certificate and its private key
 #   APPLE_CERTIFICATE_PASSWORD  the .p12's password
+#   APPLE_PROVISIONING_PROFILE  base64 of the Developer ID provisioning profile for
+#                               codes.threading. Required because the app ships a restricted
+#                               capability (Sign in with Apple); automatic signing cannot stand
+#                               in for it here, since a runner has no Xcode account to mint one.
+#                               Re-issue and re-upload it whenever a capability is added to the
+#                               App ID — a profile is a snapshot of the moment it was generated.
 #   APPLE_ID                    the Apple ID that owns the certificate
 #   APPLE_APP_PASSWORD          an app-specific password for that Apple ID (notarytool)
 #   SPARKLE_PRIVATE_KEY         the contents of the file written by
@@ -73,6 +79,19 @@ jobs:
           rm "$RUNNER_TEMP/certificate.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
 
+      - name: Install the Developer ID provisioning profile
+        env:
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+        run: |
+          # Threading ships com.apple.developer.applesignin, a restricted capability, so even a
+          # Developer ID export needs a profile. Automatic signing would ask the Apple ID signed
+          # into Xcode to mint one, and a runner has no account at all — so the profile is
+          # installed here and named explicitly by scripts/release.sh.
+          PROFILES="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILES"
+          (umask 077; echo "$APPLE_PROVISIONING_PROFILE" | base64 --decode \
+            > "$PROFILES/threading.provisionprofile")
+
       - name: Store the notary credentials
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -109,3 +128,7 @@ jobs:
       - name: Remove the Sparkle private key
         if: always()
         run: rm -f "$RUNNER_TEMP/sparkle-ed25519"
+
+      - name: Remove the provisioning profile
+        if: always()
+        run: rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/threading.provisionprofile"

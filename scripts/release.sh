@@ -41,6 +41,8 @@ readonly SCHEME="Threading"
 readonly PROJECT="Threading.xcodeproj"
 readonly TEAM_ID="SMQ3E8Y57T"
 readonly NOTARY_PROFILE="${NOTARY_PROFILE:-mjukis-notary}"
+readonly BUNDLE_ID="${THREADING_BUNDLE_ID:-codes.threading}"
+readonly PROVISIONING_PROFILE="${THREADING_PROVISIONING_PROFILE:-Threading Provisioning Profile}"
 # Threading ships for Apple silicon only. The project builds its own targets arm64-only; this is
 # the slice the archive's prebuilt embedded frameworks are thinned to, and the one every exported
 # binary is checked against. See docs/architecture/releasing.md, "Apple silicon only".
@@ -123,6 +125,66 @@ if [[ $NOTARIZE -eq 1 ]]; then
         || fail "notarytool profile '$NOTARY_PROFILE' not found — see the header of this script"
 fi
 
+# The provisioning profile, checked against the entitlements it has to authorise.
+#
+# Same bargain as the embedded-binary sweep below: exportArchive only reports this after the
+# archive is built, so an unauthorised entitlement costs a full release build to discover. It is
+# checked here, where it costs nothing. The failure this was written for is a profile issued
+# before a capability was enabled on the App ID: the App ID shows the capability ticked, and the
+# profile — a snapshot of the moment it was issued — does not carry it, so signing refuses.
+say "Checking the provisioning profile"
+profile_directory="$HOME/Library/MobileDevice/Provisioning Profiles"
+if ! python3 - "$profile_directory" "$PROVISIONING_PROFILE" "$TEAM_ID.$BUNDLE_ID" \
+    "$ROOT/Sources/Threading/Resources/Threading.entitlements"; then
+    fail "the provisioning profile cannot sign this app — see above"
+fi <<'PYTHON'
+import plistlib
+import subprocess
+import sys
+from pathlib import Path
+
+directory, wanted_name, wanted_app_id, entitlements_path = sys.argv[1:5]
+
+# Only com.apple.developer.* needs a profile's blessing; com.apple.security.cs.* are hardened
+# runtime flags the profile never mentions, and demanding them here would fail every build.
+required = {
+    key for key in plistlib.loads(Path(entitlements_path).read_bytes())
+    if key.startswith("com.apple.developer.")
+}
+
+candidates = sorted(Path(directory).glob("*.provisionprofile")) if Path(directory).is_dir() else []
+for path in candidates:
+    decoded = subprocess.run(
+        ["security", "cms", "-D", "-i", str(path)],
+        capture_output=True,
+    )
+    if decoded.returncode != 0:
+        continue
+    profile = plistlib.loads(decoded.stdout)
+    entitlements = profile.get("Entitlements", {})
+    if entitlements.get("com.apple.application-identifier") != wanted_app_id:
+        continue
+    if profile.get("Name") != wanted_name:
+        print(f"  note: {path.name} matches {wanted_app_id} but is named "
+              f"{profile.get('Name')!r}, not {wanted_name!r}", file=sys.stderr)
+        continue
+    if not profile.get("ProvisionsAllDevices"):
+        print(f"  {wanted_name!r} is not a Developer ID profile", file=sys.stderr)
+        sys.exit(1)
+    missing = sorted(required - set(entitlements))
+    if missing:
+        print(f"  {wanted_name!r} does not carry: {', '.join(missing)}", file=sys.stderr)
+        print("  Re-issue it in the portal: a profile is a snapshot of the App ID's", file=sys.stderr)
+        print("  capabilities when it was generated and cannot gain one afterwards.", file=sys.stderr)
+        sys.exit(1)
+    print(f"  {wanted_name!r} authorises {', '.join(sorted(required)) or 'no restricted entitlements'}")
+    sys.exit(0)
+
+print(f"  no installed profile named {wanted_name!r} for {wanted_app_id}", file=sys.stderr)
+print(f"  looked in {directory}", file=sys.stderr)
+sys.exit(1)
+PYTHON
+
 # MARK: - Version
 #
 # The version is *injected* rather than committed. claudex keeps its number in a standalone
@@ -196,6 +258,21 @@ say "Thinning embedded binaries to $ARCHITECTURE"
 
 # MARK: - Export
 
+# Manual signing, with the profile named explicitly.
+#
+# `automatic` cannot work here and never could. Threading ships
+# `com.apple.developer.applesignin`, a restricted capability, so even a Developer ID build needs
+# a provisioning profile — and automatic signing mints one by asking the Apple ID signed into
+# Xcode. A CI runner has the certificate and no account at all, so the first tagged release
+# would have spent a full build to arrive at:
+#
+#     error: exportArchive Cannot create a Developer ID provisioning profile for "codes.threading".
+#     error: exportArchive No profiles for 'codes.threading' were found
+#
+# Naming the profile removes the account from the picture: the export uses what is installed in
+# ~/Library/MobileDevice/Provisioning Profiles, which the workflow writes from a secret and this
+# machine has from the portal. The profile is a snapshot of the App ID's capabilities when it was
+# issued, so enabling a capability later means re-issuing it — a profile cannot gain one.
 say "Exporting with Developer ID"
 cat > "$BUILD_DIR/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -207,7 +284,14 @@ cat > "$BUILD_DIR/ExportOptions.plist" <<PLIST
 	<key>teamID</key>
 	<string>$TEAM_ID</string>
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Developer ID Application</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>$BUNDLE_ID</key>
+		<string>$PROVISIONING_PROFILE</string>
+	</dict>
 </dict>
 </plist>
 PLIST
