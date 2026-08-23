@@ -2126,6 +2126,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
         appliedContentOffsetY = contentOffset.y
+        // A UIScrollView bounds change can expose a part of this view whose backing store has
+        // never been painted. Mirroring the offset into `yDisp` updates the emulator, but it does
+        // not refresh the render owner's snapshot; until unrelated terminal output arrives UIKit
+        // therefore presents empty pixels over valid rows. Schedule exactly one coalesced frame
+        // for every accepted finger/host offset so buffer state and visible pixels advance
+        // together. Terminal-owned offsets are excluded by the guards above.
+        defer { invalidateTerminalContents() }
 
         let maxContentOffset = maxContentOffsetY()
         let offsetY = min(max(contentOffset.y, 0), maxContentOffset)

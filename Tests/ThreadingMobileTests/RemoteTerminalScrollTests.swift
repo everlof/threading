@@ -32,6 +32,10 @@ final class RemoteTerminalScrollTests: XCTestCase {
         static let disableMouseTracking = "\u{1b}[?1000l"
         /// Comfortably more than one line's worth of finger travel.
         static let dragDistance: CGFloat = 400
+        /// A rendered `line N` run contains thousands of anti-aliased foreground pixels. Keep
+        /// the floor low enough to ignore font rasterization differences and high enough that a
+        /// caret or scroll indicator cannot make an empty terminal pass.
+        static let minimumVisibleInkPixels = 200
     }
 
     // MARK: - Tests
@@ -182,6 +186,28 @@ final class RemoteTerminalScrollTests: XCTestCase {
 
         XCTAssertEqual(visibleTopLine(of: view), held)
         XCTAssertLessThan(view.contentOffset.y, offset)
+    }
+
+    /// Buffer assertions are not enough for a scroll view: UIKit can hold the right `yDisp`
+    /// while SwiftTerm paints those rows outside the visible layer. That presents as a working
+    /// scrollbar over an entirely empty terminal, which is the on-device Codex failure this
+    /// guards. A midpoint deliberately avoids both zero-offset and live-tail special cases.
+    func testScrolledBackRowsProduceVisiblePixels() throws {
+        let view = makeView(feeding: Fixture.lines)
+        view.nativeBackgroundColor = .black
+        view.nativeForegroundColor = .white
+        view.backgroundColor = .black
+        let maximumOffset = view.contentSize.height - view.bounds.height
+        view.contentOffset = CGPoint(x: 0, y: maximumOffset * 0.5)
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertNotNil(visibleTopLine(of: view), "the emulator fixture must contain visible text")
+        XCTAssertGreaterThan(view.contentOffset.y, 0, "the fixture must exercise a real offset")
+        XCTAssertGreaterThan(
+            try visibleInkPixelCount(in: view),
+            Fixture.minimumVisibleInkPixels,
+            "scrollback rows existed in the emulator but were painted outside the visible layer"
+        )
     }
 
     /// Claude's TUI tracks the mouse, and a program that tracks the mouse scrolls *its own*
@@ -438,6 +464,32 @@ final class RemoteTerminalScrollTests: XCTestCase {
         view.terminalStateSnapshot().visibleRows
             .first(where: { $0.row == 0 })?.text
             .trimmingCharacters(in: .whitespaces)
+    }
+
+    private func visibleInkPixelCount(in view: RemoteTerminalView) throws -> Int {
+        let width = Int(view.bounds.width.rounded(.up))
+        let height = Int(view.bounds.height.rounded(.up))
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.translateBy(x: -view.bounds.minX, y: -view.bounds.minY)
+        view.layer.render(in: context)
+
+        return stride(from: 0, to: bytes.count, by: 4).reduce(into: 0) { count, index in
+            let red = bytes[index]
+            let green = bytes[index + 1]
+            let blue = bytes[index + 2]
+            if red > 24 || green > 24 || blue > 24 {
+                count += 1
+            }
+        }
     }
 }
 

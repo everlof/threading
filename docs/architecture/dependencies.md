@@ -157,7 +157,10 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     impossible. `updateScroller` now follows `buffer.yDisp`, `layoutSubviews` mirrors an offset
     the view did not set back into the emulator (`yDisp` plus `Terminal.userScrolling`), a drag in
     flight is left alone and only nudged by the lines the scrollback trimmed under it, and typing
-    rejoins the tail. The second rule is the wheel: a program that tracks the mouse scrolls its
+    rejoins the tail. Accepting that external offset also marks SwiftTerm's frame driver dirty:
+    changing `yDisp` without refreshing the render snapshot leaves valid buffer rows behind an
+    empty `UIScrollView` backing region until unrelated output happens to repaint it. The second
+    rule is the wheel: a program that tracks the mouse scrolls its
     *own* content, so one finger is now reported as wheel buttons 4/5 through the shared
     `WheelReportBudget` — the same measured 100/s with a burst of 6 the Mac spends — instead of
     the press-and-drag it used to send, which is a selection gesture and moved nothing at all.
