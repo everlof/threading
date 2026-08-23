@@ -5,19 +5,29 @@ import AppKit
 ///
 /// Provider CLIs still own credentials and removal. Threading owns the isolated-home setup and
 /// verification flow, plus the presentation choices below. It is built from the settings kit
-/// (`SettingsUI`, `SettingsCard`, `ThemedButton`) as a card of flat account rows rather than a
-/// table, so it reads as one piece with the other preference panes.
+/// (`SettingsUI`, `ThemedGroupedTableView`, `ThemedButton`) as virtual card rows: the complete
+/// account and limit ordering is cheap value state, while AppKit owns only the viewport.
 final class AccountsPreferencesViewController: NSViewController {
 
-    // MARK: - Properties
+    private enum PresentationRow {
+        case setup
+        case accountCaption
+        case emptyAccount
+        case account(Int)
+        case accountNote
+        case limit(AccountLimitsSectionController.PresentationRow)
+        case extensionCaption(Int)
+        case extensionField(section: Int, field: Int)
+    }
 
-    /// Holds the freshly rebuilt page; cleared and repopulated on every `reload()`.
-    private let pageContainer = NSView()
+    // MARK: - Properties
 
     private let accountsProvider: () -> [AgentAccount]
     private let setupController: AccountSetupCardViewController
 
     private var accounts: [AgentAccount] = []
+    private var extensionSections: [ExtensionSettingsSectionModel] = []
+    private var presentationRows: [PresentationRow] = []
 
     /// The open icon picker, retained so it survives until dismissed.
     private var iconPopover: ThemedPopover?
@@ -26,6 +36,35 @@ final class AccountsPreferencesViewController: NSViewController {
     /// open, and a fold that closed every time a rule was added would be the page arguing with
     /// the person using it.
     private let limits: AccountLimitsSectionController
+
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("AccountsSettingsContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = AccountsPreferencesLayout.estimatedRowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
 
     init(
         accountsProvider: @escaping () -> [AgentAccount] = {
@@ -60,19 +99,36 @@ final class AccountsPreferencesViewController: NSViewController {
             self?.reload()
             self?.notifyAccountsChanged()
         }
-        pageContainer.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(pageContainer)
+        limits.onChange = { [weak self] in self?.notifyAccountsChanged() }
+        limits.onPresentationChange = { [weak self] in self?.reloadPresentationRows() }
+
+        let page = SettingsUI.listPage(
+            title: "Accounts",
+            body: scrollView
+        )
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
         NSLayoutConstraint.activate([
-            pageContainer.topAnchor.constraint(equalTo: view.topAnchor),
-            pageContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            pageContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            pageContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
     }
 
     override func viewWillAppear() {
         super.viewWillAppear()
         reload()
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
     }
 
     /// Opens the limit folds in the production Accounts page for deterministic rendered evidence.
@@ -82,37 +138,37 @@ final class AccountsPreferencesViewController: NSViewController {
 
     // MARK: - Reload
 
-    /// Rebuilds the whole page from the currently discovered accounts.
+    /// Refreshes the complete cheap model. The fixed page and scroll owner survive, and AppKit
+    /// recycles only cells intersecting the viewport.
     private func reload() {
         // Every discovered login, including the ones switched off: this is the one page where a
         // disabled account has to appear, since it is where it is switched back on.
         accounts = accountsProvider()
-
-        pageContainer.subviews.forEach { $0.removeFromSuperview() }
-
-        let rows: [NSView] = accounts.isEmpty
-            ? [makeEmptyRow()]
-            : accounts.enumerated().map { makeAccountRow(for: $1, row: $0) }
-
-        let card = SettingsCard(rows: rows)
-        limits.onChange = { [weak self] in self?.notifyAccountsChanged() }
         limits.reload(accounts: accounts)
+        extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .accounts)
+        reloadPresentationRows()
+    }
 
-        let page = SettingsUI.page(title: "Accounts", sections: [
-            SettingsUI.section("Add or Reconnect", setupController.view),
-            SettingsUI.section("Agent Accounts", card),
-            SettingsUI.note(AccountsPreferencesStrings.explanation),
-            limits.view
-        ], hostPage: .accounts)
-
-        page.translatesAutoresizingMaskIntoConstraints = false
-        pageContainer.addSubview(page)
-        NSLayoutConstraint.activate([
-            page.topAnchor.constraint(equalTo: pageContainer.topAnchor),
-            page.bottomAnchor.constraint(equalTo: pageContainer.bottomAnchor),
-            page.leadingAnchor.constraint(equalTo: pageContainer.leadingAnchor),
-            page.trailingAnchor.constraint(equalTo: pageContainer.trailingAnchor)
-        ])
+    private func reloadPresentationRows() {
+        var rows: [PresentationRow] = [.setup, .accountCaption]
+        if accounts.isEmpty {
+            rows.append(.emptyAccount)
+        } else {
+            rows.append(contentsOf: accounts.indices.map(PresentationRow.account))
+        }
+        rows.append(.accountNote)
+        rows.append(contentsOf: limits.presentationRows.map(PresentationRow.limit))
+        for (sectionIndex, section) in extensionSections.enumerated() {
+            if section.visibleTitle != nil {
+                rows.append(.extensionCaption(sectionIndex))
+            }
+            rows.append(contentsOf: section.fields.indices.map {
+                .extensionField(section: sectionIndex, field: $0)
+            })
+        }
+        presentationRows = rows
+        updateCardDecorations()
+        tableView.reloadData()
     }
 
     // MARK: - Row Construction
@@ -355,6 +411,179 @@ final class AccountsPreferencesViewController: NSViewController {
     private func notifyAccountsChanged() {
         NotificationCenter.default.post(ProjectsDidChange())
     }
+
+    /// Stress-fixture observability: complete value rows versus live viewport cells.
+    var virtualRowCountForTesting: Int { presentationRows.count }
+
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
+}
+
+// MARK: - Virtualized Page
+
+extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in _: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_: NSTableView, shouldSelectRow _: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor _: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("AccountsSettingsVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+        host.install(
+            content(for: presentationRows[tableRow]),
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset(forRowAt: tableRow),
+            bottomInset: bottomInset(forRowAt: tableRow)
+        )
+        return host
+    }
+
+    private func content(for row: PresentationRow) -> NSView {
+        switch row {
+        case .setup:
+            return SettingsUI.section("Add or Reconnect", setupController.view)
+        case .accountCaption:
+            return SettingsUI.caption("Agent Accounts")
+        case .emptyAccount:
+            return makeEmptyRow()
+        case .account(let index):
+            guard accounts.indices.contains(index) else { return NSView() }
+            return makeAccountRow(for: accounts[index], row: index)
+        case .accountNote:
+            return SettingsUI.note(AccountsPreferencesStrings.explanation)
+        case .limit(let row):
+            return limits.content(for: row)
+        case .extensionCaption(let sectionIndex):
+            guard extensionSections.indices.contains(sectionIndex),
+                  let title = extensionSections[sectionIndex].visibleTitle else { return NSView() }
+            let caption = SettingsUI.caption(title, localizes: false)
+            caption.setAccessibilityIdentifier(
+                extensionSections[sectionIndex].accessibilityIdentifier
+            )
+            return caption
+        case .extensionField(let sectionIndex, let fieldIndex):
+            guard extensionSections.indices.contains(sectionIndex) else { return NSView() }
+            return ExtensionSettingsRenderer.fieldRow(
+                in: extensionSections[sectionIndex],
+                fieldIndex: fieldIndex
+            )
+        }
+    }
+
+    private func topInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        switch presentationRows[index] {
+        case .setup, .accountCaption, .accountNote:
+            return Design.Spacing.large
+        case .emptyAccount, .account:
+            return Design.Spacing.small
+        case .limit(let row):
+            switch row {
+            case .alertsSection, .scopeHeader, .note:
+                return Design.Spacing.large
+            case .rule, .empty, .add:
+                return 0
+            }
+        case .extensionCaption:
+            return Design.Spacing.large
+        case .extensionField(let sectionIndex, let fieldIndex):
+            guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
+                return 0
+            }
+            return extensionSections[sectionIndex].visibleTitle == nil
+                ? Design.Spacing.large
+                : Design.Spacing.small
+        }
+    }
+
+    private func bottomInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        switch presentationRows[index] {
+        case .accountCaption, .extensionCaption:
+            return Design.Spacing.small
+        default:
+            return index == presentationRows.count - 1 ? Design.Spacing.large : 0
+        }
+    }
+
+    private func updateCardDecorations() {
+        var accountBounds: (first: Int, last: Int)?
+        var limitBounds: [Int: (first: Int, last: Int)] = [:]
+        var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+
+        for (index, row) in presentationRows.enumerated() {
+            switch row {
+            case .emptyAccount, .account:
+                if var bounds = accountBounds {
+                    bounds.last = index
+                    accountBounds = bounds
+                } else {
+                    accountBounds = (index, index)
+                }
+            case .limit(let limitRow):
+                guard let scopeIndex = limits.cardScopeIndex(for: limitRow) else { continue }
+                if var bounds = limitBounds[scopeIndex] {
+                    bounds.last = index
+                    limitBounds[scopeIndex] = bounds
+                } else {
+                    limitBounds[scopeIndex] = (index, index)
+                }
+            case .extensionField(let sectionIndex, _):
+                if var bounds = extensionBounds[sectionIndex] {
+                    bounds.last = index
+                    extensionBounds[sectionIndex] = bounds
+                } else {
+                    extensionBounds[sectionIndex] = (index, index)
+                }
+            case .setup, .accountCaption, .accountNote, .extensionCaption:
+                break
+            }
+        }
+
+        var decorations: [ThemedTableCardDecoration] = []
+        if let accountBounds {
+            decorations.append(ThemedTableCardDecoration(
+                rows: accountBounds.first...accountBounds.last,
+                topInset: Design.Spacing.small
+            ))
+        }
+        decorations.append(contentsOf: limitBounds.sorted { $0.key < $1.key }.map {
+            ThemedTableCardDecoration(
+                rows: $0.value.first...$0.value.last,
+                topInset: Design.Spacing.large
+            )
+        })
+        decorations.append(contentsOf: extensionBounds.sorted { $0.key < $1.key }.map {
+            let section = extensionSections[$0.key]
+            return ThemedTableCardDecoration(
+                rows: $0.value.first...$0.value.last,
+                topInset: section.visibleTitle == nil
+                    ? Design.Spacing.large
+                    : Design.Spacing.small,
+                bottomInset: $0.value.last == presentationRows.count - 1
+                    ? Design.Spacing.large
+                    : 0
+            )
+        })
+        tableView.cardDecorations = decorations
+    }
 }
 
 // MARK: - Agent Kind Fallback Icon
@@ -376,6 +605,7 @@ extension AgentKind {
 // MARK: - Accounts Preferences Layout
 
 enum AccountsPreferencesLayout {
+    static let estimatedRowHeight: CGFloat = 72
     static let emojiFontSize: CGFloat = 16
     static let iconWellSize: CGFloat = 30
     /// Dims the fallback icon in a well with no chosen emoji.

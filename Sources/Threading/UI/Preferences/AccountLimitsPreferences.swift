@@ -5,10 +5,9 @@ import AppKit
 /// The "Your Own Limits" half of the Accounts page: the switch that lets a limit speak, and one
 /// fold per login holding the lines drawn on it.
 ///
-/// Kept as its own controller rather than as more rows in `AccountsPreferencesViewController`
-/// because it has state the rest of that page does not — which folds are open, and a menu hanging
-/// off one of its buttons — and because the page rebuilds itself wholesale on every edit. A fold
-/// that closed every time a rule was added would be the page arguing with the person using it.
+/// Kept as its own renderer rather than folded into `AccountsPreferencesViewController` because
+/// it owns state the rest of that page does not — which folds are open, and a menu hanging off one
+/// of its buttons. It publishes cheap row identities; the Accounts table owns their views.
 ///
 /// **Quiet until relevant.** The shipped default is no rules at all, so an untouched install sees
 /// one switch and a list of logins reading "No limits" — not a form. Everything else appears
@@ -16,15 +15,23 @@ import AppKit
 @MainActor
 final class AccountLimitsSectionController {
 
-    // MARK: - Properties
+    enum PresentationRow {
+        case alertsSection
+        case scopeHeader(Int)
+        case rule(scopeIndex: Int, ruleIndex: Int)
+        case empty(Int)
+        case add(Int)
+        case note
+    }
 
-    /// The section's root. Handed to the page once and repopulated in place, so the page's own
-    /// rebuild does not have to know this exists.
-    let view = NSView()
+    // MARK: - Properties
 
     /// Called after any edit, so the page that owns this can refresh anything of its own that
     /// reads the same accounts.
     var onChange: (() -> Void)?
+
+    /// Called whenever expansion or an edit changes the cheap row model.
+    var onPresentationChange: (() -> Void)?
 
     private var accounts: [AgentAccount] = []
 
@@ -33,13 +40,6 @@ final class AccountLimitsSectionController {
 
     /// The open templates menu, retained for as long as it is on screen.
     private var menuSession: AnyObject?
-
-    /// Row index → the scope its Add button edits, for the controls that carry a tag rather than
-    /// a value.
-    private var rowScopes: [Int: Scope] = [:]
-
-    /// Button tag → the rule it removes and the scope it removes it from, for the same reason.
-    private var rowRules: [Int: (scope: Scope, ruleID: UUID)] = [:]
 
     /// The two stores this section edits.
     ///
@@ -62,10 +62,11 @@ final class AccountLimitsSectionController {
 
     // MARK: - Public Methods
 
-    /// Rebuilds the section for the given logins.
+    /// Replaces the cheap account model. The page decides when to reload its visible cells.
     func reload(accounts: [AgentAccount]) {
         self.accounts = accounts
-        rebuild()
+        let liveKeys = Set([AccountLimitsLayout.allAccountsKey] + accounts.map(\.id.rawValue))
+        expanded.formIntersection(liveKeys)
     }
 
     /// Opens every fold, so a render can review the rows that only exist when one is open.
@@ -75,7 +76,7 @@ final class AccountLimitsSectionController {
     /// draws.
     func expandEverythingForTesting() {
         expanded = Set([AccountLimitsLayout.allAccountsKey] + accounts.map(\.id.rawValue))
-        rebuild()
+        onPresentationChange?()
     }
 
     /// The semantic menu tree without presenting it, so a behavior test can hold the custom
@@ -84,41 +85,116 @@ final class AccountLimitsSectionController {
         templates(for: account.map(Scope.account) ?? .allAccounts)
     }
 
-    // MARK: - Building
+#if DEBUG
+    /// A finite retained fixture for direct component tests. The shipping Accounts page never
+    /// calls this; it consumes `presentationRows` through its single virtual table.
+    func materializedSectionForTesting() -> NSView {
+        let rows = presentationRows
+        var sections: [NSView] = []
+        if let alerts = rows.first {
+            sections.append(content(for: alerts))
+        }
+        for scopeIndex in 0..<scopeCount {
+            let cardRows = rows.filter { cardScopeIndex(for: $0) == scopeIndex }
+            sections.append(SettingsCard(rows: cardRows.map { content(for: $0) }))
+        }
+        if let note = rows.last {
+            sections.append(content(for: note))
+        }
 
-    private func rebuild() {
-        view.subviews.forEach { $0.removeFromSuperview() }
-        rowScopes.removeAll()
-        rowRules.removeAll()
+        let stack = NSStackView(views: sections)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.distribution = .fill
+        stack.spacing = Design.Spacing.large
+        for section in sections {
+            section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        return stack
+    }
+#endif
 
-        let built = sections()
-        let content = NSStackView(views: built)
-        content.orientation = .vertical
-        content.alignment = .leading
-        content.distribution = .fill
-        content.spacing = Design.Spacing.large
-        content.translatesAutoresizingMaskIntoConstraints = false
+    // MARK: - Virtual Row Model
 
-        view.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: view.topAnchor),
-            content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
+    /// Closed scopes contribute only their header. Expanded scopes contribute value identities
+    /// for their bounded rule list and Add row; no hidden AppKit subtree is constructed.
+    var presentationRows: [PresentationRow] {
+        var result: [PresentationRow] = [.alertsSection]
+        for scopeIndex in 0..<scopeCount {
+            result.append(.scopeHeader(scopeIndex))
+            guard let scope = scope(at: scopeIndex), expanded.contains(scope.key) else { continue }
+            let rules = self.rules(in: scope)
+            if rules.isEmpty {
+                result.append(.empty(scopeIndex))
+            } else {
+                result.append(contentsOf: rules.indices.map {
+                    .rule(scopeIndex: scopeIndex, ruleIndex: $0)
+                })
+            }
+            result.append(.add(scopeIndex))
+        }
+        result.append(.note)
+        return result
+    }
 
-        // Every fold fills the column, the rule `SettingsUI.page` states for its own sections and
-        // for the same failure. A vertical stack aligned `.leading` pins leading edges and lets
-        // each arranged view take its *fitting* width, so without this the cards sat at about a
-        // third of the pane with the rest of the column empty — and each card's label column, cut
-        // to that width, wrapped a one-line caption into five lines and truncated `Claude Code` to
-        // `Clau`. Nothing asserted on the section could see it; the render could.
-        for section in built {
-            section.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+    /// Identifies the rows whose shared card surface is painted by the owning virtual table.
+    func cardScopeIndex(for row: PresentationRow) -> Int? {
+        switch row {
+        case .scopeHeader(let index), .empty(let index), .add(let index):
+            return index
+        case .rule(let index, _):
+            return index
+        case .alertsSection, .note:
+            return nil
         }
     }
 
-    private func sections() -> [NSView] {
+    func content(for row: PresentationRow) -> NSView {
+        switch row {
+        case .alertsSection:
+            return alertsSection()
+        case .scopeHeader(let scopeIndex):
+            return scopeHeader(at: scopeIndex)
+        case .rule(let scopeIndex, let ruleIndex):
+            guard let scope = scope(at: scopeIndex),
+                  rules(in: scope).indices.contains(ruleIndex) else { return NSView() }
+            return self.row(
+                for: rules(in: scope)[ruleIndex],
+                scope: scope,
+                isInherited: isInheriting(scope),
+                tag: scopeIndex * AccountLimitsLayout.tagStride + ruleIndex
+            )
+        case .empty(let scopeIndex):
+            guard let scope = scope(at: scopeIndex) else { return NSView() }
+            return SettingsUI.row(
+                title: AccountLimitsStrings.noRulesTitle,
+                subtitle: emptySubtitle(for: scope, isInherited: isInheriting(scope))
+            )
+        case .add(let scopeIndex):
+            guard let scope = scope(at: scopeIndex) else { return NSView() }
+            let add = SettingsUI.button(
+                AccountLimitsStrings.addButton,
+                target: self,
+                action: #selector(addClicked(_:))
+            )
+            add.tag = scopeIndex
+            add.isEnabled = rules(in: scope).count < CustomLimitDefaults.maximumRulesPerAccount
+            return SettingsUI.row(
+                title: scope.account == nil
+                    ? AccountLimitsStrings.addRowTitleForAll
+                    : AccountLimitsStrings.addRowTitle,
+                subtitle: AccountLimitsStrings.addRowSubtitle,
+                control: add,
+                localizes: false
+            )
+        case .note:
+            return SettingsUI.note(AccountLimitsStrings.explanation)
+        }
+    }
+
+    private var scopeCount: Int { accounts.count + 1 }
+
+    private func alertsSection() -> NSView {
         let alerts = SettingsUI.toggle(
             isOn: settings.alertsEnabled,
             target: self,
@@ -134,62 +210,15 @@ final class AccountLimitsSectionController {
             )
         ])
 
-        var views: [NSView] = [
-            SettingsUI.section(AccountLimitsStrings.sectionTitle, switchCard)
-        ]
-
-        // The app-wide fold comes first, because it is the one that explains the others: a login
-        // reading "from All Accounts" under its rules is only legible beside the place those were
-        // set.
-        views.append(fold(for: .allAccounts, row: 0))
-        for (index, account) in accounts.enumerated() {
-            views.append(fold(for: .account(account), row: index + 1))
-        }
-
-        views.append(SettingsUI.note(AccountLimitsStrings.explanation))
-        return views
+        return SettingsUI.section(AccountLimitsStrings.sectionTitle, switchCard)
     }
 
-    /// One scope's fold: the count when closed, its rules and an Add control when open.
-    private func fold(for scope: Scope, row index: Int) -> NSView {
-        rowScopes[index] = scope
-
+    /// One scope's cheap header. Detail rows enter `presentationRows` only while it is open.
+    private func scopeHeader(at index: Int) -> NSView {
+        guard let scope = scope(at: index) else { return NSView() }
         let rules = self.rules(in: scope)
-        let isInherited = isInheriting(scope)
         let isExpanded = expanded.contains(scope.key)
-
-        var detail: [NSView] = rules.enumerated().map { ruleIndex, rule in
-            row(
-                for: rule,
-                scope: scope,
-                isInherited: isInherited,
-                tag: index * AccountLimitsLayout.tagStride + ruleIndex
-            )
-        }
-        if rules.isEmpty {
-            detail.append(SettingsUI.row(
-                title: AccountLimitsStrings.noRulesTitle,
-                subtitle: emptySubtitle(for: scope, isInherited: isInherited)
-            ))
-        }
-
-        let add = SettingsUI.button(
-            AccountLimitsStrings.addButton,
-            target: self,
-            action: #selector(addClicked(_:))
-        )
-        add.tag = index
-        add.isEnabled = rules.count < CustomLimitDefaults.maximumRulesPerAccount
-        detail.append(SettingsUI.row(
-            title: scope.account == nil
-                ? AccountLimitsStrings.addRowTitleForAll
-                : AccountLimitsStrings.addRowTitle,
-            subtitle: AccountLimitsStrings.addRowSubtitle,
-            control: add,
-            localizes: false
-        ))
-
-        return SettingsUI.disclosureCard(
+        return SettingsUI.disclosureHeader(
             title: scope.title,
             subtitle: scope.subtitle,
             summary: AccountLimitsStrings.summary(count: rules.count),
@@ -203,9 +232,8 @@ final class AccountLimitsSectionController {
                 } else {
                     self.expanded.remove(scope.key)
                 }
-                self.rebuild()
-            },
-            detailRows: detail
+                self.onPresentationChange?()
+            }
         )
     }
 
@@ -248,8 +276,6 @@ final class AccountLimitsSectionController {
         pill.tag = tag
         pill.toolTip = AccountLimitsStrings.toolbarTooltip
         pill.setAccessibilityLabel(AccountLimitsStrings.toolbarLabel)
-
-        rowRules[tag] = (scope, rule.id)
 
         var subtitle = evaluation.map {
             CustomLimitReceipt.status(for: $0, windowName: windowName)
@@ -294,6 +320,23 @@ final class AccountLimitsSectionController {
         var subtitle: String? {
             account?.provider.displayName ?? AccountLimitsStrings.allAccountsSubtitle
         }
+    }
+
+    /// Scope zero is app-wide; the remaining stable indexes map directly to discovered accounts.
+    private func scope(at index: Int) -> Scope? {
+        guard index >= 0 else { return nil }
+        if index == 0 { return .allAccounts }
+        guard accounts.indices.contains(index - 1) else { return nil }
+        return .account(accounts[index - 1])
+    }
+
+    private func ruleEntry(for tag: Int) -> (scope: Scope, ruleID: UUID)? {
+        let scopeIndex = tag / AccountLimitsLayout.tagStride
+        let ruleIndex = tag % AccountLimitsLayout.tagStride
+        guard let scope = scope(at: scopeIndex) else { return nil }
+        let rules = rules(in: scope)
+        guard rules.indices.contains(ruleIndex) else { return nil }
+        return (scope, rules[ruleIndex].id)
     }
 
     private func rules(in scope: Scope) -> [CustomLimit] {
@@ -466,11 +509,10 @@ final class AccountLimitsSectionController {
 
     @objc private func alertsChanged(_ sender: ThemedToggle) {
         settings.alertsEnabled = sender.state == .on
-        rebuild()
     }
 
     @objc private func addClicked(_ sender: ThemedButton) {
-        guard let scope = rowScopes[sender.tag] else { return }
+        guard let scope = scope(at: sender.tag) else { return }
 
         menuSession = ThemedMenuPresenter.present(
             ThemedMenuPresentation(
@@ -486,7 +528,7 @@ final class AccountLimitsSectionController {
     }
 
     @objc private func toolbarChanged(_ sender: ThemedToggle) {
-        guard let entry = rowRules[sender.tag] else { return }
+        guard let entry = ruleEntry(for: sender.tag) else { return }
 
         if let account = entry.scope.account {
             settings.setShowsInToolbar(
@@ -502,7 +544,7 @@ final class AccountLimitsSectionController {
     }
 
     @objc private func removeClicked(_ sender: ThemedButton) {
-        guard let entry = rowRules[sender.tag] else { return }
+        guard let entry = ruleEntry(for: sender.tag) else { return }
 
         if let account = entry.scope.account {
             settings.remove(ruleID: entry.ruleID, for: account.id, store: accountStore)
@@ -516,7 +558,7 @@ final class AccountLimitsSectionController {
     /// centre and a rule created now has to be able to speak before the next reading arrives.
     private func edited() {
         NotificationCenter.default.post(CustomLimitsDidChange())
-        rebuild()
+        onPresentationChange?()
         onChange?()
     }
 }

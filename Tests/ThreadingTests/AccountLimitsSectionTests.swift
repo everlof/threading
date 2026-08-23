@@ -72,10 +72,11 @@ final class AccountLimitsSectionTests: XCTestCase {
     /// reach past that width — a control aligned by ink still has to fit the card it sits in.
     func testTheSectionBuildsAndFitsThePane() {
         section.reload(accounts: [account])
-        let host = laidOut(section.view, width: Render.width)
+        let sectionView = section.materializedSectionForTesting()
+        let host = laidOut(sectionView, width: Render.width)
 
-        XCTAssertGreaterThan(section.view.frame.height, 100, "the limits section collapsed")
-        XCTAssertLessThanOrEqual(section.view.frame.width, host.bounds.width)
+        XCTAssertGreaterThan(sectionView.frame.height, 100, "the limits section collapsed")
+        XCTAssertLessThanOrEqual(sectionView.frame.width, host.bounds.width)
     }
 
     /// Every fold fills the column.
@@ -87,14 +88,15 @@ final class AccountLimitsSectionTests: XCTestCase {
     /// kept as an assertion.
     func testEveryFoldFillsTheColumn() {
         section.reload(accounts: [account])
-        _ = laidOut(section.view, width: Render.width)
+        let sectionView = section.materializedSectionForTesting()
+        _ = laidOut(sectionView, width: Render.width)
 
-        let folds = descendants(of: section.view).compactMap { $0 as? SettingsCard }
+        let folds = descendants(of: sectionView).compactMap { $0 as? SettingsCard }
         XCTAssertFalse(folds.isEmpty, "the section built no cards at all")
         for fold in folds {
             XCTAssertEqual(
                 fold.frame.width,
-                section.view.frame.width,
+                sectionView.frame.width,
                 accuracy: 1,
                 "a card is hugging its content instead of filling the column"
             )
@@ -111,8 +113,9 @@ final class AccountLimitsSectionTests: XCTestCase {
         )
         section.reload(accounts: [account])
 
-        let host = laidOut(section.view, width: 420)
-        XCTAssertLessThanOrEqual(section.view.frame.width, host.bounds.width)
+        let sectionView = section.materializedSectionForTesting()
+        let host = laidOut(sectionView, width: 420)
+        XCTAssertLessThanOrEqual(sectionView.frame.width, host.bounds.width)
     }
 
     // MARK: - What It Says
@@ -153,9 +156,10 @@ final class AccountLimitsSectionTests: XCTestCase {
     /// sentence and whose own label has to stand alone in the rotor.
     func testTheAlertsSwitchIsNamed() throws {
         section.reload(accounts: [account])
-        _ = laidOut(section.view, width: Render.width)
+        let sectionView = section.materializedSectionForTesting()
+        _ = laidOut(sectionView, width: Render.width)
 
-        let toggles = descendants(of: section.view).compactMap { $0 as? ThemedToggle }
+        let toggles = descendants(of: sectionView).compactMap { $0 as? ThemedToggle }
         let named = try XCTUnwrap(toggles.first)
         XCTAssertEqual(named.accessibilityLabel(), AccountLimitsStrings.alertsToggleLabel)
     }
@@ -315,9 +319,10 @@ final class AccountLimitsSectionTests: XCTestCase {
         var written = 0
         for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
-            let host = laidOut(section.view, width: Render.width)
+            let sectionView = section.materializedSectionForTesting()
+            let host = laidOut(sectionView, width: Render.width)
             host.appearance = appearance
-            section.view.appearance = appearance
+            sectionView.appearance = appearance
 
             var data: Data?
             appearance.performAsCurrentDrawingAppearance {
@@ -328,7 +333,7 @@ final class AccountLimitsSectionTests: XCTestCase {
             let url = directory.appendingPathComponent("account-limits-\(name).png")
             try XCTUnwrap(data, "Failed to render the limits section in \(name)").write(to: url)
             written += 1
-            section.view.removeFromSuperview()
+            sectionView.removeFromSuperview()
         }
 
         XCTAssertEqual(written, 2)

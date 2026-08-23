@@ -118,6 +118,41 @@ final class SettingsDisclosureRenderTests: XCTestCase {
     }
 
     @MainActor
+    func testAccountsAndClosedLimitFoldsMaterializeOnlyTheViewport() throws {
+        let suite = "AccountsSettingsVirtualization-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accounts = (0..<120).map { index in
+            AgentAccount(
+                provider: .claude,
+                handle: .named("virtual-\(index)"),
+                configPath: "/tmp/threading-account-virtual-\(index)",
+                displayName: "Virtual Account \(index)"
+            )
+        }
+        let controller = AccountsPreferencesViewController(
+            accountsProvider: { accounts },
+            limitSettings: CustomLimitSettings(defaults: defaults),
+            accountStore: AccountPreferencesStore(defaults: defaults)
+        )
+        let page = controller.view
+        controller.viewWillAppear()
+        let window = performanceWindow(page)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(controller.virtualRowCountForTesting, 240)
+        XCTAssertGreaterThan(controller.materializedRowCountForTesting, 0)
+        XCTAssertLessThan(
+            controller.materializedRowCountForTesting,
+            controller.virtualRowCountForTesting / 2,
+            "Accounts retained rows far outside its viewport"
+        )
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
+        withExtendedLifetime(window) {}
+    }
+
+    @MainActor
     func testBrowserSignInExemptionsRemainActionableWhenVirtualized() throws {
         let previousProvider = BrowserCredentialPreference.provider
         BrowserCredentialPreference.provider = .systemAutoFill
