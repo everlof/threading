@@ -157,7 +157,10 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     impossible. `updateScroller` now follows `buffer.yDisp`, `layoutSubviews` mirrors an offset
     the view did not set back into the emulator (`yDisp` plus `Terminal.userScrolling`), a drag in
     flight is left alone and only nudged by the lines the scrollback trimmed under it, and typing
-    rejoins the tail. Accepting that external offset also marks SwiftTerm's frame driver dirty:
+    rejoins the tail. A non-shrinking buffer update preserves UIKit's finger/momentum offset too;
+    assigning `contentSize` otherwise clamps a bottom rubber-band synchronously and makes live
+    output cancel the system bounce. Accepting that external offset also marks SwiftTerm's frame
+    driver dirty:
     changing `yDisp` without refreshing the render snapshot leaves valid buffer rows behind an
     empty `UIScrollView` backing region until unrelated output happens to repaint it. The second
     rule is the wheel: a program that tracks the mouse scrolls its

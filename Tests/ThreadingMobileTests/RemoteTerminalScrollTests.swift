@@ -32,6 +32,9 @@ final class RemoteTerminalScrollTests: XCTestCase {
         static let disableMouseTracking = "\u{1b}[?1000l"
         /// Comfortably more than one line's worth of finger travel.
         static let dragDistance: CGFloat = 400
+        /// Far enough past the legal bottom to remain in UIKit's rubber-band region when one
+        /// more output row extends the buffer underneath it.
+        static let bottomOverscroll: CGFloat = 80
         /// A rendered `line N` run contains thousands of anti-aliased foreground pixels. Keep
         /// the floor low enough to ignore font rasterization differences and high enough that a
         /// caret or scroll indicator cannot make an empty terminal pass.
@@ -208,6 +211,37 @@ final class RemoteTerminalScrollTests: XCTestCase {
             Fixture.minimumVisibleInkPixels,
             "scrollback rows existed in the emulator but were painted outside the visible layer"
         )
+    }
+
+    /// Repainting a finger-owned offset must not turn that repaint into scroll ownership. At the
+    /// live tail UIKit is allowed to travel beyond its legal maximum and spring back; output that
+    /// arrives during that momentum may extend the maximum, but must not clamp the presentation
+    /// to it and cancel the system bounce.
+    func testLiveOutputDoesNotCancelBottomRubberBand() {
+        let view = makeScrollPhaseView(feeding: Fixture.lines)
+        let maximumBeforeOutput = view.contentSize.height - view.bounds.height
+
+        view.simulatesTracking = true
+        view.contentOffset = CGPoint(
+            x: 0,
+            y: maximumBeforeOutput + Fixture.bottomOverscroll
+        )
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        view.simulatesTracking = false
+        view.simulatesDeceleration = true
+        let fingerOwnedOffset = view.contentOffset.y
+
+        view.feed(text: "during bounce\r\n")
+        settleTerminalCallbacks(for: view)
+
+        let maximumAfterOutput = view.contentSize.height - view.bounds.height
+        XCTAssertGreaterThan(
+            view.contentOffset.y,
+            maximumAfterOutput,
+            "live output took contentOffset away from UIKit before its bottom bounce settled"
+        )
+        XCTAssertEqual(view.contentOffset.y, fingerOwnedOffset, accuracy: Fixture.offsetTolerance)
     }
 
     /// Claude's TUI tracks the mouse, and a program that tracks the mouse scrolls *its own*
@@ -452,7 +486,22 @@ final class RemoteTerminalScrollTests: XCTestCase {
         return view
     }
 
-    private func settleTerminalCallbacks(for view: RemoteTerminalView) {
+    private func makeScrollPhaseView(feeding lines: Int) -> ScrollPhaseTerminalView {
+        let view = ScrollPhaseTerminalView(
+            frame: Fixture.frame,
+            font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
+        )
+        let window = UIWindow(frame: Fixture.frame)
+        window.addSubview(view)
+        hostWindows.append(window)
+        for line in 0..<lines {
+            view.feed(text: "line \(line)\r\n")
+        }
+        settleTerminalCallbacks(for: view)
+        return view
+    }
+
+    private func settleTerminalCallbacks(for view: TerminalView) {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
         view.setNeedsLayout()
         view.layoutIfNeeded()
@@ -490,6 +539,22 @@ final class RemoteTerminalScrollTests: XCTestCase {
                 count += 1
             }
         }
+    }
+}
+
+/// UIScrollView's tracking state is read-only, but its getters are overridable. Keeping the seam
+/// in the fixture lets this regression exercise SwiftTerm's real output/frame path without a
+/// private UIKit mutation or a production test hook.
+private final class ScrollPhaseTerminalView: TerminalView {
+    var simulatesTracking = false
+    var simulatesDeceleration = false
+
+    override var isTracking: Bool {
+        simulatesTracking || super.isTracking
+    }
+
+    override var isDecelerating: Bool {
+        simulatesDeceleration || super.isDecelerating
     }
 }
 

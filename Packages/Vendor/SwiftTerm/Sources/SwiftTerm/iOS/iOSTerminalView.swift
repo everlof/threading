@@ -2014,27 +2014,44 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     {
         terminal.terminalLock.preconditionLocked()
         let displayBuffer = terminal.displayBuffer
+        let offsetBeforeContentUpdate = contentOffset
+        let maximumBeforeContentUpdate = maxContentOffsetY()
+        let wasVerticallyRubberBanding = offsetBeforeContentUpdate.y < -contentOffsetTolerance
+            || offsetBeforeContentUpdate.y
+                > maximumBeforeContentUpdate + contentOffsetTolerance
+        let gestureOwnsOffset = isTracking
+            || (isDecelerating && (userScrolling || wasVerticallyRubberBanding))
+        let previousContentHeight = contentSize.height
+        let updatedContentSize = CGSize(
+            width: CGFloat(displayBuffer.cols) * cellDimension.width,
+            height: CGFloat(displayBuffer.lines.count) * cellDimension.height
+        )
         // UIKit can change `contentOffset` synchronously when `contentSize`
         // changes. Suppress the observer so it does not take the terminal lock
-        // again.
+        // again. During a non-shrinking update, restore the finger/momentum
+        // offset UIKit clamped as a side effect; changing the buffer extent is
+        // not permission to cancel an in-flight gesture.
         updatingContentOffsetFromTerminal = true
-        contentSize = CGSize (width: CGFloat (displayBuffer.cols) * cellDimension.width,
-                              height: CGFloat (displayBuffer.lines.count) * cellDimension.height)
+        contentSize = updatedContentSize
+        if gestureOwnsOffset
+            && updatedContentSize.height >= previousContentHeight - contentOffsetTolerance
+            && abs(contentOffset.y - offsetBeforeContentUpdate.y) > contentOffsetTolerance {
+            contentOffset = offsetBeforeContentUpdate
+        }
         appliedContentOffsetY = contentOffset.y
         updatingContentOffsetFromTerminal = false
         // Let the gesture own contentOffset while the finger is physically down
-        // (isTracking), and while frozen history coasts under momentum —
-        // re-asserting it there fights the drag and blocks the user from reaching
-        // the bottom. But when following the bottom (userScrolling == false) we
-        // must keep pinning to the bottom even during deceleration: otherwise
-        // streaming output grows the content faster than the coasting offset, the
-        // tail pulls away, and the view falls behind the live output.
+        // (isTracking), while frozen history coasts under momentum, and while a
+        // live-tail gesture is rubber-banding outside UIKit's legal range.
+        // Re-asserting an offset in any of those states fights the system motion.
+        // Once a live-tail bounce re-enters the legal range we resume pinning so
+        // streaming output cannot grow away from the coasting offset.
         //
         // NOTE: isTracking (finger down), not isDragging — on device isDragging
         // stays true through the whole momentum coast, so it cannot distinguish
         // an active drag from post-lift deceleration. contentSize is still
         // updated above so the newly appended rows remain reachable.
-        if isTracking || (userScrolling && isDecelerating) {
+        if gestureOwnsOffset {
             return
         }
         let rowOffset = CGFloat (displayBuffer.yDisp) * cellDimension.height
