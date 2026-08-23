@@ -7,96 +7,137 @@ import AppKit
 /// let you change could not answer that, and would make a conflict with ⌘Q look like a free slot.
 final class KeyboardPreferencesViewController: NSViewController {
 
+    private enum PresentationRow {
+        case note
+        case composer
+        case group(Int)
+        case command(group: Int, command: Int)
+        case reset
+    }
+
     // MARK: - Properties
 
-    private let store = ShortcutOverrideStore.shared
-    private let registry = CommandRegistry.shared
+    private let store: ShortcutOverrideStore
+    private let registry: CommandRegistry
     private let appEvents = AppEventObservations()
 
-    /// Rebuilt wholesale on any change, following `ArchivedPreferencesViewController`: a rebind
-    /// can move a conflict warning onto a row far from the one that was edited, so redrawing the
-    /// page is both simpler and more correct than patching the row that changed.
-    private var recorders: [String: ShortcutRecorderView] = [:]
+    /// The complete command inventory is cheap value state. Extensions and project scripts are
+    /// provider-sized, so their recorder controls belong only to the AppKit viewport.
+    private var groups: [(group: AppCommand.Group, commands: [AppCommand])] = []
+    private var presentationRows: [PresentationRow] = []
 
     /// The command groups whose shortcut rows are unfolded, by group name. A view state,
     /// kept for the session only.
     private var expandedGroups: Set<String> = []
 
-    /// The Return-key choice. Held across rebuilds rather than rebuilt with the rest of the
-    /// page: it is the one control here that is not a chord recorder, and re-adding the same
+    /// The Return-key choice. Held across cell reuse rather than rebuilt with the rest of its
+    /// fixed row: it is the one control here that is not a chord recorder, and re-adding the same
     /// pop-up keeps its open menu and selection from being torn out underneath a click.
     private lazy var returnKeyPopUp = SettingsUI.popUp(
         target: self,
         action: #selector(returnKeyChanged)
     )
 
-    /// The line under that row, which names the chord the choice leaves behind. Re-captured on
-    /// every rebuild because the row builds a fresh label each time.
+    /// The line under that row, which names the chord the choice leaves behind. Re-captured when
+    /// its fixed row materializes because the row builds a fresh label each time.
     private var returnKeyDetail: NSTextField?
+
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("KeyboardSettingsContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = KeyboardPreferencesLayout.estimatedRowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
+
+    init(
+        registry: CommandRegistry = .shared,
+        store: ShortcutOverrideStore? = nil
+    ) {
+        self.registry = registry
+        self.store = store ?? .shared
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     // MARK: - Lifecycle
 
     override func loadView() {
         view = NSView()
-        rebuild()
+        let page = SettingsUI.listPage(title: "Keyboard", body: scrollView)
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        reload()
         appEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
-            self?.rebuild()
+            self?.reload()
+        }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
         }
     }
 
     // MARK: - Building
 
-    private func rebuild() {
-        view.subviews.forEach { $0.removeFromSuperview() }
-        recorders.removeAll()
+    private func reload() {
+        groups = registry.grouped()
+        expandedGroups.formIntersection(Set(groups.map { $0.group.rawValue }))
+        reloadPresentationRows()
+    }
 
-        var sections: [NSView] = [
-            SettingsUI.note(Strings.note),
-            SettingsUI.section(Strings.composerSection, SettingsCard(rows: [makeReturnKeyRow()]))
-        ]
-
-        // Each command group folds to one row with its count: the page is a reference, and
-        // forty-odd recorder rows in five always-open sections made it the longest page in
-        // Settings. The Return-key choice above and the reset below stay visible — those are
-        // decisions, and only inventories fold.
-        for (group, commands) in registry.grouped() {
-            let key = group.rawValue
-            let expanded = expandedGroups.contains(key)
-            sections.append(SettingsUI.disclosureCard(
-                title: group.rawValue,
-                summary: shortcutCount(commands.count),
-                isExpanded: expanded,
-                onToggle: { [weak self] nowExpanded in
-                    guard let self else { return }
-                    if nowExpanded {
-                        self.expandedGroups.insert(key)
-                    } else {
-                        self.expandedGroups.remove(key)
-                    }
-                    self.rebuild()
-                },
-                detailRows: expanded ? commands.map(makeRow) : []
-            ))
+    /// Opening a fold inserts command coordinates, not controls. A shortcut change can affect a
+    /// conflict subtitle anywhere in the inventory, so reloading the value projection is still
+    /// correct; the fixed scroll owner and viewport survive it.
+    private func reloadPresentationRows() {
+        var rows: [PresentationRow] = [.note, .composer]
+        for (groupIndex, entry) in groups.enumerated() {
+            rows.append(.group(groupIndex))
+            guard expandedGroups.contains(entry.group.rawValue) else { continue }
+            rows.append(contentsOf: entry.commands.indices.map {
+                .command(group: groupIndex, command: $0)
+            })
         }
-
-        sections.append(SettingsUI.section(nil, SettingsCard(rows: [
-            SettingsUI.row(
-                title: Strings.resetTitle,
-                subtitle: Strings.resetSubtitle,
-                control: SettingsUI.button(Strings.resetButton, target: self, action: #selector(resetAllClicked))
-            )
-        ])))
-
-        let page = SettingsUI.page(title: "Keyboard", sections: sections, hostPage: .keyboard)
-        page.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(page)
-
-        NSLayoutConstraint.activate([
-            page.topAnchor.constraint(equalTo: view.topAnchor),
-            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            page.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            page.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+        rows.append(.reset)
+        presentationRows = rows
+        updateCardDecorations()
+        tableView.reloadData()
     }
 
     private func shortcutCount(_ count: Int) -> String {
@@ -121,7 +162,6 @@ final class KeyboardPreferencesViewController: NSViewController {
         recorder.onRecord = { [weak self] captured in
             self?.record(captured, for: command)
         }
-        recorders[command.id] = recorder
 
         return SettingsUI.row(
             title: rowTitle(command),
@@ -194,12 +234,12 @@ final class KeyboardPreferencesViewController: NSViewController {
     private func record(_ shortcut: KeyboardShortcut?, for command: AppCommand) {
         if let shortcut, let other = store.conflict(for: shortcut, excluding: command) {
             presentConflict(shortcut, taken: other)
-            rebuild()
+            reloadPresentationRows()
             return
         }
 
         store.setShortcut(shortcut, for: command)
-        rebuild()
+        reloadPresentationRows()
     }
 
     private func presentConflict(_ shortcut: KeyboardShortcut, taken other: AppCommand) {
@@ -223,8 +263,153 @@ final class KeyboardPreferencesViewController: NSViewController {
 
     @objc private func resetAllClicked() {
         store.resetAll()
-        rebuild()
+        reloadPresentationRows()
     }
+}
+
+// MARK: - Virtual Rows
+
+extension KeyboardPreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in _: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_: NSTableView, shouldSelectRow _: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor _: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("KeyboardSettingsVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+        host.install(
+            content(for: presentationRows[tableRow]),
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset(forRowAt: tableRow),
+            bottomInset: tableRow == presentationRows.count - 1 ? Design.Spacing.large : 0
+        )
+        return host
+    }
+
+    private func content(for row: PresentationRow) -> NSView {
+        switch row {
+        case .note:
+            return SettingsUI.note(Strings.note)
+        case .composer:
+            return SettingsUI.section(
+                Strings.composerSection,
+                SettingsCard(rows: [makeReturnKeyRow()])
+            )
+        case .group(let groupIndex):
+            guard groups.indices.contains(groupIndex) else { return NSView() }
+            let entry = groups[groupIndex]
+            let key = entry.group.rawValue
+            return SettingsUI.disclosureHeader(
+                title: key,
+                summary: shortcutCount(entry.commands.count),
+                isExpanded: expandedGroups.contains(key),
+                onToggle: { [weak self] expanded in
+                    self?.setGroup(key, expanded: expanded)
+                }
+            )
+        case .command(let groupIndex, let commandIndex):
+            guard groups.indices.contains(groupIndex),
+                  groups[groupIndex].commands.indices.contains(commandIndex) else {
+                return NSView()
+            }
+            return makeRow(groups[groupIndex].commands[commandIndex])
+        case .reset:
+            return SettingsCard(rows: [SettingsUI.row(
+                title: Strings.resetTitle,
+                subtitle: Strings.resetSubtitle,
+                control: SettingsUI.button(
+                    Strings.resetButton,
+                    target: self,
+                    action: #selector(resetAllClicked)
+                )
+            )])
+        }
+    }
+
+    private func topInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        switch presentationRows[index] {
+        case .note, .composer, .group, .reset:
+            return Design.Spacing.large
+        case .command:
+            return 0
+        }
+    }
+
+    private func setGroup(_ key: String, expanded: Bool) {
+        if expanded {
+            expandedGroups.insert(key)
+        } else {
+            expandedGroups.remove(key)
+        }
+        reloadPresentationRows()
+    }
+
+    private func updateCardDecorations() {
+        var boundsByGroup: [Int: (first: Int, last: Int)] = [:]
+        for (index, row) in presentationRows.enumerated() {
+            let groupIndex: Int?
+            switch row {
+            case .group(let index), .command(let index, _):
+                groupIndex = index
+            case .note, .composer, .reset:
+                groupIndex = nil
+            }
+            guard let groupIndex else { continue }
+            if var bounds = boundsByGroup[groupIndex] {
+                bounds.last = index
+                boundsByGroup[groupIndex] = bounds
+            } else {
+                boundsByGroup[groupIndex] = (index, index)
+            }
+        }
+        tableView.cardDecorations = boundsByGroup.sorted { $0.key < $1.key }.map {
+            ThemedTableCardDecoration(
+                rows: $0.value.first...$0.value.last,
+                topInset: Design.Spacing.large
+            )
+        }
+    }
+
+    var virtualRowCountForTesting: Int { presentationRows.count }
+
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
+
+    func setGroupExpandedForTesting(_ group: AppCommand.Group, expanded: Bool) {
+        setGroup(group.rawValue, expanded: expanded)
+    }
+
+    func scrollCommandToVisibleForTesting(group: AppCommand.Group, index: Int) {
+        guard let groupIndex = groups.firstIndex(where: { $0.group == group }),
+              let row = presentationRows.firstIndex(where: { presentationRow in
+                  guard case .command(let candidateGroup, let candidateCommand) = presentationRow
+                  else { return false }
+                  return candidateGroup == groupIndex && candidateCommand == index
+              }) else { return }
+        tableView.scrollRowToVisible(row)
+    }
+}
+
+private enum KeyboardPreferencesLayout {
+    static let estimatedRowHeight: CGFloat = 72
 }
 
 // MARK: - Strings
