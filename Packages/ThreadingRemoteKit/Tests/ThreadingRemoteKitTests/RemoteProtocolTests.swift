@@ -1157,6 +1157,11 @@ final class RemoteProtocolTests: XCTestCase {
             "https://quiet-river.trycloudflare.com/api/session/abc/attachment?id=attachment-1"
         )
         XCTAssertEqual(
+            link.attachmentThumbnailURL(sessionID: "abc", id: "attachment-1")?
+                .absoluteString,
+            "https://quiet-river.trycloudflare.com/api/session/abc/attachment-thumbnail?id=attachment-1"
+        )
+        XCTAssertEqual(
             link.workspaceURL(sessionID: "abc").absoluteString,
             "https://quiet-river.trycloudflare.com/api/session/abc/workspace"
         )

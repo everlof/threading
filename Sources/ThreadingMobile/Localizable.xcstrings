@@ -573,6 +573,10 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "i" } } }
     },
+    "%lld of %lld": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%lld av %lld" } } }
+    },
     "Ready for a new task": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Redo för en ny uppgift" } } }

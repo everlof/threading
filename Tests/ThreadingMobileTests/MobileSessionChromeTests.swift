@@ -316,13 +316,6 @@ final class MobileSessionChromeTests: XCTestCase {
         ))
     }
 
-    func testAFlickFromTheEdgeOpensTheWorkspaceAndAGrazeDoesNot() {
-        XCTAssertTrue(ScreenEdgeSwipeGesture.isDeliberate(travel: CGPoint(x: -120, y: 8)))
-        XCTAssertFalse(ScreenEdgeSwipeGesture.isDeliberate(travel: CGPoint(x: -6, y: 0)))
-        // A near-vertical drag that happened to begin at the bezel is a scroll.
-        XCTAssertFalse(ScreenEdgeSwipeGesture.isDeliberate(travel: CGPoint(x: -60, y: -200)))
-    }
-
     // MARK: - The dashboard row's trailing swipe
 
     /// `.swipeActions` is a `List` modifier, and the dashboard's rows are on a `ThemedRowGroup`
@@ -570,5 +563,121 @@ final class MobileSessionChromeTests: XCTestCase {
 
         XCTAssertNotNil(tray.notice)
         XCTAssertEqual(tray.items.count, staged, "a refusal must not disturb what is staged")
+    }
+}
+
+/// The workspace drawer's arithmetic, asked the way the gestures ask it: where the panel is for
+/// a finger that has travelled so far, where it settles when the finger lets go, and which
+/// touches are its at all.
+final class SessionWorkspaceDrawerTests: XCTestCase {
+    func testThePanelIsThePhoneLessARevealAndNeverWiderThanAPhone() {
+        XCTAssertEqual(SessionWorkspaceDrawer.width(in: 402), 402 - SessionWorkspaceDrawer.reveal)
+        XCTAssertEqual(SessionWorkspaceDrawer.width(in: 1_024), SessionWorkspaceDrawer.maximumWidth)
+        XCTAssertEqual(SessionWorkspaceDrawer.width(in: 20), 0, "a sliver cannot hold a drawer")
+    }
+
+    func testOpeningFollowsTheFingerLeftwardAndStopsAtTheEdges() {
+        XCTAssertEqual(SessionWorkspaceDrawer.openingProgress(translation: -179, width: 358), 0.5)
+        XCTAssertEqual(SessionWorkspaceDrawer.openingProgress(translation: 40, width: 358), 0)
+        XCTAssertEqual(SessionWorkspaceDrawer.openingProgress(translation: -900, width: 358), 1)
+        XCTAssertEqual(SessionWorkspaceDrawer.closingProgress(translation: 179, width: 358), 0.5)
+        XCTAssertEqual(SessionWorkspaceDrawer.closingProgress(translation: -30, width: 358), 0)
+    }
+
+    /// Half way is the rule, and a throw is read a fifth of a second ahead of the finger.
+    func testAReleaseSettlesByPositionAndAFlickDecidesShortOfHalfWay() {
+        XCTAssertTrue(SessionWorkspaceDrawer.settlesOpen(openness: 0.6, velocity: 0, width: 358))
+        XCTAssertFalse(SessionWorkspaceDrawer.settlesOpen(openness: 0.4, velocity: 0, width: 358))
+        // A quarter open, flicked inward at 1,000 pt/s: 0.25 + 200/358 lands past half.
+        XCTAssertTrue(SessionWorkspaceDrawer.settlesOpen(openness: 0.25, velocity: -1_000, width: 358))
+        // Three quarters open, flicked outward: it goes.
+        XCTAssertFalse(SessionWorkspaceDrawer.settlesOpen(openness: 0.75, velocity: 1_000, width: 358))
+        XCTAssertFalse(SessionWorkspaceDrawer.settlesOpen(openness: 1, velocity: 0, width: 0))
+    }
+
+    /// A touch is the drawer's when it begins at the right bezel heading left; the same drag
+    /// begun a thumb's width in is the list's, and a scroll that happens to start at the bezel
+    /// is the list's too.
+    func testOnlyALeftwardTouchFromTheRightBezelOpens() {
+        XCTAssertTrue(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 398, y: 450), velocity: CGPoint(x: -400, y: 30), width: 402
+        ))
+        XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 360, y: 450), velocity: CGPoint(x: -400, y: 30), width: 402
+        ))
+        XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 398, y: 450), velocity: CGPoint(x: -60, y: -900), width: 402
+        ))
+        XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 398, y: 450), velocity: CGPoint(x: 300, y: 0), width: 402
+        ))
+    }
+
+    func testOnlyARightwardSidewaysPanOnThePanelCloses() {
+        XCTAssertTrue(SessionWorkspaceDrawer.isDismissDirection(velocity: CGPoint(x: 420, y: 60)))
+        XCTAssertFalse(SessionWorkspaceDrawer.isDismissDirection(velocity: CGPoint(x: -420, y: 60)))
+        XCTAssertFalse(SessionWorkspaceDrawer.isDismissDirection(velocity: CGPoint(x: 60, y: 900)))
+        // Exactly diagonal is the list's: scrolling is the commoner intent.
+        XCTAssertFalse(SessionWorkspaceDrawer.isDismissDirection(velocity: CGPoint(x: 300, y: 300)))
+    }
+}
+
+/// The gallery's detail line and the ledger's bounds, without a window.
+final class RemoteAttachmentGalleryTests: XCTestCase {
+    func testTheDetailLineIsPositionThenPixelsThenSizeInTheMacsOrder() {
+        XCTAssertEqual(
+            RemoteAttachmentGalleryDetail.text(
+                index: 0, count: 27, pixelSize: CGSize(width: 1_219, height: 874), byteCount: 188_000
+            ),
+            "1 of 27 · 1219 × 874 · 188 KB"
+        )
+        XCTAssertEqual(
+            RemoteAttachmentGalleryDetail.text(index: 3, count: 7, pixelSize: nil, byteCount: 1_284),
+            "4 of 7 · 1 KB",
+            "pixels are named only once the image has been decoded"
+        )
+        XCTAssertEqual(
+            RemoteAttachmentGalleryDetail.text(index: 0, count: 1, pixelSize: nil, byteCount: 2_048),
+            "2 KB",
+            "one attachment has no position to state"
+        )
+    }
+
+    func testOnlyImagesAndPDFsAreAskedForAThumbnail() {
+        XCTAssertTrue(RemoteAttachmentGalleryDetail.hasThumbnail(kind: .image))
+        XCTAssertTrue(RemoteAttachmentGalleryDetail.hasThumbnail(kind: .pdf))
+        let others: [RemoteAttachmentKind] = [
+            .html, .text, .archive, .document, .diagram, .media, .video, .unknown("hologram"),
+        ]
+        for kind in others {
+            XCTAssertFalse(RemoteAttachmentGalleryDetail.hasThumbnail(kind: kind), "\(kind)")
+        }
+    }
+
+    @MainActor
+    func testTheThumbnailStoreKeepsABoundedNumber() throws {
+        let image = try XCTUnwrap(UIImage(systemName: "photo"))
+        let seed = Dictionary(uniqueKeysWithValues: (0..<(RemoteAttachmentThumbnailStore.capacity + 5))
+            .map { ("attachment-\($0)", image) })
+        let store = RemoteAttachmentThumbnailStore(isOffered: true, seed: seed) { _ in Data() }
+
+        // A dictionary seed has no first; the bound is the invariant, not which one went.
+        XCTAssertEqual(store.images.count, RemoteAttachmentThumbnailStore.capacity)
+    }
+
+    /// A Mac that did not advertise thumbnails is never asked: the cell keeps its glyph and the
+    /// link carries nothing for it.
+    @MainActor
+    func testAMacWithoutThumbnailsIsNeverAsked() async throws {
+        var fetches = 0
+        let store = RemoteAttachmentThumbnailStore(isOffered: false) { _ in
+            fetches += 1
+            return Data()
+        }
+
+        await store.load(id: "attachment-1", hasThumbnail: true)
+
+        XCTAssertNil(store.image(for: "attachment-1"))
+        XCTAssertEqual(fetches, 0)
     }
 }

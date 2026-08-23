@@ -1878,6 +1878,14 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
         XCTAssertEqual(
             try XCTUnwrap(get(
+                "/api/session/\(sessionID.uuidString)/attachment-thumbnail?id=attachment-1",
+                bearer: "guesttoken"
+            )).status,
+            403,
+            "a thumbnail is gated exactly like the attachment it shrinks"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(get(
                 "/api/session/\(sessionID.uuidString)/workspace",
                 bearer: "guesttoken"
             )).status,
@@ -2649,6 +2657,18 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 forPath: "/api/session/abc/attachment"
             ),
             "abc"
+        )
+        XCTAssertEqual(
+            RemoteRouter.attachmentThumbnailSessionID(
+                forPath: "/api/session/abc/attachment-thumbnail"
+            ),
+            "abc"
+        )
+        XCTAssertNil(
+            RemoteRouter.attachmentSessionID(
+                forPath: "/api/session/abc/attachment-thumbnail"
+            ),
+            "the thumbnail route is its own action, not a suffix of the attachment's"
         )
         XCTAssertEqual(
             RemoteRouter.workspaceSessionID(

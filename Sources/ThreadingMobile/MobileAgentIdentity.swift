@@ -223,6 +223,64 @@ struct MobileAgentMarkGlyph: View {
     }
 }
 
+// MARK: - Mobile Account Disc
+
+/// The account as a bar control: the runtime's mark on the toolbar's disc, ringed by how much
+/// of the account's allowance is used.
+///
+/// The ring is the usage reading the old identity capsule spelled out — "5h 18% · 7d 63%" —
+/// reduced to the one fact a glance needs, how close to the limit. The disc is the dashboard's
+/// toolbar circle, so the bar keeps one kind of control, and the mark is the one the rows draw,
+/// so the runtime looks like itself. The draft's bar wears it to choose an account; the chat's
+/// bar wears the same disc, for the same account, as the handle on the session's actions — so
+/// starting a chat keeps the control where it was.
+struct MobileAccountDisc: View {
+    let identity: MobileAgentIdentity
+    /// Peak consumed fraction, 0...1; nil draws the mark alone, for a share or a host that does
+    /// not report usage.
+    let usageFraction: Double?
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(theme.controlResting)
+            MobileAgentMarkGlyph(identity: identity)
+            if let usageFraction {
+                let tint = usageTint(for: usageFraction)
+                Circle()
+                    .stroke(
+                        tint.opacity(MobileDesign.Opacity.usageRingTrack),
+                        lineWidth: MobileDesign.Size.badgeStroke
+                    )
+                Circle()
+                    .trim(from: 0, to: min(max(usageFraction, 0), 1))
+                    .stroke(
+                        tint,
+                        style: StrokeStyle(
+                            lineWidth: MobileDesign.Size.badgeStroke,
+                            lineCap: .round
+                        )
+                    )
+                    .rotationEffect(.degrees(-90))
+            }
+        }
+        .frame(
+            width: MobileDesign.Size.compactControl,
+            height: MobileDesign.Size.compactControl
+        )
+        .contentShape(Circle())
+    }
+
+    /// The ring's colour by how close the account is to its limit — the thresholds the draft's
+    /// identity capsule used for its usage text.
+    private func usageTint(for fraction: Double) -> Color {
+        if fraction >= 0.9 { return theme.negative }
+        if fraction >= 0.75 { return theme.warning }
+        return theme.positive
+    }
+}
+
 // MARK: - Mobile Account Chip
 
 /// An alternate account's chip: the emoji it was given, else the initial of its login on a disc

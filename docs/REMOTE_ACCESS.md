@@ -329,13 +329,63 @@ are pushed immediately so another open device follows the switch without waiting
 
 A session's iPhone **Workspace** gathers **Browser**, **Review**, the read-only repository
 **Files** browser, and **Attachments** under one route so companion surfaces do not accumulate as
-toolbar buttons. The session screen keeps a single trailing **…** control for the same reason:
+toolbar buttons. The session screen keeps a single trailing control for the same reason:
 Workspace and the terminal palette are entries in that menu rather than glyphs of their own,
 because three of them plus a back button left the session's name a truncated stub at phone width.
+That control is the **account disc** (`MobileAccountDisc`) rather than an ellipsis: the
+runtime's mark ringed by the session's login's usage fraction, joined from the catalogue by
+`accountID` the way the settings screen joins it, so the bar says which login is paying for the
+turn and how close it is to its limit. It is the same disc the draft's bar wears to choose that
+account, so starting a chat keeps the control where it was; a share or an older host with no
+usage to report gets the mark alone.
 A swipe in from the right edge opens Workspace without the menu, and the menu still appears for
 any of the three permissions that used to reveal a button of its own — a share that may recolour
-a terminal without managing the session still gets it. When an agent opens or navigates a browser
-tab, the phone never changes screens: the **…** control receives one quiet pulse and an unread
+a terminal without managing the session still gets it.
+
+**Workspace is a drawer from the right, and it follows the finger.** It was a sheet: the edge
+swipe came from the right and the panel rose from the bottom, which is two directions for one
+gesture. It is now a panel that slides in from the right edge over the chat, leaving a tap
+target's width of the chat visible under a scrim (`SessionWorkspaceDrawer.reveal`), and the
+right-edge pan pulls it in by as far as the finger has travelled; a rightward pan on the panel
+pushes it back the same way, a tap on the scrim or the panel's close button dismisses it, and a
+release settles whichever side a throw was heading — the same fifth-of-a-second projection the
+dashboard row swipe reads. The panel has to cover the chat's navigation bar (a panel with a bar
+of its own under the chat's bar is two bars), which a SwiftUI overlay on a destination cannot
+do, so the drawer is a UIKit custom modal presentation hosting the SwiftUI workspace, with a
+`UIPercentDrivenInteractiveTransition` scrubbing an interruptible property animator. Only the
+theme crosses into the hosted tree (`mobileTheme`), as it did into the sheet; the Mac's
+thumbnail capability is carried in by value for the same reason. The opening recogniser is a
+plain `UIPanGestureRecognizer` whose `shouldBegin` states the edge rule
+(`SessionWorkspaceDrawer.isOpeningEdgeTouch`): `UIScreenEdgePanGestureRecognizer` on the hosting
+view received every bezel touch and never began, over the conversation's collection view and
+the terminal alike, while the system's own back swipe on the same touches did. Scroll views
+under either pan are made to wait for it (`shouldBeRequiredToFailBy`), which is what lets the
+edge win over the timeline's scroll; the closing pan declines a drag that is not rightward and
+sideways, one inside a horizontally scrollable view, and one at the panel's leading edge when
+the workspace's own navigation stack has something to pop. The rules are arithmetic in
+`SessionWorkspaceDrawer` and tested as such.
+
+**An attachment opens in a gallery, with its neighbours a swipe away.** A row in **Attachments**
+used to push one preview; it now pushes `RemoteAttachmentGallery` at that row, a horizontal
+paging scroll of the same previews built lazily (`LazyHStack` inside `scrollTargetBehavior
+(.paging)`, so a session with a hundred attachments mounts the one on screen and its neighbours),
+with the Mac inspector's detail under the name in the bar — "3 of 27 · 1219 × 874 · 188 KB",
+the pixels once the image has decoded — and the inspector's rail as a ledger underneath: every
+attachment as a thumbnail, the current one outlined in the accent and kept in view, a tap going
+there. Thumbnails come from a new owner-only route, `GET …/attachment-thumbnail?id=`, gated
+exactly like the attachment route it shrinks and advertised as
+`RemoteRESTFeature.attachmentThumbnails`; the Mac rasters an image or a PDF's first page under
+`BoundedImageDecodePolicy.thumbnail` at no more than `RemoteAttachmentThumbnail.maximumPixelDimension`
+a side whatever was asked (`RemoteAttachmentThumbnailRenderer`), answers a JPEG, and 404s every
+other kind, which the ledger draws as the kind's glyph. The phone asks per cell as the lazy row
+brings it on screen, once per attachment (a failure is not retried), through a cache bounded at
+`RemoteAttachmentThumbnailStore.capacity`; a Mac that does not advertise the feature is never
+asked, and a notification that names one attachment opens the gallery on it with the listing
+that resolved it as the set.
+
+When an agent opens or navigates a browser
+tab, the phone never changes screens: the account disc takes one quiet breath (a scale phase,
+since a brand mark is not a symbol and takes no symbol effect) and an unread
 dot. Opening **Browser** follows the
 Mac-owned tab through bounded, read-only snapshots; clicks, scrolling, and form entry continue to
 run only on the Mac and merely refresh an already visible follow view. Routine browser mutations
@@ -423,12 +473,15 @@ VoiceOver increase/decrease actions use the same setting. Font sizing remains ho
 than becoming an extension surface: it controls renderer/PTY geometry, while an extension may
 continue to customize only the content it owns.
 
-Entering a terminal-backed session commits the navigation destination without a width animation.
-A navigation push that reveals the destination through intermediate widths is not cosmetic for a
-terminal: every width becomes a SwiftTerm grid, a viewport message, a PTY resize/SIGWINCH and a
-full-screen agent repaint. The immediate route installs the one useful final grid. Native
-conversation sessions retain the standard navigation transition because their virtual rows do not
-control a remote process viewport.
+Terminal-backed sessions keep the ordinary system navigation transition, including interactive
+Back, without making that transition terminal layout. `RemoteTerminalLayoutView` retains one
+settled SwiftTerm width and lets the navigation container clip it while the destination travels;
+otherwise every intermediate width would become a grid, a viewport message, a PTY
+resize/SIGWINCH and a full-screen agent repaint. A width commits only after the navigation
+coordinator ends with the terminal still on screen, or an ordinary resize holds still; a successful
+Back discards its outgoing proposal before teardown. The inset is inside that host, so its retained
+width is the terminal's real content width rather than the whole screen. Native conversation rows
+need no corresponding boundary because they do not control a remote process viewport.
 
 **Only a settled grid becomes a lease.** Whole-point crossings bound the pinch locally, but a
 single gesture still crosses many points — the Mac's journal recorded nineteen `Remote viewport

@@ -203,7 +203,15 @@ struct SessionDetailView: View {
                     Menu {
                         sessionMenuContent
                     } label: {
-                        SessionActionsToolbarIcon(activity: workspaceActivity)
+                        // The same disc the draft wore while this chat was being written — its
+                        // runtime's mark ringed by its account's usage — now the handle on the
+                        // chat's actions, so starting a chat keeps the control where it was and
+                        // the bar says which login is paying for the turn.
+                        SessionActionsToolbarIcon(
+                            activity: workspaceActivity,
+                            identity: .resolve(currentSession.agentKind),
+                            usageFraction: sessionAccount?.usageFraction
+                        )
                     }
                     .accessibilityLabel(
                         MobileL10n.string(
@@ -212,32 +220,38 @@ struct SessionDetailView: View {
                                 : "Session actions"
                         )
                     )
+                    .accessibilityValue(sessionAccount?.usageSummary ?? "")
                 }
             }
         }
-        .onScreenEdgeSwipe(from: .right, perform: openWorkspace)
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .background(theme.ground)
-        .sheet(isPresented: $isShowingWorkspace, onDismiss: {
-            initialWorkspaceDestination = nil
-            initialWorkspaceEventID = nil
-        }) {
+        // The workspace is a drawer from the right edge — where the edge swipe that opens it
+        // comes from, and where a sheet rising from the bottom never matched. The swipe pulls
+        // it in by as far as the finger travels, and a rightward drag on it pushes it back.
+        .sessionWorkspaceDrawer(isPresented: $isShowingWorkspace, isEnabled: canOpenWorkspace) {
             if let client = model.client {
                 SessionWorkspaceView(
                     session: currentSession,
                     client: client,
                     activity: workspaceActivity,
-                    initialDestination: initialWorkspaceDestination
+                    initialDestination: initialWorkspaceDestination,
+                    offersAttachmentThumbnails: model.me?.features?.contains(
+                        RemoteRESTFeature.attachmentThumbnails.rawValue
+                    ) == true
                 )
                 // A second milestone may be opened while Workspace is already presented. Give
                 // each notification its own navigation identity so that tap replaces the old
                 // stack with the newly requested attachment or live surface.
                 .id(initialWorkspaceEventID ?? "manual-workspace")
                 .mobileTheme(theme)
-                .presentationDetents([.fraction(0.72), .large])
-                .presentationDragIndicator(.visible)
             }
+        }
+        .onChange(of: isShowingWorkspace) { _, isShowing in
+            guard !isShowing else { return }
+            initialWorkspaceDestination = nil
+            initialWorkspaceEventID = nil
         }
         .sheet(isPresented: $isShowingSessionSettings) {
             MobileSessionSettingsView(
@@ -466,6 +480,15 @@ struct SessionDetailView: View {
         )
     }
 
+    /// The catalogue's row for the login this chat runs on, which is where its usage lives —
+    /// joined by `accountID`, as the settings screen joins it, because a session row carries no
+    /// usage of its own. Nil for a guest share, a runtime without account routing, or an older
+    /// host, and the disc then shows the mark alone.
+    private var sessionAccount: RemoteAccountChoiceDTO? {
+        let agent = model.me?.newSessionCatalog?.agents.first { $0.id == currentSession.agentKind }
+        return MobileSessionSettingsPresentation.account(for: currentSession, in: agent)
+    }
+
     private var canOpenWorkspace: Bool {
         MobileSessionChrome.canOpenWorkspace(
             canManageSessions: model.canManageSessions,
@@ -661,12 +684,14 @@ struct SessionDetailView: View {
 /// this opens: a milestone the phone was not watching still has to be visible from the outside.
 private struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
+    let identity: MobileAgentIdentity
+    let usageFraction: Double?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
-        symbol
+        disc
             .overlay(alignment: .topTrailing) {
                 if activity.hasUnseenBrowser {
                     Circle()
@@ -692,17 +717,23 @@ private struct SessionActionsToolbarIcon: View {
             )
     }
 
+    /// The disc gives one quiet breath when the agent opens or navigates a browser tab — the
+    /// pulse the ellipsis used to give — and the dot stays until Browser is opened. A brand
+    /// mark is not a symbol, so the breath is a scale phase rather than a symbol effect.
     @ViewBuilder
-    private var symbol: some View {
-        let image = Image(systemName: "ellipsis")
+    private var disc: some View {
+        let disc = MobileAccountDisc(identity: identity, usageFraction: usageFraction)
         if reduceMotion {
-            image
+            disc
         } else {
-            image.symbolEffect(
-                .pulse,
-                options: .nonRepeating,
-                value: activity.latestBrowserActivityID
-            )
+            disc.phaseAnimator(
+                [false, true],
+                trigger: activity.latestBrowserActivityID
+            ) { content, lifted in
+                content.scaleEffect(lifted ? MobileDesign.Motion.activityBreathScale : 1)
+            } animation: { _ in
+                .snappy(duration: MobileDesign.Motion.activityBreathDuration)
+            }
         }
     }
 }

@@ -16,17 +16,22 @@ struct RemoteAttachmentsView: View {
     @State private var errorMessage: String?
     @State private var isLoading = false
     private let loadsRemotely: Bool
+    /// Whether the paired Mac draws thumbnails (`RemoteRESTFeature.attachmentThumbnails`);
+    /// the gallery's ledger asks for none otherwise.
+    private let offersThumbnails: Bool
 
     init(
         session: RemoteSessionSummaryDTO,
         client: RemoteClient,
         showsCloseButton: Bool = true,
+        offersThumbnails: Bool = false,
         initialAttachments: [RemoteAttachmentDTO]? = nil,
         loadsRemotely: Bool = true
     ) {
         self.session = session
         self.client = client
         self.showsCloseButton = showsCloseButton
+        self.offersThumbnails = offersThumbnails
         self.loadsRemotely = loadsRemotely
         _attachments = State(initialValue: initialAttachments)
     }
@@ -53,11 +58,16 @@ struct RemoteAttachmentsView: View {
                 }
             } else {
                 List(attachments ?? []) { attachment in
+                    // A row opens the gallery at itself: the rest of the list is a swipe away
+                    // and in the ledger underneath, the way the Mac's inspector keeps a file's
+                    // neighbours in its rail.
                     NavigationLink {
-                        RemoteAttachmentPreview(
+                        RemoteAttachmentGallery(
                             sessionID: session.id,
-                            attachment: attachment,
-                            client: client
+                            attachments: attachments ?? [],
+                            initialID: attachment.id,
+                            client: client,
+                            offersThumbnails: offersThumbnails
                         )
                     } label: {
                         RemoteAttachmentRow(attachment: attachment)
@@ -165,16 +175,7 @@ private struct RemoteAttachmentRow: View {
     }
 
     private var iconName: String {
-        switch attachment.kind {
-        case .pdf: "doc.richtext"
-        case .html: "safari"
-        case .archive: "archivebox"
-        case .document: "doc.text"
-        case .diagram: "point.3.connected.trianglepath.dotted"
-        case .media: "play.rectangle"
-        case .video: "film"
-        default: "photo"
-        }
+        RemoteAttachmentGlyph.name(for: attachment.kind)
     }
 }
 
@@ -184,18 +185,24 @@ struct RemoteAttachmentTargetView: View {
     let session: RemoteSessionSummaryDTO
     let attachmentID: String
     let client: RemoteClient
+    var offersThumbnails = false
 
     @Environment(\.remoteTheme) private var theme
     @State private var attachment: RemoteAttachmentDTO?
+    @State private var attachments: [RemoteAttachmentDTO] = []
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
             if let attachment {
-                RemoteAttachmentPreview(
+                // The notification named one attachment; the listing that resolved it is the
+                // gallery's set, so the neighbours are a swipe away here as well.
+                RemoteAttachmentGallery(
                     sessionID: session.id,
-                    attachment: attachment,
-                    client: client
+                    attachments: attachments.isEmpty ? [attachment] : attachments,
+                    initialID: attachment.id,
+                    client: client,
+                    offersThumbnails: offersThumbnails
                 )
             } else if let errorMessage {
                 ContentUnavailableView {
@@ -227,6 +234,7 @@ struct RemoteAttachmentTargetView: View {
                 )
                 return
             }
+            self.attachments = attachments
             attachment = matched
             errorMessage = nil
         } catch is CancellationError {
@@ -239,16 +247,15 @@ struct RemoteAttachmentTargetView: View {
     }
 }
 
+/// One attachment under its own title — the shape a single preview takes when nothing else is
+/// beside it. The gallery draws the same content as pages and owns the title itself.
 struct RemoteAttachmentPreview: View {
     let sessionID: String
     let attachment: RemoteAttachmentDTO
     let client: RemoteClient
-
-    @Environment(\.remoteTheme) private var theme
-    @State private var data: Data?
-    @State private var errorMessage: String?
-    @State private var isLoading = false
+    private let initialData: Data?
     private let loadsRemotely: Bool
+    @Environment(\.remoteTheme) private var theme
 
     init(
         sessionID: String,
@@ -260,7 +267,52 @@ struct RemoteAttachmentPreview: View {
         self.sessionID = sessionID
         self.attachment = attachment
         self.client = client
+        self.initialData = initialData
         self.loadsRemotely = loadsRemotely
+    }
+
+    var body: some View {
+        RemoteAttachmentPreviewContent(
+            sessionID: sessionID,
+            attachment: attachment,
+            client: client,
+            initialData: initialData,
+            loadsRemotely: loadsRemotely
+        )
+        .navigationTitle(attachment.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(theme.surface, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+    }
+}
+
+/// The preview itself, with no claim on the navigation bar.
+struct RemoteAttachmentPreviewContent: View {
+    let sessionID: String
+    let attachment: RemoteAttachmentDTO
+    let client: RemoteClient
+
+    @Environment(\.remoteTheme) private var theme
+    @State private var data: Data?
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    private let loadsRemotely: Bool
+    /// Told the pixel size of a decoded image, for the gallery's detail line.
+    private let onDecodedImageSize: ((CGSize) -> Void)?
+
+    init(
+        sessionID: String,
+        attachment: RemoteAttachmentDTO,
+        client: RemoteClient,
+        initialData: Data? = nil,
+        loadsRemotely: Bool = true,
+        onDecodedImageSize: ((CGSize) -> Void)? = nil
+    ) {
+        self.sessionID = sessionID
+        self.attachment = attachment
+        self.client = client
+        self.loadsRemotely = loadsRemotely
+        self.onDecodedImageSize = onDecodedImageSize
         _data = State(initialValue: initialData)
     }
 
@@ -323,12 +375,17 @@ struct RemoteAttachmentPreview: View {
                 MobileLoadingPlaceholder(MobileL10n.string("Loading preview…"))
             }
         }
-        .navigationTitle(attachment.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(theme.surface, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
         .background(theme.ground)
         .task { await load() }
+    }
+
+    private func reportImageSize(in data: Data) {
+        guard let onDecodedImageSize, attachment.kind == .image,
+              let image = UIImage(data: data) else { return }
+        onDecodedImageSize(CGSize(
+            width: image.size.width * image.scale,
+            height: image.size.height * image.scale
+        ))
     }
 
     @ViewBuilder
@@ -345,33 +402,28 @@ struct RemoteAttachmentPreview: View {
     ]
 
     private var unavailableIconName: String {
-        switch attachment.kind {
-        case .pdf: "doc.richtext"
-        case .html: "safari"
-        case .archive: "archivebox"
-        case .text: "doc.plaintext"
-        case .document: "doc.text"
-        case .diagram: "point.3.connected.trianglepath.dotted"
-        case .media: "play.rectangle"
-        case .video: "film"
-        default: "photo"
-        }
+        RemoteAttachmentGlyph.name(for: attachment.kind)
     }
 
     @MainActor
     private func load() async {
         // The body never renders these kinds, so their bytes are never asked for.
         guard !Self.previewsOnMacOnly.contains(attachment.kind) else { return }
-        guard loadsRemotely else { return }
+        guard loadsRemotely else {
+            if let data { reportImageSize(in: data) }
+            return
+        }
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            data = try await client.attachmentData(
+            let fetched = try await client.attachmentData(
                 sessionID: sessionID,
                 id: attachment.id
             )
+            data = fetched
             errorMessage = nil
+            reportImageSize(in: fetched)
         } catch {
             guard let message = RemoteAttachmentPreviewFailure.message(for: error) else { return }
             MobileDiagnostics.logDegraded(.attachmentContent, error: error)
@@ -388,20 +440,37 @@ struct RemoteAttachmentPreview: View {
 struct RemoteAttachmentPreviewDemo: View {
     let kind: RemoteAttachmentKind
 
+    /// Every kind the demo knows, in the order the ledger shows them; the one asked for is
+    /// the page on screen, so a capture of any kind also shows its neighbours.
+    static let kinds: [RemoteAttachmentKind] = [
+        .image, .pdf, .html, .text, .archive, .media, .video
+    ]
+
     var body: some View {
-        RemoteAttachmentPreview(
+        RemoteAttachmentGallery(
             sessionID: "workspace-demo",
-            attachment: attachment,
+            attachments: Self.kinds.map { Self.attachment(for: $0) },
+            initialID: Self.attachment(for: kind).id,
             client: RemoteClient(link: RemoteConnectionLink(
                 baseURL: URL(string: "https://workspace.invalid")!,
                 token: "attachment-preview"
             )!),
-            initialData: previewData,
+            offersThumbnails: false,
+            initialData: Dictionary(uniqueKeysWithValues: Self.kinds.compactMap { kind in
+                Self.previewData(for: kind).map { (Self.attachment(for: kind).id, $0) }
+            }),
+            // The Mac draws thumbnails; the demo has no Mac, so the image's own bytes stand in
+            // for its thumbnail and every other cell shows its glyph.
+            seedThumbnails: Dictionary(uniqueKeysWithValues: [RemoteAttachmentKind.image].compactMap { kind in
+                Self.previewData(for: kind).flatMap(UIImage.init(data:)).map {
+                    (Self.attachment(for: kind).id, $0)
+                }
+            }),
             loadsRemotely: false
         )
     }
 
-    private var attachment: RemoteAttachmentDTO {
+    private static func attachment(for kind: RemoteAttachmentKind) -> RemoteAttachmentDTO {
         switch kind {
         case .pdf:
             .init(path: "artifacts/threading-ui-review.pdf", name: "threading-ui-review.pdf", kind: .pdf, byteCount: 842_761, origin: .agent)
@@ -420,7 +489,7 @@ struct RemoteAttachmentPreviewDemo: View {
         }
     }
 
-    private var previewData: Data? {
+    private static func previewData(for kind: RemoteAttachmentKind) -> Data? {
         switch kind {
         case .pdf: return Self.pdfData()
         case .html:

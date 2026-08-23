@@ -73,16 +73,21 @@ struct SessionWorkspaceView: View {
     @Environment(\.remoteTheme) private var theme
     @State private var workspace: RemoteWorkspaceDTO?
     @State private var path: [SessionWorkspaceRoute]
+    /// Whether the Mac advertised `RemoteRESTFeature.attachmentThumbnails`. Carried in rather
+    /// than read from the model, because the drawer is hosted outside SwiftUI's environment.
+    private let offersAttachmentThumbnails: Bool
 
     init(
         session: RemoteSessionSummaryDTO,
         client: RemoteClient,
         activity: MobileWorkspaceActivity,
         initialWorkspace: RemoteWorkspaceDTO? = nil,
-        initialDestination: RemoteNotificationDestinationDTO? = nil
+        initialDestination: RemoteNotificationDestinationDTO? = nil,
+        offersAttachmentThumbnails: Bool = false
     ) {
         self.session = session
         self.client = client
+        self.offersAttachmentThumbnails = offersAttachmentThumbnails
         _activity = ObservedObject(wrappedValue: activity)
         _workspace = State(initialValue: initialWorkspace)
         _path = State(initialValue: SessionWorkspaceRoute.notificationDestination(
@@ -156,13 +161,15 @@ struct SessionWorkspaceView: View {
             RemoteAttachmentsView(
                 session: session,
                 client: client,
-                showsCloseButton: false
+                showsCloseButton: false,
+                offersThumbnails: offersAttachmentThumbnails
             )
         case .attachment(let id):
             RemoteAttachmentTargetView(
                 session: session,
                 attachmentID: id,
-                client: client
+                client: client,
+                offersThumbnails: offersAttachmentThumbnails
             )
         case .extensionPanel(let extensionIdentifier, let panelID):
             RemoteExtensionPanelView(

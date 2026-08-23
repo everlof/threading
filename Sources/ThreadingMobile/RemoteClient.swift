@@ -788,6 +788,17 @@ struct RemoteClient {
         return data
     }
 
+    /// A bounded raster of one attachment for the gallery's ledger. Ask only where
+    /// `RemoteRESTFeature.attachmentThumbnails` was advertised; an older Mac answers 404.
+    func attachmentThumbnail(sessionID: String, id: String) async throws -> Data {
+        guard let url = link.attachmentThumbnailURL(sessionID: sessionID, id: id) else {
+            throw RemoteClientError.invalidResponse
+        }
+        let (data, response) = try await Self.session.data(for: request(url: url))
+        _ = try validate(data: data, response: response, accepted: 200...299)
+        return data
+    }
+
     /// Hands one composer attachment to the Mac, a chunk at a time, and answers its upload id.
     ///
     /// The id is the only thing the phone learns: where the file landed is the Mac's business,

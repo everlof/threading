@@ -2693,10 +2693,18 @@ the top or choose **Load earlier messages** to fetch older pages without losing 
 position. A permission whose edit diff is too large for a bounded remote snapshot must be
 reviewed on the Mac, so a remote device can never approve from a partial preview.
 
-On iPhone, open the session's **…** menu and choose **Workspace** for **Browser**, **Review**,
-**Files**, and **Attachments**; a swipe in from the right edge of the session opens the same
-thing. If an agent opens a page, Threading does not pull you away from the chat. The **…**
-control gives one subtle pulse and keeps a small dot until you open Browser. Browser is a
+On iPhone, the session's menu is the **account disc** at the top right — the agent's mark ringed
+by how much of that login's allowance is used, the same disc the New session screen wears, so it
+stays put when a draft becomes a chat. Open it and choose **Workspace** for **Browser**,
+**Review**, **Files**, and **Attachments**; a swipe in from the right edge of the session opens
+the same thing. Workspace is a drawer: it slides in from the right over the chat and follows your finger
+as you pull it, leaving a sliver of the chat visible at the left edge; drag the panel back to the
+right, tap that sliver, or use its close button to put it away. An attachment opens in a gallery
+— swipe left and right between the session's attachments, read "3 of 27 · 1219 × 874 · 188 KB"
+under the name, and use the ledger of thumbnails along the bottom to jump to any of them (the
+Mac draws the thumbnails for images and PDFs; other kinds show their glyph). If an agent opens a
+page, Threading does not pull you away from the chat. The account
+disc takes one quiet breath and keeps a small dot until you open Browser. Browser is a
 read-only follow view of the Mac tab: the Mac still owns navigation and interaction, and private
 tabs never send a preview. The Workspace is available only to a paired owner device, not one-chat
 guest links. Attachment files are still fetched only when you choose one, and only if the file

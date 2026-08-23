@@ -102,6 +102,9 @@ enum MobileDesign {
         /// The glyph on the draft's empty ground. A symbol, not a tile: large enough to name the
         /// surface being started, drawn light and in the tertiary ink so it stays a hint.
         static let draftHintGlyph: CGFloat = 30
+        /// A cell of the attachment gallery's ledger: a thumbnail big enough to tell a
+        /// screenshot from a diagram, small enough that a phone shows six of them.
+        static let attachmentLedgerCell: CGFloat = 56
     }
 
     enum Offset {
@@ -145,6 +148,13 @@ enum MobileDesign {
 
     enum Motion {
         static let controlResponse: Double = 0.18
+        /// The attachment ledger bringing the current cell into view, and a page changing under
+        /// a tapped cell: one chrome response, so the two read as one move.
+        static let ledgerScroll: TimeInterval = 0.25
+        /// The session's account disc taking one breath when the agent does something in the
+        /// browser: a touch larger, and back, in the time the ellipsis took to pulse.
+        static let activityBreathScale: CGFloat = 1.12
+        static let activityBreathDuration: TimeInterval = 0.32
         /// LabelMorph's showcase timing brought to the pace of application chrome.
         static let nameMorphTempo: Double = 0.65
         /// The whole character cascade is bounded so sentence-length chat names do not settle

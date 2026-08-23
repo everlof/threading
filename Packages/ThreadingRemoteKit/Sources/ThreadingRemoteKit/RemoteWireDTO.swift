@@ -1101,6 +1101,19 @@ public struct RemoteHostDTO: Codable, Equatable, Sendable {
 public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     case usageDashboard = "usage-dashboard"
     case hostedPeerTransport = "hosted-peer-transport"
+    /// `attachment-thumbnail` answers: a small, bounded raster of an image or a PDF's first
+    /// page, for the gallery's ledger. A phone paired with a Mac that does not say so draws the
+    /// kind's glyph in each cell and asks for no bytes.
+    case attachmentThumbnails = "attachment-thumbnails"
+}
+
+/// The size a thumbnail is asked at, and the most a Mac will answer with.
+///
+/// One number on both sides: the phone draws the cell at a fixed size and asks for twice that in
+/// pixels, the Mac clamps to this regardless of what was asked, so a client cannot turn the
+/// thumbnail route into a second full-size route.
+public enum RemoteAttachmentThumbnail {
+    public static let maximumPixelDimension = 256
 }
 
 /// A device-bound hosted rendezvous credential issued by the paired Mac. The ordinary remote

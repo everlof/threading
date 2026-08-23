@@ -514,10 +514,9 @@ private struct SessionDraftComposerScreen: View {
                 }
             }
         } label: {
-            DraftIdentityDisc(
+            MobileAccountDisc(
                 identity: .resolve(agentID),
-                usageFraction: selectedAccount?.usageFraction,
-                usageTint: selectedAccount?.usageFraction.map(usageTint(for:)) ?? theme.positive
+                usageFraction: selectedAccount?.usageFraction
             )
         }
         .disabled(isSubmitting)
@@ -706,12 +705,6 @@ private struct SessionDraftComposerScreen: View {
         guard let selectedAccount else { return selectedIdentityLabel }
         guard let usage = selectedAccount.usageSummary else { return selectedIdentityLabel }
         return "\(selectedIdentityLabel), \(usage)"
-    }
-
-    private func usageTint(for fraction: Double) -> Color {
-        if fraction >= 0.9 { return theme.negative }
-        if fraction >= 0.75 { return theme.warning }
-        return theme.positive
     }
 
     private func accountMenuTitle(_ account: RemoteAccountChoiceDTO) -> String {
@@ -926,46 +919,3 @@ private struct DraftIconMenuLabel: View {
     }
 }
 
-/// The account control in the navigation bar: the runtime's mark on the toolbar's disc, ringed
-/// by how much of the account's allowance is used.
-///
-/// The ring is the usage reading the old identity capsule spelled out — "5h 18% · 7d 63%" —
-/// reduced to the one fact a glance needs, how close to the limit; the words are still in the
-/// menu beside each account. The disc is the dashboard's toolbar circle, so the bar keeps one
-/// kind of control, and the mark is the one the rows draw, so the runtime looks like itself.
-private struct DraftIdentityDisc: View {
-    let identity: MobileAgentIdentity
-    let usageFraction: Double?
-    let usageTint: Color
-    @Environment(\.remoteTheme) private var theme
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(theme.controlResting)
-            MobileAgentMarkGlyph(identity: identity)
-            if let usageFraction {
-                Circle()
-                    .stroke(
-                        usageTint.opacity(MobileDesign.Opacity.usageRingTrack),
-                        lineWidth: MobileDesign.Size.badgeStroke
-                    )
-                Circle()
-                    .trim(from: 0, to: min(max(usageFraction, 0), 1))
-                    .stroke(
-                        usageTint,
-                        style: StrokeStyle(
-                            lineWidth: MobileDesign.Size.badgeStroke,
-                            lineCap: .round
-                        )
-                    )
-                    .rotationEffect(.degrees(-90))
-            }
-        }
-        .frame(
-            width: MobileDesign.Size.compactControl,
-            height: MobileDesign.Size.compactControl
-        )
-        .contentShape(Circle())
-    }
-}

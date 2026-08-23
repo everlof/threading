@@ -336,6 +336,9 @@ final class RemoteSessionMirrorRegistry {
            RemoteAccessCoordinator.shared.canIssueHostedDeviceCredentials {
             features.append(RemoteRESTFeature.hostedPeerTransport.rawValue)
         }
+        // The thumbnail route is gated exactly like the attachment route it shrinks, so it is
+        // advertised to whoever may read attachments at all.
+        features.append(RemoteRESTFeature.attachmentThumbnails.rawValue)
         return features.isEmpty ? nil : features
     }
 

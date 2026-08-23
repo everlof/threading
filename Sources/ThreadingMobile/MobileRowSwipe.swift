@@ -396,7 +396,7 @@ private struct MobileRowSwipeModifier: ViewModifier {
 /// `DragGesture` cannot do this.
 ///
 /// The recogniser goes on the enclosing scroll view rather than on this representable's own
-/// view, for the reason ``ScreenEdgeSwipe`` gives: a recogniser sees only touches in its own
+/// view, for the reason ``SessionWorkspaceDrawer`` gives: a recogniser sees only touches in its own
 /// view or a descendant, and a SwiftUI background is a sibling of the content in front of it.
 /// This view is still what says *where* the row is — it is laid out at the row's exact frame, so
 /// the delegate can ask whether a touch is this row's before claiming it. It takes no touches of

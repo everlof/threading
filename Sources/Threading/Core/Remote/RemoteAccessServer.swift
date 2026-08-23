@@ -655,6 +655,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if request.method == "GET",
+           let sessionID = RemoteRouter.attachmentThumbnailSessionID(forPath: path) {
+            handleAttachmentThumbnail(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "GET",
            let sessionID = RemoteRouter.attachmentSessionID(forPath: path) {
             handleAttachment(request, sessionID: sessionID, respond: respond)
             return
@@ -2363,6 +2369,54 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     return
                 }
                 respond(.respond(RemoteRouter.data(data, contentType: contentType)))
+            }
+        }
+    }
+
+    /// A small raster of one attachment for the phone's gallery ledger.
+    ///
+    /// Gated like the attachment route it shrinks — the same owner read, the same id policy, the
+    /// same visibility and size checks — and bounded on its own account: the decode runs under
+    /// `BoundedImageDecodePolicy.thumbnail`, so a decompression bomb is refused before it is
+    /// rasterised, and the answer is never wider than `RemoteAttachmentThumbnail` allows whatever
+    /// the request said. An image is thumbnailed by ImageIO; a PDF by its first page; every
+    /// other kind is a 404, which the phone draws as the kind's glyph.
+    private func handleAttachmentThumbnail(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let sessionID = authorizeOwnerSessionRead(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let attachmentID = RemoteRouter.queryValue(named: "id", in: request.path),
+              RemoteInboundPolicy.acceptsAttachmentID(attachmentID) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard RemoteSessionAccess.isVisible(
+                self.services.sessionQueries.session(withID: sessionID)
+            ), let attachment = self.services.attachments.attachment(
+                for: sessionID,
+                id: attachmentID
+            ), let values = try? attachment.url.resourceValues(forKeys: [.fileSizeKey]),
+               let size = values.fileSize,
+               size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+
+            let url = attachment.url
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let data = RemoteAttachmentThumbnailRenderer.jpeg(at: url) else {
+                    respond(.respond(RemoteRouter.error(404, "Not Found")))
+                    return
+                }
+                respond(.respond(RemoteRouter.data(data, contentType: "image/jpeg")))
             }
         }
     }
