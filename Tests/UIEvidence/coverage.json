@@ -775,13 +775,55 @@
       }
     },
     {
+      "id": "keyboard-settings",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Keyboard settings",
+      "description": "The complete deterministic Keyboard page with a provider-command fold expanded through virtual rows, shortcut recorders, fixed composer behavior and reset action.",
+      "states": ["Expanded provider commands", "Shortcut recorders", "Regular width", "Constrained width"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Regular", "Constrained"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/KeyboardPreferencesVirtualizationTests.swift",
+        "test": "ThreadingTests/KeyboardPreferencesVirtualizationTests/testRendersKeyboardSettingsToImages"
+      },
+      "capture": {
+        "glob": "keyboard-settings-*.png"
+      }
+    },
+    {
+      "id": "account-usage-window-popover",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Single-account usage popover",
+      "description": "The shipping single-account usage controller scrolled into a provider-sized model-window inventory, with its identity and freshness fixed around a bounded virtual viewport.",
+      "states": ["Provider model windows", "Deep virtual scroll", "Fixed identity and freshness"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["272×400-point popover"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AccountUsagePopoverVirtualizationTests.swift",
+        "test": "ThreadingTests/AccountUsagePopoverVirtualizationTests/testRendersVirtualAccountUsagePopoverToImages"
+      },
+      "capture": {
+        "glob": "account-usage-window-popover-*.png"
+      }
+    },
+    {
       "id": "remaining-settings-destinations",
       "kind": "surface",
       "status": "planned",
       "priority": "important",
       "title": "Remaining Settings destinations",
       "description": "Deterministic fixture seams and complete-page captures for the remaining data-backed Settings pages, without reading developer accounts, profiles, projects or installed extensions.",
-      "states": ["Keyboard", "Terminal profile", "Archived", "Search results"],
+      "states": ["Terminal profile", "Archived", "Search results"],
       "matrix": {
         "themes": ["System", "Two contrasting authored themes"],
         "appearances": ["Light", "Dark"],
