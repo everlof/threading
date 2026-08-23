@@ -61,33 +61,30 @@ The application target currently approximates the other layers:
 | `App/` | Process composition. `AppEnvironment` owns the legacy store/service instances passed into migrated coordinators. |
 | `UI/` | AppKit composition and presentation. Feature UI uses `UI/Design`; tool and browser controllers adapt application capabilities to windows and WebKit. |
 
-## Remaining upward dependencies
+## Upward dependency invariant
 
-The architecture gate rejects every Core reference to `AppDelegate` or `MainWindowController` and
-permits only the ratcheted concrete-controller edges reported by
-`scripts/check_dependency_boundaries.py`:
-
-- `Core/Agent/AgentRuntime.swift` constructs and retains conversation view controllers. Terminal
-  adapters are constructed in UI and retained through `AgentTerminalRuntimeSurface`.
-- `Core/Session/ProjectTerminalRuntime.swift` constructs and retains a project-terminal controller.
+The architecture gate rejects every Core reference to `AppDelegate`, `MainWindowController`, or a
+concrete UI controller. UI constructs both native-conversation and project-terminal controllers,
+then registers their typed runtime surfaces with Core. `AgentRuntime` and
+`ProjectTerminalRuntime` retain only those capabilities; neither can construct, return, or recover
+the UI adapter behind one.
 
 Session-context routing is no longer in this queue: Core targets the typed
 `SessionContextReceiving` capability and resolves it through `SessionContextDestinationQuerying`;
 the UI controller is only an adapter. Remote conversation mirroring now follows the same rule:
 `RemoteConversationSurface` owns the Foundation-only projection/submission contract and
-`ConversationViewController` adapts it, so Core/Remote never receives the controller. Remote
-terminal mirroring crosses the injected Foundation-only `RemoteTerminalApplicationCapability`;
+`ConversationViewController` adapts it, so Core/Remote never receives the controller. Native
+conversation lifecycle crosses `AgentConversationRuntimeSurface`, while standalone-terminal
+lifecycle crosses `ProjectTerminalRuntimeSurface`; construction and presentation stay in UI.
+Remote terminal mirroring crosses the injected Foundation-only
+`RemoteTerminalApplicationCapability`;
 its live implementation receives `AgentRuntime` from `AppEnvironment` and has no route-time
 global lookup. Context handoff and message delivery consume `AgentTerminalInputSurface`; limit
 recovery consumes `AgentTerminalLimitRecoverySurface`; extension process inspection receives only
 a scalar process-root projection. None of those Core owners can acquire the UI adapter. The
-ratchet now permits 8 references across the two files above, down from 19 across five and from the
-immediately preceding baseline of 17 across three. The checker also rejects inferred
-controller-returning lookups anywhere in Core, with exact ratchets for the remaining standalone-
-terminal declaration and call.
-
-These are a migration queue, not exemptions. Remove one complete ownership edge, add a focused
-capability/projection test, and lower the ratchet in the same coherent commit.
+ratchet is zero references across zero Core files, down from 8 references across the final two
+owners. It also rejects inferred controller-returning lookups so a differently named accessor
+cannot recreate the dependency.
 
 ## Composition and identity rules
 
@@ -129,34 +126,30 @@ hand-maintained tool, settings, shortcut, or component inventory.
 
 ## Current stabilization increment
 
-These measurements are the output of `scripts/report_architecture_health.py` against the truthful
-pre-change `HEAD` tree and the current source tree. The remote terminal mirror now consumes the
-injected `RemoteTerminalApplicationCapability`, while UI constructs the concrete agent-terminal
-adapter and Core retains only its typed runtime surface. The capability distinguishes cheap live
-state from a bounded attach repaint, returns typed unavailable/applied outcomes, and preserves
-transport-owned authorization, validation, audit and replay ordering. The same UI adapter exposes
-separate typed Core capabilities for ordinary input, limit recovery and process-root projection;
-the architecture gate rejects every inferred controller-returning lookup outside the exact
-standalone-terminal debt ratchet.
+These measurements are the output of `scripts/report_architecture_health.py` against commit
+`746400ac`, immediately before the last two concrete-controller ownership edges moved, and commit
+`b4053b80`, which removed them. UI now creates both adapters and Core retains typed runtime
+surfaces. The architecture checker was lowered to zero in the same change and rejects inferred
+controller-returning lookups as well as direct type references.
 
-| Metric | Before | Current | Change |
+| Metric | Before | After | Change |
 |---|---:|---:|---:|
-| Threading Swift files / lines | 795 / 329,431 | 796 / 329,841 | +1 capability file / +410 net typed contracts, wiring, regression proofs, and runtime adaptation |
+| Threading Swift files / lines | 910 / 381,645 | 910 / 381,756 | +111 net typed contracts, wiring, and runtime adaptation |
 | `ThreadingDomain` Swift files / lines | 1 / 197 | 1 / 197 | unchanged |
-| `static … shared` declarations | 89 / 87 files | 89 / 87 files | unchanged |
-| `ProjectStore.shared` | 247 / 63 files | 247 / 63 files | unchanged |
-| `AgentRuntime.shared` | 102 / 31 files | 92 / 31 files | −10 remote/controller lookups; no new source of truth |
-| `AppSettings.shared` | 196 / 39 files | 196 / 39 files | unchanged |
-| `EventLog.shared` | 82 / 25 files | 82 / 25 files | unchanged |
+| `static … shared` declarations | 105 / 103 files | 105 / 103 files | unchanged |
+| `ProjectStore.shared` | 295 / 74 files | 295 / 74 files | unchanged |
+| `AgentRuntime.shared` | 108 / 37 files | 108 / 37 files | unchanged |
+| `AppSettings.shared` | 207 / 42 files | 207 / 42 files | unchanged |
+| `EventLog.shared` | 110 / 28 files | 110 / 28 files | unchanged |
 | Core `AppDelegate.shared` | 0 / 0 files | 0 / 0 files | unchanged |
-| Concrete UI-controller references in Core | 17 / 3 files | 8 / 2 files | −9 complete agent-terminal runtime ownership edge / −1 file; remains active debt |
-| UI-framework imports in Core/Models | 63 / 61 files | 62 / 60 files | −1 Core AppKit import / −1 file; remains active debt |
-| `MainWindowController` authority | 5,098 / 4 files | 5,098 / 4 files | unchanged; remains active debt |
-| `AgentToolCoordinator` authority | 8,979 / 15 files | 8,979 / 15 files | unchanged; remains active debt |
-| Capability extensions | 5,882 / 11 files | 5,882 / 11 files | unchanged |
-| `ThreadingTests` Swift files | 382 | 383 | +1 focused contract-test file; filesystem synchronized |
+| Concrete UI-controller references in Core | 8 / 2 files | 0 / 0 files | −8 / −2 files; the exception is closed |
+| UI-framework imports in Core/Models | 69 / 66 files | 69 / 66 files | unchanged; remains active debt |
+| `MainWindowController` authority | 5,909 / 5 files | 5,909 / 5 files | unchanged; remains active debt |
+| `AgentToolCoordinator` authority | 8,967 / 18 files | 8,967 / 18 files | unchanged; remains active debt |
+| Capability extensions | 5,900 / 14 files | 5,900 / 14 files | unchanged |
+| `ThreadingTests` Swift files | 488 | 488 | unchanged; existing boundary tests carry the zero ratchet |
 
-The unchanged main-window and tool-coordinator authorities stay in the active debt ledger at their
-full reported sizes. This increment removes the complete agent-terminal runtime/controller
-ownership edge; it does not claim decomposition of those hubs or of the two remaining Core
-controller dependencies.
+The current source-tree report still measures zero concrete-controller references in Core (with
+911 Threading Swift files and 383,474 lines). The main-window and tool-coordinator authorities stay
+in the active debt ledger at their full current sizes; removing this dependency did not decompose
+either hub.

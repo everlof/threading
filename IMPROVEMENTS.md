@@ -8,18 +8,17 @@ Refresh counts with `scripts/report_architecture_health.py`. A count is evidence
 itself: work is complete only when authority and dependency direction become smaller and a test or
 gate prevents the old coupling from returning.
 
-## Current boundaries — 16 August 2026
+## Current boundaries — 23 August 2026
 
 | Boundary | Current measurement | Next coherent reduction |
 |---|---:|---|
-| Concrete UI-controller references in Core | 8 across 2 files | Move the next complete conversation or project-terminal ownership edge behind a typed application capability; ratchet the gate in the same commit. |
-| UI-framework imports in Core/Models | 62 across 60 files | Extract stable Foundation-only contracts into the existing domain boundary before adding another module. |
-| `ProjectStore.shared` | 247 across 63 files | Migrate the next complete application coordinator or background service through an existing composition root. |
-| `AgentRuntime.shared` | 92 across 31 files | Inject the runtime at the next ownership boundary that already has a composition root. |
-| `AppSettings.shared` | 196 across 39 files | Pass a narrow settings projection or store only where a use case needs it. |
-| `EventLog.shared` | 82 across 25 files | Inject logging into application services; system log APIs may remain process-global. |
-| `MainWindowController` authority | 5,098 lines across 4 files | Continue moving use cases out; the controller should converge on composition, navigation, and window lifecycle. |
-| `AgentToolCoordinator` authority | 8,979 lines across 15 files | Move the next command family's policy and sequencing behind a typed, independently tested boundary. |
+| UI-framework imports in Core/Models | 69 across 66 files | Extract stable Foundation-only contracts into the existing domain boundary before adding another module. |
+| `ProjectStore.shared` | 295 across 74 files | Migrate the next complete application coordinator or background service through an existing composition root. |
+| `AgentRuntime.shared` | 108 across 37 files | Inject the runtime at the next ownership boundary that already has a composition root. |
+| `AppSettings.shared` | 207 across 42 files | Pass a narrow settings projection or store only where a use case needs it. |
+| `EventLog.shared` | 110 across 28 files | Inject logging into application services; system log APIs may remain process-global. |
+| `MainWindowController` authority | 5,911 lines across 5 files | Continue moving use cases out; the controller should converge on composition, navigation, and window lifecycle. |
+| `AgentToolCoordinator` authority | 8,967 lines across 18 files | Move the next command family's policy and sequencing behind a typed, independently tested boundary. |
 
 ## Rules for closing an item
 
