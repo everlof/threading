@@ -63,6 +63,13 @@ final class DisplayPaneStoreMigrationTests: XCTestCase {
 
     /// The other half: a layout that actually uses a detached window declares the version that
     /// carries it, so a build without the feature refuses rather than silently dropping the window.
+    ///
+    /// That version is 2, stated as a literal on purpose. It was once also the newest this build
+    /// knew, and asserting `currentFormatVersion` read as the same thing — until the adopted
+    /// Simulator added 3 and the two parted, failing this test while both the encoder and the rule
+    /// above were behaving exactly as designed. A document declares what it *needs*; the newest
+    /// version this build can write is a different number, and only the tab that needs it may
+    /// raise it.
     func testALayoutWithADetachedWindowDeclaresTheNewerVersion() throws {
         let windowID = UUID()
         let panel = PersistedPanel(
@@ -83,7 +90,13 @@ final class DisplayPaneStoreMigrationTests: XCTestCase {
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(panel)) as? [String: Any]
         )
-        XCTAssertEqual(object["formatVersion"] as? Int, PersistedPanel.currentFormatVersion)
+        XCTAssertEqual(object["formatVersion"] as? Int, 2)
+        XCTAssertEqual(panel.requiredFormatVersion, 2)
+        XCTAssertLessThanOrEqual(
+            panel.requiredFormatVersion,
+            PersistedPanel.currentFormatVersion,
+            "A document may never declare a version this build cannot itself write"
+        )
     }
 
     func testFutureLayoutVersionIsRefused() throws {
