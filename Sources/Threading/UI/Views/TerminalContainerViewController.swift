@@ -1218,8 +1218,11 @@ final class TerminalContainerViewController: NSViewController {
     /// The pane's own bounds are still the frame, for the reason `launchInBackground` gives, but
     /// the *grid* is the daemon's rather than this one's: an attach never resizes, so the replay
     /// is rendered at the size it was written at and only a genuinely different window sends a
-    /// resize afterwards. A native conversation is never host-backed in version 1, so it is
-    /// refused here rather than silently taking the terminal path.
+    /// resize afterwards. A native conversation's child can be host-backed too, but it is never
+    /// *reattached*: `PTYHostReattach` ends it and resumes the conversation from its transcript,
+    /// because a request/response transport cannot be rejoined half-way through a turn. The guard
+    /// stays here as well, so a summary that reached this call by another route is refused rather
+    /// than silently given a terminal.
     @discardableResult
     func reattachInBackground(summary: PTYHostSessionSummary, socketPath: String) -> Bool {
         guard !isRecovery else {

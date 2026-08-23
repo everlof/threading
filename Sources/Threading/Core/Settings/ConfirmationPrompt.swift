@@ -54,6 +54,10 @@ enum ConfirmationPrompt: String, CaseIterable {
     // MARK: Recoverable elsewhere
 
     case quitWithRunningAgents
+    /// The same moment, asked differently: `threading-ptyd` is holding sessions, so quitting is a
+    /// choice between two quits rather than a confirmation of one. Its own case because a choice
+    /// cannot be suppressible — see `.policy` below and `ConfirmationAlert.choose`.
+    case quitWithBackgroundSessions
     case removeExtension
     case revokeAllWebsiteAccess
     case revokeAllManagerRoles
@@ -290,6 +294,17 @@ enum ConfirmationPrompt: String, CaseIterable {
             return .alwaysAsks(.securityGrant)
 
         case .installUpdate, .installUpdateAndRelaunch:
+            return .alwaysAsks(.newQuestionEachTime)
+
+        // Two different quits, and a remembered answer would have to be one of them. The sibling
+        // above *is* suppressible, because "quit anyway" is a single answer worth remembering;
+        // this question names a set of agents that did not exist when the last answer was given
+        // and asks which of them should go on working, which is a new question every time — the
+        // same reason an update's version makes its prompt new. The user's switch on the sibling
+        // is still honoured, at the call site, and it resolves to the recoverable answer: nothing
+        // is stopped without somebody asking for it. Return stays on the affirmative, and the
+        // affirmative here is the one that destroys nothing.
+        case .quitWithBackgroundSessions:
             return .alwaysAsks(.newQuestionEachTime)
 
         // Each repair is a different agent's account of a different broken conversation, and the

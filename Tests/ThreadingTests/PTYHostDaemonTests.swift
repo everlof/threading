@@ -91,6 +91,158 @@ final class PTYHostDaemonTests: XCTestCase {
         try client.waitForOutput(containing: "[ping]", timeout: Fixture.childTimeout)
     }
 
+    // MARK: - The pipe channel
+
+    /// A conversation's CLI, on three pipes, with the two output streams kept apart.
+    ///
+    /// The separation is the assertion and not a detail: the transports parse standard output a
+    /// line of JSON at a time, and a diagnostic line merged into it is a malformed record rather
+    /// than a message. The wire keeps them apart with a flag, so a build that does not know the
+    /// flag reads diagnostics as output instead of dropping the connection.
+    func testAPipesChildKeepsItsTwoOutputStreamsApart() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon)
+        let id = Self.newIdentity()
+
+        let spawned = try spawnPipes(
+            on: client,
+            id: id,
+            script: "printf 'to-stdout'; printf 'to-stderr' >&2"
+        )
+        XCTAssertGreaterThan(spawned.pid, 0, "a spawned child has a pid")
+
+        try client.waitForOutput(containing: "to-stdout", timeout: Fixture.childTimeout)
+        try client.waitForErrorOutput(containing: "to-stderr", timeout: Fixture.childTimeout)
+        XCTAssertFalse(
+            client.text.contains("to-stderr"),
+            "a diagnostic merged into the parsed stream is a malformed record"
+        )
+    }
+
+    /// Standard input reaches the child, and **closing** it is what ends the conversation.
+    ///
+    /// The graceful shutdown every native transport performs is `close(stdin)`, which is a
+    /// descriptor event with no byte to carry it — which is the whole reason `closeInput` is a
+    /// frame of its own rather than something a byte stream could express.
+    func testAPipesChildReadsItsInputAndEndsWhenTheInputIsClosed() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon)
+        let id = Self.newIdentity()
+
+        _ = try spawnPipes(
+            on: client,
+            id: id,
+            script: "while read -r line; do printf \"[$line]\"; done; printf done"
+        )
+        client.sendInput("ping\n")
+        try client.waitForOutput(containing: "[ping]", timeout: Fixture.childTimeout)
+
+        client.send(.closeInput(PTYHostCloseInput(id: id)))
+        try client.waitForOutput(containing: "done", timeout: Fixture.childTimeout)
+        let exited = try nextExit(on: client)
+        XCTAssertEqual(exited.status, 0, "end of input is an ordinary ending, not a failure")
+    }
+
+    /// A pipes session has no terminal, so a `resize` is an error the connection survives.
+    ///
+    /// A close would be the wrong answer twice over: the frame is well formed and the stream is
+    /// still readable, and closing here would end somebody's conversation over a caller's slip.
+    func testAPipesSessionRefusesAResizeAndKeepsWorking() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon)
+        let id = Self.newIdentity()
+
+        _ = try spawnPipes(
+            on: client,
+            id: id,
+            script: "while read -r line; do printf \"[$line]\"; done"
+        )
+        client.send(.resize(PTYHostResize(id: id, grid: PTYHostGrid(cols: 100, rows: 40))))
+
+        let refusal = try client.nextControl(timeout: Fixture.replyTimeout) {
+            if case .error = $0 { return true }
+            return false
+        }
+        guard case .error(let failure) = refusal else {
+            throw PTYHostTestFailure("expected an error frame, got \(refusal)")
+        }
+        XCTAssertEqual(failure.code, .unsupportedChannel)
+
+        client.sendInput("still-here\n")
+        try client.waitForOutput(containing: "[still-here]", timeout: Fixture.childTimeout)
+        XCTAssertFalse(client.isClosed, "a wrong-channel frame is not a poisoned one")
+    }
+
+    /// What a rejoining watcher is owed: `CAN`, alone on its line, then whole lines.
+    ///
+    /// A pipes session is **always** a cut — there is no emulator anywhere to seed an exact
+    /// replay from — and a tail beginning mid-line would hand a fresh parser one guaranteed
+    /// malformed line, which reads as a provider protocol error rather than as a cut.
+    func testAPipesRejoinIsACutThatBeginsAtALineBoundary() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon)
+        let id = Self.newIdentity()
+
+        // Comfortably past the ring, so the tail is certainly cut mid-line before trimming.
+        // `awk` rather than a shell loop: sixty thousand `printf` processes is a minute of
+        // scheduling, and what this test is about is the byte the daemon trims to.
+        _ = try spawnPipes(
+            on: client,
+            id: id,
+            script: "awk 'BEGIN { for (i = 0; i < 60000; i++) printf \"{\\\"line\\\":%d}\\n\", i }'"
+                + "; sleep 30"
+        )
+        try client.waitForBytes(atLeast: Fixture.overflowBytes, timeout: Fixture.childTimeout)
+        client.hangUp()
+
+        let rejoined = try connect(to: daemon)
+        let attached = try attach(on: rejoined, id: id)
+        XCTAssertEqual(attached.replay, .cut, "a pipes session has no screen to seed from")
+
+        // Enough of the replay to hold a whole line after the marker; the tail itself is the
+        // ring's, and the assertion below is about where it starts rather than how long it is.
+        try rejoined.waitForBytes(atLeast: 4096, timeout: Fixture.childTimeout)
+        let replay = rejoined.bytes
+        XCTAssertEqual(replay.first, 0x18, "the cut marker leads")
+        XCTAssertEqual(
+            replay.dropFirst().first,
+            UInt8(ascii: "\n"),
+            "the marker keeps a line of its own, so the first byte after it starts a line"
+        )
+        let lines = String(decoding: replay.dropFirst(2), as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        XCTAssertTrue(
+            lines.first?.hasPrefix("{\"line\":") ?? false,
+            "the first replayed line is whole: \(lines.first ?? "")"
+        )
+    }
+
+    /// The summary says which transport a child is speaking, because the app cannot infer it —
+    /// and a pipes session reports no window size rather than a plausible one it does not have.
+    func testASummarySaysWhichChannelItsSessionIsOn() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon)
+        let terminal = Self.newIdentity()
+        let conversation = Self.newIdentity()
+
+        _ = try spawn(on: client, id: terminal, script: "sleep 30")
+        let second = try connect(to: daemon)
+        _ = try spawnPipes(on: second, id: conversation, script: "sleep 30")
+
+        client.send(.list)
+        let summaries = try nextSessions(on: client)
+        let byIdentity = Dictionary(uniqueKeysWithValues: summaries.map { ($0.id, $0) })
+
+        XCTAssertEqual(byIdentity[terminal]?.resolvedChannel, .pty)
+        XCTAssertEqual(byIdentity[terminal]?.grid.cols, 80)
+        XCTAssertEqual(byIdentity[conversation]?.resolvedChannel, .pipes)
+        XCTAssertEqual(
+            byIdentity[conversation]?.grid,
+            PTYHostGrid(cols: 0, rows: 0),
+            "a window size it does not have is a fact somebody would act on"
+        )
+    }
+
     // MARK: - The window size
 
     /// A `resize` reaches the child; an `attach` deliberately does not.
@@ -555,6 +707,32 @@ final class PTYHostDaemonTests: XCTestCase {
         return body
     }
 
+    /// The same spawn on three pipes: no grid, because there is no terminal to size.
+    @discardableResult
+    private func spawnPipes(
+        on client: PTYHostTestClient,
+        id: PTYHostSessionIdentity,
+        script: String
+    ) throws -> PTYHostSpawned {
+        client.send(.spawn(PTYHostSpawnRequest(
+            id: id,
+            channel: .pipes,
+            executable: Fixture.shell,
+            arguments: ["-c", script],
+            environment: Self.childEnvironment,
+            cwd: NSTemporaryDirectory()
+        )))
+        let frame = try client.nextControl(timeout: Fixture.replyTimeout) {
+            if case .spawned = $0 { return true }
+            if case .spawnRefused = $0 { return true }
+            return false
+        }
+        guard case .spawned(let body) = frame else {
+            throw PTYHostTestFailure("the daemon refused the spawn: \(frame)")
+        }
+        return body
+    }
+
     private func attach(
         on client: PTYHostTestClient,
         id: PTYHostSessionIdentity,
@@ -796,6 +974,9 @@ private final class PTYHostTestClient: @unchecked Sendable {
     private var decoder = PTYHostFrameDecoder()
     private var controls: [PTYHostFrame] = []
     private var received = Data()
+    /// Only a `.pipes` session ever fills this: a pseudo-terminal has one stream by
+    /// construction, so a pty session's frames never carry the standard-error flag.
+    private var receivedErrors = Data()
     private var closed = false
 
     private static let encoder = JSONEncoder()
@@ -902,6 +1083,32 @@ private final class PTYHostTestClient: @unchecked Sendable {
 
     var text: String { String(decoding: bytes, as: UTF8.self) }
 
+    /// What arrived on the child's standard error, kept apart from its standard output because
+    /// merging the two would corrupt the newline-delimited JSON a conversation transport parses.
+    var errorBytes: Data {
+        condition.lock()
+        defer { condition.unlock() }
+        return receivedErrors
+    }
+
+    var errorText: String { String(decoding: errorBytes, as: UTF8.self) }
+
+    func waitForErrorOutput(containing needle: String, timeout: TimeInterval) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        condition.lock()
+        defer { condition.unlock() }
+        while true {
+            if String(decoding: receivedErrors, as: UTF8.self).contains(needle) { return }
+            guard condition.wait(until: deadline) else {
+                throw PTYHostTestFailure(
+                    "the child never produced \(needle) on standard error; it produced "
+                        + String(decoding: receivedErrors.suffix(200), as: UTF8.self)
+                            .debugDescription
+                )
+            }
+        }
+    }
+
     func resetOutput() {
         condition.lock()
         received = Data()
@@ -982,7 +1189,11 @@ private final class PTYHostTestClient: @unchecked Sendable {
                             controls.append(control)
                         }
                     case .output:
-                        received.append(frame.payload)
+                        if frame.flags & PTYHostFramingDefaults.standardErrorFlag != 0 {
+                            receivedErrors.append(frame.payload)
+                        } else {
+                            received.append(frame.payload)
+                        }
                     case .input:
                         break
                     }

@@ -89,6 +89,19 @@ public enum PTYHostFrame: Codable, Equatable, Sendable {
     /// App → daemon: I am leaving, and here is what the screen looked like when I did.
     case detach(PTYHostDetach)
 
+    /// App → daemon: the child will read no more input.
+    ///
+    /// The graceful shutdown of every native transport, and the reason it needs a frame of its
+    /// own: `ClaudeStreamSession`, `CodexStreamSession` and `ACPStreamSession` all end a
+    /// conversation by closing the CLI's standard input and letting it exit on end-of-input,
+    /// which is a *descriptor* event and has no representation in a byte stream. Without this the
+    /// only way to end a hosted conversation would be `kill`, which is the ungraceful one.
+    ///
+    /// Meaningless on a `.pty` session, where the master is one bidirectional descriptor and
+    /// closing it is closing the terminal; that is answered `unsupportedChannel` rather than
+    /// obeyed.
+    case closeInput(PTYHostCloseInput)
+
     /// App → daemon: end this child.
     case kill(PTYHostKill)
 
@@ -172,16 +185,26 @@ public struct PTYHostHelloRefusal: Codable, Equatable, Sendable {
 
 /// How a child is wired up.
 ///
-/// Present from protocol version 1 even though only `.pty` is implemented, exactly so that
-/// hosting native conversations later — three descriptors, a process group, `waitpid`, and byte
-/// relaying with no interpretation — bumps nothing (D6). It is also the seam the fd-passing
-/// fallback would extend; see `PTYHostFrame.spawn`.
+/// Present from protocol version 1, which is what let hosting native conversations arrive as a
+/// daemon change rather than a protocol bump (D6). It is also the seam the fd-passing fallback
+/// would extend; see `PTYHostFrame.spawn`.
 public enum PTYHostChannel: Codable, Equatable, Sendable {
     /// A pseudo-terminal, sized by `grid`. The app must send the real grid: SwiftTerm clamps an
     /// unlaid-out view to 2×1 rather than to zero, and `forkpty` takes 2×1 at face value, so a
     /// placeholder boots the agent's TUI into a two-column window.
     case pty(grid: PTYHostGrid)
-    /// Three pipes. Not implemented in version 1.
+
+    /// Three pipes — stdin, stdout, stderr — a process group, and `waitpid`.
+    ///
+    /// What a native conversation's CLI is launched on: `AgentChildProcess`'s spawn contract
+    /// minus the `Process` object. The three streams stay three on the wire as well, because
+    /// merging stderr into stdout would corrupt the JSON line stream the transports parse —
+    /// stderr crosses as a `kind` 1 frame carrying `PTYHostFramingDefaults.standardErrorFlag`.
+    ///
+    /// A pipes session has **no terminal**, so three things a `.pty` session has are absent
+    /// rather than defaulted: no grid (`resize` is answered `unsupportedChannel`), no
+    /// `tcgetpgrp` and therefore no `foreground` frame, and no screen to seed — a `detach`
+    /// carries empty seeds and a rejoin is always `.cut`.
     case pipes
 
     enum Mode: String, Codable {
@@ -269,9 +292,10 @@ public enum PTYHostSpawnRefusal: String, Codable, Equatable, Sendable {
     case executableUnavailable
     case retiring
     case capacity
-    /// A `channel` this build does not implement — `.pipes` until native conversations are hosted
-    /// (D6). A refusal rather than a silent `.pty`: a conversation transport quietly given a
-    /// pseudo-terminal would look like a working session producing unparseable output.
+    /// A `channel` this build does not implement. Nothing refuses `.pipes` any more, but the
+    /// token stays because the refusal is the rule rather than the case: a conversation transport
+    /// quietly given a pseudo-terminal would look like a working session producing unparseable
+    /// output, so an unimplemented channel is always a refusal and never a substitution.
     case unsupportedChannel
 }
 
@@ -339,6 +363,13 @@ public enum PTYHostReplay: Codable, Equatable, Sendable {
     /// The ring wrapped, or there was no seed. `CAN` (0x18) then the ring tail — CAN first,
     /// because cutting the head off the ring means the replay can now *begin* inside an escape
     /// sequence too. The watcher re-derives its own screen from what follows.
+    ///
+    /// **On a `.pipes` session the tail is trimmed to a line boundary**, and this is the only
+    /// answer such a session ever gives. The stream the adapters parse is newline-delimited
+    /// JSON, so a tail beginning mid-line hands a fresh parser one guaranteed malformed line;
+    /// the daemon therefore drops everything before the first newline in the tail, leaving the
+    /// `CAN` alone on the first line and every line after it whole. It still parses nothing to
+    /// do it — finding a byte is not reading a stream.
     case cut
     /// There is no history to replay.
     case none
@@ -441,6 +472,15 @@ public struct PTYHostDetach: Codable, Equatable, Sendable {
         self.screenSeed = screenSeed
         self.modeSeed = modeSeed
         self.ringOffset = ringOffset
+    }
+}
+
+/// Close this child's standard input, and nothing else.
+public struct PTYHostCloseInput: Codable, Equatable, Sendable {
+    public let id: PTYHostSessionIdentity
+
+    public init(id: PTYHostSessionIdentity) {
+        self.id = id
     }
 }
 
@@ -550,6 +590,7 @@ extension PTYHostFrame {
         case attached
         case resize
         case detach
+        case closeInput
         case kill
         case exited
         case foreground
@@ -583,6 +624,7 @@ extension PTYHostFrame {
         case .attached: self = .attached(try Self.body(container, raw))
         case .resize: self = .resize(try Self.body(container, raw))
         case .detach: self = .detach(try Self.body(container, raw))
+        case .closeInput: self = .closeInput(try Self.body(container, raw))
         case .kill: self = .kill(try Self.body(container, raw))
         case .exited: self = .exited(try Self.body(container, raw))
         case .foreground: self = .foreground(try Self.body(container, raw))
@@ -628,6 +670,9 @@ extension PTYHostFrame {
             try container.encode(value, forKey: .body)
         case .detach(let value):
             try container.encode(FrameType.detach, forKey: .type)
+            try container.encode(value, forKey: .body)
+        case .closeInput(let value):
+            try container.encode(FrameType.closeInput, forKey: .type)
             try container.encode(value, forKey: .body)
         case .kill(let value):
             try container.encode(FrameType.kill, forKey: .type)

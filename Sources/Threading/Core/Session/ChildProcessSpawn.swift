@@ -442,6 +442,16 @@ final class ChildPipe {
         writeEnd = -1
         return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
+
+    /// The write end without Foundation in the middle, for `PTYHostPipeLink`, which hands it to a
+    /// `DispatchIO` channel that closes the descriptor from its own cleanup handler and must be
+    /// its only owner.
+    func takeWriteDescriptor() -> Int32 {
+        precondition(writeEnd >= 0, "A pipe write end can be transferred once")
+        let descriptor = writeEnd
+        writeEnd = -1
+        return descriptor
+    }
 }
 
 // MARK: - Bounded One-Shot Child

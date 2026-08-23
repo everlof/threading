@@ -403,7 +403,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 77)
+        XCTAssertEqual(authoredRows.count, 79)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -475,10 +475,13 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Files & Folders", "Notifications", "Accessibility", "Screen Recording",
             "Live usage from your Claude login"
         ])
+        // The background host's two rows are last on the page and are ordered after Start Over
+        // deliberately: the page reads as "where things are, how to start over, and what is still
+        // running when Threading is not".
         XCTAssertEqual(actual["advanced"], [
             "Allow paired-iPhone checkups", "Settings", "Projects, sessions and caches",
             "First-launch walkthrough", "Run at next launch", "Reset settings",
-            "Reset everything"
+            "Reset everything", "Background host", "Turn off the background host"
         ])
     }
 

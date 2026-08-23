@@ -1,15 +1,16 @@
 # The PTY host
 
-Status: **an agent session survives a quit and a relaunch under the hidden key; there is no
-visibility surface yet.** `Packages/ThreadingPTYHostKit` holds the contract, `Targets/PTYHost` is
-the daemon and launchd starts it, `Sources/Threading/Core/PTYHost` can connect to it, refuse an
-incompatible one and say why it did not, an **agent session** runs its child there instead of in
-this process, and quitting Threading now hands those children over rather than killing them —
-the next launch takes them back, replays exactly what it missed where it can, and does not reflow
-an agent that kept working. What is still missing is the surface that *says* any of this is
-happening: the quit question, the launch band and the Background Sessions list are the next slice.
-`AppSettings.ptyHostEnabled` ships off, so every session runs its PTY in-process exactly as before
-unless somebody sets the hidden key. The feature it serves — sessions that outlive the app — is
+Status: **a session survives a quit and a relaunch, on a terminal or on pipes, and the app now
+says so.** `Packages/ThreadingPTYHostKit` holds the contract, `Targets/PTYHost` is the daemon and
+launchd starts it, `Sources/Threading/Core/PTYHost` can connect to it, refuse an incompatible one
+and say why it did not, an **agent session** runs its child there instead of in this process,
+a **native conversation** runs its CLI there over three pipes, and quitting Threading hands those
+children over rather than killing them — the next launch takes the terminals back, replays exactly
+what they missed where it can, does not reflow an agent that kept working, and resumes each
+conversation from what its CLI wrote while nobody was watching. Three surfaces report it: the quit
+question, a once-per-launch band, and the Background Sessions list on the Advanced page.
+`AppSettings.ptyHostEnabled` ships off, so every session runs in-process exactly as before unless
+somebody turns it on. The feature it serves — sessions that outlive the app — is
 `docs/feature-drafts/durable-sessions.md` §4.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
@@ -37,7 +38,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `hello` | → ← | 0 | `protocol`, `minimumSupported`, `build`, `pid` |
 | `helloRefused` | ← | 0 | `compatibility`, `update` |
 | `list` | → | 0 | — |
-| `sessions` | ← | 0 | `[PTYHostSessionSummary]` — `id`, `pid`, `startedAt`, `executable`, `grid`, `isAttached`, `exit` |
+| `sessions` | ← | 0 | `[PTYHostSessionSummary]` — `id`, `pid`, `startedAt`, `executable`, `grid`, `isAttached`, `exit`, `channel` |
 | `spawn` | → | 0 | `id`, `channel` (`.pty(grid:)` \| `.pipes`), `executable`, `arguments`, `execName`, `environment`, `cwd` |
 | `spawned` | ← | 0 | `id`, `pid`, `startTime` |
 | `spawnRefused` | ← | 0 | `id`, `reason` (`alreadyExists`, `executableUnavailable`, `retiring`, `capacity`, `unsupportedChannel`) |
@@ -48,6 +49,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `input` | → | 2 | raw bytes, no envelope |
 | `resize` | → | 0 | `id`, `grid` (cols, rows, xpixel, ypixel) |
 | `detach` | → | 0 | `id`, `screenSeed`, `modeSeed`, `ringOffset` |
+| `closeInput` | → | 0 | `id` |
 | `kill` | → | 0 | `id`, `escalate` |
 | `exited` | ← | 0 | `id`, `status`, `signalled` |
 | `foreground` | ← | 0 | `id`, `processGroup` |
@@ -75,10 +77,11 @@ whole `ViewportLeases` structure are remote-access authorization concerns, and t
 receives one resolved grid and never learns there were leases. No title, cwd or activity — the
 app parses those, from the emulator it still owns.
 
-**Deferred but shaped for.** `channel: .pipes` for native conversations over pipes, and the
-compression bit in `flags`. Each is a frame or a field that already exists, so neither bumps the
-protocol. `foreground` was deferred too and then was not: the app decides title ownership from
-`tcgetpgrp` on a descriptor a host-backed session does not have, so the frame landed in v1 — the
+**Deferred but shaped for.** The compression bit in `flags`. `channel: .pipes` was the other one
+and is now implemented — see [Pipes](#pipes) — which cost the protocol one frame (`closeInput`), one
+`flags` bit and one optional summary field, and bumped nothing, which is exactly what deciding the
+discriminator in version 1 bought. `foreground` was deferred too and then was not: the app decides
+title ownership from `tcgetpgrp` on a descriptor a host-backed session does not have, so the frame landed in v1 — the
 daemon holds the master, and one syscall with no parsing in it is a question it can answer.
 Hosting `.projectTerminal`, `.sessionShell` and `.ephemeral` terminals is what that unblocks, and
 stays out of these slices.
@@ -300,10 +303,13 @@ draining.
 placeholder, for the 2×1 reason above — using `executable`, `arguments`, `execName`, `environment`
 and `cwd` **verbatim**. The daemon adds nothing and removes nothing: it inherits launchd's
 environment rather than the user's, and the composition rules stay in the app where the measured
-leakage list and the login-shell command line already live. `.pipes` is refused with
-`spawnRefused(unsupportedChannel)` until native conversations are hosted; a duplicate id is
-`alreadyExists`; a missing or non-executable file is `executableUnavailable`, checked before the
-fork so the answer is a refusal rather than an exit status.
+leakage list and the login-shell command line already live. `.pipes` forks the same way through
+`posix_spawn` — see [Pipes](#pipes); a duplicate id is `alreadyExists`; a missing or
+non-executable file is `executableUnavailable`, checked before the fork so the answer is a refusal
+rather than an exit status. `unsupportedChannel` survives with no channel to refuse, because the
+refusal is the rule rather than the case: an unimplemented channel is always a refusal and never a
+substitution, since a conversation transport quietly given a pseudo-terminal would look like a
+working session producing unparseable output.
 
 The reply is `spawned(id, pid, startTime)`, where the start time is read straight back out of the
 kernel with `proc_pidinfo` — the same pair the app's orphan sweep uses, because a pid on its own
@@ -735,8 +741,9 @@ Threading's to write.
 
 ### What registration does not cover
 
-No UI. The Advanced page's controls, the Background Sessions list and the quit question are the
-visibility surface, and they are the next slice. And the hidden key stays **off by default** until
+The controls that drive it. The Advanced page's switch, the Background Sessions list and the quit
+question are [the visibility surface](#the-visibility-surface). And the key stays **off by
+default** until
 R1 — TCC attribution of a launchd agent's children — has been run on a SIP-enabled Mac; see
 [`permissions.md`](permissions.md#the-pty-host-daemon-breaks-the-parent-relationship-and-that-is-unverified).
 
@@ -835,11 +842,10 @@ handed a factory or it is not.
 - **The remote mirror is unaffected.** It taps `onOutputBytes`, which fires in the same place it
   did.
 
-### What host-backing does not cover yet
+### What host-backing says on screen
 
-The visibility surface. Nothing on screen says a session is host-backed, that three of them kept
-running while Threading was closed, or that one of them is wedged; the quit question, the launch
-band and the Background Sessions list are the next slice.
+[The visibility surface](#the-visibility-surface): the quit question, the launch band and the
+Background Sessions list.
 
 ## Detach and reattach
 
@@ -879,16 +885,17 @@ session closes and only work in flight is lost, and neither is true of one the d
 ### What a launch takes back
 
 `PTYHostReattach.run` connects, `list`s, and classifies what came back against what the app still
-has. Four answers, because "the daemon has it" is not one fact:
+has. Five answers, because "the daemon has it" is not one fact:
 
 | | What happens |
 |---|---|
-| running, and the conversation exists | taken back — a controller is built the way a dormant session's is, and its `TerminalSession` **attaches instead of spawning** |
+| running on a **pty**, and the conversation exists | taken back — a controller is built the way a dormant session's is, and its `TerminalSession` **attaches instead of spawning** |
+| running on **pipes** | ended here, and the conversation resumed from its transcript — see [Pipes](#pipes) for why a request/response transport cannot be rejoined |
 | `exit != nil` | the exit is recorded on the session record and the row stays dormant with that status, exactly as an in-process ending would have left it. `lastActiveAt` is untouched: nobody recorded when it ended |
 | the conversation is gone or archived | `attach` then `kill(escalate:)`, journalled. Nothing can ever show that child again |
 | in the daemon's `lost` set | journalled, and left to `relaunchSessionsFromLastQuit` to resume from its transcript. The daemon cannot hand it back, so holding it back from the relaunch would strand it |
 
-The first two are what the relaunch must skip; the last two are not. `relaunchSessionsFromLastQuit`
+The first and third are what the relaunch must skip; the other three are not. `relaunchSessionsFromLastQuit`
 runs **after** this and plans only what the host does not hold — see
 [`crash-recovery.md`](crash-recovery.md#what-a-recovery-launch-does-not-write) for what that does
 to the running-sessions record, and [`sessions.md`](sessions.md#the-sessions-that-come-back-on-their-own)
@@ -969,7 +976,231 @@ installs a `SIGWINCH` handler that appends `stty size` to a file, and the file i
 a whole detach-and-reattach cycle and has exactly one line after the window genuinely moves. The
 screen cannot be the witness here, because a replay puts an earlier size line back on it.
 
+## Pipes
+
+A native conversation's CLI has no terminal. It is `posix_spawn`ed with three pipes, a process
+group of its own, and `waitpid` — `AgentChildProcess`'s existing spawn contract minus the
+`Process` object — and the daemon relays bytes across it without reading one. That was decided in
+version 1 as `spawn`'s `channel` discriminator and shipped last, because the pipe path is not more
+daemon code; it is a great deal more *app* code, and re-hosting three transports under a new
+transport in the same change as the terminal one would be two risky changes wearing one commit.
+
+### Three streams stay three
+
+The daemon reads standard output and standard error on separate channels and keeps them separate
+on the wire: stderr crosses as a `kind` 1 frame with `PTYHostFramingDefaults.standardErrorFlag`
+set. Merging them would corrupt the newline-delimited JSON the transports parse, which is
+`AgentChildProcess`'s own rule rather than a new one.
+
+**A flag rather than a fourth `kind`.** An unknown `kind` byte is terminal to the decoder — there
+is no resynchronisation point in a length-prefixed stream — so a stderr burst reaching a build that
+predates it would close the connection rather than be ignored. `flags` is already carried through
+untouched, so an older build reads diagnostics as ordinary output instead of dropping the link,
+which is the milder of the two wrong answers.
+
+**Only standard output reaches the ring.** A rejoining watcher parses one stream, and interleaving
+the other into the replay would corrupt exactly what the replay exists to hand over; a second ring
+would be a second `totalBytesWritten` for one `ringOffset` to mean two things by. Diagnostics are
+live-only, which is also honest: a rejoin that replayed yesterday's stderr would be attributing an
+old observation to a new one.
+
+### What a pipes session does not have
+
+Three things are absent rather than defaulted, and each is a refusal rather than a substitution:
+
+- **No grid.** `resize` is answered `error(unsupportedChannel)` and the connection *survives* it —
+  a well-formed frame for the wrong channel is not a frame that cannot be believed, and closing
+  would end somebody's conversation over a caller's slip. The summary reports a 0×0 grid rather
+  than a plausible 80×24, because a window size it does not have is a fact somebody would act on.
+- **No `tcgetpgrp`.** No `foreground` frame is ever pushed. Not a degradation: the app asks that
+  question only of a terminal, to decide whether a title belongs to the shell or to what it is
+  running.
+- **No screen.** A `detach` carries empty seeds, because a screen seed is a repaint derived from a
+  live emulator and there is no emulator anywhere. So a rejoin is **always** a cut, and answering
+  `.exact` off an empty screen would be a replay of bytes with nothing to render them into.
+
+The cut tail is trimmed to a line boundary: everything before the first newline goes, leaving the
+`CAN` alone on the first line and every line after it whole. A tail beginning mid-line would hand a
+fresh parser one guaranteed malformed line — and, worse, one that reads as a provider protocol
+error rather than as a cut. The daemon still parses nothing to do it: finding a byte is not reading
+a stream.
+
+### `closeInput`, and why it needs a frame
+
+Every native transport ends a conversation by closing the CLI's standard input and letting it exit
+on end of input. That is a *descriptor* event and has no representation in a byte stream, so
+without a frame the only way to end a hosted conversation would be `kill`, which is the ungraceful
+one. The daemon closes the channel rather than the descriptor — `DispatchIO`'s cleanup handler is
+the descriptor's only owner — and closes it with `[]` rather than `.stop`, so whatever is still
+queued reaches the child first: the last thing written before a goodbye is usually the request the
+goodbye is about. On a `.pty` session the frame is answered `unsupportedChannel`, where the master
+is one bidirectional descriptor and closing it is closing the terminal.
+
+### The app's half: the same three descriptors
+
+`AgentChildProcess.launch` gains a `host: PTYHostChildPlan?`. When it is set, the launch makes the
+*same three pipes it always made* and hands the transport the identical ends — same `FileHandle`s,
+same `F_SETNOSIGPIPE` on standard input, same end-of-file semantics — while `PTYHostPipeLink` owns
+the other three and pumps them across the wire. So `ClaudeStreamSession`, `CodexStreamSession` and
+`ACPStreamSession` see the same bytes, in the same order, through the same API, and the framing,
+handshake deadlines, malformed-line counters and exactly-once exit callbacks each of them owns are
+untouched. That is the property the whole slice rests on, and it is a property of the construction
+rather than a claim.
+
+**Nil is always "run it here instead".** No daemon, a version gate that refused, a `spawnRefused`,
+a silence — each is a degradation to the launch this app performed before the daemon existed, each
+is journalled with a structural cause, and none of them throws: a throw would be a launch failure
+on a conversation that has a perfectly good way to start.
+
+**The spawn is awaited, and the wait is bounded.** `AgentChildProcess.launch` is synchronous by
+contract — the transports set `isRunning` on the line after it returns — so the host-backed path
+has to know whether the child exists before it returns, which means waiting for `spawned` or
+`spawnRefused`. The daemon answers straight out of `posix_spawn`, so this is a millisecond in
+practice; `PTYHostPipeDefaults.spawnTimeout` exists so that a daemon which has stopped answering
+costs a launch a fallback rather than a hang.
+
+**One ending, delivered once.** An `exited` frame and the connection dropping under it are the same
+fact seen twice. `PTYHostPipeLink.end(status:)` is guarded, closes the two output channels with
+`[]` so the last of the child's output is read before the end of file that follows it, and only
+then delivers the status on the main queue — a transport told "it exited" while its pipe was still
+open would tear itself down with the child's last output unread. A link that ended without an
+`exited` reports `128 + SIGHUP`, which is what a shell reports for a process that lost the thing it
+was attached to, and is deliberately not the spawn-failure status: that means "it never started"
+and would put a launch failure on a conversation that had been running for an hour.
+
+### Why a conversation is not reattached
+
+A quit hands the CLI over; the next launch **ends it and resumes the conversation from its
+transcript**. That is the one asymmetry with terminals, and it is a property of the transport
+rather than a shortcut. A terminal's whole state is a byte stream, which is why a replay can
+reproduce it. A conversation's transport is a request/response protocol whose state — the
+handshake, the thread identity, the turn in flight, the composer capabilities, the pending
+permission — lives in the app, not on the wire, and a fresh app cannot pick up a stream that is
+half-way through a turn it never started.
+
+**What the child did while Threading was closed is not lost**, which is the point: it was written
+to the provider's own transcript as it happened, and that is what the resume reads. So the cost of
+a quit drops from "the turn in flight is lost" to "the turn in flight finishes without you", which
+is the whole of what §4 asks for on this surface.
+
+The end-and-resume is the reattach step's, not the relaunch's, and the relaunch **waits for it**:
+each child is being ended precisely so a fresh CLI can start on the same conversation, and two CLIs
+writing one provider transcript is the race that would make. An orphan has no conversation and
+nothing waits on it, which is why that kill stays fire-and-forget.
+
+Re-adopting a live conversation is the named follow-up, and it needs one thing this design does not
+have: the transports' handshake state on the wire, or a way to re-derive it. Do not add it by
+teaching the daemon to parse the stream.
+
+## The visibility surface
+
+Three places, no fourth. Work with no window has to be visible, and each of these answers a
+different moment: what quitting will do, what a launch found, and where a wedged agent is.
+
+**Rejected: an `NSStatusItem`.** The app has none, and a permanent menu-bar item is a new always-on
+surface with its own icon, theme, accessibility and localisation burden for a fact that is only
+interesting at two moments — quit and launch — both of which already have a place to say it.
+Revisit only if the first two measurably fail.
+
+### The quit question becomes a choice
+
+`AppDelegate.quitConfirmation(runningSessionCount:inFlightTurnCount:)` still builds today's
+two-answer `ConfirmationRequest`, and the three-answer overload **calls it** when nothing is
+host-backed — so "the wording did not change for a launch without the background host" is true by
+construction rather than by two copies being kept in step. With sessions in the daemon the question
+becomes a `QuitQuestion.chooses`: *Leave 3 Running* / *Stop Them and Quit* / *Cancel*.
+
+The counts are the whole difficulty. Sessions the daemon keeps are named as continuing; sessions it
+**cannot** keep are counted separately and still described as closing, because that is what happens
+to them; and the turns in flight are counted among the closing set only, since a turn being written
+in a session the daemon keeps is not lost by quitting. Saying "3 sessions close" over a set where
+two of them keep working is the exact overstatement this sheet already learned not to make once,
+with agents that were merely idle.
+
+**A choice cannot be suppressible.** `ConfirmationPrompt.quitWithBackgroundSessions` is
+`.alwaysAsks(.newQuestionEachTime)`: a remembered answer has to be *an* answer, and a box beside
+three of them says nothing about which one it would repeat — the question names a set of agents
+that did not exist when the last answer was given. The user's switch on the *sibling* prompt is
+still honoured at the call site and resolves to `.leaveRunning`: somebody who asked not to be
+interrupted at a quit did not ask for their agents to be stopped, and the one thing a suppressed
+prompt must never do is pick the destructive branch on their behalf.
+
+`QuitAnswer.stopEverything` runs `AgentRuntime.terminateHostBackedSessions()` **before**
+`detachHostBackedSessions()`, which then finds nothing left to hand over, and *after* the
+running-sessions record is written: a session the user stopped at the quit is still a session the
+next launch should offer to bring back.
+
+### A launch band, once per launch
+
+`PaneNoticeView` — the component `LaunchRestoration` already uses for the post-crash band, and for
+its reason: this is a standing condition rather than a receipt, so it is explicitly not a
+`ToastView`. `PTYHostLaunchNotice` is the decision as a value, so what the band says can be
+asserted without a window, and `PTYHostLaunchNoticeCenter` holds the one-shot rule in memory.
+Nothing goes on disk: the fact it reports is the daemon's own list, which the next launch asks for
+again.
+
+Two sentences and two answers:
+
+- **"3 sessions kept running while Threading was closed."** Terminals taken back plus conversations
+  the daemon kept working. `Reattach` appears only when this launch did *not* take something
+  back — after a clean reattach they are ordinary running sessions and there is nothing left to
+  press.
+- **"2 sessions were lost while Threading was closed."** The daemon restarted and its children went
+  with it (`KeepAlive` restores the service, not the work). `Resume` puts them back through the
+  ordinary staggered relaunch, bypassing `sessionRestorePolicy` on purpose: the policy answers
+  "what should come back on its own", and this is somebody pressing a button.
+
+**A loss outranks a survival.** Only one band fits, and the kept-running sentence is good news that
+needs nothing done about it while the lost one names work that is not coming back on its own. The
+journal has both counts either way.
+
+### The Background Sessions list
+
+A section on the Advanced page, beside the "where is my data" paths: the list leads, and the two
+controls follow, because the list is the subject and the switch is what you reach for after reading
+it. The list is **not** a row inside the card — a `SettingsCard` is a retained stack of full-bleed
+rows and a bounded table is not a row.
+
+`PTYHostBackgroundSessionsInventory` surveys off the main actor — connect, `hello`, `list`, close —
+and hands the page one value. The registration status is asked *between* the cheap refusals and the
+connect, because "launchd has never seen the label" explains a silence the socket probe would report
+only as `notRunning`. A hosted test bundle never reads `SMAppService.status`, for
+`PTYHostRegistrationCoordinator`'s reason: the bundle a test runs in *is* the shipping app.
+
+Each row is the daemon's vocabulary joined to the app's: the conversation's name, its project, its
+runtime, an elapsed uptime — "started 4 hours ago" is the question a wedged agent raises — and the
+pid a support answer needs. A child whose conversation has been deleted is still identifiable by
+what it is running, which is exactly the row somebody hunting a wedged agent needs to see. **Stop**
+is attach-then-kill on a connection of its own (`PTYHostSessionStop`, shared with the reattach
+step's own kills): `kill` names a session and a connection may only name the one it is bound to, so
+a watcher that wants to end a child it is not watching has to become its watcher first. An ended
+child's Stop is disabled rather than dropped — a control that vanishes explains less than one that
+waits.
+
+The viewport caps at six rows and the table owns only what is inside it. The count comes from
+another process and is unbounded as far as this page is concerned; the list hands the wheel back at
+its own content ends, because the page below it is the scroller the user is driving.
+
+The empty state carries the **reason**, which is the whole point of `PTYHostAvailability` having
+separate cases rather than a `Bool`. `requiresApproval` is the one reason with a fix the app cannot
+perform itself, so it is the one that grows a button —
+`PTYHostRegistration.openLoginItemsSettings()`.
+
+**Turn off the background host** drives `AppSettings.ptyHostEnabled` off and then says which way
+the removal went, because the two outcomes are otherwise indistinguishable and the one that leaves
+a daemon running is the one a user needs told. The removal itself is
+[`PTYHostRegistration.removalDecision`](#turning-it-off)'s, unchanged: unregister when the daemon
+holds nothing, leave it registered when it holds something, because `unregister()` kills the
+running helper and turning a preference off must not be a way to end somebody's turn.
+
+The switch itself stopped being a `defaults write` here. It is presented on the Advanced page and
+is `.catalogueOnly` by construction — omitting `remotePolicy` is deliberate, so `list_settings` may
+describe the row while neither the phone nor an agent can read or move the value. Starting a
+background daemon on somebody's Mac from a phone is not a thing this switch is going to do.
+
 ## What is not decided here
 
-The visibility surface — the quit question, the launch band, the Background Sessions list — is a
-later slice. When it lands it adds its section here rather than a new document.
+Re-adopting a **live** native conversation, rather than ending it and resuming from its transcript
+— see [Why a conversation is not reattached](#why-a-conversation-is-not-reattached). The mirror
+unification and scheduled work without a window are the other two named follow-ups, and both stay
+contingent on this having shipped and settled.

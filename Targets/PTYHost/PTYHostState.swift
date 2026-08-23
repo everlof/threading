@@ -30,6 +30,15 @@ struct PTYHostStateRecord: Codable, Equatable {
     let startTime: PTYHostProcessStartTime?
     /// Present on `spawned`, as the app named it. Nothing here interprets it.
     let executable: String?
+    /// Present on `spawned`. **Absent means `.pty`**, so every line written before pipes existed
+    /// reads as what it was — the same migration discipline `AgentChildRecord.owner` states, and
+    /// for the same reason: the property belongs to the record's shape rather than to a build.
+    ///
+    /// A restart uses it for one thing, and it is not a decision: the `lost` report and the
+    /// journal line say which kind of session could not be accounted for, which is the difference
+    /// between "an agent's terminal ended" and "a conversation's turn ended" for whoever reads it
+    /// afterwards. The reclaim itself is the same either way — pid, start time, kill the group.
+    let channel: PTYHostChannelKind?
     let status: Int32?
     let signalled: Bool?
     let at: Date
@@ -40,6 +49,7 @@ struct PTYHostStateRecord: Codable, Equatable {
         pid: Int32,
         startTime: PTYHostProcessStartTime? = nil,
         executable: String? = nil,
+        channel: PTYHostChannelKind? = nil,
         status: Int32? = nil,
         signalled: Bool? = nil,
         at: Date = Date()
@@ -50,6 +60,7 @@ struct PTYHostStateRecord: Codable, Equatable {
         self.pid = pid
         self.startTime = startTime
         self.executable = executable
+        self.channel = channel
         self.status = status
         self.signalled = signalled
         self.at = at
@@ -63,6 +74,8 @@ struct PTYHostUnaccountedSession: Equatable {
     let id: PTYHostSessionIdentity
     let pid: Int32
     let startTime: PTYHostProcessStartTime?
+    /// What it was wired up as, for the journal line that says what was lost. Absent is `.pty`.
+    let channel: PTYHostChannelKind
     /// The last moment the previous daemon can be said to have vouched for it: the timestamp on
     /// its own `spawned` line.
     let since: Date
@@ -171,6 +184,7 @@ final class PTYHostState: @unchecked Sendable {
                     id: record.id,
                     pid: record.pid,
                     startTime: record.startTime,
+                    channel: record.channel ?? .pty,
                     since: record.at
                 )
             case .exited, .lost:

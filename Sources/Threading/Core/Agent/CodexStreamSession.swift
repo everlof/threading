@@ -70,6 +70,14 @@ final class CodexStreamSession:
     private let configurationProvider: () -> CodexTurnConfiguration
     private let workingDirectory: String
 
+    /// Whether this conversation's CLI belongs in `threading-ptyd`, asked once per launch.
+    ///
+    /// A closure rather than a value for `plan`'s reason: it is resolved at launch time, so a
+    /// dormant conversation reopened an hour later asks the current setting and the current
+    /// daemon rather than the ones that were true when the controller was built. Nil is today's
+    /// in-process child, which every unavailability degrades to.
+    private let hostPlan: () -> PTYHostChildPlan?
+
     private var process: AgentChildProcess?
     private var input: FileHandle?
     private var launchResumeState: ResumeState = .unavailable
@@ -138,11 +146,13 @@ final class CodexStreamSession:
         sessionID: SessionID,
         workingDirectory: String = FileManager.default.currentDirectoryPath,
         configurationProvider: @escaping () -> CodexTurnConfiguration = { .inherited },
+        hostPlan: @escaping () -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.workingDirectory = workingDirectory
         self.configurationProvider = configurationProvider
+        self.hostPlan = hostPlan
         self.plan = plan
     }
 
@@ -175,7 +185,8 @@ final class CodexStreamSession:
                 executable: launchPlan.executable,
                 arguments: launchPlan.arguments,
                 environment: launchPlan.launchEnvironment(),
-                sessionID: sessionID
+                sessionID: sessionID,
+                host: hostPlan()
             ) { [weak self] status in
                 Task { @MainActor [weak self] in
                     self?.handleTermination(status: status)
@@ -352,6 +363,22 @@ final class CodexStreamSession:
         } else {
             onExit?(0)
         }
+    }
+
+    var isHostBacked: Bool { process?.isHostBacked ?? false }
+
+    /// Hands the CLI to `threading-ptyd` rather than ending it.
+    ///
+    /// Deliberately **not** `finish()` first, for the reason `ClaudeStreamSession` states: closing
+    /// standard input is how an app-server conversation ends gracefully, and this is the one path
+    /// where it must go on running.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool {
+        guard isRunning, let process, process.detachFromBackgroundHost(by: deadline) else {
+            return false
+        }
+        isRunning = false
+        onInteractionAvailabilityChange?()
+        return true
     }
 
     // MARK: - Launch Handshake

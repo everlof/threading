@@ -45,6 +45,14 @@ final class ACPStreamSession:
     private let mcpBinding: MCPServerBinding?
     private let plan: () throws -> AgentLaunchPlan
 
+    /// Whether this conversation's CLI belongs in `threading-ptyd`, asked once per launch.
+    ///
+    /// A closure rather than a value for `plan`'s reason: it is resolved at launch time, so a
+    /// dormant conversation reopened an hour later asks the current setting and the current
+    /// daemon rather than the ones that were true when the controller was built. Nil is today's
+    /// in-process child, which every unavailability degrades to.
+    private let hostPlan: () -> PTYHostChildPlan?
+
     private var process: AgentChildProcess?
     private var input: FileHandle?
     private var buffer = Data()
@@ -92,6 +100,7 @@ final class ACPStreamSession:
         profile: ACPProviderProfile,
         handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
         mcpBinding: MCPServerBinding? = nil,
+        hostPlan: @escaping () -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
@@ -99,6 +108,7 @@ final class ACPStreamSession:
         self.profile = profile
         self.handshakeTimeout = handshakeTimeout
         self.mcpBinding = mcpBinding
+        self.hostPlan = hostPlan
         self.plan = plan
     }
 
@@ -115,7 +125,8 @@ final class ACPStreamSession:
                 executable: launchPlan.executable,
                 arguments: launchPlan.arguments,
                 environment: launchPlan.launchEnvironment(),
-                sessionID: sessionID
+                sessionID: sessionID,
+                host: hostPlan()
             ) { [weak self] status in
                 Task { @MainActor [weak self] in self?.handleTermination(status: status) }
             }
@@ -240,6 +251,23 @@ final class ACPStreamSession:
         }
         finish()
         process?.terminate()
+    }
+
+    var isHostBacked: Bool { process?.isHostBacked ?? false }
+
+    /// Hands the CLI to `threading-ptyd` rather than ending it.
+    ///
+    /// Neither `session/cancel` nor `finish()`, for the reason `ClaudeStreamSession` states: both
+    /// are how a conversation *ends*, and this is the one path where the turn goes on running
+    /// after the window it was started from has gone.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool {
+        guard isRunning, let process, process.detachFromBackgroundHost(by: deadline) else {
+            return false
+        }
+        isRunning = false
+        cancelHandshakeDeadline()
+        onInteractionAvailabilityChange?()
+        return true
     }
 
     // MARK: - Handshake

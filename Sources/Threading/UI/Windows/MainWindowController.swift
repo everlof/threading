@@ -1859,10 +1859,90 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                     socketPath: socketPath
                 ) ?? false
             },
+            notice: { [weak self] notice in
+                self?.backgroundHostNotice.offer(notice)
+            },
             completion: { [weak self] heldByHost in
                 self?.planRelaunchFromLastQuit(recorded: recorded, heldByHost: heldByHost)
             }
         )
+    }
+
+    /// The launch band, once per launch, and the two answers it can carry.
+    ///
+    /// `LaunchRestoration`'s shape: the decision about *whether* there is anything to say is a
+    /// value (`PTYHostLaunchNotice`), the one-shot rule is the center's, and this is only the
+    /// presenter. Nothing about it is persisted — the fact it reports is the daemon's own list.
+    private lazy var backgroundHostNotice = PTYHostLaunchNoticeCenter(
+        actions: PTYHostLaunchNoticeCenter.Actions(
+            present: { [weak self] notice, answer in
+                self?.presentBackgroundHostNotice(notice, answer: answer)
+            },
+            reattach: { [weak self] in self?.reattachHeldSessions() },
+            resume: { [weak self] sessionIDs in self?.resumeLostSessions(sessionIDs) }
+        )
+    )
+
+    /// A `PaneNoticeView` rather than a toast: nobody clicked, there is no dwell long enough for
+    /// somebody who has walked away, and a band with a way back on it must wait for a press.
+    private func presentBackgroundHostNotice(
+        _ notice: PTYHostLaunchNotice,
+        answer: @escaping () -> Void
+    ) {
+        var actions: [PaneNoticeAction] = []
+        if let title = notice.actionTitle {
+            actions.append(PaneNoticeAction(title: title) { [weak self] in
+                self?.containerViewController.dismissNotice()
+                answer()
+            })
+        }
+        let band = PaneNoticeView(
+            tone: notice.isAttention ? .attention : .informational,
+            message: notice.message,
+            actions: actions,
+            onDismiss: { [weak self] in self?.containerViewController.dismissNotice() }
+        )
+        containerViewController.showNotice(band)
+    }
+
+    /// Asks the host again and takes back whatever it is still holding.
+    ///
+    /// Deliberately not `relaunchSessionsFromLastQuit()`: that record is consumed by the launch
+    /// that read it, and pressing a button must not be able to spend it a second time.
+    /// `reattachInBackground` refuses a session that already has a terminal, so asking twice
+    /// cannot produce two terminals on one conversation.
+    private func reattachHeldSessions() {
+        PTYHostReattach.run(
+            decision: PTYHostDecision.live(settings: environment.settings, bundle: .main),
+            store: environment.projectStore,
+            eventLog: environment.eventLog,
+            adopt: { [weak self] summary, socketPath in
+                self?.containerViewController.reattachInBackground(
+                    summary: summary,
+                    socketPath: socketPath
+                ) ?? false
+            },
+            completion: { _ in }
+        )
+    }
+
+    /// Puts the sessions a restarted daemon could not account for back, through the ordinary
+    /// relaunch path — the same staggered launcher a quit's record uses, because resuming eight
+    /// conversations at once is the thundering herd that launcher exists to avoid.
+    ///
+    /// It bypasses `sessionRestorePolicy` on purpose: the policy answers "what should come back
+    /// on its own", and this is somebody pressing a button.
+    private func resumeLostSessions(_ sessionIDs: [SessionID]) {
+        let resumable = sessionIDs.filter { environment.projectStore.session(withID: $0) != nil }
+        guard !resumable.isEmpty else { return }
+        environment.eventLog.record(.session, "Resuming sessions the PTY host lost", [
+            "sessions": String(resumable.count)
+        ])
+        let relauncher = StartupSessionRelauncher(sessionIDs: resumable) { [weak self] sessionID in
+            self?.containerViewController.launchInBackground(sessionID: sessionID)
+        }
+        startupRelauncher = relauncher
+        relauncher.start()
     }
 
     /// The half of `relaunchSessionsFromLastQuit` that runs once the background host has answered.

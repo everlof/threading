@@ -826,7 +826,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return .terminateNow
         }
 
-        guard confirmQuitIfAgentsRunning() else { return .terminateCancel }
+        let quitAnswer = confirmQuitIfAgentsRunning()
+        guard quitAnswer.quits else { return .terminateCancel }
 
         // Projects are persisted by ProjectStore as they change, but a coalesced write may
         // still be pending, so it is flushed before the agents are torn down.
@@ -864,6 +865,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // process can compute are what make the next launch's replay exact rather than a cut.
         // Necessarily ahead of `terminateAll`, which would otherwise kill exactly these children,
         // and after the record above, which stays the truth for the degraded path.
+        //
+        // Unless the user answered "stop them and quit", which is the whole point of the third
+        // button: the children are ended here, so the detach below finds nothing left to hand
+        // over. It runs *after* the running-sessions record above on purpose — a session the user
+        // stopped at the quit is still a session the next launch should offer to bring back, and
+        // that is exactly what the record is for.
+        if quitAnswer == .stopEverything {
+            AgentRuntime.shared.terminateHostBackedSessions()
+        }
         AgentRuntime.shared.detachHostBackedSessions()
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
@@ -904,21 +914,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// also why it stays quiet when nothing is running — a confirmation on every quit would be
     /// asking about nothing most of the time, which is how a prompt teaches people to dismiss it.
     @MainActor
-    private func confirmQuitIfAgentsRunning() -> Bool {
-        guard !isSystemInitiatedQuit else { return true }
+    private func confirmQuitIfAgentsRunning() -> QuitAnswer {
+        guard !isSystemInitiatedQuit else { return .leaveRunning }
 
-        // A host-backed session keeps running through the quit, so counting it here would have
-        // this sheet announce a loss that does not happen — its message says every open session
-        // closes and only work in flight is lost, and neither is true of one the daemon keeps.
-        // The *wording* is slice 9's, in `pty-host.md`; this is only the count refusing to lie.
-        let ending = AgentRuntime.shared.runningSessionIDs
-            .subtracting(AgentRuntime.shared.hostBackedSessionIDs)
-        guard !ending.isEmpty else { return true }
+        // A host-backed session keeps running through the quit, so counting it among what closes
+        // would have this sheet announce a loss that does not happen — that message says every
+        // open session closes and only work in flight is lost, and neither is true of one the
+        // daemon keeps. It is counted separately, and the question grows a third answer.
+        let background = AgentRuntime.shared.hostBackedSessionIDs
+        let ending = AgentRuntime.shared.runningSessionIDs.subtracting(background)
+        guard !ending.isEmpty || !background.isEmpty else { return .leaveRunning }
 
-        return ConfirmationAlert.ask(Self.quitConfirmation(
+        return ask(Self.quitConfirmation(
             runningSessionCount: ending.count,
-            inFlightTurnCount: AgentRuntime.shared.inFlightTurnCount(among: ending)
+            inFlightTurnCount: AgentRuntime.shared.inFlightTurnCount(among: ending),
+            backgroundSessionCount: background.count
         ))
+    }
+
+    /// Puts the question up and reads the answer back.
+    ///
+    /// The choice is not suppressible — a remembered answer has to be *an* answer, and a box
+    /// beside three of them says nothing about which one it would repeat — but the switch the
+    /// user already has, on the two-answer question, covers this moment too and is honoured here:
+    /// it resolves to `.leaveRunning`, the answer that ends nothing. Somebody who asked not to be
+    /// interrupted at a quit did not ask for their agents to be stopped, and the one thing a
+    /// suppressed prompt must never do is pick the destructive branch on their behalf.
+    @MainActor
+    private func ask(_ question: QuitQuestion) -> QuitAnswer {
+        switch question {
+        case .confirms(let request):
+            return ConfirmationAlert.ask(request) ? .leaveRunning : .cancel
+        case .chooses(let request):
+            guard AppSettings.shared.asks(before: .quitWithRunningAgents) else {
+                return .leaveRunning
+            }
+            return question.answer(atIndex: ConfirmationAlert.choose(request))
+        }
     }
 
     /// Built separately from being asked, so a test can hold the wording to what quitting does
@@ -951,6 +983,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 ),
             confirmTitle: L10n.string("Quit")
         )
+    }
+
+    /// The same seam once `threading-ptyd` is in the picture, and the reason it is an overload
+    /// rather than a third parameter with a default: with no host-backed session this **calls**
+    /// the two-answer builder above, so "the wording did not change for a launch without the
+    /// background host" is true by construction rather than by two copies being kept in step.
+    ///
+    /// `runningSessionCount` is the sessions that *close* — the daemon cannot host them, or the
+    /// session opted out, or there is no daemon — and `inFlightTurnCount` counts turns among
+    /// those only. A turn being written in a session the daemon keeps is not lost by quitting.
+    static func quitConfirmation(
+        runningSessionCount: Int,
+        inFlightTurnCount: Int,
+        backgroundSessionCount: Int
+    ) -> QuitQuestion {
+        guard backgroundSessionCount > 0 else {
+            return .confirms(quitConfirmation(
+                runningSessionCount: runningSessionCount,
+                inFlightTurnCount: inFlightTurnCount
+            ))
+        }
+        return .chooses(QuitChoiceCopy.request(
+            backgroundSessionCount: backgroundSessionCount,
+            closingSessionCount: runningSessionCount,
+            inFlightTurnCount: inFlightTurnCount
+        ))
     }
 
     /// Names the turns when there are any, and the sessions otherwise — the two facts cost the

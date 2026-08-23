@@ -967,10 +967,23 @@ enum AppSettingDefinitions {
     /// run on a **SIP-enabled** Mac and the answer written into `permissions.md`, turning this on
     /// by default risks agents that silently cannot read the user's files. Off is the only
     /// defensible default until then.
+    ///
+    /// **Presented on the Advanced page only, and `.catalogueOnly` by construction.** The switch
+    /// stopped being a `defaults write` when the Background Sessions section landed: a feature
+    /// whose whole point is work with no window has to be findable, and a key nothing names is a
+    /// key nobody can turn off either. Omitting `remotePolicy` is deliberate — a presented
+    /// descriptor resolves to `.catalogueOnly`, so `list_settings` may describe the row and
+    /// neither the phone nor an agent can read or move the value. `.ownerMutable` would open the
+    /// remote `PATCH`, and starting a background daemon on somebody's Mac from a phone is not a
+    /// thing this switch is going to do.
     static let ptyHostEnabled = AppSettingDescriptor<Bool>(
         identity: .ptyHostEnabled,
         persistenceKey: "ptyHostEnabled",
-        absence: .falseValue
+        absence: .falseValue,
+        presentations: [row(
+            "advanced", 7, "Background Sessions", "Background host",
+            ["PTY", "daemon", "background", "durable", "keep running", "threading-ptyd"]
+        )]
     )
     static let workspaceNavigatorSelection = AppSettingDescriptor<Data>(
         identity: .workspaceNavigatorSelection,
@@ -1382,7 +1395,10 @@ enum AppSettingDefinitions {
                   "reset", "start over", "fresh"),
         surfaced("advanced.resetEverything", pageID: "advanced", order: 6,
                   section: "Start Over", title: "Reset everything",
-                  "erase", "corrupt", "start over")
+                  "erase", "corrupt", "start over"),
+        surfaced("advanced.turnOffBackgroundHost", pageID: "advanced", order: 8,
+                  section: "Background Sessions", title: "Turn off the background host",
+                  "login items", "launch agent", "daemon", "threading-ptyd")
     ]
 
     static let all: [AppSettingDefinition] =

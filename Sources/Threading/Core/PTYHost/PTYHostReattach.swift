@@ -14,16 +14,12 @@ enum PTYHostReattachDefaults {
     /// that has not answered in this long is one whose answer this launch is better off without.
     static let surveyTimeout: TimeInterval = PTYHostRegistrationDefaults.surveyTimeout
 
-    /// How long a session nothing can show is given to die before its connection is dropped.
-    static let killTimeout: TimeInterval = 3
-
-    /// The replay a kill-only attach asks for.
+    /// The queue the survey and the launch's own kills run on. Serial, because the relaunch waits
+    /// on what is enqueued ahead of it.
     ///
-    /// Bound to the floor rather than to nothing: attaching is the only way to name a session on
-    /// a `kill`, and a watcher that is about to end the child has no use for its history. The
-    /// daemon clamps anything smaller up to this anyway.
-    static let killReplayBudget = PTYHostReplayDefaults.minimumBudgetBytes
-
+    /// The deadline and the bounded replay a *stop* is given are not here: they live with the stop
+    /// itself, in `PTYHostBackgroundSessionsDefaults`, because the Background Sessions list
+    /// performs exactly the same one.
     static let queueLabel = "codes.threading.ptyhost.reattach"
 }
 
@@ -83,7 +79,7 @@ struct PTYHostHoldingsSurvey: Sendable {
     static func connecting(eventLog: EventLog = .shared) -> PTYHostHoldingsSurvey {
         PTYHostHoldingsSurvey { decision in
             let held = PTYHostLatch<[PTYHostSessionSummary]>()
-            let box = ClientBox()
+            let box = PTYHostClientHolder()
 
             let probe = PTYHostProbe { request in
                 let client = PTYHostClient(
@@ -147,39 +143,33 @@ struct PTYHostHoldingsSurvey: Sendable {
         PTYHostHoldingsSurvey { _ in holdings }
     }
 
-    /// Holds a client across the `@Sendable` boundary the probe closure is.
-    private final class ClientBox: @unchecked Sendable {
-        private let lock = NSLock()
-        private var storage: PTYHostClient?
-
-        var client: PTYHostClient? {
-            lock.lock()
-            defer { lock.unlock() }
-            return storage
-        }
-
-        func adopt(_ client: PTYHostClient) {
-            lock.lock()
-            storage = client
-            lock.unlock()
-        }
-    }
 }
 
 // MARK: - The plan
 
 /// What one launch does about each session the background host is holding.
 ///
-/// Four answers rather than two, because "the daemon has it" is not one fact. A running child is
-/// taken back; a child that ended while nobody was attached is a dormant row with an exit status,
-/// exactly as an in-process exit would have left it; a child held for a conversation this app no
-/// longer has can never be shown by anything and is ended; and a session a restarted daemon could
-/// not account for is not the daemon's any more at all, so it goes to the ordinary relaunch path
-/// to be resumed by transcript.
+/// Five answers rather than two, because "the daemon has it" is not one fact. A running terminal
+/// is taken back; a running *conversation* kept working and is resumed from what it wrote, because
+/// its transport cannot be rejoined mid-stream; a child that ended while nobody was attached is a
+/// dormant row with an exit status, exactly as an in-process exit would have left it; a child held
+/// for a conversation this app no longer has can never be shown by anything and is ended; and a
+/// session a restarted daemon could not account for is not the daemon's any more at all, so it goes
+/// to the ordinary relaunch path to be resumed by transcript.
 struct PTYHostReattachPlan: Equatable {
 
-    /// Still running. This launch reconnects a terminal to it.
+    /// Still running, on a pseudo-terminal. This launch reconnects a terminal to it.
     let adopt: [PTYHostSessionSummary]
+
+    /// Still running, on three pipes. **Ended here and resumed from its transcript.**
+    ///
+    /// A native conversation's CLI speaks a newline-delimited request/response protocol whose
+    /// state — the handshake, the thread identity, the turn in flight, the composer capabilities
+    /// — lives in the app rather than on the wire, so a fresh app cannot pick up a stream that is
+    /// half-way through one. What the child *did* while Threading was closed is not lost, because
+    /// it was written to the provider's own transcript as it happened; that is what the resume
+    /// reads. `PTYHostSessionSummary.channel` is why this is a decision rather than a guess.
+    let resume: [PTYHostSessionSummary]
 
     /// Ended while nobody was watching. The exit is recorded and the row stays dormant.
     let ended: [PTYHostSessionSummary]
@@ -190,7 +180,13 @@ struct PTYHostReattachPlan: Equatable {
     /// Reported lost by a restarted daemon. Left to `relaunchSessionsFromLastQuit`.
     let lost: [SessionID]
 
-    static let empty = PTYHostReattachPlan(adopt: [], ended: [], orphans: [], lost: [])
+    static let empty = PTYHostReattachPlan(
+        adopt: [],
+        resume: [],
+        ended: [],
+        orphans: [],
+        lost: []
+    )
 
     /// Every session the ordinary relaunch must leave alone.
     ///
@@ -198,12 +194,14 @@ struct PTYHostReattachPlan: Equatable {
     /// quit and then ended is *not* a session to relaunch. It ran, it finished, and starting a
     /// second agent on the conversation because the record from the last quit said it had been
     /// running would be relaunching something that already had its turn.
+    /// A session on `resume` is deliberately **not** here: its child is being ended precisely so
+    /// the ordinary relaunch can start a fresh one on the conversation it was writing.
     var heldSessionIDs: Set<SessionID> {
         Set((adopt + ended).compactMap(\.sessionID))
     }
 
     var isEmpty: Bool {
-        adopt.isEmpty && ended.isEmpty && orphans.isEmpty && lost.isEmpty
+        adopt.isEmpty && resume.isEmpty && ended.isEmpty && orphans.isEmpty && lost.isEmpty
     }
 }
 
@@ -245,6 +243,7 @@ enum PTYHostReattach {
         isKnown: (SessionID) -> Bool
     ) -> PTYHostReattachPlan {
         var adopt: [PTYHostSessionSummary] = []
+        var resume: [PTYHostSessionSummary] = []
         var ended: [PTYHostSessionSummary] = []
         var orphans: [PTYHostSessionIdentity] = []
 
@@ -253,15 +252,21 @@ enum PTYHostReattach {
                 orphans.append(summary.id)
                 continue
             }
-            if summary.exit == nil {
-                adopt.append(summary)
-            } else {
+            guard summary.exit == nil else {
+                // An ending is an ending on either channel: the status is recorded and the row
+                // is dormant, whichever transport wrote the bytes before it.
                 ended.append(summary)
+                continue
+            }
+            switch summary.resolvedChannel {
+            case .pty: adopt.append(summary)
+            case .pipes: resume.append(summary)
             }
         }
 
         return PTYHostReattachPlan(
             adopt: adopt,
+            resume: resume,
             ended: ended,
             orphans: orphans,
             // A lost session is one the daemon *cannot* hand back, so it is deliberately not
@@ -289,6 +294,7 @@ enum PTYHostReattach {
         store: ProjectStore = .shared,
         eventLog: EventLog = .shared,
         adopt: @escaping @MainActor (PTYHostSessionSummary, String) -> Bool,
+        notice: @escaping @MainActor (PTYHostLaunchNotice) -> Void = { _ in },
         completion: @escaping @MainActor (Set<SessionID>) -> Void
     ) {
         // Answered here rather than inside the survey so it costs no hop at all: this is every
@@ -311,16 +317,52 @@ enum PTYHostReattach {
                         guard let session = store.session(withID: sessionID) else { return false }
                         return !session.isArchived
                     }
-                    let taken = apply(
+                    let outcome = apply(
                         plan,
                         socketPath: holdings.socketPath,
-                        build: build,
                         store: store,
                         eventLog: eventLog,
-                        queue: queue,
                         adopt: adopt
                     )
-                    completion(taken)
+                    // The band before the relaunch: the relaunch is what `completion` starts, and
+                    // a notice about what survived belongs in front of it rather than behind.
+                    if let announcement = PTYHostLaunchNotice.forLaunch(
+                        plan,
+                        pending: outcome.pending
+                    ) {
+                        notice(announcement)
+                    }
+
+                    // **The relaunch waits for the conversations, and only for those.** Each of
+                    // them is being ended so this launch can start a fresh CLI on the same
+                    // conversation, and two CLIs writing one provider transcript is the race that
+                    // would make. The orphans are enqueued *behind* the completion hop on the
+                    // same serial queue rather than ahead of it: nothing waits on a child held for
+                    // a conversation that no longer exists, and putting them first would make
+                    // every relaunch pay their deadlines.
+                    let socketPath = holdings.socketPath
+                    let ending = plan.resume.map(\.id)
+                    let orphans = plan.orphans
+                    guard !ending.isEmpty || !orphans.isEmpty else {
+                        completion(outcome.taken)
+                        return
+                    }
+                    queue.async {
+                        for identity in ending {
+                            endHandedBack(
+                                identity,
+                                socketPath: socketPath,
+                                build: build,
+                                eventLog: eventLog
+                            )
+                        }
+                        DispatchQueue.main.async {
+                            MainActor.assumeIsolated { completion(outcome.taken) }
+                        }
+                        for identity in orphans {
+                            end(identity, socketPath: socketPath, build: build, eventLog: eventLog)
+                        }
+                    }
                 }
             }
         }
@@ -331,20 +373,29 @@ enum PTYHostReattach {
     /// Performs the plan and answers the sessions the relaunch must leave alone.
     ///
     /// A session whose terminal could not be built is **not** in the answer: it is not being
-    /// taken back, so the ordinary relaunch is exactly right to relaunch it.
+    /// taken back, so the ordinary relaunch is exactly right to relaunch it. It *is* counted as
+    /// pending, which is what puts a `Reattach` on the launch band.
+    ///
+    /// Everything here is main-actor work on values the survey already has. The two kinds of
+    /// child that have to be *ended* are the caller's, because their deadlines decide when the
+    /// relaunch may start.
     private static func apply(
         _ plan: PTYHostReattachPlan,
         socketPath: String,
-        build: String,
         store: ProjectStore,
         eventLog: EventLog,
-        queue: DispatchQueue,
         adopt: @MainActor (PTYHostSessionSummary, String) -> Bool
-    ) -> Set<SessionID> {
+    ) -> (taken: Set<SessionID>, pending: Int) {
         var taken: Set<SessionID> = []
+        // Running sessions this launch did **not** take back. Normally zero — and it is the
+        // difference between a band that states a fact and a band with `Reattach` on it.
+        var pending = 0
         for summary in plan.adopt {
             guard let sessionID = summary.sessionID else { continue }
-            guard adopt(summary, socketPath) else { continue }
+            guard adopt(summary, socketPath) else {
+                pending += 1
+                continue
+            }
             taken.insert(sessionID)
         }
 
@@ -362,21 +413,14 @@ enum PTYHostReattach {
         }
 
         journal(plan, eventLog: eventLog)
-
-        guard !plan.orphans.isEmpty else { return taken }
-        let orphans = plan.orphans
-        queue.async {
-            for identity in orphans {
-                end(identity, socketPath: socketPath, build: build, eventLog: eventLog)
-            }
-        }
-        return taken
+        return (taken, pending)
     }
 
     private static func journal(_ plan: PTYHostReattachPlan, eventLog: EventLog) {
         guard !plan.isEmpty else { return }
         eventLog.record(.session, "PTY host reattach", [
             "adopted": String(plan.adopt.count),
+            "resumed": String(plan.resume.count),
             "ended": String(plan.ended.count),
             "orphaned": String(plan.orphans.count),
             "lost": String(plan.lost.count)
@@ -393,9 +437,9 @@ enum PTYHostReattach {
 
     /// Ends a child the host is holding for a conversation nothing can show.
     ///
-    /// An attach first, because `kill` names a session and a connection may only name the one it
-    /// is bound to. The replay it costs is bounded to the floor: this watcher is here to end the
-    /// child, not to read its history.
+    /// The attach-then-kill is `PTYHostSessionStop`'s, shared with the Background Sessions list's
+    /// Stop: `kill` names a session and a connection may only name the one it is bound to, so a
+    /// watcher that wants to end a child it is not watching has to become its watcher first.
     ///
     /// **Blocking**; never on the main actor.
     private static func end(
@@ -404,34 +448,42 @@ enum PTYHostReattach {
         build: String,
         eventLog: EventLog
     ) {
-        let exited = PTYHostLatch<Void>()
-        let client = PTYHostClient(
+        _ = PTYHostSessionStop.run(
+            identity,
             socketPath: socketPath,
             build: build,
-            events: PTYHostClient.Events(
-                frame: { frame in
-                    guard case .exited(let ending) = frame, ending.id == identity else { return }
-                    exited.complete(())
-                },
-                closed: { _ in exited.abandon() }
-            ),
             eventLog: eventLog
         )
-        defer { client.close() }
-
-        guard (try? client.connect()) != nil else { return }
-        do {
-            try client.attach(PTYHostAttach(
-                id: identity,
-                replayBudget: PTYHostReattachDefaults.killReplayBudget
-            ))
-            try client.kill(PTYHostKill(id: identity, escalate: true))
-        } catch {
-            return
-        }
-        _ = exited.wait(PTYHostReattachDefaults.killTimeout)
         eventLog.record(.session, "PTY host held a session nothing can show", [
             "session": identity.description
+        ])
+    }
+
+    /// Ends a conversation's CLI that kept working while Threading was closed.
+    ///
+    /// The same attach-then-kill, said differently in the journal because it is a different fact:
+    /// this child was not stranded, it was *working*, and what it produced is in the provider's
+    /// transcript waiting for the resume that follows.
+    ///
+    /// **Blocking**; never on the main actor.
+    private static func endHandedBack(
+        _ identity: PTYHostSessionIdentity,
+        socketPath: String,
+        build: String,
+        eventLog: EventLog
+    ) {
+        let stopped = PTYHostSessionStop.run(
+            identity,
+            socketPath: socketPath,
+            build: build,
+            eventLog: eventLog
+        )
+        eventLog.record(.session, "PTY host kept a conversation working", [
+            "session": identity.description,
+            // A stop that outran its deadline is not a stop that failed — the kill has been sent
+            // to the group either way — but the relaunch that follows is the thing that would
+            // notice, so the difference is written down.
+            "ended": stopped ? "confirmed" : "unconfirmed"
         ])
     }
 }

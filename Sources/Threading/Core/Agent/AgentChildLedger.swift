@@ -205,6 +205,33 @@ final class AgentChildLedger: @unchecked Sendable {
         return self.record(record) ? .recorded : .persistenceRefused
     }
 
+    /// Records a child `threading-ptyd` spawned on this app's behalf.
+    ///
+    /// The identity is the **daemon's**, not one read here. It reported the pid and the kernel
+    /// start time out of its own `posix_spawn`, and re-reading the start time from this process a
+    /// moment later would race exactly the pid reuse the pair exists to rule out.
+    ///
+    /// `owner: .ptyHost` is the whole difference, and it is what stops this record ever being
+    /// acted on: `OrphanedAgentChildSweep.verdict` answers `.skip(.heldByHost)` before it looks at
+    /// a probe, so all three sweepers leave it alone. Recording it at all is what lets a launch
+    /// *see* what is running; the owner field is what stops the same launch killing it.
+    func recordHostBackedChild(
+        pid: pid_t,
+        startTime: ProcessStartTime,
+        sessionID: String?,
+        executable: String
+    ) -> LiveChildEnrollmentResult {
+        let record = AgentChildRecord(
+            pid: pid,
+            startTime: startTime,
+            sessionID: sessionID,
+            executable: URL(fileURLWithPath: executable).lastPathComponent,
+            recordedAt: Date(),
+            owner: .ptyHost
+        )
+        return self.record(record) ? .recorded : .persistenceRefused
+    }
+
     /// Forgets a child that has been reaped. Its pid is the kernel's to hand out again from
     /// this moment, so the record must not outlive the reap by any amount.
     func clear(pid: pid_t) {

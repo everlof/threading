@@ -871,11 +871,13 @@ child's own serial queue, cancelling the source inside the handler — the arran
 of 22 July 2026 established, where a manual `waitpid` racing a still-registered source made
 libdispatch treat `EV_VANISHED` as a fatal client bug.
 
-**The background host is behind one hidden key, and it is off.** `AppSettings.ptyHostEnabled`
-(`defaults write codes.threading ptyHostEnabled -bool true`) is registered in
-`AppSettingDefinitions` with **no `presentations`**, so `remotePolicy` resolves `.hidden`: it
-produces no Settings row and does not cross to the phone's settings mirror — the
-`remoteViewportLeaseGraceSeconds` shape, reachable by `defaults write` and by a test. Off is §9
+**The background host is one switch, and it ships off.** `AppSettings.ptyHostEnabled` is on the
+Advanced page — a feature whose whole point is work with no window has to be findable, and a key
+nothing names is a key nobody can turn off either. It carries **no `remotePolicy`**, which
+resolves a presented descriptor to `.catalogueOnly`: `list_settings` may describe the row, and
+neither the phone nor an agent can read or move the value. `.ownerMutable` would open the remote
+`PATCH`, and starting a background daemon on somebody's Mac from a phone is not a thing this
+switch is going to do. Off is §9
 step 4 of `docs/feature-drafts/durable-sessions.md`, and there is a second, harder gate on top of
 the rollout one. A launchd agent is **not** a supervised child of Threading, and macOS attributes
 file access by directly spawned, supervised children (see [`permissions.md`](permissions.md)); the
@@ -884,8 +886,7 @@ spawned by `threading-ptyd` inherits Threading's grants is unanswerable on the m
 was written on, because `csrutil status` is disabled there and every arm of the experiment passed
 trivially. Until that experiment has been run on a **SIP-enabled** Mac and the answer written into
 `permissions.md`, defaulting this on risks agents that silently cannot read the user's files —
-which reads to the user as the app breaking, not as a feature. Turning it on today still changes
-nothing on its own: no session's PTY has moved yet. See [`pty-host.md`](pty-host.md).
+which reads to the user as the app breaking, not as a feature. See [`pty-host.md`](pty-host.md).
 
 ### The sessions that come back on their own
 
@@ -1352,9 +1353,8 @@ this process. The point of moving it is that a process the app does not own can 
 The whole design is [`pty-host.md`](pty-host.md); what belongs here is the choice and what it
 costs.
 
-**Three states, twice, again.** `AppSettings.ptyHostEnabled` is the hidden global — no
-`presentations`, so it produces no Settings row and does not cross to the phone's settings mirror;
-`defaults write codes.threading ptyHostEnabled -bool true` is how it is turned on — and
+**Three states, twice, again.** `AppSettings.ptyHostEnabled` is the global — Settings ▸ Advanced ▸
+Background Sessions, and `.catalogueOnly` so nothing remote can move it — and
 `AgentSession.backgroundHost` is one conversation's override. `PTYHostPolicy.hostsSession` reads
 session, then global, then off, and `nil` survives to the JSON rather than collapsing into a
 boolean, so a record written before the field existed reads as "no opinion". It ships **off**: the
@@ -1362,12 +1362,14 @@ question of how macOS attributes file access for a launchd agent's children has 
 on a SIP-enabled Mac, and until it is, an agent under the daemon might be an agent that cannot
 read the user's files.
 
-**Version 1 hosts agent sessions only.** Not project terminals, not shell drawers, not ephemeral
-terminals — those poll `tcgetpgrp` on a descriptor a host-backed session does not have, and the
-`foreground` frame that replaces it is wired up for the one surface that has been measured. There
-is **no `AgentKind` capability** for this and there must not be: whether a session has a pty is
-already `kind.supports(.terminalUI)`, and host-backing is a fact about the surface rather than a
-static fact about a runtime.
+**Version 1 hosts agent sessions only, on either surface.** Not project terminals, not shell
+drawers, not ephemeral terminals — those poll `tcgetpgrp` on a descriptor a host-backed session
+does not have, and the `foreground` frame that replaces it is wired up for the one terminal
+surface that has been measured. A **natively rendered conversation** is hosted too, on three pipes
+rather than a pseudo-terminal: same session id, same `PTYHostPolicy` answer, a different `channel`
+on the same `spawn`. There is **no `AgentKind` capability** for any of this and there must not be:
+whether a session has a pty is already `kind.supports(.terminalUI)`, and host-backing is a fact
+about the surface rather than a static fact about a runtime.
 
 **Nothing else about the session changes while it is attached.** The same
 `EmojiFixedTerminalView` renders the same bytes — a render test compares the two paths pixel for
@@ -1377,10 +1379,18 @@ on answering, and the remote mirror still taps `onOutputBytes` where it always d
 *absent* is the pty descriptor: `foregroundIsAnotherProgram()` and the title's owner read the
 daemon's pushed `foreground` frame instead of `tcgetpgrp`.
 
-**Until reattach lands, stopping a host-backed session kills it.** There is no way to hand one
-over yet, and an agent still working in a session no surface can reach is worse than one that
-ended. Every way the host can be unavailable — off, not installed, not running, the wrong version
-— is an ordinary in-process launch and one journal line saying which.
+**A quit hands it over; an explicit stop still kills it.** Only the quit path detaches, and only
+the quit question's third answer stops a host-backed child deliberately. Everything else that
+tears a session down guards on the hand-over, because tearing every session down must not become a
+way to end a child nobody asked to stop. Every way the host can be unavailable — off, not
+installed, not running, the wrong version — is an ordinary in-process launch and one journal line
+saying which.
+
+**A hosted conversation is resumed rather than rejoined.** The next launch ends its CLI and
+resumes the conversation from the transcript that CLI was writing, because a request/response
+transport cannot be picked up half-way through a turn — the terminal's replay has no equivalent
+here. What the agent finished while Threading was closed is in the transcript, which is the whole
+point; see [`pty-host.md`](pty-host.md#why-a-conversation-is-not-reattached).
 
 ## Close and Archive
 

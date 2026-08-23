@@ -1244,6 +1244,16 @@ open**, because closing a row of idle agents costs you nothing but their process
 window is quitting and asks the same question: decline it, and the window stays open with
 everything still running.
 
+**With the background host on, quitting becomes a choice rather than a confirmation.** If sessions
+are running in the helper, the sheet offers three answers instead of two: **Leave 3 Running** keeps
+them working while Threading is closed and takes them back on the next launch, **Stop Them and
+Quit** ends them the way quitting always has, and **Cancel** does neither. Sessions the helper is
+not running are counted separately and still close, and the turns it names as lost are only theirs.
+This question is never remembered — it names a different set of agents every time — but if you have
+switched the ordinary quit confirmation off, that choice is honoured here as leaving them running:
+nothing is stopped without somebody asking for it. See **Sessions that outlive the app** under
+Settings ▸ Advanced.
+
 Nothing else offers the checkbox. Anything that deletes for good — removing a project,
 **deleting a session**, deleting an archived session or a theme, reclaiming build directories,
 clearing website data, running an extension command marked destructive, ending a Threading that
@@ -4670,7 +4680,42 @@ names it has — build directories are full of them, and counting each name woul
 that deleting does not return.
 
 ### Advanced
-Where Threading keeps what it remembers, and how to start over.
+Where Threading keeps what it remembers, sessions that outlive it, and how to start over.
+
+#### Sessions that outlive the app
+
+**Background host** runs each agent in a helper that keeps working while Threading is closed and
+hands the sessions back on the next launch. It ships **off**, and there is a reason to leave it off
+for now: an agent started by the helper may not inherit Threading's own file access, which is still
+being proven. With it off, every session runs inside Threading and ends when Threading quits,
+exactly as before.
+
+With it on, **Background Sessions** lists what the helper is holding — the conversation's name, its
+project, which agent it is, how long it has been running, and its process id. That list is where a
+session that has got stuck with no window is found, and **Stop** beside a row ends that agent; the
+conversation is kept and can be resumed from the sidebar. A row that has already finished says
+**Ended** and cannot be stopped.
+
+When the helper is not running the list says why instead of showing nothing — it is switched off,
+macOS has not been told about it yet, or it is waiting for your approval in **System Settings ▸
+General ▸ Login Items**, which is the one case with a button that takes you there.
+
+**Turn off the background host** stops Threading using the helper and removes it from Login Items.
+If it is still holding sessions it stays registered and they keep running, because removing it
+would end them; the next launch that finds it idle removes it.
+
+The first launch after a quit says what it found. A band across the pane reads "3 sessions kept
+running while Threading was closed", with **Reattach** if any of them are not back yet. If the
+helper itself was restarted its agents went with it, and the band says so and offers **Resume**,
+which brings the conversations back from their transcripts — the same cost as an ordinary quit,
+which is the turn that was in flight.
+
+Natively rendered chats can use the helper too, with one difference: their agent keeps working
+while Threading is closed, and the next launch resumes the conversation from what it wrote rather
+than reconnecting to it. Whatever the agent finished while you were away is in the conversation
+when you come back.
+
+#### Where things are
 
 Ordinary settings and work live in exactly two file locations, and both are shown with a
 **Reveal** button rather than described:

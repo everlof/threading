@@ -56,6 +56,17 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
+| Background sessions (quit choice, launch band, Advanced list) | — | host-only | which children the daemon holds and their identities, the quit answer and what it stops, registration and its removal rule, the stop's attach-then-kill, bounded survey and viewport | Host-only |
+
+The background-sessions surfaces remain host-only because each of the three is a **decision about
+somebody's running work**, not a presentation of it. The quit choice ends processes or does not;
+the list's Stop ends one; the switch beside it registers or removes a launchd agent whose
+`unregister()` kills the running helper. None of that is a layout, and a replaceable presentation
+of it would be a surface that can misname which agent it is about to stop. The facts behind them
+are already published where an extension can reach them honestly — a session's activity and its
+runtime — and what is missing for an extension that wants to *act* is a typed background-session
+entity with the daemon's identity in it, not the box the rows are in. The launch band is a
+`PaneNoticeView`, which is host chrome for the same reason every other band is.
 
 The launch failure surface remains host-only because its content *is* the evidence. The whole
 surface exists because an agent's account of why it would not start was being destroyed, and a

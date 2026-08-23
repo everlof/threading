@@ -51,6 +51,12 @@ final class PTYHostServer: @unchecked Sendable {
     private var isRetiring = false
     private var ringBudget = PTYHostDefaults.aggregateRingBytes
 
+    /// A `.pipes` child's three parent-side descriptors, held between the spawn that made them
+    /// and the read channels that adopt them. Removed the moment `startReading` has handed each
+    /// one to a `DispatchIO`, which is then their only owner — a descriptor with two apparent
+    /// owners is how one gets closed under a file the kernel has already recycled it for.
+    private var pipeDescriptors: [PTYHostSessionIdentity: PTYSpawn.PipeChild] = [:]
+
     // MARK: - Initialization
 
     init(socketPath: String, stateDirectory: URL, build: String) {
@@ -109,6 +115,8 @@ final class PTYHostServer: @unchecked Sendable {
         static let rows = "rows"
         static let lines = "lines"
         static let executable = "executable"
+        static let channel = "channel"
+        static let stream = "stream"
     }
 
     /// Created `0700` and then set `0700` again, because the directory may already exist from a
@@ -175,6 +183,7 @@ final class PTYHostServer: @unchecked Sendable {
             journal.record(stillRunning ? .lostSessionStillRunning : .lostSession, [
                 Field.session: entry.id.description,
                 Field.pid: String(entry.pid),
+                Field.channel: entry.channel.rawValue,
                 Field.detail: stillRunning ? "groupKilled" : "processGone"
             ])
             state.append(PTYHostStateRecord(edge: .lost, id: entry.id, pid: entry.pid))
@@ -374,20 +383,47 @@ final class PTYHostServer: @unchecked Sendable {
             attach(request, from: connection)
         case .resize(let request):
             guard let session = boundSession(named: request.id, on: connection) else { return }
+            guard session.channel == .pty else {
+                // A well-formed frame for the wrong channel, which is not the same failure as a
+                // frame that cannot be believed: the stream is still readable and the session is
+                // still working, so this is an `error` the connection survives rather than a
+                // close. Closing here would end a conversation over a caller's slip.
+                journal.record(.frameRefused, [
+                    Field.session: session.id.description,
+                    Field.connection: String(connection.number),
+                    Field.reason: PTYHostError.unsupportedChannel.rawValue,
+                    Field.detail: "resize"
+                ])
+                connection.send(.error(PTYHostErrorFrame(
+                    code: .unsupportedChannel,
+                    detail: "resize"
+                )))
+                return
+            }
             resize(session, to: request.grid)
         case .detach(let request):
             guard let session = boundSession(named: request.id, on: connection) else { return }
-            session.seed = PTYSession.DetachSeed(
-                screen: request.screenSeed,
-                modes: request.modeSeed,
-                ringOffset: request.ringOffset
-            )
-            unbind(connection, from: session, keepingSeed: true)
+            // A pipes session stores nothing: it has no emulator anywhere, so its seeds are
+            // empty by construction and an `.exact` rejoin off an empty screen would be a replay
+            // of bytes with nothing to render them into. The frame is still the right one to
+            // send — it is what makes the hand-over deliberate rather than a watcher that
+            // vanished, and it is what the app's drain waits on before the process exits.
+            if session.channel == .pty {
+                session.seed = PTYSession.DetachSeed(
+                    screen: request.screenSeed,
+                    modes: request.modeSeed,
+                    ringOffset: request.ringOffset
+                )
+            }
+            unbind(connection, from: session, keepingSeed: session.channel == .pty)
             journal.record(.detached, [
                 Field.session: session.id.description,
                 Field.connection: String(connection.number),
                 Field.bytes: String(request.ringOffset)
             ])
+        case .closeInput(let request):
+            guard let session = boundSession(named: request.id, on: connection) else { return }
+            closeInput(of: session, from: connection)
         case .kill(let request):
             guard let session = boundSession(named: request.id, on: connection) else { return }
             kill(session, escalate: request.escalate)
@@ -497,41 +533,50 @@ final class PTYHostServer: @unchecked Sendable {
             refuseSpawn(request.id, .alreadyExists, on: connection)
             return
         }
-        guard case .pty(let grid) = request.channel else {
-            refuseSpawn(request.id, .unsupportedChannel, on: connection)
-            return
+        let session: PTYSession
+        switch request.channel {
+        case .pty(let grid):
+            let outcome = PTYSpawn.spawn(
+                executable: request.executable,
+                arguments: request.arguments,
+                execName: request.execName,
+                environment: request.environment,
+                workingDirectory: request.cwd,
+                grid: grid
+            )
+            switch outcome {
+            case .success(let child):
+                session = PTYSession(
+                    id: request.id,
+                    child: child,
+                    executable: request.executable,
+                    grid: grid
+                )
+            case .failure(let failure):
+                refuseSpawnFailure(failure, request.id, on: connection)
+                return
+            }
+        case .pipes:
+            let outcome = PTYSpawn.spawnPipes(
+                executable: request.executable,
+                arguments: request.arguments,
+                execName: request.execName,
+                environment: request.environment,
+                workingDirectory: request.cwd
+            )
+            switch outcome {
+            case .success(let child):
+                session = PTYSession(
+                    id: request.id,
+                    child: child,
+                    executable: request.executable
+                )
+                pipeDescriptors[request.id] = child
+            case .failure(let failure):
+                refuseSpawnFailure(failure, request.id, on: connection)
+                return
+            }
         }
-
-        let outcome = PTYSpawn.spawn(
-            executable: request.executable,
-            arguments: request.arguments,
-            execName: request.execName,
-            environment: request.environment,
-            workingDirectory: request.cwd,
-            grid: grid
-        )
-        let child: PTYSpawn.Child
-        switch outcome {
-        case .success(let spawned):
-            child = spawned
-        case .failure(.executableUnavailable):
-            refuseSpawn(request.id, .executableUnavailable, on: connection)
-            return
-        case .failure(.forkFailed(let code)):
-            journal.record(.spawnFailed, [
-                Field.session: request.id.description,
-                Field.reason: String(cString: strerror(code))
-            ])
-            connection.send(.error(PTYHostErrorFrame(code: .spawnFailed)))
-            return
-        }
-
-        let session = PTYSession(
-            id: request.id,
-            child: child,
-            executable: request.executable,
-            grid: grid
-        )
         sessions[request.id] = session
 
         // Written before the reply, because the whole point of the file is to be the last thing
@@ -542,14 +587,16 @@ final class PTYHostServer: @unchecked Sendable {
             id: session.id,
             pid: session.pid,
             startTime: session.startTime,
-            executable: session.executable
+            executable: session.executable,
+            channel: session.channel
         ))
         journal.record(.spawned, [
             Field.session: session.id.description,
             Field.pid: String(session.pid),
             Field.executable: (session.executable as NSString).lastPathComponent,
-            Field.cols: String(grid.cols),
-            Field.rows: String(grid.rows)
+            Field.channel: session.channel.rawValue,
+            Field.cols: String(session.grid.cols),
+            Field.rows: String(session.grid.rows)
         ])
 
         startReading(session)
@@ -562,6 +609,29 @@ final class PTYHostServer: @unchecked Sendable {
         )))
         bind(connection, to: session)
         enforceRingBudget()
+    }
+
+    /// The two ways a spawn can fail, answered the same way for both channels.
+    ///
+    /// A missing executable is the caller's fact and travels as a `spawnRefused` token; a `fork`
+    /// or `posix_spawn` that failed is the machine's and travels as an `error`, because there is
+    /// nothing the app can change about it and the errno belongs in the journal rather than on
+    /// the wire.
+    private func refuseSpawnFailure(
+        _ failure: PTYSpawn.Failure,
+        _ id: PTYHostSessionIdentity,
+        on connection: PTYHostConnection
+    ) {
+        switch failure {
+        case .executableUnavailable:
+            refuseSpawn(id, .executableUnavailable, on: connection)
+        case .forkFailed(let code):
+            journal.record(.spawnFailed, [
+                Field.session: id.description,
+                Field.reason: String(cString: strerror(code))
+            ])
+            connection.send(.error(PTYHostErrorFrame(code: .spawnFailed)))
+        }
     }
 
     private func refuseSpawn(
@@ -648,6 +718,33 @@ final class PTYHostServer: @unchecked Sendable {
         ])
     }
 
+    /// Closes a pipes child's standard input, which is how every native transport says goodbye.
+    ///
+    /// The channel is closed rather than the descriptor: `DispatchIO`'s cleanup handler is the
+    /// descriptor's only owner, so closing it here and closing it there would be two closes of a
+    /// number the kernel may already have handed to something else. `close(flags: [])` lets
+    /// whatever is still queued reach the child first, which matters because the last thing
+    /// written before a goodbye is usually the request the goodbye is about.
+    private func closeInput(of session: PTYSession, from connection: PTYHostConnection) {
+        guard session.channel == .pipes else {
+            journal.record(.frameRefused, [
+                Field.session: session.id.description,
+                Field.connection: String(connection.number),
+                Field.reason: PTYHostError.unsupportedChannel.rawValue,
+                Field.detail: "closeInput"
+            ])
+            connection.send(.error(PTYHostErrorFrame(
+                code: .unsupportedChannel,
+                detail: "closeInput"
+            )))
+            return
+        }
+        guard let io = session.io else { return }
+        session.io = nil
+        io.close(flags: [])
+        journal.record(.inputClosed, [Field.session: session.id.description])
+    }
+
     /// `SIGTERM` to the group, then `SIGKILL` to the group after a grace when asked to escalate.
     ///
     /// The group rather than the process, because `forkpty` made the child a session leader and
@@ -676,22 +773,48 @@ final class PTYHostServer: @unchecked Sendable {
 
     // MARK: - Private Methods — the byte stream
 
-    /// Reads the master on its own channel and hands each burst back to the host queue.
+    /// Wires up whichever descriptors this session has.
+    ///
+    /// One `DispatchIO` per direction per stream, each on its own read queue and each handing its
+    /// bytes back to the host queue. A pty has one channel that both reads and writes its master;
+    /// a pipes child has three, and the asymmetry is the channel's whole difference here.
     private func startReading(_ session: PTYSession) {
+        switch session.channel {
+        case .pty:
+            let master = session.master
+            session.io = readChannel(master, of: session, stream: .standardOutput)
+        case .pipes:
+            guard let child = pipeDescriptors.removeValue(forKey: session.id) else { return }
+            sessionCount += 1
+            let input = child.input
+            session.io = DispatchIO(
+                type: .stream,
+                fileDescriptor: input,
+                queue: DispatchQueue(label: "codes.threading.ptyd.stdin.\(sessionCount)"),
+                cleanupHandler: { _ in close(input) }
+            )
+            session.outputIO = readChannel(child.output, of: session, stream: .standardOutput)
+            session.errorIO = readChannel(child.errors, of: session, stream: .standardError)
+        }
+    }
+
+    /// One reader, on its own queue, delivering bursts to the host queue in order.
+    private func readChannel(
+        _ descriptor: Int32,
+        of session: PTYSession,
+        stream: OutputStreamKind
+    ) -> DispatchIO {
         sessionCount += 1
-        let master = session.master
-        let readQueue = DispatchQueue(label: "codes.threading.ptyd.pty.\(sessionCount)")
         let io = DispatchIO(
             type: .stream,
-            fileDescriptor: master,
-            queue: readQueue,
-            cleanupHandler: { _ in close(master) }
+            fileDescriptor: descriptor,
+            queue: DispatchQueue(label: "codes.threading.ptyd.read.\(sessionCount)"),
+            cleanupHandler: { _ in close(descriptor) }
         )
         io.setLimit(lowWater: 1)
         // One read is one frame, and a frame stays well inside the wire's 1 MiB bound: a repaint
         // crosses as several frames rather than one a slow watcher cannot use yet.
         io.setLimit(highWater: PTYHostDefaults.readChunkBytes)
-        session.io = io
 
         io.read(offset: 0, length: Int.max, queue: queue) { [weak self, weak session] done, data, error in
             guard let self, let session else { return }
@@ -699,11 +822,36 @@ final class PTYHostServer: @unchecked Sendable {
                 var bytes = Data()
                 bytes.reserveCapacity(data.count)
                 data.enumerateBytes { buffer, _, _ in bytes.append(contentsOf: buffer) }
-                deliver(bytes, of: session)
+                deliver(bytes, of: session, stream: stream)
             }
             if done || error != 0 {
-                session.masterFinished = true
+                session.noteReaderFinished()
                 deliverExitIfReady(session)
+            }
+        }
+        return io
+    }
+
+    /// Which of a child's two output streams a burst came from.
+    ///
+    /// Only a `.pipes` child has two. The three streams stay three all the way across the wire,
+    /// because merging them would corrupt the newline-delimited JSON the app's transports parse —
+    /// which is `AgentChildProcess`'s own rule, kept here rather than restated differently.
+    private enum OutputStreamKind {
+        case standardOutput
+        case standardError
+
+        var flags: UInt8 {
+            switch self {
+            case .standardOutput: return 0
+            case .standardError: return PTYHostFramingDefaults.standardErrorFlag
+            }
+        }
+
+        var token: String {
+            switch self {
+            case .standardOutput: return "stdout"
+            case .standardError: return "stderr"
             }
         }
     }
@@ -712,13 +860,23 @@ final class PTYHostServer: @unchecked Sendable {
     ///
     /// A detached session costs exactly this: one append, one comparison, and no allocation per
     /// watcher, because there are none and the frame is never built.
-    private func deliver(_ bytes: Data, of session: PTYSession) {
-        session.append(bytes)
+    ///
+    /// **Only standard output reaches the ring**, and only a pipes child has anything else. The
+    /// ring is what a rejoin replays, and a rejoining watcher parses one stream; interleaving the
+    /// other into it would corrupt exactly what the replay exists to hand over, and a second ring
+    /// would be a second `totalBytesWritten` for one `ringOffset` to mean two things by.
+    /// Diagnostics are live-only: the transports read them separately and surface them when a
+    /// child dies unexpectedly, and a rejoin that replayed yesterday's stderr would be
+    /// attributing an old observation to a new one.
+    private func deliver(_ bytes: Data, of session: PTYSession, stream: OutputStreamKind) {
+        if stream == .standardOutput { session.append(bytes) }
         if !session.watchers.isEmpty {
             for chunk in Self.chunks(of: bytes) {
-                guard let framed = try? PTYHostFraming.encode(kind: .output, payload: chunk) else {
-                    continue
-                }
+                guard let framed = try? PTYHostFraming.encode(
+                    kind: .output,
+                    flags: stream.flags,
+                    payload: chunk
+                ) else { continue }
                 for watcher in session.watchers { watcher.sendFramed(framed) }
             }
         }
@@ -731,6 +889,10 @@ final class PTYHostServer: @unchecked Sendable {
             return
         }
         guard session.exit == nil, let io = session.io else {
+            // Either the child has ended or its standard input has already been closed. Both mean
+            // the same thing to the writer — these bytes will never be read — and both are said
+            // with a token rather than swallowed, because a transport that thinks it sent a turn
+            // waits for an answer that is not coming.
             connection.send(.error(PTYHostErrorFrame(code: .sessionExited, detail: "input")))
             return
         }
@@ -760,6 +922,10 @@ final class PTYHostServer: @unchecked Sendable {
     /// detached: a program can take the terminal without writing a byte, and a detached session
     /// has nobody to tell.
     private func pushForeground(of session: PTYSession) {
+        // A pipes child has no controlling terminal, so there is no foreground process group to
+        // read and nothing to say. Not a degradation: the app asks the question only of a
+        // terminal, to decide whether a title belongs to the shell or to what it is running.
+        guard session.channel == .pty else { return }
         guard session.isAttached, session.exit == nil else { return }
         guard let group = PTYSpawn.foregroundProcessGroup(of: session.master) else { return }
         guard group != session.lastForeground else { return }
@@ -770,6 +936,7 @@ final class PTYHostServer: @unchecked Sendable {
     }
 
     private func startForegroundTimer(for session: PTYSession) {
+        guard session.channel == .pty else { return }
         guard session.foregroundTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(
@@ -912,6 +1079,14 @@ final class PTYHostServer: @unchecked Sendable {
         session.processSource = nil
         session.io?.close(flags: .stop)
         session.io = nil
+        session.outputIO?.close(flags: .stop)
+        session.outputIO = nil
+        session.errorIO?.close(flags: .stop)
+        session.errorIO = nil
+        // Only reached when a spawn was answered and the descriptors were never adopted, which
+        // cannot happen today — but a descriptor left in this map is a leak for the life of the
+        // process, so the release is the one place that can promise it is empty.
+        pipeDescriptors.removeValue(forKey: session.id)
         for watcher in session.watchers { watcher.boundSession = nil }
         session.watchers.removeAll()
         journal.record(.released, [Field.session: session.id.description])

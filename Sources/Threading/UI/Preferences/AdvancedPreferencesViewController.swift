@@ -15,6 +15,36 @@ import AppKit
 /// the narrow fix cost the whole history.
 final class AdvancedPreferencesViewController: NSViewController {
 
+    // MARK: - Properties
+
+    /// What `threading-ptyd` is holding, surveyed off the main actor. Injectable so the three
+    /// interesting states — off, waiting for approval, holding sessions — are reachable in a test
+    /// with no daemon anywhere.
+    private let backgroundSessions: PTYHostBackgroundSessionsInventory
+
+    private lazy var backgroundSessionsList = BackgroundSessionsListView(
+        actions: BackgroundSessionsListView.Actions(
+            stop: { [weak self] session in self?.stopBackgroundSession(session) },
+            openLoginItems: { PTYHostRegistration.openLoginItemsSettings() }
+        )
+    )
+
+    /// What turning the host off did, once it has been pressed. Nil until then: a row that
+    /// explains an outcome nobody has caused yet is a row explaining nothing.
+    private var backgroundHostRemoval: String?
+
+    // MARK: - Initialization
+
+    init(backgroundSessions: PTYHostBackgroundSessionsInventory = .init()) {
+        self.backgroundSessions = backgroundSessions
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     // MARK: - Lifecycle
 
     override func loadView() {
@@ -29,6 +59,13 @@ final class AdvancedPreferencesViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         rebuild()
+        // The list is updated in place rather than by rebuilding the page: the survey's answer is
+        // a value model, and the sessions in it are sized by another process.
+        backgroundSessions.onChange = { [weak self] in
+            guard let self else { return }
+            backgroundSessionsList.show(backgroundSessions.state)
+        }
+        backgroundSessions.refresh()
 #if DEBUG
         refreshOutboxRecordCount()
 #endif
@@ -84,6 +121,15 @@ final class AdvancedPreferencesViewController: NSViewController {
                     action: #selector(resetEverything)
                 )
             ])),
+            // Last, and in the order the catalogue reports it. A settings row's order is a wire
+            // fact — `AppSettingDefinitionTests` pins it — so a section appended to the
+            // definitions is a section appended to the page, rather than two orders to keep in
+            // step. It also reads correctly: this is the page about what Threading keeps, and
+            // this is the part of it that keeps running when Threading does not.
+            SettingsUI.section(
+                AdvancedStrings.backgroundSessionsSection,
+                backgroundSessionsSection()
+            ),
             SettingsUI.note(AdvancedStrings.keptNote)
         ])
 
@@ -126,6 +172,62 @@ final class AdvancedPreferencesViewController: NSViewController {
                 button: clearButton
             ),
         ]
+    }
+
+    /// What has no window: the sessions `threading-ptyd` is holding, and the two controls that
+    /// decide whether it holds any.
+    ///
+    /// The list leads and the controls follow, because the list is the subject — this is the
+    /// surface a wedged detached agent is found on, and the switch beside it is the thing you
+    /// reach for after reading it. The list is **not** a row inside the card: a `SettingsCard` is
+    /// a retained stack of full-bleed rows, and a bounded table is not a row.
+    private func backgroundSessionsSection() -> NSView {
+        backgroundSessionsList.show(backgroundSessions.state)
+
+        let card = SettingsCard(rows: [
+            SettingsUI.row(
+                title: AdvancedStrings.backgroundHostTitle,
+                subtitle: AdvancedStrings.backgroundHostDetail,
+                control: backgroundHostToggle()
+            ),
+            row(
+                title: AdvancedStrings.backgroundHostOffTitle,
+                detail: backgroundHostRemoval ?? AdvancedStrings.backgroundHostOffDetail,
+                button: backgroundHostOffButton()
+            )
+        ])
+
+        let stack = NSStackView(views: [backgroundSessionsList, card])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.medium
+        for row in [backgroundSessionsList, card] as [NSView] {
+            row.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+            row.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        }
+        return stack
+    }
+
+    private func backgroundHostToggle() -> ThemedToggle {
+        let toggle = SettingsUI.toggle(
+            isOn: AppSettings.shared.ptyHostEnabled,
+            target: self,
+            action: #selector(backgroundHostChanged(_:))
+        )
+        toggle.setAccessibilityLabel(AdvancedStrings.backgroundHostTitle)
+        return toggle
+    }
+
+    private func backgroundHostOffButton() -> ThemedButton {
+        let button = SettingsUI.button(
+            AdvancedStrings.backgroundHostOffButton,
+            target: self,
+            action: #selector(turnOffBackgroundHost)
+        )
+        // Nothing to turn off when it is already off. Disabled rather than dropped, so the row
+        // still says what the control would do.
+        button.isEnabled = AppSettings.shared.ptyHostEnabled
+        return button
     }
 
     /// A path with a button that opens it. The path is the *detail*, not the title, because it
@@ -267,6 +369,60 @@ final class AdvancedPreferencesViewController: NSViewController {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    // MARK: - Background Sessions
+
+    @objc private func backgroundHostChanged(_ sender: ThemedToggle) {
+        AppSettings.shared.ptyHostEnabled = sender.state == .on
+        // A new answer to the switch retires the last turn-off's receipt: it described what
+        // happened to a registration the user has just changed their mind about.
+        backgroundHostRemoval = nil
+        backgroundSessions.refresh()
+        rebuild()
+    }
+
+    /// Drives the key off and says which way the removal went.
+    ///
+    /// The removal itself is not performed here. `PTYHostRegistrationCoordinator` follows the key
+    /// and applies `PTYHostRegistration.removalDecision` off the main actor — unregister when the
+    /// daemon holds nothing, leave it registered when it does, because `unregister()` **kills the
+    /// running helper** and turning a preference off must not be a way to end somebody's turn.
+    /// What this adds is the sentence: without it the two outcomes are indistinguishable, and the
+    /// one that leaves a daemon running is the one a user needs told.
+    @objc private func turnOffBackgroundHost() {
+        let held = backgroundSessions.state.status.heldSessionCount
+        AppSettings.shared.ptyHostEnabled = false
+        switch PTYHostRegistration.removalDecision(heldSessions: held) {
+        case .unregister:
+            backgroundHostRemoval = AdvancedStrings.backgroundHostRemoved
+        case .leave(let count):
+            backgroundHostRemoval = AdvancedStrings.backgroundHostLeft(count: count)
+        }
+        backgroundSessions.refresh()
+        rebuild()
+    }
+
+    private func stopBackgroundSession(_ session: PTYHostHeldSession) {
+        guard ConfirmationAlert.ask(Self.stopConfirmation(sessionName: session.name)) else {
+            return
+        }
+        backgroundSessions.stop(session)
+    }
+
+    /// Built apart from being asked, so a test can hold the wording to what Stop does without a
+    /// modal.
+    ///
+    /// `.stopSessionProcess` is the register's existing entry for exactly this: the process can be
+    /// started again, but not from anything in the app — the way back is the user's own next
+    /// message — so Return sits on Cancel and the verb is on a destructive button.
+    static func stopConfirmation(sessionName: String) -> ConfirmationRequest {
+        ConfirmationRequest(
+            prompt: .stopSessionProcess,
+            title: AdvancedStrings.confirmStopTitle(name: sessionName),
+            message: AdvancedStrings.confirmStopBody,
+            confirmTitle: AdvancedStrings.stopButton
+        )
+    }
+
     @objc private func showWelcomeTour() {
         AppDelegate.shared?.presentOnboarding()
     }
@@ -393,6 +549,51 @@ enum AdvancedStrings {
     static var settingsLocationTitle: String { L10n.string("Settings") }
     static var dataLocationTitle: String { L10n.string("Projects, sessions and caches") }
     static var reveal: String { L10n.string("Reveal") }
+
+    static var backgroundSessionsSection: String { L10n.string("Background Sessions") }
+    static var backgroundHostTitle: String { L10n.string("Background host") }
+    static var backgroundHostDetail: String {
+        L10n.string(
+            "Runs each agent's terminal in a helper that keeps working while Threading is closed, "
+                + "and hands the sessions back on the next launch. Off while this is still being "
+                + "proven: an agent started by the helper may not inherit Threading's file access."
+        )
+    }
+    static var backgroundHostOffTitle: String { L10n.string("Turn off the background host") }
+    static var backgroundHostOffDetail: String {
+        L10n.string(
+            "Stops using the helper and removes it from Login Items. Sessions it is still holding "
+                + "keep running; it is removed at the next launch that finds it idle."
+        )
+    }
+    static var backgroundHostOffButton: String { L10n.string("Turn Off") }
+    static var backgroundHostRemoved: String {
+        L10n.string("The background host is off and has been removed from Login Items.")
+    }
+    static func backgroundHostLeft(count: Int) -> String {
+        count == 1
+            ? L10n.string(
+                "Threading has stopped using the background host. One session is still running "
+                    + "under it, so it stays in Login Items and is removed at the next launch "
+                    + "that finds it idle."
+            )
+            : L10n.format(
+                "Threading has stopped using the background host. %lld sessions are still "
+                    + "running under it, so it stays in Login Items and is removed at the next "
+                    + "launch that finds it idle.",
+                count
+            )
+    }
+    static var stopButton: String { L10n.string("Stop") }
+    static func confirmStopTitle(name: String) -> String {
+        L10n.format("Stop “%@”?", name)
+    }
+    static var confirmStopBody: String {
+        L10n.string(
+            "The agent ends and whatever it is working on right now is lost. The conversation is "
+                + "kept and can be resumed from the sidebar."
+        )
+    }
 
     static var tourSection: String { L10n.string("Welcome Tour") }
     static var tourTitle: String { L10n.string("First-launch walkthrough") }

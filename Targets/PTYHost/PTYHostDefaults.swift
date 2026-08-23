@@ -175,4 +175,24 @@ enum PTYHostDefaults {
     /// `CAN`, the cut marker that precedes a truncated replay. First, because cutting the head
     /// off the ring means the replay can now begin inside an escape sequence too.
     static let cancelByte: UInt8 = 0x18
+
+    /// The line terminator a `.pipes` replay is trimmed to.
+    ///
+    /// A pipes session carries a newline-delimited stream that the app parses a line at a time,
+    /// so a cut tail beginning mid-line would hand a rejoining parser one guaranteed malformed
+    /// line. Everything before the first newline goes, which leaves the `CAN` alone on the first
+    /// line and every line after it whole. Finding a byte is not parsing a stream: the daemon
+    /// still has no idea what any of them mean.
+    static let newlineByte: UInt8 = 0x0A
+
+    // MARK: - The pipe channel
+
+    /// The three descriptor numbers a `.pipes` child is given.
+    static let childStandardInput: Int32 = 0
+    static let childStandardOutput: Int32 = 1
+    static let childStandardError: Int32 = 2
+
+    /// `posix_spawnattr_setpgroup`'s "lead your own group" value, so `kill(-pid, …)` reaches the
+    /// CLI and everything it started rather than only the CLI.
+    static let leadOwnGroup: pid_t = 0
 }

@@ -42,7 +42,16 @@ final class PTYSession: @unchecked Sendable {
     let startedAt: Date
     let startTime: PTYHostProcessStartTime?
 
-    /// The master descriptor, owned by `io` and closed with it.
+    /// How this child is wired up, and the one fact the rest of the daemon branches on.
+    ///
+    /// It is stored rather than derived because three behaviours turn on it and each is an
+    /// absence rather than a variation: a `.pipes` session has no window size to set, no
+    /// `tcgetpgrp` to answer, and no screen a watcher could have handed over — so `resize` is
+    /// refused with a token, no `foreground` frame is ever pushed, and a rejoin is always a cut.
+    let channel: PTYHostChannelKind
+
+    /// The pseudo-terminal master for a `.pty` session, and `-1` for a `.pipes` session, which
+    /// has three descriptors instead. Owned by `io` and closed with it.
     let master: Int32
 
     /// **Durable session state.** A `resize` sets it; an `attach` never does. A new watcher
@@ -72,14 +81,30 @@ final class PTYSession: @unchecked Sendable {
     /// watcher that reconnects a moment later is owed the ending, not "unknown session".
     var exitObserved = false
 
-    /// True once the master has reached end of file, so the last output has been fanned out.
-    var masterFinished = false
+    /// True once every reader has reached end of file, so the last output has been fanned out.
+    /// Set through `noteReaderFinished()`, never directly: a pipes session has two readers and
+    /// "the output is over" is only true when both have ended.
+    private(set) var masterFinished = false
 
     /// True once the `exited` frame has been written to every bound connection. The exit is
     /// reported once; a later attach is told separately, as part of its own `attached`.
     var exitDelivered = false
 
+    /// The channel input is written on: the master for `.pty`, the child's standard input for
+    /// `.pipes`. One name, because "where do this session's keystrokes go" is one question.
     var io: DispatchIO?
+
+    /// A `.pipes` session's two read channels. A `.pty` session has none: its master is `io`,
+    /// which reads and writes the same descriptor.
+    var outputIO: DispatchIO?
+    var errorIO: DispatchIO?
+
+    /// How many of this session's readers have yet to reach end of file. One for a `.pty`
+    /// master, two for a pipes child's stdout and stderr. The `exited` frame waits for it to
+    /// reach zero, because a watcher told "it ended" before it is shown the ending has lost
+    /// exactly the bytes it most wanted.
+    var openReaders = 0
+
     var processSource: DispatchSourceProcess?
     var foregroundTimer: DispatchSourceTimer?
     var lastForeground: pid_t?
@@ -98,6 +123,7 @@ final class PTYSession: @unchecked Sendable {
         startedAt: Date = Date()
     ) {
         self.id = id
+        channel = .pty
         pid = child.pid
         master = child.master
         startTime = child.startTime
@@ -106,6 +132,31 @@ final class PTYSession: @unchecked Sendable {
         self.startedAt = startedAt
         ring = RemoteRingBuffer(capacity: ringCapacity)
         detachedAt = startedAt
+        openReaders = 1
+    }
+
+    /// A child on three pipes.
+    ///
+    /// The grid is zeroes rather than a plausible 80×24: a pipes child has no terminal, and a
+    /// summary reporting a window size it does not have is a fact somebody will act on.
+    init(
+        id: PTYHostSessionIdentity,
+        child: PTYSpawn.PipeChild,
+        executable: String,
+        ringCapacity: Int = PTYHostDefaults.ringBytes,
+        startedAt: Date = Date()
+    ) {
+        self.id = id
+        channel = .pipes
+        pid = child.pid
+        master = -1
+        startTime = child.startTime
+        self.executable = executable
+        grid = PTYHostGrid(cols: 0, rows: 0)
+        self.startedAt = startedAt
+        ring = RemoteRingBuffer(capacity: ringCapacity)
+        detachedAt = startedAt
+        openReaders = 2
     }
 
     // MARK: - Public Methods
@@ -120,7 +171,8 @@ final class PTYSession: @unchecked Sendable {
             executable: executable,
             grid: grid,
             isAttached: isAttached,
-            exit: exit?.status
+            exit: exit?.status,
+            channel: channel
         )
     }
 
@@ -129,6 +181,12 @@ final class PTYSession: @unchecked Sendable {
     /// account for.
     func append(_ data: Data) {
         ring.append(data)
+    }
+
+    /// One reader reached end of file. The output is over when the last of them has.
+    func noteReaderFinished() {
+        openReaders = max(0, openReaders - 1)
+        if openReaders == 0 { masterFinished = true }
     }
 
     func noteExit(status: Int32, signalled: Bool, at moment: Date = Date()) {
@@ -160,6 +218,8 @@ final class PTYSession: @unchecked Sendable {
     /// **Modes are always the last word**, in both branches: the ring is replayed history, and
     /// history holds modes that stopped being true.
     func replay(budget: Int?) -> (kind: PTYHostReplay, payloads: [Data]) {
+        if channel == .pipes { return pipeReplay(budget: budget) }
+
         if let seed, let slice = ring.snapshot(from: seed.ringOffset) {
             let payloads = [seed.screen, slice, seed.modes].filter { !$0.isEmpty }
             return (.exact(fromOffset: seed.ringOffset), payloads)
@@ -181,5 +241,43 @@ final class PTYSession: @unchecked Sendable {
         var payloads = [cut]
         if let modes = seed?.modes, !modes.isEmpty { payloads.append(modes) }
         return (.cut, payloads)
+    }
+
+    // MARK: - Private Methods
+
+    /// What a watcher rejoining a `.pipes` session is owed: `CAN`, then whole lines.
+    ///
+    /// **Always a cut, never an exact rejoin**, and that is a property of the channel rather than
+    /// of what happened to be stored. An exact replay is only meaningful with a screen seed to
+    /// put the bytes on, and a pipes session has no emulator anywhere to compute one — its
+    /// `detach` carries empty seeds by construction. Answering `.exact` off an empty screen would
+    /// be an exact replay of bytes with nothing to render them into, which is worse than saying
+    /// honestly that history was cut.
+    ///
+    /// **And the tail starts at a line boundary.** The stream is newline-delimited JSON that the
+    /// app parses a line at a time, so a tail beginning mid-line hands a fresh parser one
+    /// guaranteed malformed line — and, worse, one that looks like a provider protocol error
+    /// rather than like a cut. Everything before the first newline goes; the `CAN` is then alone
+    /// on the first line and every line after it is whole. The budget is applied first, because
+    /// bounding the answer and then finding a boundary inside it is the order that keeps both
+    /// promises.
+    private func pipeReplay(budget: Int?) -> (kind: PTYHostReplay, payloads: [Data]) {
+        let tail = ring.snapshot()
+        guard !tail.isEmpty else { return (.none, []) }
+
+        let bounded: Data
+        if let budget, budget < tail.count {
+            bounded = Data(tail.suffix(budget))
+        } else {
+            bounded = tail
+        }
+
+        var cut = Data([PTYHostDefaults.cancelByte])
+        if let newline = bounded.firstIndex(of: PTYHostDefaults.newlineByte) {
+            // From the newline itself, so the marker keeps a line of its own and the first byte
+            // after it starts a line.
+            cut.append(contentsOf: bounded[newline...])
+        }
+        return (.cut, [cut])
     }
 }

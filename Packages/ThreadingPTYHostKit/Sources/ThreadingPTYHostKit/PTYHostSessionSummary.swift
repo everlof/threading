@@ -132,11 +132,29 @@ public struct PTYHostSessionSummary: Codable, Equatable, Sendable {
     public let startedAt: Date
     /// The executable as the app named it in `spawn`, unchanged. The daemon interprets nothing.
     public let executable: String
+    /// The session's window size, or zeroes for a `.pipes` session, which has no terminal.
     public let grid: PTYHostGrid
     public let isAttached: Bool
     /// Set once the child has exited and the status is being held for a late observer; nil while
     /// it is still running.
     public let exit: Int32?
+
+    /// How the child is wired up. **Absent means `.pty`**, and absent is how every summary
+    /// written before pipes existed reads.
+    ///
+    /// Optional rather than a defaulted `.pty` for `AgentChildRecord.owner`'s reason: the
+    /// migration property has to belong to the type rather than to a build, so a peer that
+    /// predates the field decodes without it and a peer that has it never has to guess. Read
+    /// through `resolvedChannel`; nothing decides anything on the raw optional.
+    ///
+    /// It is here rather than inferred by the app because the app *cannot* infer it. A launch
+    /// that finds the daemon holding a session has to decide whether to take the terminal back
+    /// or to end the child and resume the conversation from its transcript, and that answer
+    /// turns entirely on which transport the child is speaking.
+    public let channel: PTYHostChannelKind?
+
+    /// The channel a caller acts on. Absent is `.pty` — see `channel`.
+    public var resolvedChannel: PTYHostChannelKind { channel ?? .pty }
 
     public init(
         id: PTYHostSessionIdentity,
@@ -145,7 +163,8 @@ public struct PTYHostSessionSummary: Codable, Equatable, Sendable {
         executable: String,
         grid: PTYHostGrid,
         isAttached: Bool,
-        exit: Int32? = nil
+        exit: Int32? = nil,
+        channel: PTYHostChannelKind? = nil
     ) {
         self.id = id
         self.pid = pid
@@ -154,5 +173,17 @@ public struct PTYHostSessionSummary: Codable, Equatable, Sendable {
         self.grid = grid
         self.isAttached = isAttached
         self.exit = exit
+        self.channel = channel
     }
+}
+
+/// Which of `PTYHostChannel`'s two shapes a session has, with none of its payload.
+///
+/// A separate token from `PTYHostChannel` on purpose: that type carries the grid a `spawn`
+/// states, and a summary reporting a channel is answering "what is this" rather than restating
+/// a launch. It is also what the daemon's `sessions.jsonl` records, where a grid would be a
+/// second copy of durable state the file does not own.
+public enum PTYHostChannelKind: String, Codable, Equatable, Sendable {
+    case pty
+    case pipes
 }

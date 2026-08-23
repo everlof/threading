@@ -37,6 +37,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "switchRunningSessionSurface",
             "conversationRepairOutcome",
             "quitWithRunningAgents",
+            "quitWithBackgroundSessions",
             "removeExtension",
             "revokeAllWebsiteAccess",
             "revokeAllManagerRoles",

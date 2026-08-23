@@ -126,8 +126,20 @@ final class PTYHostClient: @unchecked Sendable {
         /// afterwards is, including `lost`, which is also recorded on the client.
         var frame: @Sendable (PTYHostFrame) -> Void
 
-        /// Raw PTY output (`kind` 1): replay bytes first, in order, then live output.
+        /// Raw output (`kind` 1): replay bytes first, in order, then live output. A pty
+        /// session's whole stream, and a pipes session's **standard output** only.
         var output: @Sendable (Data) -> Void
+
+        /// A pipes session's standard error (`kind` 1 with
+        /// `PTYHostFramingDefaults.standardErrorFlag`).
+        ///
+        /// A second closure rather than a flag on `output`, so a caller that has one stream —
+        /// every pty session, which is every caller that existed before pipes — reads exactly
+        /// what it read before and cannot accidentally feed diagnostics into an emulator. The
+        /// default drops them, which is the right answer for a terminal: a pty child's stderr
+        /// *is* the terminal, so a frame carrying this flag on a pty session is a frame that
+        /// should not exist.
+        var standardError: @Sendable (Data) -> Void
 
         /// The link ended. Delivered exactly once, and only for a client whose `connect()`
         /// returned — a `connect()` that throws *is* its own report. `nil` means `close()`.
@@ -136,10 +148,12 @@ final class PTYHostClient: @unchecked Sendable {
         init(
             frame: @escaping @Sendable (PTYHostFrame) -> Void = { _ in },
             output: @escaping @Sendable (Data) -> Void = { _ in },
+            standardError: @escaping @Sendable (Data) -> Void = { _ in },
             closed: @escaping @Sendable (PTYHostClientError?) -> Void = { _ in }
         ) {
             self.frame = frame
             self.output = output
+            self.standardError = standardError
             self.closed = closed
         }
 
@@ -300,6 +314,8 @@ final class PTYHostClient: @unchecked Sendable {
             try requireBinding(matches: request.id)
         case .detach(let request):
             try requireBinding(matches: request.id)
+        case .closeInput(let request):
+            try requireBinding(matches: request.id)
         case .kill(let request):
             try requireBinding(matches: request.id)
         default:
@@ -323,6 +339,8 @@ final class PTYHostClient: @unchecked Sendable {
     func resize(_ request: PTYHostResize) throws { try send(.resize(request)) }
 
     func detach(_ request: PTYHostDetach) throws { try send(.detach(request)) }
+
+    func closeInput(_ request: PTYHostCloseInput) throws { try send(.closeInput(request)) }
 
     func kill(_ request: PTYHostKill) throws { try send(.kill(request)) }
 
@@ -660,7 +678,11 @@ final class PTYHostClient: @unchecked Sendable {
     private func dispatch(_ frame: PTYHostWireFrame) {
         switch frame.kind {
         case .output:
-            events.output(frame.payload)
+            if frame.flags & PTYHostFramingDefaults.standardErrorFlag != 0 {
+                events.standardError(frame.payload)
+            } else {
+                events.output(frame.payload)
+            }
         case .input:
             ThreadingLogger.ptyHost.error("PTY host sent an input frame; ignored")
         case .control:

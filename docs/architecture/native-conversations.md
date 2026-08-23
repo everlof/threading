@@ -233,6 +233,33 @@ does the same for Cursor, and its fakes quote §10 of the findings verbatim — 
 permission options whose ids are hyphenated while their kinds are underscored, and a rejected
 call the agent reports as `completed`.
 
+### The CLI can live in the background host
+
+A conversation's child does not have to be a child of this process. `AgentChildProcess.launch`
+takes an optional `host: PTYHostChildPlan`, and when the plan resolves, the CLI is spawned inside
+`threading-ptyd` on three pipes instead — which is what lets a turn go on being written while
+Threading is closed. `ConversationViewController` composes the plan once per launch, beside the
+`plan` and `mcpBinding` closures and for the same reason: it is resolved at launch time, so a
+dormant conversation reopened an hour later asks the current setting and the current daemon rather
+than the ones that were true when the controller was built.
+
+**None of the three transports learns about it.** They are handed the identical three
+`FileHandle`s the local path would have handed them — the same `F_SETNOSIGPIPE` on standard input,
+the same end-of-file semantics, the same `readabilityHandler` shape — while `PTYHostPipeLink` owns
+the other three ends and relays them across the wire. So the framing, the handshake deadlines, the
+malformed-line counters and the exactly-once deferred exit callbacks each of them owns are
+untouched, which is the whole reason the seam is *below* `ConversationStreamSession` rather than
+inside it. Each transport gains exactly two members — `isHostBacked`, and a
+`detachFromBackgroundHost(by:)` that hands the child over at a quit instead of closing standard
+input — and the protocol defaults both to "no", so a transport with no host-backed path and every
+test double is unchanged by the background host existing.
+
+Every way the host can be missing degrades to the launch this app performed before the daemon
+existed, journalled with a structural cause. A quit hands the CLI over; **the next launch ends it
+and resumes the conversation from its transcript**, because a request/response transport cannot be
+rejoined half-way through a turn — the reasoning, and what that costs, is in
+[`pty-host.md`](pty-host.md#why-a-conversation-is-not-reattached).
+
 ## Composer commands and skills
 
 Commands are a live transport capability, not a list copied from either CLI. The optional
@@ -526,6 +553,13 @@ inside one brace group, because `guard && post || deny` refuses every tool call 
 file is *shared* with — the user's own terminal Codex sessions, which have Codex's own approval
 prompt. Adding it changed that file's text once, which costs the user one re-approval; see
 [`session-activity.md`](session-activity.md).
+
+**And the second case now happens on purpose.** It was written for a CLI that outlived a crash;
+with the background host a conversation's CLI outlives an ordinary quit and goes on asking for
+tools with nothing behind the socket. So the typed deny is the difference between a turn that
+finishes what it can without the tool and one that stalls overnight on a question nobody is there
+to answer — which is why `PTYHostPipeSessionTests` exercises the fallback with no app reachable
+rather than trusting that the shape is still right.
 
 For shell execution, the tool name alone cannot make that decision. `ShellCommandPolicy` admits
 only vetted reader commands and rejects every segment if an argument can write or execute. Process

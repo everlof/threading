@@ -40,6 +40,14 @@ final class ClaudeStreamSession:
     private let effort: String?
     private let subagentTranscriptPlan: () -> ClaudeSubagentTranscriptPlan?
 
+    /// Whether this conversation's CLI belongs in `threading-ptyd`, asked once per launch.
+    ///
+    /// A closure rather than a value for `plan`'s reason: it is resolved at launch time, so a
+    /// dormant conversation reopened an hour later asks the current setting and the current
+    /// daemon rather than the ones that were true when the controller was built. Nil is today's
+    /// in-process child, which every unavailability degrades to.
+    private let hostPlan: () -> PTYHostChildPlan?
+
     /// Fired on the main queue for every parsed event.
     var onEvent: ((StreamEvent) -> Void)?
     var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
@@ -120,11 +128,13 @@ final class ClaudeStreamSession:
         sessionID: SessionID,
         effort: String? = nil,
         subagentTranscriptPlan: @escaping () -> ClaudeSubagentTranscriptPlan? = { nil },
+        hostPlan: @escaping () -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
     ) {
         self.sessionID = sessionID
         self.effort = effort
         self.subagentTranscriptPlan = subagentTranscriptPlan
+        self.hostPlan = hostPlan
         self.plan = plan
     }
 
@@ -153,7 +163,8 @@ final class ClaudeStreamSession:
                 executable: plan.executable,
                 arguments: plan.arguments,
                 environment: plan.launchEnvironment(),
-                sessionID: sessionID
+                sessionID: sessionID,
+                host: hostPlan()
             ) { [weak self] status in
                 Task { @MainActor [weak self] in
                     self?.handleTermination(status: status)
@@ -430,6 +441,24 @@ final class ClaudeStreamSession:
         guard isRunning else { return }
         finish()
         process?.terminate()
+    }
+
+    var isHostBacked: Bool { process?.isHostBacked ?? false }
+
+    /// Hands the CLI to `threading-ptyd` rather than ending it.
+    ///
+    /// Deliberately **not** `finish()` first. Closing standard input is how this conversation is
+    /// ended gracefully — the CLI reads end-of-input and exits — and that is precisely what must
+    /// not happen here. The transport lets go of its own three descriptors when this process
+    /// does; the child keeps the daemon's, and the next launch resumes the conversation with
+    /// whatever the turn finished writing.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool {
+        guard isRunning, let process, process.detachFromBackgroundHost(by: deadline) else {
+            return false
+        }
+        isRunning = false
+        onInteractionAvailabilityChange?()
+        return true
     }
 
     // MARK: - Child Transcript History

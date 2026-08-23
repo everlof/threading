@@ -23,6 +23,24 @@ public enum PTYHostFramingDefaults {
     /// one consumer rather than a change to the header.
     public static let compressionFlag: UInt8 = 0x01
 
+    /// `flags` bit 1, set on a `kind` 1 frame whose bytes are the child's **standard error**.
+    ///
+    /// Only a `.pipes` session ever sets it. A pseudo-terminal has one stream by construction —
+    /// the child's stderr *is* the terminal — so a `.pty` session's output frames never carry
+    /// this bit and a watcher that ignores it reads exactly what it read before.
+    ///
+    /// **A flag rather than a fourth `kind`, and rather than one interleaved stream.**
+    /// Interleaving is refused by `AgentChildProcess`'s own contract: "The three streams stay
+    /// three. Merging stderr into stdout would corrupt the JSON line stream the transports
+    /// parse." A new `kind` byte would be refused by every decoder that predates it —
+    /// `PTYHostFrameDecoder` treats an unknown `kind` as terminal, because there is no
+    /// resynchronisation point in a length-prefixed stream — so a stderr burst would close the
+    /// connection rather than be ignored. `flags` is already carried through the decoder
+    /// untouched, so a build that does not know this bit reads the payload as ordinary output
+    /// instead of dropping the link, which is the milder of the two wrong answers and the only
+    /// one a version gate can be relied on to prevent.
+    public static let standardErrorFlag: UInt8 = 0x02
+
     /// The offset of the `length` field inside the header.
     static let lengthOffset = 4
 }

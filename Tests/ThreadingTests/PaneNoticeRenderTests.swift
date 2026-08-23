@@ -100,6 +100,41 @@ final class PaneNoticeRenderTests: XCTestCase {
         }
     }
 
+    /// The launch band the background host puts up: agents kept working while Threading was
+    /// closed, and one of them has not been taken back yet.
+    ///
+    /// The informational tone is the point of the picture. Nothing went wrong — this is the
+    /// feature working — so the band has to read as news rather than as a warning, while still
+    /// carrying an answer somebody is meant to press.
+    func testRendersTheBackgroundHostLaunchBand() throws {
+        let notice = PTYHostLaunchNotice.keptRunning(count: 3, pending: 1)
+        try writeStorybook(named: "notice-ptyhost-kept") {
+            PaneNoticeView(
+                tone: notice.isAttention ? .attention : .informational,
+                message: notice.message,
+                actions: [PaneNoticeAction(title: notice.actionTitle ?? "") {}],
+                onDismiss: {}
+            )
+        }
+    }
+
+    /// The other half of the same surface: a restarted daemon could not account for a session,
+    /// which is the one thing about the background host that *did* go wrong.
+    ///
+    /// Drawn beside the band above deliberately: the two say almost the same sentence and have to
+    /// be tellable apart at a glance, which is what the tone and the mark are for.
+    func testRendersTheBackgroundHostLostBand() throws {
+        let notice = PTYHostLaunchNotice.lost([SessionID(), SessionID()])
+        try writeStorybook(named: "notice-ptyhost-lost") {
+            PaneNoticeView(
+                tone: notice.isAttention ? .attention : .informational,
+                message: notice.message,
+                actions: [PaneNoticeAction(title: notice.actionTitle ?? "") {}],
+                onDismiss: {}
+            )
+        }
+    }
+
     /// The quieter tone, where the mark is the secondary ink rather than the warning one — the
     /// pair of images is how the two are checked for being tellable apart.
     func testRendersTheInformationalTone() throws {

@@ -38,9 +38,13 @@ enum PTYHostSessionDefaults {
 ///
 /// A protocol rather than the concrete client so the whole host-backed path — the spawn, the
 /// keystroke, the resize, the exit, the foreground push — can be driven by a fake with no daemon,
-/// no socket, no pty and no window. That is not only a testing convenience: everything below the
-/// protocol was already covered by `PTYHostClientTests` and `PTYHostDaemonTests`, and what is
-/// worth asserting here is what the *session* does with it.
+/// no socket, no pty and no window. `PTYHostPipeLink` speaks the same protocol for a native
+/// conversation, using the subset that means anything without a terminal: it never resizes, and
+/// it is the only caller of `closeInput`, which is how every native transport says goodbye.
+///
+/// The fake is not only a testing convenience: everything below the protocol was already covered
+/// by `PTYHostClientTests` and `PTYHostDaemonTests`, and what is worth asserting here is what the
+/// *session* does with it.
 ///
 /// Every member is already `PTYHostClient`'s, with the same name and signature, so the conformance
 /// below is empty.
@@ -53,6 +57,7 @@ protocol PTYHostSessionTransport: AnyObject, Sendable {
     func attach(_ request: PTYHostAttach) throws
     func resize(_ request: PTYHostResize) throws
     func detach(_ request: PTYHostDetach) throws
+    func closeInput(_ request: PTYHostCloseInput) throws
     func kill(_ request: PTYHostKill) throws
     func sendInput(_ bytes: Data) throws
 

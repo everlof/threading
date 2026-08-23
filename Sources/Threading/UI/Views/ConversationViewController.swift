@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingExtensionKit
+import ThreadingPTYHostKit
 import ThreadingRemoteKit
 
 /// Incremental provider-neutral projection of the native timeline.
@@ -993,6 +994,24 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             return MCPSessionRegistry.binding(for: sessionID, decision: decision)
         }
 
+        // Whether this conversation's CLI belongs in `threading-ptyd`, asked exactly once per
+        // launch and asked *here*, because this is the surface that holds the conversation
+        // record — the same place `AgentSessionViewController` asks it for a terminal. Nil is
+        // today's in-process child, which every unavailability degrades to, and the working
+        // directory is stated rather than left to the daemon because a daemon started by launchd
+        // is somewhere else entirely. See `PTYHostPolicy`.
+        let hostPlan = { () -> PTYHostChildPlan? in
+            let identity = TerminalInstanceIdentity.agentSession(sessionID)
+            guard let factory = PTYHostPolicy.transportFactory(
+                for: identity,
+                session: currentSessionProjection.session(for: sessionID)
+            ) else { return nil }
+            return PTYHostChildPlan(
+                identity: PTYHostSessionIdentity(identity),
+                factory: factory
+            )
+        }
+
         switch agentSession.kind {
         case .claude:
             self.stream = ClaudeStreamSession(
@@ -1014,6 +1033,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                         directory: directory
                     )
                 },
+                hostPlan: hostPlan,
                 plan: plan
             )
         case .codex:
@@ -1050,6 +1070,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                         serviceTier: serviceTier
                     )
                 },
+                hostPlan: hostPlan,
                 plan: plan
             )
         case .grok:
@@ -1058,6 +1079,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 workingDirectory: agentSession.workingDirectory(in: project),
                 profile: .grok,
                 mcpBinding: mcpBinding(),
+                hostPlan: hostPlan,
                 plan: plan
             )
         case .cursor:
@@ -1070,6 +1092,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 workingDirectory: agentSession.workingDirectory(in: project),
                 profile: .cursor,
                 mcpBinding: mcpBinding(),
+                hostPlan: hostPlan,
                 plan: plan
             )
         case .openCode:
@@ -3771,6 +3794,20 @@ private enum ConversationControlDefaults {
 extension ConversationViewController: AgentConversationRuntimeSurface {
     var conversationRootProcessIdentifier: pid_t? {
         stream.rootProcessIdentifier
+    }
+
+    var isHostBacked: Bool { stream.isHostBacked }
+
+    /// A quit hands this conversation's CLI over rather than ending it.
+    ///
+    /// The viewport is still saved, because the conversation is coming back: the next launch
+    /// resumes it, and a scroll position lost at a quit is lost whether or not the child
+    /// survived. Nothing else about the teardown runs — no permission is denied and no stream is
+    /// stopped — because nothing is ending.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool {
+        guard stream.detachFromBackgroundHost(by: deadline) else { return false }
+        saveConversationViewport()
+        return true
     }
 
     func removeFromPresentation() {

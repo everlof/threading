@@ -21,6 +21,7 @@ enum PTYHostJournalEvent: String {
     case frameRefused
     case backpressureClosed
     case inputDropped
+    case inputClosed
     case spawned
     case spawnRefused
     case spawnFailed

@@ -92,10 +92,30 @@ protocol AgentConversationRuntimeSurface:
     var onAttention: (() -> Void)? { get set }
     var conversationRootProcessIdentifier: pid_t? { get }
 
+    /// Whether this conversation's CLI lives in `threading-ptyd` rather than in this process.
+    var isHostBacked: Bool { get }
+
     func resolveRemotePermission(id: String, decision: RemotePermissionDecision) -> Bool
     func resolveManagerPermission(id: String, decision: ControlPermissionDecision) -> Bool
     func terminate(preservingViewport: Bool)
+
+    /// Hands this conversation's CLI to the background PTY host instead of ending it, answering
+    /// whether it did.
+    ///
+    /// The terminal surface's rule, one renderer over: a quit is the one teardown that is not a
+    /// stop. **Blocking, bounded by `deadline`**, which the caller shares across every session.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool
+
     func removeFromPresentation()
+}
+
+extension AgentConversationRuntimeSurface {
+
+    /// Defaults so a renderer with no host-backed path — and every test double — is unchanged by
+    /// the background host existing.
+    var isHostBacked: Bool { false }
+
+    func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
 }
 
 /// Tracks the live terminal runtimes backing agent sessions.
@@ -333,10 +353,16 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// must not count them. The wording of that question is the visibility surface's — slice 9 of
     /// [`pty-host.md`](../../../../docs/architecture/pty-host.md) — and this is only the count
     /// refusing to claim a loss that does not happen.
+    /// Both renderers, because both can have one: a terminal's pty and a native conversation's
+    /// three pipes are the same `channel` discriminator on the same `spawn` frame.
     var hostBackedSessionIDs: Set<SessionID> {
-        Set(controllers.compactMap { sessionID, surface in
+        let terminals = controllers.compactMap { sessionID, surface in
             surface.isHostBacked && surface.isRunning ? sessionID : nil
-        })
+        }
+        let conversed = conversations.compactMap { sessionID, surface in
+            surface.isHostBacked && surface.isRunning ? sessionID : nil
+        }
+        return Set(terminals).union(conversed)
     }
 
     /// Hands every host-backed session's child to `threading-ptyd`, and answers which they were.
@@ -355,11 +381,40 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         where controller.detachFromBackgroundHost(by: deadline) {
             detached.insert(sessionID)
         }
+        for (sessionID, conversation) in conversations
+        where conversation.detachFromBackgroundHost(by: deadline) {
+            detached.insert(sessionID)
+        }
         guard !detached.isEmpty else { return detached }
         EventLog.shared.record(.session, "Sessions left running in the PTY host", [
             "sessions": String(detached.count)
         ])
         return detached
+    }
+
+    /// Ends every host-backed session's child rather than handing it over, and answers which they
+    /// were.
+    ///
+    /// The other half of the quit question's third answer. It runs **before**
+    /// `detachHostBackedSessions()`, which then finds nothing left to hand over — `terminate()`
+    /// clears `isRunning`, and detaching guards on it — so the two steps compose rather than
+    /// racing. Nothing else may call this: a stop that nobody asked for is exactly what the
+    /// daemon exists to prevent, and every other teardown path deliberately hands these children
+    /// over instead.
+    @discardableResult
+    func terminateHostBackedSessions() -> Set<SessionID> {
+        let hosted = hostBackedSessionIDs
+        guard !hosted.isEmpty else { return [] }
+        for sessionID in hosted {
+            controllers[sessionID]?.terminate()
+            // The viewport is preserved for the same reason every other teardown preserves it:
+            // the conversation is being stopped, not closed, and it opens again where it was.
+            conversations[sessionID]?.terminate(preservingViewport: true)
+        }
+        EventLog.shared.record(.session, "Background host sessions stopped at quit", [
+            "sessions": String(hosted.count)
+        ])
+        return hosted
     }
 
     /// What the session is currently doing. Sessions with no terminal are dormant.
@@ -895,6 +950,8 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
         for sessionID in conversations.keys {
             RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+            guard conversations[sessionID]?.detachFromBackgroundHost(by: detachDeadline) != true
+            else { continue }
             conversations[sessionID]?.terminate(preservingViewport: true)
         }
         conversations.removeAll()

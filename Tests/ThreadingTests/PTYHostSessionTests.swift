@@ -644,6 +644,9 @@ private final class FakeHostTransport: PTYHostSessionTransport, @unchecked Senda
     func attach(_ request: PTYHostAttach) throws { record(.attach(request)) }
     func resize(_ request: PTYHostResize) throws { record(.resize(request)) }
     func detach(_ request: PTYHostDetach) throws { record(.detach(request)) }
+
+    /// Meaningless on a terminal, and never sent by one — recorded so the test can say so.
+    func closeInput(_ request: PTYHostCloseInput) throws { record(.closeInput(request)) }
     func kill(_ request: PTYHostKill) throws { record(.kill(request)) }
 
     /// Nothing is queued, so everything is always written.

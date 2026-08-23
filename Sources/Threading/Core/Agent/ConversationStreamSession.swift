@@ -43,6 +43,14 @@ protocol ConversationStreamSession: AnyObject {
     /// and transport lifetime are related but are not the same fact.
     var rootProcessIdentifier: pid_t? { get }
 
+    /// Whether the CLI behind this conversation lives in `threading-ptyd` rather than in this
+    /// process, and can therefore outlive it.
+    ///
+    /// A fact about the running child rather than about the runtime: the same transport answers
+    /// yes on one launch and no on the next, because every way the host can be missing degrades
+    /// to an in-process child. See [`pty-host.md`](../../../../docs/architecture/pty-host.md).
+    var isHostBacked: Bool { get }
+
     func start()
 
     /// Sends a turn, returning false when the transport cannot accept one yet.
@@ -51,6 +59,14 @@ protocol ConversationStreamSession: AnyObject {
 
     func finish()
     func terminate()
+
+    /// Hands the CLI to the background host instead of ending it, and answers whether it did.
+    ///
+    /// The counterpart of `terminate()` on the one path that is not a stop: a quit. A transport
+    /// whose child is in this process has nothing to hand over and answers false, and
+    /// `terminate()` is still its ending. **Blocking, bounded by `deadline`** — the frame has to
+    /// have left before the process does.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool
 }
 
 /// A transport that can expose the provider's execution-bearing wire objects before its
@@ -74,6 +90,12 @@ protocol ReasoningEffortConfigurableConversation: AnyObject {}
 
 extension ConversationStreamSession {
     var acceptsConfigurationChange: Bool { false }
+
+    /// Defaults so a transport with no host-backed path — and every test double — is unchanged
+    /// by the background host existing.
+    var isHostBacked: Bool { false }
+
+    func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
 
     /// The shared context boundary. Providers continue to own only their text wire protocol;
     /// every reference and comment reaches Claude, Codex, and ACP in the same durable envelope.

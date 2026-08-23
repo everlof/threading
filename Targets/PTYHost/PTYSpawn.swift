@@ -223,3 +223,190 @@ private final class CStringVector {
         base.deallocate()
     }
 }
+
+// MARK: - Pipes
+
+/// The pipe half of `PTYSpawn`: three descriptors, a process group, and nothing else.
+///
+/// Deliberately a second entry point rather than a branch inside `spawn`. The two share no
+/// mechanism — one is `forkpty` and a controlling terminal, the other is `posix_spawn` and three
+/// `dup2` actions — and the one thing they must agree about, that the child leads its own group
+/// so `kill(-pid, …)` is the whole job's ending, is stated in both places because it is the
+/// property that makes teardown correct rather than an implementation detail of either.
+extension PTYSpawn {
+
+    /// A child wired to three pipes. The descriptors are the **parent's** ends.
+    struct PipeChild {
+        let pid: pid_t
+        /// The daemon writes the child's standard input here.
+        let input: Int32
+        /// The daemon reads the child's standard output here.
+        let output: Int32
+        /// And its standard error here. Separate, because merging the two would corrupt the
+        /// newline-delimited JSON the app's transports parse.
+        let errors: Int32
+        let startTime: PTYHostProcessStartTime?
+    }
+
+    /// Spawns a child on three pipes, leading its own process group.
+    ///
+    /// `posix_spawn` rather than `fork`/`exec` here, where `forkpty` is unavoidable next door:
+    /// between `fork` and `exec` only async-signal-safe calls are allowed, and `posix_spawn` does
+    /// the whole dance — descriptor actions, working directory, signal dispositions, process
+    /// group — inside the kernel with none of that hazard. It is the same primitive, and the same
+    /// flags, the app's own `ChildProcessSpawn` uses for exactly this child.
+    ///
+    /// **Every signal disposition goes back to the default.** The daemon ignores `SIGPIPE` and
+    /// libdispatch masks signals of its own; an ignored disposition survives `exec`, so a child
+    /// that inherited them would be a CLI that cannot be interrupted and cannot notice a closed
+    /// reader.
+    static func spawnPipes(
+        executable: String,
+        arguments: [String],
+        execName: String?,
+        environment: [String],
+        workingDirectory: String?
+    ) -> Result<PipeChild, Failure> {
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            return .failure(.executableUnavailable)
+        }
+
+        guard let input = DescriptorPair(), let output = DescriptorPair() else {
+            return .failure(.forkFailed(errno))
+        }
+        guard let errors = DescriptorPair() else {
+            input.closeBoth()
+            output.closeBoth()
+            return .failure(.forkFailed(errno))
+        }
+
+        var argumentVector = arguments
+        argumentVector.insert(execName ?? executable, at: 0)
+        guard let argv = CStringVector(argumentVector) else {
+            [input, output, errors].forEach { $0.closeBoth() }
+            return .failure(.forkFailed(ENOMEM))
+        }
+        guard let envp = CStringVector(environment) else {
+            argv.deallocate()
+            [input, output, errors].forEach { $0.closeBoth() }
+            return .failure(.forkFailed(ENOMEM))
+        }
+        defer {
+            argv.deallocate()
+            envp.deallocate()
+        }
+
+        var actions: posix_spawn_file_actions_t?
+        guard posix_spawn_file_actions_init(&actions) == 0 else {
+            [input, output, errors].forEach { $0.closeBoth() }
+            return .failure(.forkFailed(errno))
+        }
+        defer { posix_spawn_file_actions_destroy(&actions) }
+
+        if let workingDirectory {
+            // The `_np` spelling deliberately: the unsuffixed one arrived in macOS 26 and this
+            // daemon deploys to 13, so the deprecation is the price of the only form that exists
+            // on the deployment target.
+            guard posix_spawn_file_actions_addchdir_np(&actions, workingDirectory) == 0 else {
+                [input, output, errors].forEach { $0.closeBoth() }
+                return .failure(.forkFailed(errno))
+            }
+        }
+        let map: [(Int32, Int32)] = [
+            (PTYHostDefaults.childStandardInput, input.readEnd),
+            (PTYHostDefaults.childStandardOutput, output.writeEnd),
+            (PTYHostDefaults.childStandardError, errors.writeEnd)
+        ]
+        for (target, source) in map {
+            guard posix_spawn_file_actions_adddup2(&actions, source, target) == 0 else {
+                [input, output, errors].forEach { $0.closeBoth() }
+                return .failure(.forkFailed(errno))
+            }
+        }
+
+        var attributes: posix_spawnattr_t?
+        guard posix_spawnattr_init(&attributes) == 0 else {
+            [input, output, errors].forEach { $0.closeBoth() }
+            return .failure(.forkFailed(errno))
+        }
+        defer { posix_spawnattr_destroy(&attributes) }
+
+        var defaulted = sigset_t()
+        sigfillset(&defaulted)
+        _ = posix_spawnattr_setsigdefault(&attributes, &defaulted)
+        // A pgid of zero means "lead your own group", so the child's group id is its pid and
+        // `kill(-pid, …)` reaches it and every grandchild it starts. `CLOEXEC_DEFAULT` means it
+        // inherits exactly the three descriptors named above and nothing else the daemon
+        // happened to have open — including the socket its own app is talking to.
+        guard posix_spawnattr_setpgroup(&attributes, PTYHostDefaults.leadOwnGroup) == 0,
+              posix_spawnattr_setflags(
+                  &attributes,
+                  Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF)
+              ) == 0 else {
+            [input, output, errors].forEach { $0.closeBoth() }
+            return .failure(.forkFailed(errno))
+        }
+
+        var pid: pid_t = 0
+        let result = posix_spawn(&pid, executable, &actions, &attributes, argv.base, envp.base)
+        guard result == 0 else {
+            [input, output, errors].forEach { $0.closeBoth() }
+            return .failure(.forkFailed(result))
+        }
+
+        // The child holds its own copies now. Until these go, the child's stdout never reaches
+        // end of file for the daemon and closing its stdin never reads as end of input to the
+        // CLI — which is the graceful shutdown every one of these transports depends on.
+        input.closeReadEnd()
+        output.closeWriteEnd()
+        errors.closeWriteEnd()
+
+        let parentEnds = [input.writeEnd, output.readEnd, errors.readEnd]
+        for descriptor in parentEnds { _ = fcntl(descriptor, F_SETFD, FD_CLOEXEC) }
+
+        return .success(PipeChild(
+            pid: pid,
+            input: input.writeEnd,
+            output: output.readEnd,
+            errors: errors.readEnd,
+            startTime: startTime(of: pid)
+        ))
+    }
+}
+
+// MARK: - Descriptor pairs
+
+/// One `pipe(2)`, with each end released exactly once.
+///
+/// Raw descriptors rather than anything owning: the daemon hands two of the six to `DispatchIO`
+/// channels that close them from their own cleanup handlers, and a second apparent owner is how
+/// a descriptor the kernel has already recycled gets closed under an unrelated file.
+private final class DescriptorPair {
+
+    private(set) var readEnd: Int32
+    private(set) var writeEnd: Int32
+
+    init?() {
+        var descriptors: [Int32] = [-1, -1]
+        guard pipe(&descriptors) == 0 else { return nil }
+        readEnd = descriptors[0]
+        writeEnd = descriptors[1]
+    }
+
+    func closeReadEnd() {
+        guard readEnd >= 0 else { return }
+        close(readEnd)
+        readEnd = -1
+    }
+
+    func closeWriteEnd() {
+        guard writeEnd >= 0 else { return }
+        close(writeEnd)
+        writeEnd = -1
+    }
+
+    func closeBoth() {
+        closeReadEnd()
+        closeWriteEnd()
+    }
+}
