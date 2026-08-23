@@ -143,6 +143,10 @@ enum RemoteRouteWalkBudget {
 enum RemoteRouteWalkDeadline {
 
     /// Which side of the race answered.
+    /// One main-actor state machine owns both continuations and every answer. Keeping this
+    /// isolation on the type — rather than relying on all current callers happening to arrive
+    /// from main-actor tasks — makes the exactly-once handoff a compiler-checked invariant.
+    @MainActor
     private final class Arbiter<Value> {
         private enum State {
             case waiting
