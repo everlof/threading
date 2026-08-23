@@ -641,8 +641,13 @@ private final class FakeHostTransport: PTYHostSessionTransport, @unchecked Senda
     // MARK: - PTYHostSessionTransport
 
     func spawn(_ request: PTYHostSpawnRequest) throws { record(.spawn(request)) }
+    func attach(_ request: PTYHostAttach) throws { record(.attach(request)) }
     func resize(_ request: PTYHostResize) throws { record(.resize(request)) }
+    func detach(_ request: PTYHostDetach) throws { record(.detach(request)) }
     func kill(_ request: PTYHostKill) throws { record(.kill(request)) }
+
+    /// Nothing is queued, so everything is always written.
+    func drainWrites(until deadline: Date) -> Bool { true }
 
     func sendInput(_ bytes: Data) throws {
         lock.lock()
@@ -687,6 +692,20 @@ private final class FakeHostTransport: PTYHostSessionTransport, @unchecked Senda
     var kills: [PTYHostKill] {
         sent.compactMap { frame -> PTYHostKill? in
             guard case .kill(let request) = frame else { return nil }
+            return request
+        }
+    }
+
+    var attaches: [PTYHostAttach] {
+        sent.compactMap { frame -> PTYHostAttach? in
+            guard case .attach(let request) = frame else { return nil }
+            return request
+        }
+    }
+
+    var detaches: [PTYHostDetach] {
+        sent.compactMap { frame -> PTYHostDetach? in
+            guard case .detach(let request) = frame else { return nil }
             return request
         }
     }

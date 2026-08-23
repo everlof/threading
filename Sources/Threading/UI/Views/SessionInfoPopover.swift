@@ -458,13 +458,22 @@ enum SessionPopoverDefaults {
     ///
     /// Nil for a session that *was* restored: it is live, and the card is already saying so.
     static func dormancyReason(for outcome: SessionRestorationOutcome) -> String? {
+        // The one answer launch restore did not decide: the background host kept this session
+        // running past the quit, and it is dormant now because it ended, not because a rule
+        // turned it away. Pointing at the restore page would point at a setting that had no say.
+        if case .reattached = outcome { return backgroundHostReason }
         guard let reason = reasonSentence(for: outcome) else { return nil }
         return "\(reason) \(restoreSettingHint)"
     }
 
+    /// Said for a session `threading-ptyd` was still running when this launch asked.
+    static var backgroundHostReason: String {
+        L10n.string("It kept running in the background after Threading quit, and has since stopped.")
+    }
+
     private static func reasonSentence(for outcome: SessionRestorationOutcome) -> String? {
         switch outcome {
-        case .restored:
+        case .restored, .reattached:
             return nil
 
         case .restoreDisabled:

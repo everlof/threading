@@ -99,6 +99,19 @@ enum PTYHostPolicy {
             return nil
         }
 
+        return attachingTransportFactory(socketPath: socketPath, bundle: bundle)
+    }
+
+    /// A factory for a rendezvous somebody has already decided on.
+    ///
+    /// The reattach path's, and it takes no availability of its own on purpose: the daemon has
+    /// just answered `list` on this exact socket, so asking again would be asking a question
+    /// already answered — and answering it differently the second time would mean building a
+    /// terminal for a session nothing is going to hand back.
+    static func attachingTransportFactory(
+        socketPath: String,
+        bundle: Bundle = .main
+    ) -> PTYHostTransportFactory {
         let build = PTYHostBuild.string(for: bundle)
         return { events in
             let client = PTYHostClient(socketPath: socketPath, build: build, events: events)

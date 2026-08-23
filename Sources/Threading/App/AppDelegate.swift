@@ -859,6 +859,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         activeTurnSleepInhibitor?.stop()
         activeTurnSleepInhibitor = nil
+        // Host-backed sessions are handed to `threading-ptyd` rather than ended: their children
+        // belong to the daemon and outlive this process, and the screen and mode seeds only this
+        // process can compute are what make the next launch's replay exact rather than a cut.
+        // Necessarily ahead of `terminateAll`, which would otherwise kill exactly these children,
+        // and after the record above, which stays the truth for the degraded path.
+        AgentRuntime.shared.detachHostBackedSessions()
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing
@@ -901,12 +907,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func confirmQuitIfAgentsRunning() -> Bool {
         guard !isSystemInitiatedQuit else { return true }
 
-        let running = AgentRuntime.shared.runningSessionCount
-        guard running > 0 else { return true }
+        // A host-backed session keeps running through the quit, so counting it here would have
+        // this sheet announce a loss that does not happen — its message says every open session
+        // closes and only work in flight is lost, and neither is true of one the daemon keeps.
+        // The *wording* is slice 9's, in `pty-host.md`; this is only the count refusing to lie.
+        let ending = AgentRuntime.shared.runningSessionIDs
+            .subtracting(AgentRuntime.shared.hostBackedSessionIDs)
+        guard !ending.isEmpty else { return true }
 
         return ConfirmationAlert.ask(Self.quitConfirmation(
-            runningSessionCount: running,
-            inFlightTurnCount: AgentRuntime.shared.inFlightTurnCount
+            runningSessionCount: ending.count,
+            inFlightTurnCount: AgentRuntime.shared.inFlightTurnCount(among: ending)
         ))
     }
 

@@ -1836,8 +1836,40 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// is a run-loop turn away, which `hasTerminal` alone would race.
     func relaunchSessionsFromLastQuit() {
         // Consumed whatever the policy is, and before the policy is consulted: a list written
-        // under one choice must not be able to fire under a later one.
+        // under one choice must not be able to fire under a later one. Consumed *here* rather
+        // than inside the completion below for the same reason it has always been consumed
+        // unconditionally — the record is spent by the launch that read it, whatever that launch
+        // then decides to do with it.
         let recorded = StateManager.shared.consumeRunningSessionIDs()
+
+        // The background host is asked first, and that order is the whole of the durable half of
+        // this feature: the record above says what *was* running at the last quit, and the daemon
+        // says what *is*. Relaunching a session it still holds would start a second agent on a
+        // conversation whose first has been working the whole time.
+        //
+        // With the hidden key off — every launch until R1 is answered — this answers on this
+        // turn without opening anything, so the launch below is the launch it has always been.
+        PTYHostReattach.run(
+            decision: PTYHostDecision.live(settings: environment.settings, bundle: .main),
+            store: environment.projectStore,
+            eventLog: environment.eventLog,
+            adopt: { [weak self] summary, socketPath in
+                self?.containerViewController.reattachInBackground(
+                    summary: summary,
+                    socketPath: socketPath
+                ) ?? false
+            },
+            completion: { [weak self] heldByHost in
+                self?.planRelaunchFromLastQuit(recorded: recorded, heldByHost: heldByHost)
+            }
+        )
+    }
+
+    /// The half of `relaunchSessionsFromLastQuit` that runs once the background host has answered.
+    private func planRelaunchFromLastQuit(
+        recorded: [SessionID],
+        heldByHost: Set<SessionID>
+    ) {
         let settings = environment.settings
         let policy = settings.sessionRestorePolicy
 
@@ -1849,7 +1881,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             limit: settings.sessionRestoreLimit,
             excluding: settings.restoresLastSession
                 ? environment.projectStore.selectedSessionID
-                : nil
+                : nil,
+            heldByHost: heldByHost
         )
         // Recorded before the plan is allowed to be empty, and recorded for every policy: the
         // hover card on a dormant row explains this decision, and "nothing came back" is the
@@ -1863,7 +1896,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         environment.eventLog.record(.session, "Relaunching sessions from last quit", [
             "policy": policy.rawValue,
             "recorded": String(recorded.count),
-            "relaunching": String(plan.sessionIDs.count)
+            "relaunching": String(plan.sessionIDs.count),
+            // Said out loud beside the other two: "recorded 3, relaunching 0" reads as a feature
+            // that did nothing until this number says three of them never stopped.
+            "heldByHost": String(heldByHost.count)
         ])
 
         guard !plan.sessionIDs.isEmpty else { return }

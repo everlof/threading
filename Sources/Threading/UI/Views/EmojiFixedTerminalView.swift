@@ -128,6 +128,18 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// `feedFromHost(_:answersQueries:)` — so two replayed feeds in one turn can overlap.
     private var suppressedQueryReplyScopes = 0
 
+    /// The grid the background host is already holding, while this terminal has *adopted* one
+    /// rather than chosen it.
+    ///
+    /// A reattach adopts the daemon's grid, and adopting it is an emulator resize — which
+    /// SwiftTerm reports through `onMain`, one main-queue turn later, by which time the link is
+    /// installed. Telling the daemon the size it has just told us would raise `SIGWINCH` on an
+    /// agent that has been working at that size all along, which is exactly the reflow
+    /// reattaching must not cause. So a window size equal to the adopted grid is not sent, and a
+    /// different one — a window the user resized while Threading was closed — is a real change,
+    /// is sent once, and ends the comparison.
+    private var adoptedHostGrid: (cols: Int, rows: Int)?
+
     /// Whether this delivery is the emulator answering rather than a person typing.
     ///
     /// The two are told apart by the scopes the local paths already establish: every keystroke,
@@ -202,7 +214,29 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// holding it whichever process owns the pty.
     override func sendWindowSize(_ size: inout winsize) -> Bool {
         guard let hostTransport else { return super.sendWindowSize(&size) }
+        if let adopted = adoptedHostGrid {
+            guard Int(size.ws_col) != adopted.cols || Int(size.ws_row) != adopted.rows else {
+                // Delivered, in the only sense the caller cares about: the host holds this grid.
+                return true
+            }
+            adoptedHostGrid = nil
+        }
         return hostTransport.sendWindowSize(size)
+    }
+
+    /// Puts the emulator on the grid the background host is holding, without telling the host.
+    ///
+    /// The durable grid belongs to the session rather than to whichever window is looking at it,
+    /// so a reattach inherits it and the replay is rendered at the size it was written at. A
+    /// repeat of the grid already in force does nothing at all: SwiftTerm's resize path ends in
+    /// `softReset()`, and re-applying an unchanged grid would clear a working agent's scrolling
+    /// region for no reason — the same scar `applyRemoteGrid` records.
+    func adoptHostGrid(cols: Int, rows: Int) {
+        guard cols > 0, rows > 0 else { return }
+        adoptedHostGrid = (cols, rows)
+        let current = terminalDimensions
+        guard current.cols != cols || current.rows != rows else { return }
+        resize(cols: cols, rows: rows)
     }
 
     /// Programmatic insertion that still belongs to the person operating this terminal.

@@ -977,12 +977,26 @@ The rules, each of which is the answer to a way this goes wrong:
 - **A dormant row can say why it is dormant.** `StartupSessionRelaunch.Plan` carries a
   `SessionRestorationOutcome` for every unarchived session — restored, restore off, not running
   at the last quit, nothing recorded, outside the window (with when it was last used), or past
-  the limit — and `SessionRestorationLedger` holds them for the launch. The session hover card
+  the limit, or reattached from the background host — and `SessionRestorationLedger` holds them for
+  the launch. The session hover card
   reads it under "Dormant · resumable" and names the settings page. Recorded rather than
   recomputed for two reasons: the answer belongs to the decision that was actually made, and a
   card built while the pointer rests on a row must not do work proportional to the whole store.
   The ledger forgets a session the moment it launches, because from then on its dormancy is its
   own agent's exit and the launch's reason would be a lie.
+- **A session the background PTY host is still running is not a session to start.** With the
+  hidden key on, a host-backed session is *detached* at the quit rather than terminated, so it goes
+  on working while Threading is closed; `PTYHostReattach` asks the daemon what it is holding
+  **before** `relaunchSessionsFromLastQuit` plans anything, and those ids leave the launch set with
+  the outcome `.reattached` rather than `.restored`. Relaunching one would put a second agent on a
+  conversation whose first never stopped. Three neighbouring answers fall out of the same list and
+  are deliberately different: a child that *ended* while nobody was attached has its exit recorded
+  and stays a dormant row, exactly as an in-process exit would have left it; a child held for a
+  conversation that has since been deleted or archived is killed, because nothing can ever show it
+  again; and a session a restarted daemon reports as `lost` is left to the ordinary relaunch, which
+  resumes it from its transcript. With the key off — every launch until the TCC question above is
+  answered — the whole step is decided on the calling turn without opening anything, so the plan
+  and its ordering are exactly what they were. See [`pty-host.md`](pty-host.md#detach-and-reattach).
 - **Both ends of the handshake are journalled**, because neither was, and that is why the
   above stayed invisible: the `Quit` record carries `runningSessions`, and the launch records
   `recorded` beside `relaunching`. The pair is what separates the three ways this comes to

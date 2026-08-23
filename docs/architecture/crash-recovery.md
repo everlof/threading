@@ -349,6 +349,26 @@ the *next* normal launch was going to bring back. It is not consumed here either
 hangs off the MCP listener's callback. Leaving it alone at both ends is what preserves it end to
 end.
 
+**That record is now a hint rather than the only truth, and every word above still applies to it.**
+A session whose pty lives in `threading-ptyd` is *detached* on the quit rather than terminated, so
+the daemon's own list is what is actually running when the next launch starts;
+`relaunchSessionsFromLastQuit` therefore runs **after** `PTYHostReattach`, and plans only the
+sessions the host does not hold. Relaunching one it does hold would start a second agent on a
+conversation whose first has been working the whole time. The record stays written, and stays
+guarded exactly as above, because it is the whole of the degraded path: the hidden key is off by
+default, the daemon may be missing or refused for any of `PTYHostAvailability`'s reasons, and every
+one of those cases is today's launch, unchanged — with the feature off the reattach step answers on
+the calling turn without opening anything. A session the daemon reports as `lost` is deliberately
+*not* held back, because the daemon cannot hand it over; the ordinary relaunch resumes it by its
+agent-assigned identifier, at the cost this has always had. See
+[`pty-host.md`](pty-host.md#detach-and-reattach).
+
+**`SessionRestorationLedger` gains a `reattached` outcome** beside `restored`, so a row can tell
+"it came back" from "it never went away". They are different facts and only one of them cost a turn
+in flight. The dormant hover card says so without naming Settings ▸ General, because launch restore
+did not decide it: a `reattached` row is dormant only because the agent that kept running has since
+ended, and `PTYHostReattach` recorded that ending off the daemon's own exit status.
+
 **The theme.** `AppThemeLibrary.restore(_:)` pins System under `.recovery`, in memory. Nothing in
 `restore` writes, today or after — the write lives in `apply`, which records even a pick that
 changes nothing on screen — so "recovery cannot re-persist the theme" is bought by taking that path

@@ -35,6 +35,12 @@ enum StartupSessionRelaunch {
     /// well would race the selection's own launch. Most recently used goes first, because the
     /// stagger means the last in line waits the whole line, and the session touched last is the
     /// one most likely to be wanted first.
+    ///
+    /// `heldByHost` is what `threading-ptyd` was still running when this launch asked, and it
+    /// outranks every policy: a session that never stopped is not a session to start. Relaunching
+    /// one would put a second agent on a conversation whose first is still working, so those ids
+    /// leave the launch set entirely and are answered `.reattached` instead — which is a
+    /// different fact from `.restored` and worth being able to tell apart.
     static func plan(
         policy: SessionRestorePolicy,
         recorded: [SessionID],
@@ -42,7 +48,38 @@ enum StartupSessionRelaunch {
         windowDays: Int = SessionRestoreDefaults.windowDays,
         limit: Int = SessionRestoreDefaults.limit,
         now: Date = Date(),
-        excluding excludedID: SessionID? = nil
+        excluding excludedID: SessionID? = nil,
+        heldByHost: Set<SessionID> = []
+    ) -> Plan {
+        let planned = policyPlan(
+            policy: policy,
+            recorded: recorded,
+            sessions: sessions,
+            windowDays: windowDays,
+            limit: limit,
+            now: now,
+            excluding: excludedID
+        )
+        guard !heldByHost.isEmpty else { return planned }
+
+        var outcomes = planned.outcomes
+        for sessionID in heldByHost where outcomes[sessionID] != nil {
+            outcomes[sessionID] = .reattached
+        }
+        return Plan(
+            sessionIDs: planned.sessionIDs.filter { !heldByHost.contains($0) },
+            outcomes: outcomes
+        )
+    }
+
+    private static func policyPlan(
+        policy: SessionRestorePolicy,
+        recorded: [SessionID],
+        sessions: [AgentSession],
+        windowDays: Int,
+        limit: Int,
+        now: Date,
+        excluding excludedID: SessionID?
     ) -> Plan {
         // Archived sessions are not dormant rows anybody can see, so they earn no outcome: the
         // sidebar does not list them and Settings ▸ Archived is where they are explained.
@@ -129,6 +166,15 @@ enum SessionRestorationOutcome: Equatable, Sendable {
 
     /// Brought back live by this launch, or being brought back by the restored selection.
     case restored
+
+    /// It never went away. `threading-ptyd` was still running it when this launch asked, so
+    /// there was nothing to bring back — the terminal was reconnected to a process that had been
+    /// working the whole time.
+    ///
+    /// Distinct from `restored` because the two are different facts about the same row, and the
+    /// difference is the one a person asks about: a session that came back lost its turn in
+    /// flight, and a session that never stopped did not.
+    case reattached
 
     /// Launch restore is switched off.
     case restoreDisabled

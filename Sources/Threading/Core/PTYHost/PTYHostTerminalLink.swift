@@ -11,13 +11,25 @@ import ThreadingPTYHostKit
 /// bundle, the handshake deadlines. These are about one session's link once it has been reached.
 enum PTYHostSessionDefaults {
 
-    /// How long a `kill` is given to reach the daemon before the connection is closed anyway.
+    /// How long the **whole** quit path waits for its `detach` frames to leave.
     ///
-    /// A close is asynchronous and `DispatchIO.close(flags: .stop)` abandons what has not been
-    /// written, so closing in the same turn as the `kill` can discard the very frame that ends
-    /// the child. The ordinary path never needs this — the daemon answers `exited` and the link
-    /// closes on that — so this is the deadline for the case where it does not.
-    static let killDrainSeconds: TimeInterval = 3
+    /// A `DispatchIO` write is reported complete later, and on this one path the close that
+    /// follows the frame is the process exiting: a `detach` still queued when the app dies is a
+    /// seed the next launch never gets, and its rejoin degrades from exact to a cut. A `kill`
+    /// needs no equivalent, because the link stays open until the daemon answers `exited`.
+    ///
+    /// One shared deadline rather than one per session, so forty host-backed sessions cost the
+    /// same wait as one — the ordinary case is a fraction of a millisecond, and the case this
+    /// bounds is a daemon that has stopped reading, which the write-queue guard has already
+    /// closed the connection for.
+    static let detachDrainSeconds: TimeInterval = 1
+
+    /// The history a reattach asks for: everything the ring can still prove.
+    ///
+    /// Nil rather than a number, because a stated budget is a statement about what the watcher
+    /// can hold, and a Mac terminal that is about to render the session in full can hold all of
+    /// it. `PTYHostAttach.normalizedReplayBudget` reads nil as "no statement".
+    static let reattachReplayBudget: Int? = nil
 }
 
 // MARK: - Transport
@@ -38,9 +50,16 @@ protocol PTYHostSessionTransport: AnyObject, Sendable {
     var queue: DispatchQueue { get }
 
     func spawn(_ request: PTYHostSpawnRequest) throws
+    func attach(_ request: PTYHostAttach) throws
     func resize(_ request: PTYHostResize) throws
+    func detach(_ request: PTYHostDetach) throws
     func kill(_ request: PTYHostKill) throws
     func sendInput(_ bytes: Data) throws
+
+    /// Blocks until nothing queued is still unwritten, or the deadline passes. Answers whether
+    /// the queue drained.
+    func drainWrites(until deadline: Date) -> Bool
+
     func close()
 }
 
@@ -86,10 +105,12 @@ struct PTYHostFeedSegment: Sendable {
 /// actor, in `installProcessOutputObserver`'s existing shape, because a hop per frame would put a
 /// terminal's whole output rate on the main queue — the shape that makes a mirror slow.
 ///
-/// **A link that is released kills its child.** Detach and reattach are the next slice; until they
-/// land, a session that goes away must not leave an agent running in a process nothing references.
-/// When `detach` replaces this, the deinit below becomes the failure path rather than the ordinary
-/// one.
+/// **Only an explicit stop kills the child.** `terminate()` sends `kill`; a quit sends `detach`
+/// with the seeds only this process can compute; and a link that is simply released lets go —
+/// it closes, which the daemon reads as a watcher that vanished, keeps the child for, and
+/// answers the next attach with a cut. Sending `detach` from the deinit instead would be worse
+/// rather than better: a deinit has no emulator to repaint from, so the seeds would be empty and
+/// the next attach would be an *exact* replay of bytes with no screen to put them on.
 final class PTYHostTerminalLink: @unchecked Sendable {
 
     // MARK: - Types
@@ -104,6 +125,11 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         /// The child exists: its pid and the kernel start time that is the other half of its
         /// identity.
         var spawned: @Sendable (PTYHostSpawned) -> Void = { _ in }
+
+        /// The daemon handed this session's child back: its pid, the grid it has been holding,
+        /// and what the raw bytes that follow are. Delivered **before** the replay, so the
+        /// emulator can adopt the grid the bytes were written at.
+        var attached: @Sendable (PTYHostAttached) -> Void = { _ in }
 
         /// A different process group owns the terminal now.
         var foreground: @Sendable (Int32) -> Void = { _ in }
@@ -132,9 +158,37 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     private var deliveryStorage = Delivery()
     private var pending: [PTYHostFeedSegment] = []
     private var isFlushScheduled = false
-    /// True once an ending has been delivered, so the deinit below knows there is no child left
-    /// to kill and a second ending is never reported.
+    /// True once an ending has been delivered or the child has been handed over, so the deinit
+    /// below knows there is nothing left to let go of and a second ending is never reported.
     private var hasEnded = false
+
+    /// Where this watcher is in the daemon's byte stream, in the daemon's own `totalBytesWritten`
+    /// units — the number `detach` hands back and `.exact` is decided from.
+    ///
+    /// A spawned link starts at zero and every byte it is given is a ring byte, so its count is
+    /// the daemon's exactly. An **attached** link starts at the `attached` frame's count and then
+    /// counts the replay along with the live output, because the wire carries no marker saying
+    /// where the replay ended: the screen and mode seeds are bytes the daemon stores and forwards
+    /// but never wrote to the ring, and their lengths are not on the wire. So after a replay this
+    /// is an *upper* bound rather than the exact value, and that is the safe direction:
+    /// `RemoteRingBuffer.snapshot(from:)` refuses an offset ahead of its own count by design, so
+    /// the attach after a reattach is answered with a cut rather than with duplicated bytes.
+    /// Closing that gap needs one field on `attached` naming the replay's length; it is written
+    /// down in `pty-host.md` rather than guessed at here.
+    private var ringOffset: UInt64 = 0
+
+    /// True while the bytes arriving are a `.cut` replay, which the emulator must not answer.
+    ///
+    /// Cleared by the first flush, which is the only boundary the wire gives: the daemon queues
+    /// the whole replay from its serial queue before it binds the connection, so the replay is
+    /// the head of what arrives, and the coalescer turns everything read before the first
+    /// main-queue hop into one run. Erring towards suppressing one live reply for one main-queue
+    /// turn is the right direction — answering history is the failure P1 names, and a stale `DA`
+    /// reply reaching a program that already had one is worse than silence.
+    ///
+    /// `.exact` needs none of this: those bytes have never reached an emulator, so they are
+    /// answered exactly as live output is.
+    private var isReplayingHistory = false
 
     // MARK: - Initialization
 
@@ -145,22 +199,14 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     deinit {
         lock.lock()
         let transport = transportStorage
-        let ended = hasEnded
         transportStorage = nil
         lock.unlock()
 
-        guard let transport else { return }
-        guard !ended else {
-            transport.close()
-            return
-        }
-        // Nothing references this session's terminal any more, and until the detach slice lands
-        // there is no way to hand it over. Ending it is the honest answer: an agent still working
-        // in a session no surface can reach is worse than one that stopped.
-        try? transport.kill(PTYHostKill(id: identity, escalate: true))
-        transport.queue.asyncAfter(deadline: .now() + PTYHostSessionDefaults.killDrainSeconds) {
-            transport.close()
-        }
+        // Letting go, never killing. The child is the daemon's and outlives this process, so a
+        // watcher that stopped watching is a close — which the daemon reads as a detach without
+        // seeds, keeps the child for, and answers the next attach with a cut. An explicit stop
+        // is `terminate()` and sends `kill`; a quit is `detach` and hands the seeds over.
+        transport?.close()
     }
 
     // MARK: - Public Methods
@@ -195,9 +241,69 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     }
 
     /// Starts the child. Throwing means nothing was sent, so the caller may still run in-process.
+    ///
+    /// A spawned session's ring starts empty, so this watcher is at offset zero and every byte it
+    /// is given afterwards is a byte the daemon wrote — which is what makes its `detach` offset
+    /// exact rather than an upper bound.
     func spawn(_ request: PTYHostSpawnRequest) throws {
         guard let transport = currentTransport() else { throw PTYHostClientError.notReady }
+        lock.lock()
+        ringOffset = 0
+        lock.unlock()
         try transport.spawn(request)
+    }
+
+    /// Takes a session the daemon is already holding. Throwing means nothing was sent.
+    ///
+    /// The answer is an `attached` frame carrying the pid, the grid the daemon has been holding
+    /// and what the raw bytes that follow are — and **it never resizes**: the watcher inherits
+    /// the grid rather than imposing one, which is what keeps an agent that kept working through
+    /// a restart from being reflowed by the app that came back to it.
+    func attach(_ request: PTYHostAttach) throws {
+        guard let transport = currentTransport() else { throw PTYHostClientError.notReady }
+        try transport.attach(request)
+    }
+
+    /// Hands the child back to the daemon instead of ending it, and lets go of the link.
+    ///
+    /// The seeds are the app's to compute — the daemon has no emulator, and a repaint is derived
+    /// from one — and the offset is where this watcher had got to, which is the whole mechanism
+    /// behind the next launch's exact replay. Answers whether the frame was sent.
+    ///
+    /// **Blocking, and bounded by `deadline`.** This is the quit path: `DispatchIO` reports a
+    /// write as complete later, and the close that follows here is the process exiting, so a
+    /// detach that has not left yet is a seed the next launch never sees.
+    @discardableResult
+    func detach(screenSeed: Data, modeSeed: Data, by deadline: Date) -> Bool {
+        lock.lock()
+        guard !hasEnded, let transport = transportStorage else {
+            lock.unlock()
+            return false
+        }
+        hasEnded = true
+        let offset = ringOffset
+        transportStorage = nil
+        lock.unlock()
+
+        do {
+            try transport.detach(PTYHostDetach(
+                id: identity,
+                screenSeed: screenSeed,
+                modeSeed: modeSeed,
+                ringOffset: offset
+            ))
+        } catch {
+            let cause = (error as? PTYHostClientError)?.token ?? "unknown"
+            ThreadingLogger.ptyHost.error(
+                "PTY host detach could not be sent: \(cause, privacy: .public)"
+            )
+            transport.close()
+            return false
+        }
+
+        _ = transport.drainWrites(until: deadline)
+        transport.close()
+        return true
     }
 
     /// Keystrokes, paste and the emulator's own answers.
@@ -257,6 +363,16 @@ final class PTYHostTerminalLink: @unchecked Sendable {
             let delivery = self.delivery
             DispatchQueue.main.async { delivery.spawned(spawned) }
 
+        case .attached(let attached) where attached.id == identity:
+            lock.lock()
+            ringOffset = attached.totalBytesWritten
+            // `.exact` carries bytes no emulator has ever seen and must be answered; `.cut` is
+            // history and must not be. See `isReplayingHistory`.
+            if case .cut = attached.replay { isReplayingHistory = true }
+            let delivery = deliveryStorage
+            lock.unlock()
+            DispatchQueue.main.async { delivery.attached(attached) }
+
         case .spawnRefused(let refusal) where refusal.id == identity:
             refused(refusal.reason)
 
@@ -289,7 +405,11 @@ final class PTYHostTerminalLink: @unchecked Sendable {
 
     private func received(output bytes: Data) {
         guard !bytes.isEmpty else { return }
-        deliver(PTYHostFeedSegment(bytes: [UInt8](bytes), answersQueries: true))
+        lock.lock()
+        ringOffset &+= UInt64(bytes.count)
+        let answers = !isReplayingHistory
+        lock.unlock()
+        deliver(PTYHostFeedSegment(bytes: [UInt8](bytes), answersQueries: answers))
     }
 
     /// Appends to the pending burst and schedules at most one main-queue hop for it.
@@ -318,6 +438,9 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         let segments = pending
         pending.removeAll(keepingCapacity: true)
         isFlushScheduled = false
+        // The replay is the head of what a rejoining watcher is given, and this hop is the only
+        // boundary the wire offers. See `isReplayingHistory`.
+        if !segments.isEmpty { isReplayingHistory = false }
         let delivery = deliveryStorage
         lock.unlock()
 

@@ -181,6 +181,10 @@ final class PTYHostClient: @unchecked Sendable {
     private var peerHelloStorage: PTYHostHello?
     private var reportedLossStorage: PTYHostLost?
     private var didReportClosed = false
+    /// Callers blocked in `drainWrites(until:)`. Signalled when the queue empties, and again
+    /// when the connection closes — a waiter must not be held for its whole deadline by a link
+    /// that has already ended.
+    private var drainWaiters: [DispatchSemaphore] = []
 
     // MARK: - Initialization
 
@@ -339,6 +343,33 @@ final class PTYHostClient: @unchecked Sendable {
         lock.unlock()
         guard bound != nil else { throw PTYHostClientError.notBound }
         try enqueue(PTYHostFraming.framed(kind: .input, payload: bytes))
+    }
+
+    /// Blocks until nothing this client has queued is still unwritten, or `deadline` passes.
+    ///
+    /// `DispatchIO` accepts a write and reports it complete later, so "it has been sent" is not
+    /// something the caller learns by returning from `send`. That matters in exactly one place:
+    /// the quit path, where the close that follows the last frame is the process exiting, and a
+    /// `detach` still in the queue is a seed the next launch never gets.
+    ///
+    /// **Blocking.** Bounded by the caller's deadline, which is the whole reason the deadline is
+    /// the caller's: a quit with forty host-backed sessions must cost one wait, not forty.
+    @discardableResult
+    func drainWrites(until deadline: Date) -> Bool {
+        lock.lock()
+        guard queuedWriteBytes > 0, state == .ready else {
+            let drained = queuedWriteBytes == 0
+            lock.unlock()
+            return drained
+        }
+        let semaphore = DispatchSemaphore(value: 0)
+        drainWaiters.append(semaphore)
+        lock.unlock()
+
+        _ = semaphore.wait(timeout: .now() + max(0, deadline.timeIntervalSinceNow))
+        lock.lock()
+        defer { lock.unlock() }
+        return queuedWriteBytes == 0
     }
 
     /// Ends the link. Idempotent; `Events.closed` fires at most once.
@@ -776,9 +807,20 @@ final class PTYHostClient: @unchecked Sendable {
     private func finishedWrite(_ count: Int, error: Int32) {
         lock.lock()
         queuedWriteBytes = max(0, queuedWriteBytes - count)
+        // Taken under the lock and signalled outside it: the lock is never held across a call
+        // out of this type.
+        let waiters = queuedWriteBytes == 0 ? takeDrainWaitersLocked() : []
         lock.unlock()
+        for waiter in waiters { waiter.signal() }
         guard error != 0 else { return }
         close(with: .writeFailed(errno: error))
+    }
+
+    /// The waiters, cleared. **The lock must be held.**
+    private func takeDrainWaitersLocked() -> [DispatchSemaphore] {
+        let waiters = drainWaiters
+        drainWaiters.removeAll()
+        return waiters
     }
 
     // MARK: - Private Methods — Closing
@@ -797,7 +839,9 @@ final class PTYHostClient: @unchecked Sendable {
         channel = nil
         descriptor = -1
         boundSessionStorage = nil
+        let waiters = takeDrainWaitersLocked()
         lock.unlock()
+        for waiter in waiters { waiter.signal() }
 
         if openDescriptor >= 0 { _ = Darwin.shutdown(openDescriptor, SHUT_RDWR) }
         if let openChannel {

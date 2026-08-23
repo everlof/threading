@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingPTYHostKit
 
 private enum StatusCardRemoteDefaults {
     /// Checkout notifications arrive in bursts while an agent writes. Local/provider discovery
@@ -1205,6 +1206,40 @@ final class TerminalContainerViewController: NSViewController {
         controller.activityTracker.noteUnattendedLaunch()
         controller.launch(initialPrompt: openingPrompt)
         return true
+    }
+
+    /// Reconnects a terminal to an agent `threading-ptyd` has been running since the last quit.
+    ///
+    /// The sibling of `launchInBackground` and built the same way — same runtime cache, same
+    /// delegate, never attached — with one difference that is the whole point: **nothing is
+    /// launched**. There is no plan, no `--resume`, and no boot. The agent has been working the
+    /// whole time; this builds the surface that can show it again.
+    ///
+    /// The pane's own bounds are still the frame, for the reason `launchInBackground` gives, but
+    /// the *grid* is the daemon's rather than this one's: an attach never resizes, so the replay
+    /// is rendered at the size it was written at and only a genuinely different window sends a
+    /// resize afterwards. A native conversation is never host-backed in version 1, so it is
+    /// refused here rather than silently taking the terminal path.
+    @discardableResult
+    func reattachInBackground(summary: PTYHostSessionSummary, socketPath: String) -> Bool {
+        guard !isRecovery else {
+            RecoveryMode.refuse("taking a session back from the PTY host")
+            return false
+        }
+        guard let sessionID = summary.sessionID,
+              let agentSession = ProjectStore.shared.session(withID: sessionID),
+              !agentSession.isArchived,
+              !agentSession.usesNativeUI,
+              !AgentRuntime.shared.hasTerminal(sessionID: sessionID) else { return false }
+
+        let controller = AgentRuntime.shared.makeController(for: agentSession)
+        controller.delegate = self
+        controller.view.frame = NSRect(origin: .zero, size: backgroundLaunchSize)
+        controller.view.layoutSubtreeIfNeeded()
+        return controller.reattachToBackgroundHost(
+            socketPath: socketPath,
+            grid: summary.grid
+        )
     }
 
     /// The size a background-launched surface is laid out at before its process starts:

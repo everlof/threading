@@ -1,13 +1,15 @@
 # The PTY host
 
-Status: **the wire, the daemon, its registration, the app's client and the host-backed session
-exist; the feature is off.** `Packages/ThreadingPTYHostKit` holds the contract, `Targets/PTYHost`
-is the daemon and launchd starts it, `Sources/Threading/Core/PTYHost` can connect to it, refuse
-an incompatible one and say why it did not, and an **agent session** can now run its child there
-instead of in this process. What is still missing is detach and reattach — a host-backed session
-that stops is killed rather than handed over — and `AppSettings.ptyHostEnabled` ships off, so
-every session runs its PTY in-process exactly as before unless somebody sets the hidden key. The
-feature it serves — sessions that outlive the app — is
+Status: **an agent session survives a quit and a relaunch under the hidden key; there is no
+visibility surface yet.** `Packages/ThreadingPTYHostKit` holds the contract, `Targets/PTYHost` is
+the daemon and launchd starts it, `Sources/Threading/Core/PTYHost` can connect to it, refuse an
+incompatible one and say why it did not, an **agent session** runs its child there instead of in
+this process, and quitting Threading now hands those children over rather than killing them —
+the next launch takes them back, replays exactly what it missed where it can, and does not reflow
+an agent that kept working. What is still missing is the surface that *says* any of this is
+happening: the quit question, the launch band and the Background Sessions list are the next slice.
+`AppSettings.ptyHostEnabled` ships off, so every session runs its PTY in-process exactly as before
+unless somebody sets the hidden key. The feature it serves — sessions that outlive the app — is
 `docs/feature-drafts/durable-sessions.md` §4.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
@@ -384,7 +386,9 @@ replay, and then `exited`. It is owed the ending *after* the history rather than
 grid is then the session's durable window size, kept indefinitely while nobody is attached. **An
 attach never resizes** — the watcher is told the grid and adopts it. `PTYHostDaemonTests` asserts
 both halves by asking the child what `stty size` says, which is the only assertion that can tell a
-daemon that resized the terminal from one that sent the right frames.
+daemon that resized the terminal from one that sent the right frames. The app's half of that rule —
+adopting a grid rather than imposing one, and not sending it straight back — is
+[The durable grid](#the-durable-grid).
 
 ### Foreground
 
@@ -833,9 +837,137 @@ handed a factory or it is not.
 
 ### What host-backing does not cover yet
 
-Detach and reattach, the durable grid across an app restart, and the visibility surface. Until
-they land, a host-backed session that is stopped or deinitialised is **killed**, so nothing is
-left running unreferenced — and that is the one behaviour reattach replaces rather than adds to.
+The visibility surface. Nothing on screen says a session is host-backed, that three of them kept
+running while Threading was closed, or that one of them is wedged; the quit question, the launch
+band and the Background Sessions list are the next slice.
+
+## Detach and reattach
+
+This is the half that makes the feature a feature: quitting leaves the agents working, and
+launching picks them back up into the same conversations.
+
+### What a quit sends
+
+`AppDelegate.applicationShouldTerminate` calls `AgentRuntime.detachHostBackedSessions()` **before**
+`terminateAll`, which would otherwise kill exactly these children. Each host-backed session sends
+one `detach` carrying three things only this process can produce:
+
+- `screenSeed` — `RemoteScreenSeed.repaint(of:)` of the live emulator. The daemon cannot synthesise
+  a screen because a repaint is derived from an emulator and it has none; the app is present at
+  exactly the moment the last watcher leaves, which is what makes this possible at all.
+- `modeSeed` — `RemoteTerminalModeSeed.bytes(for:)` of the modes read off the same snapshot.
+- `ringOffset` — where this watcher had got to in the daemon's own `totalBytesWritten` units,
+  tracked by `PTYHostTerminalLink` from the byte counts it has delivered.
+
+The whole set is bounded by **one** deadline (`PTYHostSessionDefaults.detachDrainSeconds`), not one
+per session: `DispatchIO` reports a write complete later and on this path the close is the process
+exiting, so the frames are drained before the app goes — and forty host-backed sessions must cost
+one wait rather than forty. Losing a `detach` is not losing the session: a close without one leaves
+the child running and clears the seed, so the next attach is a cut.
+
+`terminateAll` keeps the same guard for anything that reaches it another way, because tearing every
+session down must not become a way to kill a child nobody asked to stop. **An explicit stop still
+kills**: `TerminalSession.terminate()` sends `kill`, and only a released link — a watcher that
+simply went away — closes and lets go. A deinit deliberately does *not* send `detach`, because a
+deinit has no emulator to repaint from: the seeds would be empty, and an `.exact` replay of bytes
+with no screen to put them on is worse than the honest cut a bare close produces.
+
+The quit question's count excludes host-backed sessions, because its message says every open
+session closes and only work in flight is lost, and neither is true of one the daemon keeps. The
+*wording* is the visibility surface's; this is only the count refusing to overstate.
+
+### What a launch takes back
+
+`PTYHostReattach.run` connects, `list`s, and classifies what came back against what the app still
+has. Four answers, because "the daemon has it" is not one fact:
+
+| | What happens |
+|---|---|
+| running, and the conversation exists | taken back — a controller is built the way a dormant session's is, and its `TerminalSession` **attaches instead of spawning** |
+| `exit != nil` | the exit is recorded on the session record and the row stays dormant with that status, exactly as an in-process ending would have left it. `lastActiveAt` is untouched: nobody recorded when it ended |
+| the conversation is gone or archived | `attach` then `kill(escalate:)`, journalled. Nothing can ever show that child again |
+| in the daemon's `lost` set | journalled, and left to `relaunchSessionsFromLastQuit` to resume from its transcript. The daemon cannot hand it back, so holding it back from the relaunch would strand it |
+
+The first two are what the relaunch must skip; the last two are not. `relaunchSessionsFromLastQuit`
+runs **after** this and plans only what the host does not hold — see
+[`crash-recovery.md`](crash-recovery.md#what-a-recovery-launch-does-not-write) for what that does
+to the running-sessions record, and [`sessions.md`](sessions.md#the-sessions-that-come-back-on-their-own)
+for the launch set. With the hidden key off the whole step answers on the calling turn without
+opening anything, so a launch with the feature off is the launch it has always been.
+
+Taking eight sessions back costs about what starting eight bare children costs — roughly 3 ms
+each, measured, with the numbers and the two things they deliberately leave out in
+[`performance.md`](performance.md#taking-sessions-back-against-starting-them).
+
+The survey's connect **is** the availability probe rather than a second one beside it:
+`PTYHostAvailability.resolve` owns the order those questions are asked in, and the probe closure it
+is handed keeps the client it made so the `list` goes out on the connection the gate has already
+admitted.
+
+### The feed rule, and the one thing the wire does not carry
+
+`attached` says what the bytes that follow are, and the app feeds them accordingly:
+
+- `.exact` — every byte is fed with `answersQueries: true`. Those bytes have never reached an
+  emulator, so a `DA2` or an `OSC 11` in them is a question nobody has answered and **must** be
+  answered, once, late. `ringOffset` is what proves they are new.
+- `.cut` — the replay is fed with the emulator's replies suppressed. History is not a live query,
+  and a stale `DA` reply reaching a program that already had one is worse than silence.
+
+The boundary between the replay and the live output behind it is the one thing the wire does not
+carry. The daemon queues the whole replay from its serial queue before it binds the connection, so
+the replay is the head of what arrives; `PTYHostTerminalLink` therefore ends the suppression at its
+**first coalesced flush**, which errs towards swallowing one live reply for one main-queue turn
+rather than answering history. That is the safe direction, and it is stated here rather than left
+to be discovered because the exact fix is one field: a replay byte count on `attached` (or a flags
+bit marking replay frames) would make the boundary exact instead of prompt.
+
+The same missing field has a second consequence, and it is the honest cost of this slice. A link
+that attached with a replay counts the replay bytes along with the live ones, because it cannot
+tell them apart — so its `ringOffset` is an **upper bound** rather than the exact value.
+`RemoteRingBuffer.snapshot(from:)` refuses an offset ahead of its own count by design, so the
+attach *after* a reattach is answered with a cut rather than with duplicated bytes: the first
+restart replays exactly, and a second consecutive restart re-derives from a tail. Under-counting
+would duplicate bytes into a live screen, so this is the direction to be wrong in, and it is a
+daemon-side field away from not being wrong at all.
+
+### What a reattach re-derives, and what it cannot
+
+The tracker is a **new** one, so there is nothing stale to correct — the staleness R7 names comes
+from hooks posted into a dead socket while the app was closed, and those never reached a tracker
+that did not exist. From there the ordinary readings resume: output inference for every runtime,
+and Claude's and Codex's transcript boundary readers as their own output callbacks re-arm them
+(`resetTranscriptFallbackObservation` drops the previous process's paths, because a resumed
+conversation and a migrated account both change the answer). Grok and OpenCode have no transcript
+boundary to read and stay on output inference, which is R7's accepted cost; no second
+reconciliation is invented for them.
+
+`noteUnattendedLaunch` is granted for the same reason a background relaunch grants it: nobody is
+looking, and a replay is a repaint — without it the rejoin's first burst reads as a finished turn
+and marks every recovered session unread.
+
+Titles and the working directory come back on their own: the pid arrives in `attached` and becomes
+`shellPid`, and OSC 0/2 and OSC 7 come through the emulator, which is here again.
+
+## The durable grid
+
+**An attach never resizes**, and the app's half of that rule is to *adopt* rather than impose.
+`TerminalSession.attachToHost(grid:)` puts the emulator on the daemon's grid **before** a byte of
+the replay lands, so a screen written at 100×40 is rendered at 100×40; imposing this window's grid
+first and reflowing afterwards would be a screen nobody ever saw.
+
+Adopting a grid is itself an emulator resize, and SwiftTerm reports one through `onMain` — a
+main-queue turn later, by which time the link is installed. Telling the daemon the size it has just
+told us would raise `SIGWINCH` on an agent that has been working at that size all along, which is
+precisely the reflow reattaching must not cause. So `EmojiFixedTerminalView` remembers the adopted
+grid and refuses to send it back; a window size that differs — the user resized Threading while it
+was closed — is a real change, is sent once, and ends the comparison. It is a comparison rather than
+a timer because a timer is a guess about how long AppKit takes to lay out.
+
+`PTYHostReattachDaemonTests` asserts both halves the only way they can be asserted: the child
+installs a `SIGWINCH` handler that appends `stty size` to a file, and the file is still empty after
+a whole detach-and-reattach cycle and has exactly one line after the window genuinely moves. The
+screen cannot be the witness here, because a replay puts an earlier size line back on it.
 
 ## What is not decided here
 

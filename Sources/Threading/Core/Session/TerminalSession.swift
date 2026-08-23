@@ -578,6 +578,103 @@ final class TerminalSession: NSObject {
         return true
     }
 
+    /// Takes back a child `threading-ptyd` has been holding since the last quit.
+    ///
+    /// The counterpart of `launchAgentThroughHost` and deliberately **not** a launch: nothing is
+    /// spawned, no command line is built, no launch record is written. The conversation never
+    /// stopped, so there is nothing to resume — this reconnects a terminal to a process that has
+    /// been running the whole time.
+    ///
+    /// `grid` is the daemon's, and the emulator adopts it before a byte of the replay lands. An
+    /// attach never resizes, so a screen written at 100×40 is rendered at 100×40; imposing this
+    /// window's grid first and reflowing afterwards would be a screen nobody ever saw, and would
+    /// raise `SIGWINCH` on an agent that has been working at that size all along.
+    ///
+    /// Answers whether the attach was sent. False is not a failure of the session: the caller's
+    /// answer is to leave the row dormant, and the ordinary resume still works.
+    @discardableResult
+    func attachToHost(grid: PTYHostGrid) -> Bool {
+        guard !isRunning else { return false }
+        guard let hostTransportFactory else { return false }
+        // Version 1 hosts agent sessions only, exactly as the spawn path does.
+        guard case .agentSession = identity else { return false }
+
+        let hostIdentity = PTYHostSessionIdentity(identity)
+        let link = PTYHostTerminalLink(identity: hostIdentity)
+        link.delivery = hostDelivery(for: link)
+
+        do {
+            link.adopt(try hostTransportFactory(link.events()))
+            try link.attach(PTYHostAttach(
+                id: hostIdentity,
+                replayBudget: PTYHostSessionDefaults.reattachReplayBudget
+            ))
+        } catch {
+            let cause = (error as? PTYHostClientError)?.token ?? "unknown"
+            EventLog.shared.record(
+                .session,
+                "Session could not be taken back from the PTY host",
+                ["session": identity.historyFileStem, "cause": cause]
+            )
+            ThreadingLogger.ptyHost.error(
+                """
+                PTY host could not hand this session back: \(cause, privacy: .public); \
+                the conversation stays dormant
+                """
+            )
+            return false
+        }
+
+        hostLink = link
+        terminalView.hostTransport = TerminalHostTransport(
+            sendInput: { [weak link] bytes in link?.sendInput(bytes) },
+            sendWindowSize: { [weak link] size in link?.sendWindowSize(size) ?? false },
+            kill: { [weak link] in link?.kill() }
+        )
+        // Running from the moment the attach left, for the same reason the spawn path is: a stop
+        // arriving in between has to reach the daemon.
+        isRunning = true
+
+        // After the transport, and still ahead of every replayed byte: the daemon's answer is
+        // delivered on a later main-queue turn and this call is on the current one. The view
+        // remembers the grid it was handed and refuses to send it back, because SwiftTerm reports
+        // this resize one turn later — by which time the link would carry it to a daemon that
+        // told us the number in the first place.
+        terminalView.adoptHostGrid(cols: grid.cols, rows: grid.rows)
+        return true
+    }
+
+    /// Hands this session's child back to `threading-ptyd` instead of ending it.
+    ///
+    /// The two seeds are computed here because only this process can: a repaint is derived from a
+    /// live emulator and the daemon has none. `ringOffset` travels with them from the link, and
+    /// together they are what makes the next launch's replay exact rather than a cut.
+    ///
+    /// Answers whether there was a child to hand over. **Blocking, bounded by `deadline`** — see
+    /// `PTYHostTerminalLink.detach(screenSeed:modeSeed:by:)`; this is the quit path, where the
+    /// close after the frame is the process exiting.
+    @discardableResult
+    func detachFromHost(by deadline: Date) -> Bool {
+        guard let hostLink else { return false }
+
+        let terminal = terminalView.terminalStateSnapshot()
+        let sent = hostLink.detach(
+            screenSeed: RemoteScreenSeed.repaint(of: terminal),
+            modeSeed: RemoteTerminalModeSeed.bytes(for: RemoteTerminalModes(terminal)),
+            by: deadline
+        )
+
+        self.hostLink = nil
+        hostLaunchPlan = nil
+        hostForegroundGroup = nil
+        terminalView.hostTransport = nil
+        // Not `handleProcessTermination`: nothing terminated. The session stops being *this*
+        // process's without becoming an ending anybody is told about.
+        isRunning = false
+        shellPid = 0
+        return sent
+    }
+
     /// The four edges of a host-backed session, each already on the main queue.
     ///
     /// Every one of them is guarded by the link still being *this* session's. A stop followed at
@@ -600,6 +697,12 @@ final class TerminalSession: NSObject {
                 MainActor.assumeIsolated {
                     guard let self, let link, self.hostLink === link else { return }
                     self.hostDidSpawn(pid: spawned.pid)
+                }
+            },
+            attached: { [weak self, weak link] attached in
+                MainActor.assumeIsolated {
+                    guard let self, let link, self.hostLink === link else { return }
+                    self.hostDidAttach(attached)
                 }
             },
             foreground: { [weak self, weak link] group in
@@ -629,6 +732,19 @@ final class TerminalSession: NSObject {
         guard pid > 0 else { return }
         hostLaunchPlan = nil
         shellPid = pid
+        delegate?.terminalSessionDidStart(self)
+    }
+
+    /// The daemon handed the child back, ahead of the replay bytes.
+    ///
+    /// The grid is adopted again because this frame is the authoritative one — the summary the
+    /// launch attached from was a moment older — and re-adopting a grid already in force costs
+    /// nothing: `adoptHostGrid` refuses a resize that would not change anything, and SwiftTerm's
+    /// resize path ends in `softReset()`.
+    private func hostDidAttach(_ attached: PTYHostAttached) {
+        terminalView.adoptHostGrid(cols: attached.grid.cols, rows: attached.grid.rows)
+        guard attached.pid > 0 else { return }
+        shellPid = attached.pid
         delegate?.terminalSessionDidStart(self)
     }
 

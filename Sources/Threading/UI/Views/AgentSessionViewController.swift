@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import ThreadingPTYHostKit
 
 /// Resolves the process behind a terminal session.
 ///
@@ -458,6 +459,65 @@ final class AgentSessionViewController: NSViewController {
         isRunning = false
         activityTracker.markDormant()
         resetTranscriptFallbackObservation()
+    }
+
+    /// Takes back an agent `threading-ptyd` has been running since the last quit.
+    ///
+    /// Deliberately not `launch(initialPrompt:)` and deliberately sharing none of it: there is no
+    /// plan to build, no resume refusal to consider, no `hasLaunched` to record and no launch
+    /// failure to arm. This conversation never stopped, and everything `launch` does is about
+    /// starting one that had.
+    ///
+    /// **What activity this re-derives, and what it cannot.** The tracker is a new one, so there
+    /// is no stale `working` to correct — the staleness R7 names comes from hooks posted into a
+    /// dead socket while the app was closed, and those never reached a tracker that did not
+    /// exist. From here the ordinary readings resume: output inference for every runtime, and
+    /// Claude's and Codex's transcript boundary readers as their own output callbacks re-arm
+    /// them. Grok and OpenCode have no transcript boundary to read and stay on output inference,
+    /// which is R7's accepted cost; no second reconciliation is invented here.
+    @discardableResult
+    func reattachToBackgroundHost(
+        socketPath: String,
+        grid: PTYHostGrid,
+        settings: AppSettings = .shared,
+        bundle: Bundle = .main
+    ) -> Bool {
+        guard !isRunning else { return false }
+        guard !RecoveryMode.isActive else {
+            RecoveryMode.refuse("taking a session back from the PTY host")
+            return false
+        }
+
+        session.hostTransportFactory = PTYHostPolicy.attachingTransportFactory(
+            socketPath: socketPath,
+            bundle: bundle
+        )
+        guard session.attachToHost(grid: grid) else {
+            session.hostTransportFactory = nil
+            return false
+        }
+
+        isRunning = true
+        // Not a launch date: nothing launched, so nothing can have failed to launch. The
+        // survival check exists to retire a *previous* launch's failure band, and a reattach has
+        // no evidence either way.
+        resetTranscriptFallbackObservation()
+        activityTracker.markRunning()
+        // Nobody is looking, and the replay is a repaint: without this the reattach's first
+        // burst reads as a finished turn and marks every recovered session unread. Same reason
+        // `launchInBackground` does it.
+        activityTracker.noteUnattendedLaunch()
+        if settings.remoteAccessEnabled {
+            RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
+        }
+
+        EventLog.shared.record(.session, "Session taken back from the PTY host", [
+            "session": sessionID.uuidString,
+            "cols": String(grid.cols),
+            "rows": String(grid.rows)
+        ])
+        delegate?.agentSessionDidChangeState(self)
+        return true
     }
 
     func focusTerminal() {
@@ -1283,6 +1343,20 @@ extension AgentSessionViewController: TerminalSessionDelegate {
 
 extension AgentSessionViewController: AgentTerminalRuntimeSurface {
     var remoteTerminalSurface: any RemoteTerminalSurface { session }
+
+    var isHostBacked: Bool { session.isHostBacked }
+
+    /// A quit hands this session over rather than ending it. The seeds only this process can
+    /// compute go with it, which is why this runs while the emulator is still here.
+    ///
+    /// The tracker is deliberately **not** marked dormant: nothing became dormant. The agent is
+    /// still working, in a process that is about to outlive this one.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool {
+        guard isRunning, session.detachFromHost(by: deadline) else { return false }
+        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+        isRunning = false
+        return true
+    }
 
     var terminalRootProcessIdentifier: pid_t? {
         session.shellPid > 0 ? session.shellPid : nil

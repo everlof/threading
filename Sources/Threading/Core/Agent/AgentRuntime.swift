@@ -46,11 +46,33 @@ protocol AgentTerminalRuntimeSurface:
     var isVisible: Bool { get set }
     var remoteTerminalSurface: any RemoteTerminalSurface { get }
 
+    /// Whether this session's child lives in `threading-ptyd` rather than in this process.
+    var isHostBacked: Bool { get }
+
     func noteStateChanged()
     func noteReportedCodexTranscript(path: String?, providerSessionID: TranscriptID?)
     func noteTurnFinishedForAttachmentDetection(lastAssistantMessage: String?)
     func terminate()
+
+    /// Hands this session's child to the background PTY host instead of ending it, answering
+    /// whether it did.
+    ///
+    /// The counterpart of `terminate()` on the one path that is not a stop: a quit. A session
+    /// whose pty is in this process has nothing to hand over and answers false, and `terminate()`
+    /// is still its ending. **Blocking, bounded by `deadline`** — the frame has to have left
+    /// before the process does.
+    func detachFromBackgroundHost(by deadline: Date) -> Bool
+
     func removeFromPresentation()
+}
+
+extension AgentTerminalRuntimeSurface {
+
+    /// Defaults so a surface with no pty of its own — and every test double — is unchanged by the
+    /// background host existing.
+    var isHostBacked: Bool { false }
+
+    func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
 }
 
 /// The application/runtime surface retained for a natively rendered conversation.
@@ -294,9 +316,50 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// "running" at any moment is waiting on the user, not working. The quit sheet names both,
     /// and leads with this one.
     var inFlightTurnCount: Int {
-        runningSessionIDs
+        inFlightTurnCount(among: runningSessionIDs)
+    }
+
+    /// The same count over a stated set, for a caller that has already decided which sessions
+    /// its question is about.
+    func inFlightTurnCount(among sessionIDs: Set<SessionID>) -> Int {
+        sessionIDs
             .filter { activity(sessionID: $0).hasTurnInFlight }
             .count
+    }
+
+    /// Every running session whose child lives in `threading-ptyd` rather than in this process.
+    ///
+    /// A quit hands these over rather than ending them, so a question about what quitting costs
+    /// must not count them. The wording of that question is the visibility surface's — slice 9 of
+    /// [`pty-host.md`](../../../../docs/architecture/pty-host.md) — and this is only the count
+    /// refusing to claim a loss that does not happen.
+    var hostBackedSessionIDs: Set<SessionID> {
+        Set(controllers.compactMap { sessionID, surface in
+            surface.isHostBacked && surface.isRunning ? sessionID : nil
+        })
+    }
+
+    /// Hands every host-backed session's child to `threading-ptyd`, and answers which they were.
+    ///
+    /// The quit path's step, taken **before** `terminateAll`, which would otherwise kill exactly
+    /// these children. It is also where the two seeds only this process can compute are handed
+    /// over, so it has to run while the emulators are still here.
+    ///
+    /// **Blocking, and bounded once for the whole set**: one deadline shared by every session, so
+    /// forty host-backed sessions cost the same wait as one.
+    @discardableResult
+    func detachHostBackedSessions() -> Set<SessionID> {
+        let deadline = Date().addingTimeInterval(PTYHostSessionDefaults.detachDrainSeconds)
+        var detached: Set<SessionID> = []
+        for (sessionID, controller) in controllers
+        where controller.detachFromBackgroundHost(by: deadline) {
+            detached.insert(sessionID)
+        }
+        guard !detached.isEmpty else { return detached }
+        EventLog.shared.record(.session, "Sessions left running in the PTY host", [
+            "sessions": String(detached.count)
+        ])
+        return detached
     }
 
     /// What the session is currently doing. Sessions with no terminal are dormant.
@@ -817,8 +880,15 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 #if DEBUG
         fixtureLaunchPlanProviders.removeAll()
 #endif
+        // A host-backed child is the daemon's and outlives this process, so it is handed over
+        // rather than ended. `detachHostBackedSessions()` has normally already done it on the
+        // quit path and this answers false; the guard is here because tearing every session down
+        // must not be a way to kill a child nobody asked to stop.
+        let detachDeadline = Date().addingTimeInterval(PTYHostSessionDefaults.detachDrainSeconds)
         for sessionID in controllers.keys {
             RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+            guard controllers[sessionID]?.detachFromBackgroundHost(by: detachDeadline) != true
+            else { continue }
             controllers[sessionID]?.terminate()
         }
         controllers.removeAll()

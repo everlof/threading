@@ -3592,3 +3592,62 @@ comparison off the reply path was tried and reverted: it saves 3.3 ms on a once-
 and breaks the invariant `MCPBridgeTests` asserts, that a reply implies the cache behind it is on
 disk. If `tools/list` ever becomes hot, the fix is to stop re-parsing 234 KB to detect an unchanged
 catalogue — compare the raw `result` slice of the reply instead — not to move the work later.
+
+
+## Taking sessions back against starting them
+
+`durable-sessions.md` §6 item 7 asks for the reattach path to be measured against a relaunch, and
+the first thing this measurement owes is what it does **not** compare.
+
+`PTYHostReattachDaemonTests.testStressReattachAgainstRelaunchWhenEnabled` is the fixture. It is
+gated by `THREADING_PTY_HOST_REATTACH_STRESS=1` and, because a test plan sanitizes the environment
+it launches with, it is run through the bundle directly:
+
+```bash
+xcodebuild -project Threading.xcodeproj -scheme Threading -testPlan Threading-Fast \
+  -destination platform=macOS -configuration Debug -derivedDataPath <dd> build-for-testing
+THREADING_PTY_HOST_REATTACH_STRESS=1 \
+  DYLD_LIBRARY_PATH="<dd>/Build/Products/Debug/Threading.app/Contents/MacOS" \
+  DYLD_FRAMEWORK_PATH="<dd>/Build/Products/Debug/Threading.app/Contents/Frameworks" \
+  xcrun xctest -XCTest \
+    ThreadingTests.PTYHostReattachDaemonTests/testStressReattachAgainstRelaunchWhenEnabled \
+    "<dd>/Build/Products/Debug/Threading.app/Contents/PlugIns/ThreadingTests.xctest"
+```
+
+`THREADING_PTY_HOST_REATTACH_STRESS_SESSIONS` and `..._RUNS` narrow it to one point; the defaults
+are D14's N = 8 and five runs. Each series is the wall time from the first call to all eight
+sessions holding a child pid, and the eight surfaces are built **before** the clock starts in every
+series, because manufacturing a fixture is not the operation.
+
+**Both sides run `/bin/sh -c cat`, and that is the limitation to state rather than bury.** A real
+relaunch is `--resume` into an agent CLI, and that CLI's own boot is seconds against these
+milliseconds — measuring it would be measuring Claude, not either path here. The relaunch also pays
+`StartupRelaunchDefaults.staggerInterval`, one second per session, deliberately, so that N agent
+boots do not contend; the reattach pays none of it, and none of it is in these numbers either. So
+what follows is the *floor* of the difference between the two paths, not the difference.
+
+### Measured, 2026-08-23, Debug, M-series, N = 8, median of 5
+
+| Series | Run 1 | Run 2 |
+|---|---|---|
+| **Take eight back** — one connect, one `list`, eight `attach`es | **26.2 ms** | **26.8 ms** |
+| Start eight in this process — today's relaunch with the agent's boot taken out | 30.6 ms | 24.9 ms |
+| Start eight in the daemon — one connect and one `spawn` each | 54.6 ms | 52.6 ms |
+
+**Taking eight sessions back costs about what starting eight bare children costs, and the
+difference the feature actually buys is not in this table.** Roughly 3 ms per session either way:
+the reattach is one shared `list` plus eight connects and attaches, and the in-process relaunch is
+eight `forkpty`s. Spawning through the daemon is the dearer of the three because it is a connect
+*and* a fork *and* a round trip, which is the cost the host-backed launch already pays and this
+slice does not change.
+
+What the feature buys is everything the fixture deliberately removes: the agent CLI never boots,
+because it never stopped, and there is no stagger to spread because there is nothing to spread. On
+a real store the relaunch of eight Claude sessions is bounded below by eight CLI starts and eight
+seconds of deliberate spacing; the reattach of the same eight is the 26 ms above plus whatever the
+replay costs, which is bounded by the ring — 512 KiB per session at worst, and the probe measured
+a 1 MB ring's replay at 0.4 ms to first byte and 6.9 ms to complete.
+
+**Nothing here was optimised.** The numbers are the first measurement of a path that had not been
+measured, they are comfortably inside the interaction budget, and the slice ships with them as
+found.
