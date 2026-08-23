@@ -63,6 +63,7 @@
 		B70000010000000000000002 /* Sources/Threading/Resources/Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Sources/Threading/Resources/Fonts */; };
 		B81F7A1E07A694FFB193A1BD /* threading-extension-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = C20CE9CA503B8DC639CAB992 /* threading-extension-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D0A100010000000000000001 /* ThreadingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A100010000000000000003 /* ThreadingDomain */; };
+		7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000004000000000000000C /* ThreadingPTYHostKit */; };
 		D1FF00010000000000000011 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000001 /* NativeDiffCore */; };
 		D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000002 /* NativeDiffAppKit */; };
 		D1FF00010000000000000013 /* NativeDiffCore in Frameworks */ = {isa = PBXBuildFile; productRef = D1FF00010000000000000003 /* NativeDiffCore */; };
@@ -386,6 +387,7 @@
 				F1000001000000000000039 /* ThreadingExtensionKit in Frameworks */,
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
 				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
+				7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */,
 				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
 				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
@@ -759,6 +761,7 @@
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 				F4000001000000000000009 /* ThreadingRemoteKit */,
 				D0A100010000000000000003 /* ThreadingDomain */,
+				7C000004000000000000000C /* ThreadingPTYHostKit */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
 				D1FF00010000000000000001 /* NativeDiffCore */,
 				D1FF00010000000000000002 /* NativeDiffAppKit */,
@@ -835,6 +838,7 @@
 				F4000001000000000000008 /* XCLocalSwiftPackageReference "Packages/ThreadingExtensionKit" */,
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "Packages/ThreadingRemoteKit" */,
 				D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */,
+				7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */,
 				D3EE00010000000000000003 /* XCLocalSwiftPackageReference "Packages/ThreadingPeerTransport" */,
 				D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */,
 				5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
@@ -1950,6 +1954,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingDomain;
 		};
+		7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingPTYHostKit;
+		};
 		D3EE00010000000000000003 /* XCLocalSwiftPackageReference "Packages/ThreadingPeerTransport" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingPeerTransport;
@@ -2020,6 +2028,10 @@
 		D0A100010000000000000003 /* ThreadingDomain */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingDomain;
+		};
+		7C000004000000000000000C /* ThreadingPTYHostKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPTYHostKit;
 		};
 		D1FF00010000000000000001 /* NativeDiffCore */ = {
 			isa = XCSwiftPackageProductDependency;

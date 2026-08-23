@@ -13,6 +13,10 @@ MODULE_BOUNDARIES = {
         pathlib.Path("Packages/ThreadingDomain/Sources/ThreadingDomain"),
         {"Foundation"},
     ),
+    "ThreadingPTYHostKit": (
+        pathlib.Path("Packages/ThreadingPTYHostKit/Sources/ThreadingPTYHostKit"),
+        {"Foundation", "ThreadingDomain"},
+    ),
     "Threading/Application": (
         pathlib.Path("Sources/Threading/Application"),
         {

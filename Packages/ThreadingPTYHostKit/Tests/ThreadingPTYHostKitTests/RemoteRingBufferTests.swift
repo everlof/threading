@@ -1,5 +1,5 @@
 import XCTest
-@testable import Threading
+@testable import ThreadingPTYHostKit
 
 final class RemoteRingBufferTests: XCTestCase {
 
@@ -108,5 +108,102 @@ final class RemoteRingBufferTests: XCTestCase {
 
         ring.append(Data([0xFE]))
         XCTAssertEqual(ring.snapshot(), Data([0xFF, 0x1B, 0x5B, 0x32, 0x4A, 0x00, 0xC3, 0xFE]))
+    }
+
+    // MARK: - Exact rejoin
+
+    /// The counter is the whole mechanism behind an exact rejoin, so it counts bytes the ring
+    /// itself no longer holds.
+    func testTotalBytesWrittenCountsEveryByteIncludingOverwrittenOnes() {
+        var ring = RemoteRingBuffer(capacity: 4)
+        XCTAssertEqual(ring.totalBytesWritten, 0)
+        ring.append(data("abc"))
+        XCTAssertEqual(ring.totalBytesWritten, 3)
+        ring.append(data("de"))
+        XCTAssertEqual(ring.totalBytesWritten, 5, "wrapping must not roll the counter back")
+        ring.append(data("0123456"))
+        XCTAssertEqual(ring.totalBytesWritten, 12, "an oversized write counts in full")
+        XCTAssertEqual(ring.count, 4)
+    }
+
+    func testAnEmptyAppendDoesNotMoveTheCounter() {
+        var ring = RemoteRingBuffer(capacity: 4)
+        ring.append(data("ab"))
+        ring.append(Data())
+        XCTAssertEqual(ring.totalBytesWritten, 2)
+    }
+
+    func testTotalBytesWrittenIsMonotonicAcrossManyWraps() {
+        var ring = RemoteRingBuffer(capacity: 3)
+        var last: UInt64 = 0
+        for character in "abcdefghijklmnop" {
+            ring.append(data(String(character)))
+            XCTAssertGreaterThan(ring.totalBytesWritten, last)
+            last = ring.totalBytesWritten
+        }
+        XCTAssertEqual(last, 16)
+        XCTAssertEqual(ring.snapshot(), data("nop"))
+    }
+
+    /// The exact branch: a watcher that left at offset 3 is owed exactly the bytes after it.
+    func testSnapshotFromAnOffsetStillInTheRingIsExact() {
+        var ring = RemoteRingBuffer(capacity: 8)
+        ring.append(data("abc"))
+        let offset = ring.totalBytesWritten
+        ring.append(data("defg"))
+        XCTAssertEqual(ring.snapshot(from: offset), data("defg"))
+    }
+
+    /// The exact boundary: `behind == count` is still exact, one byte more is not.
+    func testSnapshotFromTheOldestByteStillHeldIsExact() {
+        var ring = RemoteRingBuffer(capacity: 4)
+        ring.append(data("abcdef"))
+        XCTAssertEqual(ring.count, 4)
+        XCTAssertEqual(ring.totalBytesWritten, 6)
+        XCTAssertEqual(ring.snapshot(from: 2), data("cdef"), "behind == count is exact")
+        XCTAssertNil(ring.snapshot(from: 1), "one byte past the ring cannot be proven")
+    }
+
+    /// A watcher that missed nothing gets nothing, which is different from being refused.
+    func testSnapshotFromTheCurrentOffsetIsEmptyRatherThanNil() {
+        var ring = RemoteRingBuffer(capacity: 8)
+        ring.append(data("abc"))
+        XCTAssertEqual(ring.snapshot(from: ring.totalBytesWritten), Data())
+    }
+
+    /// A ring that wrapped past the watcher's offset must refuse rather than hand back a tail
+    /// that looks complete: the caller owes a `CAN` and a repaint instead.
+    func testSnapshotRefusesAnOffsetTheRingHasOverwritten() {
+        var ring = RemoteRingBuffer(capacity: 4)
+        ring.append(data("abcd"))
+        let offset = ring.totalBytesWritten
+        ring.append(data("efghij"))
+        XCTAssertNil(ring.snapshot(from: offset - 4))
+        XCTAssertEqual(ring.snapshot(from: offset + 2), data("ghij"))
+    }
+
+    /// An offset ahead of the ring is a disagreement about history, not a small clamp.
+    func testSnapshotRefusesAnOffsetAheadOfWhatWasWritten() {
+        var ring = RemoteRingBuffer(capacity: 8)
+        ring.append(data("abc"))
+        XCTAssertNil(ring.snapshot(from: 4))
+    }
+
+    /// An empty ring answers the only offset it has, and refuses every other.
+    func testSnapshotFromOnAnUntouchedRing() {
+        let ring = RemoteRingBuffer(capacity: 4)
+        XCTAssertEqual(ring.snapshot(from: 0), Data())
+        XCTAssertNil(ring.snapshot(from: 1))
+    }
+
+    /// Reading an exact slice must not consume or rotate the ring.
+    func testSnapshotFromLeavesTheRingIntact() {
+        var ring = RemoteRingBuffer(capacity: 6)
+        ring.append(data("abcd"))
+        ring.append(data("efgh"))
+        XCTAssertEqual(ring.snapshot(), data("cdefgh"))
+        XCTAssertEqual(ring.snapshot(from: 4), data("efgh"))
+        XCTAssertEqual(ring.snapshot(), data("cdefgh"))
+        XCTAssertEqual(ring.snapshot(from: 4), data("efgh"))
     }
 }

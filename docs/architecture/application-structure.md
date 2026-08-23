@@ -40,8 +40,10 @@ ThreadingUI           AppKit composition and Design components
 
 Composition roots may construct a higher layer from lower-layer implementations. A lower layer
 never locates an application delegate, window, or concrete view controller. Cross-cutting wire
-contracts remain in the Foundation-only `ThreadingRemoteKit` and `ThreadingExtensionKit` packages
-rather than being copied into the application layer.
+contracts remain in the Foundation-only `ThreadingRemoteKit`, `ThreadingExtensionKit` and
+`ThreadingPTYHostKit` packages rather than being copied into the application layer. The last of
+those is linked by a process that is not the app at all, so its allowed imports are `Foundation`
+and `ThreadingDomain` and nothing else; `scripts/check_module_boundaries.py` holds that floor.
 
 `ThreadingDomain` owns typed project, session, terminal, transcript, and account identities plus
 their storage-safe encoding behavior. Its package has no dependencies. The same directory-wide

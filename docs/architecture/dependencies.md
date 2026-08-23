@@ -13,6 +13,16 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - `scripts/check_module_boundaries.py` rejects UI or system-framework imports. Add only stable
     records, capabilities, and outcomes that can remain Foundation-only.
 
+- **ThreadingPTYHostKit** (local, ours): the wire contract between the app and the future
+  `threading-ptyd` PTY host — framing, control frames, the version gate, and `RemoteRingBuffer`.
+  - Location: `./Packages/ThreadingPTYHostKit/`; it depends only on `ThreadingDomain`.
+  - The dependency floor is the point. A daemon that owns a session's `forkpty` child and nothing
+    else cannot be allowed to reach the app's stores, themes or terminal emulation, so the package
+    both ends link is Foundation-only and `scripts/check_module_boundaries.py` holds it there.
+  - `RemoteRingBuffer` lives here rather than beside the remote mirror because both processes need
+    the same ring; the mirror uses it through the package, unchanged. See
+    [`pty-host.md`](pty-host.md).
+
 - **WebRTC** (remote, prebuilt): native ICE/STUN/TURN, DTLS/SCTP and ordered data channels for
   hosted Mac-to-iOS remote access.
   - Location: exact SwiftPM version `151.0.0`, package revision
