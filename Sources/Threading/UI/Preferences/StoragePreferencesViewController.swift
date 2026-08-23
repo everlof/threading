@@ -355,43 +355,40 @@ final class StoragePreferencesViewController: NSViewController {
     /// Internal rather than private, and taking its fold state rather than reading it, so a
     /// render test can draw the real card: a claim about how these headings look is checked by
     /// looking at a picture, and a picture of a transcription proves nothing.
-    func groupSection(_ group: FindingsGroup, groupIndex: Int, expanded: Bool) -> NSView {
-        // Enumerated over the *original* order, so a row's tag still indexes `group.artifacts`
-        // however the rows are then partitioned for display.
+    func groupSection(_ group: FindingsGroup, expanded: Bool) -> NSView {
         let indexed = Array(group.artifacts.enumerated())
         let large = indexed.filter { $0.element.byteCount >= StorageDefaults.collapseThreshold }
         let small = indexed.filter { $0.element.byteCount < StorageDefaults.collapseThreshold }
 
         var rows: [NSView] = []
         if expanded {
-            rows = large.map { index, artifact in
-                row(for: artifact, in: group, tag: tag(group: groupIndex, artifact: index))
+            rows = large.map { _, artifact in
+                row(for: artifact, in: group)
             }
 
             if !small.isEmpty {
                 let tailOpen = expandedTails.contains(group.identity)
                 if tailOpen {
-                    rows += small.map { index, artifact in
-                        row(for: artifact, in: group, tag: tag(group: groupIndex, artifact: index))
+                    rows += small.map { _, artifact in
+                        row(for: artifact, in: group)
                     }
                 }
                 rows.append(foldRow(for: small.map(\.element), in: group, expanded: tailOpen))
             }
         }
 
-        let removeAll = SettingsUI.button(
-            StorageStrings.removeAll,
-            target: self,
-            action: #selector(removeGroupClicked(_:))
+        let removal = removalAction(
+            title: StorageStrings.removeAll,
+            artifacts: group.artifacts,
+            groups: [group]
         )
-        removeAll.tag = tag(group: groupIndex, artifact: StorageDefaults.wholeGroupTag)
 
         let identity = group.identity
-        return SettingsUI.disclosureCard(
+        let content = SettingsUI.disclosureCard(
             title: group.title,
             subtitle: group.subtitle,
             summary: Self.size.string(fromByteCount: group.byteCount),
-            control: removeAll,
+            control: removal.button,
             isExpanded: expanded,
             localizes: false,
             onToggle: { [weak self] nowExpanded in
@@ -399,6 +396,7 @@ final class StoragePreferencesViewController: NSViewController {
             },
             detailRows: rows
         )
+        return RetainingStorageActionView(content: content, handler: removal.handler)
     }
 
     /// The row that stands in for everything under a gigabyte, and unfolds it on a click.
@@ -423,26 +421,26 @@ final class StoragePreferencesViewController: NSViewController {
 
     /// The live table's group heading. The card surface itself belongs to
     /// `ThemedGroupedTableView`, so this is only the row content.
-    private func groupHeader(_ group: FindingsGroup, groupIndex: Int) -> NSView {
-        let removeAll = SettingsUI.button(
-            StorageStrings.removeAll,
-            target: self,
-            action: #selector(removeGroupClicked(_:))
+    private func groupHeader(_ group: FindingsGroup) -> NSView {
+        let removal = removalAction(
+            title: StorageStrings.removeAll,
+            artifacts: group.artifacts,
+            groups: [group]
         )
-        removeAll.tag = tag(group: groupIndex, artifact: StorageDefaults.wholeGroupTag)
 
         let identity = group.identity
-        return SettingsUI.disclosureHeader(
+        let content = SettingsUI.disclosureHeader(
             title: group.title,
             subtitle: group.subtitle,
             summary: Self.size.string(fromByteCount: group.byteCount),
-            control: removeAll,
+            control: removal.button,
             isExpanded: expandedGroups.contains(identity),
             localizes: false,
             onToggle: { [weak self] nowExpanded in
                 self?.setGroup(identity, expanded: nowExpanded)
             }
         )
+        return RetainingStorageActionView(content: content, handler: removal.handler)
     }
 
     private func setGroup(_ identity: String, expanded: Bool) {
@@ -464,13 +462,12 @@ final class StoragePreferencesViewController: NSViewController {
     }
 
     /// One artifact: what it is, where it is, what it costs to bring back, and how stale it is.
-    private func row(for artifact: ReclaimableArtifact, in group: FindingsGroup, tag: Int) -> NSView {
-        let button = SettingsUI.button(
-            StorageStrings.remove,
-            target: self,
-            action: #selector(removeArtifactClicked(_:))
+    private func row(for artifact: ReclaimableArtifact, in group: FindingsGroup) -> NSView {
+        let removal = removalAction(
+            title: StorageStrings.remove,
+            artifacts: [artifact],
+            groups: [group]
         )
-        button.tag = tag
 
         let size = NSTextField(labelWithString: Self.size.string(fromByteCount: artifact.byteCount))
         // Monospaced digits and trailing alignment, so the sizes read as a column of numbers
@@ -480,13 +477,14 @@ final class StoragePreferencesViewController: NSViewController {
         size.textColor = Design.Text.secondary
         size.alignment = .right
 
-        let trailing = SettingsUI.controlGroup([size, button])
+        let trailing = SettingsUI.controlGroup([size, removal.button])
 
-        return SettingsUI.row(
+        let content = SettingsUI.row(
             title: ReclaimableFindings.rowTitle(for: artifact),
             subtitle: caption(for: artifact, in: group),
             control: trailing
         )
+        return RetainingStorageActionView(content: content, handler: removal.handler)
     }
 
     private func caption(for artifact: ReclaimableArtifact, in group: FindingsGroup) -> String {
@@ -522,7 +520,7 @@ final class StoragePreferencesViewController: NSViewController {
             return SettingsUI.note(StorageStrings.explanation)
         case .group(let groupIndex):
             guard groups.indices.contains(groupIndex) else { return NSView() }
-            return groupHeader(groups[groupIndex], groupIndex: groupIndex)
+            return groupHeader(groups[groupIndex])
         case .artifact(let groupIndex, let artifactIndex):
             guard groups.indices.contains(groupIndex),
                   groups[groupIndex].artifacts.indices.contains(artifactIndex) else {
@@ -531,8 +529,7 @@ final class StoragePreferencesViewController: NSViewController {
             let group = groups[groupIndex]
             return row(
                 for: group.artifacts[artifactIndex],
-                in: group,
-                tag: tag(group: groupIndex, artifact: artifactIndex)
+                in: group
             )
         case .tail(let groupIndex):
             guard groups.indices.contains(groupIndex) else { return NSView() }
@@ -658,45 +655,48 @@ final class StoragePreferencesViewController: NSViewController {
         tableView.scrollRowToVisible(index)
     }
 
+    func scrollArtifactToVisibleForTesting(_ artifactID: String) {
+        guard let index = presentationRows.firstIndex(where: { presentationRow in
+            guard case .artifact(let groupIndex, let artifactIndex) = presentationRow,
+                  groups.indices.contains(groupIndex),
+                  groups[groupIndex].artifacts.indices.contains(artifactIndex) else {
+                return false
+            }
+            return groups[groupIndex].artifacts[artifactIndex].id == artifactID
+        }) else { return }
+        tableView.scrollRowToVisible(index)
+    }
+
     func setGroupExpandedForTesting(_ identity: String, expanded: Bool) {
         setGroup(identity, expanded: expanded)
     }
 
-    // MARK: - Tags
-
-    /// Buttons carry their row's coordinates, so an action maps straight back to `groups`
-    /// without the page holding a second index of its own. The scratch groups are members of
-    /// that one array like any other, which is what keeps them out of a bookkeeping scheme of
-    /// their own.
-    private func tag(group: Int, artifact: Int) -> Int {
-        group * StorageDefaults.tagStride + artifact
-    }
-
-    private func coordinates(of tag: Int) -> (group: Int, artifact: Int) {
-        (tag / StorageDefaults.tagStride, tag % StorageDefaults.tagStride)
-    }
-
     // MARK: - Actions
+
+    /// The control carries the exact values it will act on. Provider cardinality and a refresh
+    /// may both change array coordinates while a materialized AppKit row is still alive; neither
+    /// is allowed to change what its Remove button means.
+    private func removalAction(
+        title: String,
+        artifacts: [ReclaimableArtifact],
+        groups: [FindingsGroup]
+    ) -> (button: ThemedButton, handler: StorageRemovalActionTarget) {
+        let handler = StorageRemovalActionTarget(
+            artifactIDs: artifacts.map(\.id),
+            groupIdentities: groups.map(\.identity)
+        ) { [weak self] in
+            self?.remove(artifacts, from: groups)
+        }
+        let button = SettingsUI.button(
+            title,
+            target: handler,
+            action: #selector(StorageRemovalActionTarget.performRemoval)
+        )
+        return (button, handler)
+    }
 
     @objc private func rescanClicked() {
         ArtifactScanService.shared.refreshAll()
-    }
-
-    @objc private func removeArtifactClicked(_ sender: ThemedButton) {
-        let position = coordinates(of: sender.tag)
-        guard groups.indices.contains(position.group) else { return }
-
-        let group = groups[position.group]
-        guard group.artifacts.indices.contains(position.artifact) else { return }
-
-        remove([group.artifacts[position.artifact]], from: [group])
-    }
-
-    @objc private func removeGroupClicked(_ sender: ThemedButton) {
-        let position = coordinates(of: sender.tag)
-        guard groups.indices.contains(position.group) else { return }
-
-        remove(groups[position.group].artifacts, from: [groups[position.group]])
     }
 
     @objc private func removeEverythingClicked() {
@@ -795,6 +795,54 @@ final class StoragePreferencesViewController: NSViewController {
     }
 }
 
+// MARK: - Retained Removal Actions
+
+/// `NSControl.target` is not an ownership boundary. A virtual row owns its typed action target
+/// for exactly as long as AppKit keeps that row materialized.
+@MainActor
+final class StorageRemovalActionTarget: NSObject {
+    let artifactIDs: [String]
+    let groupIdentities: [String]
+    private let removal: () -> Void
+
+    init(
+        artifactIDs: [String],
+        groupIdentities: [String],
+        removal: @escaping () -> Void
+    ) {
+        self.artifactIDs = artifactIDs
+        self.groupIdentities = groupIdentities
+        self.removal = removal
+    }
+
+    @objc func performRemoval() {
+        removal()
+    }
+}
+
+@MainActor
+private final class RetainingStorageActionView: NSView {
+    private let handler: StorageRemovalActionTarget
+
+    init(content: NSView, handler: StorageRemovalActionTarget) {
+        self.handler = handler
+        super.init(frame: .zero)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
 // MARK: - Virtual Rows
 
 extension StoragePreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
@@ -833,12 +881,6 @@ extension StoragePreferencesViewController: NSTableViewDataSource, NSTableViewDe
 
 private enum StorageDefaults {
     static let estimatedRowHeight: CGFloat = 72
-
-    /// Comfortably more than any group's artifact count, so a tag packs two indices.
-    static let tagStride = 10_000
-
-    /// The artifact index meaning "every artifact in this group".
-    static let wholeGroupTag = tagStride - 1
 
     /// Directories smaller than this fold into one row. A gigabyte is the line between "worth
     /// its own row" and "part of the tail" — a checkout gathers dozens of KB-sized caches, and

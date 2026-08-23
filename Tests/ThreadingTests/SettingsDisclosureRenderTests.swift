@@ -541,8 +541,8 @@ final class SettingsDisclosureRenderTests: XCTestCase {
                     SettingsUI.button("Rescan", target: self, action: #selector(noop)),
                     SettingsUI.button("Remove All…", target: self, action: #selector(noop))
                 ],
-                sections: groups.enumerated().map { index, group in
-                    controller.groupSection(group, groupIndex: index, expanded: true)
+                sections: groups.map { group in
+                    controller.groupSection(group, expanded: true)
                 },
                 localizes: false
             )

@@ -66,6 +66,58 @@ final class StoragePreferencesVirtualizationTests: XCTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
     }
 
+    /// The old control tag packed `(group, artifact)` with a stride of 10,000. Artifact 10,000
+    /// in one checkout therefore meant artifact zero in the next checkout when clicked. A
+    /// materialized row now retains the exact values it offers to remove, independent of any
+    /// provider-sized coordinate.
+    @MainActor
+    func testRemovalActionCarriesExactArtifactBeyondFormerTagStride() throws {
+        let project = Project(
+            name: "Threading",
+            folderURL: URL(fileURLWithPath: "/Users/dev/repo/Threading")
+        )
+        let checkout = "/Users/dev/worktrees/large-checkout"
+        let artifacts = (0...10_000).map { index in
+            artifact(
+                checkout,
+                name: "artifact-\(index)",
+                kind: .rust,
+                bytes: 1_100_000_000
+            )
+        }
+        let group = ReclaimableFindings.Group(
+            attribution: .checkout(project),
+            title: "Threading · large-checkout",
+            subtitle: "~/worktrees/large-checkout",
+            identity: checkout,
+            artifacts: artifacts
+        )
+        let controller = fixtureController(groups: [group])
+        let host = laidOut(controller.view, width: 440, height: 320)
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+
+        controller.setGroupExpandedForTesting(group.identity, expanded: true)
+        let expected = try XCTUnwrap(artifacts.last)
+        controller.scrollArtifactToVisibleForTesting(expected.id)
+        host.layoutSubtreeIfNeeded()
+
+        let target = try XCTUnwrap(
+            descendants(of: controller.view, type: ThemedButton.self)
+                .compactMap { $0.target as? StorageRemovalActionTarget }
+                .first { $0.artifactIDs == [expected.id] }
+        )
+        XCTAssertEqual(target.artifactIDs, [expected.id])
+        XCTAssertEqual(target.groupIdentities, [group.identity])
+    }
+
     /// The complete production controller, not a transcription of its cards. Regular and
     /// constrained widths cover the fixed header, virtual card painting, artifact controls and
     /// the smaller-directory fold under both system appearances.
@@ -196,6 +248,18 @@ final class StoragePreferencesVirtualizationTests: XCTestCase {
     private func firstScrollView(in root: NSView) -> NSScrollView? {
         if let scroll = root as? NSScrollView { return scroll }
         return root.subviews.lazy.compactMap(firstScrollView).first
+    }
+
+    @MainActor
+    private func descendants<T: NSView>(of root: NSView, type: T.Type) -> [T] {
+        var matches: [T] = []
+        if let match = root as? T {
+            matches.append(match)
+        }
+        for child in root.subviews {
+            matches.append(contentsOf: descendants(of: child, type: type))
+        }
+        return matches
     }
 
     @MainActor
