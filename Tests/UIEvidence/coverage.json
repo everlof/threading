@@ -134,24 +134,27 @@
       }
     },
     {
-      "id": "sidebar-agent-update-toast",
+      "id": "sidebar-toast-receipts",
       "kind": "component",
       "status": "implemented",
       "priority": "important",
-      "title": "Agent tool update toast",
-      "description": "The real 240-point sidebar update receipt with compact Now and Latest columns, three provider versions, and the explicit Update All action.",
-      "states": ["Current versions", "Latest versions", "Update All action"],
+      "title": "Sidebar toast receipts",
+      "description": "The real sidebar receipt surface at its standing and user-expanded widths, covering running and dormant archives, an agent-authored archive, queued and opened decks, storage progress, and the multi-provider update action.",
+      "states": ["Running archive", "Dormant archive", "Agent archive", "Queued deck", "Opened deck", "Cleanup progress", "Agent update action"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist", "Claymorphism", "Win98"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["240-point sidebar"]
+        "sizes": ["240-point sidebar", "460-point dragged sidebar"]
       },
       "source": {
         "path": "Tests/ThreadingTests/ToastRenderTests.swift",
-        "test": "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastStorybook"
+        "tests": [
+          "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastStorybook",
+          "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastInADraggedColumn"
+        ]
       },
       "capture": {
-        "glob": "toast-agent-updates-*.png"
+        "glob": "toast-*.png"
       }
     },
     {
