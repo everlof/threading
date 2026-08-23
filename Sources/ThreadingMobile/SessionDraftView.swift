@@ -101,11 +101,16 @@ enum SessionDraftMotion {
     static let foldDuration: TimeInterval = 0.25
 }
 
-/// The draft before Start: an empty ground and one composer.
+/// The draft before Start: a quiet ground and one composer.
 ///
-/// Everything that used to stand on the ground as a box — the project and identity capsules,
-/// the icon plate, the two-by-two grid of run settings — is a chip in the composer's own
-/// action row now, under the prompt. The composer is the screen's one surface: full-bleed,
+/// Three kinds of choice, at three weights. *What and where* — "Agent in AnotherTerminal" —
+/// stands in the middle of the ground as one sentence of two dropdowns under the role's glyph,
+/// with the branch beneath. *Who* — agent and account — is the disc at the navigation bar's
+/// trailing edge, the runtime's mark ringed by the account's usage, the way a profile control
+/// sits in a bar. *How* — model, effort and speed as one line of text, permissions and the
+/// interface as one glyph each — is the composer's action row under the prompt, and it fits
+/// every phone width without scrolling. None of them is a box on the ground any more. The
+/// composer is the screen's one surface: full-bleed,
 /// no corner, a hairline above it and nothing else. It rides in the bottom safe-area inset, so
 /// it sits on the keyboard's top edge while typing and follows the keyboard's interactive
 /// dismissal. The action row comes and goes with the keyboard: while the prompt has focus the
@@ -126,6 +131,7 @@ private struct SessionDraftComposerScreen: View {
     @State private var permissionID = ""
     /// The agent's supported UI is the safe default; Native stays an explicit experimental opt-in.
     @State private var surface = RemoteSessionSurface.terminal
+    @State private var role = SessionDraftRole.agent
     @State private var prompt = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
@@ -167,6 +173,12 @@ private struct SessionDraftComposerScreen: View {
 
     private var selectedProject: RemoteProjectChoiceDTO? {
         catalog?.projects.first { $0.id == projectID }
+    }
+
+    /// A Mac that can confer the manager grant on a remotely started session says so in its
+    /// catalogue; one that cannot gets no role to choose, rather than a request it would ignore.
+    private var offersManager: Bool {
+        catalog?.supportsManagerRole == true
     }
 
     private var selectedAgent: RemoteAgentChoiceDTO? {
@@ -224,6 +236,9 @@ private struct SessionDraftComposerScreen: View {
                     statusColor: hostStatusColor
                 )
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                identityMenu
+            }
         }
         .onAppear {
             applyCatalogDefaults()
@@ -272,13 +287,12 @@ private struct SessionDraftComposerScreen: View {
         )
     }
 
-    /// What the empty ground says. No plate, no tile: a glyph for the surface being started
-    /// and one line, gone as soon as there is a prompt to read instead.
+    /// The middle of the ground: the surface's glyph, the project as a plain dropdown, and its
+    /// branch. No plate and no tile — the glyph is a symbol in the tertiary ink, and the project
+    /// is a line of text with a chevron, which is as quiet as a menu can be and still be found.
     private var hint: some View {
-        VStack(spacing: MobileDesign.Spacing.medium) {
-            Image(systemName: surface == .conversation
-                ? "bubble.left.and.bubble.right"
-                : "terminal")
+        VStack(spacing: MobileDesign.Spacing.small) {
+            Image(systemName: hintSymbol)
                 .font(.system(size: MobileDesign.Size.draftHintGlyph, weight: .light))
                 .foregroundStyle(theme.tertiaryLabel)
                 .symbolEffect(
@@ -286,17 +300,36 @@ private struct SessionDraftComposerScreen: View {
                     options: .nonRepeating,
                     value: reduceMotion ? false : hintAnimated
                 )
-            Text("Ready for a new task")
-                .font(.subheadline)
-                .foregroundStyle(theme.secondaryLabel)
+                .padding(.bottom, MobileDesign.Spacing.tight)
+            // "Agent in AnotherTerminal": the role and the project as one sentence, each word a
+            // menu. Two menus rather than one format string, so each stays its own control; the
+            // joining word is the only piece that is not.
+            HStack(spacing: MobileDesign.Spacing.small) {
+                if offersManager {
+                    roleMenu
+                    Text("in")
+                        .font(.subheadline)
+                        .foregroundStyle(theme.secondaryLabel)
+                }
+                projectMenu
+            }
+            if let branch = selectedProject?.branch, !branch.isEmpty {
+                Text(branch)
+                    .font(.caption)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .lineLimit(1)
+            }
         }
-        .opacity(prompt.isEmpty ? 1 : 0)
-        .animation(
-            reduceMotion ? nil : .easeOut(duration: SessionDraftMotion.hintDuration),
-            value: prompt.isEmpty
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityHidden(!prompt.isEmpty)
+        .padding(.horizontal, MobileDesign.Spacing.pane)
+    }
+
+    /// A manager's glyph is the Mac's for the role; an agent's is its surface's.
+    private var hintSymbol: String {
+        switch role {
+        case .manager: return "person.3"
+        case .agent:
+            return surface == .conversation ? "bubble.left.and.bubble.right" : "terminal"
+        }
     }
 
     // MARK: - Composer
@@ -345,7 +378,7 @@ private struct SessionDraftComposerScreen: View {
     /// still the whole composer. Top-aligned: a longer prompt grows down from a stable first
     /// row instead of carrying the button away with every line.
     private var promptEditor: some View {
-        TextField(promptSuggestion, text: $prompt, axis: .vertical)
+        TextField(promptPlaceholder, text: $prompt, axis: .vertical)
             .focused($promptIsFocused)
             .mobileUIEvidenceKeyboardFocus($promptIsFocused)
             .textFieldStyle(.plain)
@@ -355,36 +388,18 @@ private struct SessionDraftComposerScreen: View {
             .disabled(isSubmitting)
     }
 
-    /// Every choice that used to be a box on the ground, as one row of chips that scrolls.
-    /// Ordered by how often each is changed: where, who, then how.
+    /// The run settings — how the chat will run — as one row of chips that scrolls. Where and
+    /// who are not here: the project stands in the ground and the account in the bar.
     private var choiceStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: MobileDesign.Spacing.small) {
-                projectMenu
-                identityMenu
-                modelMenu
-                reasoningMenu
-                if selectedModel?.supportsFastMode == true {
-                    speedMenu
-                }
-                if !(selectedAgent?.permissionModes ?? []).isEmpty {
-                    permissionMenu
-                }
-                if selectedAgent?.supportsConversation == true {
-                    surfaceMenu
-                }
+        HStack(spacing: MobileDesign.Spacing.small) {
+            runMenu
+                .layoutPriority(1)
+            Spacer(minLength: MobileDesign.Spacing.small)
+            if !(selectedAgent?.permissionModes ?? []).isEmpty {
+                permissionMenu
             }
-        }
-        .mask {
-            // The row runs off the trailing edge; fading its last points says so.
-            HStack(spacing: 0) {
-                Rectangle()
-                LinearGradient(
-                    colors: [.black, .clear],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: MobileDesign.Spacing.large)
+            if selectedAgent?.supportsConversation == true {
+                surfaceMenu
             }
         }
     }
@@ -416,6 +431,11 @@ private struct SessionDraftComposerScreen: View {
         .accessibilityLabel("Start session")
     }
 
+    /// A chat gets one of the task suggestions; a manager is briefed, not tasked.
+    private var promptPlaceholder: String {
+        role == .manager ? MobileL10n.string("Brief the manager…") : promptSuggestion
+    }
+
     // MARK: - Choices
 
     private var projectMenu: some View {
@@ -431,13 +451,36 @@ private struct SessionDraftComposerScreen: View {
                 }
             }
         } label: {
-            DraftChoiceChip(
-                symbol: "folder",
-                title: selectedProject?.name ?? MobileL10n.string("Project")
-            )
+            DraftMenuLabel(title: selectedProject?.name ?? MobileL10n.string("Project"))
         }
+        // A menu's button keeps the width it was first measured at, so a label that changes
+        // length — "Agent" to "Manager", one project to another — is clipped inside the old
+        // frame. A fresh identity per value is a fresh button, measured for what it says.
+        .id(projectID)
+        .disabled(isSubmitting)
         .accessibilityLabel("Project")
         .accessibilityValue(selectedProject?.name ?? "")
+    }
+
+    private var roleMenu: some View {
+        Menu {
+            ForEach(SessionDraftRole.allCases, id: \.self) { candidate in
+                Button {
+                    role = candidate
+                } label: {
+                    Label(
+                        candidate.title,
+                        systemImage: candidate == role ? "checkmark" : candidate.symbol
+                    )
+                }
+            }
+        } label: {
+            DraftMenuLabel(title: role.title)
+        }
+        .id(role)
+        .disabled(isSubmitting)
+        .accessibilityLabel("Role")
+        .accessibilityValue(role.title)
     }
 
     private var identityMenu: some View {
@@ -471,12 +514,13 @@ private struct SessionDraftComposerScreen: View {
                 }
             }
         } label: {
-            DraftChoiceChip(symbol: "sparkles", title: selectedIdentityLabel) {
-                if let fraction = selectedAccount?.usageFraction {
-                    UsageProgressRing(fraction: fraction, tint: usageTint(for: fraction))
-                }
-            }
+            DraftIdentityDisc(
+                identity: .resolve(agentID),
+                usageFraction: selectedAccount?.usageFraction,
+                usageTint: selectedAccount?.usageFraction.map(usageTint(for:)) ?? theme.positive
+            )
         }
+        .disabled(isSubmitting)
         .accessibilityLabel("Agent")
         .accessibilityValue(selectedIdentityAccessibilityValue)
     }
@@ -502,13 +546,13 @@ private struct SessionDraftComposerScreen: View {
                 )
             }
         } label: {
-            DraftChoiceChip(
-                symbol: surface == .conversation
-                    ? "bubble.left.and.bubble.right"
-                    : "terminal",
-                title: selectedSurfaceTitle
+            // The icon is the value: a terminal for the agent's own UI, a bubble for Native.
+            DraftIconMenuLabel(
+                symbol: surface == .conversation ? "bubble.left.and.bubble.right" : "terminal",
+                isSet: surface == .conversation
             )
         }
+        .disabled(isSubmitting)
         .accessibilityLabel("Interface")
         .accessibilityValue(selectedSurfaceTitle)
     }
@@ -526,7 +570,10 @@ private struct SessionDraftComposerScreen: View {
             : originalUISurfaceTitle
     }
 
-    private var modelMenu: some View {
+    /// Model, effort and speed in one menu under one line of text — "GPT-5.6 Sol · High" — the
+    /// three choices that describe the same thing, how hard the run thinks. Three chips said it
+    /// in three places and ran off the edge of the phone; one line fits every width.
+    private var runMenu: some View {
         Menu {
             if !models.isEmpty {
                 Section("Model") {
@@ -550,77 +597,64 @@ private struct SessionDraftComposerScreen: View {
                     }
                 }
             }
-        } label: {
-            DraftChoiceChip(
-                symbol: "cpu",
-                title: selectedModel?.name ?? MobileL10n.string("Default")
-            )
-        }
-        .disabled(models.isEmpty)
-        .accessibilityLabel("Model")
-        .accessibilityValue(selectedModel?.name ?? MobileL10n.string("Default"))
-    }
-
-    private var reasoningMenu: some View {
-        Menu {
-            Button {
-                reasoningID = ""
-            } label: {
-                Label("Default", systemImage: reasoningID.isEmpty ? "checkmark" : "circle")
+            if selectedModel?.reasoning.isEmpty == false {
+                Section("Effort") {
+                    Button {
+                        reasoningID = ""
+                    } label: {
+                        Label("Default", systemImage: reasoningID.isEmpty ? "checkmark" : "circle")
+                    }
+                    ForEach(selectedModel?.reasoning ?? []) { effort in
+                        Button {
+                            reasoningID = effort.id
+                        } label: {
+                            Label(
+                                effort.name,
+                                systemImage: effort.id == reasoningID
+                                    ? "checkmark"
+                                    : "brain.head.profile"
+                            )
+                        }
+                    }
+                }
             }
-            ForEach(selectedModel?.reasoning ?? []) { effort in
-                Button {
-                    reasoningID = effort.id
-                } label: {
-                    Label(
-                        effort.name,
-                        systemImage: effort.id == reasoningID
-                            ? "checkmark"
-                            : "brain.head.profile"
-                    )
+            if selectedModel?.supportsFastMode == true {
+                Section("Speed") {
+                    Button {
+                        speedID = ""
+                    } label: {
+                        Label("Inherit", systemImage: speedID.isEmpty ? "checkmark" : "circle")
+                    }
+                    Button {
+                        speedID = "standard"
+                    } label: {
+                        Label(
+                            "Standard",
+                            systemImage: speedID == "standard" ? "checkmark" : "gauge"
+                        )
+                    }
+                    Button {
+                        speedID = "fast"
+                    } label: {
+                        Label("Fast", systemImage: speedID == "fast" ? "checkmark" : "bolt.fill")
+                    }
                 }
             }
         } label: {
-            DraftChoiceChip(symbol: "brain.head.profile", title: selectedReasoningName)
+            DraftMenuLabel(symbol: "cpu", title: runSummary)
         }
-        .disabled(selectedModel?.reasoning.isEmpty != false)
-        .accessibilityLabel("Effort")
-        .accessibilityValue(selectedReasoningName)
+        .id(runSummary)
+        .disabled(models.isEmpty && selectedModel == nil)
+        .accessibilityLabel("Model and effort")
+        .accessibilityValue(runSummary)
     }
 
-    private var selectedReasoningName: String {
-        selectedModel?.reasoning.first(where: { $0.id == reasoningID })?.name
-            ?? MobileL10n.string("Default")
-    }
-
-    private var speedMenu: some View {
-        Menu {
-            Button {
-                speedID = ""
-            } label: {
-                Label("Inherit", systemImage: speedID.isEmpty ? "checkmark" : "circle")
-            }
-            Button {
-                speedID = "standard"
-            } label: {
-                Label("Standard", systemImage: speedID == "standard" ? "checkmark" : "gauge")
-            }
-            Button {
-                speedID = "fast"
-            } label: {
-                Label("Fast", systemImage: speedID == "fast" ? "checkmark" : "bolt.fill")
-            }
-        } label: {
-            // The bolt belongs to Fast, not to the control: the menu above already draws it on
-            // that one row and a dial on Standard, and a chip wearing it whatever is chosen
-            // says Fast while the value beside it says otherwise.
-            DraftChoiceChip(
-                symbol: speedID == "fast" ? "bolt.fill" : "gauge",
-                title: selectedSpeedName
-            )
-        }
-        .accessibilityLabel("Speed")
-        .accessibilityValue(selectedSpeedName)
+    private var runSummary: String {
+        SessionDraftRunSummary.text(
+            model: selectedModel?.name,
+            effort: selectedModel?.reasoning.first(where: { $0.id == reasoningID })?.name,
+            speed: speedID.isEmpty ? nil : selectedSpeedName
+        )
     }
 
     private var selectedSpeedName: String {
@@ -649,8 +683,9 @@ private struct SessionDraftComposerScreen: View {
                 }
             }
         } label: {
-            DraftChoiceChip(symbol: "hand.raised", title: selectedPermissionName)
+            DraftIconMenuLabel(symbol: "hand.raised", isSet: !permissionID.isEmpty)
         }
+        .disabled(isSubmitting)
         .accessibilityLabel("Permissions")
         .accessibilityValue(selectedPermissionName)
     }
@@ -777,6 +812,7 @@ private struct SessionDraftComposerScreen: View {
                     fastMode: speedID == "fast" ? true : (speedID == "standard" ? false : nil),
                     permissionMode: permissionID.isEmpty ? nil : permissionID,
                     surface: surface,
+                    role: role.wireValue,
                     prompt: prompt
                 )
                 // Turns this screen into the session's: `SessionDraftView` fades this one
@@ -793,61 +829,143 @@ private struct SessionDraftComposerScreen: View {
     }
 }
 
-/// One choice in the composer's action row: a glyph, the chosen value, a chevron. Quiet on
-/// purpose — the row holds up to seven of these and the prompt above them is the point.
-private struct DraftChoiceChip<Accessory: View>: View {
-    @Environment(\.remoteTheme) private var theme
-    let symbol: String
-    let title: String
-    @ViewBuilder let accessory: () -> Accessory
+/// What the draft will start: an agent on a task, or a manager coordinating the project.
+///
+/// A manager is the Mac's role, not a runtime: the same session with its project's control
+/// grant. The phone only names it; `RemoteSessionRole` carries the word and the Mac confers
+/// the authority.
+enum SessionDraftRole: CaseIterable {
+    case agent
+    case manager
 
-    init(
-        symbol: String,
-        title: String,
-        @ViewBuilder accessory: @escaping () -> Accessory = { EmptyView() }
-    ) {
-        self.symbol = symbol
-        self.title = title
-        self.accessory = accessory
+    var title: String {
+        switch self {
+        case .agent: return MobileL10n.string("Agent")
+        case .manager: return MobileL10n.string("Manager")
+        }
     }
+
+    /// The Mac's own glyph for each role, as its composer's role chip draws them.
+    var symbol: String {
+        switch self {
+        case .agent: return "bubble.left"
+        case .manager: return "person.3"
+        }
+    }
+
+    /// Nil for an agent: a chat is what an older Mac starts for a request with no role, and
+    /// what every request meant before the field existed.
+    var wireValue: String? {
+        switch self {
+        case .agent: return nil
+        case .manager: return RemoteSessionRole.manager
+        }
+    }
+}
+
+/// The run menu's one line: the model, then only the choices that depart from its defaults.
+enum SessionDraftRunSummary {
+    static let separator = " · "
+
+    /// `model` nil is the catalogue's default model; `effort` and `speed` nil mean inherited,
+    /// which the line leaves unsaid — "GPT-5.6 Sol" says more than "GPT-5.6 Sol · Default".
+    static func text(model: String?, effort: String?, speed: String?) -> String {
+        [model ?? MobileL10n.string("Default model"), effort, speed]
+            .compactMap { $0 }
+            .joined(separator: separator)
+    }
+}
+
+/// A menu that is a line of text: an optional glyph, the chosen value, a chevron. No plate —
+/// the project in the middle of the ground and the run settings in the composer are the same
+/// kind of control and read as the same kind of thing.
+private struct DraftMenuLabel: View {
+    @Environment(\.remoteTheme) private var theme
+    var symbol: String? = nil
+    let title: String
 
     var body: some View {
         HStack(spacing: MobileDesign.Spacing.tight) {
-            Image(systemName: symbol)
-                .font(.caption)
-                .foregroundStyle(theme.accent)
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.caption)
+                    .foregroundStyle(theme.secondaryLabel)
+            }
             Text(title)
-                .font(.caption.weight(.medium))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(theme.label)
                 .lineLimit(1)
-            accessory()
             Image(systemName: "chevron.down")
                 .font(.system(size: MobileDesign.Size.chipChevron, weight: .semibold))
                 .foregroundStyle(theme.tertiaryLabel)
         }
-        .foregroundStyle(theme.label)
-        .padding(.horizontal, MobileDesign.Spacing.medium)
-        .frame(height: MobileDesign.Size.compactControl)
-        .background(theme.controlResting, in: Capsule())
-        .contentShape(Capsule())
+        // The toolbar control's height rather than the full 44: in the ground the branch sits
+        // under this line, and a taller hit area pushed it off the name it belongs to.
+        .frame(minHeight: MobileDesign.Size.compactControl)
+        .contentShape(Rectangle())
     }
 }
 
-private struct UsageProgressRing: View {
-    let fraction: Double
-    let tint: Color
+/// A menu that is one glyph, for the choices almost always left alone — permissions, the
+/// interface. The glyph takes the accent when the choice departs from the default, so a row
+/// of quiet icons still says which one has been touched.
+private struct DraftIconMenuLabel: View {
+    @Environment(\.remoteTheme) private var theme
+    let symbol: String
+    let isSet: Bool
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(isSet ? theme.accent : theme.secondaryLabel)
+            .frame(
+                width: MobileDesign.Size.compactControl,
+                height: MobileDesign.Size.compactControl
+            )
+            .contentShape(Rectangle())
+    }
+}
+
+/// The account control in the navigation bar: the runtime's mark on the toolbar's disc, ringed
+/// by how much of the account's allowance is used.
+///
+/// The ring is the usage reading the old identity capsule spelled out — "5h 18% · 7d 63%" —
+/// reduced to the one fact a glance needs, how close to the limit; the words are still in the
+/// menu beside each account. The disc is the dashboard's toolbar circle, so the bar keeps one
+/// kind of control, and the mark is the one the rows draw, so the runtime looks like itself.
+private struct DraftIdentityDisc: View {
+    let identity: MobileAgentIdentity
+    let usageFraction: Double?
+    let usageTint: Color
+    @Environment(\.remoteTheme) private var theme
 
     var body: some View {
         ZStack {
             Circle()
-                .stroke(tint.opacity(0.2), lineWidth: MobileDesign.Size.badgeStroke)
-            Circle()
-                .trim(from: 0, to: min(max(fraction, 0), 1))
-                .stroke(
-                    tint,
-                    style: StrokeStyle(lineWidth: MobileDesign.Size.badgeStroke, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
+                .fill(theme.controlResting)
+            MobileAgentMarkGlyph(identity: identity)
+            if let usageFraction {
+                Circle()
+                    .stroke(
+                        usageTint.opacity(MobileDesign.Opacity.usageRingTrack),
+                        lineWidth: MobileDesign.Size.badgeStroke
+                    )
+                Circle()
+                    .trim(from: 0, to: min(max(usageFraction, 0), 1))
+                    .stroke(
+                        usageTint,
+                        style: StrokeStyle(
+                            lineWidth: MobileDesign.Size.badgeStroke,
+                            lineCap: .round
+                        )
+                    )
+                    .rotationEffect(.degrees(-90))
+            }
         }
-        .frame(width: MobileDesign.Size.usageRing, height: MobileDesign.Size.usageRing)
+        .frame(
+            width: MobileDesign.Size.compactControl,
+            height: MobileDesign.Size.compactControl
+        )
+        .contentShape(Circle())
     }
 }

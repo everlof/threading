@@ -1148,6 +1148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             permissionMode: launch.permissionMode,
             usesNativeUI: launch.usesNativeUI,
             managedWorkspacePlan: launch.managedWorkspacePlan,
+            role: launch.role,
             prompt: launch.prompt
         )?.id
     }

@@ -173,3 +173,37 @@ final class MobileSessionOpeningTests: XCTestCase {
         )
     }
 }
+
+/// The draft's run settings are one line of text, and what it says is decided here rather than
+/// in the view: the model, then only the choices that depart from its defaults.
+final class SessionDraftChoiceTests: XCTestCase {
+    func testTheRunSummaryNamesTheModelAndOnlyTheChoicesMade() {
+        XCTAssertEqual(
+            SessionDraftRunSummary.text(model: "GPT-5.6 Sol", effort: "High", speed: nil),
+            "GPT-5.6 Sol · High"
+        )
+        XCTAssertEqual(
+            SessionDraftRunSummary.text(model: "GPT-5.6 Sol", effort: nil, speed: nil),
+            "GPT-5.6 Sol"
+        )
+        XCTAssertEqual(
+            SessionDraftRunSummary.text(model: "Opus", effort: "Max", speed: "Fast"),
+            "Opus · Max · Fast"
+        )
+    }
+
+    func testTheRunSummaryWithNoModelSaysSoInsteadOfGoingBlank() {
+        XCTAssertEqual(
+            SessionDraftRunSummary.text(model: nil, effort: nil, speed: nil),
+            MobileL10n.string("Default model")
+        )
+    }
+
+    /// An agent asks for nothing on the wire — what every request meant before the role existed
+    /// — and a manager asks by the Mac's word for it.
+    func testOnlyAManagerIsNamedOnTheWire() {
+        XCTAssertNil(SessionDraftRole.agent.wireValue)
+        XCTAssertEqual(SessionDraftRole.manager.wireValue, RemoteSessionRole.manager)
+        XCTAssertEqual(SessionDraftRole.allCases, [.agent, .manager])
+    }
+}

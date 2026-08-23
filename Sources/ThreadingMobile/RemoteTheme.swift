@@ -50,7 +50,16 @@ enum MobileDesign {
         /// title still holds still — the width it settles on depends on the device, never on
         /// what the chat is called. The UIKit conversation title has stated its width since it
         /// was written, for the same reason; this is that decision, named and shared.
-        static let navigationTitleWidth: CGFloat = 280
+        ///
+        /// Sized to be *centred* as well as still. UIKit puts a title view on the bar's centre
+        /// only when it fits the space that is symmetric about that centre; one wider than that
+        /// is centred in whatever lies between the bar's items instead, and the items are never
+        /// quite symmetric — a back circle sits 13 points from its edge and a 34-point control
+        /// 19 from its, so a 280-point title came to rest 5 points left of centre on every
+        /// screen with a control at each end. Between those two, the symmetric space on the
+        /// narrowest supported phone (375 points) is 2 × (187.5 − 69), so a title this wide
+        /// lands on the centre of every phone.
+        static let navigationTitleWidth: CGFloat = 236
         static let navigationTitleHeight: CGFloat = minimumTapTarget
         /// The working orb standing in the status dot's place in a chat's navigation title. It
         /// takes the line the dot leaves rather than a place of its own, so the title stays
@@ -87,10 +96,9 @@ enum MobileDesign {
         /// the caption line it replaces so a working row is no taller than an idle one.
         static let rowWorkingOrb: CGFloat = 16
 
-        /// The draft's composer chips: the chevron that says each is a menu, and the usage ring
-        /// in the identity chip, both set to the caption line the chip's text sits on.
+        /// The draft's composer chips: the chevron that says each is a menu, set to the caption
+        /// line the chip's text sits on.
         static let chipChevron: CGFloat = 9
-        static let usageRing: CGFloat = 12
         /// The glyph on the draft's empty ground. A symbol, not a tile: large enough to name the
         /// surface being started, drawn light and in the tertiary ink so it stays a hint.
         static let draftHintGlyph: CGFloat = 30
@@ -126,6 +134,9 @@ enum MobileDesign {
         /// Dims an action the surface is offering but cannot perform yet: a dialog button, or a
         /// share grant a dormant chat has nothing to grant.
         static let disabledAction: Double = 0.42
+        /// The unfilled part of a usage ring: present enough to read as a ring, faint enough that
+        /// the filled arc is what the eye measures.
+        static let usageRingTrack: Double = 0.2
     }
 
     enum Typography {

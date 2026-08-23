@@ -1257,6 +1257,7 @@ final class RemoteAppModel: ObservableObject {
         permissionMode: String?,
         surface: RemoteSessionSurface,
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
+        role: String? = nil,
         prompt: String
     ) async throws -> RemoteSessionSummaryDTO {
         guard canManageSessions, let host = activeHost else {
@@ -1273,6 +1274,7 @@ final class RemoteAppModel: ObservableObject {
             permissionMode: permissionMode,
             surface: surface,
             managedWorkspace: managedWorkspace,
+            role: role,
             prompt: prompt
         )
         if isDemo {
@@ -3336,7 +3338,8 @@ final class RemoteAppModel: ObservableObject {
                         defaultModelID: nil,
                         supportsConversation: true
                     ),
-                ]
+                ],
+                supportsManagerRole: true
             ),
             features: [RemoteRESTFeature.usageDashboard.rawValue]
         )

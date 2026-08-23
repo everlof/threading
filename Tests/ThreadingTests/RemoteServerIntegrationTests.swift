@@ -1108,6 +1108,45 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(runtimeStatus.runningSessionIDs.contains(dormant.id))
     }
 
+    /// A phone may start a manager: the request names the role, the launch carries it to the
+    /// coordinator that confers the grant, and a role the vocabulary does not know is refused
+    /// rather than started as a chat that would not find out until it failed to reach its
+    /// siblings. No role is a chat, which is what every older phone asks for.
+    func testAManagerIsStartedByRoleAndAnUnknownRoleIsRefused() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-manager-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        sessionCommands.createdSessionID = SessionID()
+
+        func create(role: String?) throws -> Int {
+            let body = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+                projectID: project.id.uuidString,
+                agentKind: AgentKind.codex.rawValue,
+                surface: .terminal,
+                role: role,
+                prompt: "Coordinate the release"
+            ))
+            return try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: body)).status
+        }
+
+        XCTAssertEqual(try create(role: RemoteSessionRole.manager), 201)
+        XCTAssertEqual(try XCTUnwrap(sessionCommands.launches.last).role, .manager)
+
+        XCTAssertEqual(try create(role: nil), 201)
+        XCTAssertEqual(try XCTUnwrap(sessionCommands.launches.last).role, .chat)
+
+        XCTAssertEqual(try create(role: RemoteSessionRole.chat), 201)
+        XCTAssertEqual(try XCTUnwrap(sessionCommands.launches.last).role, .chat)
+
+        XCTAssertEqual(sessionCommands.launches.count, 3)
+        XCTAssertEqual(try create(role: "overlord"), 422)
+        XCTAssertEqual(sessionCommands.launches.count, 3, "an unknown role starts nothing")
+    }
+
     /// A phone may ask for the isolated worktree the Mac offered it, and nothing else.
     ///
     /// The offer itself is made in the catalogue, where the owner's setting is read; this is the

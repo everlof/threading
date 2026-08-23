@@ -51,7 +51,12 @@ cleanup, and a publicly reachable HTTP server as the first interface.
 - **`ControlOperation` and `ControlGrant`** — the closed operation vocabulary and durable,
   revocable authority joining an actor, scope, exact operation set, permission-mode ceiling,
   managed-workspace delivery cap and optional spend ceiling. `GrantOrigin` has no agent-authored
-  case: only the user's Make Manager command or New Manager template can confer one.
+  case: only the user's Make Manager command or New Manager template can confer one. A paired
+  owner phone starting a manager (`RemoteCreateSessionRequestDTO.role`) is the template by
+  another door — the server validates the word, `SessionCoordinator.startRemoteSession` confers
+  with `.newManagerTemplate` after the session exists, and a grant that cannot be written
+  removes the session rather than leaving a chat calling itself a manager. The catalogue's
+  `supportsManagerRole` is what lets a phone offer the choice only where it will be honoured.
 - **Typed outcomes** — `ControlSessionOverview`, `ControlSendOutcome`, `ControlRefusal`.
   Refusals are values; prose belongs to adapters.
 

@@ -142,12 +142,12 @@ struct RootView: View {
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
                         .hasPrefix("new-session") == true {
-                // Met as it is shipped: a screen on a stack, with a back button where the
-                // sheet's Cancel used to be.
-                NavigationStack {
-                    SessionDraftView(draft: MobileSessionDraft())
-                        .environmentObject(model)
-                }
+                // Met as it is shipped: pushed onto a stack, with a back button where the
+                // sheet's Cancel used to be. Held as the root it had no back button, and the
+                // account disc at the other end pushed the title off centre — a geometry the
+                // real screen never has.
+                SessionDraftDemoHost()
+                    .environmentObject(model)
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "themed-dialog-alert" {
                 ThemedDialogDemoView(kind: .alert)
@@ -550,6 +550,25 @@ struct RootView: View {
 }
 
 #if DEBUG
+/// The draft as it is actually met: pushed from a list, so the bar has a back button on one
+/// side of the title and the account disc on the other.
+private struct SessionDraftDemoHost: View {
+    @Environment(\.remoteTheme) private var theme
+    @State private var path: [MobileNavigationRoute] = [.draft(MobileSessionDraft())]
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            theme.ground
+                .ignoresSafeArea()
+                .navigationDestination(for: MobileNavigationRoute.self) { route in
+                    if case .draft(let draft) = route {
+                        SessionDraftView(draft: draft)
+                    }
+                }
+        }
+    }
+}
+
 /// The link-ready sheet as it is actually met: presented over the screen that made it.
 ///
 /// Held as a bare root it filled the display, which is the one shape the real surface never

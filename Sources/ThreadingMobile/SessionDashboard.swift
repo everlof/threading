@@ -728,7 +728,10 @@ struct SessionDashboard: View {
                             isArchived: showsArchived,
                             showsActions: model.canManageSessions,
                             pendingActionSessionID: pendingActionSessionID,
-                            action: perform
+                            action: perform,
+                            startNewSession: model.canManageSessions && !showsArchived
+                                ? { startDraft(in: project.projectName) }
+                                : nil
                         )
                     }
                 } else {
@@ -976,20 +979,12 @@ struct SessionDashboard: View {
             )
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
-            Button {
-                MobileSessionNavigationTransition.draft(in: projectName, onto: model)
-            } label: {
-                Image(systemName: "plus")
-                    .frame(
-                        width: MobileDesign.Size.compactControl,
-                        height: MobileDesign.Size.compactControl
-                    )
-                    .background(theme.controlResting, in: Circle())
-            }
-            .accessibilityLabel(
-                projectName.map { MobileL10n.string("New session in %@", $0) }
+            NewSessionButton(
+                accessibilityLabel: projectName.map { MobileL10n.string("New session in %@", $0) }
                     ?? MobileL10n.string("New session")
-            )
+            ) {
+                startDraft(in: projectName)
+            }
 
             if projectName == nil {
                 Menu {
@@ -1107,6 +1102,10 @@ struct SessionDashboard: View {
                 .accessibilityLabel("Remote access options")
             }
         }
+    }
+
+    private func startDraft(in projectName: String?) {
+        MobileSessionNavigationTransition.draft(in: projectName, onto: model)
     }
 
     private func perform(
@@ -1571,6 +1570,31 @@ private struct MobileConnectionProgressStepTitle: UIViewRepresentable {
     }
 }
 
+/// Starts a chat: the toolbar's plus, and the one on each project heading.
+///
+/// It carries no caption. The word sat next to a plus in a header that already names the
+/// project, which said the same thing twice and pushed the folder name into truncation on a
+/// phone-width row; the glyph alone is the same control the toolbar shows, at the same size and
+/// on the same disc as the toolbar's other circles.
+struct NewSessionButton: View {
+    let accessibilityLabel: String
+    let action: () -> Void
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .frame(
+                    width: MobileDesign.Size.compactControl,
+                    height: MobileDesign.Size.compactControl
+                )
+                .background(theme.controlResting, in: Circle())
+                .contentShape(Circle())
+        }
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 /// A project's heading and, under it, its chats and terminals on one plate — the Mac sidebar's
 /// arrangement, where a project's terminals stand in the same list as its chats and are told
 /// apart by their mark. A "Terminals" heading used to sit over the terminals alone, so one kind
@@ -1584,31 +1608,45 @@ private struct ProjectWorkGroup: View {
     let showsActions: Bool
     let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
+    /// Starts a chat in this project from its heading. `nil` for a share that may not manage
+    /// sessions, and for the archive, where nothing is started.
+    var startNewSession: (() -> Void)? = nil
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            NavigationLink(value: MobileNavigationRoute.project(projectName)) {
-                HStack(spacing: MobileDesign.Spacing.small) {
-                    // One line, always. A project is a folder on the Mac, and a folder name can be
-                    // anything the Mac's filesystem allows - a managed workspace carries a UUID, so
-                    // the name ran to three wrapped lines and pushed the chats it heads down the
-                    // screen. The header names the group; the full name is still what VoiceOver
-                    // reads and what the project's own screen shows.
-                    Label(title, systemImage: "folder")
-                        .font(.headline)
-                        .foregroundStyle(theme.label)
-                        .lineLimit(1)
-                    Spacer(minLength: MobileDesign.Spacing.tight)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(theme.tertiaryLabel)
+            HStack(spacing: MobileDesign.Spacing.small) {
+                NavigationLink(value: MobileNavigationRoute.project(projectName)) {
+                    HStack(spacing: MobileDesign.Spacing.tight) {
+                        // One line, always. A project is a folder on the Mac, and a folder name
+                        // can be anything the Mac's filesystem allows - a managed workspace
+                        // carries a UUID, so the name ran to three wrapped lines and pushed the
+                        // chats it heads down the screen. The header names the group; the full
+                        // name is still what VoiceOver reads and what the project's own screen
+                        // shows.
+                        Label(title, systemImage: "folder")
+                            .font(.headline)
+                            .foregroundStyle(theme.label)
+                            .lineLimit(1)
+                        // Beside the name rather than at the far edge: the chevron says the
+                        // name opens something, and the far edge is where the plus stands.
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(theme.tertiaryLabel)
+                    }
+                    .frame(minHeight: MobileDesign.Size.minimumTapTarget)
+                    .contentShape(Rectangle())
                 }
-                .frame(minHeight: MobileDesign.Size.minimumTapTarget)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows this project’s sessions")
+                Spacer(minLength: MobileDesign.Spacing.tight)
+                if let startNewSession {
+                    NewSessionButton(
+                        accessibilityLabel: MobileL10n.string("New session in %@", projectName),
+                        action: startNewSession
+                    )
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("Shows this project’s sessions")
             DashboardRowGroup(
                 rows: DashboardRowItem.rows(
                     sessions: sessions,

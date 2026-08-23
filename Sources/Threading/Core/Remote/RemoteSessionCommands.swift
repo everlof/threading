@@ -17,6 +17,10 @@ struct RemoteSessionLaunch {
     /// Nil is the project's own checkout, which is where every remotely started session ran
     /// before a phone could ask for anything else.
     let managedWorkspacePlan: ManagedWorkspacePlan?
+    /// A manager is the same session with its project's control grant conferred once it exists
+    /// — what the Mac's own New Manager template does. Validated by the server, conferred by the
+    /// coordinator, so the authority never leaves the Mac.
+    let role: SessionRole
     let prompt: String
 }
 

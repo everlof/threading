@@ -835,8 +835,9 @@ sharing action.
 ## Starting a chat from the phone, and seeing it work
 
 **Start opens the chat it started, on the screen that started it.** The draft is a route on the
-navigation stack (`MobileNavigationRoute.draft`), pushed by **+** from whichever list asked for
-it, so Back from the chat returns there. It was a sheet: Start created the session, the sheet
+navigation stack (`MobileNavigationRoute.draft`), pushed by **+** — the toolbar's, or the one on a
+project's heading, which seeds that project — from whichever list asked for it, so Back from the
+chat returns there. It was a sheet: Start created the session, the sheet
 dismissed, and the dashboard pushed the new chat from `onDismiss` — two motions with the list
 flashing between them, and before that, no push at all. Now the Mac answers the create with the
 new session's id *and* the whole refreshed catalogue, the model records which session the draft
@@ -852,10 +853,20 @@ running, so it shows "Resuming on your Mac…" until the agent answers. Tapping 
 through `MobileSessionNavigationTransition.push`, so a terminal commits its final geometry
 immediately rather than being resized through every intermediate width.
 
-**The draft is one composer, not a form.** Every choice — checkout, agent and account, model,
-effort, speed, permissions, interface — is a chip in the composer's action row under the prompt,
-a `Menu` each, scrolling horizontally in the order they are changed. The ground above holds only
-a glyph and a line, gone once there is a prompt. The composer rides in the bottom safe-area
+**The draft is one composer, not a form.** Three kinds of choice at three weights, none of them
+a box on the ground. *What and where* — "Agent in AnotherTerminal" — is one sentence of two plain
+dropdowns in the middle of the ground under the role's glyph, its branch beneath it; the role
+dropdown appears only when the catalogue says `supportsManagerRole`, so an older Mac is never
+sent a word it would ignore. *Who* — agent and account — is the disc at the navigation bar's
+trailing edge: the runtime's mark (`MobileAgentMarkGlyph`, the same drawing the dashboard rows
+use) on the toolbar's circle, ringed by the account's usage fraction; the words the old capsule
+spelled out are in the menu beside each account. *How* is the composer's action row under the
+prompt, and it never scrolls: model, effort and speed are one line of text
+(`SessionDraftRunSummary` — the model, then only the choices that depart from its defaults) over
+one sectioned `Menu`, and permissions and the interface are one glyph each, accent-tinted once
+set. A `Menu`'s button keeps the width it was first measured at, so each text menu is keyed by
+its value (`.id`) and re-made when the word changes — "Agent" became "lanager" before that. The
+composer rides in the bottom safe-area
 inset with SwiftUI's keyboard avoidance, so it sits on the keyboard's top edge and follows the
 interactive dismissal; it is full-bleed with a hairline above it rather than a bordered panel. The
 action row unfolds with the prompt's focus and folds when the keyboard goes, leaving one line —

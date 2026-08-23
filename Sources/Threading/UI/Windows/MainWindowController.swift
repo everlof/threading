@@ -1912,6 +1912,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         permissionMode: AgentPermissionMode?,
         usesNativeUI: Bool,
         managedWorkspacePlan: ManagedWorkspacePlan?,
+        role: SessionRole = .chat,
         prompt: String
     ) -> AgentSession? {
         sessionCoordinator.startRemoteSession(
@@ -1924,6 +1925,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             permissionMode: permissionMode,
             usesNativeUI: usesNativeUI,
             managedWorkspacePlan: managedWorkspacePlan,
+            role: role,
             prompt: prompt
         )
     }

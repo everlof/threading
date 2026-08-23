@@ -502,7 +502,11 @@ final class RemoteSessionMirrorRegistry {
             )
         }
 
-        return RemoteNewSessionCatalogDTO(projects: projects, agents: agents)
+        return RemoteNewSessionCatalogDTO(
+            projects: projects,
+            agents: agents,
+            supportsManagerRole: true
+        )
     }
 
     /// What a report sent from a paired phone would come up as in one project.

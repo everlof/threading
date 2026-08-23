@@ -182,8 +182,26 @@ struct MobileSessionMark: View {
 
     // MARK: - Private Properties
 
-    @ViewBuilder
     private var mark: some View {
+        MobileAgentMarkGlyph(identity: identity)
+    }
+
+    private var accessibilityLabel: String {
+        guard let account else { return identity.displayName }
+        return "\(identity.displayName) · \(account.name)"
+    }
+}
+
+// MARK: - Mobile Agent Mark Glyph
+
+/// A runtime's mark alone, at the tile's glyph size, in the secondary ink. The row tile draws it
+/// on its square; the draft's account control draws it on a disc in the navigation bar. One
+/// drawing, so the same runtime looks the same in both places.
+struct MobileAgentMarkGlyph: View {
+    let identity: MobileAgentIdentity
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
         switch identity.mark {
         case .brand(let asset, let keepsItsOwnColour):
             // A template mark takes the slot's tint the way the symbols beside it do, which is what
@@ -202,11 +220,6 @@ struct MobileSessionMark: View {
                 .font(.system(size: MobileDesign.Size.rowMarkGlyph, weight: .medium))
                 .foregroundStyle(theme.secondaryLabel)
         }
-    }
-
-    private var accessibilityLabel: String {
-        guard let account else { return identity.displayName }
-        return "\(identity.displayName) · \(account.name)"
     }
 }
 

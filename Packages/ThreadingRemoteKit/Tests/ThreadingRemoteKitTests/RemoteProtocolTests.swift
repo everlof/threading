@@ -801,6 +801,7 @@ final class RemoteProtocolTests: XCTestCase {
             fastMode: true,
             permissionMode: "acceptEdits",
             surface: .conversation,
+            role: RemoteSessionRole.manager,
             prompt: "Review remote access"
         )
         XCTAssertEqual(
@@ -810,6 +811,7 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             creation
         )
+        XCTAssertEqual(creation.role, "manager")
 
         let olderCreation = try JSONDecoder().decode(
             RemoteCreateSessionRequestDTO.self,
@@ -819,6 +821,22 @@ final class RemoteProtocolTests: XCTestCase {
         )
         XCTAssertNil(olderCreation.fastMode)
         XCTAssertNil(olderCreation.permissionMode)
+        XCTAssertNil(olderCreation.role, "an older phone's request is a chat")
+
+        // An older Mac's catalogue says nothing about managers, which a phone reads as "no".
+        let olderCatalog = try JSONDecoder().decode(
+            RemoteNewSessionCatalogDTO.self,
+            from: Data(#"{"projects":[],"agents":[]}"#.utf8)
+        )
+        XCTAssertNil(olderCatalog.supportsManagerRole)
+        let catalog = RemoteNewSessionCatalogDTO(projects: [], agents: [], supportsManagerRole: true)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteNewSessionCatalogDTO.self,
+                from: JSONEncoder().encode(catalog)
+            ).supportsManagerRole,
+            true
+        )
 
         let rename = RemoteRenameSessionRequestDTO(title: "Remote review")
         XCTAssertEqual(

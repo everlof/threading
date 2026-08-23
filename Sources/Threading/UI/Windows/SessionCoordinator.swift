@@ -1081,6 +1081,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         permissionMode: AgentPermissionMode?,
         usesNativeUI: Bool,
         managedWorkspacePlan: ManagedWorkspacePlan?,
+        role: SessionRole = .chat,
         prompt: String
     ) -> AgentSession? {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1137,10 +1138,23 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return nil
         }
 
+        // The same rule the composer's Start applies: a manager that cannot be granted its
+        // project is not started as a chat that merely calls itself one.
+        if role == .manager,
+           ControlGrantStore.shared.conferManager(
+               sessionID: session.id,
+               origin: .newManagerTemplate
+           ) == nil {
+            _ = environment.projectStore.removeSession(id: session.id)
+            if let managedWorkspace { try? ManagedGitWorkspace.discardUnstarted(managedWorkspace) }
+            return nil
+        }
+
         environment.eventLog.record(.remote, "Session started remotely", [
             "session": session.id.uuidString,
             "project": projectID.uuidString,
             "agent": kind.rawValue,
+            "role": role.rawValue,
             "speed": fastMode.map { $0 ? "fast" : "standard" } ?? "inherit",
             "permissionMode": permissionMode?.rawValue ?? "inherit",
             "workspace": managedWorkspace?.delivery.rawValue ?? "projectCheckout",

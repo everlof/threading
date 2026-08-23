@@ -715,11 +715,32 @@ public struct RemoteAgentChoiceDTO: Codable, Equatable, Identifiable, Sendable {
 public struct RemoteNewSessionCatalogDTO: Codable, Equatable, Sendable {
     public let projects: [RemoteProjectChoiceDTO]
     public let agents: [RemoteAgentChoiceDTO]
+    /// Whether a create request may ask for `RemoteSessionRole.manager`. Absent from a Mac
+    /// built before managers could be started remotely, which a phone reads as "no": the
+    /// request field would be ignored there and the chat started as an ordinary one, so the
+    /// choice is only offered where it will be honoured.
+    public let supportsManagerRole: Bool?
 
-    public init(projects: [RemoteProjectChoiceDTO], agents: [RemoteAgentChoiceDTO]) {
+    public init(
+        projects: [RemoteProjectChoiceDTO],
+        agents: [RemoteAgentChoiceDTO],
+        supportsManagerRole: Bool? = nil
+    ) {
         self.projects = projects
         self.agents = agents
+        self.supportsManagerRole = supportsManagerRole
     }
+}
+
+/// The `RemoteCreateSessionRequestDTO.role` vocabulary: what the started session is for.
+///
+/// Strings rather than an enum, like the host endpoint kinds, so a role a newer phone asks for
+/// is refused by the Mac's validation rather than failing the decode. A manager is an ordinary
+/// session the Mac confers its project's control grant on — the same thing the Mac's own New
+/// Manager template makes — so the role is one word here and the authority stays on the Mac.
+public enum RemoteSessionRole {
+    public static let chat = "chat"
+    public static let manager = "manager"
 }
 
 /// The `RemoteHostEndpointDTO.kind` vocabulary both products know today.
@@ -1589,6 +1610,9 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     /// Absent means the project's own checkout, which is what every client asked for before
     /// this field existed.
     public let managedWorkspace: RemoteManagedWorkspacePlanDTO?
+    /// `RemoteSessionRole.chat` or `.manager`. Absent is a chat, which is what every client
+    /// asked for before this field existed.
+    public let role: String?
     public let prompt: String
 
     public init(
@@ -1601,6 +1625,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         permissionMode: String? = nil,
         surface: RemoteSessionSurface,
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
+        role: String? = nil,
         prompt: String
     ) {
         self.projectID = projectID
@@ -1612,6 +1637,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         self.permissionMode = permissionMode
         self.surface = surface
         self.managedWorkspace = managedWorkspace
+        self.role = role
         self.prompt = prompt
     }
 }

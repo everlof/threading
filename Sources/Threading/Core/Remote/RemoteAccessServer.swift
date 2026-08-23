@@ -1032,6 +1032,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
                 return
             }
+            // Absent is a chat, the only thing older phones could ask for. A word the closed
+            // vocabulary does not know is refused rather than quietly started as a chat: a
+            // phone that asked for a manager and got a chat would not find out until the
+            // agent failed to reach its siblings.
+            guard let role = creation.role.map(SessionRole.init(rawValue:)) ?? .chat else {
+                respond(.respond(RemoteRouter.error(422, "Unknown Role")))
+                return
+            }
 
             // An isolated workspace is checked the same way the composer's checkbox is gated,
             // rather than being discovered as a failed provision after the session record
@@ -1066,6 +1074,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 permissionMode: permissionMode,
                 usesNativeUI: usesNativeUI,
                 managedWorkspacePlan: managedWorkspacePlan,
+                role: role,
                 prompt: prompt
             )
             guard let sessionID = self.sessionCommands?.startRemoteSession(launch) else {
