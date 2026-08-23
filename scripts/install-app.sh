@@ -52,6 +52,7 @@ done
 readonly DEST="$DEST_DIR/$SCHEME.app"
 readonly STAGE="$DEST_DIR/.$SCHEME.app.incoming"
 readonly PREVIOUS="$DEST_DIR/.$SCHEME.app.previous"
+readonly SOURCE_EXECUTABLE="$APP/Contents/MacOS/$SCHEME"
 # Removed installs can leave one of these behind. New installs never create one; the sweep is a
 # migration that unregisters and removes the old launch target once its original process is gone.
 readonly PARKED_PREFIX="$DEST_DIR/.$SCHEME.app.parked-"
@@ -127,6 +128,9 @@ say "Installing"
 echo "  from: $APP"
 echo "    to: $DEST"
 
+[[ -f "$SOURCE_EXECUTABLE" ]] || fail "built app has no executable at '$SOURCE_EXECUTABLE'"
+source_executable_sha="$(shasum -a 256 "$SOURCE_EXECUTABLE" | awk '{print $1}')"
+
 installed_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
     "$APP/Contents/Info.plist" 2>/dev/null || echo '?')"
 installed_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
@@ -188,6 +192,11 @@ rm -rf "$STAGE" "$PREVIOUS"
 say "Staging"
 sweep_parked_bundles
 ditto "$APP" "$STAGE"
+stage_executable_sha="$(shasum -a 256 "$STAGE/Contents/MacOS/$SCHEME" | awk '{print $1}')"
+if [[ "$stage_executable_sha" != "$source_executable_sha" ]]; then
+    rm -rf "$STAGE"
+    fail "staged executable differs from the built executable"
+fi
 
 say "Swapping"
 aside=""
@@ -250,6 +259,15 @@ dest_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
     "$DEST/Contents/Info.plist" 2>/dev/null || echo '?')"
 [[ "$dest_build" == "$installed_build" ]] \
     || fail "installed bundle reports build $dest_build, expected $installed_build"
+
+# Local builds all report 0.0.0, so the version check above cannot distinguish yesterday's
+# executable from the one the automatic installer just built. Compare the actual launch payload;
+# without this guard an installation receipt can claim a commit whose code never reached
+# /Applications, and every later diagnosis starts from a false premise.
+dest_executable_sha="$(shasum -a 256 "$DEST/Contents/MacOS/$SCHEME" | awk '{print $1}')"
+[[ "$dest_executable_sha" == "$source_executable_sha" ]] \
+    || fail "installed executable differs from the built executable"
+echo "  executable SHA-256: $dest_executable_sha"
 
 # Notification Center opens by application identity rather than by the posting process's pid.
 # Force the surviving path to be LaunchServices' current record after unregistering the outgoing

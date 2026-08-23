@@ -294,7 +294,7 @@ PYTHON
 # — release.sh's header says so — and an app you leave running all day should not be one any
 # process running as you can attach a debugger to and read the memory of.
 build_the_checkout() {
-    local status=0
+    local sha="$1" status=0 product_revision
     : > "$BUILD_LOG"
     cd "$CHECKOUT"
 
@@ -311,6 +311,7 @@ build_the_checkout() {
         PROVISIONING_PROFILE_SPECIFIER="" \
         CODE_SIGN_ENTITLEMENTS="$ENTITLEMENTS" \
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+        THREADING_SOURCE_REVISION="$sha" \
         build >>"$BUILD_LOG" 2>&1 &
     local build_pid=$!
     set +m
@@ -320,6 +321,16 @@ build_the_checkout() {
     echo "$build_pid" > "$BUILD_GROUP_FILE"
     wait "$build_pid" || status=$?
     rm -f "$BUILD_GROUP_FILE"
+
+    if [[ $status -eq 0 ]]; then
+        product_revision="$(/usr/libexec/PlistBuddy -c 'Print :ThreadingSourceRevision' \
+            "$PRODUCT/Contents/Info.plist" 2>/dev/null || true)"
+        if [[ "$product_revision" != "$sha" ]]; then
+            printf 'error: built product reports source revision %q, expected %q\n' \
+                "$product_revision" "$sha" >> "$BUILD_LOG"
+            status=1
+        fi
+    fi
     return "$status"
 }
 
@@ -437,7 +448,7 @@ run_builder() {
             return 0
         fi
 
-        build_the_checkout || status=$?
+        build_the_checkout "$sha" || status=$?
         if [[ $status -ne 0 ]]; then
             if [[ "$(source_tip)" != "$sha" ]]; then
                 log_line "build of $(short "$sha") stopped; master has moved — starting again"

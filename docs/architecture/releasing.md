@@ -56,7 +56,10 @@ converges on master's tip rather than on whichever build finished last. `status`
 **It builds a clone, not this tree.** Several agents edit this working tree at once and master
 moves under them, so a build started here would compile a half-written state and would fight the
 developer's own DerivedData. `~/.threading-autoinstall/checkout` is a `--local` clone reset to the
-exact commit that triggered the round, with DerivedData beside it. A build is of a commit.
+exact commit that triggered the round, with DerivedData beside it. A build is of a commit. The
+builder passes that commit as `THREADING_SOURCE_REVISION`, reads `ThreadingSourceRevision` back
+from the finished app, and refuses the product if the two differ. The stamp is empty in ordinary
+and shipping builds; it proves only the local convergence loop's source, never a public version.
 
 **A build action *can* be Developer ID signed** — this is the "switch every target to manual
 signing" alternative the section above names, taken from the command line where it applies to
@@ -87,6 +90,13 @@ installer. If master moves while it waits, that product is discarded and the new
 built instead. The installer checks again both before and immediately after moving the outgoing
 bundle, so a reopen during staging is refused and retried rather than turning a live bundle into
 an update casualty.
+
+**An install receipt follows the executable, not the placeholder version.** Local builds all
+report `0.0.0`, so comparing `CFBundleVersion` can accept yesterday's app as today's. The installer
+hashes the built executable, checks the staged copy before the swap, and checks the installed copy
+again before returning success. The auto-installer writes its commit receipt only after that
+return. This is the provenance boundary: a receipt can no longer say a fix reached `/Applications`
+while the process still launches from an older binary.
 
 That refusal is load-bearing for notifications. The old `--leave-running` path moved a live app
 to `.Threading.app.parked-<pid>` and installed the replacement at its original URL. LaunchServices

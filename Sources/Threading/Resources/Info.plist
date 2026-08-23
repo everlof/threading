@@ -33,6 +33,13 @@
 	-->
 	<key>ThreadingBuildChannel</key>
 	<string>$(THREADING_CHANNEL)</string>
+	<!--
+		The automatic installer stamps the exact master commit it checked out and then reads this
+		value back from the product before installation. Ordinary and shipping builds leave it
+		empty; it is provenance for the local /Applications convergence loop, not a release version.
+	-->
+	<key>ThreadingSourceRevision</key>
+	<string>$(THREADING_SOURCE_REVISION)</string>
 	<!-- Account, rendezvous, and short-lived TURN control plane. Ordinary remote traffic uses
 	     the negotiated peer path and does not transit this origin. -->
 	<key>ThreadingControlPlaneURL</key>

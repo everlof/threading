@@ -33,6 +33,16 @@ final class BuildChannelTests: XCTestCase {
         XCTAssertEqual(AppInfo.buildChannel, .dev)
     }
 
+    /// Only the automatic /Applications builder supplies this value. A normal test, Debug, or
+    /// release build must leave it empty so source-control provenance is never mistaken for the
+    /// product's public version or channel.
+    func testAPlainBuildLeavesTheAutomaticInstallerRevisionUnstamped() {
+        XCTAssertEqual(
+            Bundle.main.infoDictionary?["ThreadingSourceRevision"] as? String,
+            ""
+        )
+    }
+
     // MARK: - Badge
 
     func testAReleaseBuildWearsNoBadge() {
