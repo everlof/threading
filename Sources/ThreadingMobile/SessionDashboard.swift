@@ -2153,9 +2153,8 @@ private struct TerminalRow: View {
     }
 }
 
-/// The terminal row as a tap. A terminal transition cannot manufacture intermediate widths, so the
-/// push is immediate — the same answer `MobileSessionNavigationTransition` gives a chat on its
-/// terminal surface.
+/// The terminal row as a tap. Terminal geometry remains stable inside its UIKit host, so this row
+/// keeps the ordinary system navigation transition just like session rows do.
 private struct TerminalListItem: View {
     let terminal: RemoteProjectTerminalSummaryDTO
     let showsProjectName: Bool
@@ -2173,11 +2172,7 @@ private struct TerminalListItem: View {
 
     private func openTerminal() {
         guard model.navigationPath.last != .terminal(terminal.id) else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            model.navigationPath.append(.terminal(terminal.id))
-        }
+        model.navigationPath.append(.terminal(terminal.id))
     }
 }
 
