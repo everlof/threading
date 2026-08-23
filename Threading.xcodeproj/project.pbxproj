@@ -44,6 +44,8 @@
 		A70200010000000000000001 /* MobileHostRefreshSingleFlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */; };
 		A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */; };
 		A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70400010000000000000002 /* ComposerClipboardTests.swift */; };
+		A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */; };
+		A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */; };
 		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
 		A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61700010000000000000002 /* RemoteConnectionFailureTests.swift */; };
 		A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */; };
@@ -213,6 +215,8 @@
 		A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileHostRefreshSingleFlightTests.swift; sourceTree = "<group>"; };
 		A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteExtensionSceneScalingTests.swift; sourceTree = "<group>"; };
 		A70400010000000000000002 /* ComposerClipboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerClipboardTests.swift; sourceTree = "<group>"; };
+		A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentPreviewFailureTests.swift; sourceTree = "<group>"; };
+		A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentThumbnailRequestStateTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70000010000000000000001 /* Sources/Threading/Resources/Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
@@ -452,6 +456,8 @@
 				A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */,
 				A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */,
 				A70400010000000000000002 /* ComposerClipboardTests.swift */,
+				A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */,
+				A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -1083,6 +1089,8 @@
 				A70200010000000000000001 /* MobileHostRefreshSingleFlightTests.swift in Sources */,
 				A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */,
 				A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */,
+				A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */,
+				A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
