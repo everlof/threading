@@ -754,13 +754,34 @@
       }
     },
     {
+      "id": "storage-settings",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Storage settings",
+      "description": "The complete deterministic Storage page with fixed totals and actions, virtual checkout cards, expanded artifact rows and the smaller-directory fold.",
+      "states": ["Collapsed checkouts", "Expanded artifacts", "Smaller-directory fold", "Regular width", "Constrained width"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Regular", "Constrained"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/StoragePreferencesVirtualizationTests.swift",
+        "test": "ThreadingTests/StoragePreferencesVirtualizationTests/testRendersStorageSettingsToImages"
+      },
+      "capture": {
+        "glob": "storage-settings-*.png"
+      }
+    },
+    {
       "id": "remaining-settings-destinations",
       "kind": "surface",
       "status": "planned",
       "priority": "important",
       "title": "Remaining Settings destinations",
       "description": "Deterministic fixture seams and complete-page captures for the remaining data-backed Settings pages, without reading developer accounts, profiles, projects or installed extensions.",
-      "states": ["Keyboard", "Terminal profile", "Storage", "Archived", "Search results"],
+      "states": ["Keyboard", "Terminal profile", "Archived", "Search results"],
       "matrix": {
         "themes": ["System", "Two contrasting authored themes"],
         "appearances": ["Light", "Dark"],

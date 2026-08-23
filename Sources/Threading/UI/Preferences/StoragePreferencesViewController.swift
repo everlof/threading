@@ -31,11 +31,36 @@ final class StoragePreferencesViewController: NSViewController {
     /// Named here as well so the page — and the tests that read its cards — keep their vocabulary.
     typealias GroupAttribution = ReclaimableFindings.Attribution
     typealias FindingsGroup = ReclaimableFindings.Group
+    typealias GroupsProvider = @MainActor () -> [FindingsGroup]
+    typealias ScanningProvider = @MainActor () -> Bool
+    typealias RefreshAction = @MainActor () -> Void
+
+    private enum PresentationRow {
+        case explanation
+        case group(Int)
+        case artifact(group: Int, artifact: Int)
+        case tail(Int)
+        case empty
+        case safety
+        case extensionCaption(Int)
+        case extensionField(section: Int, field: Int)
+    }
 
     // MARK: - Properties
 
     /// Findings by group, largest first, read from the caches the service keeps.
     private var groups: [FindingsGroup] = []
+    private var presentationRows: [PresentationRow] = []
+    private var extensionSections: [ExtensionSettingsSectionModel] = []
+    private weak var pageView: SettingsPageView?
+
+    /// Disk discovery is unbounded provider input. Keep it behind a value seam so both the live
+    /// scanner and deterministic stress fixtures feed the same virtual row model.
+    private let groupsProvider: GroupsProvider
+    private let scanningProvider: ScanningProvider
+    private let refreshStaleProjects: RefreshAction
+    private let extensionSectionsProvider: @MainActor () -> [ExtensionSettingsSectionModel]
+    private let summaryProvider: @MainActor () -> String?
 
     /// Groups whose cards the user has unfolded, by identity. Collapsed, a group is one row —
     /// name, path and size — which is the table the page's numbers actually want to be read as;
@@ -48,7 +73,50 @@ final class StoragePreferencesViewController: NSViewController {
     private var expandedTails: Set<String> = []
     private let appEvents = AppEventObservations()
 
-    private var isScanning: Bool { ArtifactScanService.shared.isScanning }
+    private var isScanning: Bool { scanningProvider() }
+
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("StorageSettingsContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = StorageDefaults.estimatedRowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
+
+    private lazy var rescanButton = SettingsUI.button(
+        StorageStrings.rescan,
+        target: self,
+        action: #selector(rescanClicked)
+    )
+
+    /// Installed once with the header, then hidden when there is nothing to remove. Replacing
+    /// the whole page to add or remove this action would also replace the viewport and editors.
+    private lazy var removeEverythingButton = SettingsUI.button(
+        StorageStrings.removeEverything,
+        target: self,
+        action: #selector(removeEverythingClicked)
+    )
 
     private static let size: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -71,15 +139,61 @@ final class StoragePreferencesViewController: NSViewController {
         groups.flatMap(\.artifacts)
     }
 
+    init(
+        groupsProvider: GroupsProvider? = nil,
+        scanningProvider: @escaping ScanningProvider = {
+            ArtifactScanService.shared.isScanning
+        },
+        refreshStaleProjects: @escaping RefreshAction = {
+            ArtifactScanService.shared.refreshStaleProjects()
+        },
+        extensionSectionsProvider: @escaping @MainActor () -> [ExtensionSettingsSectionModel] = {
+            ExtensionSettingsRenderer.hostSectionModels(for: .storage)
+        },
+        summaryProvider: @escaping @MainActor () -> String? = { nil }
+    ) {
+        self.groupsProvider = groupsProvider ?? Self.liveGroups
+        self.scanningProvider = scanningProvider
+        self.refreshStaleProjects = refreshStaleProjects
+        self.extensionSectionsProvider = extensionSectionsProvider
+        self.summaryProvider = summaryProvider
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     // MARK: - Lifecycle
 
     override func loadView() {
         view = NSView()
+        let page = SettingsUI.listPage(
+            title: StorageStrings.title,
+            summary: StorageStrings.nothingFound,
+            actions: [rescanButton, removeEverythingButton],
+            body: scrollView
+        )
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        pageView = page
+        removeEverythingButton.isHidden = true
+        reload()
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         appEvents.observe(ArtifactScanDidChange.self) { [weak self] _ in
+            self?.reload()
+        }
+        appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
             self?.reload()
         }
     }
@@ -93,7 +207,17 @@ final class StoragePreferencesViewController: NSViewController {
     override func viewWillAppear() {
         super.viewWillAppear()
         reload()
-        ArtifactScanService.shared.refreshStaleProjects()
+        refreshStaleProjects()
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
     }
 
     // MARK: - Reading
@@ -101,6 +225,64 @@ final class StoragePreferencesViewController: NSViewController {
     /// Rebuilds from the caches, whether they changed because a scan landed or because something
     /// was removed.
     private func reload() {
+        groups = groupsProvider()
+        extensionSections = extensionSectionsProvider()
+        reloadPresentationRows()
+        pageView?.updateSummary(summaryProvider() ?? headerSummary())
+        removeEverythingButton.isHidden = totalBytes == 0
+    }
+
+    // MARK: - Build
+
+    /// Builds only row identities. A collapsed group is one value, while opening it adds cheap
+    /// artifact coordinates; AppKit remains responsible for the controls inside the viewport.
+    private func reloadPresentationRows() {
+        var rows: [PresentationRow] = [.explanation]
+
+        for (groupIndex, group) in groups.enumerated() {
+            rows.append(.group(groupIndex))
+            guard expandedGroups.contains(group.identity) else { continue }
+
+            let indexed = Array(group.artifacts.enumerated())
+            let large = indexed.filter {
+                $0.element.byteCount >= StorageDefaults.collapseThreshold
+            }
+            let small = indexed.filter {
+                $0.element.byteCount < StorageDefaults.collapseThreshold
+            }
+            rows.append(contentsOf: large.map {
+                .artifact(group: groupIndex, artifact: $0.offset)
+            })
+            if !small.isEmpty {
+                if expandedTails.contains(group.identity) {
+                    rows.append(contentsOf: small.map {
+                        .artifact(group: groupIndex, artifact: $0.offset)
+                    })
+                }
+                rows.append(.tail(groupIndex))
+            }
+        }
+
+        if !isScanning, groups.isEmpty { rows.append(.empty) }
+        rows.append(.safety)
+
+        for (sectionIndex, section) in extensionSections.enumerated() {
+            if section.visibleTitle != nil {
+                rows.append(.extensionCaption(sectionIndex))
+            }
+            rows.append(contentsOf: section.fields.indices.map {
+                .extensionField(section: sectionIndex, field: $0)
+            })
+        }
+
+        presentationRows = rows
+        updateCardDecorations()
+        tableView.reloadData()
+    }
+
+    /// The production value seam. Attribution remains owned by `ReclaimableFindings`; this page
+    /// only projects its answer into virtual rows.
+    private static func liveGroups() -> [FindingsGroup] {
         let projects = ProjectStore.shared.projects
 
         // A project's build cache in a temporary location is that project's line item, so it
@@ -108,68 +290,13 @@ final class StoragePreferencesViewController: NSViewController {
         // instead, in the order they are worth reading: the orphans first, since they are the
         // only findings on this page nothing can ever want back. That order is the grouping
         // model's, so the proposal sheet reads them the same way.
-        groups = ReclaimableFindings.groups(
+        return ReclaimableFindings.groups(
             checkoutArtifacts: projects.map {
                 ($0, ArtifactScanService.shared.artifacts(for: $0.id))
             },
             scratchArtifacts: ArtifactScanService.shared.scratchArtifacts(),
             among: projects
         )
-
-        rebuild()
-    }
-
-    // MARK: - Build
-
-    /// Rebuilds the page wholesale, as the other settings pages do: the list is short, and a
-    /// fresh build keeps every button's tag in step with `findings`.
-    private func rebuild() {
-        view.subviews.forEach { $0.removeFromSuperview() }
-
-        var sections: [NSView] = [
-            SettingsUI.note(StorageStrings.explanation)
-        ]
-
-        for (index, group) in groups.enumerated() {
-            sections.append(groupSection(
-                group,
-                groupIndex: index,
-                expanded: expandedGroups.contains(group.identity)
-            ))
-        }
-
-        if !isScanning, groups.isEmpty {
-            sections.append(SettingsUI.note(StorageStrings.empty))
-        }
-
-        sections.append(SettingsUI.note(StorageStrings.safety))
-
-        var actions: [NSView] = [
-            SettingsUI.button(StorageStrings.rescan, target: self, action: #selector(rescanClicked))
-        ]
-        if totalBytes > 0 {
-            actions.append(SettingsUI.button(
-                StorageStrings.removeEverything,
-                target: self,
-                action: #selector(removeEverythingClicked)
-            ))
-        }
-
-        let page = SettingsUI.page(
-            title: "Storage",
-            summary: headerSummary(),
-            actions: actions,
-            sections: sections,
-            hostPage: .storage
-        )
-        page.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(page)
-        NSLayoutConstraint.activate([
-            page.topAnchor.constraint(equalTo: view.topAnchor),
-            page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
     }
 
     /// The header's one line: the total — the number the page exists to report, kept on screen
@@ -268,13 +395,7 @@ final class StoragePreferencesViewController: NSViewController {
             isExpanded: expanded,
             localizes: false,
             onToggle: { [weak self] nowExpanded in
-                guard let self else { return }
-                if nowExpanded {
-                    self.expandedGroups.insert(identity)
-                } else {
-                    self.expandedGroups.remove(identity)
-                }
-                self.rebuild()
+                self?.setGroup(identity, expanded: nowExpanded)
             },
             detailRows: rows
         )
@@ -295,15 +416,51 @@ final class StoragePreferencesViewController: NSViewController {
             isExpanded: expanded,
             localizes: false,
             onToggle: { [weak self] nowOpen in
-                guard let self else { return }
-                if nowOpen {
-                    self.expandedTails.insert(identity)
-                } else {
-                    self.expandedTails.remove(identity)
-                }
-                self.rebuild()
+                self?.setTail(identity, expanded: nowOpen)
             }
         )
+    }
+
+    /// The live table's group heading. The card surface itself belongs to
+    /// `ThemedGroupedTableView`, so this is only the row content.
+    private func groupHeader(_ group: FindingsGroup, groupIndex: Int) -> NSView {
+        let removeAll = SettingsUI.button(
+            StorageStrings.removeAll,
+            target: self,
+            action: #selector(removeGroupClicked(_:))
+        )
+        removeAll.tag = tag(group: groupIndex, artifact: StorageDefaults.wholeGroupTag)
+
+        let identity = group.identity
+        return SettingsUI.disclosureHeader(
+            title: group.title,
+            subtitle: group.subtitle,
+            summary: Self.size.string(fromByteCount: group.byteCount),
+            control: removeAll,
+            isExpanded: expandedGroups.contains(identity),
+            localizes: false,
+            onToggle: { [weak self] nowExpanded in
+                self?.setGroup(identity, expanded: nowExpanded)
+            }
+        )
+    }
+
+    private func setGroup(_ identity: String, expanded: Bool) {
+        if expanded {
+            expandedGroups.insert(identity)
+        } else {
+            expandedGroups.remove(identity)
+        }
+        reloadPresentationRows()
+    }
+
+    private func setTail(_ identity: String, expanded: Bool) {
+        if expanded {
+            expandedTails.insert(identity)
+        } else {
+            expandedTails.remove(identity)
+        }
+        reloadPresentationRows()
     }
 
     /// One artifact: what it is, where it is, what it costs to bring back, and how stale it is.
@@ -357,6 +514,152 @@ final class StoragePreferencesViewController: NSViewController {
         }
 
         return parts.joined(separator: " · ")
+    }
+
+    private func content(for presentationRow: PresentationRow) -> NSView {
+        switch presentationRow {
+        case .explanation:
+            return SettingsUI.note(StorageStrings.explanation)
+        case .group(let groupIndex):
+            guard groups.indices.contains(groupIndex) else { return NSView() }
+            return groupHeader(groups[groupIndex], groupIndex: groupIndex)
+        case .artifact(let groupIndex, let artifactIndex):
+            guard groups.indices.contains(groupIndex),
+                  groups[groupIndex].artifacts.indices.contains(artifactIndex) else {
+                return NSView()
+            }
+            let group = groups[groupIndex]
+            return row(
+                for: group.artifacts[artifactIndex],
+                in: group,
+                tag: tag(group: groupIndex, artifact: artifactIndex)
+            )
+        case .tail(let groupIndex):
+            guard groups.indices.contains(groupIndex) else { return NSView() }
+            let group = groups[groupIndex]
+            let small = group.artifacts.filter {
+                $0.byteCount < StorageDefaults.collapseThreshold
+            }
+            return foldRow(
+                for: small,
+                in: group,
+                expanded: expandedTails.contains(group.identity)
+            )
+        case .empty:
+            return SettingsUI.note(StorageStrings.empty)
+        case .safety:
+            return SettingsUI.note(StorageStrings.safety)
+        case .extensionCaption(let sectionIndex):
+            guard extensionSections.indices.contains(sectionIndex),
+                  let title = extensionSections[sectionIndex].visibleTitle else {
+                return NSView()
+            }
+            let caption = SettingsUI.caption(title, localizes: false)
+            caption.setAccessibilityIdentifier(
+                extensionSections[sectionIndex].accessibilityIdentifier
+            )
+            return caption
+        case .extensionField(let sectionIndex, let fieldIndex):
+            guard extensionSections.indices.contains(sectionIndex) else { return NSView() }
+            return ExtensionSettingsRenderer.fieldRow(
+                in: extensionSections[sectionIndex],
+                fieldIndex: fieldIndex
+            )
+        }
+    }
+
+    private func topInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        switch presentationRows[index] {
+        case .explanation, .group, .empty, .safety, .extensionCaption:
+            return Design.Spacing.large
+        case .artifact, .tail:
+            return 0
+        case .extensionField(let sectionIndex, let fieldIndex):
+            guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
+                return 0
+            }
+            return extensionSections[sectionIndex].visibleTitle == nil
+                ? Design.Spacing.large
+                : 0
+        }
+    }
+
+    private func bottomInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        if case .extensionCaption = presentationRows[index] {
+            return Design.Spacing.small
+        }
+        return index == presentationRows.count - 1 ? Design.Spacing.large : 0
+    }
+
+    private func updateCardDecorations() {
+        var groupBounds: [Int: (first: Int, last: Int)] = [:]
+        var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+
+        for (index, presentationRow) in presentationRows.enumerated() {
+            switch presentationRow {
+            case .group(let groupIndex),
+                 .artifact(let groupIndex, _),
+                 .tail(let groupIndex):
+                if var bounds = groupBounds[groupIndex] {
+                    bounds.last = index
+                    groupBounds[groupIndex] = bounds
+                } else {
+                    groupBounds[groupIndex] = (index, index)
+                }
+            case .extensionField(let sectionIndex, _):
+                if var bounds = extensionBounds[sectionIndex] {
+                    bounds.last = index
+                    extensionBounds[sectionIndex] = bounds
+                } else {
+                    extensionBounds[sectionIndex] = (index, index)
+                }
+            case .explanation, .empty, .safety, .extensionCaption:
+                break
+            }
+        }
+
+        var decorations = groupBounds.sorted { $0.key < $1.key }.map {
+            ThemedTableCardDecoration(
+                rows: $0.value.first...$0.value.last,
+                topInset: Design.Spacing.large
+            )
+        }
+        decorations.append(contentsOf: extensionBounds.sorted { $0.key < $1.key }.map {
+            let section = extensionSections[$0.key]
+            return ThemedTableCardDecoration(
+                rows: $0.value.first...$0.value.last,
+                topInset: section.visibleTitle == nil
+                    ? Design.Spacing.large
+                    : 0,
+                bottomInset: $0.value.last == presentationRows.count - 1
+                    ? Design.Spacing.large
+                    : 0
+            )
+        })
+        tableView.cardDecorations = decorations
+    }
+
+    var virtualRowCountForTesting: Int { presentationRows.count }
+
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
+
+    func scrollGroupToVisibleForTesting(_ identity: String) {
+        guard let index = presentationRows.firstIndex(where: { presentationRow in
+            guard case .group(let groupIndex) = presentationRow,
+                  groups.indices.contains(groupIndex) else { return false }
+            return groups[groupIndex].identity == identity
+        }) else { return }
+        tableView.scrollRowToVisible(index)
+    }
+
+    func setGroupExpandedForTesting(_ identity: String, expanded: Bool) {
+        setGroup(identity, expanded: expanded)
     }
 
     // MARK: - Tags
@@ -492,9 +795,45 @@ final class StoragePreferencesViewController: NSViewController {
     }
 }
 
+// MARK: - Virtual Rows
+
+extension StoragePreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_: NSTableView, shouldSelectRow _: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor _: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("StorageSettingsVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+        host.install(
+            content(for: presentationRows[tableRow]),
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset(forRowAt: tableRow),
+            bottomInset: bottomInset(forRowAt: tableRow)
+        )
+        return host
+    }
+}
+
 // MARK: - Storage Defaults
 
 private enum StorageDefaults {
+    static let estimatedRowHeight: CGFloat = 72
+
     /// Comfortably more than any group's artifact count, so a tag packs two indices.
     static let tagStride = 10_000
 
