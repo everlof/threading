@@ -104,12 +104,12 @@ final class GrokACPProfileTests: XCTestCase {
     }
 
     func testAdapterMapsACPToolKindsToPermissionIdentities() {
-        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: "execute", title: "Run"), .bash)
-        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: "read", title: "Open"), .read)
-        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: "edit", title: "Patch"), .edit)
-        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: "fetch", title: "Fetch"), .webFetch)
+        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: .execute, title: "Run"), .bash)
+        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: .read, title: "Open"), .read)
+        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: .edit, title: "Patch"), .edit)
+        XCTAssertEqual(ACPWireAdapter.toolIdentity(kind: .fetch, title: "Fetch"), .webFetch)
         XCTAssertEqual(
-            ACPWireAdapter.toolIdentity(kind: "future", title: "NovelTool"),
+            ACPWireAdapter.toolIdentity(kind: .unknown("future"), title: "NovelTool"),
             .unknown("NovelTool")
         )
     }

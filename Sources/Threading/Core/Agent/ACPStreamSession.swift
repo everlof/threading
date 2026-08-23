@@ -658,11 +658,11 @@ final class ACPStreamSession:
         state.didEmitCall = true
         toolCalls[id] = state
         reportProviderExecution(update: update, state: state, phase: .requested, asInput: true)
-        if state.status == "completed" || state.status == "failed" {
+        if state.status?.isTerminal == true {
             reportProviderExecution(
                 update: update,
                 state: state,
-                phase: state.status == "failed" ? .failed : .completed,
+                phase: state.status == .failed ? .failed : .completed,
                 asInput: false
             )
         }
@@ -693,8 +693,8 @@ final class ACPStreamSession:
         }
         let phase: ExecutionAuditRecord.Phase
         switch state.status {
-        case "completed": phase = .completed
-        case "failed": phase = .failed
+        case .completed: phase = .completed
+        case .failed: phase = .failed
         default: phase = .progressed
         }
         if phase == .progressed || !state.didEmitResult {
@@ -730,11 +730,11 @@ final class ACPStreamSession:
     /// reaches the same conclusion through the wire, so the override never changes its rows.
     private func finishToolIfNeeded(id: String) {
         guard var state = toolCalls[id], !state.didEmitResult,
-              state.status == "completed" || state.status == "failed" else { return }
+              state.status?.isTerminal == true else { return }
         state.didEmitResult = true
         toolCalls[id] = state
 
-        let reportedFailure = state.status == "failed"
+        let reportedFailure = state.status == .failed
         let wasDenied = deniedToolCallIDs.contains(id)
         var text = ACPWireAdapter.toolResultText(from: state.payload)
         if wasDenied, !reportedFailure, text.isEmpty {

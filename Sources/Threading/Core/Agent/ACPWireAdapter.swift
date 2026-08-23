@@ -80,14 +80,14 @@ enum ACPWireAdapter {
 
     // MARK: - Tool Calls
 
-    static func toolIdentity(kind: String?, title: String) -> ToolIdentity {
+    static func toolIdentity(kind: ACPToolCallKind?, title: String) -> ToolIdentity {
         switch kind {
-        case "read": return .read
-        case "edit", "delete", "move": return .edit
-        case "search": return .grep
-        case "execute": return .bash
-        case "think": return .plan
-        case "fetch": return .webFetch
+        case .read: return .read
+        case .edit, .delete, .move: return .edit
+        case .search: return .grep
+        case .execute: return .bash
+        case .think: return .plan
+        case .fetch: return .webFetch
         default: return ToolIdentity(title)
         }
     }
@@ -162,23 +162,89 @@ enum ACPWireAdapter {
 struct ACPToolCallState {
     var payload: [String: Any]
     var title: String
-    var kind: String?
-    var status: String?
+    var kind: ACPToolCallKind?
+    var status: ACPToolCallStatus?
     var didEmitCall = false
     var didEmitResult = false
 
     init(update: [String: Any]) {
         payload = update
         title = update["title"] as? String ?? ACPToolCallDefaults.title
-        kind = update["kind"] as? String
-        status = update["status"] as? String
+        kind = (update["kind"] as? String).map(ACPToolCallKind.init(providerValue:))
+        status = (update["status"] as? String).map(ACPToolCallStatus.init(providerValue:))
     }
 
     mutating func merge(_ update: [String: Any]) {
         payload.merge(update) { _, new in new }
         if let value = update["title"] as? String { title = value }
-        if let value = update["kind"] as? String { kind = value }
-        if let value = update["status"] as? String { status = value }
+        if let value = update["kind"] as? String {
+            kind = ACPToolCallKind(providerValue: value)
+        }
+        if let value = update["status"] as? String {
+            status = ACPToolCallStatus(providerValue: value)
+        }
+    }
+}
+
+enum ACPToolCallKind: Equatable, Sendable {
+    case read
+    case edit
+    case delete
+    case move
+    case search
+    case execute
+    case think
+    case fetch
+    case unknown(String)
+
+    init(providerValue: String) {
+        switch providerValue {
+        case "read": self = .read
+        case "edit": self = .edit
+        case "delete": self = .delete
+        case "move": self = .move
+        case "search": self = .search
+        case "execute": self = .execute
+        case "think": self = .think
+        case "fetch": self = .fetch
+        default: self = .unknown(providerValue)
+        }
+    }
+
+    var providerValue: String {
+        switch self {
+        case .read: return "read"
+        case .edit: return "edit"
+        case .delete: return "delete"
+        case .move: return "move"
+        case .search: return "search"
+        case .execute: return "execute"
+        case .think: return "think"
+        case .fetch: return "fetch"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+enum ACPToolCallStatus: Equatable, Sendable {
+    case pending
+    case inProgress
+    case completed
+    case failed
+    case unknown(String)
+
+    init(providerValue: String) {
+        switch providerValue {
+        case "pending": self = .pending
+        case "in_progress": self = .inProgress
+        case "completed": self = .completed
+        case "failed": self = .failed
+        default: self = .unknown(providerValue)
+        }
+    }
+
+    var isTerminal: Bool {
+        self == .completed || self == .failed
     }
 }
 

@@ -109,9 +109,9 @@ enum CodexStreamEvent {
               let type = item.type,
               toolTypes.contains(type) else { return nil }
 
-        let status = item.string("status")
+        let status = CodexToolCallWireStatus(item.string("status"))
         let exitCode = item.integer("exit_code")
-        let isError = status == "failed" || (exitCode.map { $0 != 0 } ?? false)
+        let isError = status == .failed || (exitCode.map { $0 != 0 } ?? false)
 
         let value: JSONValue?
         switch type {
@@ -157,6 +157,24 @@ enum CodexStreamEvent {
         guard let error = event.error else { return nil }
         let text = error.encodedText(prettyPrinted: true)
         return text.isEmpty ? nil : text
+    }
+}
+
+/// Tool-call lifecycle values shared by Codex's live, app-server, audit, and replay adapters.
+/// Unknown provider values remain distinct and conservatively non-failing.
+enum CodexToolCallWireStatus: Equatable {
+    case completed
+    case failed
+    case inProgress
+    case unknown(String?)
+
+    init(_ rawValue: String?) {
+        switch rawValue {
+        case "completed": self = .completed
+        case "failed": self = .failed
+        case "inProgress", "in_progress": self = .inProgress
+        default: self = .unknown(rawValue)
+        }
     }
 }
 

@@ -34,7 +34,7 @@ struct ClaudeUtilization: Decodable {
         /// scope is what distinguishes an entry and the kind only restates it.
         let kind: String?
         /// `session` or `weekly`: which of the account's windows this limit is measured in.
-        let group: String?
+        let group: Group?
         /// Percent 0–100.
         let percent: Double?
         let resetsAt: String?
@@ -46,6 +46,21 @@ struct ClaudeUtilization: Decodable {
             struct Model: Decodable {
                 let id: String?
                 let displayName: String?
+            }
+        }
+
+        enum Group: Decodable, Equatable {
+            case session
+            case weekly
+            case unknown(String)
+
+            init(from decoder: Decoder) throws {
+                let rawValue = try decoder.singleValueContainer().decode(String.self)
+                switch rawValue {
+                case "session": self = .session
+                case "weekly": self = .weekly
+                default: self = .unknown(rawValue)
+                }
             }
         }
     }
@@ -104,12 +119,12 @@ struct ClaudeUtilization: Decodable {
     /// Which of the account's windows a scoped limit is measured in. The feed names the group
     /// rather than the length, and a scoped weekly limit resets with the weekly window.
     private static func baseWindow(
-        forGroup group: String?
+        forGroup group: Limit.Group?
     ) -> (label: String, duration: TimeInterval?) {
         switch group {
-        case ClaudeUtilizationDefaults.sessionGroup:
+        case .session:
             return (UsageDefaults.fiveHourLabel, UsageDefaults.fiveHourSeconds)
-        case ClaudeUtilizationDefaults.weeklyGroup:
+        case .weekly:
             return (UsageDefaults.weeklyLabel, UsageDefaults.sevenDaySeconds)
         default:
             return (UsageDefaults.weeklyLabel, nil)
@@ -134,12 +149,4 @@ struct ClaudeUtilization: Decodable {
             windowDuration: UsageDefaults.duration(forWindowID: id)
         )
     }
-}
-
-// MARK: - Claude Utilization Defaults
-
-enum ClaudeUtilizationDefaults {
-    /// The groups a scoped limit names itself by.
-    static let sessionGroup = "session"
-    static let weeklyGroup = "weekly"
 }

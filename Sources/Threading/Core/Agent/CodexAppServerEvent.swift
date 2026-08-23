@@ -10,9 +10,9 @@ extension TurnOutcome {
     /// a terminal event and an unknown status is treated as a completion rather than invented
     /// into a failure the user would have to explain.
     init(codexTurnStatus status: String?) {
-        switch status {
-        case "failed": self = .failed
-        case "interrupted": self = .stopped
+        switch CodexTurnWireStatus(status) {
+        case .failed: self = .failed
+        case .interrupted: self = .stopped
         default: self = .completed
         }
     }
@@ -178,9 +178,9 @@ enum CodexAppServerEvent {
               let type = item["type"] as? String,
               toolTypes.contains(type) else { return nil }
 
-        let status = item["status"] as? String
+        let status = CodexToolCallWireStatus(item["status"] as? String)
         let exitCode = integer(item["exitCode"])
-        let isError = status == "failed" || (exitCode.map { $0 != 0 } ?? false)
+        let isError = status == .failed || (exitCode.map { $0 != 0 } ?? false)
 
         let value: Any?
         switch type {
@@ -277,7 +277,7 @@ enum CodexSubagentEvent {
             guard let threadID = parameters["threadId"] as? String,
                   threadID != rootThreadID else { return [] }
             let turn = parameters["turn"] as? [String: Any]
-            let failed = turn?["status"] as? String == "failed"
+            let failed = CodexTurnWireStatus(turn?["status"] as? String) == .failed
             let message = (turn?["error"] as? [String: Any])?["message"] as? String
             var events = CodexAppServerEvent.streamEvents(
                 method: method,
@@ -349,7 +349,7 @@ enum CodexSubagentEvent {
 
             let state = states[threadID]
             let status = state.flatMap { $0["status"] as? String }
-                .map(collaborationStatus)
+                .map { collaborationStatus(CodexCollaborationWireStatus($0)) }
                 ?? fallbackStatus(item)
             events.append(.state(
                 threadID: threadID,
@@ -362,12 +362,12 @@ enum CodexSubagentEvent {
 
     private static func activityEvents(from item: [String: Any]) -> [SubagentEvent] {
         guard let threadID = item["agentThreadId"] as? String else { return [] }
-        let kind = item["kind"] as? String ?? "interacted"
-        let status: SubagentStatus = kind == "interrupted" ? .interrupted : .working
+        let kind = CodexSubagentActivityWireKind(item["kind"] as? String)
+        let status: SubagentStatus = kind == .interrupted ? .interrupted : .working
         let text: String
         switch kind {
-        case "started": text = "Started"
-        case "interrupted": text = "Interrupted"
+        case .started: text = "Started"
+        case .interrupted: text = "Interrupted"
         default: text = "Received new input"
         }
 
@@ -382,31 +382,105 @@ enum CodexSubagentEvent {
     }
 
     private static func fallbackStatus(_ item: [String: Any]) -> SubagentStatus {
-        switch item["status"] as? String {
-        case "failed": return .failed
-        case "completed": return .completed
+        switch CodexToolCallWireStatus(item["status"] as? String) {
+        case .failed: return .failed
+        case .completed: return .completed
         default: return .pending
         }
     }
 
-    private static func collaborationStatus(_ value: String) -> SubagentStatus {
+    private static func collaborationStatus(_ value: CodexCollaborationWireStatus) -> SubagentStatus {
         switch value {
-        case "pendingInit": return .pending
-        case "running": return .working
-        case "completed": return .completed
-        case "interrupted": return .interrupted
-        case "errored", "notFound": return .failed
-        case "shutdown": return .stopped
+        case .pendingInit: return .pending
+        case .running: return .working
+        case .completed: return .completed
+        case .interrupted: return .interrupted
+        case .errored, .notFound: return .failed
+        case .shutdown: return .stopped
         default: return .pending
         }
     }
 
     private static func threadStatus(_ status: [String: Any]) -> SubagentStatus {
-        switch status["type"] as? String {
-        case "active": return .working
-        case "idle": return .completed
-        case "systemError": return .failed
+        switch CodexThreadWireStatus(status["type"] as? String) {
+        case .active: return .working
+        case .idle: return .completed
+        case .systemError: return .failed
         default: return .pending
+        }
+    }
+}
+
+private enum CodexTurnWireStatus: Equatable {
+    case completed
+    case interrupted
+    case failed
+    case inProgress
+    case unknown(String?)
+
+    init(_ rawValue: String?) {
+        switch rawValue {
+        case "completed": self = .completed
+        case "interrupted": self = .interrupted
+        case "failed": self = .failed
+        case "inProgress": self = .inProgress
+        default: self = .unknown(rawValue)
+        }
+    }
+}
+
+private enum CodexCollaborationWireStatus: Equatable {
+    case pendingInit
+    case running
+    case completed
+    case interrupted
+    case errored
+    case notFound
+    case shutdown
+    case unknown(String)
+
+    init(_ rawValue: String) {
+        switch rawValue {
+        case "pendingInit": self = .pendingInit
+        case "running": self = .running
+        case "completed": self = .completed
+        case "interrupted": self = .interrupted
+        case "errored": self = .errored
+        case "notFound": self = .notFound
+        case "shutdown": self = .shutdown
+        default: self = .unknown(rawValue)
+        }
+    }
+}
+
+private enum CodexThreadWireStatus: Equatable {
+    case active
+    case idle
+    case systemError
+    case unknown(String?)
+
+    init(_ rawValue: String?) {
+        switch rawValue {
+        case "active": self = .active
+        case "idle": self = .idle
+        case "systemError": self = .systemError
+        default: self = .unknown(rawValue)
+        }
+    }
+}
+
+private enum CodexSubagentActivityWireKind: Equatable {
+    case started
+    case interrupted
+    case interacted
+    case unknown(String?)
+
+    init(_ rawValue: String?) {
+        switch rawValue {
+        case "started": self = .started
+        case "interrupted": self = .interrupted
+        case "interacted", nil: self = .interacted
+        default: self = .unknown(rawValue)
         }
     }
 }

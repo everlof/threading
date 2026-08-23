@@ -82,7 +82,7 @@ enum CodexProviderExecutionAdapter {
             )]
         }
 
-        let failed = item["status"] as? String == "failed"
+        let failed = CodexToolCallWireStatus(item["status"] as? String) == .failed
             || ((item["exitCode"] as? NSNumber)?.intValue).map { $0 != 0 } == true
         return [ProviderExecutionEvent(
             category: category,
@@ -128,7 +128,7 @@ enum ACPProviderExecutionAdapter {
     static func event(
         update: [String: Any],
         operation: String,
-        kind: String?,
+        kind: ACPToolCallKind?,
         phase: ExecutionAuditRecord.Phase,
         asInput: Bool
     ) -> ProviderExecutionEvent? {

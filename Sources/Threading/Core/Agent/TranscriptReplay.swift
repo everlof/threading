@@ -448,7 +448,8 @@ enum TranscriptReplay {
                 ToolResult(
                     toolUseID: id,
                     text: codexToolOutput(value),
-                    isError: payload["status"] as? String == "failed" || payload["error"] != nil
+                    isError: CodexToolCallWireStatus(payload["status"] as? String) == .failed
+                        || payload["error"] != nil
                 )
             ])
 

@@ -209,8 +209,8 @@ struct ClaudeSubagentEventAdapter {
             )
         ))
 
-        if let rawStatus = nonempty(wire.patch?.status) {
-            let status = notificationStatus(rawStatus)
+        if let wireStatus = wire.patch?.status {
+            let status = notificationStatus(wireStatus)
             let message = status == .failed ? nonempty(wire.patch?.error) : nil
             events.append(.state(threadID: taskID, status: status, message: message))
             if status.isDone {
@@ -367,7 +367,7 @@ struct ClaudeSubagentEventAdapter {
             ))
 
             let outcome = resultOutcome(
-                status: nonempty(metadata?.status),
+                status: metadata?.status,
                 isAsync: metadata?.isAsync ?? false,
                 isError: block.isError
             )
@@ -386,20 +386,20 @@ struct ClaudeSubagentEventAdapter {
     }
 
     private func resultOutcome(
-        status: String?,
+        status: ClaudeSubagentWireStatus?,
         isAsync: Bool,
         isError: Bool
     ) -> (status: SubagentStatus, activity: String, message: String?) {
-        switch status?.lowercased() {
-        case "failed", "error", "errored":
+        switch status {
+        case .failed:
             return (.failed, "Failed", "Claude reported that the task failed.")
-        case "interrupted", "cancelled", "canceled", "killed":
+        case .interrupted:
             return (.interrupted, "Interrupted", nil)
-        case "stopped", "shutdown":
+        case .stopped:
             return (.stopped, "Stopped", nil)
-        case "completed", "success", "succeeded":
+        case .completed:
             return (.completed, "Finished", nil)
-        case "async_launched", "in_progress", "running", "pending":
+        case .working:
             return (.working, "Started in background", nil)
         default:
             if isError {
@@ -427,9 +427,11 @@ struct ClaudeSubagentEventAdapter {
             else { return [] }
 
             let taskID = taskIDByAgentID[rawTaskID] ?? rawTaskID
-            let rawStatus = tagValue("status", in: text)
+            let wireStatus = tagValue("status", in: text).map(
+                ClaudeSubagentWireStatus.init(providerValue:)
+            )
             let summary = tagValue("summary", in: text)
-            let status = notificationStatus(rawStatus)
+            let status = notificationStatus(wireStatus)
             var events = discover(SubagentDescriptor(threadID: taskID))
             events.append(.state(
                 threadID: taskID,
@@ -447,12 +449,12 @@ struct ClaudeSubagentEventAdapter {
         }
     }
 
-    private func notificationStatus(_ value: String?) -> SubagentStatus {
-        switch value?.lowercased() {
-        case "completed", "success", "succeeded": return .completed
-        case "failed", "error", "errored": return .failed
-        case "interrupted", "cancelled", "canceled", "killed": return .interrupted
-        case "stopped", "shutdown": return .stopped
+    private func notificationStatus(_ value: ClaudeSubagentWireStatus?) -> SubagentStatus {
+        switch value {
+        case .completed: return .completed
+        case .failed: return .failed
+        case .interrupted: return .interrupted
+        case .stopped: return .stopped
         default: return .working
         }
     }
@@ -523,7 +525,7 @@ private struct ClaudeSubagentWireEvent: Decodable {
     let toolUseID: String?
     let description: String?
     let taskType: String?
-    let status: String?
+    let status: ClaudeSubagentWireStatus?
     let summary: String?
     let usage: ClaudeSubagentWireUsage?
     let lastToolName: String?
@@ -558,6 +560,7 @@ private struct ClaudeSubagentWireEvent: Decodable {
         description = container.decodeFirst(String.self, keys: ["description"])
         taskType = container.decodeFirst(String.self, keys: ["task_type", "taskType"])
         status = container.decodeFirst(String.self, keys: ["status"])
+            .map(ClaudeSubagentWireStatus.init(providerValue:))
         summary = container.decodeFirst(String.self, keys: ["summary"])
         usage = container.decodeFirst(ClaudeSubagentWireUsage.self, keys: ["usage"])
         lastToolName = container.decodeFirst(
@@ -627,7 +630,7 @@ private struct ClaudeSubagentWireToolUseResult: Decodable {
     let description: String?
     let prompt: String?
     let resolvedModel: String?
-    let status: String?
+    let status: ClaudeSubagentWireStatus?
     let isAsync: Bool?
 
     init(from decoder: Decoder) throws {
@@ -640,6 +643,7 @@ private struct ClaudeSubagentWireToolUseResult: Decodable {
             keys: ["resolvedModel", "resolved_model"]
         )
         status = container.decodeFirst(String.self, keys: ["status"])
+            .map(ClaudeSubagentWireStatus.init(providerValue:))
         isAsync = container.decodeFirst(Bool.self, keys: ["isAsync", "is_async"])
     }
 }
@@ -661,7 +665,7 @@ private struct ClaudeSubagentWireUsage: Decodable {
 }
 
 private struct ClaudeSubagentWireTaskPatch: Decodable {
-    let status: String?
+    let status: ClaudeSubagentWireStatus?
     let description: String?
     let error: String?
     let isBackgrounded: Bool?
@@ -669,12 +673,33 @@ private struct ClaudeSubagentWireTaskPatch: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: ClaudeSubagentCodingKey.self)
         status = container.decodeFirst(String.self, keys: ["status"])
+            .map(ClaudeSubagentWireStatus.init(providerValue:))
         description = container.decodeFirst(String.self, keys: ["description"])
         error = container.decodeFirst(String.self, keys: ["error"])
         isBackgrounded = container.decodeFirst(
             Bool.self,
             keys: ["is_backgrounded", "isBackgrounded"]
         )
+    }
+}
+
+private enum ClaudeSubagentWireStatus: Equatable {
+    case completed
+    case failed
+    case interrupted
+    case stopped
+    case working
+    case unknown(String)
+
+    init(providerValue: String) {
+        switch providerValue.lowercased() {
+        case "completed", "success", "succeeded": self = .completed
+        case "failed", "error", "errored": self = .failed
+        case "interrupted", "cancelled", "canceled", "killed": self = .interrupted
+        case "stopped", "shutdown": self = .stopped
+        case "async_launched", "in_progress", "running", "pending": self = .working
+        default: self = .unknown(providerValue)
+        }
     }
 }
 
