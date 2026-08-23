@@ -119,6 +119,16 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     reading a function through that generic inout seam can layer reabstraction thunks until the
     reader stack overflows. A nil observer performs no byte copy, while an installed observer gets
     an independently owned array that it may hand to another queue.
+  - **A terminal bell crosses the parser-to-main event queue before host work.** The parser calls
+    `TerminalDelegate.bell(source: Terminal)` while it owns `TerminalLock`; `TerminalView` turns
+    that into a coalesced `.bell` event, applies the style/rate policy on main, and only then calls
+    `TerminalViewDelegate.bell(source: TerminalView)`. `LocalProcessTerminalView` implements that
+    second requirement as an open method so `EmojiFixedTerminalView` can replace the default beep
+    without intercepting the lock-held parser callback. This ordering is a deadlock boundary, not
+    only a UI-thread convenience: a synchronous host activity notification can wait for main while
+    main is reading terminal text and waiting for the same lock. `TerminalBellTests` blocks main
+    until a background BEL feed returns, then proves both the callback and its main-queue observer
+    still arrive.
   - **Mouse-wheel coordinates are viewport-relative.** Full-screen clients such as Claude enable
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets

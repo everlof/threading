@@ -243,6 +243,18 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
      */
     public weak var processDelegate: LocalProcessTerminalViewDelegate?
 
+    /// Delivers a parser bell after `TerminalView` has marshalled it onto the main actor.
+    ///
+    /// Declared here instead of relying on `TerminalViewDelegate`'s protocol-extension default
+    /// so a host subclass can override the delivery without intercepting
+    /// `TerminalDelegate.bell(source: Terminal)`. That lower callback runs on the parse thread
+    /// while `TerminalLock` is held; host work there can invert the terminal lock with the main
+    /// queue. The inherited parser callback must remain the event-queue producer, and this method
+    /// is the host customization seam at its main-actor consumer.
+    open func bell(source: TerminalView) {
+        NSSound.beep()
+    }
+
     /// Gives a subclass a chance to keep the child process on an explicitly
     /// managed grid. The default preserves SwiftTerm's resize behaviour.
     open func shouldApplyProcessSizeChange(newCols: Int, newRows: Int) -> Bool {

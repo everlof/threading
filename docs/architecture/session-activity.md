@@ -90,8 +90,12 @@ activity in this vocabulary that is not derived from output, hooks or interactio
 one that is *evidence-cleared* rather than presentation-cleared — reading a completed result can
 lower `awaitsUser`, and deliberately does not lower this.
 
-Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
-`DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
+SwiftTerm 2 parses direct local-process output on its IO worker. Threading's raw-output observer
+marshals the resulting activity callback onto the main actor, which is what lets the tracker use
+`Timer` safely. Parser delegate events follow the same boundary: in particular, a BEL is first
+coalesced by SwiftTerm's `TerminalEventQueue`, then reaches Threading through the main-actor
+`TerminalViewDelegate` callback. Host activity work must never intercept the lower parser callback,
+which runs while `TerminalLock` is held.
 
 Grok and OpenCode terminal sessions stay on this provider-neutral output inference. Threading does
 not rewrite either runtime's configuration to install lifecycle hooks; adding the runtime does not

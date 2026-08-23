@@ -50,19 +50,12 @@ final class TerminalBellTests: XCTestCase {
 
     // MARK: - The Seam
 
-    /// A bell has exactly one way out of the terminal view, and this is it.
+    /// A bell has exactly one host route, after SwiftTerm's parser-to-main event queue.
     ///
-    /// The obvious place to answer a bell is the delegate, and it is the wrong place twice over.
-    /// A `LocalProcessTerminalView` sets **itself** as the view's `terminalDelegate` and does not
-    /// implement `bell`, so the call lands on `TerminalViewDelegate`'s protocol-extension
-    /// default — a bare `NSSound.beep()`. And `LocalProcessTerminalViewDelegate`, which is what
-    /// `TerminalSession` conforms to, forwards four methods to its `processDelegate` and the
-    /// bell is not among them. So a `bell(source:)` written on the session compiles, satisfies
-    /// nothing, and is never called: the beep would go on exactly as before, and the setting
-    /// would look wired up while doing nothing.
-    ///
-    /// Both halves are asserted, because either one changing upstream would silently restore
-    /// the beep or silently kill the bell.
+    /// `LocalProcessTerminalView` sets itself as `terminalDelegate`, and owns an open witness for
+    /// that protocol requirement. The subclass overrides that main-actor method; the distinct
+    /// parser-level `bell(source: Terminal)` stays inherited so it can release `TerminalLock`
+    /// without waiting for any host work.
     @MainActor
     func testTheBellLeavesTheViewThroughOnBellAndNowhereElse() {
         let view = EmojiFixedTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
@@ -73,11 +66,62 @@ final class TerminalBellTests: XCTestCase {
             "the terminal's delegate is no longer the view, so the bell may have another route"
         )
 
-        // Half two: our override answers, and it answers through the hook the session owns.
+        // Half two: our main-actor override answers through the hook the session owns.
         var rang = 0
-        view.onBell = { rang += 1 }
+        let delivered = expectation(description: "bell delivered after the parser transaction")
+        view.onBell = {
+            rang += 1
+            delivered.fulfill()
+        }
         view.feed(text: "\u{7}")
+        wait(for: [delivered], timeout: 1)
         XCTAssertEqual(rang, 1, "a bell no longer reaches the hook that decides its sound")
+    }
+
+    /// Reproduces the production deadlock without a live process.
+    ///
+    /// A terminal output callback can make the main actor read the terminal buffer while the next
+    /// parse batch owns `TerminalLock`. Before the fix, a BEL in that batch entered `onBell`
+    /// directly on the parser thread and `NotificationCenter` synchronously waited for its
+    /// main-queue observer. Main was waiting for the terminal lock, so neither side could finish.
+    /// Blocking main until the feed returns makes that inversion deterministic: the parser must
+    /// enqueue the bell and return independently, then the callback and observer may run on main.
+    @MainActor
+    func testBackgroundBellDoesNotWaitForMainWhileHoldingTerminalLock() {
+        let view = EmojiFixedTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let feed = BackgroundTerminalFeed(view)
+        let center = NotificationCenter()
+        let notificationName = Notification.Name("TerminalBellTests.backgroundBell")
+        let callbackDelivered = expectation(description: "bell callback delivered on main")
+        let observerDelivered = expectation(description: "main-queue notification delivered")
+        let observer = center.addObserver(
+            forName: notificationName,
+            object: nil,
+            queue: .main
+        ) { _ in
+            XCTAssertTrue(Thread.isMainThread)
+            observerDelivered.fulfill()
+        }
+        defer { center.removeObserver(observer) }
+
+        view.onBell = {
+            XCTAssertTrue(Thread.isMainThread, "host bell work escaped SwiftTerm's main event queue")
+            center.post(name: notificationName, object: nil)
+            callbackDelivered.fulfill()
+        }
+
+        let feedFinished = DispatchSemaphore(value: 0)
+        Thread {
+            feed.sendBell()
+            feedFinished.signal()
+        }.start()
+
+        XCTAssertEqual(
+            feedFinished.wait(timeout: .now() + 1),
+            .success,
+            "the parser waited for main while its terminal transaction was still active"
+        )
+        wait(for: [callbackDelivered, observerDelivered], timeout: 1)
     }
 
     // MARK: - Rate Limit
@@ -264,5 +308,20 @@ final class TerminalBellTests: XCTestCase {
         )
 
         XCTAssertEqual(played, [.system])
+    }
+}
+
+/// `TerminalView.feed(text:)` is explicitly nonisolated and thread-safe. This wrapper narrows the
+/// unchecked crossing to that one API so the test does not claim the AppKit view is generally
+/// safe to use away from the main actor.
+private final class BackgroundTerminalFeed: @unchecked Sendable {
+    private let view: EmojiFixedTerminalView
+
+    init(_ view: EmojiFixedTerminalView) {
+        self.view = view
+    }
+
+    func sendBell() {
+        view.feed(text: "\u{7}")
     }
 }

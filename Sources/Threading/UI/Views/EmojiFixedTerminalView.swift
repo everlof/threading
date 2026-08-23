@@ -520,17 +520,16 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
 
     // MARK: - Activity Observation
 
-    /// The bell, minus SwiftTerm's beep.
+    /// The bell, minus SwiftTerm's beep, at the main-actor half of SwiftTerm's bell boundary.
     ///
-    /// `super.bell` forwards to the view's `terminalDelegate`, which for a
-    /// `LocalProcessTerminalView` is **the view itself** — and it does not implement `bell`, so
-    /// the call lands on `TerminalViewDelegate`'s protocol-extension default, which is a bare
-    /// `NSSound.beep()`. `LocalProcessTerminalViewDelegate` forwards four methods to
-    /// `processDelegate` and the bell is not one of them, so there is no seam further down:
-    /// implementing `bell` on the session would compile, satisfy nothing, and never be called.
-    /// Not calling `super` is therefore the switch, and `onBell` — which Threading already owned
-    /// for the activity edge — becomes the one path a bell takes.
-    override func bell(source: Terminal) {
+    /// The parser-level `bell(source: Terminal)` must stay inherited. SwiftTerm invokes it on
+    /// the IO parser thread while `TerminalLock` is held, and its implementation posts a
+    /// coalesced event to the main actor. Intercepting that callback here once made a bell post a
+    /// main-queue session notification while still holding `TerminalLock`; if the main queue was
+    /// reading attachment text, each side waited for the other forever. `LocalProcessTerminalView`
+    /// makes this `TerminalViewDelegate` delivery an open method specifically so host work begins
+    /// only after the event-queue crossing.
+    override func bell(source: TerminalView) {
         onBell?()
     }
 
