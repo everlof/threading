@@ -6,14 +6,50 @@ import AppKit
 /// Content is rebuilt from the service whenever the account's entry changes, so a refresh
 /// completing while the popover is open lands in front of the user rather than behind the
 /// next click.
-final class AccountUsagePopoverViewController: NSViewController {
+final class AccountUsagePopoverViewController: NSViewController, NSTableViewDataSource,
+    NSTableViewDelegate {
 
     // MARK: - Properties
 
     private let account: AgentAccount
     private let isEmbedded: Bool
+    private let readingProvider: (AgentAccount) -> AccountUsageReading
+    private var windows: [AccountUsage.Window] = []
     private let contentStack = NSStackView()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let planLabel = NSTextField(labelWithString: "")
+    private let footerLabel = NSTextField(labelWithString: "")
     private let appEvents = AppEventObservations()
+
+    private lazy var tableView: ThemedTableView = {
+        let table = ThemedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("AccountUsageWindowContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = NSSize(width: 0, height: Design.Spacing.medium)
+        table.rowHeight = UsagePopoverDefaults.estimatedWindowHeight
+        table.usesAutomaticRowHeights = true
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
+
+    private lazy var windowListHeight = scrollView.heightAnchor.constraint(equalToConstant: 0)
 
     /// Fired as the pointer enters and leaves the popover, so the owning pill can keep a
     /// hover-opened popover alive while the pointer is inside it.
@@ -21,9 +57,14 @@ final class AccountUsagePopoverViewController: NSViewController {
 
     // MARK: - Initialization
 
-    init(account: AgentAccount, isEmbedded: Bool = false) {
+    init(
+        account: AgentAccount,
+        isEmbedded: Bool = false,
+        readingProvider: ((AgentAccount) -> AccountUsageReading)? = nil
+    ) {
         self.account = account
         self.isEmbedded = isEmbedded
+        self.readingProvider = readingProvider ?? { AccountUsageService.shared.reading(for: $0) }
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -50,6 +91,33 @@ final class AccountUsagePopoverViewController: NSViewController {
         contentStack.alignment = .leading
         contentStack.spacing = Design.Spacing.medium
         contentStack.translatesAutoresizingMaskIntoConstraints = false
+
+        nameLabel.applyFont(.control)
+        nameLabel.textColor = Design.Text.label
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        planLabel.applyFont(.caption)
+        planLabel.textColor = Design.Text.secondary
+        planLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        let header = NSStackView(views: [nameLabel, planLabel])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = Design.Spacing.small
+
+        footerLabel.applyFont(.caption)
+        footerLabel.textColor = Design.Text.tertiary
+        footerLabel.lineBreakMode = .byWordWrapping
+        footerLabel.maximumNumberOfLines = 0
+
+        contentStack.addArrangedSubview(header)
+        contentStack.addArrangedSubview(scrollView)
+        contentStack.addArrangedSubview(footerLabel)
+        for arranged in [header, scrollView, footerLabel] {
+            arranged.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        }
+        windowListHeight.isActive = true
 
         container.addSubview(contentStack)
 
@@ -83,6 +151,17 @@ final class AccountUsagePopoverViewController: NSViewController {
         }
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        tableView.fitSoleColumnToWidth()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
+    }
+
     // MARK: - Private Methods
 
     private func usageDidChange(_ event: AccountUsageDidChange) {
@@ -91,68 +170,55 @@ final class AccountUsagePopoverViewController: NSViewController {
     }
 
     private func render() {
-        contentStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-        let reading = AccountUsageService.shared.reading(for: account)
+        let origin = scrollView.contentView.bounds.origin
+        let reading = readingProvider(account)
         let usage = reading.usage
 
-        contentStack.addArrangedSubview(headerRow(planLabel: usage?.planLabel))
+        nameLabel.stringValue = "\(account.provider.displayName) — \(account.displayName)"
+        planLabel.stringValue = usage?.planLabel ?? ""
+        planLabel.isHidden = planLabel.stringValue.isEmpty
+        footerLabel.stringValue = footerText(reading: reading)
 
-        if let usage {
-            // Model-scoped windows follow the account's own, as in the composer's panel: the
-            // pill's peak deliberately ignores them, so the popover it opens is where a limit
-            // that binds one model rather than the plan gets said out loud.
-            for window in usage.windows + usage.modelWindows {
-                let rowView = row(for: window)
-                contentStack.addArrangedSubview(rowView)
-                rowView.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
-            }
-        }
-
-        if let footer = footerText(reading: reading) {
-            let label = NSTextField(labelWithString: footer)
-            label.applyFont(.caption)
-            label.textColor = Design.Text.tertiary
-            label.lineBreakMode = .byWordWrapping
-            label.maximumNumberOfLines = 0
-            contentStack.addArrangedSubview(label)
-        }
-    }
-
-    private func headerRow(planLabel: String?) -> NSView {
-        let title = "\(account.provider.displayName) — \(account.displayName)"
-        let nameLabel = NSTextField(labelWithString: title)
-        nameLabel.applyFont(.control)
-        nameLabel.textColor = Design.Text.label
-        nameLabel.lineBreakMode = .byTruncatingTail
-
-        let row = NSStackView(views: [nameLabel])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = Design.Spacing.small
-
-        if let planLabel {
-            let plan = NSTextField(labelWithString: planLabel)
-            plan.applyFont(.caption)
-            plan.textColor = Design.Text.secondary
-            row.addArrangedSubview(plan)
-        }
-
-        return row
-    }
-
-    /// One window, drawn by the shared row so the popover and the composer's usage panel
-    /// stay the same thing seen twice.
-    private func row(for window: AccountUsage.Window) -> NSView {
-        UsageWindowRow(
-            window: window,
-            limits: CustomLimitSettings.shared.rules(for: account.id)
+        // Provider-scoped model windows have no product cardinality ceiling. Keep all of their
+        // value identities so the user can reach every limit, but let AppKit own the native
+        // controls intersecting this bounded viewport. A fixed visible prefix would hide the
+        // actual limit; a stack inside a scroll view would retain the same eager cost.
+        windows = usage?.allWindows ?? []
+        tableView.reloadData()
+        scrollView.isHidden = windows.isEmpty
+        windowListHeight.constant = min(
+            CGFloat(windows.count) * UsagePopoverDefaults.estimatedWindowHeight,
+            UsagePopoverDefaults.maximumWindowListHeight
         )
+        scrollView.contentView.scroll(to: origin)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { windows.count }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row: Int
+    ) -> NSView? {
+        guard windows.indices.contains(row) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("AccountUsageVirtualWindow")
+        let host = tableView.makeView(withIdentifier: identifier, owner: self)
+            as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+        host.install(
+            UsageWindowRow(
+                window: windows[row],
+                limits: CustomLimitSettings.shared.rules(for: account.id)
+            ),
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width
+        )
+        return host
     }
 
     /// The freshness line, with the source named when the reading is second-hand — a cached
     /// value observed an hour ago should say so rather than posing as live.
-    private func footerText(reading: AccountUsageReading) -> String? {
+    private func footerText(reading: AccountUsageReading) -> String {
         if let usage = reading.usage {
             var text = L10n.format("Updated %@", UsageFormat.age(of: usage.observedAt))
             if usage.source == .localCache {
@@ -163,6 +229,29 @@ final class AccountUsagePopoverViewController: NSViewController {
 
         return reading.error?.message ?? L10n.string("Fetching usage…")
     }
+
+    // MARK: - Testing
+
+    var virtualWindowCountForTesting: Int { windows.count }
+
+    var materializedWindowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                count += cell.subviews.lazy.compactMap { $0 as? UsageWindowRow }.count
+            }
+        }
+        return count
+    }
+
+    var windowScrollOriginForTesting: NSPoint { scrollView.contentView.bounds.origin }
+
+    func scrollWindowToVisibleForTesting(_ row: Int) {
+        guard windows.indices.contains(row) else { return }
+        tableView.scrollRowToVisible(row)
+    }
+
+    func refreshForTesting() { render() }
 }
 
 // MARK: - Usage Popover Defaults
@@ -170,4 +259,6 @@ final class AccountUsagePopoverViewController: NSViewController {
 enum UsagePopoverDefaults {
     static let contentWidth: CGFloat = 240
     static let width = contentWidth + 2 * Design.Spacing.inset
+    static let estimatedWindowHeight: CGFloat = 52
+    static let maximumWindowListHeight: CGFloat = 312
 }
