@@ -47,6 +47,19 @@ final class ThemedImagePreview: ThemedControl {
         }
     }
 
+    /// Whether a small image may grow to fill the available preview region.
+    ///
+    /// Agent-produced images default to their native size because enlarging an icon or a small
+    /// crop invents blur. A device framebuffer is different: its pixels describe a complete
+    /// screen and the pane is the screen's viewer, so the Simulator surface opts in. Keeping the
+    /// policy on the component preserves the same clipping, focus and theme treatment either way.
+    var allowsUpscaling = false {
+        didSet {
+            guard allowsUpscaling != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     /// The file behind the picture, which supplies actions and a stable collection identity.
     /// Nil — or a path that has since been deleted — leaves inspection unavailable.
     var fileURL: URL? {
@@ -60,12 +73,16 @@ final class ThemedImagePreview: ThemedControl {
     private var isTrackingPress = false
     private var isPressArmed = false
 
-    /// Where the image is actually drawn inside the view: scaled down to fit, never up, and
-    /// pinned to the top edge. Read by the tests, and by the focus ring, which belongs around
-    /// the picture rather than around the empty pane it floats in.
+    /// Where the image is actually drawn inside the view: scaled to fit, enlarged only when the
+    /// host explicitly opts in, and pinned to the top edge. Read by the tests, and by the focus
+    /// ring, which belongs around the picture rather than around the empty pane it floats in.
     var imageRect: NSRect {
         guard let image else { return .zero }
-        return Self.fittedRect(for: image.size, in: bounds)
+        return Self.fittedRect(
+            for: image.size,
+            in: bounds,
+            allowsUpscaling: allowsUpscaling
+        )
     }
 
     // MARK: - Initialization
@@ -88,15 +105,21 @@ final class ThemedImagePreview: ThemedControl {
         NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
     }
 
-    /// Scales to fit and **never up**: a 16pt icon blown across the pane is not a better look
-    /// at it, it is a blurry one. Centred across the width, pinned to the top — the pane is
-    /// taller than most pictures, and one centred vertically floats with dead space above it,
-    /// away from the header the eye is already at.
-    static func fittedRect(for imageSize: NSSize, in bounds: NSRect) -> NSRect {
+    /// Scales to fit and, by default, **never up**: a 16pt icon blown across the pane is not a
+    /// better look at it, it is a blurry one. A host whose image describes a whole surface, such
+    /// as a device framebuffer, may opt in to enlargement. Centred across the width, pinned to
+    /// the top — the pane is taller than most pictures, and one centred vertically floats with
+    /// dead space above it, away from the header the eye is already at.
+    static func fittedRect(
+        for imageSize: NSSize,
+        in bounds: NSRect,
+        allowsUpscaling: Bool = false
+    ) -> NSRect {
         guard imageSize.width > 0, imageSize.height > 0,
               bounds.width > 0, bounds.height > 0 else { return .zero }
 
-        let scale = min(1, min(bounds.width / imageSize.width, bounds.height / imageSize.height))
+        let fittedScale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
+        let scale = allowsUpscaling ? fittedScale : min(1, fittedScale)
         let size = NSSize(
             width: (imageSize.width * scale).rounded(.down),
             height: (imageSize.height * scale).rounded(.down)

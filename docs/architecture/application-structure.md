@@ -155,3 +155,12 @@ The current source-tree report still measures zero concrete-controller reference
 911 Threading Swift files and 383,474 lines). The main-window and tool-coordinator authorities stay
 in the active debt ledger at their full current sizes; removing this dependency did not decompose
 either hub.
+
+The `AgentToolCoordinator` figure above is that increment's measurement, not a running total. The
+enforced ratchet in `scripts/check_architecture_boundaries.sh` moved to **9,063 across 19 files**
+when the adopted-Simulator tools landed, because a new built-in tool family reaches its
+implementation through `MCPBuiltInToolExecuting`, which only the coordinator conforms to. The
+family still keeps its policy out of the hub: `SimulatorAgentCommandService` validates the
+arguments and shapes the results, and the counted adapter decodes, reveals the pane, and maps a
+result. The debt is that the hub is the only door, not that this family walked through it, and the
+ledger entry stays open until the dispatch seam lets a service answer for its own tools.

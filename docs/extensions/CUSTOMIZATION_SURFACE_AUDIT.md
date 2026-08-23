@@ -52,6 +52,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Display-pane header | `display.pane-header@1` | protected command/status hook | tab ownership, close/select/order, overflow, persistence, `+` menu | Implemented |
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
 | Session Overview body | — | host-only | Activity attribution and lazy tree, usage/accounting truth, Info polling/process controls/port routing, section lifecycle, persistence and empty-panel fallback | Host-only |
+| In-panel iOS Simulator body | — | host-only | CoreSimulator device identity, boot lease and ownership, agent consent/routing, framebuffer/input authority, visibility budget and fallback truth | Host-only |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
@@ -151,6 +152,15 @@ The host also owns the section lifecycle—only the visible reading may poll or 
 synthetic, non-persisted Overview shown when a person opens an empty panel. Extensions can still
 compose into the surrounding `display.pane-header@1` and `display.tab-header@1`; publishing the
 body would require separate typed, brokered data contracts rather than access to these controllers.
+
+The in-panel iOS Simulator is host-only because its presentation is also an authority boundary.
+The selected UDID, whether Threading may shut it down, which session and agent may control it,
+whether a hidden tab consumes framebuffer work, and whether the direct helper or public fallback
+is active must remain one host-owned truth. An extension replacement could falsely present a
+different device or claim live input while holding neither lease nor consent. Extensions may
+still decorate the surrounding `display.pane-header@1` and `display.tab-header@1`; a future safe
+device-status component begins with a typed brokered snapshot, not access to CoreSimulator or the
+framebuffer controller.
 
 Image annotation persistence and publication remain deliberately host-owned inside the existing
 attachment-preview contract. A replacement preview may draw the file body, but it cannot replace

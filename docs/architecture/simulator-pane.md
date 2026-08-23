@@ -1,9 +1,9 @@
 # In-panel iOS Simulator
 
 Threading adopts an iOS Simulator **device**, not another application's window. The selected
-device is rendered and controlled inside the session's trailing display pane so an agent and a
-person share one stable surface without launching Apple Simulator or Device Hub as the default
-workflow.
+device is rendered inside the session's trailing display pane so an agent and a person share one
+stable surface without launching Apple Simulator or Device Hub as the default workflow. The
+public fallback is view-only; device-local interaction arrives with the direct backend below.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index. Read
 [`mcp-and-display.md`](mcp-and-display.md) for session routing and tab ownership and
@@ -38,8 +38,9 @@ deadline and caller cancellation. Output and device counts have named ceilings. 
 the queue are `Sendable`, and an invalid CoreSimulator response is a typed failure rather than an
 empty inventory.
 
-The public path is the fallback and lifecycle plane, not the intended live renderer. The direct
-backend is a first-party signed helper using the CoreSimulator framebuffer and device HID seams:
+The public path is the fallback and lifecycle plane, not the intended live renderer. The planned
+direct backend is a first-party signed helper using the CoreSimulator framebuffer and device HID
+seams:
 
 ```text
 session / MCP tool
@@ -53,12 +54,13 @@ first-party helper                  direct framebuffer + device HID
 CoreSimulator device                no Simulator.app window required
 ```
 
-The helper speaks a versioned protocol over an inherited Unix socket. It opens no listener,
+The helper will speak a versioned protocol over an inherited Unix socket. It opens no listener,
 accepts no arbitrary executable or path command, verifies same-team signing before launch, and
 exposes only the selected device's framebuffer/input vocabulary. Extension companions do not gain
 this authority: safe-extension sandboxing and ExtensionKit v1 remain unchanged.
 
-The default live codec is H.264 through VideoToolbox, with JPEG as a compatibility fallback. The
+The planned default live codec is H.264 through VideoToolbox, with JPEG as a compatibility
+fallback. The
 host permits one unacknowledged frame; a slow or hidden consumer causes replacement, never a
 queue. A hidden tab requests zero frames. Active targets are 30 fps expected and 60 fps stress,
 with decode and conversion off main.
@@ -88,16 +90,19 @@ The built-in **iOS Simulator** tool group is session-scoped. Its preferred seque
 2. The agent runs `xcodebuild` through its ordinary shell permission flow, using the returned UDID
    and a session-specific DerivedData directory.
 3. `simulator_install_launch` installs the resulting `.app` and launches it in that same device.
-4. Snapshot, screenshot and input tools address the lease rather than accepting another session id.
+4. `simulator_screenshot` reads the current pixels from that lease. Future input tools address the
+   same lease rather than accepting another session id.
 
 `xcodebuild` is deliberately not hidden inside a pre-approved MCP call. The MCP group makes the
 in-app surface easy to discover and reuse; it does not broaden permission to execute an arbitrary
-project build. Server discovery text tells agents to prefer `simulator_prepare` over launching
-Simulator/Device Hub directly whenever the in-panel preference is enabled.
+project build. While the built-in iOS Simulator group is enabled, server discovery text tells
+agents to prefer `simulator_prepare` over launching Simulator/Device Hub directly. Disabling that
+group removes both the tools and the preference guidance from discovery.
 
-Agent input and screenshots require one user decision per device. Manual interaction in the pane
-still works when agent control is denied. The consent belongs to the device identity, not to a
-pixel tab, and every tool fails closed when the lease or consent no longer matches.
+Read-only screenshots are available while the built-in group is enabled and the session's exact
+lease is alive; they update and return the same frame the user sees. Future device HID input
+requires one user decision per device. That consent belongs to the device identity, not to a pixel
+tab, and every input tool must fail closed when the lease or consent no longer matches.
 
 ## Presentation and customization boundary
 
@@ -112,10 +117,11 @@ future public extension component may embed a semantic device status or explicit
 but it cannot replace the host-owned lifecycle or consent rules. Record this deliberate host-only
 decision in `docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md` when the visible pane lands.
 
-The General preference offers **Threading right panel** (default) and **Apple Simulator / Device
-Hub**. The external choice is an explicit workflow fallback, not an automatic reaction to a
-recoverable helper error; a failed direct backend stays in the panel with a reason and retry, and
-may offer one visible "Open in Apple Simulator" action.
+The enabled built-in tool group is the current agent preference: **Threading right panel**. Apple
+Simulator / Device Hub is an explicit workflow fallback, not an automatic reaction to a
+recoverable helper error; a failed backend stays in the panel with a reason and retry. A future
+user-facing fallback setting may offer one visible "Open in Apple Simulator" action, but the app
+never opens that external window silently.
 
 ## Delivery increments
 
@@ -123,13 +129,13 @@ may offer one visible "Open in Apple Simulator" action.
    ownership, install/launch/screenshot/release, and deterministic tests.
 2. **Native pane:** persisted simulator tab, device chooser and state surface through Design,
    backed first by public screenshots and a fake live stream for deterministic tests.
-3. **Direct helper:** versioned inherited-socket protocol, compatibility probe, framebuffer and
-   HID, H.264/JPEG negotiation, signature policy and fallback state.
-4. **Agent tools:** one authored declaration per built-in, catalogue/discovery projection,
-   session coordinator, consent and structured results.
+3. **Agent tools:** one authored declaration per built-in, catalogue/discovery projection,
+   session coordinator and structured results over the same lease as the pane.
+4. **Direct helper:** versioned inherited-socket protocol, compatibility probe, framebuffer and
+   HID, H.264/JPEG negotiation, signature policy, input consent and fallback state.
 5. **Hardening:** multi-session stream budget, lifecycle grace, support diagnostics, performance
    spans, targeted real-shell evidence and the broad non-interactive gate.
 
 Each increment ships as a coherent fallback-capable slice. The direct helper does not replace the
 public lifecycle path, and the MCP tools do not create a second simulator state model beside the
-pane.
+pane. Increments 1–3 are now implemented; 4–5 remain future work.

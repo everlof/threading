@@ -151,6 +151,19 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
 
+  func simulatorPrepare(
+    _ arguments: SimulatorPrepareArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func simulatorInstallLaunch(
+    _ arguments: SimulatorInstallLaunchArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func simulatorScreenshot(
+    _ arguments: SimulatorScreenshotArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+
   func panelListTabs(for sessionID: SessionID) -> MCPToolResult
   func panelActivateTab(
     _ arguments: PanelActivateTabArguments, for sessionID: SessionID
