@@ -1,6 +1,38 @@
 import AppKit
 import SwiftTerm
 
+/// Where a terminal sends the three things it can no longer do for itself once its child lives
+/// in `threading-ptyd` rather than in this process.
+///
+/// A value of closures rather than a delegate protocol, for the reason
+/// `PTYHostClient.Events` gives next door: under complete strict concurrency a weak delegate
+/// would have to be `Sendable`, and it would then be sendable across the main actor by accident.
+/// It is also exactly three operations, which is the whole of what moves — everything else about
+/// a host-backed terminal, including all of the emoji and background compositing this class
+/// exists for, is unchanged, because the emulator never moved.
+struct TerminalHostTransport {
+
+    /// Keystrokes, paste, and the emulator's own answers to a program's queries.
+    let sendInput: (Data) -> Void
+
+    /// The whole `winsize`, pixels included. Answers whether it was delivered, which is what
+    /// `LocalProcessTerminalView.sizeChanged` uses to decide whether the resize happened.
+    let sendWindowSize: (winsize) -> Bool
+
+    /// End the child. `TerminalSession.terminate()`'s host-backed half.
+    let kill: () -> Void
+
+    init(
+        sendInput: @escaping (Data) -> Void,
+        sendWindowSize: @escaping (winsize) -> Bool,
+        kill: @escaping () -> Void
+    ) {
+        self.sendInput = sendInput
+        self.sendWindowSize = sendWindowSize
+        self.kill = kill
+    }
+}
+
 /// A subclass of LocalProcessTerminalView that fixes emoji rendering issues.
 ///
 /// The issue: Apple Color Emoji glyphs rendered via CTFontDrawGlyphs don't properly
@@ -77,12 +109,100 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// the answers off this to pin the wire contract; nil costs nothing.
     var onInputBytes: ((ArraySlice<UInt8>) -> Void)?
 
+    // MARK: - Host-Backed Mode
+
+    /// Non-nil while this terminal's child lives in `threading-ptyd` rather than in this process.
+    ///
+    /// The class does not change and `startProcess` is never called on such an instance, so the
+    /// inherited `LocalProcess` stays empty — `process.running` is false, which makes
+    /// `LocalProcess.send` and `LocalProcess.updateWindowSize` inert by their own guards. Only
+    /// the three seams this transport names actually move. See
+    /// [`pty-host.md`](../../../../docs/architecture/pty-host.md).
+    ///
+    /// Set before the spawn and cleared when the child ends, both by `TerminalSession`.
+    var hostTransport: TerminalHostTransport?
+
+    /// How many replayed feeds are still waiting for the emulator's answers to come back.
+    ///
+    /// A count rather than a flag because the scope outlives the feed that opened it — see
+    /// `feedFromHost(_:answersQueries:)` — so two replayed feeds in one turn can overlap.
+    private var suppressedQueryReplyScopes = 0
+
+    /// Whether this delivery is the emulator answering rather than a person typing.
+    ///
+    /// The two are told apart by the scopes the local paths already establish: every keystroke,
+    /// paste and drop runs inside `withLocalUserInput`, and remote injection sets its own flag,
+    /// while a query reply arrives with neither. So a keystroke that lands in the middle of a
+    /// replay is still delivered, and only the answers the replay itself provoked are swallowed.
+    private var isEmulatorReply: Bool {
+        !isInjectingRemoteInput && scopedInputSubmitsLine == nil
+    }
+
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        // Nothing at all leaves for a swallowed reply — not the bytes, and not the report that
+        // bytes were sent. `onInputBytes` says "this went upstream to the child", and an answer
+        // that was deliberately dropped did not.
+        guard suppressedQueryReplyScopes == 0 || !isEmulatorReply else { return }
+
         if !isInjectingRemoteInput, let submitsLine = scopedInputSubmitsLine {
             onUserInput?(TerminalUserInput(bytes: Array(data), submitsLine: submitsLine))
         }
         onInputBytes?(data)
-        super.send(source: source, data: data)
+
+        guard let hostTransport else {
+            super.send(source: source, data: data)
+            return
+        }
+        hostTransport.sendInput(Data(data))
+    }
+
+    /// Bytes the background host read off this session's pty.
+    ///
+    /// The local path parses on SwiftTerm's IO worker and then hops to main to fire the two
+    /// activity hooks; this is the same hop's other half, already on main, so the emulator is fed
+    /// and then **the same two callbacks fire in the same order** — `onOutput` with the count,
+    /// then `onOutputBytes` with the bytes. `SessionActivityTracker` and the remote mirror
+    /// therefore cannot tell the two paths apart, which is what makes "only process ownership
+    /// moves" true rather than hoped for. See `installProcessOutputObserver()`.
+    ///
+    /// `answersQueries` is false while a **replayed** history is being fed. SwiftTerm answers
+    /// `DA`, `DSR` and `OSC` colour queries by sending bytes back through `send(source:data:)`,
+    /// and history is not a live question: the program that asked has already had its answer, and
+    /// a second, stale one arriving later is worse than silence. It is a property of the feed
+    /// rather than of the session because the two branches differ — the exact-replay branch
+    /// carries bytes no emulator has ever seen and must answer them, and the cut branch does not.
+    func feedFromHost(_ bytes: [UInt8], answersQueries: Bool = true) {
+        guard !bytes.isEmpty else { return }
+
+        if answersQueries {
+            feed(byteArray: bytes[...])
+        } else {
+            // The scope has to close *behind* the answers rather than at the end of this call:
+            // SwiftTerm delivers `TerminalDelegate.send` through `onMain`, which is an
+            // unconditional `DispatchQueue.main.async` even when it is already on main, so a
+            // reply provoked here arrives on a later turn. The main queue is serial and FIFO, so
+            // a block enqueued now runs after every reply this feed produced — and not before.
+            suppressedQueryReplyScopes += 1
+            feed(byteArray: bytes[...])
+            DispatchQueue.main.async { [weak self] in
+                self?.suppressedQueryReplyScopes -= 1
+            }
+        }
+
+        onOutput?(bytes.count)
+        onOutputBytes?(bytes[...])
+    }
+
+    /// Routes the window size to the background host, or to the local child when there is one.
+    ///
+    /// The whole `winsize` including `ws_xpixel`/`ws_ypixel`, because `getWindowSize()` produces
+    /// both and a program that asks for pixel dimensions would otherwise be told zero. Both
+    /// resize gates above still run first — `sizeChanged` consults
+    /// `shouldApplyProcessSizeChange` before it reaches here — so a phone holding the grid keeps
+    /// holding it whichever process owns the pty.
+    override func sendWindowSize(_ size: inout winsize) -> Bool {
+        guard let hostTransport else { return super.sendWindowSize(&size) }
+        return hostTransport.sendWindowSize(size)
     }
 
     /// Programmatic insertion that still belongs to the person operating this terminal.

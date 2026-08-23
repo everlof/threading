@@ -1,10 +1,13 @@
 # The PTY host
 
-Status: **the wire, the daemon and the app's client exist; nothing in the product uses them yet.**
-`Packages/ThreadingPTYHostKit` holds the contract, `Targets/PTYHost` is the daemon, and
-`Sources/Threading/Core/PTYHost` can connect to it, refuse an incompatible one and say why it
-did not. No session's PTY has moved: `TerminalSession` still calls `forkpty` in-process, and
-`AppSettings.ptyHostEnabled` is off. The feature it serves — sessions that outlive the app — is
+Status: **the wire, the daemon, its registration, the app's client and the host-backed session
+exist; the feature is off.** `Packages/ThreadingPTYHostKit` holds the contract, `Targets/PTYHost`
+is the daemon and launchd starts it, `Sources/Threading/Core/PTYHost` can connect to it, refuse
+an incompatible one and say why it did not, and an **agent session** can now run its child there
+instead of in this process. What is still missing is detach and reattach — a host-backed session
+that stops is killed rather than handed over — and `AppSettings.ptyHostEnabled` ships off, so
+every session runs its PTY in-process exactly as before unless somebody sets the hidden key. The
+feature it serves — sessions that outlive the app — is
 `docs/feature-drafts/durable-sessions.md` §4.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
@@ -733,8 +736,108 @@ visibility surface, and they are the next slice. And the hidden key stays **off 
 R1 — TCC attribution of a launchd agent's children — has been run on a SIP-enabled Mac; see
 [`permissions.md`](permissions.md#the-pty-host-daemon-breaks-the-parent-relationship-and-that-is-unverified).
 
+## What changes in the app
+
+**The terminal view does not change class.** `EmojiFixedTerminalView` carries the emoji and
+background compositing fixes, the two resize gates, `onOutput`/`onOutputBytes`, `onBell`,
+`onUserInput`, `acceptsLocalInput`, `onLocalInputBlocked`, `onMouseReportForwarded`,
+`onInputBytes`, `onLowContrastText`, the drag-and-drop registration and the context menu; feeding
+a plain `TerminalView` instead would re-litigate all of it. So the class stays and
+**`startProcess` is simply never called on a host-backed instance**. With no child,
+`process.running` is false, and `LocalProcess.send` and `LocalProcess.updateWindowSize` guard on
+exactly that — so the inherited path is inert rather than wrong, and only four seams move.
+
+| Seam | In-process | Host-backed |
+|---|---|---|
+| `EmojiFixedTerminalView.send(source:data:)` | `super.send` → `process.send` | `hostTransport.sendInput` — an `input` frame |
+| output | `setProcessOutputBytesHandler` → main hop → `onOutput`, `onOutputBytes` | `feedFromHost(_:answersQueries:)` → `feed(byteArray:)`, then **the same two callbacks in the same order on main** |
+| `sendWindowSize(_:)` | `process.updateWindowSize` | a `resize` frame carrying the whole `winsize` |
+| `TerminalSession.terminate()` | `terminalView.terminate()` | a `kill` frame; the view's process is never touched |
+
+The third is the one SwiftTerm fork change this whole design needs, and it is recorded in
+[`dependencies.md`](dependencies.md).
+
+`TerminalHostTransport` is those three operations as a value of closures, held by the view;
+`PTYHostTerminalLink` is what fills them in, owning the connection and turning the daemon's frames
+into the session's edges. The link coalesces output into **one main-queue hop per burst** — the
+client's read loop never touches main, which is the scaling gate's rule for a callback whose
+frequency is a terminal's output rate — and it delivers a `spawned` pid, a `foreground` group and
+one ending. **A link that is released kills its child**, because until detach and reattach land
+there is no way to hand a session over, and an agent still working where no surface can reach it
+is worse than one that stopped.
+
+### Replayed history answers nothing
+
+`feedFromHost` takes `answersQueries` because SwiftTerm replies to `DA`, `DSR` and `OSC` colour
+queries by sending bytes back, and a replay is history: the program that asked has already had its
+answer, and a second, stale one is worse than silence. The exact-replay branch carries bytes no
+emulator has ever seen and **must** answer them; the cut branch must not. It is a property of the
+feed rather than of the session for exactly that reason.
+
+The scope closes one main-queue turn *behind* the feed rather than at the end of it, because
+SwiftTerm's `TerminalDelegate.send` always hops through `DispatchQueue.main.async` — even when it
+is already on main — so a reply provoked by a feed arrives on a later turn. And only the
+emulator's own answers are swallowed: a keystroke arriving in that window runs inside
+`withLocalUserInput`, and remote injection sets its own flag, so both are told apart from a reply
+that has neither.
+
+### The choice, and where it is made
+
+`AgentSession.backgroundHost: Bool?` is the per-conversation opt-in, in the tri-state
+`AgentSession.fastMode` and `remoteControl` established: nil inherits, and it survives to the JSON
+rather than collapsing into a boolean on the way, so a record written before the field existed
+reads as "no opinion" rather than as a decision to stay in-process. `PTYHostPolicy.hostsSession`
+resolves session → `AppSettings.ptyHostEnabled` → false. A session that says yes while the
+hidden global is off still runs in-process, and not because the policy lies to it:
+`PTYHostAvailability` answers `.disabled` first and without touching anything, so the global is a
+master switch *through availability* while staying an inheritable default in the policy.
+
+**No new `AgentKind` capability.** Whether a session has a pty at all is already
+`kind.supports(.terminalUI)`, withheld from one runtime for a reason of its own; a
+`.backgroundHost` capability would be true for four runtimes and false for the same one, for the
+same reason, which is a duplicated fact. `AgentCapabilities`' own rule refuses it: a capability
+earns a member only when the difference is a static fact about the *runtime*, and host-backing is
+a fact about the surface.
+
+The composition happens once per launch, in `AgentSessionViewController.startIfTerminalIsSized` —
+the surface that holds the conversation record, and the point at which the deferred-launch gate
+has already laid the terminal out, so the grid the daemon is handed is a real one rather than
+SwiftTerm's 2×1 clamp. Policy first (a `UserDefaults` read), then `PTYHostAvailability.live`, and
+anything short of `.available` is an in-process launch and one journal line naming the
+unavailability token. `TerminalSession` itself never reaches for the store or the settings: it is
+handed a factory or it is not.
+
+### What degrades, and what does not
+
+- **Activity is unchanged while attached.** `SessionActivityTracker` reads `onOutput`'s byte
+  count, which `feedFromHost` fires identically, and the hooks still route by durable token and
+  reach the app whenever the app is running. While the app is *closed* a hook posts into a dead
+  socket and is dropped, so a session that finished overnight can come back reading stale; the
+  transcript boundary readers the code already has are the answer, and they arrive with reattach.
+- **Titles keep working, through the emulator.** `TerminalNaming` reads OSC 0/2 through
+  `setTerminalTitle`, which fires from the emulator, which is still here. The daemon parses
+  nothing to make this work.
+- **The foreground group is pushed, not polled.** `TerminalSession.ptyDescriptor` is
+  `terminalView.process?.childfd`, which is `-1` host-backed, so `tcgetpgrp` has nothing to ask.
+  `currentForegroundGroup()` is the one place that knows there are two sources: the descriptor for
+  an in-process session, and the last `foreground` frame for a host-backed one. The nil rule is
+  the same on both sides — the session's own command in the foreground is not another program —
+  so `refreshForegroundProcess()`, `foregroundIsAnotherProgram()` and the title's owner all read
+  one answer.
+- **The working directory is preserved.** `spawned` reports the child pid, the session sets
+  `shellPid` from it, and `effectiveWorkingDirectory()`'s `proc_pidinfo` fallback and
+  `AgentRuntime.terminalRootProcessIdentifier` go on answering. OSC 7 is unaffected; it comes
+  through the emulator.
+- **The remote mirror is unaffected.** It taps `onOutputBytes`, which fires in the same place it
+  did.
+
+### What host-backing does not cover yet
+
+Detach and reattach, the durable grid across an app restart, and the visibility surface. Until
+they land, a host-backed session that is stopped or deinitialised is **killed**, so nothing is
+left running unreferenced — and that is the one behaviour reattach replaces rather than adds to.
+
 ## What is not decided here
 
-Registration and retirement, the `TerminalSession` host-backed mode, and the visibility surface
-(the quit question, the launch band, the Background Sessions list) are later slices. When they
-land, each adds its section here rather than a new document.
+The visibility surface — the quit question, the launch band, the Background Sessions list — is a
+later slice. When it lands it adds its section here rather than a new document.

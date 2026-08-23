@@ -521,6 +521,19 @@ struct AgentSession: Codable, Identifiable {
     return value
   }
 
+  /// Whether this conversation's pty lives in `threading-ptyd` rather than in the app.
+  ///
+  /// Nil inherits `AppSettings.ptyHostEnabled`, true asks for the background host and false
+  /// refuses it. The third state is the same one `fastMode` and `remoteControl` keep, for the
+  /// same reason: a record written before the field existed must read as "no opinion", not as a
+  /// decision to stay in-process that a later default could never move.
+  ///
+  /// The choice is not the whole answer — `PTYHostPolicy` resolves it and `PTYHostAvailability`
+  /// then says whether a compatible daemon is actually listening. Every way it is not degrades to
+  /// today's in-process `forkpty`, so this is a preference and never a requirement. See
+  /// [`pty-host.md`](../../../docs/architecture/pty-host.md).
+  var backgroundHost: Bool?
+
   /// How much this conversation may do before it has to ask.
   ///
   /// Nil defers to `AppSettings.defaultPermissionMode`, which may itself defer to the CLI's
@@ -796,6 +809,7 @@ struct AgentSession: Codable, Identifiable {
     self.accountHandle = accountHandle
     self.model = model
     self.fastMode = nil
+    self.backgroundHost = nil
     self.permissionMode = nil
     self.branch = nil
     self.isArchived = false
@@ -825,6 +839,7 @@ struct AgentSession: Codable, Identifiable {
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
     case lastLaunchFailure
     case fastMode, remoteControl, permissionMode, archived, providerArchiveState, pinned, nativeUI
+    case backgroundHost
     case snoozedAt, snoozedUntil, hadTurnInFlightWhenSnoozed, wake
     case forkParent
     case continuationSource, continuationSourceKind
@@ -875,6 +890,9 @@ struct AgentSession: Codable, Identifiable {
       forKey: .reasoningEffort
     )
     fastMode = try container.decodeIfPresent(Bool.self, forKey: .fastMode)
+    // Leniently, and with no per-runtime guard: every runtime with a terminal surface can be
+    // hosted, and an absent key is the inherit state rather than a refusal.
+    backgroundHost = try container.decodeIfPresent(Bool.self, forKey: .backgroundHost)
     let decodedRemoteControl = try container.decodeIfPresent(
       Bool.self,
       forKey: .remoteControl
@@ -1209,6 +1227,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(model, forKey: .model)
     try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
     try container.encodeIfPresent(fastMode, forKey: .fastMode)
+    try container.encodeIfPresent(backgroundHost, forKey: .backgroundHost)
     try container.encodeIfPresent(remoteControl, forKey: .remoteControl)
     try container.encodeIfPresent(permissionMode, forKey: .permissionMode)
     try container.encodeIfPresent(branch, forKey: .branch)

@@ -1,5 +1,6 @@
 import AppKit
 @preconcurrency import SwiftTerm
+import ThreadingPTYHostKit
 
 /// A person-originated terminal write and the semantic boundary activity actually needs.
 ///
@@ -140,9 +141,44 @@ final class TerminalSession: NSObject {
     var hasForegroundProcess: Bool { foregroundGroup != nil }
 
     /// The primary side of the pty, which is what `tcgetpgrp` must be asked.
+    ///
+    /// `-1` for a host-backed session: the descriptor belongs to `threading-ptyd`, which is why
+    /// the daemon pushes a `foreground` frame instead and `currentForegroundGroup()` below is the
+    /// one place that knows there are two answers to the same question.
     private var ptyDescriptor: Int32 {
         terminalView.process?.childfd ?? -1
     }
+
+    // MARK: - Background Host
+
+    /// How this session reaches `threading-ptyd`, or nil for today's in-process `forkpty`.
+    ///
+    /// Named by whoever launches the session rather than resolved here, because resolving it
+    /// needs the conversation record and the app's settings, and a terminal that reached into the
+    /// store for its own policy would be the dependency direction this file has never had. See
+    /// `PTYHostPolicy.transportFactory(for:session:…)`, which is the whole decision as one call.
+    var hostTransportFactory: PTYHostTransportFactory?
+
+    /// The live link, while this session's child lives in the background host.
+    private var hostLink: PTYHostTerminalLink?
+
+    /// The launch a host-backed spawn is still waiting on an answer for.
+    ///
+    /// Kept because a refusal is not an ending: the daemon may hold the previous incarnation of
+    /// this session for a few seconds after it exited, so a stop followed at once by a start is
+    /// answered `alreadyExists`. That launch has to *happen*, in-process, rather than be reported
+    /// as a conversation that died before it began.
+    private var hostLaunchPlan: AgentLaunchPlan?
+
+    /// The process group the host last reported as owning the terminal.
+    ///
+    /// Pushed rather than polled, because `tcgetpgrp` needs a descriptor this process does not
+    /// have. Nil means nothing has been reported yet, which reads the same way an in-process
+    /// terminal reads a foreground group equal to its own shell: no other program is in charge.
+    private var hostForegroundGroup: pid_t?
+
+    /// Whether this session's child is owned by `threading-ptyd` rather than by this process.
+    var isHostBacked: Bool { hostLink != nil }
 
     /// The name of the profile used for this session.
     var profileName: String {
@@ -457,6 +493,10 @@ final class TerminalSession: NSObject {
     }
 
     private func launchAgent(plan: AgentLaunchPlan) {
+        // The host-backed path first, and falling through to the local one on every refusal:
+        // there is exactly one behaviour to degrade to and it is the one below, unchanged.
+        if launchAgentThroughHost(plan: plan) { return }
+
         terminalView.startProcess(
             executable: plan.executable,
             args: plan.arguments,
@@ -465,6 +505,182 @@ final class TerminalSession: NSObject {
         )
 
         finishProcessStart()
+    }
+
+    /// Starts the same command line in `threading-ptyd`, answering whether it did.
+    ///
+    /// The plan, the environment and the working directory are composed **exactly** as the local
+    /// path composes them and handed over verbatim: the daemon inherits launchd's environment
+    /// rather than the user's, and the composition rules — `AgentEnvironment`'s inherited-identity
+    /// prefixes, the measured leakage list in `sessions.md`, `AgentLauncher`'s login-shell command
+    /// line — are one decision that stays in one place, here. The daemon adds nothing.
+    ///
+    /// The grid is the view's real one. It is not defended against a placeholder here on purpose:
+    /// the deferred-launch gate that makes it real — layout at a genuine frame before the launch,
+    /// then `startIfTerminalIsSized` — is the same gate the local `forkpty` depends on for the
+    /// same reason, and a second, differently-drawn threshold in this method would be a second
+    /// place for that rule to be wrong.
+    private func launchAgentThroughHost(plan: AgentLaunchPlan) -> Bool {
+        guard let hostTransportFactory else { return false }
+        // Version 1 hosts agent sessions only; every other surface still polls a descriptor.
+        guard case .agentSession = identity else { return false }
+
+        let size = terminalView.getWindowSize()
+        guard size.ws_col > 0, size.ws_row > 0 else { return false }
+
+        let hostIdentity = PTYHostSessionIdentity(identity)
+        let link = PTYHostTerminalLink(identity: hostIdentity)
+        link.delivery = hostDelivery(for: link)
+
+        do {
+            link.adopt(try hostTransportFactory(link.events()))
+            try link.spawn(PTYHostSpawnRequest(
+                id: hostIdentity,
+                channel: .pty(grid: PTYHostGrid(
+                    cols: Int(size.ws_col),
+                    rows: Int(size.ws_row),
+                    xpixel: Int(size.ws_xpixel),
+                    ypixel: Int(size.ws_ypixel)
+                )),
+                executable: plan.executable,
+                arguments: plan.arguments,
+                execName: (plan.executable as NSString).lastPathComponent,
+                environment: buildEnvironment(),
+                cwd: nil
+            ))
+        } catch {
+            let cause = (error as? PTYHostClientError)?.token ?? "unknown"
+            EventLog.shared.record(
+                .session,
+                "Session runs its PTY in-process",
+                ["session": identity.historyFileStem, "cause": cause]
+            )
+            ThreadingLogger.ptyHost.error(
+                """
+                PTY host could not start this session: \(cause, privacy: .public); \
+                running the PTY in-process
+                """
+            )
+            return false
+        }
+
+        hostLink = link
+        hostLaunchPlan = plan
+        terminalView.hostTransport = TerminalHostTransport(
+            sendInput: { [weak link] bytes in link?.sendInput(bytes) },
+            sendWindowSize: { [weak link] size in link?.sendWindowSize(size) ?? false },
+            kill: { [weak link] in link?.kill() }
+        )
+        // Running from the moment the spawn request left, rather than from the `spawned` answer:
+        // a stop arriving in between has to reach the daemon, and the pid the answer carries is
+        // what `effectiveWorkingDirectory()` needs, not what "is this session running" means.
+        isRunning = true
+        return true
+    }
+
+    /// The four edges of a host-backed session, each already on the main queue.
+    ///
+    /// Every one of them is guarded by the link still being *this* session's. A stop followed at
+    /// once by a relaunch leaves the previous link alive until the daemon answers it, and its
+    /// late `exited` must not end the launch that replaced it.
+    private func hostDelivery(for link: PTYHostTerminalLink) -> PTYHostTerminalLink.Delivery {
+        PTYHostTerminalLink.Delivery(
+            output: { [weak self, weak link] segments in
+                MainActor.assumeIsolated {
+                    guard let self, let link, self.hostLink === link else { return }
+                    for segment in segments {
+                        self.terminalView.feedFromHost(
+                            segment.bytes,
+                            answersQueries: segment.answersQueries
+                        )
+                    }
+                }
+            },
+            spawned: { [weak self, weak link] spawned in
+                MainActor.assumeIsolated {
+                    guard let self, let link, self.hostLink === link else { return }
+                    self.hostDidSpawn(pid: spawned.pid)
+                }
+            },
+            foreground: { [weak self, weak link] group in
+                MainActor.assumeIsolated {
+                    guard let self, let link, self.hostLink === link else { return }
+                    self.hostForegroundGroup = group
+                }
+            },
+            ended: { [weak self, weak link] exitCode, cause in
+                MainActor.assumeIsolated {
+                    guard let self, let link, self.hostLink === link else { return }
+                    self.hostDidEnd(exitCode: exitCode, cause: cause)
+                }
+            },
+            refused: { [weak self, weak link] reason in
+                MainActor.assumeIsolated {
+                    guard let self, let link, self.hostLink === link else { return }
+                    self.hostDidRefuseSpawn(reason)
+                }
+            }
+        )
+    }
+
+    /// The child exists. `shellPid` is what keeps `effectiveWorkingDirectory()` and
+    /// `AgentRuntime.terminalRootProcessIdentifier` answering for a session whose pty moved.
+    private func hostDidSpawn(pid: pid_t) {
+        guard pid > 0 else { return }
+        hostLaunchPlan = nil
+        shellPid = pid
+        delegate?.terminalSessionDidStart(self)
+    }
+
+    /// The daemon would not start this child, so this launch runs in-process instead.
+    ///
+    /// The same degradation every other unavailability gets, arrived at one step later — and
+    /// emphatically not a termination: nothing started, so reporting an exit would record a
+    /// launch failure against a conversation that has not been launched. The common case is
+    /// `alreadyExists`, because the daemon keeps an exited session for a few seconds so a late
+    /// watcher can still be told how it ended, and a stop followed straight away by a start
+    /// arrives inside that window.
+    private func hostDidRefuseSpawn(_ reason: PTYHostSpawnRefusal) {
+        EventLog.shared.record(
+            .session,
+            "Session runs its PTY in-process",
+            ["session": identity.historyFileStem, "cause": "spawnRefused.\(reason.rawValue)"]
+        )
+        ThreadingLogger.ptyHost.warning(
+            """
+            PTY host refused the spawn (\(reason.rawValue, privacy: .public)); \
+            running the PTY in-process
+            """
+        )
+
+        hostLink = nil
+        hostForegroundGroup = nil
+        terminalView.hostTransport = nil
+
+        guard let plan = hostLaunchPlan else { return }
+        hostLaunchPlan = nil
+        terminalView.startProcess(
+            executable: plan.executable,
+            args: plan.arguments,
+            environment: buildEnvironment(),
+            execName: (plan.executable as NSString).lastPathComponent
+        )
+        finishProcessStart()
+    }
+
+    private func hostDidEnd(exitCode: Int32?, cause: String?) {
+        if let cause {
+            EventLog.shared.record(
+                .session,
+                "Host-backed session ended without an exit status",
+                ["session": identity.historyFileStem, "cause": cause]
+            )
+        }
+        hostLink = nil
+        hostLaunchPlan = nil
+        hostForegroundGroup = nil
+        terminalView.hostTransport = nil
+        handleProcessTermination(exitCode: exitCode)
     }
 
     /// `LocalProcess` now uses `forkpty`, which returns the exact child synchronously. Keeping
@@ -486,7 +702,20 @@ final class TerminalSession: NSObject {
         pendingLaunch = nil
         guard isRunning else { return }
 
-        terminalView.terminate()
+        if let hostLink {
+            // The child is the daemon's, so the view has no process to tear down — and must not
+            // pretend otherwise. Input stops leaving at once; the link stays until the daemon
+            // answers `exited`, because a watcher is owed the ending and the ending is what
+            // drives the same termination path a local exit drives.
+            //
+            // The reattach slice replaces this with `detach`, which hands the session over
+            // instead of ending it. Until then a session nothing references is killed rather
+            // than left working somewhere no surface can reach.
+            terminalView.hostTransport = nil
+            hostLink.kill()
+        } else {
+            terminalView.terminate()
+        }
         isRunning = false
         shellPid = 0
     }
@@ -661,10 +890,30 @@ final class TerminalSession: NSObject {
     /// gate that says someone asked to hear the distinction.
     func foregroundIsAnotherProgram() -> Bool {
         guard isRunning, shellPid > 0 else { return false }
-        return ProcessUtility.foregroundProcessGroup(
-            ofPTY: ptyDescriptor,
-            shellPid: shellPid
-        ) != nil
+        return currentForegroundGroup() != nil
+    }
+
+    /// Which process group owns this terminal, or nil when the session's own command does.
+    ///
+    /// Two sources, one answer. An in-process session asks its own master with `tcgetpgrp`. A
+    /// host-backed one has no master to ask — `ptyDescriptor` is `-1` — and is *told* instead, by
+    /// the `foreground` frame the daemon pushes whenever the value changes. That frame exists for
+    /// exactly this: it is one syscall with no bytes in it, so a daemon that parses nothing can
+    /// still answer it, and it is the only fact about a host-backed terminal the app cannot
+    /// recover from the emulator it still owns.
+    ///
+    /// The nil rule is the same on both sides — `foregroundProcessGroup(ofPTY:shellPid:)` reports
+    /// nothing when the group *is* the session's own command — so no caller has to know which
+    /// side answered.
+    private func currentForegroundGroup() -> pid_t? {
+        guard isHostBacked else {
+            return ProcessUtility.foregroundProcessGroup(
+                ofPTY: ptyDescriptor,
+                shellPid: shellPid
+            )
+        }
+        guard let group = hostForegroundGroup, group > 0, group != shellPid else { return nil }
+        return group
     }
 
     /// Re-reads which command owns the terminal, and retires a title whose owner has gone.
@@ -680,7 +929,7 @@ final class TerminalSession: NSObject {
         }
 
         var changed = false
-        let group = ProcessUtility.foregroundProcessGroup(ofPTY: ptyDescriptor, shellPid: shellPid)
+        let group = currentForegroundGroup()
         let hadForegroundProcess = hasForegroundProcess
 
         if group != foregroundGroup {
@@ -734,10 +983,7 @@ extension TerminalSession: @preconcurrency LocalProcessTerminalViewDelegate {
         self.reportedTitle = title
         // Recorded at the moment of the report, not read back later: by the next poll the
         // program may already have exited, and the title would then look like the shell's.
-        self.reportedTitleOwner = ProcessUtility.foregroundProcessGroup(
-            ofPTY: ptyDescriptor,
-            shellPid: shellPid
-        )
+        self.reportedTitleOwner = currentForegroundGroup()
         delegate?.terminalSession(self, titleChangedTo: title)
     }
 
@@ -751,6 +997,21 @@ extension TerminalSession: @preconcurrency LocalProcessTerminalViewDelegate {
     }
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {
+        handleProcessTermination(exitCode: exitCode)
+    }
+}
+
+// MARK: - Termination
+
+extension TerminalSession {
+
+    /// The one ending, whichever process owned the child.
+    ///
+    /// `LocalProcessTerminalViewDelegate.processTerminated` reaches it for an in-process pty and
+    /// the daemon's `exited` frame reaches it for a host-backed one, so a rapid restart, a
+    /// retired title and the delegate's exit notice behave identically on both paths — which is
+    /// the whole claim host-backing makes.
+    fileprivate func handleProcessTermination(exitCode: Int32?) {
         isRunning = false
         shellPid = 0
         // Nothing is in the foreground of a terminal with no process, and a title the dead

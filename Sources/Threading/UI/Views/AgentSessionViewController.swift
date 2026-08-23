@@ -673,6 +673,16 @@ final class AgentSessionViewController: NSViewController {
         if plan.resumeState == .awaitingIdentifier {
             identifierLaunchDate = Date()
         }
+
+        // Whether this conversation's pty belongs in `threading-ptyd`, asked exactly once per
+        // launch and asked *here*, because this is the surface that holds the conversation
+        // record and the terminal has already been laid out — so the grid the daemon is handed
+        // is the real one rather than SwiftTerm's 2×1 clamp. Nil is today's in-process `forkpty`,
+        // which every unavailability degrades to. See `PTYHostPolicy`.
+        session.hostTransportFactory = PTYHostPolicy.transportFactory(
+            for: session.identity,
+            session: ProjectStore.shared.session(withID: sessionID)
+        )
         session.start(plan: plan)
         finishRecordedLaunch(plan: plan)
     }

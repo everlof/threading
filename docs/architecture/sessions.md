@@ -1330,6 +1330,44 @@ Threading cannot display what "follow" resolves to — the value lives in the ac
 and an unset one resolves server-side — so the inherit menu item says *Use Claude's Setting*
 rather than naming a value it would be guessing.
 
+### The background PTY host, per conversation
+
+An agent session's pty can live in `threading-ptyd` — a per-user daemon that owns the `forkpty`
+child, its output ring, its window size and its exit status, and owns nothing else — instead of in
+this process. The point of moving it is that a process the app does not own can outlive the app.
+The whole design is [`pty-host.md`](pty-host.md); what belongs here is the choice and what it
+costs.
+
+**Three states, twice, again.** `AppSettings.ptyHostEnabled` is the hidden global — no
+`presentations`, so it produces no Settings row and does not cross to the phone's settings mirror;
+`defaults write codes.threading ptyHostEnabled -bool true` is how it is turned on — and
+`AgentSession.backgroundHost` is one conversation's override. `PTYHostPolicy.hostsSession` reads
+session, then global, then off, and `nil` survives to the JSON rather than collapsing into a
+boolean, so a record written before the field existed reads as "no opinion". It ships **off**: the
+question of how macOS attributes file access for a launchd agent's children has not been answered
+on a SIP-enabled Mac, and until it is, an agent under the daemon might be an agent that cannot
+read the user's files.
+
+**Version 1 hosts agent sessions only.** Not project terminals, not shell drawers, not ephemeral
+terminals — those poll `tcgetpgrp` on a descriptor a host-backed session does not have, and the
+`foreground` frame that replaces it is wired up for the one surface that has been measured. There
+is **no `AgentKind` capability** for this and there must not be: whether a session has a pty is
+already `kind.supports(.terminalUI)`, and host-backing is a fact about the surface rather than a
+static fact about a runtime.
+
+**Nothing else about the session changes while it is attached.** The same
+`EmojiFixedTerminalView` renders the same bytes — a render test compares the two paths pixel for
+pixel — activity still counts `onOutput`'s bytes, OSC 0/2 titles still arrive through the emulator,
+`shellPid` still comes back from the daemon so the working directory and the process inspector go
+on answering, and the remote mirror still taps `onOutputBytes` where it always did. What is
+*absent* is the pty descriptor: `foregroundIsAnotherProgram()` and the title's owner read the
+daemon's pushed `foreground` frame instead of `tcgetpgrp`.
+
+**Until reattach lands, stopping a host-backed session kills it.** There is no way to hand one
+over yet, and an agent still working in a session no surface can reach is worse than one that
+ended. Every way the host can be unavailable — off, not installed, not running, the wrong version
+— is an ordinary in-process launch and one journal line saying which.
+
 ## Close and Archive
 
 Two row actions that read as near-synonyms and are near-opposites. **Close** acts on the

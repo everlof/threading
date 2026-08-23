@@ -260,7 +260,22 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     open func shouldApplyProcessSizeChange(newCols: Int, newRows: Int) -> Bool {
         true
     }
-    
+
+    /// Delivers the window size to whatever owns this terminal's child, answering
+    /// whether it was delivered.
+    ///
+    /// The default is SwiftTerm's own behaviour: apply it to the pty this view
+    /// opened, which answers false when there is no running child to apply it to.
+    /// The seam exists for a host whose child lives in another process — it has no
+    /// `LocalProcess` to update and has to send the size somewhere else — and it is
+    /// deliberately shaped like `shouldApplyProcessSizeChange` beside it, because
+    /// `sizeChanged` is a protocol requirement and therefore cannot be overridden.
+    /// `winsize` is passed whole rather than as columns and rows: a program that
+    /// asks for pixel dimensions gets zeroes if they are dropped in transit.
+    open func sendWindowSize(_ size: inout winsize) -> Bool {
+        process.updateWindowSize(&size)
+    }
+
     /**
      * This method is invoked to notify the client of the new columsn and rows that have been set by the UI
      */
@@ -270,8 +285,8 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
         }
         var size = getWindowSize()
         processAdapter.updateWindowSize(size)
-        guard process.updateWindowSize(&size) else { return }
-        
+        guard sendWindowSize(&size) else { return }
+
         processDelegate?.sizeChanged (source: self, newCols: newCols, newRows: newRows)
     }
     

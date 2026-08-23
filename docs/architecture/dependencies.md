@@ -95,6 +95,19 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     enlarge cells without reflowing the Mac-owned grid, while an interactive phone still updates
     its PTY lease. Keep both hooks and the `resetFont` routing when re-syncing: one gates the
     renderer, the other gates the PTY.
+  - **The window-size delivery seam is ours.** `LocalProcessTerminalView.sendWindowSize(_:)` is
+    an `open` method the resize path routes through: `sizeChanged` reads `getWindowSize()`,
+    updates the adapter's cached size, and then asks this seam to deliver it, taking its answer
+    as "the resize happened" — which is what gates `processDelegate?.sizeChanged`. The default is
+    exactly what the line it replaced did, `process.updateWindowSize(&size)`. It exists because a
+    terminal whose child lives in another process has no `LocalProcess` to update and must emit a
+    `resize` frame instead, and because `sizeChanged(source:newCols:newRows:)` is a
+    `LocalProcessTerminalViewDelegate` requirement and therefore `public` rather than `open` —
+    the alternative was swizzling or a base-class swap, which would re-litigate every fix
+    `EmojiFixedTerminalView` carries. The whole `winsize` is passed, `ws_xpixel`/`ws_ypixel`
+    included, because a program that asks for pixel dimensions is told zero if they are dropped
+    in transit. Both grid gates above still run first, so a phone holding the grid keeps holding
+    it whichever process owns the pty. See [`pty-host.md`](pty-host.md).
   - **iOS selection survives output, and the edit menu has a host seam.** The iOS view's
     `scrolled`/`linefeed` pair follows the Mac's: a selection is dropped only when scrollback
     recycles its rows or the alternate buffer scrolls in place, never on a line feed that merely
