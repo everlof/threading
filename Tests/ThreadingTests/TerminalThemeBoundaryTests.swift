@@ -246,8 +246,10 @@ final class TerminalThemeBoundaryTests: XCTestCase {
     /// delegate, activity tracker — because each half of this fix passes its own test while the
     /// wiring between them is what decides whether the spinner starts.
     ///
-    /// Output is delivered through `dataReceived`, which is the PTY's own entry point, so the
-    /// burst counts exactly as the CLI's repaint does.
+    /// Output is delivered through the host feed because it is the synchronous shipping seam
+    /// that fires the same count callback as the local PTY. SwiftTerm 2's local-process fast
+    /// path deliberately bypasses its compatibility `dataReceived` entry point; the real child
+    /// path is covered separately by `RemoteTerminalOutputCaptureTests`.
     func testMovingThePointerOverATrackingAgentDoesNotStartItsSpinner() throws {
         let controller = AgentSessionViewController(
             agentSession: AgentSession(kind: .claude, title: "Pointer")
@@ -257,20 +259,21 @@ final class TerminalThemeBoundaryTests: XCTestCase {
         controller.isVisible = true
         view.feed(text: "\u{1b}[?1003h\u{1b}[?1006h")
 
-        let repaint = ArraySlice(
-            [UInt8](repeating: 0x20, count: ActivityDefaults.workingByteThreshold * 4)
+        let repaint = [UInt8](
+            repeating: 0x20,
+            count: ActivityDefaults.workingByteThreshold * 4
         )
 
         // The control: the same burst with nobody touching the mouse is the agent working, and
         // has to stay that way — this suppression must not blind the inference it guards.
-        view.dataReceived(slice: repaint)
+        view.feedFromHost(repaint)
         XCTAssertEqual(controller.activity, .working)
 
         controller.activityTracker.markRunning()
         XCTAssertEqual(controller.activity, .idle)
 
         view.mouseMoved(with: try XCTUnwrap(makeMouseMovedEvent()))
-        view.dataReceived(slice: repaint)
+        view.feedFromHost(repaint)
 
         XCTAssertEqual(
             controller.activity,

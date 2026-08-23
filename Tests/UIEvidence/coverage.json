@@ -92,6 +92,26 @@
       }
     },
     {
+      "id": "model-effort-picker",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Model and effort picker",
+      "description": "The composer’s transient model-by-effort chooser in its shipping popover chrome, including inherited Auto, unavailable combinations, strong whole-cell selection and the theme-accent Ultra treatment.",
+      "states": ["Auto inheritance", "Unavailable combinations", "Selected Ultra"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Windows 98"],
+        "appearances": ["Light", "Dark"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ModelEffortPickerRenderTests.swift",
+        "test": "ThreadingTests/ModelEffortPickerRenderTests/testRendersTheShippingPopoverUnderDissimilarThemes"
+      },
+      "capture": {
+        "glob": "model-effort-picker-*.png"
+      }
+    },
+    {
       "id": "scheduled-session-placeholder",
       "kind": "surface",
       "status": "implemented",

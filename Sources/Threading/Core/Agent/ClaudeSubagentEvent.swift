@@ -421,16 +421,15 @@ struct ClaudeSubagentEventAdapter {
         from message: ClaudeSubagentWireMessage
     ) -> [SubagentEvent] {
         message.texts.flatMap { text -> [SubagentEvent] in
-            guard text.contains("<task-notification>"),
-                  let rawTaskID = tagValue("tool-use-id", in: text)
-                    ?? tagValue("task-id", in: text)
+            guard let notification = ClaudeTaskNotification.parse(text),
+                  let rawTaskID = notification.identity
             else { return [] }
 
             let taskID = taskIDByAgentID[rawTaskID] ?? rawTaskID
-            let wireStatus = tagValue("status", in: text).map(
+            let wireStatus = notification.status.map(
                 ClaudeSubagentWireStatus.init(providerValue:)
             )
-            let summary = tagValue("summary", in: text)
+            let summary = notification.summary
             let status = notificationStatus(wireStatus)
             var events = discover(SubagentDescriptor(threadID: taskID))
             events.append(.state(
@@ -492,19 +491,6 @@ struct ClaudeSubagentEventAdapter {
         return value
     }
 
-    private func tagValue(_ tag: String, in text: String) -> String? {
-        let opening = "<\(tag)>"
-        let closing = "</\(tag)>"
-        guard let openingRange = text.range(of: opening),
-              let closingRange = text.range(
-                of: closing,
-                range: openingRange.upperBound..<text.endIndex
-              )
-        else { return nil }
-        let value = text[openingRange.upperBound..<closingRange.lowerBound]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
-    }
 }
 
 // MARK: - Typed Wire Boundary

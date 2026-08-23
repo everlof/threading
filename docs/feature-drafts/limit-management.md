@@ -201,7 +201,7 @@ Nothing here scans transcripts — the ledger buckets are already built and cell
 - **Settings ▸ Accounts**: a Limits section per account — the rule list, added from templates
   named in the user's terms ("Alert me at…", "Keep this account under…", "Reserve a share for
   its owner…", "Recreate a shorter window…"), each stating its tier in plain words.
-- **The pill and its popover**: the popover always draws the cap ticks on its bars and names
+- **The pill and its popover**: the popover always draws the keyed cap markers on its bars and names
   the rule in the tooltip beside the reading's age. The always-visible pill is **opt-in per
   rule** (`showsInToolbar`): the one surface that cannot be dismissed must not acquire a new
   red state because a rule was created to fire one quiet 50% alert. Opting in does two things,
@@ -278,7 +278,7 @@ Two extensions fall out nearly free, and one is deliberately deferred:
 | **Rule record + `AccountPreferencesStore` surface** | **shipped** (`CustomLimit`, `AccountPreference.customLimits`, `CustomLimitSettings`) |
 | **`CustomLimitEvaluator`** | **shipped** for `fixedCap`; the two other metrics are declared and refused |
 | **`UsageAlertCenter` + fired-state store** | **shipped** (`UsageAlertLedger`, keyed by account + rule + window instance) |
-| **Effective-bound tinting + cap ticks** | **shipped on the bar** (`CustomLimitBounds`, `UsageBarView.capMark`); the pill, the menus and the charts still read the provider's 100% |
+| **Effective-bound tinting + keyed cap markers** | **shipped on the bar** (`CustomLimitBounds`, `UsageBarView.capMark`, `UsageLimitLegendView`); the pill, the menus and the charts still read the provider's 100% |
 | **Hold seam extensions (sends, poke, ranking, plane)** | new — one comparison at each existing seam |
 | **Tier-4 park + conduct mark + strip variant** | new |
 
@@ -311,7 +311,7 @@ Two extensions fall out nearly free, and one is deliberately deferred:
   excluding a capped account with the stated reason; none of them firing under `XCTestCase`.
 - **Honesty** — unknown never fires an alert, always engages a hold with "cannot see" as the
   stated reason; a ledger estimate never prints as a provider figure.
-- **Render** — cap ticks and effective tinting across themes, light and dark; the tier-4 strip
+- **Render** — keyed cap markers and effective tinting across themes, light and dark; the tier-4 strip
   and conduct mark visibly distinct from the provider triangle and refusal strip.
 - **Instance identity** — fired-state and overrides pruned as `resetsAt` passes; a relaunch
   neither re-fires nor forgets.
@@ -323,9 +323,8 @@ All five steps below shipped between 2026-08-14 and 2026-08-15.
 1. ~~**Alerts on provider windows.**~~ The rule record, the two storage scopes,
    `CustomLimitEvaluator`, window-instance identity, the fired-state ledger, `UsageAlertCenter`
    and the Accounts page's Limits section.
-2. ~~**Show.**~~ The line turned out not to be a tick: it is a change in the *track*, because a
-   pace mark and a cap mark on a 6pt bar are two different kinds of thing and cannot share one
-   vocabulary. `CustomLimitBounds` is the single answer every surface asks — the popover's bars,
+2. ~~**Show.**~~ The line is a colored vertical marker keyed once in the containing footer; the
+   clock's pace mark remains neutral. `CustomLimitBounds` is the single answer every surface asks — the popover's bars,
    both account menus, the always-visible pill (opt-in per rule) and the Limit History chart,
    where the cap is a **horizontal value rule** rather than a marker, since a line the user set is
    not an event.

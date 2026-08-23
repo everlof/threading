@@ -1081,13 +1081,16 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             body: create
         ))
         XCTAssertEqual(createProbe.status, 201)
+        let legacyCreation = try JSONDecoder().decode(
+            RemoteCreateSessionResponseDTO.self,
+            from: createProbe.body
+        )
         XCTAssertEqual(
-            try JSONDecoder().decode(
-                RemoteCreateSessionResponseDTO.self,
-                from: createProbe.body
-            ).sessionID,
+            legacyCreation.sessionID,
             createdID.uuidString
         )
+        XCTAssertNotNil(legacyCreation.me, "an older request still receives its full catalogue")
+        XCTAssertNil(legacyCreation.session)
         XCTAssertEqual(sessionCommands.launches.count, 1)
         let launch = try XCTUnwrap(sessionCommands.launches.first)
         XCTAssertEqual(launch.projectID, project.id)
@@ -1095,6 +1098,29 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(launch.accountHandle, .standard)
         XCTAssertFalse(launch.usesNativeUI)
         XCTAssertEqual(launch.prompt, "Inspect the dependency boundary")
+
+        sessionCommands.createdSessionID = dormant.id
+        let compactCreate = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+            projectID: project.id.uuidString,
+            agentKind: AgentKind.codex.rawValue,
+            surface: .terminal,
+            compactResponse: true,
+            prompt: "Open one changed row"
+        ))
+        let compactProbe = try XCTUnwrap(post(
+            "/api/session",
+            bearer: "goodtoken",
+            body: compactCreate
+        ))
+        XCTAssertEqual(compactProbe.status, 201)
+        let compactCreation = try JSONDecoder().decode(
+            RemoteCreateSessionResponseDTO.self,
+            from: compactProbe.body
+        )
+        XCTAssertEqual(compactCreation.sessionID, dormant.id.uuidString)
+        XCTAssertEqual(compactCreation.session?.id, dormant.id.uuidString)
+        XCTAssertEqual(compactCreation.startup, .starting)
+        XCTAssertNil(compactCreation.me, "the current path must not rebuild the complete catalogue")
 
         let resumeProbe = try XCTUnwrap(post(
             "/api/session/\(dormant.id.uuidString)/resume",

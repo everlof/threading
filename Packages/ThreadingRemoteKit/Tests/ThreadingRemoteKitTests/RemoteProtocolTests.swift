@@ -797,6 +797,7 @@ final class RemoteProtocolTests: XCTestCase {
             permissionMode: "acceptEdits",
             surface: .conversation,
             role: RemoteSessionRole.manager,
+            compactResponse: true,
             prompt: "Review remote access"
         )
         XCTAssertEqual(
@@ -807,6 +808,7 @@ final class RemoteProtocolTests: XCTestCase {
             creation
         )
         XCTAssertEqual(creation.role, .manager)
+        XCTAssertEqual(creation.compactResponse, true)
 
         let olderCreation = try JSONDecoder().decode(
             RemoteCreateSessionRequestDTO.self,
@@ -817,6 +819,51 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(olderCreation.fastMode)
         XCTAssertNil(olderCreation.permissionMode)
         XCTAssertNil(olderCreation.role, "an older phone's request is a chat")
+        XCTAssertNil(olderCreation.compactResponse)
+
+        let summary = RemoteSessionSummaryDTO(
+            id: "session",
+            title: "Remote review",
+            agentKind: "codex",
+            surface: .conversation,
+            state: .dormant,
+            projectName: "Threading",
+            isAvailable: false
+        )
+        let compactResponse = RemoteCreateSessionResponseDTO(
+            sessionID: summary.id,
+            session: summary,
+            startup: .starting
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteCreateSessionResponseDTO.self,
+                from: JSONEncoder().encode(compactResponse)
+            ),
+            compactResponse
+        )
+        XCTAssertNil(compactResponse.me)
+
+        let legacyResponse = RemoteCreateSessionResponseDTO(
+            sessionID: summary.id,
+            me: RemoteMeDTO(
+                serverProtocol: RemoteProtocolInfo(),
+                share: .init(
+                    label: "owner",
+                    scope: .all,
+                    capability: .interact,
+                    expiresAt: nil
+                ),
+                sessions: [summary]
+            )
+        )
+        let decodedLegacyResponse = try JSONDecoder().decode(
+            RemoteCreateSessionResponseDTO.self,
+            from: JSONEncoder().encode(legacyResponse)
+        )
+        XCTAssertEqual(decodedLegacyResponse.me?.sessions, [summary])
+        XCTAssertNil(decodedLegacyResponse.session)
+        XCTAssertNil(decodedLegacyResponse.startup)
 
         // An older Mac's catalogue says nothing about managers, which a phone reads as "no".
         let olderCatalog = try JSONDecoder().decode(

@@ -153,7 +153,13 @@ enum SettingsUI {
             lessThanOrEqualTo: host.widthAnchor,
             constant: -Design.Spacing.large * 2
         )
-        insetWidth.priority = .defaultHigh
+        // One point above ordinary content compression. At the same 750 priority, a page whose
+        // readable labels wanted their intrinsic width could spend this ceiling instead and
+        // consume the narrow pane's entire margin. The shell owns that boundary; content then
+        // resolves its own lower-level compression inside the canvas it was actually given.
+        insetWidth.priority = NSLayoutConstraint.Priority(
+            NSLayoutConstraint.Priority.defaultHigh.rawValue + 1
+        )
 
         // One step below the inset ceiling, the canvas states its own stable measure. This keeps
         // pages with little intrinsic content from collapsing to their fitting size after the

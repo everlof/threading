@@ -888,6 +888,10 @@ final class SessionActivityTracker {
     /// reports coming, and staying latched would leave it permanently idle.
     func markRunning() {
         bytesSinceQuiet = 0
+        // Resize and pointer suppression belongs to the process that could have answered the
+        // event. A freshly launched process did not receive an earlier terminal resize, so
+        // carrying that deadline across the launch would discard its first legitimate output.
+        suppressOutputUntil = nil
         reportsOwnActivity = false
         hasHeardFromProcess = false
         attentionEpisodeOpen = false

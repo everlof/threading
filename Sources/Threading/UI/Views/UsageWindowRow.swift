@@ -10,12 +10,11 @@ import AppKit
 /// mark is under pace; fill past it is spending faster than the window refills, which is the
 /// thing a percentage alone cannot tell you.
 ///
-/// It also carries the user's own line when one is drawn on this window (`limits`). The line
-/// changes two things and deliberately not a third: the track past it goes quiet, and the value
-/// takes its severity from consumed-of-*bound* rather than consumed-of-window. The **printed
-/// percentage and the fill's length stay the provider's own figure** — a row reading 47% under a
-/// 50% line prints 47% in the critical tint, because the number is the fact and the tint is the
-/// pressure.
+/// It also carries the user's own line when one is drawn on this window (`limits`). The line has
+/// its own colored marker and the value takes its severity from consumed-of-*bound* rather than
+/// consumed-of-window. The **printed percentage and the fill's length stay the provider's own
+/// figure** — a row reading 47% under a 50% line prints 47% in the critical tint, because the
+/// number is the fact and the tint is the pressure.
 final class UsageWindowRow: NSView {
 
     // MARK: - Properties
@@ -101,10 +100,9 @@ final class UsageWindowRow: NSView {
             CustomLimitBounds.resolvedBound(of: $0, window: window, at: now)
         }
 
-        // The line is drawn as a change in the track, which says *that* there is one and not
-        // whose or where. The rule names itself here — and in the accessibility label too, since
-        // a quieter stretch of a 6pt bar is exactly the kind of fact that reaches nobody who is
-        // not looking at it.
+        // The footer legend names the shared marker vocabulary once. This tooltip names the
+        // exact rule on this particular window — and the accessibility label does too, since
+        // color and position alone reach nobody who is not looking at the bar.
         toolTip = rule.map { CustomLimitReceipt.name(for: $0, windowName: window.label) }
 
         nameLabel.stringValue = window.label

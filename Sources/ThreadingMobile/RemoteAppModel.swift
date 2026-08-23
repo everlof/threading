@@ -28,6 +28,24 @@ struct MobileSessionDraft: Hashable {
     }
 }
 
+/// How a detail route reaches the live surface behind its catalogue row.
+enum MobileSessionOpeningStrategy: Equatable {
+    /// An existing dormant row must first ask the Mac to resume it.
+    case resumeIfNeeded
+    /// Create already owns the launch; opening another resume transaction would race it.
+    case awaitCreatedSession
+}
+
+struct MobileCreatedSession: Equatable {
+    let session: RemoteSessionSummaryDTO
+    let openingStrategy: MobileSessionOpeningStrategy
+}
+
+struct MobileStartedDraft: Equatable {
+    let sessionID: String
+    let openingStrategy: MobileSessionOpeningStrategy
+}
+
 /// The phone's durable navigation subjects.
 ///
 /// Projects are navigation context only; continuity persists the open chat, never a project
@@ -217,7 +235,7 @@ final class RemoteAppModel: ObservableObject {
     /// through this for everything that asks which chat is open — continuity, the push
     /// dedup, a notification for the chat that was just started — so a chat that began as a
     /// draft is the same navigation subject as one opened from its row.
-    @Published private(set) var startedDrafts: [UUID: String] = [:]
+    @Published private(set) var startedDrafts: [UUID: MobileStartedDraft] = [:]
 
     private let store = RemoteHostStore()
     private let hostedConnections = HostedRemoteConnectionManager()
@@ -1141,6 +1159,12 @@ final class RemoteAppModel: ObservableObject {
             try await client.resume(sessionID: session.id, requestID: requestID)
             return client.link
         }
+        // Current hosts hold this session's authenticated socket until the resumed surface can
+        // send its ordinary hello. Readiness is therefore session-scoped and the catalogue never
+        // enters the wait. Keep the old bounded polling only for an installed older Mac.
+        if me?.features?.contains(RemoteRESTFeature.sessionStartupHandshake.rawValue) == true {
+            return
+        }
         let client = RemoteClient(link: link)
         guard activeHostID == hostID else { throw CancellationError() }
 
@@ -1259,7 +1283,7 @@ final class RemoteAppModel: ObservableObject {
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
         role: RemoteSessionRole? = nil,
         prompt: String
-    ) async throws -> RemoteSessionSummaryDTO {
+    ) async throws -> MobileCreatedSession {
         guard canManageSessions, let host = activeHost else {
             throw RemoteClientError.unauthorized
         }
@@ -1275,20 +1299,36 @@ final class RemoteAppModel: ObservableObject {
             surface: surface,
             managedWorkspace: managedWorkspace,
             role: role,
+            compactResponse: true,
             prompt: prompt
         )
         if isDemo {
-            return me?.sessions.first ?? Self.demoResponse.sessions[0]
+            return MobileCreatedSession(
+                session: me?.sessions.first ?? Self.demoResponse.sessions[0],
+                openingStrategy: .awaitCreatedSession
+            )
         }
         let response = try await performMutation(for: hostID) { client, requestID in
             try await client.createSession(request, requestID: requestID)
         }
         guard activeHostID == hostID else { throw CancellationError() }
-        me = response.me
-        guard let session = response.me.sessions.first(where: { $0.id == response.sessionID }) else {
-            throw RemoteClientError.invalidResponse
+        if let session = response.session, session.id == response.sessionID {
+            guard let current = me else { throw RemoteClientError.invalidResponse }
+            me = current.applying([RemoteSessionsChangedDTO(session: session)])
+            return MobileCreatedSession(
+                session: session,
+                // Create owns this launch whether the host answered before or after its surface
+                // became ready. Never begin a second resume transaction for the row it returned.
+                openingStrategy: .awaitCreatedSession
+            )
         }
-        return session
+        // An older Mac ignored `compactResponse` and returned the original snapshot. Preserve
+        // that protocol path and its readiness behaviour until the host advertises the handshake.
+        guard let responseMe = response.me,
+              let session = responseMe.sessions.first(where: { $0.id == response.sessionID })
+        else { throw RemoteClientError.invalidResponse }
+        me = responseMe
+        return MobileCreatedSession(session: session, openingStrategy: .resumeIfNeeded)
     }
 
     func renameSession(_ session: RemoteSessionSummaryDTO, to title: String) async throws {
@@ -1524,7 +1564,7 @@ final class RemoteAppModel: ObservableObject {
     func sessionID(for route: MobileNavigationRoute?) -> String? {
         switch route {
         case .session(let id): return id
-        case .draft(let draft): return startedDrafts[draft.id]
+        case .draft(let draft): return startedDrafts[draft.id]?.sessionID
         case .project, .terminal, .none: return nil
         }
     }
@@ -1537,8 +1577,11 @@ final class RemoteAppModel: ObservableObject {
     /// Start was answered: the draft's screen now shows this session. The path itself does not
     /// change — that is the point — so the route record is refreshed here, where the top route
     /// began naming a session without moving.
-    func noteDraftStarted(_ draft: MobileSessionDraft, session: RemoteSessionSummaryDTO) {
-        startedDrafts[draft.id] = session.id
+    func noteDraftStarted(_ draft: MobileSessionDraft, creation: MobileCreatedSession) {
+        startedDrafts[draft.id] = MobileStartedDraft(
+            sessionID: creation.session.id,
+            openingStrategy: creation.openingStrategy
+        )
         recordLastRoute()
     }
 
@@ -3258,9 +3301,38 @@ final class RemoteAppModel: ObservableObject {
                                             .init(id: "medium", name: "Medium"),
                                             .init(id: "high", name: "High"),
                                             .init(id: "xhigh", name: "Extra High"),
+                                            .init(id: "max", name: "Max"),
+                                            .init(id: "ultra", name: "Ultra"),
                                         ],
                                         defaultReasoningID: "high",
                                         supportsFastMode: true
+                                    ),
+                                    .init(
+                                        id: "gpt-5.6-terra",
+                                        name: "GPT-5.6 Terra",
+                                        reasoning: [
+                                            .init(id: "low", name: "Light"),
+                                            .init(id: "medium", name: "Medium"),
+                                            .init(id: "high", name: "High"),
+                                            .init(id: "xhigh", name: "Extra High"),
+                                            .init(id: "max", name: "Max"),
+                                            .init(id: "ultra", name: "Ultra"),
+                                        ],
+                                        defaultReasoningID: "high",
+                                        supportsFastMode: true
+                                    ),
+                                    .init(
+                                        id: "gpt-5.6-luna",
+                                        name: "GPT-5.6 Luna",
+                                        reasoning: [
+                                            .init(id: "low", name: "Light"),
+                                            .init(id: "medium", name: "Medium"),
+                                            .init(id: "high", name: "High"),
+                                            .init(id: "xhigh", name: "Extra High"),
+                                            .init(id: "max", name: "Max"),
+                                        ],
+                                        defaultReasoningID: "medium",
+                                        supportsFastMode: false
                                     )
                                 ],
                                 defaultModelID: "gpt-5.6-sol"

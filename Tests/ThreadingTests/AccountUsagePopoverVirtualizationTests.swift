@@ -9,6 +9,28 @@ final class AccountUsagePopoverVirtualizationTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testFooterLegendAppearsOnlyWhenThePopoverDrawsACustomLimit() {
+        let capped = AccountUsagePopoverViewController(
+            account: fixtureAccount,
+            isEmbedded: true,
+            readingProvider: { _ in self.fixtureReading(count: 2, fractionOffset: 0) },
+            limitsProvider: { _ in [CustomLimit(windowID: "5h", bound: 0.5)] },
+            nowProvider: { self.now }
+        )
+        _ = capped.view
+        XCTAssertTrue(capped.showsLimitLegendForTesting)
+
+        let plain = AccountUsagePopoverViewController(
+            account: fixtureAccount,
+            isEmbedded: true,
+            readingProvider: { _ in self.fixtureReading(count: 2, fractionOffset: 0) },
+            limitsProvider: { _ in [] },
+            nowProvider: { self.now }
+        )
+        _ = plain.view
+        XCTAssertFalse(plain.showsLimitLegendForTesting)
+    }
+
     func testProviderWindowsMaterializeOnlyInsideThePopoverViewport() throws {
         let account = fixtureAccount
         var reading = fixtureReading(count: 2_000, fractionOffset: 0)
@@ -75,6 +97,9 @@ final class AccountUsagePopoverVirtualizationTests: XCTestCase {
                 let controller = AccountUsagePopoverViewController(
                     account: fixtureAccount,
                     readingProvider: { _ in self.fixtureReading(count: 30, fractionOffset: 0) },
+                    limitsProvider: { _ in [
+                        CustomLimit(windowID: "model-18", bound: 0.5)
+                    ] },
                     nowProvider: { self.now }
                 )
                 let host = laidOut(controller.view, width: UsagePopoverDefaults.width, height: 400)

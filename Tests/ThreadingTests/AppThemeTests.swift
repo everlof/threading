@@ -1332,13 +1332,17 @@ final class AppThemeTests: HostedStoreTestCase {
         }
     }
 
-    /// The tokens as their call sites see them, pinned against the expressions System states.
-    /// If one of these changes, the app's default appearance changed.
+    /// The unheld tokens as their call sites see them, pinned against the expressions System
+    /// states. If one of these changes, the app's default appearance changed.
+    ///
+    /// The quiet text tiers are deliberately absent. `LabelLegibility` raises AppKit's own
+    /// translucent System colours only when their rendered contrast misses the tier's floor;
+    /// `LabelLegibilityTests` pins that measured contract over every stock theme and appearance.
     ///
     /// `panel` is pinned to the ink wash rather than to the `textBackgroundColor` expression it
     /// replaced: on the modern system grounds that colour *is* the ground, so a System panel was
     /// a border around nothing — see `AppThemeRole.systemColor`.
-    func testDesignTokensAreUnchangedUnderTheSystemTheme() {
+    func testUnheldDesignTokensAreUnchangedUnderTheSystemTheme() {
         AppThemePalette.set(.system)
 
         // Build the expected colours under the same appearance `resolvedHex` uses below.
@@ -1374,9 +1378,7 @@ final class AppThemeTests: HostedStoreTestCase {
                 ("turnDivider", Design.Chat.turnDivider, halfStrengthSeparator),
                 ("syntaxKeyword", Design.Syntax.keyword, .systemPurple),
                 ("syntaxComment", Design.Syntax.comment, .tertiaryLabelColor),
-                ("label", Design.Text.label, .labelColor),
-                ("secondary", Design.Text.secondary, .secondaryLabelColor),
-                ("tertiary", Design.Text.tertiary, .tertiaryLabelColor)
+                ("label", Design.Text.label, .labelColor)
             ]
         }
 

@@ -4,11 +4,12 @@ import XCTest
 /// Reading a provider's "you are out of allowance" back off a session's own record, and the
 /// state the sidebar draws from it.
 ///
-/// The specimen these are written against is real: session `f3ad7546` on CLI 2.1.223 was refused
-/// at 10:45 on 2026-08-07 and went on drawing a working spinner until 11:04, when its user asked
-/// what had happened. Everything here is a property that reading has to have for the row to stop
-/// lying — the refusal is recognised, it stops being true when the conversation speaks again, a
-/// subagent's refusal is not the session's, and nothing else in a transcript is mistaken for one.
+/// The specimens these are written against are real: session `f3ad7546` on CLI 2.1.223 recorded
+/// the root refusal directly, while `3149ae34` on 2026-08-23 completed its root turn and then
+/// received a failed background-task notification as the terminal moved to the limit chooser.
+/// Everything here is a property that reading has to have for the row to stop lying — the refusal
+/// is recognised, it stops being true when the conversation speaks again, a subagent's failure is
+/// provisional until the root screen confirms it, and nothing else is mistaken for one.
 final class UsageLimitStopTests: XCTestCase {
 
     // MARK: - Recognising the refusal
@@ -126,6 +127,121 @@ final class UsageLimitStopTests: XCTestCase {
         let url = try transcript([refusal(isSidechain: true), assistantText("still here")])
 
         XCTAssertNil(ClaudeTranscriptUsageLimit.newestStop(at: url))
+    }
+
+    /// Session 3149ae34's exact missing edge: the root had already completed, then the provider
+    /// delivered a failed background task whose API error was the session limit. That is evidence
+    /// worth checking, but it is not yet permission to stop the parent row.
+    func testAFailedBackgroundTaskAfterACompletedRootTurnIsProvisionalLimitEvidence() throws {
+        let url = try transcript([
+            assistantText("Finished the root turn", stopReason: "end_turn"),
+            try taskNotification(
+                status: "failed",
+                summary: """
+                Agent "Slice 4" failed: Agent terminated early due to an API error: \
+                You've hit your session limit · resets 4:50pm (Europe/Stockholm) · progress saved
+                """
+            )
+        ])
+
+        let observation = ClaudeTranscriptUsageLimit.newestObservation(at: url)
+
+        XCTAssertEqual(observation?.evidence, .failedBackgroundTask)
+        XCTAssertEqual(
+            observation?.stop.recordID,
+            "task-notification:toolu_01GPpDkxiWLPRBEbYLpNP1fi"
+        )
+        XCTAssertNil(
+            observation?.confirmedStop(screenLines: ["Finished the root turn", "❯"]),
+            "a child failure alone must never stop its parent"
+        )
+    }
+
+    /// The second key from the same specimen is the provider-owned chooser in the root terminal.
+    /// Once both keys agree, the clean visible refusal — not the task wrapper — is what the ribbon
+    /// should say.
+    func testTheLiveLimitChooserConfirmsAndCleansTheProvisionalStop() throws {
+        let observation = try XCTUnwrap(provisionalObservation())
+        let stop = try XCTUnwrap(observation.confirmedStop(screenLines: [
+            "You've hit your session limit · resets 4:50pm (Europe/Stockholm)",
+            "❯ 1. Stop and wait for limit to reset",
+            "  2. Upgrade your plan"
+        ]))
+
+        XCTAssertEqual(
+            stop.message,
+            "You've hit your session limit · resets 4:50pm (Europe/Stockholm)"
+        )
+        XCTAssertEqual(stop.resetHint, "4:50pm (Europe/Stockholm)")
+        XCTAssertEqual(stop.recordID, observation.stop.recordID)
+    }
+
+    func testTheInlineLimitNoticeAlsoConfirmsTheProvisionalStop() throws {
+        let observation = try XCTUnwrap(provisionalObservation())
+
+        XCTAssertNotNil(observation.confirmedStop(screenLines: [
+            "You've hit your session limit · resets 4:50pm (Europe/Stockholm)",
+            "/upgrade to increase your usage limit."
+        ]))
+    }
+
+    /// A background task can fail for ordinary reasons, and a successful task can quote limit
+    /// language in its summary. Neither is a candidate regardless of the root's turn boundary.
+    func testOnlyAFailedTaskWhoseFailureIsALimitBecomesACandidate() throws {
+        let ordinaryFailure = try transcript([
+            assistantText("Done", stopReason: "end_turn"),
+            try taskNotification(status: "failed", summary: "Agent crashed while reading a file")
+        ])
+        let successfulLimitReport = try transcript([
+            assistantText("Done", stopReason: "end_turn"),
+            try taskNotification(status: "completed", summary: "Found a usage limit in the docs")
+        ])
+
+        XCTAssertNil(ClaudeTranscriptUsageLimit.newestObservation(at: ordinaryFailure))
+        XCTAssertNil(ClaudeTranscriptUsageLimit.newestObservation(at: successfulLimitReport))
+    }
+
+    /// The task notification belongs to delegated work still in flight when the root assistant
+    /// ended on a tool call. It cannot describe a stopped parent until that root turn completes.
+    func testAChildLimitFailureDuringAnUnfinishedRootTurnIsNotACandidate() throws {
+        let url = try transcript([
+            assistantText("Starting a background task", stopReason: "tool_use"),
+            try taskNotification(
+                status: "failed",
+                summary: "You've hit your session limit · resets 4:50pm"
+            )
+        ])
+
+        XCTAssertNil(ClaudeTranscriptUsageLimit.newestObservation(at: url))
+    }
+
+    func testANewerRootAssistantSupersedesAChildLimitFailure() throws {
+        let url = try transcript([
+            assistantText("Done", stopReason: "end_turn"),
+            try taskNotification(
+                status: "failed",
+                summary: "You've hit your session limit · resets 4:50pm"
+            ),
+            assistantText("The parent carried on", stopReason: "end_turn")
+        ])
+
+        XCTAssertNil(ClaudeTranscriptUsageLimit.newestObservation(at: url))
+    }
+
+    /// The provider's synthetic root 429 remains authoritative even if task bookkeeping follows
+    /// it, and therefore needs no terminal confirmation.
+    func testARootRateLimitRemainsAuthoritativeBesideALaterTaskFailure() throws {
+        let url = try transcript([
+            refusal(uuid: "root-refusal"),
+            try taskNotification(
+                status: "failed",
+                summary: "You've hit your session limit · resets 4:50pm"
+            )
+        ])
+        let observation = try XCTUnwrap(ClaudeTranscriptUsageLimit.newestObservation(at: url))
+
+        XCTAssertEqual(observation.evidence, .providerRefusal)
+        XCTAssertEqual(observation.confirmedStop(screenLines: [])?.recordID, "root-refusal")
     }
 
     /// The flag is the fact and the sentence is only the words: a CLI that rewords itself still
@@ -297,8 +413,9 @@ final class UsageLimitStopTests: XCTestCase {
         """#
     }
 
-    private func assistantText(_ text: String) -> String {
-        #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"\#(text)"}]}}"#
+    private func assistantText(_ text: String, stopReason: String? = nil) -> String {
+        let boundary = stopReason.map { #", "stop_reason":"\#($0)""# } ?? ""
+        return #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"\#(text)"}]\#(boundary)}}"#
     }
 
     private func userText(_ text: String) -> String {
@@ -311,5 +428,36 @@ final class UsageLimitStopTests: XCTestCase {
         try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }
         return url
+    }
+
+    private func taskNotification(status: String, summary: String) throws -> String {
+        let content = """
+        <task-notification>
+        <task-id>a6b89dbdeb0b95025</task-id>
+        <tool-use-id>toolu_01GPpDkxiWLPRBEbYLpNP1fi</tool-use-id>
+        <status>\(status)</status>
+        <summary>\(summary)</summary>
+        </task-notification>
+        """
+        let data = try JSONSerialization.data(withJSONObject: [
+            "type": "queue-operation",
+            "operation": "enqueue",
+            "content": content
+        ], options: [.sortedKeys])
+        return try XCTUnwrap(String(data: data, encoding: .utf8))
+    }
+
+    private func provisionalObservation() throws -> UsageLimitObservation? {
+        let url = try transcript([
+            assistantText("Finished", stopReason: "end_turn"),
+            try taskNotification(
+                status: "failed",
+                summary: """
+                Agent failed due to an API error: You've hit your session limit · \
+                resets 4:50pm (Europe/Stockholm) · progress saved
+                """
+            )
+        ])
+        return ClaudeTranscriptUsageLimit.newestObservation(at: url)
     }
 }

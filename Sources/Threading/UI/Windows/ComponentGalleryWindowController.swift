@@ -121,6 +121,8 @@ final class ComponentGalleryViewController: NSViewController {
         "MediaDocumentPlayerView",
         "MediaInspectorView",
         "MediaTransportView",
+        "ModelEffortMatrixControl",
+        "ModelEffortPickerViewController",
         "MorphingMultilineTitleLabel",
         "MorphingTitleLabel",
         "NavigatorGridItemView",
@@ -210,6 +212,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ControlButtonGroupView",
         "ToolbarButtonGroupView",
         "UsageDashboardView",
+        "UsageLimitLegendView",
         "UsageReadingLabel",
         "WorkingOrbView",
         "WindowBackdrop",
@@ -235,6 +238,7 @@ final class ComponentGalleryViewController: NSViewController {
     private let galleryCompletionPresenter = PromptCompletionPresenter()
     private var galleryCommandPalette: CommandPaletteViewController?
     private var galleryActionPopover: ThemedActionPopoverViewController?
+    private var galleryModelEffortPicker: ModelEffortPickerViewController?
 
     /// The hover-policy story's demos, retained so their schedulers and popovers outlive the
     /// pass that built the section.
@@ -920,6 +924,13 @@ final class ComponentGalleryViewController: NSViewController {
                     segmentedStory
                 ),
                 story(
+                    "ModelEffortPickerViewController & ModelEffortMatrixControl",
+                    "A provider-sized model-by-effort catalogue in its bounded shipping body. "
+                        + "Click a valid combination or use the arrow keys and Return; unavailable "
+                        + "pairs stay visibly unavailable and Ultra keeps its accent treatment.",
+                    makeModelEffortPickerStory()
+                ),
+                story(
                     "NavigatorGridItemView",
                     "A selectable navigator cell with hover, focus, press, and host-owned chrome.",
                     navigatorCell
@@ -1013,6 +1024,54 @@ final class ComponentGalleryViewController: NSViewController {
     /// row's edges are what it demonstrates, and a row sized to its contents has no gap to hold.
     private enum ControlRowStory {
         static let width: CGFloat = 460
+    }
+
+    private func makeModelEffortPickerStory() -> NSView {
+        let presentation = ModelEffortPickerPresentation(
+            models: [
+                .init(
+                    id: "sol",
+                    name: "GPT-5.6 Sol · Default",
+                    representedValue: nil,
+                    supportedEffortIDs: ["medium", "high", "xhigh", "max", "ultra"]
+                ),
+                .init(
+                    id: "terra",
+                    name: "GPT-5.6 Terra",
+                    representedValue: "terra",
+                    supportedEffortIDs: ["low", "medium", "high", "xhigh", "max", "ultra"]
+                ),
+                .init(
+                    id: "luna",
+                    name: "GPT-5.6 Luna",
+                    representedValue: "luna",
+                    supportedEffortIDs: ["low", "medium", "high", "xhigh", "max"]
+                )
+            ],
+            efforts: [
+                .init(
+                    id: ModelEffortPickerPresentation.automaticEffortID,
+                    name: L10n.string("Auto"),
+                    representedValue: nil
+                ),
+                .init(id: "low", name: "Light", representedValue: "low"),
+                .init(id: "medium", name: "Medium", representedValue: "medium"),
+                .init(id: "high", name: "High", representedValue: "high"),
+                .init(id: "xhigh", name: "Extra High", representedValue: "xhigh"),
+                .init(id: "max", name: "Max", representedValue: "max"),
+                .init(id: "ultra", name: "Ultra", representedValue: "ultra")
+            ],
+            selectedModelID: "sol",
+            selectedEffortID: "ultra"
+        )
+        let controller = ModelEffortPickerViewController(presentation: presentation) {
+            [weak self] _, _ in
+            self?.showReceipt(L10n.string("Model and effort"))
+        }
+        // The view outlives a local controller once the gallery retains its story card. Keep the
+        // owner too, so responder routing and the selection callback remain the shipping ones.
+        galleryModelEffortPicker = controller
+        return controller.view
     }
 
     /// The notice story's pane. Wider than the sidebar's stories because the band it holds is a
@@ -2139,6 +2198,13 @@ final class ComponentGalleryViewController: NSViewController {
                     galleryUsageReadings()
                 ),
                 story(
+                    "UsageLimitLegendView",
+                    "One footer key names the user-authored marker shared by a group of provider "
+                        + "gauges. Toggle it to verify that the line and its legend appear and "
+                        + "leave as one semantic state.",
+                    galleryUsageLimitLegend()
+                ),
+                story(
                     "CompoundValueLabel",
                     "The same rule for plain segments — the info panel's CPU · memory reading: "
                         + "both parts, then one complete part, then nothing, never a number "
@@ -2480,6 +2546,31 @@ final class ComponentGalleryViewController: NSViewController {
             ).isActive = true
             column.addArrangedSubview(line)
         }
+        return column
+    }
+
+    private func galleryUsageLimitLegend() -> NSView {
+        let bar = UsageBarView()
+        bar.fraction = 0.68
+        bar.tint = Design.Status.warning
+        bar.timeMark = 0.42
+        bar.capMark = 0.55
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        bar.heightAnchor.constraint(equalToConstant: bar.intrinsicContentSize.height).isActive = true
+
+        let legend = UsageLimitLegendView()
+        let toggle = ThemedCheckbox(title: L10n.string("Your limit")) { state in
+            let showsLimit = state == .on
+            bar.capMark = showsLimit ? 0.55 : nil
+            legend.isHidden = !showsLimit
+        }
+        toggle.state = .on
+
+        let column = NSStackView(views: [bar, legend, toggle])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.small
         return column
     }
 

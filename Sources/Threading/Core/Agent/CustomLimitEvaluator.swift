@@ -369,6 +369,21 @@ enum CustomLimitEvaluator {
 /// of one fact.
 enum CustomLimitBounds {
 
+    /// Whether a host containing these windows needs the one footer key for a drawn limit line.
+    ///
+    /// Hosts ask the same resolver as the bars themselves. A legend for an unsupported rule, or
+    /// for a rule at the provider's own 100% boundary, would describe a mark that is not there.
+    static func hasDrawableLine(
+        in windows: [AccountUsage.Window],
+        rules: [CustomLimit],
+        at now: Date = Date()
+    ) -> Bool {
+        guard !rules.isEmpty else { return false }
+        return windows.contains { window in
+            tightest(on: window.id, in: rules, window: window, at: now) != nil
+        }
+    }
+
     /// The line a rule draws **right now**, as a fraction of the window it names.
     ///
     /// A fixed cap's line is a constant and a pace share's rises with the clock, so every consumer

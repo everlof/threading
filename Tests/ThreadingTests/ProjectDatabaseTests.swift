@@ -189,6 +189,47 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertFalse(try database.isEmpty())
     }
 
+    func testSingleSessionWritesDoNotRewriteStandingRows() throws {
+        let url = directory.appendingPathComponent("single-session-writes.db")
+        let database = try ProjectDatabase(url: url)
+        let standing = AgentSession(kind: .claude, title: "Standing")
+        let project = makeProject("alpha", sessions: [standing])
+        try database.save(ProjectsState(projects: [project]))
+
+        let inspection = try SQLiteDatabase(path: url.path)
+        let sentinel = #"{"futureSessionFormat":true}"#
+        try inspection.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, sentinel)
+            .bind(2, standing.id.uuidString)
+            .run()
+
+        let added = AgentSession(kind: .codex, title: "Added")
+        try database.addSession(added, to: project.id, position: 1)
+        var renamed = added
+        renamed.title = "Renamed"
+        try database.saveSession(renamed, in: project.id, position: 1)
+
+        let standingPayload = try inspection.prepare(
+            "SELECT data FROM session WHERE id = ?"
+        )
+        standingPayload.bind(1, standing.id.uuidString)
+        defer { standingPayload.finalize() }
+        XCTAssertTrue(try standingPayload.step())
+        XCTAssertEqual(standingPayload.text(0), sentinel)
+
+        let addedPayload = try inspection.prepare(
+            "SELECT data FROM session WHERE id = ?"
+        )
+        addedPayload.bind(1, added.id.uuidString)
+        defer { addedPayload.finalize() }
+        XCTAssertTrue(try addedPayload.step())
+        let restored = try JSONDecoder().decode(
+            AgentSession.self,
+            from: try XCTUnwrap(addedPayload.data(0))
+        )
+        XCTAssertEqual(restored.title, "Renamed")
+    }
+
     func testSessionReadReceiptsRoundTripAndCascadeWithTheirSession() throws {
         let database = try makeDatabase()
         let session = AgentSession(kind: .claude, title: "Unread")

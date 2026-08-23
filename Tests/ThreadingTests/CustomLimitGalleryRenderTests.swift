@@ -5,7 +5,7 @@ import XCTest
 /// Every surface a user-authored limit reaches, drawn light and dark.
 ///
 /// One test per place the feature is *visible*, because the rule this whole feature rests on is a
-/// visual one — a limit changes the tint and the track and never the number — and that claim can
+/// visual one — a limit adds a marker and tint and never changes the number — and that claim can
 /// only be reviewed in a picture. The assertions beside each render catch what an image cannot: a
 /// surface that drew nothing at all.
 ///
@@ -66,7 +66,7 @@ final class CustomLimitGalleryRenderTests: XCTestCase {
 
     // MARK: - The Popover's Bars
 
-    /// Where a limit is read at length: full-strength track to the line, quiet past it, the
+    /// Where a limit is read at length: a colored line keyed once below the group, with the
     /// provider's own percentage in the tint the *user's* line earns it.
     func testRendersTheWindowRows() throws {
         try draw("limits-window-rows") { appearance in
@@ -78,7 +78,8 @@ final class CustomLimitGalleryRenderTests: XCTestCase {
                     limits: [self.rule]
                 )
             ]
-            let column = NSStackView(views: rows)
+            let content: [NSView] = rows
+            let column = NSStackView(views: content + [UsageLimitLegendView()])
             column.orientation = .vertical
             column.alignment = .leading
             column.spacing = Design.Spacing.medium
@@ -86,7 +87,7 @@ final class CustomLimitGalleryRenderTests: XCTestCase {
                 row.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
             }
             _ = appearance
-            return (column, NSSize(width: 260, height: 120))
+            return (column, NSSize(width: 260, height: 140))
         }
     }
 

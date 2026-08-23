@@ -16,6 +16,12 @@ private enum RemoteTerminalHydrationDefaults {
     static let maximumDelay: Duration = .seconds(3)
 }
 
+private enum RemoteSessionStartupDefaults {
+    /// A provider can spend several seconds loading history before its surface becomes live. The
+    /// wait is host-owned and bounded; no client catalogue size participates in this deadline.
+    static let maximumWait: Duration = .seconds(60)
+}
+
 /// Bridges a live session to its remote subscribers: taps the PTY byte stream, keeps a ring for
 /// late joiners, fans output out to every watcher, and routes remote input back in.
 ///
@@ -37,6 +43,7 @@ final class RemoteSessionMirrorRegistry {
     private let terminalHydrationOutputQuietDelay: Duration
     private let terminalHydrationFirstOutputMaximumDelay: Duration
     private let terminalHydrationMaximumDelay: Duration
+    private let sessionStartupMaximumWait: Duration
     /// Read at every release rather than cached, so a `defaults write` takes effect without a
     /// relaunch and a test can hand this registry milliseconds — or zero, which is the
     /// release-immediately behaviour the grace replaced.
@@ -49,6 +56,7 @@ final class RemoteSessionMirrorRegistry {
         terminalHydrationFirstOutputMaximumDelay: Duration =
             RemoteTerminalHydrationDefaults.firstOutputMaximumDelay,
         terminalHydrationMaximumDelay: Duration = RemoteTerminalHydrationDefaults.maximumDelay,
+        sessionStartupMaximumWait: Duration = RemoteSessionStartupDefaults.maximumWait,
         viewportLeaseGrace: @escaping @MainActor () -> Duration = {
             .seconds(AppSettings.shared.remoteViewportLeaseGraceSeconds)
         }
@@ -58,6 +66,7 @@ final class RemoteSessionMirrorRegistry {
         self.terminalHydrationFirstOutputMaximumDelay =
             terminalHydrationFirstOutputMaximumDelay
         self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
+        self.sessionStartupMaximumWait = sessionStartupMaximumWait
         self.viewportLeaseGrace = viewportLeaseGrace
         // A remote surface is a view of this app, so theme changes are live state rather than a
         // reconnect-only preference. Broadcast broadly and resolve per session: assignments can
@@ -184,6 +193,24 @@ final class RemoteSessionMirrorRegistry {
         var viewportLeases = ViewportLeases()
     }
 
+    enum InitialSessionAttach {
+        case attached
+        case waitingForStartup
+        case unavailable
+    }
+
+    private struct StartupWaiter {
+        let connection: RemoteConnection
+        let authorization: RemoteAuthorization
+        let authorizationIsCurrent: () -> Bool
+        let didAttach: () -> Void
+    }
+
+    private struct StartingSession {
+        var waiters: [ObjectIdentifier: StartupWaiter] = [:]
+        var expiry: Task<Void, Never>?
+    }
+
     /// One socket's initial replay plus first phone-owned resize. The external terminal program
     /// has no repaint-finished API, so the Mac observes its first post-SIGWINCH output burst,
     /// takes one final authoritative screen seed, and then puts an ordered ready frame on this
@@ -223,6 +250,10 @@ final class RemoteSessionMirrorRegistry {
     private var inputControls: [SessionID: RemoteInputControlRecord] = [:]
     private var focusedControllerReleaseTasks: [SessionID: DispatchWorkItem] = [:]
     private var sessionByConnection: [ObjectIdentifier: SessionID] = [:]
+    /// Sessions whose create/resume transaction owns producing a live surface. Authenticated
+    /// sockets wait here and receive the ordinary hello from `attach` once that surface exists.
+    private var startingSessions: [SessionID: StartingSession] = [:]
+    private var startupSessionByConnection: [ObjectIdentifier: SessionID] = [:]
     private var themeEventSubscribers: [ObjectIdentifier: RemoteConnection] = [:]
     private var pendingConversationBroadcasts: [SessionID: DispatchWorkItem] = [:]
     private var latestWorkspaceActivity: [SessionID: RemoteWorkspaceChangedDTO] = [:]
@@ -304,6 +335,23 @@ final class RemoteSessionMirrorRegistry {
         )
     }
 
+    /// One already-authorised catalogue row for an O(changed) mutation response.
+    func sessionSummary(
+        for sessionID: SessionID,
+        authorization: RemoteAuthorization
+    ) -> RemoteSessionSummaryDTO? {
+        guard let session = ProjectStore.shared.session(withID: sessionID),
+              let project = ProjectStore.shared.project(forSessionID: sessionID),
+              RemoteSessionAccess.isVisible(session),
+              authorization.scope.covers(sessionID) else { return nil }
+        return summary(
+            for: session,
+            projectName: project.name,
+            projectLimitRecovery: project.limitRecoveryPolicy,
+            authorization: authorization
+        )
+    }
+
     private func terminalSummary(
         for terminal: ProjectTerminal,
         projectName: String
@@ -339,6 +387,7 @@ final class RemoteSessionMirrorRegistry {
         // The thumbnail route is gated exactly like the attachment route it shrinks, so it is
         // advertised to whoever may read attachments at all.
         features.append(RemoteRESTFeature.attachmentThumbnails.rawValue)
+        features.append(RemoteRESTFeature.sessionStartupHandshake.rawValue)
         return features.isEmpty ? nil : features
     }
 
@@ -584,6 +633,116 @@ final class RemoteSessionMirrorRegistry {
     }
 
     // MARK: - Subscription
+
+    /// Marks the interval between a durable row being accepted and its live surface existing.
+    /// The marker belongs to the host transaction, so a client cannot make an arbitrary dormant
+    /// session wait indefinitely merely by opening its socket.
+    func noteSessionStarting(_ sessionID: SessionID) {
+        guard startingSessions[sessionID] == nil else { return }
+        var starting = StartingSession()
+        let maximumWait = sessionStartupMaximumWait
+        starting.expiry = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: maximumWait)
+            guard !Task.isCancelled else { return }
+            self?.expireSessionStartup(sessionID)
+        }
+        startingSessions[sessionID] = starting
+    }
+
+    /// Attaches now, waits only when a host-owned startup transaction names this session, or
+    /// refuses it. Waiting sends an immediate progress frame and later completes through the
+    /// exact same `attach` path as every ordinary session socket.
+    func attachOrWaitForStartup(
+        _ connection: RemoteConnection,
+        to sessionID: SessionID,
+        authorization: RemoteAuthorization,
+        authorizationIsCurrent: @escaping () -> Bool,
+        didAttach: @escaping () -> Void
+    ) -> InitialSessionAttach {
+        if attach(connection, to: sessionID, authorization: authorization) {
+            didAttach()
+            // The surface may have become attachable before its normal readiness callback ran.
+            // Complete any older waiters through the same attach path and retire an otherwise
+            // empty startup marker instead of keeping it alive until the timeout.
+            attachStartupWaiters(sessionID)
+            if let starting = startingSessions[sessionID], starting.waiters.isEmpty {
+                starting.expiry?.cancel()
+                startingSessions[sessionID] = nil
+            }
+            return .attached
+        }
+        guard var starting = startingSessions[sessionID],
+              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)) else {
+            return .unavailable
+        }
+        let key = ObjectIdentifier(connection)
+        starting.waiters[key] = StartupWaiter(
+            connection: connection,
+            authorization: authorization,
+            authorizationIsCurrent: authorizationIsCurrent,
+            didAttach: didAttach
+        )
+        startingSessions[sessionID] = starting
+        startupSessionByConnection[key] = sessionID
+        connection.sendText(encode(RemoteSessionStartingDTO()))
+        return .waitingForStartup
+    }
+
+    private func attachStartupWaiters(_ sessionID: SessionID) {
+        guard var starting = startingSessions[sessionID], !starting.waiters.isEmpty else {
+            return
+        }
+        var remaining: [ObjectIdentifier: StartupWaiter] = [:]
+        var attachedAny = false
+        for (key, waiter) in starting.waiters {
+            startupSessionByConnection[key] = nil
+            guard waiter.authorizationIsCurrent() else {
+                waiter.connection.sendClose(code: 4003, reason: "Share revoked")
+                continue
+            }
+            if attach(
+                waiter.connection,
+                to: sessionID,
+                authorization: waiter.authorization
+            ) {
+                attachedAny = true
+                waiter.didAttach()
+            } else {
+                remaining[key] = waiter
+                startupSessionByConnection[key] = sessionID
+            }
+        }
+        starting.waiters = remaining
+        if remaining.isEmpty {
+            starting.expiry?.cancel()
+            startingSessions[sessionID] = nil
+        } else {
+            startingSessions[sessionID] = starting
+        }
+        if attachedAny { broadcastSessionRow(sessionID) }
+    }
+
+    private func expireSessionStartup(_ sessionID: SessionID) {
+        guard let starting = startingSessions.removeValue(forKey: sessionID) else { return }
+        for (key, waiter) in starting.waiters {
+            startupSessionByConnection[key] = nil
+            // Startup exhaustion is terminal for this route, not a healthy-socket action
+            // refusal. `ended` prevents the client from reconnecting to a marker the host has
+            // deliberately retired and replacing the concrete failure with transport noise.
+            waiter.connection.sendText(encode(RemoteEndedDTO(reason: "sessionStartupTimedOut")))
+            waiter.connection.sendClose(code: 4004, reason: "Session startup timed out")
+        }
+    }
+
+    private func cancelSessionStartup(_ sessionID: SessionID, reason: String) {
+        guard let starting = startingSessions.removeValue(forKey: sessionID) else { return }
+        starting.expiry?.cancel()
+        for (key, waiter) in starting.waiters {
+            startupSessionByConnection[key] = nil
+            waiter.connection.sendText(encode(RemoteEndedDTO(reason: "sessionClosed")))
+            waiter.connection.sendClose(code: 4004, reason: reason)
+        }
+    }
 
     /// Attaches a connection to a session's terminal mirror, sending it `hello` and the ring
     /// snapshot. Returns false if the session has no live terminal or conversation surface.
@@ -982,6 +1141,11 @@ final class RemoteSessionMirrorRegistry {
 
     func detach(_ connection: RemoteConnection) {
         let key = ObjectIdentifier(connection)
+        if let startupSessionID = startupSessionByConnection.removeValue(forKey: key),
+           var starting = startingSessions[startupSessionID] {
+            starting.waiters[key] = nil
+            startingSessions[startupSessionID] = starting
+        }
         cancelTerminalHydration(for: key)
         themeEventSubscribers.removeValue(forKey: key)
         if let terminalID = terminalByConnection.removeValue(forKey: key) {
@@ -1092,6 +1256,7 @@ final class RemoteSessionMirrorRegistry {
         // words. See `RemoteScreenSeed`.
         ring.append(snapshot.screenSeed)
         mirrors[sessionID] = Mirror(ring: ring, surface: .terminal)
+        attachStartupWaiters(sessionID)
         return snapshot.state
     }
 
@@ -1158,6 +1323,9 @@ final class RemoteSessionMirrorRegistry {
         }
         for work in pendingConversationBroadcasts.values { work.cancel() }
         pendingConversationBroadcasts.removeAll()
+        for starting in startingSessions.values { starting.expiry?.cancel() }
+        startingSessions.removeAll()
+        startupSessionByConnection.removeAll()
         mirrors.removeAll()
         terminalMirrors.removeAll()
         terminalByConnection.removeAll()
@@ -2025,6 +2193,7 @@ final class RemoteSessionMirrorRegistry {
     /// Streaming providers can call this for every token, so updates are coalesced to one frame
     /// per display refresh.
     func sessionConversationChanged(_ sessionID: SessionID) {
+        attachStartupWaiters(sessionID)
         guard mirrors[sessionID]?.surface == .conversation,
               pendingConversationBroadcasts[sessionID] == nil else { return }
         let work = DispatchWorkItem { [weak self] in
@@ -2173,7 +2342,8 @@ final class RemoteSessionMirrorRegistry {
                       ) else { continue }
                 connection.sendText(encode(delta))
             }
-        case .sessionOrder(let sessionID), .sessionRow(let sessionID):
+        case .sessionAdded(_, let sessionID), .sessionOrder(let sessionID),
+             .sessionRow(let sessionID):
             let session = ProjectStore.shared.session(withID: sessionID)
             let project = ProjectStore.shared.project(forSessionID: sessionID)
             for connection in themeEventSubscribers.values {
@@ -2374,6 +2544,7 @@ final class RemoteSessionMirrorRegistry {
     /// Called by `AgentRuntime` when a session is discarded or the app is quitting: tells every
     /// watcher the mirror ended so the CLI is not left blocked and the client stops waiting.
     func sessionDiscarded(_ sessionID: SessionID) {
+        cancelSessionStartup(sessionID, reason: "Session closed")
         pendingConversationBroadcasts.removeValue(forKey: sessionID)?.cancel()
         latestWorkspaceActivity.removeValue(forKey: sessionID)
         typingConnections.removeValue(forKey: sessionID)
@@ -2682,6 +2853,11 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func closeUnavailableSessions() {
+        for sessionID in Array(startingSessions.keys) where !RemoteSessionAccess.isVisible(
+            ProjectStore.shared.session(withID: sessionID)
+        ) {
+            cancelSessionStartup(sessionID, reason: "Session not available")
+        }
         for sessionID in Array(mirrors.keys) where !RemoteSessionAccess.isVisible(
             ProjectStore.shared.session(withID: sessionID)
         ) {

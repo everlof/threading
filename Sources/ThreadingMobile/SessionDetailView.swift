@@ -138,6 +138,7 @@ struct SessionDetailView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
     let session: RemoteSessionSummaryDTO
+    let openingStrategy: MobileSessionOpeningStrategy
     @StateObject private var workspaceActivity: MobileWorkspaceActivity
     @State private var connection: RemoteSessionConnection?
     @State private var launchError: String?
@@ -159,8 +160,12 @@ struct SessionDetailView: View {
         MobileSessionChrome.currentSession(session, in: model.me)
     }
 
-    init(session: RemoteSessionSummaryDTO) {
+    init(
+        session: RemoteSessionSummaryDTO,
+        openingStrategy: MobileSessionOpeningStrategy = .resumeIfNeeded
+    ) {
         self.session = session
+        self.openingStrategy = openingStrategy
         _workspaceActivity = StateObject(wrappedValue: MobileWorkspaceActivity(
             sessionID: session.id
         ))
@@ -187,7 +192,8 @@ struct SessionDetailView: View {
                 }
             } else {
                 MobileLoadingPlaceholder(MobileSessionChrome.openingStatus(
-                    isAvailable: session.isAvailable,
+                    isAvailable: openingStrategy == .awaitCreatedSession
+                        || session.isAvailable,
                     routeWalk: model.routeWalkStatus
                 ))
             }
@@ -559,7 +565,9 @@ struct SessionDetailView: View {
             // the newest catalogue row rather than the immutable navigation value, which may
             // still say that the pre-switch surface was available.
             let latest = model.me?.sessions.first(where: { $0.id == session.id }) ?? session
-            try await model.makeSessionReady(latest)
+            if openingStrategy == .resumeIfNeeded {
+                try await model.makeSessionReady(latest)
+            }
             guard let client = model.client else {
                 throw RemoteClientError.invalidResponse
             }

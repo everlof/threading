@@ -394,6 +394,37 @@ final class ProjectDatabase {
         try upsert(project, position: position)
     }
 
+    /// Inserts one new session row and advances the graph generation in the same transaction.
+    /// Creation changes membership; walking every standing row to prove that one addition made
+    /// remote Start scale with the entire archive.
+    func addSession(
+        _ session: AgentSession,
+        to projectID: ProjectID,
+        position: Int
+    ) throws {
+        try database.transaction {
+            let found = try storeGeneration()
+            if let observedGeneration, observedGeneration != found {
+                throw ProjectDatabaseWriteError.staleGeneration(
+                    observed: observedGeneration,
+                    found: found
+                )
+            }
+            try upsert(session, in: projectID, position: position)
+            try advanceGeneration(from: found)
+        }
+    }
+
+    /// Persists one standing session without touching any neighbouring row. Membership and row
+    /// order are unchanged, so this deliberately does not move the graph generation.
+    func saveSession(
+        _ session: AgentSession,
+        in projectID: ProjectID,
+        position: Int
+    ) throws {
+        try upsert(session, in: projectID, position: position)
+    }
+
     /// Persists only window navigation state.
     ///
     /// A sidebar selection changes one value, not the project graph. Routing it through

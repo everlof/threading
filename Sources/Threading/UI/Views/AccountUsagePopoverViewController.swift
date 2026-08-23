@@ -9,17 +9,22 @@ import AppKit
 final class AccountUsagePopoverViewController: NSViewController, NSTableViewDataSource,
     NSTableViewDelegate {
 
+    typealias LimitsProvider = @MainActor (AccountID) -> [CustomLimit]
+
     // MARK: - Properties
 
     private let account: AgentAccount
     private let isEmbedded: Bool
     private let readingProvider: (AgentAccount) -> AccountUsageReading
+    private let limitsProvider: LimitsProvider
     private let nowProvider: () -> Date
     private var renderedAt = Date()
     private var windows: [AccountUsage.Window] = []
+    private var limits: [CustomLimit] = []
     private let contentStack = NSStackView()
     private let nameLabel = NSTextField(labelWithString: "")
     private let planLabel = NSTextField(labelWithString: "")
+    private let limitLegend = UsageLimitLegendView()
     private let footerLabel = NSTextField(labelWithString: "")
     private let appEvents = AppEventObservations()
 
@@ -63,11 +68,15 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         account: AgentAccount,
         isEmbedded: Bool = false,
         readingProvider: ((AgentAccount) -> AccountUsageReading)? = nil,
+        limitsProvider: @escaping LimitsProvider = {
+            CustomLimitSettings.shared.rules(for: $0)
+        },
         nowProvider: @escaping () -> Date = Date.init
     ) {
         self.account = account
         self.isEmbedded = isEmbedded
         self.readingProvider = readingProvider ?? { AccountUsageService.shared.reading(for: $0) }
+        self.limitsProvider = limitsProvider
         self.nowProvider = nowProvider
         super.init(nibName: nil, bundle: nil)
     }
@@ -117,8 +126,10 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
 
         contentStack.addArrangedSubview(header)
         contentStack.addArrangedSubview(scrollView)
+        contentStack.addArrangedSubview(limitLegend)
+        contentStack.setCustomSpacing(Design.Spacing.tight, after: limitLegend)
         contentStack.addArrangedSubview(footerLabel)
-        for arranged in [header, scrollView, footerLabel] {
+        for arranged in [header, scrollView, limitLegend, footerLabel] {
             arranged.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
         }
         windowListHeight.isActive = true
@@ -178,6 +189,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         let reading = readingProvider(account)
         let usage = reading.usage
         renderedAt = nowProvider()
+        limits = limitsProvider(account.id)
 
         nameLabel.stringValue = "\(account.provider.displayName) — \(account.displayName)"
         planLabel.stringValue = usage?.planLabel ?? ""
@@ -189,6 +201,11 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         // controls intersecting this bounded viewport. A fixed visible prefix would hide the
         // actual limit; a stack inside a scroll view would retain the same eager cost.
         windows = usage?.allWindows ?? []
+        limitLegend.isHidden = !CustomLimitBounds.hasDrawableLine(
+            in: windows,
+            rules: limits,
+            at: renderedAt
+        )
         tableView.reloadData()
         scrollView.isHidden = windows.isEmpty
         windowListHeight.constant = min(
@@ -215,7 +232,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
             UsageWindowRow(
                 window: windows[row],
                 now: renderedAt,
-                limits: CustomLimitSettings.shared.rules(for: account.id)
+                limits: limits
             ),
             columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width
         )
@@ -251,6 +268,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
     }
 
     var windowScrollOriginForTesting: NSPoint { scrollView.contentView.bounds.origin }
+    var showsLimitLegendForTesting: Bool { !limitLegend.isHidden }
 
     func scrollWindowToVisibleForTesting(_ row: Int) {
         guard windows.indices.contains(row) else { return }

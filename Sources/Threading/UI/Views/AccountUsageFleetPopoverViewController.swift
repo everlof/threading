@@ -8,6 +8,7 @@ final class AccountUsageFleetPopoverViewController: NSViewController {
     typealias AccountsProvider = @MainActor () -> [AgentAccount]
     typealias ReadingProvider = @MainActor (AgentAccount) -> AccountUsageReading
     typealias RefreshProvider = @MainActor (AgentAccount) -> Void
+    typealias LimitsProvider = AccountUsageFleetView.LimitsProvider
     typealias NowProvider = @MainActor () -> Date
 
     private let currentAccountID: AccountID?
@@ -16,13 +17,15 @@ final class AccountUsageFleetPopoverViewController: NSViewController {
     private let readingProvider: ReadingProvider
     private let refreshProvider: RefreshProvider
     private let nowProvider: NowProvider
-    private let fleet = AccountUsageFleetView(
-        maximumHeight: Design.AccountUsageFleet.popoverMaximumHeight
-    )
+    private let fleet: AccountUsageFleetView
     private let appEvents = AppEventObservations()
     private var accountsByID: [AccountID: AgentAccount] = [:]
 
     var onHandoff: ((AgentAccount) -> Void)?
+    var fleetVerticalScrollHandoffForTesting: ThemedScrollView.VerticalScrollHandoff {
+        fleet.verticalScrollHandoffForTesting
+    }
+    var showsLimitLegendForTesting: Bool { fleet.showsLimitLegendForTesting }
 
     init(
         currentAccountID: AccountID?,
@@ -36,6 +39,9 @@ final class AccountUsageFleetPopoverViewController: NSViewController {
         refreshProvider: @escaping RefreshProvider = {
             AccountUsageService.shared.refresh($0, force: true)
         },
+        limitsProvider: @escaping LimitsProvider = {
+            CustomLimitSettings.shared.rules(for: $0)
+        },
         nowProvider: @escaping NowProvider = { Date() }
     ) {
         self.currentAccountID = currentAccountID
@@ -44,6 +50,11 @@ final class AccountUsageFleetPopoverViewController: NSViewController {
         self.readingProvider = readingProvider
         self.refreshProvider = refreshProvider
         self.nowProvider = nowProvider
+        fleet = AccountUsageFleetView(
+            maximumHeight: Design.AccountUsageFleet.popoverMaximumHeight,
+            scrollHost: .standalone,
+            limitsProvider: limitsProvider
+        )
         super.init(nibName: nil, bundle: nil)
     }
 

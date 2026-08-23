@@ -242,10 +242,22 @@ private struct AccountUsageFleetSummaryIndex {
 /// retained because it is constant-size; account cards are table rows, so provider/account
 /// cardinality affects cheap values and scroll extent rather than view construction at open.
 final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDelegate {
+    typealias LimitsProvider = @MainActor (AccountID) -> [CustomLimit]
+
+    enum ScrollHost: Equatable {
+        /// The fleet is the only vertical viewport, as in the pinned toolbar popover.
+        case standalone
+        /// The fleet is embedded in a vertically scrolling page, as in Usage settings.
+        case nestedPage
+    }
+
     private let maximumHeight: CGFloat
+    private let scrollHost: ScrollHost
+    private let limitsProvider: LimitsProvider
     private let summaryTitle = NSTextField(labelWithString: "")
     private let summaryStatus = NSTextField(labelWithString: "")
     private let summaryReset = NSTextField(labelWithString: "")
+    private let limitLegend = UsageLimitLegendView()
     private let table = ThemedTableView()
     private let scroll = ThemedScrollView()
     private lazy var heightConstraint = scroll.heightAnchor.constraint(
@@ -253,6 +265,7 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
     )
     private var items: [AccountUsageFleetItem] = []
     private var indexByAccountID: [AccountID: Int] = [:]
+    private var limitsByAccountID: [AccountID: [CustomLimit]] = [:]
     private var summaryIndex = AccountUsageFleetSummaryIndex()
     private var estimatedContentHeight: CGFloat = 0
     private var now = Date()
@@ -267,9 +280,21 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
     var viewportHeightForTesting: CGFloat { heightConstraint.constant }
     var summaryForTesting: AccountUsageFleetSummary { summaryIndex.summary }
     var orderedAccountIDsForTesting: [AccountID] { items.map(\.account.id) }
+    var verticalScrollHandoffForTesting: ThemedScrollView.VerticalScrollHandoff {
+        scroll.verticalScrollHandoff
+    }
+    var showsLimitLegendForTesting: Bool { !limitLegend.isHidden }
 
-    init(maximumHeight: CGFloat = Design.AccountUsageFleet.settingsMaximumHeight) {
+    init(
+        maximumHeight: CGFloat = Design.AccountUsageFleet.settingsMaximumHeight,
+        scrollHost: ScrollHost = .standalone,
+        limitsProvider: @escaping LimitsProvider = {
+            CustomLimitSettings.shared.rules(for: $0)
+        }
+    ) {
         self.maximumHeight = maximumHeight
+        self.scrollHost = scrollHost
+        self.limitsProvider = limitsProvider
         super.init(frame: .zero)
         setupViews()
     }
@@ -283,11 +308,15 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         indexByAccountID = Dictionary(
             uniqueKeysWithValues: items.enumerated().map { ($0.element.account.id, $0.offset) }
         )
+        limitsByAccountID = Dictionary(uniqueKeysWithValues: items.map {
+            ($0.account.id, limitsProvider($0.account.id))
+        })
         summaryIndex.rebuild(items: items, now: now)
         estimatedContentHeight = items.reduce(CGFloat.zero) { partial, item in
             partial + estimatedHeight(for: item) + Design.AccountUsageFleet.accountGap
         }
         applySummary()
+        applyLimitLegend()
         table.reloadData()
         applyViewportHeight()
     }
@@ -311,6 +340,7 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         summaryIndex.update(item: updated, now: now)
         estimatedContentHeight += estimatedHeight(for: updated) - estimatedHeight(for: previous)
         applySummary()
+        applyLimitLegend()
         applyViewportHeight()
 
         let rows = IndexSet(integer: index)
@@ -329,6 +359,20 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         summaryReset.stringValue = summary.nextReset.map {
             L10n.format("Next reset in %@", UsageFormat.remaining(until: $0, from: now))
         } ?? ""
+    }
+
+    private func applyLimitLegend() {
+        limitLegend.isHidden = !items.contains { item in
+            guard let usage = item.reading.usage else { return false }
+            let visible = Array(usage.allWindows.lazy
+                .filter { !$0.isExpired(at: self.now) }
+                .prefix(Design.AccountUsageFleet.maximumWindowsPerAccount))
+            return CustomLimitBounds.hasDrawableLine(
+                in: visible,
+                rules: limitsByAccountID[item.account.id] ?? [],
+                at: now
+            )
+        }
     }
 
     static func stablyOrdered(_ items: [AccountUsageFleetItem]) -> [AccountUsageFleetItem] {
@@ -405,21 +449,23 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
-        scroll.verticalScrollHandoff = .atContentEnds
+        scroll.verticalScrollHandoff = scrollHost == .nestedPage ? .atContentEnds : .never
 
-        summaryRow.translatesAutoresizingMaskIntoConstraints = false
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(summaryRow)
-        addSubview(scroll)
+        let content = NSStackView(views: [summaryRow, scroll, limitLegend])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = Design.Spacing.small
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
 
         NSLayoutConstraint.activate([
-            summaryRow.topAnchor.constraint(equalTo: topAnchor),
-            summaryRow.leadingAnchor.constraint(equalTo: leadingAnchor),
-            summaryRow.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: summaryRow.bottomAnchor, constant: Design.Spacing.small),
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            summaryRow.widthAnchor.constraint(equalTo: content.widthAnchor),
+            scroll.widthAnchor.constraint(equalTo: content.widthAnchor),
+            limitLegend.widthAnchor.constraint(equalTo: content.widthAnchor),
             heightConstraint
         ])
 
@@ -472,7 +518,11 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
             as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
         host.identifier = identifier
         let item = items[row]
-        let card = AccountUsageFleetCardView(item: item, now: now)
+        let card = AccountUsageFleetCardView(
+            item: item,
+            now: now,
+            limits: limitsByAccountID[item.account.id] ?? []
+        )
         card.onHandoff = { [weak self] account in self?.onHandoff?(account) }
         host.install(
             card,
@@ -490,11 +540,13 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
 private final class AccountUsageFleetCardView: NSView {
     private let item: AccountUsageFleetItem
     private let now: Date
+    private let limits: [CustomLimit]
     var onHandoff: ((AgentAccount) -> Void)?
 
-    init(item: AccountUsageFleetItem, now: Date) {
+    init(item: AccountUsageFleetItem, now: Date, limits: [CustomLimit]) {
         self.item = item
         self.now = now
+        self.limits = limits
         super.init(frame: .zero)
         setupViews()
     }
@@ -552,7 +604,7 @@ private final class AccountUsageFleetCardView: NSView {
                 UsageWindowRow(
                     window: $0,
                     now: now,
-                    limits: CustomLimitSettings.shared.rules(for: item.account.id)
+                    limits: limits
                 )
             })
             if windows.isEmpty {

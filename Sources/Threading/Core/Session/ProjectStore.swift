@@ -116,8 +116,11 @@ final class ProjectStore {
         TerminalID: (projectIndex: Int, terminalIndex: Int)
     ] = [:]
 
-    /// Pending coalesced write, see `scheduleSave()`.
+    /// Pending high-frequency row writes. Keeping their identities means a title or turn edge
+    /// can coalesce without making the eventual write reconcile the complete project graph.
     private var saveTimer: Timer?
+    private var pendingSessionSaveIDs: Set<SessionID> = []
+    private var pendingProjectSaveIDs: Set<ProjectID> = []
 
     /// Whether a multi-system transaction may safely begin a side effect that it will later
     /// need this store to record. This is a preflight, not a promise that the next disk write
@@ -411,6 +414,7 @@ final class ProjectStore {
 
         guard validEffort,
               let index = index(ofProject: projectID),
+              sessionLocationsByID[id] == nil,
               let configuration = AgentSessionConfiguration(
                 kind: kind,
                 reasoningEffort: reasoningEffort,
@@ -438,13 +442,28 @@ final class ProjectStore {
             ?? GitInfo.currentBranch(for: projects[index].folderPath)
         session.permissionMode = permissionMode
 
-        projects[index].sessions.append(session)
-        rebuildLookupIndexes()
-        guard save() else {
+        // Preserve any coalesced title/turn observations before changing row positions. They are
+        // exact row writes too, so this does not reintroduce the whole-graph creation pause.
+        guard flushPendingRecordSaves() else {
             notifyChanged()
             return nil
         }
-        notifyChanged()
+
+        projects[index].sessions.append(session)
+        let position = projects[index].sessions.count - 1
+        sessionLocationsByID[session.id] = (index, position)
+        guard saveSessionAddition(
+            session,
+            to: projectID,
+            position: position
+        ) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
+            return nil
+        }
+        notifyChanged(sidebarImpact: .sessionAdded(
+            projectID: projectID,
+            sessionID: session.id
+        ))
 
         return session
     }
@@ -860,7 +879,7 @@ final class ProjectStore {
         else { return false }
 
         projects[location.projectIndex].terminals[location.terminalIndex].title = stored
-        scheduleSave()
+        scheduleProjectSave(projects[location.projectIndex].id)
         notifyChanged(sidebarImpact: .terminalRow(terminalID))
         return true
     }
@@ -880,7 +899,7 @@ final class ProjectStore {
 
         projects[location.projectIndex].terminals[location.terminalIndex].currentDirectory = normalized
         projects[location.projectIndex].terminals[location.terminalIndex].branch = branch
-        save()
+        _ = saveProjectRecord(at: location.projectIndex)
         notifyChanged()
     }
 
@@ -1131,6 +1150,12 @@ final class ProjectStore {
     @discardableResult
     func removeSession(id sessionID: SessionID) -> ProjectMutationResult {
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        // Flush standing rows before positions change; an exact write made afterwards must not
+        // use the shifted in-memory position and then have the delete transaction shift it again.
+        guard flushPendingRecordSaves() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
         let projectID = projects[location.projectIndex].id
         let sessionPosition = location.sessionIndex
         let indexSpan = PerformanceRecorder.shared.begin(
@@ -1283,9 +1308,9 @@ final class ProjectStore {
                 projects[location.projectIndex].sessions[location.sessionIndex]
                     .agentTitleSource = source
                 if source == .chosen {
-                    guard save() else { return .persistenceRefused }
+                    guard saveSessionRecord(at: location) else { return .persistenceRefused }
                 } else {
-                    scheduleSave()
+                    scheduleSessionSave(sessionID)
                 }
             }
             return cleaned == nil ? .cleared : .accepted
@@ -1316,9 +1341,9 @@ final class ProjectStore {
         projects[location.projectIndex].sessions[location.sessionIndex].agentTitleSource =
             cleaned == nil ? nil : source
         if source == .chosen {
-            guard save() else { return .persistenceRefused }
+            guard saveSessionRecord(at: location) else { return .persistenceRefused }
         } else {
-            scheduleSave()
+            scheduleSessionSave(sessionID)
         }
         let titleCanReorderSidebar = AppSettings.sidebarSessionOrder == .name
             && AppSettings.usesAgentTitleInSidebar
@@ -1458,7 +1483,7 @@ final class ProjectStore {
     ) -> ProjectMutationResult {
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
         mutate(&projects[location.projectIndex].sessions[location.sessionIndex])
-        guard save() else { return .persistenceRefused }
+        guard saveSessionRecord(at: location) else { return .persistenceRefused }
         return .applied
     }
 
@@ -1476,7 +1501,7 @@ final class ProjectStore {
         guard let location = locate(sessionID: sessionID),
               stateWritePolicy.allowsWrites else { return }
         projects[location.projectIndex].sessions[location.sessionIndex].lastTurnAt = Date()
-        scheduleSave()
+        scheduleSessionSave(sessionID)
     }
 
     // MARK: - Lookup
@@ -1588,13 +1613,57 @@ final class ProjectStore {
     /// `saveProject` deliberately does not rewrite session rows. Record only the project payload
     /// it committed while keeping the last durable sessions in the rollback snapshot.
     private func recordPersistedProject(at index: Int) {
-        guard projects.indices.contains(index),
-              let persistedIndex = persistedProjects.firstIndex(where: {
-                  $0.id == projects[index].id
-              }) else { return }
+        guard projects.indices.contains(index) else { return }
+        let persistedIndex: Int
+        if persistedProjects.indices.contains(index),
+           persistedProjects[index].id == projects[index].id {
+            persistedIndex = index
+        } else if let located = persistedProjects.firstIndex(where: {
+            $0.id == projects[index].id
+        }) {
+            // Structural saves refresh the complete snapshot, so this is a defensive recovery
+            // path rather than ordinary lookup work.
+            persistedIndex = located
+        } else {
+            return
+        }
         var committed = projects[index]
         committed.sessions = persistedProjects[persistedIndex].sessions
         persistedProjects[persistedIndex] = committed
+    }
+
+    /// Records the one session row an O(changed) write committed, preserving every neighbouring
+    /// payload in the rollback snapshot without copying persistence work back into the database.
+    private func recordPersistedSession(
+        projectIndex: Int,
+        sessionIndex: Int
+    ) {
+        guard projects.indices.contains(projectIndex),
+              projects[projectIndex].sessions.indices.contains(sessionIndex) else { return }
+        let persistedProjectIndex: Int
+        if persistedProjects.indices.contains(projectIndex),
+           persistedProjects[projectIndex].id == projects[projectIndex].id {
+            persistedProjectIndex = projectIndex
+        } else if let located = persistedProjects.firstIndex(where: {
+            $0.id == projects[projectIndex].id
+        }) {
+            persistedProjectIndex = located
+        } else {
+            return
+        }
+        let session = projects[projectIndex].sessions[sessionIndex]
+        let persistedSessionIndex: Int
+        if persistedProjects[persistedProjectIndex].sessions.indices.contains(sessionIndex),
+           persistedProjects[persistedProjectIndex].sessions[sessionIndex].id == session.id {
+            persistedSessionIndex = sessionIndex
+        } else if let located = persistedProjects[persistedProjectIndex].sessions.firstIndex(
+            where: { $0.id == session.id }
+        ) {
+            persistedSessionIndex = located
+        } else {
+            return
+        }
+        persistedProjects[persistedProjectIndex].sessions[persistedSessionIndex] = session
     }
 
     private func restorePersistedSelection() {
@@ -1615,18 +1684,25 @@ final class ProjectStore {
 
     // MARK: - Persistence
 
-    /// Coalesces rapid changes into a single write.
-    ///
-    /// Structural edits persist immediately; only high-frequency updates such as terminal
-    /// titles come through here, where losing the last fraction of a second costs nothing.
-    private func scheduleSave() {
+    /// Coalesces rapid changes while retaining which durable rows actually changed.
+    private func scheduleSessionSave(_ sessionID: SessionID) {
+        pendingSessionSaveIDs.insert(sessionID)
+        schedulePendingRecordSave()
+    }
+
+    private func scheduleProjectSave(_ projectID: ProjectID) {
+        pendingProjectSaveIDs.insert(projectID)
+        schedulePendingRecordSave()
+    }
+
+    private func schedulePendingRecordSave() {
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(
             withTimeInterval: ProjectStoreDefaults.saveCoalescingInterval,
             repeats: false
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, !self.save() else { return }
+                guard let self, !self.flushPendingRecordSaves() else { return }
                 self.notifyChanged()
             }
         }
@@ -1634,16 +1710,67 @@ final class ProjectStore {
 
     /// Flushes any pending coalesced write, used before the app exits.
     func flushPendingSave() {
-        guard saveTimer != nil else { return }
+        _ = flushPendingRecordSaves()
+    }
+
+    /// Flushes only the coalesced project/session rows. Successful rows update the rollback
+    /// snapshot as they commit, so a later failure restores exactly what SQLite accepted.
+    @discardableResult
+    private func flushPendingRecordSaves() -> Bool {
+        guard saveTimer != nil
+                || !pendingProjectSaveIDs.isEmpty
+                || !pendingSessionSaveIDs.isEmpty else { return true }
+
         saveTimer?.invalidate()
         saveTimer = nil
-        save()
+        let projectIDs = pendingProjectSaveIDs
+        let sessionIDs = pendingSessionSaveIDs
+        pendingProjectSaveIDs.removeAll(keepingCapacity: true)
+        pendingSessionSaveIDs.removeAll(keepingCapacity: true)
+
+        guard prepareForImmediateSave("coalesced records") else { return false }
+
+        for projectID in projectIDs {
+            guard let index = index(ofProject: projectID) else { continue }
+            guard stateManager.saveProject(projects[index], position: index) else {
+                recordFailedWritePolicy()
+                restorePersistedSnapshot()
+                return false
+            }
+            recordPersistedProject(at: index)
+        }
+        for sessionID in sessionIDs {
+            guard let location = locate(sessionID: sessionID) else { continue }
+            let project = projects[location.projectIndex]
+            let session = project.sessions[location.sessionIndex]
+            guard stateManager.saveSession(
+                session,
+                in: project.id,
+                position: location.sessionIndex
+            ) else {
+                recordFailedWritePolicy()
+                restorePersistedSnapshot()
+                return false
+            }
+            recordPersistedSession(
+                projectIndex: location.projectIndex,
+                sessionIndex: location.sessionIndex
+            )
+        }
+        return true
+    }
+
+    private func discardPendingRecordSaves() {
+        saveTimer?.invalidate()
+        saveTimer = nil
+        pendingProjectSaveIDs.removeAll(keepingCapacity: true)
+        pendingSessionSaveIDs.removeAll(keepingCapacity: true)
     }
 
     @discardableResult
     private func save() -> Bool {
-        saveTimer?.invalidate()
-        saveTimer = nil
+        // A whole-state save includes every pending row, so it supersedes their timer.
+        discardPendingRecordSaves()
 
         guard prepareForImmediateSave("projects state") else { return false }
 
@@ -1660,6 +1787,76 @@ final class ProjectStore {
         return true
     }
 
+    /// The new-row fast path: one validated SQL upsert plus the graph-generation edge.
+    private func saveSessionAddition(
+        _ session: AgentSession,
+        to projectID: ProjectID,
+        position: Int
+    ) -> Bool {
+        guard prepareForImmediateSave("session addition") else {
+            restorePersistedSnapshot()
+            return false
+        }
+        guard stateManager.addSession(session, to: projectID, position: position) else {
+            recordFailedWritePolicy()
+            restorePersistedSnapshot()
+            return false
+        }
+        recordPersistedSnapshot()
+        return true
+    }
+
+    /// The standing-row fast path used by launch bookkeeping and other isolated mutations.
+    private func saveSessionRecord(
+        at location: (projectIndex: Int, sessionIndex: Int)
+    ) -> Bool {
+        guard projects.indices.contains(location.projectIndex),
+              projects[location.projectIndex].sessions.indices.contains(location.sessionIndex)
+        else { return false }
+        let sessionID = projects[location.projectIndex].sessions[location.sessionIndex].id
+        // This write includes the target's latest coalesced fields. Flush only the other rows.
+        pendingSessionSaveIDs.remove(sessionID)
+        guard flushPendingRecordSaves(), prepareForImmediateSave("session") else {
+            restorePersistedSnapshot()
+            return false
+        }
+        let project = projects[location.projectIndex]
+        let session = project.sessions[location.sessionIndex]
+        guard stateManager.saveSession(
+            session,
+            in: project.id,
+            position: location.sessionIndex
+        ) else {
+            recordFailedWritePolicy()
+            restorePersistedSnapshot()
+            return false
+        }
+        recordPersistedSession(
+            projectIndex: location.projectIndex,
+            sessionIndex: location.sessionIndex
+        )
+        return true
+    }
+
+    /// Writes one project's own payload (including its standalone terminals) without touching
+    /// session rows. Used by terminal startup metadata such as OSC 7 location reports.
+    private func saveProjectRecord(at projectIndex: Int) -> Bool {
+        guard projects.indices.contains(projectIndex) else { return false }
+        let projectID = projects[projectIndex].id
+        pendingProjectSaveIDs.remove(projectID)
+        guard flushPendingRecordSaves(), prepareForImmediateSave("project") else {
+            restorePersistedSnapshot()
+            return false
+        }
+        guard stateManager.saveProject(projects[projectIndex], position: projectIndex) else {
+            recordFailedWritePolicy()
+            restorePersistedSnapshot()
+            return false
+        }
+        recordPersistedProject(at: projectIndex)
+        return true
+    }
+
     /// The permanent-delete fast path: one SQL delete and one positional shift, instead of
     /// encoding and upserting every session in every project on the main actor.
     private func saveSessionRemoval(
@@ -1667,9 +1864,6 @@ final class ProjectStore {
         from projectID: ProjectID,
         at position: Int
     ) -> Bool {
-        saveTimer?.invalidate()
-        saveTimer = nil
-
         guard prepareForImmediateSave("session removal") else { return false }
 
         let span = PerformanceRecorder.shared.begin(

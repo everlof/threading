@@ -563,8 +563,9 @@ resolutions:
 `UsageWindowRow` and `UsageBarView` belong to the toolbar's popover and the usage settings page
 now. `AccountUsageFleetView` composes those rows into a current-first, virtualized multi-account
 surface shared by Settings and the toolbar's Option-click popover. Its aggregate reports account
-states and the next reset, never an average across incompatible windows. `AccountUsage.readings`
-is the structured reading every tinting surface consumes — the
+states and the next reset, never an average across incompatible windows. A custom-limit mark is
+keyed once in each host's footer rather than repeated under every window or account card.
+`AccountUsage.readings` is the structured reading every tinting surface consumes — the
 pill's attributed build and both menus' toned segments — and `AccountUsage.compactSummary` is
 the same list joined plain, for the surfaces that cannot tint: the tooltips and the composer's
 line inside the prompt box.
@@ -791,22 +792,21 @@ would mark the end of the bar as though the user had put it there, and an alert-
 fire one notification must not add furniture to a gauge. And a metric this build cannot evaluate
 cannot be drawn either, for the reason it is not evaluated.
 
-**The line is a change in the track, not a second mark.** `UsageBarView.capMark` quietens the
-track past the line and leaves the stretch before it at full strength; the boundary *is* the line.
-A pace mark and a cap mark are not the same kind of thing — one is where the clock stands, the
-other is where the user said to stop — and two identical 2pt ticks on a 6pt bar would be a puzzle
-rather than a reading. The remainder keeps `cappedTrackAlpha` of its colour rather than vanishing,
-because the bar is still a gauge of the *provider's* window and a remainder drawn to nothing would
-say the window ends where the user's line does. The historical progress styles draw their own
-trough and are left alone.
+**The line is a colored vertical marker.** `UsageBarView.capMark` uses the custom-limit role while
+the pace `timeMark` stays neutral, and `UsageLimitLegendView` repeats that mark once in the footer
+of the one-account popover or the all-account fleet. The earlier change in track strength was too
+easy to read as shading or a rendering accident, especially on a six-point bar. Color plus the
+written key makes the two linear positions intentional and remains valid over historical progress
+styles, whose authored trough is left untouched.
 
 **Three things the line does not touch**: the fill's length, the printed percentage, and
 consumption past the line — which still draws at full strength, because that spend really
 happened. What moves is the tint, computed against the effective bound. A row reading 47% under a
 50% line prints `47%` in the critical tint: the number is the fact, the tint is the pressure.
 
-A quieter stretch of a 6pt bar reaches nobody who is not looking at it, so the rule also names
-itself in the row's tooltip and in what the row is read out as.
+The exact rule still names itself in the row's tooltip and in what the row is read out as. The
+footer key says what the marker vocabulary means; the row says which limit that particular line
+represents.
 
 **The identity menu's metric columns take the same tone**, and nothing else about them changes.
 That is where a fenced-off login has to read as pressured, because it is the moment an account is
@@ -903,10 +903,10 @@ different mark and different words. A provider refusal **outranks** a park where
 the one the user cannot answer, and naming the smaller fact on top of the larger one would be the
 wrong way round.
 
-`UsageBarView.drawnFillWidth` and `drawnCapTrackWidth` exist because a test reached the fill
-through `subviews.first`, and the capped track inserted below it quietly made that a different
-view — the test then reported a fill of zero for a bar drawing correctly. A gauge a test has to
-index into is a gauge whose tests break on layering.
+`UsageBarView.drawnFillWidth` and `drawnCapMarkFrame` exist because a test once reached the fill
+through `subviews.first`, and adding another layer quietly made that a different view — the test
+then reported a fill of zero for a bar drawing correctly. A gauge a test has to index into is a
+gauge whose tests break on layering.
 
 ### Holding Threading's own spend
 

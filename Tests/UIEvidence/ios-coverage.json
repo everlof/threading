@@ -101,6 +101,7 @@
     {"id": "usage-limit-zero-custom-dark", "entryID": "ios-usage", "demo": "usage-limit-zero", "appearance": "dark", "theme": "custom"},
     {"id": "usage-limit-unavailable-custom-dark", "entryID": "ios-usage", "demo": "usage-limit-unavailable", "appearance": "dark", "theme": "custom"},
     {"id": "new-session-custom-dark", "entryID": "ios-new-session", "demo": "new-session", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "new-session-model-effort-picker-custom-dark", "entryID": "ios-new-session", "demo": "new-session-model-effort-picker", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "new-session-keyboard-open-custom-dark", "entryID": "ios-new-session", "demo": "new-session", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
     {"id": "new-session-keyboard-dismissed-custom-dark", "entryID": "ios-new-session", "demo": "new-session", "appearance": "dark", "theme": "custom", "keyboardState": "dismissed-after-open", "captureMode": "app", "assertions": ["keyboardShownOnce", "keyboardHidden", "noFirstResponder", "safeAreaRestored", "editorFrameRestored"]},
     {"id": "new-session-multiline-keyboard-open-custom-dark", "entryID": "ios-new-session", "demo": "new-session-multiline", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
@@ -364,7 +365,7 @@
       "priority": "important",
       "title": "New remote session",
       "description": "The owner flow for choosing checkout, agent account, model, effort and interface before starting work on the Mac.",
-      "states": ["Catalogue loaded", "Agent choices", "Start action", "Multiline prompt growth", "Keyboard open", "Keyboard dismissed and geometry restored"],
+      "states": ["Catalogue loaded", "Agent choices", "Model × effort popover with Ultra", "Start action", "Multiline prompt growth", "Keyboard open", "Keyboard dismissed and geometry restored"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/new-session-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}

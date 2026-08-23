@@ -1150,6 +1150,18 @@ enum Design {
         static let accountGap = Spacing.small
     }
 
+    /// The two lines drawn across a provider usage gauge. Time is neutral chronology; a custom
+    /// limit is user-authored policy and keeps one semantic colour in the gauge and its legend.
+    enum UsageBar {
+        static let height: CGFloat = 6
+        static let timeMarkWidth: CGFloat = 2
+        static let limitMarkWidth: CGFloat = 2
+        static let legendMarkHeight: CGFloat = 10
+        static let legendGap = Spacing.small
+
+        static var limitMarkColor: NSColor { Status.warning }
+    }
+
     // MARK: - Surface
 
     /// Fills and borders, all derived from system colours so light and dark both work and

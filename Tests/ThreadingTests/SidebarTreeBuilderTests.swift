@@ -299,6 +299,154 @@ final class SidebarTreeBuilderTests: XCTestCase {
         }
     }
 
+    /// The ordinary remote-create shape is one appended leaf. Its notification must not rebuild
+    /// all standing siblings merely to discover the new final index.
+    func testManualSessionCreationInsertsOnePresentedLeaf() throws {
+        try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
+            try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
+                try withDefault(false, forKey: "groupsSessionsByBranch") {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                        "threading-sidebar-session-add-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                    defer { try? FileManager.default.removeItem(at: directory) }
+
+                    let standing = session("Standing")
+                    let stored = project("Created", sessions: [standing])
+                    let manager = StateManager(appSupportDirectory: directory)
+                    defer { manager.closeDatabase() }
+                    XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+                    let store = ProjectStore(stateManager: manager)
+                    let controller = ProjectSidebarViewController(projectStore: store)
+                    _ = controller.view
+
+                    let added = try XCTUnwrap(store.addSession(
+                        to: stored.id,
+                        kind: .codex,
+                        title: "Added"
+                    ))
+
+                    XCTAssertEqual(
+                        controller.presentedRowKeys,
+                        [.project(stored.id), .session(standing.id), .session(added.id)]
+                    )
+                    #if DEBUG
+                    XCTAssertEqual(controller.lastProjectStructurePerformance.treeNanoseconds, 0)
+                    XCTAssertEqual(controller.lastProjectStructurePerformance.shapeNanoseconds, 0)
+                    #endif
+                }
+            }
+        }
+    }
+
+    /// A second row on a branch creates a heading, so the exact-leaf path must hand that real
+    /// regrouping to the project-local builder instead of leaving two bare rows behind.
+    func testSessionCreationFallsBackWhenItsBranchEarnsAGroup() throws {
+        try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
+            try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
+                try withDefault(true, forKey: "groupsSessionsByBranch") {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                        "threading-sidebar-session-group-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                    try FileManager.default.createDirectory(
+                        at: directory,
+                        withIntermediateDirectories: true
+                    )
+                    defer { try? FileManager.default.removeItem(at: directory) }
+                    _ = try GitProcess.run(["init", "--initial-branch=main"], in: directory)
+
+                    let standing = session("Standing", branch: "main")
+                    var stored = project("Grouped", sessions: [standing])
+                    stored.folderPath = directory.path
+                    let stateDirectory = directory.appendingPathComponent("state", isDirectory: true)
+                    let manager = StateManager(appSupportDirectory: stateDirectory)
+                    defer { manager.closeDatabase() }
+                    XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+                    let store = ProjectStore(stateManager: manager)
+                    let controller = ProjectSidebarViewController(projectStore: store)
+                    _ = controller.view
+
+                    let added = try XCTUnwrap(store.addSession(
+                        to: stored.id,
+                        kind: .codex,
+                        title: "Added"
+                    ))
+
+                    XCTAssertEqual(
+                        controller.presentedRowKeys,
+                        [
+                            .project(stored.id),
+                            .branch(stored.id, "main"),
+                            .session(standing.id),
+                            .session(added.id)
+                        ]
+                    )
+                    #if DEBUG
+                    XCTAssertGreaterThan(
+                        controller.lastProjectStructurePerformance.treeNanoseconds,
+                        0
+                    )
+                    #endif
+                }
+            }
+        }
+    }
+
+    /// Once a branch heading already exists, appending another session is one leaf insertion
+    /// under that heading; grouping being enabled must not force a project rebuild forever.
+    func testSessionCreationInsertsExactlyIntoAnExistingBranchGroup() throws {
+        try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
+            try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
+                try withDefault(true, forKey: "groupsSessionsByBranch") {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                        "threading-sidebar-existing-session-group-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                    try FileManager.default.createDirectory(
+                        at: directory,
+                        withIntermediateDirectories: true
+                    )
+                    defer { try? FileManager.default.removeItem(at: directory) }
+                    _ = try GitProcess.run(["init", "--initial-branch=main"], in: directory)
+
+                    let first = session("First", branch: "main")
+                    let second = session("Second", branch: "main")
+                    var stored = project("Grouped", sessions: [first, second])
+                    stored.folderPath = directory.path
+                    let stateDirectory = directory.appendingPathComponent("state", isDirectory: true)
+                    let manager = StateManager(appSupportDirectory: stateDirectory)
+                    defer { manager.closeDatabase() }
+                    XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+                    let store = ProjectStore(stateManager: manager)
+                    let controller = ProjectSidebarViewController(projectStore: store)
+                    _ = controller.view
+
+                    let added = try XCTUnwrap(store.addSession(
+                        to: stored.id,
+                        kind: .codex,
+                        title: "Added"
+                    ))
+
+                    XCTAssertEqual(
+                        controller.presentedRowKeys,
+                        [
+                            .project(stored.id),
+                            .branch(stored.id, "main"),
+                            .session(first.id),
+                            .session(second.id),
+                            .session(added.id)
+                        ]
+                    )
+                    #if DEBUG
+                    XCTAssertEqual(controller.lastProjectStructurePerformance.treeNanoseconds, 0)
+                    XCTAssertEqual(controller.lastProjectStructurePerformance.shapeNanoseconds, 0)
+                    #endif
+                }
+            }
+        }
+    }
+
     /// The lazy branch still has to cross on the one state that needs it.
     func testAnEmptyInitialTreeMaterializesTheEmptyState() {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -1133,6 +1281,36 @@ final class SidebarTreeBuilderTests: XCTestCase {
         let roots = SidebarTreeBuilder.rootNodes(from: store.projects)
         let treeElapsed = DispatchTime.now().uptimeNanoseconds - treeStarted
 
+        // Remote Start is one durable row plus one project-local outline insertion. Keep the
+        // former whole-graph persistence and duplicate full-reload work beside it as matched
+        // comparisons on the exact same populated store.
+        let additionStarted = DispatchTime.now().uptimeNanoseconds
+        let addedSession = try XCTUnwrap(store.addSession(
+            to: fixture.deepProjectID,
+            kind: .codex,
+            title: "Created from remote draft"
+        ))
+        let additionMutationEnded = DispatchTime.now().uptimeNanoseconds
+        #if DEBUG
+        let additionSidebarUpdate = controller.lastProjectStructureNanoseconds
+        let additionSidebarPhases = controller.lastProjectStructurePerformance
+        #endif
+        controller.view.layoutSubtreeIfNeeded()
+        let additionLayoutEnded = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(controller.presentedRowKeys.contains(.session(addedSession.id)))
+
+        let additionWholeGraphComparisonStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(manager.saveProjectsState(ProjectsState(
+            projects: store.projects,
+            selectedSessionID: store.selectedSessionID
+        )))
+        let additionWholeGraphComparisonEnded = DispatchTime.now().uptimeNanoseconds
+
+        let additionFullReloadComparisonStarted = DispatchTime.now().uptimeNanoseconds
+        controller.reload()
+        controller.view.layoutSubtreeIfNeeded()
+        let additionFullReloadComparisonEnded = DispatchTime.now().uptimeNanoseconds
+
         func nodeCount(_ nodes: [NSObject]) -> Int {
             nodes.reduce(0) { count, node in
                 count + 1 + nodeCount(SidebarTreeBuilder.children(of: node))
@@ -1206,8 +1384,8 @@ final class SidebarTreeBuilderTests: XCTestCase {
         XCTAssertFalse(controller.presentedRowKeys.contains(.session(fixture.deepSessionID)))
         XCTAssertEqual(
             controller.outlineRowCount,
-            nodeCount(roots) - 2,
-            "removing two sessions did not leave the expected tree"
+            nodeCount(roots) - 1,
+            "one addition followed by two removals did not leave the expected tree"
         )
         XCTAssertLessThan(controller.instantiatedRowCount, controller.outlineRowCount)
         #if DEBUG
@@ -1248,6 +1426,18 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + "row_scan_refresh_250_ms=\(Self.milliseconds(scanningChurnElapsed)) "
                 + "row_refresh_250_ms=\(Self.milliseconds(churnElapsed)) "
                 + "tree_build_ms=\(Self.milliseconds(treeElapsed)) "
+                + "add_mutation_ms="
+                + Self.milliseconds(additionMutationEnded - additionStarted) + " "
+                + "add_layout_ms="
+                + Self.milliseconds(additionLayoutEnded - additionMutationEnded) + " "
+                + "add_whole_graph_comparison_ms="
+                + Self.milliseconds(
+                    additionWholeGraphComparisonEnded - additionWholeGraphComparisonStarted
+                ) + " "
+                + "add_full_reload_comparison_ms="
+                + Self.milliseconds(
+                    additionFullReloadComparisonEnded - additionFullReloadComparisonStarted
+                ) + " "
                 + "resize_ticks=\(resizeTickCount) "
                 + "resize_total_ms=\(Self.milliseconds(resizeElapsed)) "
                 + "resize_p50_ms=\(Self.milliseconds(Self.percentile(0.50, in: orderedResizeSamples))) "
@@ -1264,7 +1454,19 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + "remove_selected_layout_ms="
                 + Self.milliseconds(selectedLayoutEnded - selectedMutationEnded)
         #if DEBUG
-        performanceLine += " remove_dormant_sidebar_ms="
+        performanceLine += " add_sidebar_ms="
+                + Self.milliseconds(additionSidebarUpdate)
+                + " add_tree_ms="
+                + Self.milliseconds(additionSidebarPhases.treeNanoseconds)
+                + " add_shape_ms="
+                + Self.milliseconds(additionSidebarPhases.shapeNanoseconds)
+                + " add_adopt_ms="
+                + Self.milliseconds(additionSidebarPhases.adoptionNanoseconds)
+                + " add_indexes_ms="
+                + Self.milliseconds(additionSidebarPhases.indexingNanoseconds)
+                + " add_outline_ms="
+                + Self.milliseconds(additionSidebarPhases.outlineNanoseconds)
+                + " remove_dormant_sidebar_ms="
                 + Self.milliseconds(dormantSidebarUpdate)
                 + " remove_dormant_tree_ms="
                 + Self.milliseconds(dormantSidebarPhases.treeNanoseconds)

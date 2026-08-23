@@ -24,7 +24,7 @@ struct RootView: View {
 #endif
 
     var body: some View {
-        Group {
+        MobileRootBackdrop(ground: theme.ground) {
 #if DEBUG
             if Self.terminalDemoModes.contains(
                 ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
@@ -223,7 +223,6 @@ struct RootView: View {
 #endif
         }
         .mobileTheme(theme)
-        .background(theme.ground.ignoresSafeArea())
         .background {
             ShakeGestureDetector {
                 guard issueReportRequest == nil, !isCapturingReportScreen else { return }
@@ -547,6 +546,28 @@ struct RootView: View {
         .sheet(isPresented: $showsSettings) {
             MobileSettingsView()
                 .mobileTheme(theme)
+        }
+    }
+}
+
+/// Paints the application ground independently of whichever screen navigation is laying out.
+///
+/// A focused destination is keyboard-sized during an interactive pop. Attaching its background
+/// to that destination therefore leaves the hosting window visible below it while the screen is
+/// sliding away. The sibling layer stays window-sized while navigation and the keyboard animate.
+struct MobileRootBackdrop<Content: View>: View {
+    let ground: Color
+    let content: Content
+
+    init(ground: Color, @ViewBuilder content: () -> Content) {
+        self.ground = ground
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            ground.ignoresSafeArea()
+            content
         }
     }
 }

@@ -1162,7 +1162,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         ])
 
         pendingPrompt = opening
-        sidebar.reload()
+        // `ProjectStore.addSession` publishes the exact structural insertion synchronously.
+        // Rebuilding the complete sidebar here made remote creation scale with every archived
+        // session and duplicated work the store notification had already completed.
         sidebar.select(sessionID: session.id)
         return session
     }

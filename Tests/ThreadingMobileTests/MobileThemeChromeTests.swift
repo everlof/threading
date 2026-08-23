@@ -1,3 +1,4 @@
+import SwiftUI
 import ThreadingRemoteKit
 import UIKit
 import XCTest
@@ -76,6 +77,87 @@ final class MobileFloatingSurfaceTests: XCTestCase {
             throw XCTSkip("The test colour did not resolve in sRGB")
         }
         return ColorComponents(red: red, green: green, blue: blue, alpha: alpha)
+    }
+}
+
+@MainActor
+final class MobileRootBackdropTests: XCTestCase {
+    /// During an interactive pop, SwiftUI lays the destination out only above the still-focused
+    /// keyboard. A background attached to that content stops at the same height, exposing the
+    /// hosting view below. The root backdrop must keep painting independently of that short view.
+    func testBackdropPaintsBelowKeyboardSizedNavigationContent() throws {
+        let ground = UIColor(red: 31 / 255, green: 31 / 255, blue: 31 / 255, alpha: 1)
+        let root = MobileRootBackdrop(ground: Color(uiColor: ground)) {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: 520)
+        }
+        let controller = UIHostingController(rootView: root)
+        controller.view.backgroundColor = .black
+        let window = hostedWindow(rootViewController: controller)
+        defer { window.isHidden = true }
+
+        let screenshot = UIGraphicsImageRenderer(
+            bounds: window.bounds,
+            format: onePixelPointFormat
+        ).image { context in
+            window.layer.render(in: context.cgContext)
+        }
+        let pixel = try rgba(in: screenshot, at: CGPoint(x: 20, y: 820))
+
+        XCTAssertEqual(pixel.red, 31, accuracy: 1)
+        XCTAssertEqual(pixel.green, 31, accuracy: 1)
+        XCTAssertEqual(pixel.blue, 31, accuracy: 1)
+        XCTAssertEqual(pixel.alpha, 255, accuracy: 1)
+    }
+
+    private var onePixelPointFormat: UIGraphicsImageRendererFormat {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return format
+    }
+
+    private func hostedWindow(rootViewController: UIViewController) -> UIWindow {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = rootViewController
+        window.makeKeyAndVisible()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+        return window
+    }
+
+    private func rgba(in image: UIImage, at point: CGPoint) throws -> RGBA {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let cropped = try XCTUnwrap(cgImage.cropping(to: CGRect(
+            x: Int(point.x),
+            y: Int(point.y),
+            width: 1,
+            height: 1
+        )))
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cropped, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return RGBA(red: bytes[0], green: bytes[1], blue: bytes[2], alpha: bytes[3])
+    }
+
+    private struct RGBA {
+        let red: UInt8
+        let green: UInt8
+        let blue: UInt8
+        let alpha: UInt8
     }
 }
 

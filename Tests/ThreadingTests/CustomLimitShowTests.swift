@@ -4,10 +4,10 @@ import XCTest
 
 /// Drawing the user's own line where the reading is.
 ///
-/// The rule this whole tier rests on is that a limit changes the **tint and the track**, never the
-/// length or the printed number. A bar drawing full at 40% would lie about the figure beside it,
-/// and a rule that could make a gauge lie is worse than no rule — so the assertions here are as
-/// much about what stays put as about what moves.
+/// The rule this whole tier rests on is that a limit adds its **marker and tint**, never changing
+/// the length or the printed number. A bar drawing full at 40% would lie about the figure beside
+/// it, and a rule that could make a gauge lie is worse than no rule — so the assertions here are
+/// as much about what stays put as about what moves.
 @MainActor
 final class CustomLimitShowTests: XCTestCase {
 
@@ -104,31 +104,40 @@ final class CustomLimitShowTests: XCTestCase {
         XCTAssertEqual(CustomLimitBounds.severity(of: nil, on: weekly, in: half), .normal)
     }
 
-    // MARK: - The Track
+    // MARK: - The Markers
 
-    /// The line is drawn as a change in the *track*: full strength up to it, quiet past it.
-    ///
-    /// Asserted in pixels rather than on the view tree, because the claim is about what a reader
-    /// sees. Two identical 2pt ticks on a 6pt bar would satisfy any structural assertion and be
-    /// unreadable.
-    func testTheTrackGoesQuietPastTheUsersLine() throws {
+    /// Time and policy are both linear positions, but only the user's policy line takes the
+    /// custom-limit colour repeated by the footer legend.
+    func testTheUsersLineIsAColoredMarkerDistinctFromTime() throws {
         let bar = UsageBarView()
         bar.fraction = 0
-        bar.capMark = 0.5
+        bar.timeMark = 0.25
+        bar.capMark = 0.75
         let host = hosted(bar)
+        let frame = try XCTUnwrap(bar.drawnCapMarkFrame)
+
+        XCTAssertEqual(frame.midX, Render.width * 0.75, accuracy: 0.5)
+        XCTAssertEqual(frame.width, Design.UsageBar.limitMarkWidth, accuracy: 0.5)
 
         let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: rep)
 
-        let before = try distanceFromGround(at: Render.width * 0.25, in: rep, host: host)
-        let after = try distanceFromGround(at: Render.width * 0.85, in: rep, host: host)
-
-        XCTAssertGreaterThan(
-            before,
-            after,
-            "the track past the user's line is not quieter than the track before it"
+        let policy = try colour(at: frame.midX, in: rep, host: host)
+        let time = try colour(at: Render.width * 0.25, in: rep, host: host)
+        let expected = try XCTUnwrap(
+            Design.UsageBar.limitMarkColor.usingColorSpace(.deviceRGB)
         )
-        XCTAssertGreaterThan(after, 0, "the remainder was drawn away entirely; the window is still that long")
+
+        XCTAssertEqual(policy.redComponent, expected.redComponent, accuracy: 0.03)
+        XCTAssertEqual(policy.greenComponent, expected.greenComponent, accuracy: 0.03)
+        XCTAssertEqual(policy.blueComponent, expected.blueComponent, accuracy: 0.03)
+        XCTAssertGreaterThan(
+            abs(policy.redComponent - time.redComponent)
+                + abs(policy.greenComponent - time.greenComponent)
+                + abs(policy.blueComponent - time.blueComponent),
+            0.1,
+            "the custom limit and clock marks still use one indistinguishable vocabulary"
+        )
     }
 
     /// Without a line the track is one strength end to end, exactly as it has always been.
@@ -176,13 +185,17 @@ final class CustomLimitShowTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(bar.displayedFraction, 0.4, accuracy: 0.0001)
         XCTAssertEqual(bar.drawnFillWidth, Render.width * 0.4, accuracy: 0.5)
-        XCTAssertEqual(bar.drawnCapTrackWidth, Render.width * 0.5, accuracy: 0.5)
+        XCTAssertEqual(
+            try XCTUnwrap(bar.drawnCapMarkFrame).midX,
+            Render.width * 0.5,
+            accuracy: 0.5
+        )
 
         bar.apply(fraction: 0.4, tint: .systemGreen, timeMark: nil, capMark: nil, animated: false)
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(bar.displayedFraction, 0.4, accuracy: 0.0001)
         XCTAssertEqual(bar.drawnFillWidth, Render.width * 0.4, accuracy: 0.5)
-        XCTAssertEqual(bar.drawnCapTrackWidth, 0, "the line was removed and its track stayed")
+        XCTAssertNil(bar.drawnCapMarkFrame, "the line was removed and its marker stayed")
     }
 
     // MARK: - The Row

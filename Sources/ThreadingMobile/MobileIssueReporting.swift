@@ -437,7 +437,7 @@ struct MobileIssueReportView: View {
                 let submission = try makeSubmission(destination: "pairedMac")
                 let prompt = try developerPrompt(for: submission)
                 let launch = destination.launch
-                let session = try await model.createSession(
+                let creation = try await model.createSession(
                     projectID: destination.project.id,
                     agentKind: destination.agent.id,
                     accountHandle: destination.accountHandle,
@@ -462,7 +462,7 @@ struct MobileIssueReportView: View {
                         "A new %@ task is investigating this report in %@.",
                         destination.agent.name,
                         destination.project.name
-                    ) + "\n\n" + session.title + workspaceNote,
+                    ) + "\n\n" + creation.session.title + workspaceNote,
                     dismissReport: true
                 )
             } catch is CancellationError {

@@ -23,9 +23,11 @@ struct SessionDraftView: View {
     /// fade, so the chat underneath is revealed rather than cut to.
     @State private var draftIsMounted = true
 
-    private var startedSessionID: String? {
+    private var startedDraft: MobileStartedDraft? {
         model.startedDrafts[draft.id]
     }
+
+    private var startedSessionID: String? { startedDraft?.sessionID }
 
     private var startedSession: RemoteSessionSummaryDTO? {
         guard let startedSessionID else { return nil }
@@ -43,7 +45,10 @@ struct SessionDraftView: View {
         // cut in over a draft still fading. The draft's own opacity is SwiftUI's to animate.
         ZStack {
             if let startedSession {
-                SessionDetailView(session: startedSession)
+                SessionDetailView(
+                    session: startedSession,
+                    openingStrategy: startedDraft?.openingStrategy ?? .resumeIfNeeded
+                )
             } else if startedSessionID != nil {
                 ContentUnavailableView(
                     "Session unavailable",
@@ -107,9 +112,9 @@ enum SessionDraftMotion {
 /// stands in the middle of the ground as one sentence of two dropdowns under the role's glyph,
 /// with the branch beneath. *Who* — agent and account — is the disc at the navigation bar's
 /// trailing edge, the runtime's mark ringed by the account's usage, the way a profile control
-/// sits in a bar. *How* — model, effort and speed as one line of text, permissions and the
-/// interface as one glyph each — is the composer's action row under the prompt, and it fits
-/// every phone width without scrolling. None of them is a box on the ground any more. The
+/// sits in a bar. *How* — model and effort as one line, speed as its own compact choice,
+/// permissions and the interface as one glyph each — is the composer's action row under the
+/// prompt, and it fits every phone width without scrolling. None of them is a box on the ground. The
 /// composer is the screen's one surface: full-bleed,
 /// no corner, a hairline above it and nothing else. It rides in the bottom safe-area inset, so
 /// it sits on the keyboard's top edge while typing and follows the keyboard's interactive
@@ -141,6 +146,7 @@ private struct SessionDraftComposerScreen: View {
     /// and a row folding then is a second motion after the first; folding on the announcement
     /// lets the row fold as the keyboard drops.
     @State private var keyboardIsLeaving = false
+    @State private var runPickerIsPresented = false
     @FocusState private var promptIsFocused: Bool
 
     private static let promptSuggestions = [
@@ -197,8 +203,13 @@ private struct SessionDraftComposerScreen: View {
         selectedAccount?.models ?? selectedAgent?.models ?? []
     }
 
+    private var defaultModelID: String? {
+        selectedAccount?.defaultModelID ?? selectedAgent?.defaultModelID
+    }
+
     private var selectedModel: RemoteModelChoiceDTO? {
-        models.first { $0.id == modelID }
+        let effectiveID = modelID.isEmpty ? defaultModelID : modelID
+        return models.first { $0.id == effectiveID }
     }
 
     private var hostStatusColor: Color {
@@ -247,6 +258,13 @@ private struct SessionDraftComposerScreen: View {
             if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                 == "new-session-multiline" {
                 prompt = "Review the keyboard lifecycle, compare the open and dismissed layouts, and summarize any remaining spacing regressions before you make changes."
+            }
+            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "new-session-model-effort-picker" {
+                if selectedModel?.reasoning.contains(where: { $0.id == "ultra" }) == true {
+                    reasoningID = "ultra"
+                }
+                runPickerIsPresented = true
             }
             if ProcessInfo.processInfo.environment[
                 "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
@@ -388,12 +406,15 @@ private struct SessionDraftComposerScreen: View {
             .disabled(isSubmitting)
     }
 
-    /// The run settings — how the chat will run — as one row of chips that scrolls. Where and
+    /// The run settings — how the chat will run — as one compact, non-scrolling row. Where and
     /// who are not here: the project stands in the ground and the account in the bar.
     private var choiceStrip: some View {
         HStack(spacing: MobileDesign.Spacing.small) {
             runMenu
                 .layoutPriority(1)
+            if selectedModel?.supportsFastMode == true {
+                speedMenu
+            }
             Spacer(minLength: MobileDesign.Spacing.small)
             if !(selectedAgent?.permissionModes ?? []).isEmpty {
                 permissionMenu
@@ -569,91 +590,83 @@ private struct SessionDraftComposerScreen: View {
             : originalUISurfaceTitle
     }
 
-    /// Model, effort and speed in one menu under one line of text — "GPT-5.6 Sol · High" — the
-    /// three choices that describe the same thing, how hard the run thinks. Three chips said it
-    /// in three places and ran off the edge of the phone; one line fits every width.
+    /// Model and effort keep one unchanged one-line trigger. Only its presented choice surface
+    /// is custom: the popover shows the two as the relationship they actually are, while speed
+    /// remains the simpler independent three-way choice beside it.
     private var runMenu: some View {
-        Menu {
-            if !models.isEmpty {
-                Section("Model") {
-                    Button {
-                        modelID = ""
-                    } label: {
-                        Label(
-                            "Default",
-                            systemImage: modelID.isEmpty ? "checkmark" : "circle"
-                        )
-                    }
-                    ForEach(models) { model in
-                        Button {
-                            modelID = model.id
-                        } label: {
-                            Label(
-                                model.name,
-                                systemImage: model.id == modelID ? "checkmark" : "cpu"
-                            )
-                        }
-                    }
-                }
-            }
-            if selectedModel?.reasoning.isEmpty == false {
-                Section("Effort") {
-                    Button {
-                        reasoningID = ""
-                    } label: {
-                        Label("Default", systemImage: reasoningID.isEmpty ? "checkmark" : "circle")
-                    }
-                    ForEach(selectedModel?.reasoning ?? []) { effort in
-                        Button {
-                            reasoningID = effort.id
-                        } label: {
-                            Label(
-                                effort.name,
-                                systemImage: effort.id == reasoningID
-                                    ? "checkmark"
-                                    : "brain.head.profile"
-                            )
-                        }
-                    }
-                }
-            }
-            if selectedModel?.supportsFastMode == true {
-                Section("Speed") {
-                    Button {
-                        speedID = ""
-                    } label: {
-                        Label("Inherit", systemImage: speedID.isEmpty ? "checkmark" : "circle")
-                    }
-                    Button {
-                        speedID = "standard"
-                    } label: {
-                        Label(
-                            "Standard",
-                            systemImage: speedID == "standard" ? "checkmark" : "gauge"
-                        )
-                    }
-                    Button {
-                        speedID = "fast"
-                    } label: {
-                        Label("Fast", systemImage: speedID == "fast" ? "checkmark" : "bolt.fill")
-                    }
-                }
-            }
+        Button {
+            runPickerIsPresented = true
         } label: {
             DraftMenuLabel(symbol: "cpu", title: runSummary)
         }
+        .buttonStyle(.plain)
         .id(runSummary)
         .disabled(models.isEmpty && selectedModel == nil)
         .accessibilityLabel(MobileL10n.string("Model and effort"))
         .accessibilityValue(runSummary)
+        .popover(
+            isPresented: $runPickerIsPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            MobileModelEffortPicker(
+                models: models,
+                defaultModelID: defaultModelID,
+                selectedModelID: modelID,
+                selectedEffortID: reasoningID,
+                onChoose: { model, effort in
+                    modelID = model ?? ""
+                    reasoningID = effort ?? ""
+                    runPickerIsPresented = false
+                }
+            )
+            .mobileTheme(theme)
+            .presentationBackground(theme.floatingSurface)
+            .presentationCornerRadius(theme.panelRadius)
+            .presentationCompactAdaptation(.popover)
+        }
     }
 
     private var runSummary: String {
         SessionDraftRunSummary.text(
             model: selectedModel?.name,
-            effort: selectedModel?.reasoning.first(where: { $0.id == reasoningID })?.name,
-            speed: speedID.isEmpty ? nil : selectedSpeedName
+            effort: selectedModel?.reasoning.first(where: { $0.id == reasoningID })?.name
         )
+    }
+
+    private var speedMenu: some View {
+        Menu {
+            Button {
+                speedID = ""
+            } label: {
+                Label(
+                    "Inherit",
+                    systemImage: speedID.isEmpty ? "checkmark" : "arrow.triangle.branch"
+                )
+            }
+            Button {
+                speedID = "standard"
+            } label: {
+                Label(
+                    "Standard",
+                    systemImage: speedID == "standard" ? "checkmark" : "gauge.with.dots.needle.50percent"
+                )
+            }
+            Button {
+                speedID = "fast"
+            } label: {
+                Label(
+                    "Fast",
+                    systemImage: speedID == "fast" ? "checkmark" : "bolt.fill"
+                )
+            }
+        } label: {
+            DraftMenuLabel(symbol: "bolt", title: selectedSpeedName)
+        }
+        .id("speed-\(speedID)")
+        .disabled(isSubmitting)
+        .accessibilityLabel(MobileL10n.string("Speed"))
+        .accessibilityValue(selectedSpeedName)
     }
 
     private var selectedSpeedName: String {
@@ -761,7 +774,6 @@ private struct SessionDraftComposerScreen: View {
     }
 
     private func applyAccountDefaults() {
-        let defaultModelID = selectedAccount?.defaultModelID ?? selectedAgent?.defaultModelID
         if !models.contains(where: { $0.id == modelID }) {
             modelID = defaultModelID.flatMap { id in
                 models.contains(where: { $0.id == id }) ? id : nil
@@ -796,7 +808,7 @@ private struct SessionDraftComposerScreen: View {
         promptIsFocused = false
         Task {
             do {
-                let session = try await appModel.createSession(
+                let creation = try await appModel.createSession(
                     projectID: projectID,
                     agentKind: agentID,
                     accountHandle: accountID.isEmpty ? nil : accountID,
@@ -810,7 +822,7 @@ private struct SessionDraftComposerScreen: View {
                 )
                 // Turns this screen into the session's: `SessionDraftView` fades this one
                 // out over the chat the model now says the draft became.
-                appModel.noteDraftStarted(draft, session: session)
+                appModel.noteDraftStarted(draft, creation: creation)
             } catch is CancellationError {
                 isSubmitting = false
             } catch {
@@ -860,10 +872,11 @@ enum SessionDraftRole: CaseIterable {
 enum SessionDraftRunSummary {
     static let separator = " · "
 
-    /// `model` nil is the catalogue's default model; `effort` and `speed` nil mean inherited,
-    /// which the line leaves unsaid — "GPT-5.6 Sol" says more than "GPT-5.6 Sol · Default".
-    static func text(model: String?, effort: String?, speed: String?) -> String {
-        [model ?? MobileL10n.string("Default model"), effort, speed]
+    /// `model` nil is the catalogue's default model and `effort` nil means inherited, which the
+    /// line leaves unsaid — "GPT-5.6 Sol" says more than "GPT-5.6 Sol · Default". Speed owns
+    /// the neighbouring control instead of making this relationship read as a three-axis grid.
+    static func text(model: String?, effort: String?) -> String {
+        [model ?? MobileL10n.string("Default model"), effort]
             .compactMap { $0 }
             .joined(separator: separator)
     }
@@ -918,4 +931,3 @@ private struct DraftIconMenuLabel: View {
             .contentShape(Rectangle())
     }
 }
-

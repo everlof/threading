@@ -93,7 +93,7 @@ final class MobileSessionOpeningTests: XCTestCase {
         XCTAssertNil(model.openSessionID)
         XCTAssertNil(model.sessionID(for: .draft(draft)))
 
-        model.noteDraftStarted(draft, session: session(surface: .conversation))
+        model.noteDraftStarted(draft, creation: creation(surface: .conversation))
 
         XCTAssertEqual(model.navigationPath, [.draft(draft)])
         XCTAssertEqual(model.sessionID(for: .draft(draft)), "session-1")
@@ -107,7 +107,13 @@ final class MobileSessionOpeningTests: XCTestCase {
         let draft = MobileSessionDraft()
         let started = session(surface: .conversation)
         model.navigationPath = [.draft(draft)]
-        model.noteDraftStarted(draft, session: started)
+        model.noteDraftStarted(
+            draft,
+            creation: MobileCreatedSession(
+                session: started,
+                openingStrategy: .awaitCreatedSession
+            )
+        )
 
         MobileSessionNavigationTransition.push(started, onto: model)
 
@@ -118,7 +124,7 @@ final class MobileSessionOpeningTests: XCTestCase {
     func testADifferentDraftDoesNotInheritAnotherDraftsSession() {
         let model = makeModel()
         let started = MobileSessionDraft()
-        model.noteDraftStarted(started, session: session(surface: .terminal))
+        model.noteDraftStarted(started, creation: creation(surface: .terminal))
 
         XCTAssertNil(model.sessionID(for: .draft(MobileSessionDraft())))
         XCTAssertNil(model.sessionID(for: .project("AnotherTerminal")))
@@ -136,7 +142,7 @@ final class MobileSessionOpeningTests: XCTestCase {
         model.navigationPath = [.draft(draft)]
         XCTAssertNil(continuity.lastRoute)
 
-        model.noteDraftStarted(draft, session: session(surface: .conversation))
+        model.noteDraftStarted(draft, creation: creation(surface: .conversation))
 
         XCTAssertEqual(continuity.lastRoute?.sessionID, "session-1")
         XCTAssertEqual(continuity.lastRoute?.hostID, model.activeHostID)
@@ -156,29 +162,36 @@ final class MobileSessionOpeningTests: XCTestCase {
             projectName: "AnotherTerminal"
         )
     }
+
+    private func creation(surface: RemoteSessionSurface) -> MobileCreatedSession {
+        MobileCreatedSession(
+            session: session(surface: surface),
+            openingStrategy: .awaitCreatedSession
+        )
+    }
 }
 
-/// The draft's run settings are one line of text, and what it says is decided here rather than
-/// in the view: the model, then only the choices that depart from its defaults.
+/// The draft's model and effort are one line of text, while speed owns its neighbouring menu.
+/// What the shared line says is decided here rather than in the view.
 final class SessionDraftChoiceTests: XCTestCase {
     func testTheRunSummaryNamesTheModelAndOnlyTheChoicesMade() {
         XCTAssertEqual(
-            SessionDraftRunSummary.text(model: "GPT-5.6 Sol", effort: "High", speed: nil),
+            SessionDraftRunSummary.text(model: "GPT-5.6 Sol", effort: "High"),
             "GPT-5.6 Sol · High"
         )
         XCTAssertEqual(
-            SessionDraftRunSummary.text(model: "GPT-5.6 Sol", effort: nil, speed: nil),
+            SessionDraftRunSummary.text(model: "GPT-5.6 Sol", effort: nil),
             "GPT-5.6 Sol"
         )
         XCTAssertEqual(
-            SessionDraftRunSummary.text(model: "Opus", effort: "Max", speed: "Fast"),
-            "Opus · Max · Fast"
+            SessionDraftRunSummary.text(model: "Opus", effort: "Max"),
+            "Opus · Max"
         )
     }
 
     func testTheRunSummaryWithNoModelSaysSoInsteadOfGoingBlank() {
         XCTAssertEqual(
-            SessionDraftRunSummary.text(model: nil, effort: nil, speed: nil),
+            SessionDraftRunSummary.text(model: nil, effort: nil),
             MobileL10n.string("Default model")
         )
     }

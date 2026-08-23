@@ -908,8 +908,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     return
                 }
             }
+            let isReady = self.services.runtimeStatus.isRunning(sessionID: sessionID)
+            if !isReady { self.services.mirrors.noteSessionStarting(sessionID) }
             respond(.respond(RemoteRouter.json(
-                ["state": self.services.runtimeStatus.isRunning(sessionID: sessionID) ? "ready" : "starting"],
+                ["state": isReady ? "ready" : "starting"],
                 status: 202,
                 reason: "Accepted"
             )))
@@ -1090,14 +1092,30 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
 
-            respond(.respond(RemoteRouter.json(
-                RemoteCreateSessionResponseDTO(
+            self.services.mirrors.noteSessionStarting(sessionID)
+            let response: RemoteCreateSessionResponseDTO
+            if creation.compactResponse == true {
+                guard let session = self.services.mirrors.sessionSummary(
+                    for: sessionID,
+                    authorization: authorization
+                ) else {
+                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                    return
+                }
+                response = RemoteCreateSessionResponseDTO(
+                    sessionID: sessionID.uuidString,
+                    session: session,
+                    startup: .starting
+                )
+            } else {
+                // Compatibility for installed clients whose response decoder still requires the
+                // complete catalogue. Current clients explicitly ask for the compact row above.
+                response = RemoteCreateSessionResponseDTO(
                     sessionID: sessionID.uuidString,
                     me: self.services.mirrors.meResponse(for: authorization)
-                ),
-                status: 201,
-                reason: "Created"
-            )))
+                )
+            }
+            respond(.respond(RemoteRouter.json(response, status: 201, reason: "Created")))
         }
     }
 
@@ -2812,36 +2830,50 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 connection.sendClose(code: 4003, reason: "Share revoked")
                 return
             }
-            let attached = self.services.mirrors.attach(
+            let attach = self.services.mirrors.attachOrWaitForStartup(
                 connection,
                 to: sessionID,
-                authorization: authorization
-            )
-            if attached {
-                self.services.eventLog.recordRemoteEvent("Remote client connected", [
-                    "session": sessionID.uuidString,
-                    "capability": authorization.capability.rawValue,
-                    "device": device ?? "unknown",
-                ])
-                var fields: [RemoteDiagnosticField: String] = [
-                    .session: MacRemoteDiagnostics.pseudonym(
-                        sessionID.uuidString,
-                        prefix: "session"
-                    ),
-                    .capability: authorization.capability.rawValue,
-                    .transport: "websocket",
-                ]
-                if let device {
-                    fields[.peer] = MacRemoteDiagnostics.pseudonym(
-                        device,
-                        prefix: "device"
+                authorization: authorization,
+                authorizationIsCurrent: { [weak self] in
+                    self?.authorizer?.isCurrent(authorization) == true
+                },
+                didAttach: { [weak self] in
+                    guard let self else { return }
+                    self.recordSessionConnection(
+                        sessionID: sessionID,
+                        authorization: authorization,
+                        device: device
                     )
                 }
-                MacRemoteDiagnostics.record(.socketConnected, fields: fields)
-            } else {
+            )
+            if case .unavailable = attach {
                 connection.sendClose(code: 4004, reason: "Session not available")
             }
         }
+    }
+
+    private func recordSessionConnection(
+        sessionID: SessionID,
+        authorization: RemoteAuthorization,
+        device: String?
+    ) {
+        services.eventLog.recordRemoteEvent("Remote client connected", [
+            "session": sessionID.uuidString,
+            "capability": authorization.capability.rawValue,
+            "device": device ?? "unknown",
+        ])
+        var fields: [RemoteDiagnosticField: String] = [
+            .session: MacRemoteDiagnostics.pseudonym(
+                sessionID.uuidString,
+                prefix: "session"
+            ),
+            .capability: authorization.capability.rawValue,
+            .transport: "websocket",
+        ]
+        if let device {
+            fields[.peer] = MacRemoteDiagnostics.pseudonym(device, prefix: "device")
+        }
+        MacRemoteDiagnostics.record(.socketConnected, fields: fields)
     }
 
     private func handleInput(_ connection: RemoteConnection, data: String?) {

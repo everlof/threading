@@ -23,6 +23,11 @@ enum RemoteMobileConnectionDefaults {
     /// reconnect, and no terminal event in the diagnostics journal, which is exactly the shape
     /// that report could not explain. Long enough for a slow cellular handshake, far shorter than a person's patience.
     static let helloDeadline: Duration = .seconds(15)
+    /// Once the host has explicitly accepted this socket into a session startup transaction,
+    /// provider history loading may outlive an ordinary route handshake.
+    // Slightly longer than the host's 60-second ownership window, so its authoritative timeout
+    // frame/close wins over a client-side transport race on a slow link.
+    static let startupHelloDeadline: Duration = .seconds(65)
     /// How long a phone-owned grid must hold still before it is leased to the Mac.
     ///
     /// A pinch, a keyboard, or an animated layout reports one grid per crossed cell boundary,
@@ -476,9 +481,9 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
     /// Every connect ends in a terminal event, including the one nobody answers.
-    private func armHelloDeadline(generation: Int) {
+    private func armHelloDeadline(generation: Int, deadline: Duration? = nil) {
         helloDeadlineTask?.cancel()
-        let deadline = helloDeadline
+        let deadline = deadline ?? helloDeadline
         helloDeadlineTask = Task { [weak self] in
             try? await Task.sleep(for: deadline)
             guard !Task.isCancelled else { return }
@@ -1206,6 +1211,17 @@ final class RemoteSessionConnection: ObservableObject {
         let data = Data(text.utf8)
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else { return }
         switch envelope.type {
+        case "sessionStarting":
+            guard phase == .connecting,
+                  (try? JSONDecoder().decode(RemoteSessionStartingDTO.self, from: data)) != nil
+            else { return }
+            // The host has authenticated this exact socket and owns completing it when the live
+            // surface exists. Replace the route deadline with the bounded startup transaction;
+            // no catalogue refresh or reconnect is needed in between.
+            armHelloDeadline(
+                generation: connectionGeneration,
+                deadline: RemoteMobileConnectionDefaults.startupHelloDeadline
+            )
         case "hello":
             guard let hello = try? JSONDecoder().decode(RemoteHelloDTO.self, from: data) else { return }
             mirroredCaption = hello.title.isEmpty ? mirroredCaption : hello.title
@@ -1430,6 +1446,8 @@ final class RemoteSessionConnection: ObservableObject {
             switch ended?.reason {
             case "sessionClosed":
                 phase = .ended(MobileL10n.string("Session closed on Mac"))
+            case "sessionStartupTimedOut":
+                phase = .ended(MobileL10n.string("Couldn’t start session"))
             case "protocolMismatch":
                 phase = .ended(
                     ended?.update == .client

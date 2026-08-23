@@ -9,7 +9,7 @@ final class UsagePreferencesViewController: NSViewController {
     typealias RefreshProvider = @MainActor (AgentAccount, Bool) -> Void
 
     private let appEvents = AppEventObservations()
-    private let liveCapacity = AccountUsageFleetView()
+    private let liveCapacity = AccountUsageFleetView(scrollHost: .nestedPage)
     private let dashboard = UsageDashboardView()
     private let accountsProvider: AccountsProvider
     private let readingProvider: ReadingProvider

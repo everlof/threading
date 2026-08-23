@@ -957,6 +957,8 @@
     "Hover or arrow through points, then switch data to inspect the interrupted morph animation.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Håll pekaren över eller använd piltangenterna för att granska punkter och byt sedan data för att se den avbrutna övergångsanimeringen." } } } },
     "Local transcripts are read incrementally and deduplicated across resumes, compactions, forks, and subagents. Runtime and billing route stay separate, so OpenCode through OpenRouter is reported honestly. Prices use exact official model identifiers from catalog %@; unmatched tokens remain visibly unpriced. Grok exposes context occupancy but no authoritative token or limit history source.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lokala transkript läses inkrementellt och dedupliceras mellan återupptagningar, komprimeringar, förgreningar och underagenter. Körmiljö och faktureringsväg hålls åtskilda, så OpenCode via OpenRouter redovisas korrekt. Priser använder exakta officiella modellidentifierare från katalog %@; tokens utan träff visas utan pris. Grok visar kontextbeläggning men saknar en auktoritativ källa för token- eller gränshistorik." } } } },
     "Measured": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Uppmätt" } } } },
+    "ModelEffortPickerViewController & ModelEffortMatrixControl": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "ModelEffortPickerViewController och ModelEffortMatrixControl" } } } },
+    "A provider-sized model-by-effort catalogue in its bounded shipping body. Click a valid combination or use the arrow keys and Return; unavailable pairs stay visibly unavailable and Ultra keeps its accent treatment.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En leverantörsstor katalog över modell och nivå i sin begränsade leveransvy. Klicka på en giltig kombination eller använd piltangenterna och Retur; otillgängliga par förblir tydligt otillgängliga och Ultra behåller sin accentbehandling." } } } },
     "Models": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Modeller" } } } },
     "Models, projects, accounts, and billing routes.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Modeller, projekt, konton och faktureringsvägar." } } } },
     "More observations needed": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Fler observationer behövs" } } } },
@@ -1022,6 +1024,8 @@
     "Usage over time": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användning över tid" } } } },
     "Usage section": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Användningssektion" } } } },
     "UsageDashboardView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "UsageDashboardView" } } } },
+    "UsageLimitLegendView": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "UsageLimitLegendView" } } } },
+    "One footer key names the user-authored marker shared by a group of provider gauges. Toggle it to verify that the line and its legend appear and leave as one semantic state.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En enda sidfotsförklaring namnger den användarskapade markören som delas av en grupp leverantörsmätare. Växla den för att verifiera att linjen och dess förklaring visas och försvinner som ett semantiskt tillstånd." } } } },
     "UsageReadingLabel": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "UsageReadingLabel" } } } },
     "Narrow the row and the reading gives up whole windows rather than characters: everything, then one complete window, then nothing.": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Smalna av raden så ger avläsningen upp hela fönster i stället för tecken: allt, sedan ett helt fönster, sedan ingenting." } } } },
     "Uncached input": { "extractionState": "manual", "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Icke-cachelagrad indata" } } } },
@@ -6646,6 +6650,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatiskt"
+          }
+        }
+      }
+    },
+    "Model and effort": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modell och nivå"
+          }
+        }
+      }
+    },
+    "Model × effort": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modell × nivå"
           }
         }
       }
@@ -28708,6 +28734,7 @@
     "Let this limit colour the usage pill in the toolbar": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt den här gränsen färga användningsknappen i verktygsfältet"}}}},
     "Show this limit on the toolbar pill": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa den här gränsen på verktygsfältets användningsknapp"}}}},
     "Toolbar": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Verktygsfält"}}}},
+    "Your limit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Din gräns"}}}},
     "Your limit · %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Din gräns · %@"}}}},
     "No limit of yours is holding this account.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen av dina gränser håller tillbaka det här kontot."}}}},
     "%1$@ is at your %2$@ limit, so Threading is not spending this account on its own.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%1$@ har nått din gräns på %2$@, så Threading spenderar inte det här kontot på egen hand."}}}},

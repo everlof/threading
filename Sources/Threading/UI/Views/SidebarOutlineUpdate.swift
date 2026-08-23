@@ -51,6 +51,24 @@ struct SidebarTreeShape: Equatable {
         childrenByParent[parent] ?? []
     }
 
+    /// Inserts one new leaf without reconstructing the containing project's complete shape.
+    /// Returns false when the caller's presented-node assumptions do not match this ledger.
+    mutating func insertLeaf(
+        _ key: SidebarNodeKey,
+        into parent: SidebarNodeKey,
+        at index: Int
+    ) -> Bool {
+        guard keys.contains(parent),
+              !keys.contains(key),
+              childrenByParent[key] == nil else { return false }
+        var siblings = childrenByParent[parent] ?? []
+        guard siblings.indices.contains(index) || index == siblings.endIndex else { return false }
+        siblings.insert(key, at: index)
+        childrenByParent[parent] = siblings
+        keys.insert(key)
+        return true
+    }
+
     /// Removes one leaf without reconstructing the containing project's complete shape.
     /// Returns its former child index, which is exactly the index `NSOutlineView` must receive.
     mutating func removeLeaf(

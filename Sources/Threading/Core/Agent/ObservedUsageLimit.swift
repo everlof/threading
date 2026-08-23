@@ -52,6 +52,16 @@ enum ObservedUsageLimit {
     /// What has already been read for this session, or nil when nothing has been or nothing can
     /// be. Touches no disk, so a view may ask while it paints.
     static func known(for session: AgentSession, in project: Project) -> UsageLimitStop? {
+        knownObservation(for: session, in: project)?.stop
+    }
+
+    /// The cached evidence as well as its words. Recovery needs the distinction because a
+    /// background-task failure must be checked against the live terminal before it can park the
+    /// parent session; presentation callers that already own a stop keep using `known` above.
+    static func knownObservation(
+        for session: AgentSession,
+        in project: Project
+    ) -> UsageLimitObservation? {
         guard let source = source(for: session, in: project) else { return nil }
         return source.known(source.url)
     }
@@ -64,6 +74,16 @@ enum ObservedUsageLimit {
         for session: AgentSession,
         in project: Project,
         completion: @escaping @MainActor @Sendable (UsageLimitStop?) -> Void
+    ) {
+        revalidateObservation(for: session, in: project) { observation in
+            completion(observation?.stop)
+        }
+    }
+
+    static func revalidateObservation(
+        for session: AgentSession,
+        in project: Project,
+        completion: @escaping @MainActor @Sendable (UsageLimitObservation?) -> Void
     ) {
         guard let source = source(for: session, in: project) else { return }
         source.revalidate(source.url, completion)
@@ -94,9 +114,12 @@ enum ObservedUsageLimit {
     /// One session's readable refusal: the file it is in, and the reader that answers for it.
     private struct Source {
         let url: URL
-        let known: @MainActor (URL) -> UsageLimitStop?
+        let known: @MainActor (URL) -> UsageLimitObservation?
         let revalidate:
-            @MainActor (URL, @escaping @MainActor @Sendable (UsageLimitStop?) -> Void) -> Void
+            @MainActor (
+                URL,
+                @escaping @MainActor @Sendable (UsageLimitObservation?) -> Void
+            ) -> Void
     }
 
     private static func source(for session: AgentSession, in project: Project) -> Source? {
@@ -108,8 +131,10 @@ enum ObservedUsageLimit {
 
             return Source(
                 url: url,
-                known: { ClaudeTranscriptUsageLimit.known(at: $0) },
-                revalidate: { ClaudeTranscriptUsageLimit.revalidate(at: $0, completion: $1) }
+                known: { ClaudeTranscriptUsageLimit.knownObservation(at: $0) },
+                revalidate: {
+                    ClaudeTranscriptUsageLimit.revalidateObservation(at: $0, completion: $1)
+                }
             )
 
         case nil:

@@ -11,7 +11,7 @@ import Foundation
 /// whatever it was drawing before: a spinner, for hours, for a conversation that had already
 /// stopped. See [`session-activity.md`](../../../../docs/architecture/session-activity.md).
 ///
-/// Claude writes the refusal down as a synthetic assistant record:
+/// Claude normally writes the refusal down as a synthetic assistant record:
 ///
 /// ```json
 /// {"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,
@@ -33,13 +33,19 @@ import Foundation
 /// The caching, the size gate and the background hop are `TranscriptFactReader`'s, shared with
 /// `ClaudeTranscriptModel` and `ClaudeTranscriptPermissionMode`. Callers in the app should ask
 /// `ObservedUsageLimit`, which is where the choice of *which* runtime can answer is made.
+///
+/// One second shape exists after delegated work: a completed root turn can receive a failed
+/// `<task-notification>` whose summary carries the limit failure, while the CLI leaves the root
+/// terminal at its limit chooser without appending another assistant record. That child failure
+/// is only a candidate here. `UsageLimitObservation` requires the live terminal chooser or notice
+/// before the coordinator is allowed to turn it into a session stop.
 @MainActor
 enum ClaudeTranscriptUsageLimit {
 
     // MARK: - Properties
 
-    private static let reader = TranscriptFactReader<UsageLimitStop> { url in
-        newestStop(at: url)
+    private static let reader = TranscriptFactReader<UsageLimitObservation> { url in
+        newestObservation(at: url)
     }
 
     // MARK: - Public Methods
@@ -47,6 +53,10 @@ enum ClaudeTranscriptUsageLimit {
     /// What has already been read for this transcript. Touches no disk, so a caller painting a
     /// view can ask on the main thread.
     static func known(at url: URL) -> UsageLimitStop? {
+        knownObservation(at: url)?.stop
+    }
+
+    static func knownObservation(at url: URL) -> UsageLimitObservation? {
         reader.known(at: url)
     }
 
@@ -55,6 +65,15 @@ enum ClaudeTranscriptUsageLimit {
     static func revalidate(
         at url: URL,
         completion: @escaping @MainActor @Sendable (UsageLimitStop?) -> Void
+    ) {
+        revalidateObservation(at: url) { observation in
+            completion(observation?.stop)
+        }
+    }
+
+    static func revalidateObservation(
+        at url: URL,
+        completion: @escaping @MainActor @Sendable (UsageLimitObservation?) -> Void
     ) {
         reader.revalidate(at: url, completion: completion)
     }
@@ -79,22 +98,74 @@ enum ClaudeTranscriptUsageLimit {
     /// the same split the two readers beside it keep. Callers in the app should ask
     /// `known`/`revalidate` instead; this touches the disk.
     nonisolated static func newestStop(at url: URL) -> UsageLimitStop? {
-        guard let record = ClaudeTranscriptAPIError.newestAssistantMessage(
-            at: url,
-            limit: UsageLimitDefaults.scanBytes
-        ),
-            let failure = ClaudeTranscriptAPIError.parse(record),
-            failure.isRateLimit
-        else { return nil }
+        newestObservation(at: url)?.stop
+    }
 
-        let recognised = UsageLimitStop.recognised(in: failure.text)
-        return UsageLimitStop(
-            message: recognised?.message
-                ?? failure.text
-                ?? TranscriptUsageLimitDefaults.unstatedRefusal,
-            resetHint: recognised?.resetHint,
-            recordID: ClaudeTranscriptAPIError.identity(of: record)
-        )
+    /// The newest root refusal, or a background-task limit candidate following a completed root
+    /// turn. One bounded backwards walk keeps the relative ordering of those two record shapes.
+    nonisolated static func newestObservation(at url: URL) -> UsageLimitObservation? {
+        var candidate: UsageLimitObservation?
+        var answer: UsageLimitObservation?
+
+        JSONLReader.forEachRecordFromEnd(at: url, limit: UsageLimitDefaults.scanBytes) { record in
+            guard record[ClaudeAPIErrorDefaults.sidechainKey] as? Bool != true else { return true }
+
+            if candidate == nil,
+               let notification = taskNotification(in: record),
+               notification.isFailed,
+               let recognised = UsageLimitStop.recognised(in: notification.summary) {
+                let identity = notification.identity
+                    ?? ClaudeTranscriptAPIError.identity(of: record)
+                candidate = UsageLimitObservation(
+                    stop: UsageLimitStop(
+                        message: recognised.message,
+                        resetHint: recognised.resetHint,
+                        recordID: "task-notification:\(identity)"
+                    ),
+                    evidence: .failedBackgroundTask
+                )
+            }
+
+            guard record[ClaudeAPIErrorDefaults.typeKey] as? String == "assistant" else {
+                return true
+            }
+
+            if let failure = ClaudeTranscriptAPIError.parse(record), failure.isRateLimit {
+                let recognised = UsageLimitStop.recognised(in: failure.text)
+                answer = UsageLimitObservation(
+                    stop: UsageLimitStop(
+                        message: recognised?.message
+                            ?? failure.text
+                            ?? TranscriptUsageLimitDefaults.unstatedRefusal,
+                        resetHint: recognised?.resetHint,
+                        recordID: ClaudeTranscriptAPIError.identity(of: record)
+                    ),
+                    evidence: .providerRefusal
+                )
+            } else if assistantCompletedTurn(record) {
+                answer = candidate
+            }
+            return false
+        }
+
+        return answer
+    }
+
+    private nonisolated static func taskNotification(
+        in record: [String: Any]
+    ) -> ClaudeTaskNotification? {
+        guard record[ClaudeAPIErrorDefaults.typeKey] as? String == "queue-operation",
+              record["operation"] as? String == "enqueue",
+              let content = record[ClaudeAPIErrorDefaults.contentKey] as? String
+        else { return nil }
+        return ClaudeTaskNotification.parse(content)
+    }
+
+    private nonisolated static func assistantCompletedTurn(_ record: [String: Any]) -> Bool {
+        guard let message = record[ClaudeAPIErrorDefaults.messageKey] as? [String: Any] else {
+            return false
+        }
+        return message["stop_reason"] as? String == "end_turn"
     }
 }
 

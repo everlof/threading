@@ -1,5 +1,12 @@
 import AppKit
 
+/// A non-menu chooser presented from a chip. The chip owns the held/pressed state and dismissal
+/// bookkeeping; the session owns only its presentation surface.
+@MainActor
+protocol ChipChoicePresentationSession: AnyObject {
+    func dismissChipChoicePresentation()
+}
+
 /// Geometry and period indicator ink shared by both chooser implementations.
 ///
 /// `ChipView` serves the composer while `ThemedPopUp` serves forms and extension UI; a retro
@@ -260,6 +267,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
         }
     }
     private var menuSession: AnyObject?
+    private var choicePresentationSession: (any ChipChoicePresentationSession)?
     private var heightConstraint: NSLayoutConstraint?
 
     var heightStyle: HeightStyle = .compact {
@@ -377,6 +385,17 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
 
     /// Choices to offer, rebuilt each time so the menu always reflects current state.
     var itemsProvider: (() -> [ThemedMenuEntry])?
+
+    /// Replaces only the choice surface while leaving this chip's appearance and layout intact.
+    ///
+    /// The callback receives the chip to anchor from and a dismissal callback that must be
+    /// invoked exactly once when its transient surface closes. Returning nil falls back to the
+    /// ordinary menu provider. Kept at the design boundary so a feature never intercepts AppKit
+    /// mouse events or subclasses this control just to present different themed content.
+    var choicePresentationProvider: ((
+        _ chip: ChipView,
+        _ didDismiss: @escaping () -> Void
+    ) -> (any ChipChoicePresentationSession)?)?
 
     /// The item currently represented, so callers can read the selection back.
     private(set) var selectedItem: ThemedMenuItem?
@@ -500,6 +519,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil {
             ThemedMenuPresenter.dismiss(menuSession)
+            choicePresentationSession?.dismissChipChoicePresentation()
         }
         super.viewWillMove(toWindow: newWindow)
     }
@@ -671,9 +691,25 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
 
     @discardableResult
     private func presentMenu() -> Bool {
-        guard isEnabled, menuSession == nil, let presentation = preparedPresentation() else {
+        guard isEnabled, menuSession == nil, choicePresentationSession == nil else {
             return false
         }
+
+        if let choicePresentationProvider {
+            themedMenuPresentationDidChange(isPresented: true)
+            let session = choicePresentationProvider(self) { [weak self] in
+                guard let self else { return }
+                self.choicePresentationSession = nil
+                self.themedMenuPresentationDidChange(isPresented: false)
+            }
+            if let session {
+                choicePresentationSession = session
+                return true
+            }
+            themedMenuPresentationDidChange(isPresented: false)
+        }
+
+        guard let presentation = preparedPresentation() else { return false }
 
         if let menuPresentationOverride {
             themedMenuPresentationDidChange(isPresented: true)

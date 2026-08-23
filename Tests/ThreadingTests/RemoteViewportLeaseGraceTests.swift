@@ -20,6 +20,77 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
     /// byte reaches the unstarted `NWConnection`.
     private var connectionDelegates: [SilentConnectionDelegate] = []
 
+    // MARK: - Session startup handoff
+
+    func testACreatedSessionSocketWaitsForItsHostOwnedSurfaceAndThenAttaches() throws {
+        let fixture = try makeFixture(grace: .zero)
+        fixture.capability.setAvailable(false, for: .agentSession(fixture.sessionID))
+        fixture.registry.noteSessionStarting(fixture.sessionID)
+
+        let phone = authenticated(deviceID: "startup-phone", authorization: Self.ownerInteract)
+        var didAttach = false
+        let result = fixture.registry.attachOrWaitForStartup(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract,
+            authorizationIsCurrent: { true },
+            didAttach: { didAttach = true }
+        )
+        guard case .waitingForStartup = result else {
+            return XCTFail("a host-owned creation should hold its socket until the surface exists")
+        }
+        XCTAssertFalse(didAttach)
+        XCTAssertFalse(fixture.registry.isAttached(phone, to: fixture.sessionID))
+
+        fixture.capability.setAvailable(true, for: .agentSession(fixture.sessionID))
+        XCTAssertNotNil(fixture.registry.beginCapturing(sessionID: fixture.sessionID))
+        XCTAssertTrue(didAttach)
+        XCTAssertTrue(fixture.registry.isAttached(phone, to: fixture.sessionID))
+    }
+
+    func testADormantSessionCannotInventAStartupWaitByOpeningASocket() throws {
+        let fixture = try makeFixture(grace: .zero)
+        fixture.capability.setAvailable(false, for: .agentSession(fixture.sessionID))
+        let phone = authenticated(deviceID: "dormant-phone", authorization: Self.ownerInteract)
+
+        let result = fixture.registry.attachOrWaitForStartup(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract,
+            authorizationIsCurrent: { true },
+            didAttach: { XCTFail("a dormant session has no host-owned startup transaction") }
+        )
+        guard case .unavailable = result else {
+            return XCTFail("the client must not create an unbounded wait for a dormant session")
+        }
+        XCTAssertFalse(fixture.registry.isAttached(phone, to: fixture.sessionID))
+    }
+
+    func testASessionStartupWaitExpiresInsteadOfBecomingAHiddenPoll() async throws {
+        let fixture = try makeFixture(grace: .zero, startupWait: .milliseconds(10))
+        fixture.capability.setAvailable(false, for: .agentSession(fixture.sessionID))
+        fixture.registry.noteSessionStarting(fixture.sessionID)
+
+        let phone = authenticated(deviceID: "timeout-phone", authorization: Self.ownerInteract)
+        var didAttach = false
+        let result = fixture.registry.attachOrWaitForStartup(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract,
+            authorizationIsCurrent: { true },
+            didAttach: { didAttach = true }
+        )
+        guard case .waitingForStartup = result else {
+            return XCTFail("the socket should enter the host's bounded startup transaction")
+        }
+
+        try await Task.sleep(for: .milliseconds(40))
+        fixture.capability.setAvailable(true, for: .agentSession(fixture.sessionID))
+        XCTAssertNotNil(fixture.registry.beginCapturing(sessionID: fixture.sessionID))
+        XCTAssertFalse(didAttach, "a timed-out socket must not attach to a later surface")
+        XCTAssertFalse(fixture.registry.isAttached(phone, to: fixture.sessionID))
+    }
+
     // MARK: - The rule
 
     /// The case the grace exists for: the phone that went away and came straight back.
@@ -414,7 +485,10 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
         scope: .allSessions
     )
 
-    private func makeFixture(grace: Duration) throws -> Fixture {
+    private func makeFixture(
+        grace: Duration,
+        startupWait: Duration = .seconds(60)
+    ) throws -> Fixture {
         let store = ProjectStore.shared
         // A folder of its own: `addProject` returns the existing project for a folder it already
         // knows, so a shared temporary directory would hand this test a sibling's project.
@@ -427,6 +501,7 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
         let capability = LeaseCapability(sessionID: session.id, terminalID: terminal.id)
         let registry = RemoteSessionMirrorRegistry(
             terminalApplication: capability,
+            sessionStartupMaximumWait: startupWait,
             viewportLeaseGrace: { grace }
         )
         // Which mode a shared chat starts in is an ordinary user setting, and in Focused mode a
@@ -512,6 +587,7 @@ private final class LeaseCapability: RemoteTerminalApplicationCapability {
 
     private(set) var viewportCalls: [ViewportCall] = []
     private var appliedViewports: [TerminalInstanceIdentity: RemoteTerminalGrid] = [:]
+    private var unavailableIdentities: Set<TerminalInstanceIdentity> = []
     let identities: Set<TerminalInstanceIdentity>
 
     init(sessionID: SessionID, terminalID: TerminalID) {
@@ -522,8 +598,18 @@ private final class LeaseCapability: RemoteTerminalApplicationCapability {
         appliedViewports[identity]
     }
 
+    func setAvailable(_ isAvailable: Bool, for identity: TerminalInstanceIdentity) {
+        if isAvailable {
+            unavailableIdentities.remove(identity)
+        } else {
+            unavailableIdentities.insert(identity)
+        }
+    }
+
     func state(for identity: TerminalInstanceIdentity) -> RemoteTerminalStateResult {
-        guard identities.contains(identity) else { return .unavailable }
+        guard identities.contains(identity), !unavailableIdentities.contains(identity) else {
+            return .unavailable
+        }
         return .available(RemoteTerminalState(
             grid: Self.macGrid,
             title: "Lease fixture",
@@ -534,7 +620,9 @@ private final class LeaseCapability: RemoteTerminalApplicationCapability {
     func currentSnapshot(
         for identity: TerminalInstanceIdentity
     ) -> RemoteTerminalCaptureResult {
-        guard identities.contains(identity) else { return .unavailable }
+        guard identities.contains(identity), !unavailableIdentities.contains(identity) else {
+            return .unavailable
+        }
         return .captured(snapshot(for: identity))
     }
 
@@ -542,7 +630,9 @@ private final class LeaseCapability: RemoteTerminalApplicationCapability {
         for identity: TerminalInstanceIdentity,
         output: @escaping RemoteTerminalOutputSink
     ) -> RemoteTerminalCaptureResult {
-        guard identities.contains(identity) else { return .unavailable }
+        guard identities.contains(identity), !unavailableIdentities.contains(identity) else {
+            return .unavailable
+        }
         return .captured(snapshot(for: identity))
     }
 

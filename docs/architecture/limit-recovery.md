@@ -22,11 +22,12 @@ does not describe this state at all: session `a926e034` on CLI 2.1.223 hit its l
 
 Four facts fall out of it, and each is load-bearing:
 
-- **The limit hit is a durable, structured record.** A synthetic assistant message with
+- **The ordinary limit hit is a durable, structured record.** A synthetic assistant message with
   `isApiErrorMessage: true`, `error: "rate_limit"` and `apiErrorStatus: 429` is appended to the
-  session's transcript. Detection is therefore a transcript read, never screen scraping: the TUI
+  session's transcript. This path is therefore a transcript read, never screen scraping: the TUI
   chooser drawn over it ("Stop and wait for limit to reset / Upgrade your plan") is interactive
-  dressing over a state the file already states exactly.
+  dressing over a state the file already states exactly. The delegated-work exception below is
+  deliberately weaker and needs a second key.
 - **The turn is over when the chooser appears** (`turn_duration` is written). So a recovery that
   stops the process — the account-routing policies below — never needs to answer the chooser at
   all.
@@ -40,12 +41,45 @@ Four facts fall out of it, and each is load-bearing:
   record shape on `ClaudeTranscriptAPIError.isRateLimit`; detection here must stay narrow, because
   a login failure recovered as if the account were spent schedules a continuation against a
   window that was never the problem.
-- **The rendered text is the one source never parsed.** "resets 1:50am (Europe/Rome)" is
-  locale-shaped prose; the authoritative reset instant is `resetsAt` from the usage sources
-  [`accounts.md`](accounts.md) already ranks. The transcript proves *that* the limit hit;
-  the usage reading says *when* it lifts. (The specimen also shows why: the message blamed the
-  session window while the toolbar pill was blaming the weekly Fable window — readings drift,
-  the record does not.)
+- **The rendered reset is never scheduling authority.** "resets 1:50am (Europe/Rome)" is
+  locale-shaped prose; it can supply the human-facing hint (and, for the delegated exception, a
+  clean sentence without the task wrapper), but the authoritative reset instant is `resetsAt`
+  from the usage sources [`accounts.md`](accounts.md) already ranks. The transcript proves *that*
+  the limit hit; the usage reading says *when* it lifts. (The specimen also shows why: the
+  message blamed the session window while the toolbar pill was blaming the weekly Fable window —
+  readings drift, the record does not.)
+
+### The delegated-work exception has two keys
+
+A second real specimen exposed a different provider edge: session `3149ae34` on 2026-08-23 was
+still shown as working although its root terminal stood at the limit question. Its tail was:
+
+```
+11:49:59  assistant  stop_reason:"end_turn"              ← root completed
+11:54:27  queue-operation enqueue <task-notification>
+          status:"failed"
+          summary:"Agent terminated early due to an API error:
+                   You've hit your session limit · resets 4:50pm … · progress saved"
+          root terminal: limit chooser / inline notice    ← no root synthetic 429 follows
+```
+
+The notification is a child outcome, not a root refusal. On its own it may never stop the parent:
+the earlier `f3ad7546` specimen had a sidechain hit its limit and the root continued for another
+five minutes. Conversely, the screen alone is untrusted presentation that can contain an agent
+quoting these same words. Admission therefore requires both independent keys:
+
+1. the newest completed root assistant (`stop_reason: "end_turn"`) is followed by a complete,
+   failed task notification whose provider-failure summary is a recognised usage limit; and
+2. the live root terminal positively parses as the exact chooser (one stop-and-wait option plus
+   an upgrade option) or the exact inline notice (`resets … limit` or `/upgrade`).
+
+`ClaudeTranscriptUsageLimit` returns the first key as a provisional `UsageLimitObservation`.
+`LimitRecoveryCoordinator` checks the second through the existing `LimitChooserReading`, with the
+same bounded write/paint retries used before chooser actuation, and only then creates the
+`UsageLimitStop`. A newer root assistant supersedes the candidate. A root assistant ending on
+`tool_use`, an ordinary task failure, a successful task that merely mentions limits, or any screen
+other than the positive provider shape all fail closed. A rejected record identity is remembered
+so the five-second poll does not screen-read it forever; a new notification receives a new attempt.
 
 ## Two layers, deliberately split
 
@@ -59,12 +93,14 @@ meeting at one seam:
   newer outcome. A newer user record is only proof that a retry was submitted locally; `/loop`
   can write it immediately before the provider repeats the same refusal. Sidechain refusals are
   excluded: a subagent running out of limit is a failed task to its parent, not the session
-  stopping.
+  stopping. A failed task notification after a completed root turn is retained only as a
+  provisional `UsageLimitObservation`; it crosses into `UsageLimitStop` only when the live root
+  terminal supplies the delegated-work exception's second key above.
 - **Recovery** is `LimitRecoveryCoordinator` + `LimitRecoveryPolicy` + `LimitChooserReading`:
   a poll at `UsageLimitDefaults.pollInterval` over the live sessions (`stat`-cheap — the
   reader's size gate skips any transcript that has not grown, and its changed-only callback
-  means one refusal is handled exactly once), the policy switch, the chooser actuator, and the
-  scheduled continuation.
+  means one refusal is handled exactly once), the bounded confirmation of a provisional task
+  failure, the policy switch, the chooser actuator, and the scheduled continuation.
 
 Recovery reaches a terminal through `AgentTerminalLimitRecoverySurface`: bounded visible lines,
 keystroke insertion, and the two limit-park mutations. The UI adapter delegates those operations
@@ -520,6 +556,8 @@ follows the hooks' rule: `EventLog.Category.limitRecovery` journals what a bug r
 later would need, and the live narration goes to `ThreadingLogger` at `.debug`:
 
 - the detection, with the record's error string and the session it belongs to;
+- provisional background-task evidence, including whether the live terminal confirmed or
+  rejected it and the bounded screen sample on rejection;
 - the tracker repair (stranded turn ended, park applied);
 - the chooser read — including the refusals, *with the rows it saw*, because "it did nothing"
   and "it read a screen that was not the chooser" are unrelated bugs that look identical;

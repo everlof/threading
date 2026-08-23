@@ -32,13 +32,19 @@ Every relationship remains foreign keyed with `ON DELETE CASCADE`, so deleting e
 cannot leave usable authority or an orphaned audit stream. Event insertion and pruning to
 `SupervisionDefaults.maximumEvents` happen in one transaction.
 
-Writes are **per row, in one transaction**: upsert what is there, delete what has gone. That is
-the actual gain over the document — the store is no longer rewritten in full every time an agent
-renames a chat or standalone terminal — and it retires the rolling `projects.json.bak`, whose whole job was
-covering the window in which a full rewrite could be interrupted. WAL is the other half: a read
-never blocks the writer, and `busy_timeout` turns "another process has it" into a wait. That
-makes multiple writers *possible*, not permitted — `SingleInstanceLock` still stands, and is a
-chosen concurrency model rather than a workaround.
+SQLite writes are **per row, in one transaction**, and `ProjectStore` has both exact-record and
+graph-reconciliation routes. Session creation appends its one row at the project's final position;
+removal deletes its row and shifts only later positions in that project. Generic single-session
+updates, terminal location/title updates, and coalesced agent-title/turn metadata also retain the
+affected identifiers rather than converting a burst into a delayed whole-graph save. The
+graph-reconciliation path remains for operations whose input really is the complete graph and for
+structural routes that have not declared a narrower transaction; it is not the persistence
+primitive behind a newly started chat or high-frequency row observation. This is the actual gain
+over the document, and it retires the rolling `projects.json.bak`, whose whole job was covering the
+window in which a full rewrite could be interrupted. WAL is the other half: a read never blocks the
+writer, and `busy_timeout` turns "another process has it" into a wait. That makes multiple writers
+*possible*, not permitted — `SingleInstanceLock` still stands, and is a chosen concurrency model
+rather than a workaround.
 
 **SQLite handles have one deterministic lifetime.** `SQLiteDatabase.Statement` finalizes in
 `deinit` as well as after `run`: fluent binding can throw while the statement expression is still

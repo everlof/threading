@@ -1101,6 +1101,10 @@ public struct RemoteHostDTO: Codable, Equatable, Sendable {
 public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     case usageDashboard = "usage-dashboard"
     case hostedPeerTransport = "hosted-peer-transport"
+    /// A session socket may authenticate while a create/resume transaction is still installing
+    /// its live surface. The host holds that socket and completes the ordinary `hello` handshake
+    /// when the surface exists, so clients never poll the complete catalogue for readiness.
+    case sessionStartupHandshake = "session-startup-handshake"
     /// `attachment-thumbnail` answers: a small, bounded raster of an image or a PDF's first
     /// page, for the gallery's ledger. A phone paired with a Mac that does not say so draws the
     /// kind's glyph in each cell and asks for no bytes.
@@ -1749,6 +1753,9 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     /// `RemoteSessionRole.chat` or `.manager`. Absent is a chat, which is what every client
     /// asked for before this field existed.
     public let role: RemoteSessionRole?
+    /// New clients ask for the one changed row. Absent keeps the original full-catalogue response
+    /// for older clients whose decoder requires `me`.
+    public let compactResponse: Bool?
     public let prompt: String
 
     public init(
@@ -1762,6 +1769,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         surface: RemoteSessionSurface,
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
         role: RemoteSessionRole? = nil,
+        compactResponse: Bool? = nil,
         prompt: String
     ) {
         self.projectID = projectID
@@ -1774,17 +1782,42 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         self.surface = surface
         self.managedWorkspace = managedWorkspace
         self.role = role
+        self.compactResponse = compactResponse
         self.prompt = prompt
     }
 }
 
+public enum RemoteSessionStartupState: String, Codable, Equatable, Sendable {
+    /// The durable row exists and its launch transaction owns bringing the live surface up.
+    case starting
+    case ready
+}
+
 public struct RemoteCreateSessionResponseDTO: Codable, Equatable, Sendable {
     public let sessionID: String
-    public let me: RemoteMeDTO
+    /// The legacy response. Still emitted when an older client does not request a compact row.
+    public let me: RemoteMeDTO?
+    /// The O(changed) response requested by current clients.
+    public let session: RemoteSessionSummaryDTO?
+    /// Present with a compact response so the client never infers readiness from a stale row.
+    public let startup: RemoteSessionStartupState?
 
     public init(sessionID: String, me: RemoteMeDTO) {
         self.sessionID = sessionID
         self.me = me
+        self.session = nil
+        self.startup = nil
+    }
+
+    public init(
+        sessionID: String,
+        session: RemoteSessionSummaryDTO,
+        startup: RemoteSessionStartupState
+    ) {
+        self.sessionID = sessionID
+        self.me = nil
+        self.session = session
+        self.startup = startup
     }
 }
 
@@ -2765,6 +2798,16 @@ public struct RemoteTerminalReadyDTO: Codable, Equatable, Sendable {
     public init(requestID: String? = nil) {
         self.type = "terminalReady"
         self.requestID = requestID
+    }
+}
+
+/// A create/resume socket has authenticated and is waiting on that session's live surface.
+/// This is progress, not the surface handshake: `hello` remains the one authoritative attach.
+public struct RemoteSessionStartingDTO: Codable, Equatable, Sendable {
+    public let type: String
+
+    public init() {
+        self.type = "sessionStarting"
     }
 }
 

@@ -309,6 +309,17 @@ final class RemoteConnectionFailureTests: XCTestCase {
         XCTAssertEqual(connection.phase.failure?.recovery, .reconnect)
     }
 
+    func testAHostStartupTimeoutEndsTheRouteInsteadOfStartingReconnectRecovery() throws {
+        let connection = makeConnection(port: 1, sessionID: UUID().uuidString.lowercased())
+        let ended = RemoteEndedDTO(reason: "sessionStartupTimedOut")
+        let frame = String(decoding: try JSONEncoder().encode(ended), as: UTF8.self)
+
+        connection.receiveServerTextForTesting(frame)
+
+        XCTAssertEqual(connection.phase, .ended(MobileL10n.string("Couldn’t start session")))
+        XCTAssertNil(connection.phase.failure)
+    }
+
     func testAPermissionRaceStillDoesNotFailTheSession() {
         let connection = makeConnection(port: 1, sessionID: UUID().uuidString.lowercased())
 

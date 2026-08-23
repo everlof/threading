@@ -545,6 +545,22 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nivå" } } }
     },
+    "Next effort page": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nästa nivåsida" } } }
+    },
+    "Next model page": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nästa modellsida" } } }
+    },
+    "Previous effort page": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Föregående nivåsida" } } }
+    },
+    "Previous model page": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Föregående modellsida" } } }
+    },
     "Permissions": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Behörigheter" } } }
@@ -564,6 +580,26 @@
     "Model and effort": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Modell och nivå" } } }
+    },
+    "%@ · Default": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%@ · Standard" } } }
+    },
+    "Auto": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Automatiskt" } } }
+    },
+    "Max": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Max" } } }
+    },
+    "Model × effort": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Modell × nivå" } } }
+    },
+    "Ultra": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ultra" } } }
     },
     "Role": {
       "extractionState": "manual",

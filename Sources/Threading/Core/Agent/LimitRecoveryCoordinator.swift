@@ -37,6 +37,19 @@ final class LimitRecoveryCoordinator {
     /// this and the rendered-conversation surface feed.
     private var parked: [SessionID: UsageLimitStop] = [:]
 
+    /// A failed background task is not the parent session's refusal until the parent terminal
+    /// shows Claude's limit chooser or inline notice. These attempts bridge the short write/paint
+    /// race without admitting a child failure on transcript text alone.
+    private struct TerminalConfirmation {
+        let id: UUID
+        let observation: UsageLimitObservation
+    }
+    private var terminalConfirmations: [SessionID: TerminalConfirmation] = [:]
+
+    /// A complete but non-matching screen is a rejected candidate, not something to re-read every
+    /// five seconds forever. A new provider record has a new identity and gets its own attempt.
+    private var rejectedTerminalConfirmations: [SessionID: String] = [:]
+
     /// How much login-hopping each session has done unattended. The floor under the two policies
     /// that move a conversation, and the guard the interactive escape deliberately does without —
     /// see `LimitRecoveryBudget`.
@@ -89,12 +102,127 @@ final class LimitRecoveryCoordinator {
                   let project = ProjectStore.shared.executionProject(forSessionID: sessionID)
             else { continue }
 
+            // A first read may land before the running terminal surface is registered. The fact
+            // reader correctly suppresses unchanged callbacks, so retry a cached provisional
+            // observation here; authoritative refusals never need this screen-confirmation path.
+            if let known = ObservedUsageLimit.knownObservation(for: session, in: project),
+               known.requiresTerminalConfirmation {
+                limitObservationMoved(sessionID, observation: known)
+            }
+
             // A runtime that records no refusal produces no source and no callback, so the
             // capability table decides here, not a branch.
-            ObservedUsageLimit.revalidate(for: session, in: project) { [weak self] stop in
-                self?.limitReadingMoved(sessionID, stop: stop)
+            ObservedUsageLimit.revalidateObservation(
+                for: session,
+                in: project
+            ) { [weak self] observation in
+                self?.limitObservationMoved(sessionID, observation: observation)
             }
         }
+    }
+
+    private func limitObservationMoved(
+        _ sessionID: SessionID,
+        observation: UsageLimitObservation?
+    ) {
+        guard let observation else {
+            terminalConfirmations.removeValue(forKey: sessionID)
+            rejectedTerminalConfirmations.removeValue(forKey: sessionID)
+            limitReadingMoved(sessionID, stop: nil)
+            return
+        }
+
+        guard observation.requiresTerminalConfirmation else {
+            terminalConfirmations.removeValue(forKey: sessionID)
+            rejectedTerminalConfirmations.removeValue(forKey: sessionID)
+            limitReadingMoved(sessionID, stop: observation.stop)
+            return
+        }
+
+        beginTerminalConfirmation(observation, for: sessionID)
+    }
+
+    private func beginTerminalConfirmation(
+        _ observation: UsageLimitObservation,
+        for sessionID: SessionID
+    ) {
+        let identity = confirmationIdentity(of: observation)
+        guard parked[sessionID] != observation.stop,
+              rejectedTerminalConfirmations[sessionID] != identity,
+              terminalConfirmations[sessionID]?.observation != observation,
+              let terminal = AgentRuntime.shared.runningLimitRecoverySurface(for: sessionID)
+        else { return }
+
+        let confirmation = TerminalConfirmation(id: UUID(), observation: observation)
+        terminalConfirmations[sessionID] = confirmation
+        confirmTerminalLimit(
+            confirmation,
+            on: terminal,
+            for: sessionID,
+            attempt: 0
+        )
+    }
+
+    private func confirmTerminalLimit(
+        _ confirmation: TerminalConfirmation,
+        on terminal: any AgentTerminalLimitRecoverySurface,
+        for sessionID: SessionID,
+        attempt: Int
+    ) {
+        guard terminalConfirmations[sessionID]?.id == confirmation.id else { return }
+
+        let lines = terminal.visibleTerminalScreenLines()
+        switch LimitChooserReading.read(screenLines: lines) {
+        case .chooser, .notice:
+            guard let stop = confirmation.observation.confirmedStop(screenLines: lines) else {
+                return
+            }
+            terminalConfirmations.removeValue(forKey: sessionID)
+            rejectedTerminalConfirmations.removeValue(forKey: sessionID)
+            EventLog.shared.record(
+                .limitRecovery,
+                "Background-task limit confirmed by the live terminal",
+                [
+                    "session": sessionID.uuidString,
+                    "record": stop.recordID ?? ""
+                ]
+            )
+            limitReadingMoved(sessionID, stop: stop)
+
+        case .absent(let reason):
+            guard attempt < LimitRecoveryDefaults.chooserReadAttempts else {
+                terminalConfirmations.removeValue(forKey: sessionID)
+                rejectedTerminalConfirmations[sessionID] = confirmationIdentity(
+                    of: confirmation.observation
+                )
+                EventLog.shared.record(
+                    .limitRecovery,
+                    "Background-task limit was not a parent-session stop",
+                    [
+                        "session": sessionID.uuidString,
+                        "reason": reason,
+                        "screen": Self.screenSample(lines)
+                    ]
+                )
+                return
+            }
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + LimitRecoveryDefaults.chooserReadDelay
+            ) {
+                self.confirmTerminalLimit(
+                    confirmation,
+                    on: terminal,
+                    for: sessionID,
+                    attempt: attempt + 1
+                )
+            }
+        }
+    }
+
+    private func confirmationIdentity(of observation: UsageLimitObservation) -> String {
+        observation.stop.recordID
+            ?? "\(observation.stop.message)|\(observation.stop.resetHint ?? "")"
     }
 
     private func limitReadingMoved(_ sessionID: SessionID, stop: UsageLimitStop?) {
@@ -126,8 +254,8 @@ final class LimitRecoveryCoordinator {
             )
             return
         }
+        guard parked[sessionID] != stop else { return }
         if recovering[sessionID] != nil {
-            guard parked[sessionID] != stop else { return }
             // A new refusal supersedes the asynchronous recovery of the old one. Its callbacks
             // carry the old attempt id and will refuse themselves below.
             recovering.removeValue(forKey: sessionID)

@@ -10,6 +10,8 @@ struct ProjectsDidChange: AppEvent {
         case structure
         /// Rows were added, removed, or regrouped inside one project; repository roots stand.
         case projectStructure(ProjectID)
+        /// One session joined an otherwise standing project hierarchy.
+        case sessionAdded(projectID: ProjectID, sessionID: SessionID)
         /// One durable session row left an otherwise standing project hierarchy.
         case sessionRemoved(projectID: ProjectID, sessionID: SessionID)
         /// One session's display name can move it among otherwise unchanged siblings.

@@ -883,6 +883,22 @@ takes the rest. Split any other way, the two would disagree about what a rate li
 time a CLI version moved a key — and disagreement means a login failure recovered as if the
 account were spent, or a spent account quietly marked unread.
 
+There is one limit edge with no root API-error record at all. Measured on session `3149ae34` on
+2026-08-23: the root assistant had completed with `stop_reason: "end_turn"`, remained `working`
+because it had delegated background work, and later received a failed `<task-notification>` whose
+summary carried the provider's session-limit error. Claude moved the root terminal to its limit
+chooser but appended no synthetic root 429. The pause-on-own-work fact was still true, so nothing
+in the ordinary hook settlement could lower the spinner.
+
+That child notification is never a lifecycle boundary by itself — another measured parent kept
+working for five minutes after the same kind of sidechain failure. The limit reader therefore
+emits only a provisional observation when the notification follows a completed root turn, and
+`LimitRecoveryCoordinator` admits it only while the *root's live terminal* positively matches
+`LimitChooserReading`'s exact chooser or inline notice. The confirmed limit park outranks
+`pausedOnOwnWork`, clears the stranded turn fact and settles to `limitReached`; an ordinary screen,
+an unfinished root `tool_use`, or a newer root assistant leaves activity untouched. This two-key
+rule is detailed in [`limit-recovery.md`](limit-recovery.md#the-delegated-work-exception-has-two-keys).
+
 Two rules are load-bearing there. The refusal carries the failing record's **`uuid`**, because the
 reader calls back only when the answer *moves* and an expired login refuses every turn with the
 same class and the same sentence; the intervening user record cannot be relied on to reset it,

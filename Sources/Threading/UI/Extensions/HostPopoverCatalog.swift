@@ -16,6 +16,7 @@ enum HostPopoverID: String, CaseIterable {
     case extensionNodeDetail = "extension.node-detail"
     case conversationChangedFileDiff = "conversation.changed-file-diff"
     case sessionCornerCardAttachment = "session.corner-card.attachment-preview"
+    case composerModelEffortPicker = "composer.model-effort-picker"
     case designHelp = "design.help"
 
     var exposure: HostPopoverExposure {
@@ -54,6 +55,14 @@ enum HostPopoverID: String, CaseIterable {
                     + "an extension to compose into — the body *is* the change — and the "
                     + "surface exists only while a reader is holding a row open, so its "
                     + "timing, placement, chrome and dismissal stay host-owned."
+            )
+        case .composerModelEffortPicker:
+            return .hostOnly(
+                reason: "Edits executable launch configuration from the selected runtime and "
+                    + "login's live model catalogue. Provider validity, inherited defaults, "
+                    + "persistence, launch flags, keyboard focus and dismissal stay host-owned; "
+                    + "extensions can customize the surrounding composer without replacing the "
+                    + "provider-truth surface that decides what process AnotherTerminal starts."
             )
         case .designHelp:
             return .hostOnly(

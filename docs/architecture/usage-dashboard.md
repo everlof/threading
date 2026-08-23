@@ -45,8 +45,10 @@ next real active-window reset. It deliberately never averages unlike provider wi
 percentage and a weekly or model-scoped percentage do not form a capacity providers enforce.
 Expired windows are absent. Each account renders at most six active windows and each account card
 is an `NSTableView` row, so opening five or five hundred discovered accounts constructs only the
-viewport. The viewport itself is height-bounded and hands scrolling to the Settings page at its
-content ends.
+viewport. One fixed footer legend keys any user-authored limit markers visible across those rows;
+it is not repeated per recycled card. The viewport itself is height-bounded. In Settings it hands
+scrolling to the enclosing page at its content ends; in the pinned toolbar popover it owns the
+complete gesture because there is no parent scroller to receive a handoff.
 
 That bound continues after open. `AccountUsageDidChange` already carries an `AccountID`, so both
 hosts replace only that identity's cached item and reload only its table row. Status counts update

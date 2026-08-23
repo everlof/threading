@@ -267,6 +267,12 @@ final class ThemedPopover {
 
 }
 
+extension ThemedPopover: ChipChoicePresentationSession {
+    func dismissChipChoicePresentation() {
+        close()
+    }
+}
+
 /// Owns the panel past the main-actor presenter's lifetime. A parent window retains its child
 /// windows, so an owner dropped without `close()` must still detach the panel or it remains visible
 /// after the monitor that could dismiss it is gone. Uniquely owned storage makes that exceptional

@@ -239,6 +239,51 @@ final class StateManager {
         }
     }
 
+    /// Commits one graph addition without reconciling every project and session row.
+    @discardableResult
+    func addSession(
+        _ session: AgentSession,
+        to projectID: ProjectID,
+        position: Int
+    ) -> Bool {
+        guard writesAreAllowed(for: "session addition") else { return false }
+        do {
+            try database().addSession(session, to: projectID, position: position)
+            return true
+        } catch ProjectDatabaseWriteError.staleGeneration(let observed, let found) {
+            ThreadingLogger.agent.error(
+                "Refused a stale session addition: store moved from \(observed, privacy: .public) to \(found, privacy: .public)"
+            )
+            return false
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to add session: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
+    /// Writes one session payload without walking the graph around it.
+    @discardableResult
+    func saveSession(
+        _ session: AgentSession,
+        in projectID: ProjectID,
+        position: Int
+    ) -> Bool {
+        guard writesAreAllowed(for: "session") else { return false }
+        do {
+            try database().saveSession(session, in: projectID, position: position)
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to save session: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
     /// Writes the selected row without rewriting the projects and sessions beside it.
     @discardableResult
     func saveSelectedSessionID(_ id: SessionID?) -> Bool {

@@ -376,6 +376,9 @@ final class SessionComposerViewController: NSViewController {
     /// The composer's own column, bottom-flush in the pane.
     private let stack = NSStackView()
     private let appEvents = AppEventObservations()
+    /// Retained only while the existing model or effort chip is presenting its chooser.
+    /// Nothing about the chip row or composer layout depends on this surface.
+    private var modelEffortPopover: ThemedPopover?
 
     // Not private: `SessionComposerScheduling` freezes exactly these decisions into a
     // `ScheduledSessionPlan`. A start that happens later has to be the start that was
@@ -891,6 +894,9 @@ final class SessionComposerViewController: NSViewController {
         }
 
         modelChip.itemsProvider = { [weak self] in self?.modelItems() ?? [] }
+        modelChip.choicePresentationProvider = { [weak self] chip, didDismiss in
+            self?.presentModelEffortPicker(from: chip, didDismiss: didDismiss)
+        }
         modelChip.onSelect = { [weak self] item in
             guard let self else { return }
             self.selectedModel = item.representedValue as? String
@@ -900,6 +906,9 @@ final class SessionComposerViewController: NSViewController {
         }
 
         effortChip.itemsProvider = { [weak self] in self?.effortItems() ?? [] }
+        effortChip.choicePresentationProvider = { [weak self] chip, didDismiss in
+            self?.presentModelEffortPicker(from: chip, didDismiss: didDismiss)
+        }
         effortChip.onSelect = { [weak self] item in
             // Nil is the explicit first row: let the account or model choose.
             self?.selectedReasoningEffort = item.representedValue as? String
@@ -2001,6 +2010,115 @@ final class SessionComposerViewController: NSViewController {
             kind: selectedAgent,
             model: modelIdentifierToLaunch(on: account),
             account: account
+        )
+    }
+
+    /// The two existing chips are two views onto one launch choice, so either opens the same
+    /// matrix. Their titles, sizing, footer position and persistence remain exactly as before;
+    /// only the transient choice surface changes.
+    private func presentModelEffortPicker(
+        from chip: ChipView,
+        didDismiss: @escaping () -> Void
+    ) -> (any ChipChoicePresentationSession)? {
+        guard let presentation = modelEffortPickerPresentation() else { return nil }
+
+        let popover = HostPopoverFactory.make(.composerModelEffortPicker)
+        let controller = ModelEffortPickerViewController(
+            presentation: presentation
+        ) { [weak self, weak popover] model, effort in
+            guard let self else { return }
+            self.selectedModel = model
+            self.selectedReasoningEffort = effort
+            self.discardUnsupportedFastMode()
+            self.refreshChips()
+            popover?.close()
+        }
+        popover.behavior = .transient
+        popover.contentViewController = controller
+        popover.initialFirstResponder = controller.matrixView
+        popover.onClose = { [weak self, weak popover] in
+            if let popover, self?.modelEffortPopover === popover {
+                self?.modelEffortPopover = nil
+            }
+            didDismiss()
+        }
+        modelEffortPopover = popover
+        popover.show(relativeTo: chip.bounds, of: chip, preferredEdge: .maxY)
+        guard popover.isShown else {
+            modelEffortPopover = nil
+            return nil
+        }
+        return popover
+    }
+
+    /// Builds one union of every effort the current login advertises. A cell is enabled only
+    /// when its row's model offers that value; Auto is always enabled and answers nil.
+    private func modelEffortPickerPresentation() -> ModelEffortPickerPresentation? {
+        let account = selectedAgent.supportsAccounts
+            ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
+            : nil
+        let resolved = resolvedDefaultModel(for: account)
+        let options = AgentModels.options(for: selectedAgent, account: account)
+        guard !options.isEmpty else { return nil }
+
+        let markedInList = resolved.identifier.map { identifier in
+            options.contains { $0.identifier == identifier }
+        } ?? false
+        func markedTitle(_ option: AgentModelOption) -> String {
+            "\(option.displayName)\(ComposerDefaults.suffix(for: resolved.source))"
+        }
+
+        var models: [ModelEffortPickerPresentation.Model] = []
+        if !markedInList {
+            let resolvedOption = resolved.identifier.flatMap { identifier in
+                AgentModels.option(identifier: identifier, for: selectedAgent, account: account)
+            }
+            models.append(.init(
+                id: resolved.identifier ?? "threading.model-effort.default-model",
+                name: resolved.identifier.map(ModelName.display)
+                    ?? ComposerDefaults.defaultModelTitle,
+                representedValue: nil,
+                supportedEffortIDs: Set(resolvedOption?.reasoningLevels.map(\.effort) ?? [])
+            ))
+        }
+
+        models += options.map { option in
+            let isDefault = markedInList && option.identifier == resolved.identifier
+            return .init(
+                id: option.identifier,
+                name: isDefault ? markedTitle(option) : option.displayName,
+                representedValue: isDefault ? nil : option.identifier,
+                supportedEffortIDs: Set(option.reasoningLevels.map(\.effort))
+            )
+        }
+
+        var seenEfforts: Set<String> = []
+        var efforts: [ModelEffortPickerPresentation.Effort] = [
+            .init(
+                id: ModelEffortPickerPresentation.automaticEffortID,
+                name: L10n.string("Auto"),
+                representedValue: nil
+            )
+        ]
+        for option in options {
+            for level in option.reasoningLevels where seenEfforts.insert(level.effort).inserted {
+                efforts.append(.init(
+                    id: level.effort,
+                    name: level.displayName,
+                    representedValue: level.effort
+                ))
+            }
+        }
+
+        let selectedModelID = selectedModel
+            ?? resolved.identifier
+            ?? "threading.model-effort.default-model"
+        return ModelEffortPickerPresentation(
+            models: models,
+            efforts: efforts,
+            selectedModelID: selectedModelID,
+            selectedEffortID: selectedReasoningEffort
+                ?? ModelEffortPickerPresentation.automaticEffortID
         )
     }
 

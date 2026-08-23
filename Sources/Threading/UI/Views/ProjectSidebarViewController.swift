@@ -1084,6 +1084,132 @@ extension ProjectSidebarViewController {
         span.end(metadata: ["steps": String(steps.count)])
     }
 
+    /// Inserts the ordinary newly-created leaf without rebuilding its standing siblings.
+    ///
+    /// Manual forward order is the creation order, so a new unpinned top-level chat belongs at
+    /// the end of its session/branch parent. Branch creation or dissolution can legitimately
+    /// regroup several rows; those uncommon boundaries retain the authoritative project-local
+    /// builder instead of duplicating its policy here.
+    private func applySessionAddition(_ sessionID: SessionID, to projectID: ProjectID) {
+        guard sessionVisibility == .attention,
+              AppSettings.sidebarSessionOrder == .manual,
+              !AppSettings.sidebarSessionOrderIsReversed,
+              let session = projectStore.session(withID: sessionID),
+              !session.isArchived,
+              !session.isSnoozed(at: Date()),
+              !session.isPinned,
+              session.forkedFrom == nil,
+              let projectNode = projectNodesByID[projectID],
+              sessionNodesByID[sessionID] == nil
+        else {
+            applyProjectStructureChange(projectID)
+            return
+        }
+
+        let parent: any SidebarOutlineNode
+        let childIndex: Int
+        let firstTerminalOnlyChild = projectNode.childNodes.firstIndex { child in
+            child is TerminalNode
+                || ((child as? BranchGroupNode)?.sessionNodes.isEmpty == true)
+        }
+        if AppSettings.groupsSessionsByBranch, let branch = session.branch {
+            if let group = projectNode.childNodes.compactMap({ $0 as? BranchGroupNode })
+                .first(where: { $0.branch == branch }) {
+                parent = group
+                // Manual order presents sessions before any terminals in their branch group.
+                childIndex = group.sessionNodes.count
+            } else {
+                let standingSessionSharesBranch = projectNode.childNodes
+                    .compactMap { $0 as? SessionNode }
+                    .contains { node in
+                        projectStore.session(withID: node.sessionID)?.branch == branch
+                    }
+                let standingTerminalSharesBranch = projectNode.childNodes
+                    .compactMap { $0 as? TerminalNode }
+                    .contains { node in
+                        projectStore.terminal(withID: node.terminalID)?.branch == branch
+                    }
+                let loneBranchWouldEarnAGroup = AppSettings.groupsLoneBranches
+                    && projectNode.childNodes.contains { $0 is BranchGroupNode }
+                guard !standingSessionSharesBranch,
+                      !standingTerminalSharesBranch,
+                      !loneBranchWouldEarnAGroup else {
+                    applyProjectStructureChange(projectID)
+                    return
+                }
+                parent = projectNode
+                childIndex = firstTerminalOnlyChild ?? projectNode.childNodes.endIndex
+            }
+        } else {
+            parent = projectNode
+            childIndex = firstTerminalOnlyChild ?? projectNode.childNodes.endIndex
+        }
+
+        let parentKey = parent.sidebarKey
+        let key = SidebarNodeKey.session(sessionID)
+        guard renderedShape.insertLeaf(key, into: parentKey, at: childIndex) else {
+            applyProjectStructureChange(projectID)
+            return
+        }
+
+        #if DEBUG
+        let updateStarted = DispatchTime.now().uptimeNanoseconds
+        var measuredUpdate = ProjectSidebarReloadPerformance()
+        defer {
+            measuredUpdate.totalNanoseconds = DispatchTime.now().uptimeNanoseconds - updateStarted
+            lastProjectStructureNanoseconds = measuredUpdate.totalNanoseconds
+            lastProjectStructurePerformance = measuredUpdate
+        }
+        let indexingStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+        let node = SessionNode(sessionID: sessionID)
+        projectNode.sessionNodes.append(node)
+        switch parent {
+        case let project as ProjectNode:
+            project.childNodes.insert(node, at: childIndex)
+        case let group as BranchGroupNode:
+            group.sessionNodes.append(node)
+        default:
+            preconditionFailure("Validated sidebar session parent changed type")
+        }
+
+        let projectAncestors: [NSObject] = rootNodes.compactMap { root in
+            guard let repository = root as? RepoGroupNode,
+                  repository.projectNodes.contains(where: { $0 === projectNode }) else {
+                return nil
+            }
+            return repository
+        }
+        nodesByKey[key] = node
+        sessionNodesByID[sessionID] = node
+        projectNodesBySessionID[sessionID] = projectNode
+        var ancestors = projectAncestors + [projectNode]
+        if let group = parent as? BranchGroupNode { ancestors.append(group) }
+        ancestorsBySessionID[sessionID] = ancestors
+        #if DEBUG
+        measuredUpdate.indexingNanoseconds = DispatchTime.now().uptimeNanoseconds
+            - indexingStarted
+        let outlineStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
+
+        let span = PerformanceRecorder.shared.begin(
+            "sidebar.session-add.apply",
+            category: "sidebar",
+            metadata: ["project_sessions": String(projectNode.sessionNodes.count)]
+        )
+        applyStructure(
+            steps: [.insert(parent: parentKey, indexes: IndexSet(integer: childIndex))],
+            wholesale: false
+        )
+        if let row = projectRow(for: projectID) {
+            outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: [0])
+        }
+        #if DEBUG
+        measuredUpdate.outlineNanoseconds = DispatchTime.now().uptimeNanoseconds - outlineStarted
+        #endif
+        span.end(metadata: ["steps": "1"])
+    }
+
     /// Removes one rendered leaf without rebuilding every sibling in its project.
     ///
     /// A deletion that changes grouping still takes the complete project-local path: a parent
@@ -2538,6 +2664,8 @@ private extension ProjectSidebarViewController {
             reload()
         case .projectStructure(let projectID):
             applyProjectStructureChange(projectID)
+        case .sessionAdded(let projectID, let sessionID):
+            applySessionAddition(sessionID, to: projectID)
         case .sessionRemoved(let projectID, let sessionID):
             applySessionRemoval(sessionID, from: projectID)
         case .sessionOrder(let sessionID):

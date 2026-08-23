@@ -86,6 +86,42 @@ final class AccountUsageFleetTests: XCTestCase {
         XCTAssertLessThan(fleet.visibleCellCountForTesting, fleet.itemCountForTesting)
     }
 
+    func testPinnedPopoverKeepsVerticalScrollingInsteadOfHandingItToAMissingPage() {
+        let controller = AccountUsageFleetPopoverViewController(
+            currentAccountID: nil,
+            handoffAccountIDs: [],
+            accountsProvider: { [] },
+            readingProvider: { _ in .notFetched },
+            refreshProvider: { _ in },
+            nowProvider: { self.now }
+        )
+
+        _ = controller.view
+
+        XCTAssertEqual(controller.fleetVerticalScrollHandoffForTesting, .never)
+    }
+
+    func testSettingsFleetHandsScrollingToItsPageOnlyAtContentEnds() {
+        let fleet = AccountUsageFleetView(scrollHost: .nestedPage)
+
+        XCTAssertEqual(fleet.verticalScrollHandoffForTesting, .atContentEnds)
+    }
+
+    func testFleetUsesOneFooterLegendForItsRepeatedCustomLimitMarkers() {
+        let capped = item("capped", fraction: 0.47)
+        let fleet = AccountUsageFleetView(limitsProvider: { accountID in
+            accountID == capped.account.id
+                ? [CustomLimit(windowID: "5h", bound: 0.5)]
+                : []
+        })
+
+        fleet.show([capped], at: now)
+        XCTAssertTrue(fleet.showsLimitLegendForTesting)
+
+        fleet.show([item("plain", fraction: 0.47)], at: now)
+        XCTAssertFalse(fleet.showsLimitLegendForTesting)
+    }
+
     func testOneReadingUpdatePreservesFleetOrderAndUpdatesOnlyItsAggregateContribution() {
         let fleet = AccountUsageFleetView(maximumHeight: 260)
         let initial = (0..<120).map { index in
@@ -236,6 +272,11 @@ final class AccountUsageFleetTests: XCTestCase {
                         items.first { $0.account.id == account.id }?.reading ?? .notFetched
                     },
                     refreshProvider: { _ in },
+                    limitsProvider: { accountID in
+                        accountID == currentID
+                            ? [CustomLimit(windowID: "5h", bound: 0.5)]
+                            : []
+                    },
                     nowProvider: { self.now }
                 )
                 let content = controller.view

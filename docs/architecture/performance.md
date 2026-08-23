@@ -286,6 +286,42 @@ per hour and about 24,000 over 20 visible hours, even with no changes. The healt
 now zero repeated REST requests: one activation/foreground snapshot, scoped deltas for row
 changes, and a coalesced snapshot only for structural changes or socket recovery.
 
+### Mobile created-session startup transaction, 2026-08-23
+
+Moving directly from a submitted draft into its new conversation exposed a transaction boundary
+that the old dismiss-and-return flow had hidden. The create response arrived before the Mac's
+asynchronous presentation and provider launch made a terminal available. The detail screen then
+called the generic dormant-session resume route a second time and polled the complete `/api/me`
+catalogue every 500 ms, up to 30 times, while waiting for one row. On the reported store that meant
+re-projecting 435 sessions, including 387 archived sessions, on the main actor for every check.
+Observed create-to-attach intervals were 14.3 and 42.5 seconds even though the Mac had launched the
+provider after 1.5–4.2 seconds and submitted the prompt after 8.4–9.8 seconds. The delay was host
+catalogue churn and duplicate lifecycle work, not a slow provider launch.
+
+Created-session startup is now one host-owned transaction. A capable phone requests a compact
+response containing the exact authorised session summary and startup state rather than a complete
+`me` snapshot, publishes that row locally, and opens its session socket without issuing resume or
+polling the catalogue. The Mac owns the bounded wait between creation and terminal registration:
+the socket receives `sessionStarting`, attaches when the exact session mirror appears, and fails
+after 60 seconds if launch never produces one. The client deadline is deliberately longer so the
+host's concrete failure wins. Older clients retain the original full response and older Macs retain
+the phone's compatibility fallback; feature negotiation, rather than version guessing, selects the
+new path.
+
+The same changed-entity rule reaches the Mac UI and store. Creation appends one SQLite session row
+and emits `sessionAdded`; coalesced title/turn writes also persist their exact session or project
+row. The common manual-order, top-level addition mutates one sidebar leaf, its ancestor/index
+entries and one outline row. A project-local rebuild remains the correctness fallback when branch
+grouping genuinely changes the surrounding structure. The coordinator does not issue a second
+reload after the store notification.
+
+The matched one-project / 5,000-session Debug fixture measured the complete add mutation at
+**150.351 ms before and 5.550 ms after**. Sidebar work fell from **139.647 ms to 1.039 ms**;
+the new path built no tree or shape and spent 0.010 ms in index work and 1.010 ms applying the
+outline insertion. In the same after-process, the deliberately retained whole-graph persistence
+and full-reload comparisons cost 244.985 ms and 51.045 ms. The performance record is
+`/tmp/threading-profiles/20260823T211000Z-created-session-add/project-sidebar-stress.log`.
+
 ### Mobile terminal viewport-lease scaling contract, 2026-08-20
 
 A phone-owned terminal grid is recomputed on every crossed cell boundary — pinch steps, the
@@ -2962,10 +2998,13 @@ bottleneck to repair. Keep `host_window_ms` as a harness-health diagnostic, but 
 `SidebarTreeBuilderTests.testStressProjectSidebarWhenEnabled` seeds a throwaway `ProjectStore`
 database and loads the production `ProjectSidebarViewController`. It measures cold load and layout,
 same-shape content refresh, collapse/re-expand, a reveal through branch and nested side-chat levels,
-one targeted title event, 250 repeated row updates, and the pure tree builder. The fixture fixes the
-grouping defaults, parameterizes manual/recent/name order, and never reads or changes the user's
-projects. It also asserts that the expanded outline contains exactly as many rows as the pure tree;
-this catches an ancestor that a sort order accidentally left closed, not just slow work.
+one targeted title event, 250 repeated row updates, one exact session creation, two exact removals,
+and the pure tree builder. Creation and removal retain deliberate whole-graph/full-reload comparison
+phases so an ostensibly faster targeted path is measured against the broad work it replaced. The
+fixture fixes the grouping defaults, parameterizes manual/recent/name order, and never reads or
+changes the user's projects. It also asserts that the expanded outline contains exactly as many
+rows as the pure tree; this catches an ancestor that a sort order accidentally left closed, not just
+slow work.
 
 The cold fixture follows `MainWindowController`'s production lifecycle: load the deferred sidebar
 shell, give it its final 300 × 720 geometry, cross the explicit initial-tree mount boundary, then
@@ -2995,6 +3034,9 @@ virtualization is already doing its job. The measured fixes are above that layer
   session-order impact under Name order. The latter rebuilds, adopts and diffs only the affected
   project's subtree; an identity-set guard falls back to the complete builder if a supposedly
   title-only event ever adds or removes a row;
+- a `sessionAdded` impact inserts the common manual-order leaf and its exact indexes directly.
+  Branch-group transitions and non-manual orders fall back to the affected project's subtree,
+  never the complete sidebar;
 - outline expansion callbacks ignore disclosure state that already matches the model, and an actual
   disclosure change upserts only that project row. It never walks or rewrites the session table.
 
