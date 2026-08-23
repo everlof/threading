@@ -806,7 +806,7 @@
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["272×400-point popover"]
+        "sizes": ["264×400-point popover"]
       },
       "source": {
         "path": "Tests/ThreadingTests/AccountUsagePopoverVirtualizationTests.swift",
