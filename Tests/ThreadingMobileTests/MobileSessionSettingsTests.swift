@@ -24,9 +24,7 @@ final class MobileSessionSettingsTests: XCTestCase {
             in: makeAgent(accounts: [makeAccount(id: "personal", name: "David")])
         )
 
-        XCTAssertTrue(choices.contains {
-            $0.policy.action == RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount
-        })
+        XCTAssertTrue(choices.contains { $0.policy == .resumeOnBestAccount })
     }
 
     func testPinnedRecoveryOffersOnlyOtherAccounts() {
@@ -39,9 +37,10 @@ final class MobileSessionSettingsTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            choices.filter {
-                $0.policy.action == RemoteLimitRecoveryPolicyDTO.resumeVia
-            }.map(\.policy.accountID),
+            choices.compactMap {
+                guard case .resumeVia(let accountID) = $0.policy else { return nil }
+                return accountID
+            },
             ["work"]
         )
     }
@@ -62,10 +61,7 @@ final class MobileSessionSettingsTests: XCTestCase {
     func testPinnedRecoveryUsesTheAccountsDisplayName() {
         let session = makeSession(
             accountID: "personal",
-            limitRecovery: .init(
-                action: RemoteLimitRecoveryPolicyDTO.resumeVia,
-                accountID: "work"
-            )
+            limitRecovery: .resumeVia(accountID: "work")
         )
 
         XCTAssertEqual(
@@ -79,9 +75,7 @@ final class MobileSessionSettingsTests: XCTestCase {
 
     private func makeSession(
         accountID: String?,
-        limitRecovery: RemoteLimitRecoveryPolicyDTO? = .init(
-            action: RemoteLimitRecoveryPolicyDTO.waitForReset
-        )
+        limitRecovery: RemoteLimitRecoveryPolicyDTO? = .waitForReset
     ) -> RemoteSessionSummaryDTO {
         RemoteSessionSummaryDTO(
             id: "session",

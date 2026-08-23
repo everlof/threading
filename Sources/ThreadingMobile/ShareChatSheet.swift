@@ -8,7 +8,7 @@ struct SharedSessionLink: Identifiable {
     let id = UUID()
     let sessionTitle: String
     let url: URL
-    let capability: String
+    let capability: RemoteAdvertisedCapability
     let canApprovePermissions: Bool
     let expiresAt: Date
 }
@@ -556,7 +556,7 @@ private struct SharedSessionLinkStage: View {
     }
 
     private var markSymbol: String {
-        link.capability == RemoteCapability.interact.rawValue
+        link.capability == .interact
             ? "person.2.badge.gearshape"
             : "person.2"
     }
@@ -604,10 +604,10 @@ enum SharedSessionLinkCopy {
     /// One line saying what the link grants, naming the chat it grants.
     static func grant(
         chatTitle: String,
-        capability: String,
+        capability: RemoteAdvertisedCapability,
         canApprovePermissions: Bool
     ) -> String {
-        guard capability == RemoteCapability.interact.rawValue else {
+        guard capability == .interact else {
             return MobileL10n.string("Can view “%@”", chatTitle)
         }
         return canApprovePermissions
@@ -655,7 +655,7 @@ enum ShareChatDemo {
             string: "https://192.168.1.181:8760/#demo-invitation."
                 + String(repeating: "A", count: 26)
         )!,
-        capability: RemoteCapability.interact.rawValue,
+        capability: .interact,
         canApprovePermissions: true,
         expiresAt: Date().addingTimeInterval(86_400)
     )
@@ -665,7 +665,7 @@ enum ShareChatDemo {
             SharedSessionLink(
                 sessionTitle: chatTitle,
                 url: link.url,
-                capability: role.capability.rawValue,
+                capability: RemoteAdvertisedCapability(role.capability),
                 canApprovePermissions: role.canApprovePermissions,
                 expiresAt: link.expiresAt
             )

@@ -392,7 +392,7 @@ struct RemoteThemePalette: Equatable {
         self.source = source
     }
 
-    var colorScheme: ColorScheme { source?.mode == "light" ? .light : .dark }
+    var colorScheme: ColorScheme { source?.mode == .light ? .light : .dark }
     var ground: Color { color("ground", fallback: "#16181D") }
     var surface: Color { color("surface", fallback: "#1B1E24") }
     var panel: Color { color("panel", fallback: "#22252C") }

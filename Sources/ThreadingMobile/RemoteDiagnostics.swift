@@ -715,9 +715,9 @@ struct RemoteDiagnosticsView: View {
     private var deliveryStatus: String {
         guard let host = model.activeHost else { return MobileL10n.string("No Mac") }
         switch notifications.deliveryByConnection[host.id] {
-        case "push": return "APNs"
-        case "live": return MobileL10n.string("Live only")
-        case .some(let value): return value
+        case .push: return "APNs"
+        case .live: return MobileL10n.string("Live only")
+        case .some(let value): return value.rawValue
         case nil: return MobileL10n.string("Not registered")
         }
     }

@@ -469,14 +469,14 @@ final class RemoteAppModel: ObservableObject {
     }
 
     var canManageThemes: Bool {
-        me?.share.scope == "all"
-            && me?.share.capability == RemoteCapability.interact.rawValue
+        me?.share.scope == .all
+            && me?.share.capability == .interact
             && me?.themeCatalog != nil
     }
 
     var canManageSessions: Bool {
-        me?.share.scope == "all"
-            && me?.share.capability == RemoteCapability.interact.rawValue
+        me?.share.scope == .all
+            && me?.share.capability == .interact
             && me?.newSessionCatalog != nil
     }
 
@@ -593,12 +593,12 @@ final class RemoteAppModel: ObservableObject {
         let hostID = identity?.id ?? link.baseURL.host ?? UUID().uuidString
         // One Mac can be present once as My Devices and again through individual guest shares.
         // A guest token must never replace the owner's all-session capability in Keychain.
-        let id = me.share.scope == "all"
+        let id = me.share.scope == .all
             ? hostID
             : "\(hostID):share:\(me.share.label)"
         var hostedServiceURL = hosts.first(where: { $0.id == id })?.hostedServiceURL
         var hostedCredential = hosts.first(where: { $0.id == id })?.hostedCredential
-        if me.share.scope == "all",
+        if me.share.scope == .all,
            me.features?.contains(RemoteRESTFeature.hostedPeerTransport.rawValue) == true {
             let provisioningStartedAt = MobileDiagnostics.monotonicNow()
             let provisioningFields = pairingFields.merging([
@@ -648,7 +648,7 @@ final class RemoteAppModel: ObservableObject {
             id: id,
             hostID: hostID,
             shareID: me.share.label,
-            scope: me.share.scope,
+            scope: me.share.scope.rawValue,
             name: identity?.name ?? link.baseURL.host ?? "Threading Mac",
             link: link,
             lastConnectedAt: Date(),
@@ -659,8 +659,8 @@ final class RemoteAppModel: ObservableObject {
             hostedCredential: hostedCredential,
             // Owner responses only: a guest capability is not the Mac's owner and never teaches
             // this phone which certificate to trust.
-            pinnedFingerprint: me.share.scope == "all" ? identity?.pinnedFingerprint : nil,
-            nextPinnedFingerprint: me.share.scope == "all" ? identity?.nextPinnedFingerprint : nil
+            pinnedFingerprint: me.share.scope == .all ? identity?.pinnedFingerprint : nil,
+            nextPinnedFingerprint: me.share.scope == .all ? identity?.nextPinnedFingerprint : nil
         )
         RemoteHostTrust.register([host])
 
@@ -699,7 +699,7 @@ final class RemoteAppModel: ObservableObject {
             .result: "succeeded",
             .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
             .peer: MobileDiagnostics.pseudonym(id, prefix: "peer"),
-            .capability: me.share.capability,
+            .capability: me.share.capability.rawValue,
         ]) { _, new in new })
     }
 
@@ -1159,7 +1159,7 @@ final class RemoteAppModel: ObservableObject {
 
     func makeTerminalReady(_ terminal: RemoteProjectTerminalSummaryDTO) async throws {
         guard !terminal.isAvailable, let host = activeHost else { return }
-        guard me?.share.capability == RemoteCapability.interact.rawValue else {
+        guard me?.share.capability == .interact else {
             throw RemoteClientError.unauthorized
         }
         if isDemo { return }
@@ -1257,7 +1257,7 @@ final class RemoteAppModel: ObservableObject {
         permissionMode: String?,
         surface: RemoteSessionSurface,
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
-        role: String? = nil,
+        role: RemoteSessionRole? = nil,
         prompt: String
     ) async throws -> RemoteSessionSummaryDTO {
         guard canManageSessions, let host = activeHost else {
@@ -1424,7 +1424,7 @@ final class RemoteAppModel: ObservableObject {
 
     func createShare(
         for session: RemoteSessionSummaryDTO,
-        capability: String,
+        capability: RemoteCapability,
         canApprovePermissions: Bool
     ) async throws -> RemoteCreateShareResponseDTO {
         guard canManageSessions, let host = activeHost else {
@@ -1458,7 +1458,7 @@ final class RemoteAppModel: ObservableObject {
 
     func createTerminalShare(
         for terminal: RemoteProjectTerminalSummaryDTO,
-        capability: String
+        capability: RemoteCapability
     ) async throws -> RemoteCreateShareResponseDTO {
         guard canManageSessions, let host = activeHost else {
             throw RemoteClientError.unauthorized
@@ -2853,7 +2853,7 @@ final class RemoteAppModel: ObservableObject {
     static let demoTheme = RemoteThemeDTO(
         id: "cyberpunk",
         name: "Cyberpunk",
-        mode: "dark",
+        mode: .dark,
         colors: [
             "ground": "#07070B",
             "surface": "#0D0D14",
@@ -2886,7 +2886,7 @@ final class RemoteAppModel: ObservableObject {
     static let demoLightTheme = RemoteThemeDTO(
         id: "paper",
         name: "Paper",
-        mode: "light",
+        mode: .light,
         colors: [
             "ground": "#F6F1E8",
             "surface": "#EEE7DA",
@@ -2921,7 +2921,7 @@ final class RemoteAppModel: ObservableObject {
     static let demoSystemRemoteTheme = RemoteThemeDTO(
         id: "system-remote",
         name: "System remote",
-        mode: "dark",
+        mode: .dark,
         colors: [
             "ground": "#1E1E1E",
             "surface": "#1E1E1E",
@@ -2954,7 +2954,7 @@ final class RemoteAppModel: ObservableObject {
     static let demoThreadingTheme = RemoteThemeDTO(
         id: "threading",
         name: "Threading",
-        mode: "dark",
+        mode: .dark,
         colors: [
             "ground": "#040A12",
             "surface": "#071626",
@@ -2986,7 +2986,7 @@ final class RemoteAppModel: ObservableObject {
     private static func demoCatalogTheme(
         id: String,
         name: String,
-        mode: String,
+        mode: RemoteThemeMode,
         ground: String,
         surface: String,
         panel: String,
@@ -3014,11 +3014,11 @@ final class RemoteAppModel: ObservableObject {
                 "accent": accent,
                 "accent_muted": accent + "24",
                 "selection": accent + "30",
-                "status_positive": mode == "light" ? "#197149" : "#74C49A",
-                "status_warning": mode == "light" ? "#9A6700" : "#E6A35D",
-                "status_negative": mode == "light" ? "#B42318" : "#E06E65",
-                "diff_added": mode == "light" ? "#197149" : "#74C49A",
-                "diff_removed": mode == "light" ? "#B42318" : "#E06E65",
+                "status_positive": mode == .light ? "#197149" : "#74C49A",
+                "status_warning": mode == .light ? "#9A6700" : "#E6A35D",
+                "status_negative": mode == .light ? "#B42318" : "#E06E65",
+                "diff_added": mode == .light ? "#197149" : "#74C49A",
+                "diff_removed": mode == .light ? "#B42318" : "#E06E65",
             ],
             material: .init(
                 panelRadius: radius,
@@ -3033,37 +3033,37 @@ final class RemoteAppModel: ObservableObject {
         demoThreadingTheme,
         demoLightTheme,
         demoCatalogTheme(
-            id: "editorial", name: "Editorial", mode: "light",
+            id: "editorial", name: "Editorial", mode: .light,
             ground: "#F2EEE7", surface: "#E8E1D7", panel: "#FBF8F2",
             label: "#2A2520", accent: "#A85632", radius: 5
         ),
         demoCatalogTheme(
-            id: "swiss-minimalist", name: "Swiss Minimalist", mode: "light",
+            id: "swiss-minimalist", name: "Swiss Minimalist", mode: .light,
             ground: "#FFFFFF", surface: "#F2F2F2", panel: "#FFFFFF",
             label: "#111111", accent: "#FF3000", radius: 0, borderWidth: 2
         ),
         demoCatalogTheme(
-            id: "bauhaus", name: "Bauhaus", mode: "light",
+            id: "bauhaus", name: "Bauhaus", mode: .light,
             ground: "#F0F0F0", surface: "#FFFFFF", panel: "#FFFFFF",
             label: "#121212", accent: "#D02020", radius: 0, borderWidth: 4
         ),
         demoCatalogTheme(
-            id: "art-deco", name: "Art Deco", mode: "dark",
+            id: "art-deco", name: "Art Deco", mode: .dark,
             ground: "#0A0A0F", surface: "#050505", panel: "#141414",
             label: "#F2F0E4", accent: "#D4AF37", radius: 4
         ),
         demoCatalogTheme(
-            id: "neo-brutalism", name: "Neo Brutalism", mode: "light",
+            id: "neo-brutalism", name: "Neo Brutalism", mode: .light,
             ground: "#FFFDF5", surface: "#C4B5FD", panel: "#FFFFFF",
             label: "#000000", accent: "#FF6B6B", radius: 0, borderWidth: 4
         ),
         demoCatalogTheme(
-            id: "claymorphism", name: "Claymorphism", mode: "light",
+            id: "claymorphism", name: "Claymorphism", mode: .light,
             ground: "#E9E7F7", surface: "#DCD8F0", panel: "#F5F2FF",
             label: "#332B55", accent: "#7C4DFF", radius: 24
         ),
         demoCatalogTheme(
-            id: "vaporwave", name: "Vaporwave", mode: "dark",
+            id: "vaporwave", name: "Vaporwave", mode: .dark,
             ground: "#120A26", surface: "#1B0E35", panel: "#261346",
             label: "#F7E8FF", accent: "#FF4FCB", radius: 12
         ),
@@ -3107,8 +3107,8 @@ final class RemoteAppModel: ObservableObject {
             serverProtocol: RemoteProtocolInfo(),
             share: .init(
                 label: "preview",
-                scope: "all",
-                capability: "interact",
+                scope: .all,
+                capability: .interact,
                 canApprovePermissions: true,
                 expiresAt: nil
             ),
@@ -3127,9 +3127,7 @@ final class RemoteAppModel: ObservableObject {
                     inheritedTerminalThemeName: demoTerminalTheme.name,
                     inheritedTerminalTheme: demoTerminalTheme,
                     accountID: "default",
-                    limitRecovery: .init(
-                        action: RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount
-                    )
+                    limitRecovery: .resumeOnBestAccount
                 ),
                 .init(
                     id: "ff9f4a47-4c3b-466b-bcc5-a864b0657423",

@@ -1122,7 +1122,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
         sessionCommands.createdSessionID = SessionID()
 
-        func create(role: String?) throws -> Int {
+        func create(role: RemoteSessionRole?) throws -> Int {
             let body = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
                 projectID: project.id.uuidString,
                 agentKind: AgentKind.codex.rawValue,
@@ -1143,7 +1143,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(try XCTUnwrap(sessionCommands.launches.last).role, .chat)
 
         XCTAssertEqual(sessionCommands.launches.count, 3)
-        XCTAssertEqual(try create(role: "overlord"), 422)
+        let unknownRole = Data(
+            #"{"projectID":"\#(project.id.uuidString)","agentKind":"codex","surface":"terminal","role":"overlord","prompt":"Coordinate the release"}"#.utf8
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: unknownRole)).status,
+            400
+        )
         XCTAssertEqual(sessionCommands.launches.count, 3, "an unknown role starts nothing")
     }
 
@@ -1194,7 +1200,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(
             try create(
                 in: plainProject.id,
-                workspace: RemoteManagedWorkspacePlanDTO(delivery: "mergeAndCleanUp")
+                workspace: RemoteManagedWorkspacePlanDTO(delivery: .mergeAndCleanUp)
             ),
             422,
             "a worktree was accepted for a folder with no Git checkout"
@@ -1202,7 +1208,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
         XCTAssertEqual(
             try create(in: gitProject.id, workspace: RemoteManagedWorkspacePlanDTO(
-                delivery: "rebaseOntoMain"
+                delivery: .unknown("rebaseOntoMain")
             )),
             422,
             "an unrecognised delivery was accepted rather than refused"
@@ -1212,8 +1218,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         // pocket does not open change requests.
         XCTAssertEqual(
             try create(in: gitProject.id, workspace: RemoteManagedWorkspacePlanDTO(
-                delivery: "mergeAndCleanUp",
-                publication: "draft"
+                delivery: .mergeAndCleanUp,
+                publication: .draft
             )),
             422,
             "a phone was allowed to publish a change request"
@@ -1237,7 +1243,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
         XCTAssertEqual(
             try create(in: gitProject.id, workspace: RemoteManagedWorkspacePlanDTO(
-                delivery: "keepForReview"
+                delivery: .keepForReview
             )),
             201
         )
@@ -1328,9 +1334,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         LimitRecoverySettings.policy = .flagOnly
         defer { LimitRecoverySettings.policy = originalPolicy }
         let recovery = try JSONEncoder().encode(
-            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
-                action: RemoteLimitRecoveryPolicyDTO.waitForReset
-            ))
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: .waitForReset)
         )
         let recoveryProbe = try XCTUnwrap(post(
             "/api/session/\(session.id.uuidString)/limit-recovery",
@@ -1346,13 +1350,11 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(ownerSummary.accountID, session.accountHandle.name)
         XCTAssertEqual(
             ownerSummary.limitRecovery,
-            .init(action: RemoteLimitRecoveryPolicyDTO.waitForReset)
+            .waitForReset
         )
 
         let inheritedRecovery = try JSONEncoder().encode(
-            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
-                action: RemoteLimitRecoveryPolicyDTO.flagOnly
-            ))
+            RemoteSetSessionLimitRecoveryRequestDTO(policy: .flagOnly)
         )
         XCTAssertEqual(
             try XCTUnwrap(post(
@@ -1405,7 +1407,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             400
         )
         let futureRecovery = try JSONEncoder().encode(
-            RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(action: "futureAction"))
+            RemoteSetSessionLimitRecoveryRequestDTO(
+                policy: .unknown(action: "futureAction", accountID: nil)
+            )
         )
         XCTAssertEqual(
             try XCTUnwrap(post(
@@ -1480,7 +1484,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertFalse(ownerMe.sessions.contains { $0.id == terminal.id.uuidString })
         let summary = try XCTUnwrap(ownerMe.terminals?.first { $0.id == terminal.id.uuidString })
         XCTAssertEqual(summary.projectName, project.name)
-        XCTAssertEqual(summary.state, "dormant")
+        XCTAssertEqual(summary.state, .dormant)
         XCTAssertFalse(summary.isAvailable)
 
         authority.set(RemoteAuthorization(
@@ -1493,7 +1497,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             RemoteMeDTO.self,
             from: try XCTUnwrap(get("/api/me", bearer: "terminalview")).body
         )
-        XCTAssertEqual(guestMe.share.scope, "terminal")
+        XCTAssertEqual(guestMe.share.scope, .terminal)
         XCTAssertTrue(guestMe.sessions.isEmpty)
         XCTAssertEqual(guestMe.terminals?.map(\.id), [terminal.id.uuidString])
         XCTAssertEqual(
@@ -1539,7 +1543,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 "/api/terminal/\(terminal.id.uuidString)/share",
                 bearer: "terminalcontrol",
                 body: try JSONEncoder().encode(
-                    RemoteCreateShareRequestDTO(capability: RemoteCapability.view.rawValue)
+                    RemoteCreateShareRequestDTO(capability: .view)
                 )
             )).status,
             403,
@@ -1557,11 +1561,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             try XCTUnwrap(post(
                 "/api/terminal/\(terminal.id.uuidString)/share",
                 bearer: "goodtoken",
-                body: try JSONEncoder().encode(
-                    RemoteCreateShareRequestDTO(capability: "administrator")
-                )
+                body: Data(#"{"capability":"administrator"}"#.utf8)
             )).status,
-            422
+            400
         )
     }
 
@@ -1573,7 +1575,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             Set(AppThemeRole.allCases.map(\.wireName))
         )
         XCTAssertTrue(chrome.colors.values.allSatisfy { $0.hasPrefix("#") })
-        XCTAssertTrue(["light", "dark"].contains(chrome.mode))
+        XCTAssertTrue([RemoteThemeMode.light, .dark].contains(chrome.mode))
         XCTAssertNotNil(chrome.material.textScale)
 
         let terminal = RemoteThemeBridge.terminalTheme(for: SessionID())
@@ -1810,9 +1812,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 "/api/session/\(sessionID.uuidString)/limit-recovery",
                 bearer: "guesttoken",
                 body: try JSONEncoder().encode(
-                    RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
-                        action: RemoteLimitRecoveryPolicyDTO.waitForReset
-                    ))
+                    RemoteSetSessionLimitRecoveryRequestDTO(policy: .waitForReset)
                 )
             )).status,
             403
@@ -1829,7 +1829,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             403
         )
         let share = try JSONEncoder().encode(
-            RemoteCreateShareRequestDTO(capability: RemoteCapability.view.rawValue)
+            RemoteCreateShareRequestDTO(capability: .view)
         )
         XCTAssertEqual(
             try XCTUnwrap(post(
@@ -2102,7 +2102,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     func testNotificationRegistrationIsAuthenticatedAndValidatesDeviceToken() throws {
         let valid = try JSONEncoder().encode(RemoteNotificationRegistrationDTO(
             deviceToken: String(repeating: "ab", count: 32),
-            environment: "sandbox",
+            environment: .sandbox,
             enabledKinds: [.permissionRequest, .agentMessage]
         ))
         let registered = try XCTUnwrap(post(
@@ -2115,11 +2115,11 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             RemoteNotificationRegistrationResponseDTO.self,
             from: registered.body
         )
-        XCTAssertTrue(["live", "push"].contains(response.delivery))
+        XCTAssertTrue([.live, .push].contains(response.delivery))
 
         let invalid = try JSONEncoder().encode(RemoteNotificationRegistrationDTO(
             deviceToken: "../../not-a-token",
-            environment: "sandbox",
+            environment: .sandbox,
             enabledKinds: [.permissionRequest]
         ))
         XCTAssertEqual(
@@ -2341,7 +2341,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             from: response.body
         )
         XCTAssertEqual(accepted.accessToken, "goodtoken")
-        XCTAssertEqual(accepted.me.share.scope, "all")
+        XCTAssertEqual(accepted.me.share.scope, .all)
     }
 
     func testOnlyTheNativeIOSClientRequestsDurableOwnerPairing() throws {

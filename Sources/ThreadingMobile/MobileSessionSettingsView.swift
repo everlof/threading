@@ -42,11 +42,11 @@ enum MobileSessionSettingsPresentation {
 
         var choices = [
             MobileSessionLimitRecoveryChoice(
-                policy: .init(action: RemoteLimitRecoveryPolicyDTO.flagOnly),
+                policy: .flagOnly,
                 title: MobileL10n.string("Stop and Wait for Me")
             ),
             MobileSessionLimitRecoveryChoice(
-                policy: .init(action: RemoteLimitRecoveryPolicyDTO.waitForReset),
+                policy: .waitForReset,
                 title: MobileL10n.string("Continue at Reset")
             ),
         ]
@@ -56,17 +56,14 @@ enum MobileSessionSettingsPresentation {
         // be armed before another login is added, matching the Mac's standing-policy menu.
         if let accounts = agent?.accounts {
             choices.append(.init(
-                policy: .init(action: RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount),
+                policy: .resumeOnBestAccount,
                 title: MobileL10n.string("Continue on the Best Login")
             ))
             choices.append(contentsOf: accounts
                 .filter { $0.id != session.accountID }
                 .map { account in
                     .init(
-                        policy: .init(
-                            action: RemoteLimitRecoveryPolicyDTO.resumeVia,
-                            accountID: account.id
-                        ),
+                        policy: .resumeVia(accountID: account.id),
                         title: MobileL10n.string("Continue as %@", account.name)
                     )
                 })
@@ -79,18 +76,17 @@ enum MobileSessionSettingsPresentation {
         in agent: RemoteAgentChoiceDTO?
     ) -> String? {
         guard let policy = session.limitRecovery else { return nil }
-        switch policy.action {
-        case RemoteLimitRecoveryPolicyDTO.flagOnly:
+        switch policy {
+        case .flagOnly:
             return MobileL10n.string("Stop and Wait for Me")
-        case RemoteLimitRecoveryPolicyDTO.waitForReset:
+        case .waitForReset:
             return MobileL10n.string("Continue at Reset")
-        case RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount:
+        case .resumeOnBestAccount:
             return MobileL10n.string("Continue on the Best Login")
-        case RemoteLimitRecoveryPolicyDTO.resumeVia:
-            let name = agent?.accounts?.first { $0.id == policy.accountID }?.name
-                ?? policy.accountID
-            return name.map { MobileL10n.string("Continue as %@", $0) }
-        default:
+        case .resumeVia(let accountID):
+            let name = agent?.accounts?.first { $0.id == accountID }?.name ?? accountID
+            return MobileL10n.string("Continue as %@", name)
+        case .unknown:
             return nil
         }
     }

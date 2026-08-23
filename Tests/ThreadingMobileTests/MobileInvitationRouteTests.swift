@@ -193,19 +193,19 @@ final class MobileInvitationRouteTests: XCTestCase {
         XCTAssertTrue(
             SharedSessionLinkCopy.grant(
                 chatTitle: "LANDING",
-                capability: RemoteCapability.view.rawValue,
+                capability: .view,
                 canApprovePermissions: false
             ).contains("LANDING")
         )
         XCTAssertNotEqual(
             SharedSessionLinkCopy.grant(
                 chatTitle: "LANDING",
-                capability: RemoteCapability.interact.rawValue,
+                capability: .interact,
                 canApprovePermissions: true
             ),
             SharedSessionLinkCopy.grant(
                 chatTitle: "LANDING",
-                capability: RemoteCapability.interact.rawValue,
+                capability: .interact,
                 canApprovePermissions: false
             ),
             "approval is a separate right and the sheet has to say so"

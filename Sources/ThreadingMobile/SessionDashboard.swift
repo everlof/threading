@@ -1161,7 +1161,7 @@ struct SessionDashboard: View {
     ) async throws -> SharedSessionLink {
         let response = try await model.createShare(
             for: session,
-            capability: role.capability.rawValue,
+            capability: role.capability,
             canApprovePermissions: role.canApprovePermissions
         )
         guard let url = URL(string: response.url) else {

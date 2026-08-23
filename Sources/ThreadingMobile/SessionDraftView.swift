@@ -855,7 +855,7 @@ enum SessionDraftRole: CaseIterable {
 
     /// Nil for an agent: a chat is what an older Mac starts for a request with no role, and
     /// what every request meant before the field existed.
-    var wireValue: String? {
+    var wireValue: RemoteSessionRole? {
         switch self {
         case .agent: return nil
         case .manager: return RemoteSessionRole.manager

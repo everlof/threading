@@ -26,7 +26,7 @@ enum RemoteThemeBridge {
     /// role — harmless, and a future client that learns to bevel finds its colours waiting.
     static func appTheme(_ theme: AppTheme) -> RemoteThemeDTO {
         var colors: [String: String] = [:]
-        var mode = theme.mode.rawValue
+        var mode = RemoteThemeMode(rawValue: theme.mode.rawValue)
         var glowColor: String?
         var material = AppTheme.Material.system
         let appearance = drawingAppearance(for: theme)
@@ -35,8 +35,8 @@ enum RemoteThemeBridge {
             if theme.isAdaptive {
                 mode = NSAppearance.currentDrawing()
                     .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                    ? "dark"
-                    : "light"
+                    ? .dark
+                    : .light
             }
             material = theme.variant(for: appearance)?.material ?? theme.material
             for role in AppThemeRole.allCases {
@@ -79,7 +79,7 @@ enum RemoteThemeBridge {
                 borderWidth: Double(material.borderWidth),
                 glow: glow,
                 textScale: Double(material.textScale),
-                typeface: material.typeface.rawValue,
+                typeface: RemoteThemeTypeface(rawValue: material.typeface.rawValue),
                 // This bridge promises resolved, portable state. Send the first named family the
                 // host can actually use rather than an unavailable historical preference; a
                 // remote client cannot reproduce this Mac's fallback search for itself.

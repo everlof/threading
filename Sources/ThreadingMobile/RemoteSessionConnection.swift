@@ -1203,7 +1203,7 @@ final class RemoteSessionConnection: ObservableObject {
             if surface != .terminal {
                 completeTerminalHydration()
             }
-            capability = RemoteCapability(rawValue: hello.capability) ?? .view
+            capability = hello.capability.knownCapability ?? .view
             theme = hello.theme ?? theme
             terminalTheme = hello.terminalTheme ?? terminalTheme
             serverFeatures = Set(hello.features ?? [])
@@ -1242,7 +1242,7 @@ final class RemoteSessionConnection: ObservableObject {
             ).merging([
                 .result: "succeeded",
                 .attempt: String(socketAttempt),
-                .capability: hello.capability,
+                .capability: hello.capability.rawValue,
                 .surface: hello.surface.rawValue,
             ]) { current, _ in current })
             reconnectAttempt = 0

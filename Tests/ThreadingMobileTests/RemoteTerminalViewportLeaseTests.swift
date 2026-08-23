@@ -129,7 +129,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         // fallback for compatibility.
         connection.receiveServerTextForTesting(Self.encoded(RemoteHelloDTO(
             surface: .terminal,
-            capability: RemoteCapability.interact.rawValue,
+            capability: .interact,
             cols: 80,
             rows: 24,
             title: "Legacy terminal",
@@ -200,7 +200,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         connection.onTerminalOutput = { _ in }
         connection.receiveServerTextForTesting(Self.encoded(RemoteHelloDTO(
             surface: .terminal,
-            capability: RemoteCapability.interact.rawValue,
+            capability: .interact,
             cols: 80,
             rows: 24,
             title: "Current terminal",
@@ -249,7 +249,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         )
         connection.receiveServerTextForTesting(Self.encoded(RemoteHelloDTO(
             surface: .terminal,
-            capability: RemoteCapability.interact.rawValue,
+            capability: .interact,
             cols: 80,
             rows: 24,
             title: "Current terminal",

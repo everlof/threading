@@ -119,7 +119,7 @@ final class RemoteNotificationService {
         authorization: RemoteAuthorization
     ) -> RemoteNotificationRegistrationResponseDTO? {
         guard let environment = RemoteAPNSPushSender.Environment(
-            rawValue: registration.environment
+            rawValue: registration.environment.rawValue
         ), Self.acceptsDeviceToken(registration.deviceToken) else {
             return nil
         }
@@ -162,7 +162,7 @@ final class RemoteNotificationService {
         }
 
         return RemoteNotificationRegistrationResponseDTO(
-            delivery: supportsPush ? "push" : "live"
+            delivery: supportsPush ? .push : .live
         )
     }
 

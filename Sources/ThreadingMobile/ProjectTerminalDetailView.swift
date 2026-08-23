@@ -14,7 +14,7 @@ struct ProjectTerminalDetailView: View {
     @State private var connection: RemoteSessionConnection?
     @State private var launchError: String?
     @State private var actionError: String?
-    @State private var pendingShareCapability: String?
+    @State private var pendingShareCapability: RemoteCapability?
     @State private var sharedLink: SharedSessionLink?
     @State private var isMutating = false
 
@@ -55,14 +55,14 @@ struct ProjectTerminalDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
-                            pendingShareCapability = RemoteCapability.view.rawValue
+                            pendingShareCapability = .view
                         } label: {
                             Label(MobileL10n.string("Share view-only link"), systemImage: "eye")
                         }
                         .disabled(!currentTerminal.isAvailable || isMutating)
 
                         Button {
-                            pendingShareCapability = RemoteCapability.interact.rawValue
+                            pendingShareCapability = .interact
                         } label: {
                             Label(
                                 MobileL10n.string("Share full-control link"),
@@ -97,10 +97,10 @@ struct ProjectTerminalDetailView: View {
                 .mobileTheme(theme)
         }
         .themedConfirmationDialog(
-            pendingShareCapability == RemoteCapability.view.rawValue
+            pendingShareCapability == .view
                 ? MobileL10n.string("Share terminal for viewing?")
                 : MobileL10n.string("Share full terminal control?"),
-            message: pendingShareCapability == RemoteCapability.view.rawValue
+            message: pendingShareCapability == .view
                 ? MobileL10n.string("The link can watch this terminal’s output while its shell is running.")
                 : MobileL10n.string("Anyone who accepts can start the shell and run commands as your Mac user. The project folder is only its starting directory, not a security boundary."),
             isPresented: Binding(
@@ -133,7 +133,7 @@ struct ProjectTerminalDetailView: View {
                 title: latest.title,
                 agentKind: "terminal",
                 surface: .terminal,
-                state: RemoteSessionActivity(rawValue: latest.state),
+                state: RemoteSessionActivity(rawValue: latest.state.rawValue),
                 projectName: latest.projectName,
                 isAvailable: latest.isAvailable,
                 lastActiveAt: latest.createdAt,
@@ -164,7 +164,7 @@ struct ProjectTerminalDetailView: View {
     /// The chosen grant is captured, not read back: the system action sheet clears its
     /// presentation binding before the button's handler runs, and that binding is what holds
     /// `pendingShareCapability`.
-    private func shareActions(for capability: String?) -> [ThemedDialogAction] {
+    private func shareActions(for capability: RemoteCapability?) -> [ThemedDialogAction] {
         guard let capability else { return [] }
         return [
             ThemedDialogAction(MobileL10n.string("Create link")) {
@@ -176,7 +176,7 @@ struct ProjectTerminalDetailView: View {
         ]
     }
 
-    private func createShare(capability: String) {
+    private func createShare(capability: RemoteCapability) {
         pendingShareCapability = nil
         isMutating = true
         Task {

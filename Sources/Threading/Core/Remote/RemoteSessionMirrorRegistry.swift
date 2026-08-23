@@ -258,11 +258,11 @@ final class RemoteSessionMirrorRegistry {
             }
             .sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
 
-        let scopeName: String
+        let scopeName: RemoteShareScope
         switch authorization.scope {
-        case .allSessions: scopeName = "all"
-        case .session: scopeName = "session"
-        case .projectTerminal: scopeName = "terminal"
+        case .allSessions: scopeName = .all
+        case .session: scopeName = .session
+        case .projectTerminal: scopeName = .terminal
         }
 
         let ownsSessionLifecycle = canManageSessions(authorization)
@@ -284,7 +284,7 @@ final class RemoteSessionMirrorRegistry {
             share: .init(
                 label: authorization.shareID,
                 scope: scopeName,
-                capability: authorization.capability.rawValue,
+                capability: RemoteAdvertisedCapability(authorization.capability),
                 canApprovePermissions: authorization.canApprovePermissions,
                 expiresAt: authorization.expiresAt?.timeIntervalSince1970,
                 memberID: authorization.member?.id,
@@ -393,16 +393,13 @@ final class RemoteSessionMirrorRegistry {
     ) -> RemoteLimitRecoveryPolicyDTO {
         switch policy {
         case .flagOnly:
-            return .init(action: RemoteLimitRecoveryPolicyDTO.flagOnly)
+            return .flagOnly
         case .waitForReset:
-            return .init(action: RemoteLimitRecoveryPolicyDTO.waitForReset)
+            return .waitForReset
         case .resumeOnBestAccount:
-            return .init(action: RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount)
+            return .resumeOnBestAccount
         case .resumeVia(let accountID):
-            return .init(
-                action: RemoteLimitRecoveryPolicyDTO.resumeVia,
-                accountID: accountID.handle.name
-            )
+            return .resumeVia(accountID: accountID.handle.name)
         }
     }
 
@@ -573,8 +570,10 @@ final class RemoteSessionMirrorRegistry {
             surface: inherited.usesNativeUI ? .conversation : .terminal,
             managedWorkspace: workspace.map {
                 RemoteManagedWorkspacePlanDTO(
-                    delivery: $0.delivery.rawValue,
-                    publication: $0.publication?.rawValue
+                    delivery: RemoteManagedWorkspaceDelivery(rawValue: $0.delivery.rawValue),
+                    publication: $0.publication.map {
+                        RemoteManagedWorkspacePublication(rawValue: $0.rawValue)
+                    }
                 )
             }
         )
@@ -656,7 +655,7 @@ final class RemoteSessionMirrorRegistry {
         terminalByConnection[key] = terminalID
         connection.sendText(encode(RemoteHelloDTO(
             surface: .terminal,
-            capability: authorization.capability.rawValue,
+            capability: RemoteAdvertisedCapability(authorization.capability),
             cols: snapshot.grid.cols,
             rows: snapshot.grid.rows,
             title: snapshot.title,
@@ -804,7 +803,7 @@ final class RemoteSessionMirrorRegistry {
 
         let hello = RemoteHelloDTO(
             surface: .terminal,
-            capability: capability.rawValue,
+            capability: RemoteAdvertisedCapability(capability),
             cols: snapshot.grid.cols,
             rows: snapshot.grid.rows,
             title: snapshot.title,
@@ -913,7 +912,7 @@ final class RemoteSessionMirrorRegistry {
         sessionByConnection[key] = sessionID
         connection.sendText(encode(RemoteHelloDTO(
             surface: .conversation,
-            capability: authorization.capability.rawValue,
+            capability: RemoteAdvertisedCapability(authorization.capability),
             cols: 0,
             rows: 0,
             title: ProjectStore.shared.session(withID: sessionID)?.displayTitle ?? "",

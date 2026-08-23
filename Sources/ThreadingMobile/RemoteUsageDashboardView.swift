@@ -930,8 +930,8 @@ struct RemoteUsageDashboardView: View {
 
                     ForEach(detail.resets) { reset in
                         RuleMark(x: .value("Reset", Date(timeIntervalSince1970: reset.detectedAt)))
-                            .foregroundStyle(reset.cause == "bankedCredit" ? theme.positive : theme.secondaryLabel)
-                            .lineStyle(.init(lineWidth: reset.cause == "bankedCredit" ? 2 : 1, dash: [3, 3]))
+                            .foregroundStyle(reset.cause == .bankedCredit ? theme.positive : theme.secondaryLabel)
+                            .lineStyle(.init(lineWidth: reset.cause == .bankedCredit ? 2 : 1, dash: [3, 3]))
                     }
 
                     if let expiry = detail.series.nextBankedResetExpiresAt {
@@ -1383,7 +1383,7 @@ enum RemoteUsageDemo {
                     id: "demo-banked-reset",
                     detectedAt: bankedResetAt,
                     previousObservedAt: bankedResetAt - 3_600,
-                    cause: "bankedCredit",
+                    cause: .bankedCredit,
                     restoredFraction: 0.72,
                     elapsedFraction: 0.18,
                     paceGainFraction: 0.54

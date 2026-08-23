@@ -178,12 +178,12 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
     ) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
 #if DEBUG
-        let pushEnvironment = "sandbox"
+        let pushEnvironment = RemoteNotificationEnvironment.sandbox
 #else
-        let pushEnvironment = "production"
+        let pushEnvironment = RemoteNotificationEnvironment.production
 #endif
         MobileDiagnostics.record(.apnsRegistrationSucceeded, fields: [
-            .environment: pushEnvironment
+            .environment: pushEnvironment.rawValue
         ])
         NotificationCenter.default.post(
             name: RemoteNotificationBridge.deviceTokenNotification,
@@ -878,7 +878,7 @@ final class RemoteNotificationManager: ObservableObject {
 
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published private(set) var deviceToken: String?
-    @Published private(set) var deliveryByConnection: [String: String] = [:]
+    @Published private(set) var deliveryByConnection: [String: RemoteNotificationDelivery] = [:]
     @Published var scenePhase: ScenePhase = .active
 
     @Published var sharedChatsEnabled: Bool {
@@ -1039,7 +1039,7 @@ final class RemoteNotificationManager: ObservableObject {
     }
 
     var hasLiveOnlyConnections: Bool {
-        deliveryByConnection.values.contains("live")
+        deliveryByConnection.values.contains(.live)
     }
 
     func prepare() async {
@@ -1109,9 +1109,9 @@ final class RemoteNotificationManager: ObservableObject {
             ])
 
 #if DEBUG
-            let pushEnvironment = "sandbox"
+            let pushEnvironment = RemoteNotificationEnvironment.sandbox
 #else
-            let pushEnvironment = "production"
+            let pushEnvironment = RemoteNotificationEnvironment.production
 #endif
             // Register the established kinds first. An older Mac cannot decode a newly added
             // enum case, so sending attentionRequest in the only registration would also turn
@@ -1165,8 +1165,8 @@ final class RemoteNotificationManager: ObservableObject {
                 registeredSignatures.insert(signature)
                 MobileDiagnostics.record(.notificationRegistrationSucceeded, fields: [
                     .peer: peer,
-                    .transport: result.delivery,
-                    .environment: pushEnvironment,
+                    .transport: result.delivery.rawValue,
+                    .environment: pushEnvironment.rawValue,
                 ])
             } catch {
                 MobileDiagnostics.record(
@@ -1309,7 +1309,7 @@ final class RemoteNotificationManager: ObservableObject {
 
         // APNs owns system presentation once the Mac reports push delivery. Scheduling the live
         // mirror too would produce two banners for one permission request.
-        if let connectionID, deliveryByConnection[connectionID] == "push" {
+        if let connectionID, deliveryByConnection[connectionID] == .push {
             MobileDiagnostics.record(.notificationSuppressed, fields: [
                 .trace: event.id,
                 .reason: "apnsOwnsPresentation",

@@ -22,7 +22,7 @@ final class ShareChatFlowTests: XCTestCase {
         SharedSessionLink(
             sessionTitle: chatTitle,
             url: URL(string: "https://192.168.1.181:8760/#invitation")!,
-            capability: role.capability.rawValue,
+            capability: RemoteAdvertisedCapability(role.capability),
             canApprovePermissions: role.canApprovePermissions,
             expiresAt: Date(timeIntervalSince1970: 2_000_000)
         )
@@ -39,7 +39,7 @@ final class ShareChatFlowTests: XCTestCase {
         await flow.choose(.collaborate)
 
         XCTAssertFalse(flow.stage.isChoosingRole)
-        XCTAssertEqual(flow.stage.link?.capability, RemoteCapability.interact.rawValue)
+        XCTAssertEqual(flow.stage.link?.capability, .interact)
         XCTAssertEqual(flow.stage.link?.sessionTitle, chatTitle)
     }
 
@@ -61,7 +61,11 @@ final class ShareChatFlowTests: XCTestCase {
 
             await flow.choose(role)
 
-            XCTAssertEqual(flow.stage.link?.capability, capability.rawValue, "\(role)")
+            XCTAssertEqual(
+                flow.stage.link?.capability,
+                RemoteAdvertisedCapability(capability),
+                "\(role)"
+            )
             XCTAssertEqual(flow.stage.link?.canApprovePermissions, approves, "\(role)")
         }
 
@@ -88,7 +92,7 @@ final class ShareChatFlowTests: XCTestCase {
         await flow.choose(.collaborate)
 
         XCTAssertEqual(mints, 1)
-        XCTAssertEqual(flow.stage.link?.capability, RemoteCapability.interact.rawValue)
+        XCTAssertEqual(flow.stage.link?.capability, .interact)
     }
 
     /// Once the link exists the chooser is gone, so a stale tap arriving from it cannot replace
@@ -99,7 +103,7 @@ final class ShareChatFlowTests: XCTestCase {
 
         await flow.choose(.view)
 
-        XCTAssertEqual(flow.stage.link?.capability, RemoteCapability.interact.rawValue)
+        XCTAssertEqual(flow.stage.link?.capability, .interact)
         XCTAssertTrue(flow.stage.link?.canApprovePermissions == true)
     }
 

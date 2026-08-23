@@ -69,7 +69,7 @@ final class RemoteProtocolTests: XCTestCase {
 
         let registration = RemoteNotificationRegistrationDTO(
             deviceToken: "abcd",
-            environment: "sandbox",
+            environment: .sandbox,
             enabledKinds: [
                 .sharedSession, .permissionRequest, .agentQuestion, .attentionRequest,
             ],
@@ -167,7 +167,7 @@ final class RemoteProtocolTests: XCTestCase {
 
     func testInvitationMembershipAndPresenceRoundTrip() throws {
         let request = RemoteCreateShareRequestDTO(
-            capability: "interact",
+            capability: .interact,
             canApprovePermissions: true
         )
         XCTAssertEqual(
@@ -184,8 +184,8 @@ final class RemoteProtocolTests: XCTestCase {
                 serverProtocol: RemoteProtocolInfo(),
                 share: .init(
                     label: "member-1",
-                    scope: "session",
-                    capability: "interact",
+                    scope: .session,
+                    capability: .interact,
                     canApprovePermissions: true,
                     expiresAt: nil,
                     memberID: "member-1",
@@ -291,7 +291,7 @@ final class RemoteProtocolTests: XCTestCase {
         let theme = RemoteThemeDTO(
             id: "cyberpunk",
             name: "Cyberpunk",
-            mode: "dark",
+            mode: .dark,
             colors: ["ground": "#07070B", "accent": "#00FF88"],
             material: .init(
                 panelRadius: 3,
@@ -303,7 +303,7 @@ final class RemoteProtocolTests: XCTestCase {
         )
         let me = RemoteMeDTO(
             serverProtocol: RemoteProtocolInfo(),
-            share: .init(label: "l", scope: "all", capability: "interact", expiresAt: nil),
+            share: .init(label: "l", scope: .all, capability: .interact, expiresAt: nil),
             sessions: [RemoteSessionSummaryDTO(
                 id: "s", title: "t", agentKind: "claude", surface: .terminal,
                 state: .idle, projectName: "p", isAvailable: false, lastActiveAt: 123,
@@ -313,9 +313,7 @@ final class RemoteProtocolTests: XCTestCase {
                 inheritedTerminalThemeName: "Default",
                 inheritedTerminalTheme: terminalTheme,
                 accountID: "default",
-                limitRecovery: .init(
-                    action: RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount
-                )
+                limitRecovery: .resumeOnBestAccount
             )],
             terminals: [RemoteProjectTerminalSummaryDTO(
                 id: "terminal-1",
@@ -409,19 +407,16 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertFalse(summary.isSnoozed())
     }
 
-    func testLimitRecoveryPolicyRecognizesOnlyStructurallyValidChoices() {
-        XCTAssertTrue(RemoteLimitRecoveryPolicyDTO(
-            action: RemoteLimitRecoveryPolicyDTO.flagOnly
+    func testLimitRecoveryPolicyRecognizesOnlyStructurallyValidChoices() throws {
+        XCTAssertTrue(RemoteLimitRecoveryPolicyDTO.flagOnly.isKnown)
+        XCTAssertTrue(RemoteLimitRecoveryPolicyDTO.resumeVia(accountID: "work").isKnown)
+        XCTAssertFalse(try JSONDecoder().decode(
+            RemoteLimitRecoveryPolicyDTO.self,
+            from: Data(#"{"action":"resumeVia"}"#.utf8)
         ).isKnown)
-        XCTAssertTrue(RemoteLimitRecoveryPolicyDTO(
-            action: RemoteLimitRecoveryPolicyDTO.resumeVia,
-            accountID: "work"
-        ).isKnown)
-        XCTAssertFalse(RemoteLimitRecoveryPolicyDTO(
-            action: RemoteLimitRecoveryPolicyDTO.resumeVia
-        ).isKnown)
-        XCTAssertFalse(RemoteLimitRecoveryPolicyDTO(
-            action: "futureAction"
+        XCTAssertFalse(try JSONDecoder().decode(
+            RemoteLimitRecoveryPolicyDTO.self,
+            from: Data(#"{"action":"futureAction"}"#.utf8)
         ).isKnown)
     }
 
@@ -525,7 +520,7 @@ final class RemoteProtocolTests: XCTestCase {
 
         let me = RemoteMeDTO(
             serverProtocol: RemoteProtocolInfo(),
-            share: .init(label: "owner", scope: "all", capability: "view", expiresAt: nil),
+            share: .init(label: "owner", scope: .all, capability: .view, expiresAt: nil),
             sessions: [],
             features: [RemoteRESTFeature.usageDashboard.rawValue]
         )
@@ -540,7 +535,7 @@ final class RemoteProtocolTests: XCTestCase {
             theme: .init(
                 id: "swiss",
                 name: "Swiss",
-                mode: "light",
+                mode: .light,
                 colors: ["ground": "#FFFFFF", "label": "#111111"],
                 material: .init(
                     panelRadius: 0,
@@ -681,7 +676,7 @@ final class RemoteProtocolTests: XCTestCase {
 
         let hello = RemoteHelloDTO(
             surface: .conversation,
-            capability: "interact",
+            capability: .interact,
             cols: 0,
             rows: 0,
             title: "Review",
@@ -811,7 +806,7 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             creation
         )
-        XCTAssertEqual(creation.role, "manager")
+        XCTAssertEqual(creation.role, .manager)
 
         let olderCreation = try JSONDecoder().decode(
             RemoteCreateSessionRequestDTO.self,
@@ -886,10 +881,9 @@ final class RemoteProtocolTests: XCTestCase {
             ),
             account
         )
-        let recovery = RemoteSetSessionLimitRecoveryRequestDTO(policy: .init(
-            action: RemoteLimitRecoveryPolicyDTO.resumeVia,
-            accountID: "work"
-        ))
+        let recovery = RemoteSetSessionLimitRecoveryRequestDTO(
+            policy: .resumeVia(accountID: "work")
+        )
         XCTAssertEqual(
             try JSONDecoder().decode(
                 RemoteSetSessionLimitRecoveryRequestDTO.self,

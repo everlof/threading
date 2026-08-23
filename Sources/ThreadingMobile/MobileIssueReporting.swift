@@ -1069,8 +1069,8 @@ extension MobileDiagnostics {
             .connectionStateHistory: MobileConnectionStateLog.summary() ?? "none",
             .pairedHostCount: String(model.hosts.count),
             .visibleSessionCount: String(model.me?.sessions.count ?? 0),
-            .activeScope: model.me?.share.scope ?? "none",
-            .activeCapability: model.me?.share.capability ?? "none",
+            .activeScope: model.me?.share.scope.rawValue ?? "none",
+            .activeCapability: model.me?.share.capability.rawValue ?? "none",
             .notificationAuthorization: notificationAuthorization(
                 notifications.authorizationStatus
             ),
@@ -1078,7 +1078,7 @@ extension MobileDiagnostics {
 
         if let host = model.activeHost {
             details[.notificationDelivery] =
-                notifications.deliveryByConnection[host.id] ?? "none"
+                notifications.deliveryByConnection[host.id]?.rawValue ?? "none"
         } else {
             details[.notificationDelivery] = "none"
         }

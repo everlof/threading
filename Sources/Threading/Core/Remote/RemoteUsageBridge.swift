@@ -78,7 +78,7 @@ enum RemoteUsageBridge {
                     id: $0.id,
                     detectedAt: $0.detectedAt.timeIntervalSince1970,
                     previousObservedAt: $0.previousObservedAt.timeIntervalSince1970,
-                    cause: $0.cause.rawValue,
+                    cause: RemoteUsageLimitResetCause(rawValue: $0.cause.rawValue),
                     restoredFraction: $0.restoredFraction,
                     elapsedFraction: $0.elapsedFraction,
                     paceGainFraction: $0.paceGainFraction

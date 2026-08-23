@@ -700,7 +700,7 @@ struct RemoteClient {
 
     func createShare(
         sessionID: String,
-        capability: String,
+        capability: RemoteCapability,
         canApprovePermissions: Bool,
         requestID: String = UUID().uuidString.lowercased()
     ) async throws -> RemoteCreateShareResponseDTO {
@@ -727,7 +727,7 @@ struct RemoteClient {
 
     func createTerminalShare(
         terminalID: String,
-        capability: String,
+        capability: RemoteCapability,
         requestID: String = UUID().uuidString.lowercased()
     ) async throws -> RemoteCreateShareResponseDTO {
         try await postResponse(

@@ -109,8 +109,8 @@ final class MobileSessionChromeTests: XCTestCase {
 
         static let share = RemoteMeDTO.Share(
             label: "preview",
-            scope: "all",
-            capability: "interact",
+            scope: .all,
+            capability: .interact,
             expiresAt: nil
         )
 

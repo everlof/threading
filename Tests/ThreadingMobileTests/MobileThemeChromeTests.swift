@@ -55,7 +55,7 @@ final class MobileFloatingSurfaceTests: XCTestCase {
         RemoteThemeDTO(
             id: "floating-surface-test",
             name: "Floating surface test",
-            mode: "dark",
+            mode: .dark,
             colors: colors,
             material: RemoteThemeDTO.Material(
                 panelRadius: 20,
@@ -143,7 +143,7 @@ final class MobileKeyboardAppearanceTests: XCTestCase {
         RemoteThemeDTO(
             id: "test",
             name: "Test",
-            mode: "dark",
+            mode: .dark,
             colors: ["accent": accent],
             material: RemoteThemeDTO.Material(
                 panelRadius: 20,

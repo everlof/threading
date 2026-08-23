@@ -1036,7 +1036,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             // vocabulary does not know is refused rather than quietly started as a chat: a
             // phone that asked for a manager and got a chat would not find out until the
             // agent failed to reach its siblings.
-            guard let role = creation.role.map(SessionRole.init(rawValue:)) ?? .chat else {
+            guard let role = creation.role.map({ SessionRole(rawValue: $0.rawValue) }) ?? .chat else {
                 respond(.respond(RemoteRouter.error(422, "Unknown Role")))
                 return
             }
@@ -1048,7 +1048,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             // is a decision made while looking at the repository, not one a phone may post.
             let managedWorkspacePlan: ManagedWorkspacePlan?
             if let requested = creation.managedWorkspace {
-                guard let delivery = ManagedWorkspaceDelivery(rawValue: requested.delivery),
+                guard requested.delivery.isKnown,
+                      let delivery = ManagedWorkspaceDelivery(rawValue: requested.delivery.rawValue),
                       requested.publication == nil,
                       let project = self.services.sessionQueries.project(withID: projectID),
                       ManagedGitWorkspace.canProvision(from: project),
@@ -1120,11 +1121,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
                 "share": authorization.shareID,
                 "device": deviceID,
-                "delivery": result.delivery,
+                "delivery": result.delivery.rawValue,
             ])
             MacRemoteDiagnostics.record(.notificationRegistrationReceived, fields: [
                 .peer: MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
-                .transport: result.delivery,
+                .transport: result.delivery.rawValue,
                 .capability: authorization.capability.rawValue,
                 .enabledKindCount: String(registration.enabledKinds.count),
             ])
@@ -1926,22 +1927,21 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         _ remote: RemoteLimitRecoveryPolicyDTO,
         for session: AgentSession
     ) -> LimitRecoveryPolicy? {
-        switch remote.action {
-        case RemoteLimitRecoveryPolicyDTO.flagOnly:
+        switch remote {
+        case .flagOnly:
             return .flagOnly
-        case RemoteLimitRecoveryPolicyDTO.waitForReset:
+        case .waitForReset:
             return .waitForReset
-        case RemoteLimitRecoveryPolicyDTO.resumeOnBestAccount:
+        case .resumeOnBestAccount:
             return session.kind.supportsAccounts ? .resumeOnBestAccount : nil
-        case RemoteLimitRecoveryPolicyDTO.resumeVia:
-            guard let rawAccountID = remote.accountID,
-                  RemoteInboundPolicy.acceptsAccountIdentifier(rawAccountID) else { return nil }
+        case .resumeVia(let rawAccountID):
+            guard RemoteInboundPolicy.acceptsAccountIdentifier(rawAccountID) else { return nil }
             let handle = AccountHandle(storedName: rawAccountID)
             guard SessionMigration.destinations(for: session).contains(where: {
                 $0.handle == handle
             }) else { return nil }
             return .resumeVia(AccountID(provider: session.kind, handle: handle))
-        default:
+        case .unknown:
             return nil
         }
     }
@@ -1963,10 +1963,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
-        guard let capability = RemoteCapability(rawValue: choice.capability) else {
-            respond(.respond(RemoteRouter.error(422, "Unknown Share Role")))
-            return
-        }
+        let capability = choice.capability
 
         DispatchQueue.main.async {
             guard let hostCommands = self.hostCommands else {
@@ -1981,7 +1978,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             case .success(let created):
                 respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
                     url: created.url.absoluteString,
-                    capability: capability.rawValue,
+                    capability: RemoteAdvertisedCapability(capability),
                     canApprovePermissions: created.canApprovePermissions,
                     expiresAt: created.expiresAt.timeIntervalSince1970,
                     me: self.services.mirrors.meResponse(for: authorization)
@@ -2046,10 +2043,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
-        guard let capability = RemoteCapability(rawValue: choice.capability) else {
-            respond(.respond(RemoteRouter.error(422, "Unknown Share Role")))
-            return
-        }
+        let capability = choice.capability
         DispatchQueue.main.async {
             guard self.services.sessionQueries.terminal(withID: terminalID) != nil,
                   let hostCommands = self.hostCommands else {
@@ -2060,7 +2054,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             case .success(let created):
                 respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
                     url: created.url.absoluteString,
-                    capability: capability.rawValue,
+                    capability: RemoteAdvertisedCapability(capability),
                     canApprovePermissions: false,
                     expiresAt: created.expiresAt.timeIntervalSince1970,
                     me: self.services.mirrors.meResponse(for: authorization)

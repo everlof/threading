@@ -91,7 +91,7 @@ final class DemoSessionScript {
         self.connection = connection
         deliver(RemoteHelloDTO(
             surface: session.surface,
-            capability: RemoteCapability.interact.rawValue,
+            capability: .interact,
             cols: session.surface == .terminal ? 80 : 0,
             rows: session.surface == .terminal ? 24 : 0,
             title: session.title,

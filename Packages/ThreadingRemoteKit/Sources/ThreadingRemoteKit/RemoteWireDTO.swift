@@ -55,7 +55,7 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
         /// field existed ignores it, and one built after it still decodes a payload from a Mac
         /// that predates it. A client that wants to match maps these onto its own platform's
         /// font designs; iOS has the same four.
-        public let typeface: String?
+        public let typeface: RemoteThemeTypeface?
 
         /// A named family the theme asks for, where it is more specific than a class. **Advisory
         /// on the wire**: it names a font installed on the *Mac*, and a phone that does not have
@@ -68,7 +68,7 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
             borderWidth: Double,
             glow: Glow? = nil,
             textScale: Double? = nil,
-            typeface: String? = nil,
+            typeface: RemoteThemeTypeface? = nil,
             fontFamily: String? = nil
         ) {
             self.panelRadius = panelRadius
@@ -83,15 +83,15 @@ public struct RemoteThemeDTO: Codable, Equatable, Sendable {
 
     public let id: String
     public let name: String
-    /// Resolved `light` or `dark`; any adaptive Mac theme is resolved before sending.
-    public let mode: String
+    /// Any adaptive Mac theme is resolved before sending.
+    public let mode: RemoteThemeMode
     public let colors: [String: String]
     public let material: Material
 
     public init(
         id: String,
         name: String,
-        mode: String,
+        mode: RemoteThemeMode,
         colors: [String: String],
         material: Material
     ) {
@@ -231,32 +231,64 @@ public struct RemoteSessionAccountDTO: Codable, Equatable, Sendable {
 
 /// What one chat will do after its provider refuses a turn over an account limit.
 ///
-/// The action stays a string so a newer host can add an outcome without making an older phone
-/// fail to decode the whole session catalogue. `accountID` is the account handle only; the
-/// session already supplies the runtime that qualifies it.
-public struct RemoteLimitRecoveryPolicyDTO: Codable, Equatable, Sendable {
-    public static let flagOnly = "flagOnly"
-    public static let waitForReset = "waitForReset"
-    public static let resumeOnBestAccount = "resumeOnBestAccount"
-    public static let resumeVia = "resumeVia"
+/// Known actions are cases so callers cannot misspell or partially interpret them. A newer host
+/// can still add an outcome without making an older phone fail to decode the whole catalogue:
+/// `unknown` preserves that action and its optional account. `accountID` is the account handle
+/// only; the session already supplies the runtime that qualifies it.
+public enum RemoteLimitRecoveryPolicyDTO: Codable, Equatable, Sendable {
+    case flagOnly
+    case waitForReset
+    case resumeOnBestAccount
+    case resumeVia(accountID: String)
+    case unknown(action: String, accountID: String?)
 
-    public let action: String
-    public let accountID: String?
+    private enum CodingKeys: String, CodingKey {
+        case action
+        case accountID
+    }
 
-    public init(action: String, accountID: String? = nil) {
-        self.action = action
-        self.accountID = accountID
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let action = try container.decode(String.self, forKey: .action)
+        let accountID = try container.decodeIfPresent(String.self, forKey: .accountID)
+        switch (action, accountID) {
+        case ("flagOnly", nil): self = .flagOnly
+        case ("waitForReset", nil): self = .waitForReset
+        case ("resumeOnBestAccount", nil): self = .resumeOnBestAccount
+        case ("resumeVia", .some(let accountID)) where !accountID.isEmpty:
+            self = .resumeVia(accountID: accountID)
+        default:
+            self = .unknown(action: action, accountID: accountID)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(action, forKey: .action)
+        try container.encodeIfPresent(accountID, forKey: .accountID)
+    }
+
+    public var action: String {
+        switch self {
+        case .flagOnly: return "flagOnly"
+        case .waitForReset: return "waitForReset"
+        case .resumeOnBestAccount: return "resumeOnBestAccount"
+        case .resumeVia: return "resumeVia"
+        case .unknown(let action, _): return action
+        }
+    }
+
+    public var accountID: String? {
+        switch self {
+        case .resumeVia(let accountID): return accountID
+        case .unknown(_, let accountID): return accountID
+        case .flagOnly, .waitForReset, .resumeOnBestAccount: return nil
+        }
     }
 
     public var isKnown: Bool {
-        switch action {
-        case Self.flagOnly, Self.waitForReset, Self.resumeOnBestAccount:
-            return accountID == nil
-        case Self.resumeVia:
-            return accountID?.isEmpty == false
-        default:
-            return false
-        }
+        if case .unknown = self { return false }
+        return true
     }
 }
 
@@ -574,17 +606,18 @@ public struct RemoteProjectChoiceDTO: Codable, Equatable, Identifiable, Sendable
 
 /// An isolated workspace a session runs in, and what becomes of it when the agent finishes.
 ///
-/// Strings rather than closed enumerations for the same reason `surface` was: a host that grows
-/// a third delivery must not make an older client fail to decode the whole catalogue. The Mac
-/// maps them back to its own types and refuses what it does not recognise.
+/// Lossless wire enums preserve a delivery or publication value added by a newer host, while the
+/// Mac maps only known values back to its own types and refuses anything it does not recognise.
 public struct RemoteManagedWorkspacePlanDTO: Codable, Equatable, Sendable {
-    /// `mergeAndCleanUp` or `keepForReview`.
-    public let delivery: String
+    public let delivery: RemoteManagedWorkspaceDelivery
     /// `draft` or `ready` when finishing should also open a change request; absent for local
     /// delivery, which is every workspace a phone can currently ask for.
-    public let publication: String?
+    public let publication: RemoteManagedWorkspacePublication?
 
-    public init(delivery: String, publication: String? = nil) {
+    public init(
+        delivery: RemoteManagedWorkspaceDelivery,
+        publication: RemoteManagedWorkspacePublication? = nil
+    ) {
         self.delivery = delivery
         self.publication = publication
     }
@@ -771,9 +804,9 @@ public struct RemoteNewSessionCatalogDTO: Codable, Equatable, Sendable {
 /// is refused by the Mac's validation rather than failing the decode. A manager is an ordinary
 /// session the Mac confers its project's control grant on — the same thing the Mac's own New
 /// Manager template makes — so the role is one word here and the authority stays on the Mac.
-public enum RemoteSessionRole {
-    public static let chat = "chat"
-    public static let manager = "manager"
+public enum RemoteSessionRole: String, Codable, Equatable, Hashable, Sendable {
+    case chat
+    case manager
 }
 
 /// The `RemoteHostEndpointDTO.kind` vocabulary both products know today.
@@ -1378,8 +1411,7 @@ public struct RemoteUsageLimitResetDTO: Codable, Equatable, Sendable, Identifiab
     public let id: String
     public let detectedAt: Double
     public let previousObservedAt: Double
-    /// `scheduled`, `provider`, or `bankedCredit`.
-    public let cause: String
+    public let cause: RemoteUsageLimitResetCause
     public let restoredFraction: Double
     public let elapsedFraction: Double
     public let paceGainFraction: Double
@@ -1388,7 +1420,7 @@ public struct RemoteUsageLimitResetDTO: Codable, Equatable, Sendable, Identifiab
         id: String,
         detectedAt: Double,
         previousObservedAt: Double,
-        cause: String,
+        cause: RemoteUsageLimitResetCause,
         restoredFraction: Double,
         elapsedFraction: Double,
         paceGainFraction: Double
@@ -1448,9 +1480,8 @@ public struct RemoteUsageLimitDTO: Codable, Equatable, Sendable {
 public struct RemoteMeDTO: Codable, Equatable, Sendable {
     public struct Share: Codable, Equatable, Sendable {
         public let label: String
-        /// "all" for My Devices, "session" for one chat, or "terminal" for one project shell.
-        public let scope: String
-        public let capability: String
+        public let scope: RemoteShareScope
+        public let capability: RemoteAdvertisedCapability
         /// Independently granted per chat member. An interactive guest may collaborate without
         /// this right, or be trusted to review requests caused by their work.
         public let canApprovePermissions: Bool
@@ -1460,8 +1491,8 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
 
         public init(
             label: String,
-            scope: String,
-            capability: String,
+            scope: RemoteShareScope,
+            capability: RemoteAdvertisedCapability,
             canApprovePermissions: Bool = false,
             expiresAt: Double?,
             memberID: String? = nil,
@@ -1484,8 +1515,8 @@ public struct RemoteMeDTO: Codable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             label = try container.decode(String.self, forKey: .label)
-            scope = try container.decode(String.self, forKey: .scope)
-            capability = try container.decode(String.self, forKey: .capability)
+            scope = try container.decode(RemoteShareScope.self, forKey: .scope)
+            capability = try container.decode(RemoteAdvertisedCapability.self, forKey: .capability)
             canApprovePermissions = try container.decodeIfPresent(
                 Bool.self,
                 forKey: .canApprovePermissions
@@ -1559,12 +1590,11 @@ public struct RemoteSetTerminalThemeRequestDTO: Codable, Equatable, Sendable {
 }
 
 public struct RemoteCreateShareRequestDTO: Codable, Equatable, Sendable {
-    /// "view" or "interact".
-    public let capability: String
+    public let capability: RemoteCapability
     /// An independent, chat-scoped right. Ignored unless capability is `interact`.
     public let canApprovePermissions: Bool
 
-    public init(capability: String, canApprovePermissions: Bool = false) {
+    public init(capability: RemoteCapability, canApprovePermissions: Bool = false) {
         self.capability = capability
         self.canApprovePermissions = canApprovePermissions
     }
@@ -1575,7 +1605,7 @@ public struct RemoteCreateShareRequestDTO: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        capability = try container.decode(String.self, forKey: .capability)
+        capability = try container.decode(RemoteCapability.self, forKey: .capability)
         canApprovePermissions = try container.decodeIfPresent(
             Bool.self,
             forKey: .canApprovePermissions
@@ -1585,7 +1615,7 @@ public struct RemoteCreateShareRequestDTO: Codable, Equatable, Sendable {
 
 public struct RemoteCreateShareResponseDTO: Codable, Equatable, Sendable {
     public let url: String
-    public let capability: String
+    public let capability: RemoteAdvertisedCapability
     public let canApprovePermissions: Bool
     /// Expiry of the unused invitation. An accepted membership has no timer.
     public let expiresAt: Double
@@ -1593,7 +1623,7 @@ public struct RemoteCreateShareResponseDTO: Codable, Equatable, Sendable {
 
     public init(
         url: String,
-        capability: String,
+        capability: RemoteAdvertisedCapability,
         canApprovePermissions: Bool = false,
         expiresAt: Double,
         me: RemoteMeDTO
@@ -1645,7 +1675,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     public let managedWorkspace: RemoteManagedWorkspacePlanDTO?
     /// `RemoteSessionRole.chat` or `.manager`. Absent is a chat, which is what every client
     /// asked for before this field existed.
-    public let role: String?
+    public let role: RemoteSessionRole?
     public let prompt: String
 
     public init(
@@ -1658,7 +1688,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         permissionMode: String? = nil,
         surface: RemoteSessionSurface,
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
-        role: String? = nil,
+        role: RemoteSessionRole? = nil,
         prompt: String
     ) {
         self.projectID = projectID
@@ -2113,12 +2143,11 @@ public struct RemoteWorkspaceDTO: Codable, Equatable, Sendable {
 
 /// The state a device is in while it awaits approval or after denial, returned as a 403 body.
 public struct RemoteDeviceStateDTO: Codable, Equatable, Sendable {
-    /// "pendingApproval" or "denied".
-    public let state: String
+    public let state: RemoteDeviceApprovalState
     /// Seconds the client should wait before polling `/api/me` again.
     public let retryAfter: Double?
 
-    public init(state: String, retryAfter: Double?) {
+    public init(state: RemoteDeviceApprovalState, retryAfter: Double?) {
         self.state = state
         self.retryAfter = retryAfter
     }
@@ -2146,7 +2175,7 @@ public struct RemoteUpgradeRequiredDTO: Codable, Equatable, Sendable {
 public struct RemoteHelloDTO: Codable, Equatable, Sendable {
     public let type: String        // "hello"
     public let surface: RemoteSessionSurface
-    public let capability: String  // "view" | "interact"
+    public let capability: RemoteAdvertisedCapability
     public let cols: Int
     public let rows: Int
     public let title: String
@@ -2159,7 +2188,7 @@ public struct RemoteHelloDTO: Codable, Equatable, Sendable {
 
     public init(
         surface: RemoteSessionSurface,
-        capability: String,
+        capability: RemoteAdvertisedCapability,
         cols: Int,
         rows: Int,
         title: String,
@@ -2862,8 +2891,7 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
 
 public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     public let deviceToken: String
-    /// "sandbox" for a development build, "production" for TestFlight/App Store.
-    public let environment: String
+    public let environment: RemoteNotificationEnvironment
     public let enabledKinds: [RemoteNotificationKind]
     /// Kinds that may make sound on this device. Nil preserves the behavior of an older client;
     /// an empty array is an explicit request for quiet delivery.
@@ -2871,7 +2899,7 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
 
     public init(
         deviceToken: String,
-        environment: String,
+        environment: RemoteNotificationEnvironment,
         enabledKinds: [RemoteNotificationKind],
         soundEnabledKinds: [RemoteNotificationKind]? = nil
     ) {
@@ -2883,10 +2911,9 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
 }
 
 public struct RemoteNotificationRegistrationResponseDTO: Codable, Equatable, Sendable {
-    /// "push" when this Mac can reach APNs, otherwise "live".
-    public let delivery: String
+    public let delivery: RemoteNotificationDelivery
 
-    public init(delivery: String) {
+    public init(delivery: RemoteNotificationDelivery) {
         self.delivery = delivery
     }
 }

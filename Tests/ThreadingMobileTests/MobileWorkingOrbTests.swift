@@ -191,7 +191,7 @@ final class MobileWorkingOrbViewTests: XCTestCase {
         RemoteThemeDTO(
             id: "orb-fixture",
             name: "Orb fixture",
-            mode: "dark",
+            mode: .dark,
             colors: ["ground": "#000000", "label": "#FFFFFF", "accent": accent],
             material: .init(panelRadius: 8, controlRadius: 6, borderWidth: 1, glow: nil)
         )
