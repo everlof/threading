@@ -1148,7 +1148,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
         XCTAssertEqual(
             try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: unknownRole)).status,
-            400
+            422
         )
         XCTAssertEqual(sessionCommands.launches.count, 3, "an unknown role starts nothing")
     }

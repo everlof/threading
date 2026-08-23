@@ -1032,10 +1032,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
                 return
             }
-            // Absent is a chat, the only thing older phones could ask for. A word the closed
-            // vocabulary does not know is refused rather than quietly started as a chat: a
-            // phone that asked for a manager and got a chat would not find out until the
-            // agent failed to reach its siblings.
+            // Absent is a chat, the only thing older phones could ask for. The lossless wire
+            // vocabulary carries a future word this far so validation can refuse it rather
+            // than treating a semantically valid request as malformed JSON. It is never
+            // guessed as chat: a phone that asked for a manager and got a chat would not find
+            // out until the agent failed to reach its siblings.
             guard let role = creation.role.map({ SessionRole(rawValue: $0.rawValue) }) ?? .chat else {
                 respond(.respond(RemoteRouter.error(422, "Unknown Role")))
                 return

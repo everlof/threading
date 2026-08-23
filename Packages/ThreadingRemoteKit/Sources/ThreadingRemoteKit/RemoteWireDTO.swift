@@ -800,13 +800,31 @@ public struct RemoteNewSessionCatalogDTO: Codable, Equatable, Sendable {
 
 /// The `RemoteCreateSessionRequestDTO.role` vocabulary: what the started session is for.
 ///
-/// Strings rather than an enum, like the host endpoint kinds, so a role a newer phone asks for
-/// is refused by the Mac's validation rather than failing the decode. A manager is an ordinary
-/// session the Mac confers its project's control grant on — the same thing the Mac's own New
-/// Manager template makes — so the role is one word here and the authority stays on the Mac.
-public enum RemoteSessionRole: String, Codable, Equatable, Hashable, Sendable {
+/// Lossless at the wire boundary so a role a newer phone asks for reaches the Mac's validation
+/// and is refused as an unknown role rather than collapsing the whole request into malformed
+/// JSON. A manager is an ordinary session the Mac confers its project's control grant on — the
+/// same thing the Mac's own New Manager template makes — so the role is one word here and the
+/// authority stays on the Mac.
+public enum RemoteSessionRole: RemoteLosslessStringToken {
     case chat
     case manager
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "chat": self = .chat
+        case "manager": self = .manager
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .chat: return "chat"
+        case .manager: return "manager"
+        case .unknown(let value): return value
+        }
+    }
 }
 
 /// The `RemoteHostEndpointDTO.kind` vocabulary both products know today.

@@ -45,13 +45,22 @@ final class RemoteVocabularyTests: XCTestCase {
             from: Data(#""admin""#.utf8)
         ))
         XCTAssertThrowsError(try JSONDecoder().decode(
-            RemoteSessionRole.self,
-            from: Data(#""overlord""#.utf8)
-        ))
-        XCTAssertThrowsError(try JSONDecoder().decode(
             RemoteNotificationEnvironment.self,
             from: Data(#""development""#.utf8)
         ))
+    }
+
+    func testSessionRolePreservesUnknownValuesForServerValidation() throws {
+        let future = try JSONDecoder().decode(
+            RemoteSessionRole.self,
+            from: Data(#""overlord""#.utf8)
+        )
+
+        XCTAssertEqual(future, .unknown("overlord"))
+        XCTAssertEqual(
+            String(decoding: try JSONEncoder().encode(future), as: UTF8.self),
+            #""overlord""#
+        )
     }
 
     func testLimitRecoveryIsAnAssociatedEnumWithoutChangingItsObjectWireShape() throws {
