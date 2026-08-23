@@ -78,26 +78,32 @@ final class KeyboardPreferencesVirtualizationTests: XCTestCase {
                 ("light", NSAppearance.Name.aqua),
                 ("dark", NSAppearance.Name.darkAqua)
             ] {
-                let fixture = makeFixture(commandCount: 8, givesShortcuts: true)
-                defer { fixture.defaults.removePersistentDomain(forName: fixture.suiteName) }
-                let controller = KeyboardPreferencesViewController(
-                    registry: fixture.registry,
-                    store: fixture.store
-                )
-                controller.setGroupExpandedForTesting(.extensions, expanded: true)
-
-                let host = laidOut(controller.view, width: width, height: Render.height)
-                host.appearance = try XCTUnwrap(NSAppearance(named: appearance))
-                controller.view.appearance = host.appearance
-                AppThemeRefresh.repaint(host)
-                host.layoutSubtreeIfNeeded()
-
                 let filename = "keyboard-settings-\(Int(width))-\(appearanceName).png"
-                try XCTUnwrap(png(of: host)).write(
+                let resolvedAppearance = try XCTUnwrap(NSAppearance(named: appearance))
+                var data: Data?
+                resolvedAppearance.performAsCurrentDrawingAppearance {
+                    let fixture = makeFixture(commandCount: 8, givesShortcuts: true)
+                    defer {
+                        fixture.defaults.removePersistentDomain(forName: fixture.suiteName)
+                    }
+                    let controller = KeyboardPreferencesViewController(
+                        registry: fixture.registry,
+                        store: fixture.store
+                    )
+                    controller.setGroupExpandedForTesting(.extensions, expanded: true)
+
+                    let host = laidOut(controller.view, width: width, height: Render.height)
+                    host.appearance = resolvedAppearance
+                    controller.view.appearance = resolvedAppearance
+                    AppThemeRefresh.repaint(host)
+                    host.layoutSubtreeIfNeeded()
+                    data = png(of: host)
+                    XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
+                }
+                try XCTUnwrap(data, "Failed to render \(filename)").write(
                     to: Render.directory.appendingPathComponent(filename)
                 )
                 written.append(filename)
-                XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
             }
         }
 
