@@ -137,6 +137,7 @@ final class ComponentGalleryViewController: NSViewController {
         "SearchMatchLabel",
         "SearchResultRowView",
         "ScreenshotReportDropTargetView",
+        "SemanticHierarchySceneView",
         "SemanticSceneView",
         "SeparatorView",
         "ShortcutRecorderView",
@@ -4724,11 +4725,17 @@ final class ComponentGalleryViewController: NSViewController {
         ).isActive = true
 
         let semanticScene = makeSemanticSceneStory()
+        let semanticHierarchy = makeSemanticHierarchySceneStory()
         var rows = [
             story(
                 "SemanticSceneView",
                 "Normalized, interactive marks for treemaps, heatmaps, timelines, scatter plots, and bubbles.",
                 semanticScene
+            ),
+            story(
+                "SemanticHierarchySceneView",
+                "One rooted branch of the same marks: click a circle to zoom it, the breadcrumb or Escape to come back out.",
+                semanticHierarchy
             ),
             story(
                 "ExtensionNode renderer",
@@ -4807,6 +4814,107 @@ final class ComponentGalleryViewController: NSViewController {
             scene.heightAnchor.constraint(equalToConstant: 210)
         ])
         return scene
+    }
+
+    /// The hierarchy half: a real circle packing, because that is the geometry the component's
+    /// contract is written about — every circle inside its parent's and clear of its siblings'.
+    /// Two levels deep, so zooming a branch has somewhere to go and the breadcrumb has something
+    /// to say.
+    private func makeSemanticHierarchySceneStory() -> NSView {
+        let activate: (String) -> Void = { [weak self] itemID in
+            self?.showReceipt(
+                L10n.format("Extension action “%@” was invoked.", itemID)
+            )
+        }
+        func packed(
+            _ id: String,
+            parent: String?,
+            _ frame: NSRect,
+            _ color: SemanticSceneView.Item.Color,
+            _ label: String,
+            _ detail: String,
+            actionable: Bool
+        ) -> SemanticSceneView.Item {
+            SemanticSceneView.Item(
+                id: id,
+                parentID: parent,
+                normalizedFrame: frame,
+                shape: .ellipse,
+                color: color,
+                label: label,
+                detail: detail,
+                accessibilityLabel: label,
+                accessibilityValue: detail,
+                isEnabled: true,
+                isSelected: false,
+                onActivate: actionable ? { activate(id) } : nil
+            )
+        }
+        let hierarchy = SemanticHierarchySceneView(
+            accessibilityLabel: L10n.string("Checkout size by folder"),
+            rootID: "checkout",
+            preferredAspectRatio: 1,
+            items: [
+                packed(
+                    "checkout",
+                    parent: nil,
+                    NSRect(x: 0, y: 0, width: 1, height: 1),
+                    .category(3),
+                    L10n.string("Checkout"),
+                    L10n.string("57.0 GiB"),
+                    actionable: false
+                ),
+                packed(
+                    "build",
+                    parent: "checkout",
+                    NSRect(x: 0.18, y: 0.34, width: 0.32, height: 0.32),
+                    .category(0),
+                    L10n.string("Build"),
+                    L10n.string("32.4 GiB"),
+                    actionable: false
+                ),
+                packed(
+                    "products",
+                    parent: "build",
+                    NSRect(x: 0.23, y: 0.39, width: 0.14, height: 0.14),
+                    .category(1),
+                    L10n.string("Products"),
+                    L10n.string("11.7 GiB"),
+                    actionable: true
+                ),
+                packed(
+                    "index",
+                    parent: "build",
+                    NSRect(x: 0.34, y: 0.50, width: 0.10, height: 0.10),
+                    .category(4),
+                    L10n.string("Index"),
+                    L10n.string("6.1 GiB"),
+                    actionable: true
+                ),
+                packed(
+                    "sources",
+                    parent: "checkout",
+                    NSRect(x: 0.54, y: 0.28, width: 0.28, height: 0.28),
+                    .category(1),
+                    L10n.string("Sources"),
+                    L10n.string("14.2 GiB"),
+                    actionable: true
+                ),
+                packed(
+                    "documents",
+                    parent: "checkout",
+                    NSRect(x: 0.40, y: 0.64, width: 0.24, height: 0.24),
+                    .category(5),
+                    L10n.string("Documents"),
+                    L10n.string("9.8 GiB"),
+                    actionable: true
+                )
+            ]
+        )
+        NSLayoutConstraint.activate([
+            hierarchy.widthAnchor.constraint(equalToConstant: 320)
+        ])
+        return hierarchy
     }
 
     // MARK: Actions

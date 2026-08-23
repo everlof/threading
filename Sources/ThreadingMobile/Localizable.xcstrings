@@ -541,6 +541,18 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Ärv" } } }
     },
+    "Effort": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Nivå" } } }
+    },
+    "Permissions": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Behörigheter" } } }
+    },
+    "Speed": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hastighet" } } }
+    },
     "Ready for a new task": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Redo för en ny uppgift" } } }
@@ -971,8 +983,11 @@
     "The Mac rejected this line. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade raden. Ditt utkast finns kvar." } } }
     },
-    "The Mac couldn’t insert these files. They’re still here.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn kunde inte infoga filerna. De finns kvar." } } }
+    "The Mac was busy. These files will be inserted in a moment.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn var upptagen. Filerna infogas om ett ögonblick." } } }
+    },
+    "The Mac couldn’t insert these files. Please choose them again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn kunde inte infoga filerna. Välj dem igen." } } }
     },
     "The Mac rejected this prompt. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade prompten. Ditt utkast finns kvar." } } }
@@ -983,8 +998,8 @@
     "The session changed before this line could be sent. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen ändrades innan raden kunde skickas. Ditt utkast finns kvar." } } }
     },
-    "The session changed before these files could be inserted. They’re still here.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen ändrades innan filerna kunde infogas. De finns kvar." } } }
+    "The session changed before these files could be inserted. Please choose them again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sessionen ändrades innan filerna kunde infogas. Välj dem igen." } } }
     },
     "These indicators stay inside the live chat and never create push notifications.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Indikatorerna stannar i den aktiva chatten och skapar aldrig pushnotiser." } } }
@@ -995,8 +1010,8 @@
     "This line could not be retried safely. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Raden kunde inte skickas igen säkert. Ditt utkast finns kvar." } } }
     },
-    "These files could not be retried safely. They’re still here.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Filerna kunde inte skickas igen säkert. De finns kvar." } } }
+    "These files could not be inserted safely. Please choose them again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Filerna kunde inte infogas säkert. Välj dem igen." } } }
     },
     "Typing indicators": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skrivindikatorer" } } }
@@ -1419,6 +1434,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Arkiverade sessioner"
+          }
+        }
+      }
+    },
+    "Attachment": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilaga"
           }
         }
       }
@@ -5609,12 +5634,32 @@
         }
       }
     },
+    "That is more text than one paste can carry.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det är mer text än en inklistring rymmer."
+          }
+        }
+      }
+    },
     "There’s nothing on the clipboard to attach.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Det finns inget i urklipp att bifoga."
+          }
+        }
+      }
+    },
+    "There’s nothing on the clipboard to paste.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det finns inget i urklipp att klistra in."
           }
         }
       }

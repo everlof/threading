@@ -207,6 +207,44 @@ outgoing 500-mark view tree beside a replacement during animation.
 The iPhone projection builds the same branch by one child traversal and one source-order scan;
 it does not repeat a full ancestor walk for every SwiftUI mark on each focus-state render.
 
+Colour derivation is per *kind* of mark, not per mark. A hierarchy fill is mixed in Oklab from
+the resolved panel — three surface composites and two colour-space round trips inside an
+appearance push — and every mark sharing a colour role, depth, enabled state and emphasis paints
+the identical result. That was being derived once per mark per repaint, and because hover marked
+the whole view dirty, the pointer crossing from one mark to its neighbour re-derived all five
+hundred. Fills are now derived once per repaint per distinct key, hover and press invalidate the
+affected marks alone, and `draw(_:)` paints only the marks meeting the dirty rectangle — which is
+safe because marks keep their order, so a partial repaint layers parents before children exactly
+as a whole one does.
+`SemanticSceneScalingTests/testAStressedHierarchyDerivesAFillPerKindOfMarkNotPerMark` pins the
+bound as a count rather than a duration, so it means the same thing on every machine; the cache is
+per-draw, which is why no theme or appearance change can leave a stale colour behind for the next
+frame.
+
+Hit testing asks the mark's own shape, not its bounding box. A circle covers π/4 of its
+rectangle, and a hierarchy's circle packing makes sibling boxes overlap wherever the circles are
+tangent — so rectangle hit testing handed hover, the pointing-hand cursor and the click to a mark
+the pointer was not over. `SemanticSceneHitTests` covers the geometry and the click routing.
+
+### Extension scene validation is bounded by the cap it reports
+
+`ExtensionScene.validationIssues` used to append "exceeds maximum item count" and then walk the
+oversized array anyway, through a per-item pass and two hierarchy passes that are quadratic in
+the number of marks. Measured against the real validator on this machine, Debug:
+
+| marks | issues produced | wall clock |
+|---|---|---|
+| 500 (the documented cap) | 124,751 | 0.09 s |
+| 2,000 | 1,999,001 | 1.5 s |
+| 8,000 (fits inside one 1 MiB protocol line) | 31,996,001 | 25.9 s |
+
+Two things were wrong and both are the same mistake: the cap bounded the *report* rather than the
+*scan*, and sibling overlap was reported once per colliding pair rather than once per offending
+mark. An oversized scene is now answered by its size and nothing else, and within the cap the
+overlap report is linear. The 8,000-mark case returns one issue in under a millisecond.
+`ExtensionContractTests/testAnOversizedSceneIsAnsweredByItsSizeAlone` and
+`testOverlappingSiblingsAreNamedOncePerMarkRatherThanOncePerPair` keep it that way.
+
 ### Mobile remote dashboard scaling contract
 
 The dashboard catalogue scales with sessions and its invalidation source can burst when the Mac

@@ -1,6 +1,6 @@
 # Competitive landscape
 
-Last updated: 2026-08-14
+Last updated: 2026-08-22
 
 This is the index for products we have researched as competitors or close
 substitutes. Each dossier is a point-in-time source review, not a permanent claim
@@ -12,6 +12,7 @@ a product decision.
 | Product | Category | Why it matters | Research |
 |---|---|---|---|
 | **Threading** | Reference product | Native Mac workspace plus scoped remote collaboration, source review, browser automation, and a capability-governed extension host. | Current repository documentation |
+| **[Paseo](https://github.com/getpaseo/paseo)** | Direct, closest overlap | AGPL daemon plus Electron/Expo/web/CLI clients for 40+ agent CLIs, with workspaces, worktrees, review, browser tools, cross-provider subagents, schedules, voice, and a plugin host. | [Dated findings](archive/research/PASEO_FINDINGS.md), source snapshot `7c43077` on 2026-08-22 |
 | **[omg.dev](https://github.com/BennyKok/omg.dev)** | Direct | Self-hosted web/PWA control plane for many coding-agent CLIs, with worktrees, delegation, automation, artifacts, and phone access. | [Dated findings](archive/research/OMG_DEV_FINDINGS.md), source snapshot `301e29f` on 2026-08-13 |
 | **[bb](https://github.com/get-bb/bb)** | Direct/strategic | Programmable agentic IDE with a shipped agent-authored plugin loop, broad backend/frontend extension APIs, durable threads, delegation, remote machines, and Git workflows. | [Dated findings](archive/research/BB_FINDINGS.md), source snapshot `5ecdd69` on 2026-08-14 |
 | **[t3code](https://github.com/pingdotgg/t3code)** | Direct | Web/Electron/mobile coding-agent client with normalized conversations, PTYs, worktrees, review, and remote access. | [Dated findings](archive/research/T3CODE_FINDINGS.md), researched 2026-07-25 |
@@ -23,24 +24,26 @@ The cells describe first-party product behavior found in the researched source. 
 agent being able to run a shell command is not counted as a first-party product
 feature.
 
-| Capability | Threading | omg.dev | bb | t3code | Herdr |
-|---|---|---|---|---|---|
-| Primary surface | Native macOS; native iOS companion; browser | React PWA backed by a local Bun server | Electron desktop, web app, CLI, and HTTP API | Web, Electron, and mobile clients | Rust terminal UI and CLI |
-| Supported interactive agents | Claude Code, Codex, Grok, OpenCode | Claude, Codex, OpenCode, Jcode, Cursor, Grok, Pi, Copilot | Claude Code, Codex, Pi, and ACP agents including Cursor | Claude Code and Codex | Any terminal process; agent presets |
-| Native structured conversation | Yes, with terminal fallback | Yes; normalized from SDKs and TUI transcripts | Yes; append-only normalized events plus terminal panels | Yes; normalized provider events | No; PTY output is the interface |
-| Simultaneous session view | Sidebar attention model; one focused conversation | Up to four pinned conversations on a wide screen | Split panes and thread panels; multiple live threads | Thread list plus focused workspace | Multiple live panes is the core UI |
-| Durable process after client disconnect | Remote host remains active; local agents end when the Mac app quits | Yes, via tmux | Yes; server and host daemon own lifecycle | Server-owned sessions | Yes, via the daemon and PTYs |
-| Isolated git worktrees | Opt-in managed workspaces with a finish/merge/disposal handshake | Default for managed sessions in git repositories | Opt-in managed worktree environments | Per-thread option | First-class worktree sessions |
-| Read-only diff review | Six scopes, structured and image diffs | Session-branch diff, unified or split | Thread and workspace diffs, including images | Four scopes, unified or split | No dedicated review UI |
-| Stage, commit, and PR/MR workflow | Yes | No dedicated workflow | Commit, PR, and squash-merge flow; no staging UI found | Commit, push, and PR flow; no staging UI | No dedicated workflow |
-| Mobile and remote | Paired devices, native iOS and browser, APNs | Installable PWA over Tailscale or experimental relay; Web Push | Paired browser access, Tailscale, and enrolled execution machines; no native mobile app | Mobile clients, relay/Tailscale, APNs/Live Activities | SSH from any terminal |
-| Scoped collaboration and roles | Per-conversation View, Collaborate, and Approve roles | No; anyone who can reach the server controls it | Account-gated owner access; no comparable per-thread roles found | Pairing and remote access, without comparable per-chat roles | Host/SSH boundary |
-| Visible delegation hierarchy | Yes | Yes; MCP-driven, cross-agent children | Yes; manager and child threads, plus Tasks delegation | Subagent activity indicator, not a comparable tree | Agent processes, without a normalized transcript tree |
-| Recurring autonomous watchers | No; scheduled messages are narrower | Yes; scheduled auto-agents emit deduplicated findings | Automations, workflows, schedules, and background services through plugins | No first-party equivalent found | No first-party equivalent found |
-| Usage and limit visibility | Account limits, history, recovery estimates, tokens, and cost | Provider limits, context, tokens, cost estimates, and process resources | Context and process state; no comparable account-limit dashboard found | Provider diagnostics; no comparable per-turn cost dashboard | No first-party equivalent found |
-| Rich artifacts/results | Display panel, attachments, media, charts, scenes | Sandboxed artifacts plus a cross-session **Shipped** feed | Inline visualizations plus plugin-owned panels and records | Attachments and browser previews | Terminal output |
-| First-party browser automation | Visible browser, annotation, evidence, audits, and execution ledger | No first-party browser-control surface found | No first-party interactive browser-control surface found | Embedded preview, DOM picking, and Playwright MCP | No |
-| Extension boundary | Capability policy plus semantic native rendering | Trusted ESM injection and embeddable React packages | Full-trust in-process TypeScript and same-origin React plugin SDK | Provider integration seams; no comparable app-extension host | Executable plugins; intentionally unsandboxed |
+| Capability | Threading | Paseo | omg.dev | bb | t3code | Herdr |
+|---|---|---|---|---|---|---|
+| Primary surface | Native macOS; native iOS companion; browser | Electron desktop, Expo iOS/Android, web app, and CLI from one React tree | React PWA backed by a local Bun server | Electron desktop, web app, CLI, and HTTP API | Web, Electron, and mobile clients | Rust terminal UI and CLI |
+| Supported interactive agents | Claude Code, Codex, Grok, OpenCode | Bundled Claude Code, Codex, OpenCode, Pi, OMP, and Copilot, plus a 37-entry one-click ACP catalog and arbitrary ACP agents | Claude, Codex, OpenCode, Jcode, Cursor, Grok, Pi, Copilot | Claude Code, Codex, Pi, and ACP agents including Cursor | Claude Code and Codex | Any terminal process; agent presets |
+| Native structured conversation | Yes, with terminal fallback | Yes; the terminal is a separate session type, not a fallback | Yes; normalized from SDKs and TUI transcripts | Yes; append-only normalized events plus terminal panels | Yes; normalized provider events | No; PTY output is the interface |
+| Simultaneous session view | Sidebar attention model; one focused conversation | A workspace holds agents, terminals, browsers, and diffs as tabs in split panes | Up to four pinned conversations on a wide screen | Split panes and thread panels; multiple live threads | Thread list plus focused workspace | Multiple live panes is the core UI |
+| Durable process after client disconnect | Remote host remains active; local agents end when the Mac app quits | Yes; the daemon owns lifecycle and every client detaches | Yes, via tmux | Yes; server and host daemon own lifecycle | Server-owned sessions | Yes, via the daemon and PTYs |
+| Isolated git worktrees | Opt-in managed workspaces with a finish/merge/disposal handshake | First-class isolation mode with committed setup/teardown hooks and refcounted removal | Default for managed sessions in git repositories | Opt-in managed worktree environments | Per-thread option | First-class worktree sessions |
+| Read-only diff review | Six scopes, structured and image diffs | Folder tree, ordered files, inline comments, and an explicit too-large state | Session-branch diff, unified or split | Thread and workspace diffs, including images | Four scopes, unified or split | No dedicated review UI |
+| Stage, commit, and PR/MR workflow | Yes | Commit, push, PR, three merge modes and auto-merge across GitHub, GitLab, Gitea, Forgejo and Codeberg; no staging UI | No dedicated workflow | Commit, PR, and squash-merge flow; no staging UI found | Commit, push, and PR flow; no staging UI | No dedicated workflow |
+| Mobile and remote | Paired devices, native iOS and browser, APNs | App Store and Play apps, E2E relay or Tailscale, self-served web UI; push through Expo's hosted service | Installable PWA over Tailscale or experimental relay; Web Push | Paired browser access, Tailscale, and enrolled execution machines; no native mobile app | Mobile clients, relay/Tailscale, APNs/Live Activities | SSH from any terminal |
+| Scoped collaboration and roles | Per-conversation View, Collaborate, and Approve roles | No; one optional bcrypt daemon password gates everything | No; anyone who can reach the server controls it | Account-gated owner access; no comparable per-thread roles found | Pairing and remote access, without comparable per-chat roles | Host/SSH boundary |
+| Visible delegation hierarchy | Yes | Yes; a Subagents track, and a subagent may run a different provider than its parent | Yes; MCP-driven, cross-agent children | Yes; manager and child threads, plus Tasks delegation | Subagent activity indicator, not a comparable tree | Agent processes, without a normalized transcript tree |
+| Recurring autonomous watchers | No; scheduled messages are narrower | Yes; cron schedules start fresh agents and heartbeats prompt a live one | Yes; scheduled auto-agents emit deduplicated findings | Automations, workflows, schedules, and background services through plugins | No first-party equivalent found | No first-party equivalent found |
+| Usage and limit visibility | Account limits, history, recovery estimates, tokens, and cost | Plan usage for eight providers; no recovery, parking, or continuation policy | Provider limits, context, tokens, cost estimates, and process resources | Context and process state; no comparable account-limit dashboard found | Provider diagnostics; no comparable per-turn cost dashboard | No first-party equivalent found |
+| Rich artifacts/results | Display panel, attachments, media, charts, scenes | Attachments, images, and a file explorer; no host-owned media player found | Sandboxed artifacts plus a cross-session **Shipped** feed | Inline visualizations plus plugin-owned panels and records | Attachments and browser previews | Terminal output |
+| First-party browser automation | Visible browser, annotation, evidence, audits, and execution ledger | 22 tools including arbitrary page evaluation; one global switch, no origin grants, no ledger | No first-party browser-control surface found | No first-party interactive browser-control surface found | Embedded preview, DOM picking, and Playwright MCP | No |
+| Extension boundary | Capability policy plus semantic native rendering | In-process TypeScript and React Native, documented as unsandboxed on both halves | Trusted ESM injection and embeddable React packages | Full-trust in-process TypeScript and same-origin React plugin SDK | Provider integration seams; no comparable app-extension host | Executable plugins; intentionally unsandboxed |
+| Voice input | No | Local ONNX dictation and voice mode by default, OpenAI optional, reasoning through an installed provider | Dictation and push-to-talk | Not assessed | Not assessed | Not assessed |
+| Host platforms | macOS on Apple silicon | macOS, Windows, Linux, Docker, any Node host | Not assessed | Not assessed | Not assessed | Not assessed |
 
 ## Watchlist and baselines
 

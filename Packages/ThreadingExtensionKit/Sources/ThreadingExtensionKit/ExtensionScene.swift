@@ -70,6 +70,10 @@ public enum ExtensionSceneColorRole: String, Codable, Equatable, Sendable {
 /// Geometry remains normalized scene geometry supplied by the producer. The hierarchy adds
 /// meaning to that geometry: Threading can zoom a branch, expose native breadcrumbs, and mirror
 /// the same navigation on another device without learning anything about files or artifacts.
+/// Elliptical hierarchy marks form a true packing: each is a circle, children stay inside their
+/// parent circle, and sibling circles do not intersect. Being a circle is part of the rule rather
+/// than a precondition for it — an ellipse that is wider than it is tall has no packing anyone
+/// can check, so the scene is refused instead of exempted.
 public struct ExtensionSceneHierarchy: Codable, Equatable, Sendable {
     public let rootID: String
 
@@ -184,6 +188,13 @@ public struct ExtensionScene: Codable, Equatable, Sendable {
                 path: "\(path).items",
                 message: "exceeds maximum item count \(maximumItems)"
             ))
+            // A cap that only *reports* is not a cap. Everything below is at least linear and
+            // the hierarchy passes are quadratic in the number of items, so walking an
+            // oversized scene is precisely the work this limit exists to refuse. 8,000 items —
+            // which fits comfortably inside one protocol line — took 26 seconds and produced 32
+            // million issues before this returned. The count is the finding; nothing further
+            // about an item is worth saying while the scene is this size.
+            return issues
         }
 
         var seenIDs = Set<String>()
@@ -307,11 +318,50 @@ public struct ExtensionScene: Codable, Equatable, Sendable {
                 issues.append(.init(path: itemPath, message: "must not name the item itself"))
             } else if !itemIDs.contains(parentID) {
                 issues.append(.init(path: itemPath, message: "must match an item id"))
-            } else if let parent = itemByID[parentID],
-                      !parent.frame.contains(item.frame) {
+            } else if let parent = itemByID[parentID] {
+                let isContained = parent.frame.contains(item.frame)
+                    && parent.circularMarkContains(item)
+                if !isContained {
+                    issues.append(.init(
+                        path: "\(path).items[\(index)].frame",
+                        message: "must be contained by parent '\(parentID)'"
+                    ))
+                }
+            }
+        }
+
+        // A circle that is going to take part in a packing has to be a circle. `frame.circle`
+        // answers nil for an ellipse that is wider than it is tall, and the containment and
+        // overlap tests below can say nothing about such a mark — so without this they would
+        // wave it through, and an extension could opt out of the whole rule by authoring its
+        // ellipses a hundred-thousandth off square. Say so once, here, instead.
+        for (index, item) in items.enumerated()
+        where item.shape == .ellipse && item.frame.circle == nil {
+            issues.append(.init(
+                path: "\(path).items[\(index)].frame",
+                message: "must be square so an elliptical hierarchy mark is a circle"
+            ))
+        }
+
+        let siblingsByParent = Dictionary(grouping: items.enumerated().compactMap {
+            index, item in
+            item.parentID.map { ($0, index, item) }
+        }, by: \.0)
+        for siblings in siblingsByParent.values {
+            // One issue per offending *mark*, against the first sibling it collides with —
+            // not one per colliding pair. A packing that has gone wrong has usually gone wrong
+            // for many pairs at once, and pairs are quadratic: 499 marks in the same place
+            // produced 124,751 issues, each carrying its own formatted path and message, for a
+            // scene sitting inside the documented item cap. Naming every bad mark once reports
+            // the same set of mistakes in linear space.
+            for rightIndex in siblings.indices {
+                let right = siblings[rightIndex]
+                guard let left = siblings[..<rightIndex].first(where: {
+                    $0.2.circularMarkOverlaps(right.2)
+                }) else { continue }
                 issues.append(.init(
-                    path: "\(path).items[\(index)].frame",
-                    message: "must be contained by parent '\(parentID)'"
+                    path: "\(path).items[\(right.1)].frame",
+                    message: "must not overlap sibling '\(left.2.id)'"
                 ))
             }
         }
@@ -349,5 +399,55 @@ private extension ExtensionSceneRect {
             && other.y + epsilon >= y
             && other.x + other.width <= x + width + epsilon
             && other.y + other.height <= y + height + epsilon
+    }
+
+    var circle: (x: Double, y: Double, radius: Double)? {
+        guard abs(width - height) <= ExtensionScenePacking.tolerance else { return nil }
+        return (x + width / 2, y + height / 2, width / 2)
+    }
+}
+
+/// How near tangency counts as tangent.
+///
+/// A packing's circles *touch*: `distance == r₁ + r₂` exactly, which no finite decimal states.
+/// Producers write normalized coordinates to a few decimal places, so a correct packing arrives
+/// up to half a quantum off tangency in whichever direction the rounding went, and the tolerance
+/// has to be wider than that quantum or a legal layout is rejected as overlapping. The circle
+/// packing shipped in this repository sits as close as 3.5e-7 to tangency, which the original
+/// 1e-6 admitted by luck rather than by design — one unit in the last place of a re-rounded
+/// coordinate would have refused the whole scene. A ten-thousandth of a unit square is a tenth
+/// of a pixel on a thousand-pixel canvas: far below noticing, far above any rounding a producer
+/// can introduce.
+private enum ExtensionScenePacking {
+    static let tolerance = 0.000_1
+}
+
+private extension ExtensionSceneItem {
+    /// Whether this mark's circle encloses `child`'s.
+    ///
+    /// Answers `true` for anything that is not a pair of circles, because there is then no
+    /// packing to judge and the caller's rectangle test is the whole rule. A hierarchy mark that
+    /// is an ellipse without being a circle is reported where the hierarchy is validated, so it
+    /// does not silently reach here as an exemption.
+    func circularMarkContains(_ child: ExtensionSceneItem) -> Bool {
+        guard shape == .ellipse,
+              child.shape == .ellipse,
+              let parentCircle = frame.circle,
+              let childCircle = child.frame.circle else { return true }
+        return hypot(
+            parentCircle.x - childCircle.x,
+            parentCircle.y - childCircle.y
+        ) + childCircle.radius <= parentCircle.radius + ExtensionScenePacking.tolerance
+    }
+
+    func circularMarkOverlaps(_ sibling: ExtensionSceneItem) -> Bool {
+        guard shape == .ellipse,
+              sibling.shape == .ellipse,
+              let leftCircle = frame.circle,
+              let rightCircle = sibling.frame.circle else { return false }
+        return hypot(
+            leftCircle.x - rightCircle.x,
+            leftCircle.y - rightCircle.y
+        ) + ExtensionScenePacking.tolerance < leftCircle.radius + rightCircle.radius
     }
 }

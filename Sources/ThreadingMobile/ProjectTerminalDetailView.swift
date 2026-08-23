@@ -133,7 +133,7 @@ struct ProjectTerminalDetailView: View {
                 title: latest.title,
                 agentKind: "terminal",
                 surface: .terminal,
-                state: latest.state,
+                state: RemoteSessionActivity(rawValue: latest.state),
                 projectName: latest.projectName,
                 isAvailable: latest.isAvailable,
                 lastActiveAt: latest.createdAt,

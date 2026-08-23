@@ -1,6 +1,72 @@
 import AppKit
 @preconcurrency import SwiftTerm
 
+/// A person-originated terminal write and the semantic boundary activity actually needs.
+///
+/// Raw bytes alone are insufficient: a bracketed paste may contain newlines without submitting,
+/// while Kitty keyboard mode encodes Return without a literal carriage return. The terminal
+/// sources resolve that distinction before the tracker sees the event.
+struct TerminalUserInput: Equatable {
+    let bytes: [UInt8]
+    let submitsLine: Bool
+
+    /// Remote clients carry terminal bytes over one WebSocket input message. Literal Return and
+    /// Kitty's CSI-u Enter both submit; one complete bracketed paste does not, regardless of the
+    /// newlines in its payload.
+    static func remote(bytes: [UInt8]) -> TerminalUserInput {
+        let isBracketedPaste = bytes.containsSubsequence([0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E])
+            && bytes.containsSubsequence([0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E])
+        let submitsLine = !isBracketedPaste
+            && (bytes.contains(0x0D) || bytes.contains(0x0A) || bytes.containsKittyEnter)
+        return TerminalUserInput(bytes: bytes, submitsLine: submitsLine)
+    }
+}
+
+private extension Array where Element == UInt8 {
+    func containsSubsequence(_ needle: [UInt8]) -> Bool {
+        guard !needle.isEmpty, count >= needle.count else { return false }
+        for start in 0...(count - needle.count)
+        where self[start..<(start + needle.count)].elementsEqual(needle) {
+            return true
+        }
+        return false
+    }
+
+    /// Kitty's Enter is `CSI 13 ... u`; modifiers and event type, when present, live between
+    /// the code point and the final `u`.
+    var containsKittyEnter: Bool {
+        var index = 0
+        while index + 3 < count {
+            guard self[index] == 0x1B, self[index + 1] == 0x5B else {
+                index += 1
+                continue
+            }
+            var cursor = index + 2
+            var codePoint = 0
+            var hasDigit = false
+            while cursor < count, self[cursor] >= 0x30, self[cursor] <= 0x39 {
+                hasDigit = true
+                codePoint = codePoint * 10 + Int(self[cursor] - 0x30)
+                cursor += 1
+            }
+            guard hasDigit, codePoint == 13 else {
+                index += 1
+                continue
+            }
+            while cursor < count {
+                let byte = self[cursor]
+                if byte == 0x75 { return true }
+                guard (byte >= 0x30 && byte <= 0x39) || byte == 0x3B || byte == 0x3A else {
+                    break
+                }
+                cursor += 1
+            }
+            index += 1
+        }
+        return false
+    }
+}
+
 /// Manages a single terminal session including the terminal view, shell process, and session state.
 @MainActor
 final class TerminalSession: NSObject {
@@ -142,8 +208,10 @@ final class TerminalSession: NSObject {
             self.delegate?.terminalSessionDidForwardMouseReport(self)
         }
 
-        terminalView.onUserInput = { [weak self] in
-            guard let sessionID = self?.identity.ownerSessionID else { return }
+        terminalView.onUserInput = { [weak self] input in
+            guard let self else { return }
+            self.delegate?.terminalSession(self, didReceiveUserInput: input)
+            guard let sessionID = self.identity.ownerSessionID else { return }
             Task { @MainActor in
                 RemoteNotificationService.shared.recordOwnerInteraction(
                     sessionID: sessionID
@@ -522,7 +590,7 @@ final class TerminalSession: NSObject {
            !RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) {
             return
         }
-        terminalView.send(txt: text)
+        terminalView.sendUserText(text)
     }
 
     /// Inserts text the way a paste arrives, rather than the way typing does.
@@ -537,11 +605,13 @@ final class TerminalSession: NSObject {
            !RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) {
             return
         }
-        terminalView.pasteText(text)
+        terminalView.pasteUserText(text)
     }
 
     /// Sends raw bytes to the PTY as if typed — the entry point for remote keyboard input.
     func sendRemoteInput(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty else { return }
+        delegate?.terminalSession(self, didReceiveUserInput: .remote(bytes: bytes))
         terminalView.sendRemote(bytes[...])
     }
 
@@ -716,6 +786,7 @@ protocol TerminalSessionDelegate: AnyObject {
     )
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?)
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int)
+    func terminalSession(_ session: TerminalSession, didReceiveUserInput input: TerminalUserInput)
 
     /// A `BEL` arrived: record whatever activity edge it means, and answer why it rang.
     ///
@@ -738,6 +809,7 @@ extension TerminalSessionDelegate {
     ) {}
     func terminalSession(_ session: TerminalSession, didTerminateWithExitCode exitCode: Int32?) {}
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {}
+    func terminalSession(_ session: TerminalSession, didReceiveUserInput input: TerminalUserInput) {}
     func terminalSessionDidReceiveBell(_ session: TerminalSession) -> SoundEvent? { nil }
     func terminalSessionDidForwardMouseReport(_ session: TerminalSession) {}
 }

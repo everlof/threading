@@ -137,7 +137,17 @@ Each mark declares:
 
 Activating a mark raises its `actionID` with the mark ID as the correlated string value. A mark
 without an action remains an informative accessibility element. Array order is paint order, so
-overlapping marks can express scatter and bubble plots as well as non-overlapping treemaps.
+overlapping marks can express scatter and bubble plots as well as non-overlapping treemaps. A
+circular hierarchy is stricter: an ellipse inside a hierarchy must be a circle — a square
+frame — and every circle must stay inside its parent's and clear of its siblings'. Being a circle
+is part of the rule rather than a precondition for it: a hierarchy ellipse wider than it is tall
+is refused, because otherwise authoring every mark a hundred-thousandth off square opted a scene
+out of the packing check while still drawing as overlapping bubbles. Tangency is compared to a
+tolerance of 1e-4, which is wider than the rounding a producer writing normalized coordinates to
+six decimal places can introduce and far below a tenth of a pixel on a thousand-point canvas.
+That keeps containment legible and prevents malformed producer geometry from becoming misleading
+host-owned navigation — and Threading hit-tests the circle it drew, so the corners of a mark's
+bounding box belong to whatever is visible there rather than to the mark.
 
 A producer which already has nested geometry may add
 `hierarchy: ExtensionSceneHierarchy(rootID:)` and set every non-root mark's `parentID`. Threading
@@ -145,6 +155,14 @@ then owns branch navigation: activating a mark with children zooms it locally, t
 shown as native breadcrumbs, and activating the focused backdrop or an ancestor breadcrumb moves
 back out. Leaf actions keep the ordinary action-ID round trip. The complete hierarchy still
 spends the scene's 500-mark budget; zooming does not ask the extension to publish another tree.
+
+A scene over the mark budget is answered by its size and nothing else: validation stops at the
+count rather than reporting every fault in an oversized array. The per-item and hierarchy checks
+are linear and quadratic respectively, so walking an oversized scene is the exact work the budget
+exists to refuse — 8,000 marks, which fits inside one protocol line, took 26 seconds and produced
+32 million issues before that was true. Within the budget, sibling overlap is reported once per
+offending mark rather than once per colliding pair, for the same reason: pairs are quadratic, and
+the set of marks in the wrong place is the whole finding.
 
 This is a public extension primitive, not ArtifactKit-specific presentation. Extensions own the
 semantic hierarchy, normalized geometry, labels, details, and leaf actions. Threading keeps

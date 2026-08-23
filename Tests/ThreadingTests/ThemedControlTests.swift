@@ -7737,6 +7737,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "RevealHighlightView",
                 "SearchMatchLabel",
                 "SearchResultRowView",
+                "SemanticHierarchySceneView",
                 "SemanticSceneView",
                 "SeparatorView",
                 "ShortcutRecorderView",

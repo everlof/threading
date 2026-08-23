@@ -5,11 +5,12 @@ the inference.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-`SessionActivityTracker` derives `dormant` / `idle` / `working` / `needsAttention` from PTY
-output, because an idle agent writes nothing at all — measured at zero bytes over 19s while
-sitting at its prompt. This works for any program rather than one specific agent.
+`SessionActivityTracker` derives `dormant` / `idle` / `working` / `awaitingUser` /
+`needsAttention` from PTY output and lifecycle boundaries, because an idle agent writes nothing
+at all — measured at zero bytes over 19s while sitting at its prompt. This works for any program
+rather than one specific agent.
 
-Five guards keep it honest:
+Five guards and one interaction boundary keep it honest:
 
 - A **byte threshold** (`workingByteThreshold`), so the terminal echoing typed characters is
   not mistaken for work.
@@ -38,9 +39,20 @@ Five guards keep it honest:
   grace holds, nothing the process emits on its own raises a flag: output opens no inferred
   turn, a bell does not flag, and Claude's idle-prompt `Notification` — which a relaunched
   session sitting at its prompt is precisely the shape of — is ignored (it still latches
-  `reportsOwnActivity`, since it does prove the hooks arrived). The grace ends at the first
-  look, or at the first reported turn — the remote mirror can type into an unattended
-  terminal, and from that turn on the session flags like any other.
+  `reportsOwnActivity`, since it does prove the hooks arrived). **Looking does not end the
+  grace**: selecting the restored session or attaching a phone is presentation, and both provoke
+  the very resize/repaint traffic the grace exists to reject. The grace ends at the first actual
+  terminal input, or at the first reported turn — the remote mirror can type into an unattended
+  terminal, and from that interaction on the session flags like any other.
+- A **submitted-input boundary** (`noteUserInput`). Claude reports a permission prompt but no
+  complementary "permission answered" event. A long, silent command can therefore be running
+  while the last reported state still says `awaitingUser`. Enter is the provider-neutral fact
+  that the terminal answer was committed, locally or remotely: it lowers only the inferred
+  waiting flag and returns to the already-open turn. Editing bytes do not claim an answer, and
+  an ask-shaped tool call remains owned by its exact `PostToolUse` close hook. The local terminal
+  marks the real AppKit input scope explicitly because SwiftTerm carries its own colour/query
+  replies through the same low-level sender; those replies are not interaction. Submission is
+  semantic too: Kitty-encoded Enter counts, while newlines inside a bracketed paste do not.
 
 The tracker reports an **attention episode** whenever work finishes or a terminal bell raises an
 unread result, independently of who is looking. `AgentRuntime` gives that episode a monotonic
@@ -74,9 +86,9 @@ into its TUI, which this file's machinery sees as bytes and reads as work. The s
 from the session's own transcript instead, and everything about it — the reader, the tracker's
 `limitPark`, the mark, and what may and may not lower it — lives in
 [`limit-recovery.md`](limit-recovery.md). What belongs here is the boundary: it is the only
-activity in this vocabulary that is not derived from output, hooks or visibility, and the only one
-that is *evidence-cleared* rather than guess-cleared — being looked at lowers `awaitsUser` and
-deliberately does not lower this.
+activity in this vocabulary that is not derived from output, hooks or interaction, and the only
+one that is *evidence-cleared* rather than presentation-cleared — reading a completed result can
+lower `awaitsUser`, and deliberately does not lower this.
 
 Output arrives on the main queue (`LocalProcess` defaults its dispatch queue to
 `DispatchQueue.main`), which is what lets the tracker use `Timer` safely.
@@ -174,9 +186,15 @@ is the single place that turns them into a `SessionActivity`. Three rules fall o
 - **`awaitingUser` and a bell raise the flag without touching the turn.** Where nothing reports,
   the bell still ends the inferred turn — it is the only boundary a shell has, and leaving the
   turn open would strand it `working` with no quiet timer left to stop it.
-- **Being looked at lowers the tracker's process-local waiting flag and returns to the turn**, so
-  a session asked-and-answered mid-turn goes back to `working`, while one that genuinely finished
-  goes `idle` before its participant-specific unread receipt is projected onto the row.
+- **Being looked at lowers only a completed result's process-local waiting flag.** A session whose
+  turn genuinely finished goes `idle` before its participant-specific unread receipt is projected
+  onto the row. A question inside an open turn stays `awaitingUser`: showing a prompt is not the
+  same fact as answering it.
+- **Submitted terminal input returns an inferred question to its open turn.** Claude exposes no
+  hook for a permission answer, so a committed line is the missing structured boundary. It is
+  forwarded from both local and remote input and works while the Mac surface is off screen. A
+  named ask tool is not inferred and ignores this boundary; its own close hook remains the owner.
+  Terminal protocol replies and paste contents are kept out of the submitted-input edge.
 - **Output may lower the flag, and may do nothing else.** Answering in place raises no hook at
   all, so a fresh burst inside a flagged turn is the only evidence the agent resumed. It is
   admitted on screen only — off screen the flag is the one thing saying the session is waiting,
@@ -277,11 +295,12 @@ then nothing for as long as it stood, with `Notification` arriving late and type
 `permission_prompt`. Answering produced `PostToolUse` carrying the *same* `tool_use_id` as the
 `PreToolUse`, and only then `Stop`. Both halves of the fix below are that trace.
 
-And even when the notice did arrive, the session being *looked at* lowered it — correctly, for
-what that flag means. `Notification` cannot say what it is waiting for, so answering a CLI's own
-permission prompt, which happens in the terminal and raises no hook, is only visible as "the user
-is here" or "output resumed". Both rules then fire on a question: the box repaints when it is
-drawn and again on every arrow key.
+And even when the notice did arrive, Threading once lowered it merely because the session was
+*looked at*. That made presentation pretend to be an answer and, on a restored terminal, also
+opened the gate through which later TUI paint became a false turn. `Notification` cannot say what
+it is waiting for, so a generic prompt now lowers only on a submitted terminal answer or on the
+existing on-screen output-resumed fallback. The box being drawn is neither. Arrow-key editing is
+not a submission either.
 
 So a second, narrower fact was added rather than weakening the first. `TurnBlockingTools` names
 the tools whose *result is the user's answer* — `AskUserQuestion` and `ExitPlanMode` for Claude —

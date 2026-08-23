@@ -61,13 +61,16 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// is output we caused, and must not read as the agent working.
     var onMouseReportForwarded: (() -> Void)?
 
-    /// Local keyboard/paste input, excluding bytes injected by a remote controller.
-    var onUserInput: (() -> Void)?
+    /// Genuine local keyboard/paste input, excluding bytes injected by a remote controller and
+    /// the terminal's own protocol replies. The latter use this same delegate method, so the
+    /// explicit input scope is the fact that keeps a colour query from looking like an answer.
+    var onUserInput: ((TerminalUserInput) -> Void)?
     /// Checked only for local gestures. Remote injection and terminal protocol replies bypass
     /// this gate, so focused control cannot break colour queries or other emulator responses.
     var acceptsLocalInput: (() -> Bool)?
     var onLocalInputBlocked: (() -> Void)?
     private var isInjectingRemoteInput = false
+    private var localUserInputScopes: [Bool] = []
 
     /// Every chunk sent upstream to the child — keystrokes, paste, and the terminal's own
     /// answers (query replies, colour-scheme reports) alike. `TerminalColorQueryTests` reads
@@ -75,9 +78,28 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     var onInputBytes: ((ArraySlice<UInt8>) -> Void)?
 
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        if !isInjectingRemoteInput { onUserInput?() }
+        if !isInjectingRemoteInput, let submitsLine = scopedInputSubmitsLine {
+            onUserInput?(TerminalUserInput(bytes: Array(data), submitsLine: submitsLine))
+        }
         onInputBytes?(data)
         super.send(source: source, data: data)
+    }
+
+    /// Programmatic insertion that still belongs to the person operating this terminal.
+    /// Keeping it inside the same scope as AppKit input means generated commands and keyboard
+    /// events cannot accidentally acquire different activity semantics.
+    func sendUserText(_ text: String) {
+        withLocalUserInput(submitsLine: text.contains("\r") || text.contains("\n")) {
+            send(txt: text)
+        }
+    }
+
+    /// Programmatic paste is editing even when its bracketed payload contains newlines. The
+    /// program receives it as one unit; only the later Return actually submits it.
+    func pasteUserText(_ text: String) {
+        withLocalUserInput(submitsLine: false) {
+            pasteText(text)
+        }
     }
 
     func sendRemote(_ data: ArraySlice<UInt8>) {
@@ -91,7 +113,12 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             onLocalInputBlocked?()
             return
         }
-        super.keyDown(with: event)
+        // 36 is Return and 76 is the keypad Enter key. Retaining that semantic around
+        // SwiftTerm's encoding also works when Kitty mode emits no literal carriage return.
+        let submitsLine = event.keyCode == 36 || event.keyCode == 76
+        withLocalUserInput(submitsLine: submitsLine) {
+            super.keyDown(with: event)
+        }
     }
 
     override func insertText(_ string: Any, replacementRange: NSRange) {
@@ -99,7 +126,9 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             onLocalInputBlocked?()
             return
         }
-        super.insertText(string, replacementRange: replacementRange)
+        withLocalUserInput(submitsLine: false) {
+            super.insertText(string, replacementRange: replacementRange)
+        }
     }
 
     override func paste(_ sender: Any) {
@@ -107,7 +136,25 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             onLocalInputBlocked?()
             return
         }
-        super.paste(sender)
+        withLocalUserInput(submitsLine: false) {
+            super.paste(sender)
+        }
+    }
+
+    private var scopedInputSubmitsLine: Bool? {
+        guard !localUserInputScopes.isEmpty else { return nil }
+        // `keyDown` commonly nests `insertText`. Return's outer semantic must win over that
+        // inner editing scope, while an ordinary character remains editing-only.
+        return localUserInputScopes.contains(true)
+    }
+
+    private func withLocalUserInput<Result>(
+        submitsLine: Bool,
+        _ operation: () -> Result
+    ) -> Result {
+        localUserInputScopes.append(submitsLine)
+        defer { localUserInputScopes.removeLast() }
+        return operation()
     }
 
     /// Mirrors the routing condition in the fork's `MacTerminalView.scrollWheel`: the wheel

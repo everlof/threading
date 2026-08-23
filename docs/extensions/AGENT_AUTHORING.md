@@ -763,7 +763,9 @@ When those marks form one nested map, declare
 `hierarchy: ExtensionSceneHierarchy(rootID: "...")` and give every non-root item a `parentID`.
 Threading owns branch zoom, breadcrumbs, keyboard and accessibility navigation on Mac and iPhone;
 leaf `actionID` values still return to the extension. All marks remain inside the same 500-mark
-scene budget.
+scene budget. Circular hierarchy marks are a true packing: child circles stay inside their parent
+and sibling circles do not intersect. Flat scenes may still overlap marks for scatter and bubble
+plots.
 
 These richer nodes are available in full panels. Compact component surfaces disallow them unless
 their published constraint vocabulary explicitly opts in. Read the contract rather than assuming

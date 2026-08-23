@@ -327,11 +327,10 @@ struct TerminalKeyBar: View {
     let customize: () -> Void
     let showsAttachmentKey: Bool
     let canAttach: Bool
-    /// Menu items only request presentation: a `PhotosPicker` placed inside a `Menu` is torn
-    /// down with the menu before its sheet can present, so the owner attaches
-    /// `.photosPicker`/`.fileImporter` to its own stable hierarchy instead.
-    let chooseAttachmentPhotos: () -> Void
-    let chooseAttachmentFiles: () -> Void
+    /// The owner presents the source chooser from its stable hierarchy. Keeping the chooser out
+    /// of this key's transient menu also lets the owner wait for that sheet to dismiss before it
+    /// presents Photos or Files.
+    let chooseAttachmentSource: () -> Void
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var theme
     @State private var isKeyboardVisible = false
@@ -394,17 +393,7 @@ struct TerminalKeyBar: View {
     }
 
     private var attachmentButton: some View {
-        Menu {
-            Button(action: chooseAttachmentPhotos) {
-                Label(
-                    MobileL10n.string("Photo Library"),
-                    systemImage: "photo.on.rectangle"
-                )
-            }
-            Button(action: chooseAttachmentFiles) {
-                Label(MobileL10n.string("Files"), systemImage: "folder")
-            }
-        } label: {
+        Button(action: chooseAttachmentSource) {
             Image(systemName: TerminalKeyBarSymbols.attachments)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(theme.label)

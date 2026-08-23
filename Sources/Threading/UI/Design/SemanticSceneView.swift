@@ -20,7 +20,7 @@ final class SemanticSceneView: ThemedControl {
             case ellipse
         }
 
-        enum Color {
+        enum Color: Hashable {
             case neutral
             case accent
             case positive
@@ -34,6 +34,8 @@ final class SemanticSceneView: ThemedControl {
         let normalizedFrame: NSRect
         let shape: Shape
         let color: Color
+        /// Nil for ordinary scenes; zero is the focused hierarchy circle.
+        let hierarchyDepth: Int?
         let label: String?
         let detail: String?
         let accessibilityLabel: String
@@ -48,6 +50,7 @@ final class SemanticSceneView: ThemedControl {
             normalizedFrame: NSRect,
             shape: Shape,
             color: Color,
+            hierarchyDepth: Int? = nil,
             label: String?,
             detail: String?,
             accessibilityLabel: String,
@@ -61,6 +64,7 @@ final class SemanticSceneView: ThemedControl {
             self.normalizedFrame = normalizedFrame
             self.shape = shape
             self.color = color
+            self.hierarchyDepth = hierarchyDepth
             self.label = label
             self.detail = detail
             self.accessibilityLabel = accessibilityLabel
@@ -86,15 +90,27 @@ final class SemanticSceneView: ThemedControl {
             guard hoveredIndex != oldValue else { return }
             toolTip = hoveredIndex.map(tooltip(at:))
             refreshPointerClaims()
-            needsDisplay = true
+            invalidateMarks(oldValue, hoveredIndex)
         }
     }
     private var pressedIndex: Int? {
         didSet {
-            if pressedIndex != oldValue { needsDisplay = true }
+            guard pressedIndex != oldValue else { return }
+            invalidateMarks(oldValue, pressedIndex)
         }
     }
     private var pressOriginIndex: Int?
+    /// Hierarchy fills for the draw in progress. Every mark at the same depth, colour, enabled
+    /// and emphasis state paints the identical colour, and deriving one costs three surface
+    /// composites and two Oklab round trips inside an appearance push — so a 500-mark scene was
+    /// paying that five hundred times per repaint, and the pointer crossing one mark repainted
+    /// the lot. Cleared at the top of `draw(_:)`, which is the only place it is read, so a theme
+    /// or appearance change cannot leave a stale colour behind for the next frame to use.
+    private var hierarchyFills: [HierarchyFillKey: NSColor] = [:]
+    /// How many of those the last `draw(_:)` had to derive rather than reuse. Exposed for the
+    /// same reason `SemanticSceneHierarchyIndex.Traversal.workCount` is: a bound argued for only
+    /// in a comment is a bound that quietly stops holding.
+    private(set) var derivedHierarchyFillCount = 0
     private var keyboardIndex: Int? {
         didSet {
             if keyboardIndex != oldValue { needsDisplay = true }
@@ -208,7 +224,7 @@ final class SemanticSceneView: ThemedControl {
     override func mouseDragged(with event: NSEvent) {
         guard let pressOriginIndex else { return }
         let point = convert(event.locationInWindow, from: nil)
-        pressedIndex = markFrames[pressOriginIndex].contains(point) ? pressOriginIndex : nil
+        pressedIndex = markContains(point, at: pressOriginIndex) ? pressOriginIndex : nil
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -216,7 +232,7 @@ final class SemanticSceneView: ThemedControl {
         let point = convert(event.locationInWindow, from: nil)
         self.pressOriginIndex = nil
         self.pressedIndex = nil
-        if markFrames[pressOriginIndex].contains(point) {
+        if markContains(point, at: pressOriginIndex) {
             _ = activate(at: pressOriginIndex)
         }
     }
@@ -258,14 +274,44 @@ final class SemanticSceneView: ThemedControl {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        hierarchyFills.removeAll(keepingCapacity: true)
+        derivedHierarchyFillCount = 0
         ThemedSurface.draw(
             bounds,
             fill: Design.Surface.panel,
             border: Design.Surface.border,
             radius: Design.Radius.panel
         )
-        for index in items.indices where markFrames.indices.contains(index) {
+        // Marks keep their order, so a partial repaint layers exactly as a whole one does: a
+        // parent still paints before the children sitting inside it, and both are clipped to the
+        // same dirty rectangle. Anything a mark draws stays inside its own frame, so a mark that
+        // does not meet the rectangle has nothing to contribute to it.
+        let visible = visibleMarkIndices(in: dirtyRect)
+        for index in visible {
             drawMark(at: index)
+        }
+        // A hierarchy's immediate-child label names the whole region, not whichever empty patch
+        // happened to remain after its descendants were packed. Paint those labels as an overlay
+        // pass so later child fills cannot erase them. Ordinary scenes keep their mark-local
+        // labels because their draw order may itself carry meaning.
+        for index in visible where items[index].hierarchyDepth != nil {
+            drawLabels(for: items[index], in: markFrames[index])
+        }
+    }
+
+    private func visibleMarkIndices(in dirtyRect: NSRect) -> [Int] {
+        items.indices.filter {
+            markFrames.indices.contains($0) && markFrames[$0].intersects(dirtyRect)
+        }
+    }
+
+    /// Repaint the marks whose appearance changed, and no others. A scene may hold five hundred,
+    /// and the pointer crossing from one mark to its neighbour is not a reason to redraw the
+    /// other four hundred and ninety-eight. Widened a little because a mark's border is stroked
+    /// on its outline, so it lies half outside the frame.
+    private func invalidateMarks(_ indices: Int?...) {
+        for index in indices.compactMap({ $0 }) where markFrames.indices.contains(index) {
+            setNeedsDisplay(markFrames[index].insetBy(dx: -3, dy: -3))
         }
     }
 
@@ -315,10 +361,19 @@ final class SemanticSceneView: ThemedControl {
         guard bounds.width > 0, bounds.height > 0 else { return nil }
         let normalized = NSPoint(x: point.x / bounds.width, y: point.y / bounds.height)
         for index in hitIndex.candidates(at: normalized).reversed()
-        where markFrames.indices.contains(index) && markFrames[index].contains(point) {
+        where markContains(point, at: index) {
             return index
         }
         return nil
+    }
+
+    /// Whether a mark is under this point — asked of the shape that was painted, not of the
+    /// rectangle it was painted in.
+    private func markContains(_ point: NSPoint, at index: Int) -> Bool {
+        guard items.indices.contains(index), markFrames.indices.contains(index) else {
+            return false
+        }
+        return items[index].shape.contains(point, in: markFrames[index])
     }
 
     private func tooltip(at index: Int) -> String {
@@ -332,6 +387,10 @@ final class SemanticSceneView: ThemedControl {
     private func drawMark(at index: Int) {
         let item = items[index]
         let frame = markFrames[index]
+        if let hierarchyDepth = item.hierarchyDepth {
+            drawHierarchyMark(item, depth: hierarchyDepth, at: index, in: frame)
+            return
+        }
         let base = color(for: item.color)
         let emphasized = item.isSelected
             || hoveredIndex == index
@@ -359,15 +418,139 @@ final class SemanticSceneView: ThemedControl {
         }
     }
 
-    private func cornerRadius(for shape: Item.Shape, in frame: NSRect) -> CGFloat {
-        switch shape {
-        case .rectangle:
-            0
-        case .roundedRectangle:
-            Design.Radius.control(fitting: frame.size)
-        case .ellipse:
-            min(frame.width, frame.height) / 2
+    /// Hierarchical circles read as nested opaque regions, not translucent bubbles laid over one
+    /// another. The semantic hue survives, but it is mixed into the panel once before painting;
+    /// parent and child fills therefore never create a third accidental colour where they meet.
+    /// A strong neutral perimeter names the current focus, while internal boundaries stay quiet.
+    private func drawHierarchyMark(
+        _ item: Item,
+        depth: Int,
+        at index: Int,
+        in frame: NSRect
+    ) {
+        let base = color(for: item.color)
+        let isFocusedBoundary = depth == 0
+        // A producer's own selection counts, the way it does for an ordinary mark. Without it a
+        // branch the extension marked selected drew identically to every unselected sibling
+        // while accessibility went on reporting it as chosen. The focus circle is selected by
+        // construction and takes its emphasis from its perimeter instead, so this only ever
+        // changes a mark below the focus.
+        let isEmphasized = item.isSelected
+            || hoveredIndex == index
+            || pressedIndex == index
+            || (hasKeyboardFocus && keyboardIndex == index)
+        let fill = hierarchyFill(
+            color: item.color,
+            depth: depth,
+            isEnabled: item.isEnabled,
+            isEmphasized: isEmphasized
+        )
+        // The reference grammar uses ink-dark construction lines. Black remains the quiet edge
+        // on paper and on every lifted region; only an authored near-black fill switches to white
+        // so a theme cannot make a branch boundary disappear completely.
+        let internalStroke: NSColor = ThemeContrast.ratio(.black, fill) >= 1.28
+            ? .black
+            : .white
+        let stroke = isFocusedBoundary ? Design.Text.label : internalStroke
+        let path = shapePath(for: item.shape, in: frame)
+
+        fill.setFill()
+        path.fill()
+        stroke.setStroke()
+        path.lineWidth = isFocusedBoundary
+            ? max(2.25, Design.Radius.border)
+            : max(item.isSelected ? 1.75 : 1.15, Design.Radius.border)
+        path.stroke()
+
+        if keyboardIndex == index {
+            drawKeyboardFocus(
+                around: ThemedSurface.Shape(
+                    rect: frame,
+                    radius: cornerRadius(for: item.shape, in: frame)
+                ),
+                color: base
+            )
         }
+    }
+
+    /// Mix hierarchy colours in Oklab so lightness and colourfulness can be controlled
+    /// independently. A straight alpha or sRGB blend left Cyberpunk's blue and magenta parents
+    /// looking like chart series; the inspiration uses brighter-but-muted parent land masses and
+    /// lets the smaller leaves carry most of the colour.
+    private func hierarchyFill(
+        color: Item.Color,
+        depth: Int,
+        isEnabled: Bool,
+        isEmphasized: Bool
+    ) -> NSColor {
+        // Every mark sharing these four answers paints the identical colour, so derive it once
+        // per repaint. The key buckets depth the way the shares below do: past the second level
+        // the treatment stops changing, and a deep branch must not mint a fresh entry per level.
+        let key = HierarchyFillKey(
+            color: color,
+            depth: min(depth, 2),
+            isEnabled: isEnabled,
+            isEmphasized: isEmphasized
+        )
+        if let cached = hierarchyFills[key] { return cached }
+        let resolved = derivedHierarchyFill(key: key, base: self.color(for: color))
+        hierarchyFills[key] = resolved
+        derivedHierarchyFillCount += 1
+        return resolved
+    }
+
+    private struct HierarchyFillKey: Hashable {
+        let color: Item.Color
+        let depth: Int
+        let isEnabled: Bool
+        let isEmphasized: Bool
+    }
+
+    private func derivedHierarchyFill(key: HierarchyFillKey, base: NSColor) -> NSColor {
+        let depth = key.depth
+        let isEnabled = key.isEnabled
+        let isEmphasized = key.isEmphasized
+        // `panel` and the semantic palette can both be dynamic System colours. Oklab conversion
+        // resolves a dynamic NSColor against the *current drawing* appearance, which is not
+        // necessarily this view's appearance during an offscreen evidence render. Resolve the
+        // whole derivation explicitly or light and dark captures can exchange their fills.
+        var resolved = NSColor.clear
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            // System's panel is a low-alpha label wash. Measure the opaque colour AppKit
+            // actually paints, rather than treating that wash's white/black RGB payload as the
+            // panel itself and accidentally inverting the hierarchy between appearances.
+            let ground = Design.Surface.ground
+            let surface = Design.Surface.background.composited(over: ground)
+            let panel = Design.Surface.panel.composited(over: surface).oklab
+            let semantic = base.oklab
+            let restingShares: (lightness: CGFloat, colour: CGFloat)
+            switch depth {
+            case 0:
+                restingShares = (0.20, 0.32)
+            case 1:
+                restingShares = (0.46, 0.10)
+            default:
+                restingShares = (0.72, 0.54)
+            }
+            let enabledShare: CGFloat = isEnabled ? 1 : 0.52
+            let emphasis: CGFloat = isEmphasized && depth > 0 ? 0.08 : 0
+            let lightnessShare = min(1, restingShares.lightness * enabledShare + emphasis)
+            let colourShare = min(1, restingShares.colour * enabledShare + emphasis)
+
+            resolved = NSColor.oklab(
+                Oklab(
+                    lightness: panel.lightness
+                        + (semantic.lightness - panel.lightness) * lightnessShare,
+                    a: panel.a + (semantic.a - panel.a) * colourShare,
+                    b: panel.b + (semantic.b - panel.b) * colourShare
+                )
+            )
+        }
+        return resolved
+    }
+
+    private func cornerRadius(for shape: Item.Shape, in frame: NSRect) -> CGFloat {
+        shape.cornerRadius(in: frame)
     }
 
     private func shapePath(for shape: Item.Shape, in frame: NSRect) -> NSBezierPath {
@@ -404,6 +587,10 @@ final class SemanticSceneView: ThemedControl {
 
     private func drawLabels(for item: Item, in frame: NSRect) {
         guard frame.width >= 34, frame.height >= 22, let label = item.label else { return }
+        if item.hierarchyDepth != nil {
+            drawHierarchyLabels(label: label, detail: item.detail, in: frame)
+            return
+        }
         let inset = min(Design.Spacing.small, max(3, min(frame.width, frame.height) / 8))
         let textRect = frame.insetBy(dx: inset, dy: inset)
         guard textRect.width > 0, textRect.height > 0 else { return }
@@ -446,6 +633,116 @@ final class SemanticSceneView: ThemedControl {
                 .paragraphStyle: paragraph
             ]
         )
+    }
+
+    private func drawHierarchyLabels(label: String, detail: String?, in frame: NSRect) {
+        guard frame.width >= 48, frame.height >= 34 else { return }
+        let inset = min(Design.Spacing.small, max(4, min(frame.width, frame.height) / 9))
+        let textRect = frame.insetBy(dx: inset, dy: inset)
+        guard textRect.width > 0, textRect.height > 0 else { return }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byTruncatingTail
+        let labelFont = Design.Typography.control()
+        let labelHeight = ceil(labelFont.boundingRectForFont.height)
+        let detailFont = Design.Typography.detail()
+        let detailHeight = detail == nil ? 0 : ceil(detailFont.boundingRectForFont.height)
+        let detailGap: CGFloat = detail == nil ? 0 : 2
+        let blockHeight = min(textRect.height, labelHeight + detailGap + detailHeight)
+        let labelRect = NSRect(
+            x: textRect.minX,
+            y: textRect.midY - blockHeight / 2,
+            width: textRect.width,
+            height: min(labelHeight, blockHeight)
+        )
+        (label as NSString).draw(
+            in: labelRect,
+            withAttributes: [
+                .font: labelFont,
+                .foregroundColor: Design.Text.label.withAlphaComponent(0.72),
+                .paragraphStyle: paragraph
+            ]
+        )
+
+        guard let detail, blockHeight > labelHeight + detailGap else { return }
+        let detailRect = NSRect(
+            x: textRect.minX,
+            y: labelRect.maxY + detailGap,
+            width: textRect.width,
+            height: min(detailHeight, textRect.maxY - labelRect.maxY - detailGap)
+        )
+        (detail as NSString).draw(
+            in: detailRect,
+            withAttributes: [
+                .font: detailFont,
+                .foregroundColor: Design.Text.secondary.withAlphaComponent(0.58),
+                .paragraphStyle: paragraph
+            ]
+        )
+    }
+}
+
+/// The geometry of a mark, kept apart from the control so it can be asserted directly.
+///
+/// Main-actor because a corner radius is a theme reading, and the theme is main-actor state.
+/// Every caller — layout, drawing, hit testing, the tests — is already there.
+@MainActor
+extension SemanticSceneView.Item.Shape {
+
+    /// The corner radius this shape draws with in `frame`. One owner, because the fill, the
+    /// keyboard focus ring and the hit test all have to agree on the same outline.
+    func cornerRadius(in frame: NSRect) -> CGFloat {
+        switch self {
+        case .rectangle:
+            0
+        case .roundedRectangle:
+            min(Design.Radius.control(fitting: frame.size), min(frame.width, frame.height) / 2)
+        case .ellipse:
+            min(frame.width, frame.height) / 2
+        }
+    }
+
+    /// Whether `point` is inside the mark this shape draws in `frame`.
+    ///
+    /// A bounding rectangle is not a mark. A circle covers π/4 of its box, so better than a
+    /// fifth of every round mark's rectangle is somewhere the mark is not — and in a hierarchy's
+    /// circle packing, where sibling circles are tangent and boxes therefore overlap, those
+    /// corners are exactly where the *neighbouring* circles and the parent are the thing on
+    /// screen. Testing the rectangle gave the hover highlight, the pointing-hand cursor and the
+    /// click to a mark the pointer was demonstrably not over. The packing rule the scene
+    /// contract now enforces is about circles; so is this.
+    func contains(_ point: NSPoint, in frame: NSRect) -> Bool {
+        guard frame.contains(point) else { return false }
+        switch self {
+        case .rectangle:
+            return true
+        case .roundedRectangle:
+            return isInsideCorners(point, in: frame, radius: cornerRadius(in: frame))
+        case .ellipse:
+            let semiWidth = frame.width / 2
+            let semiHeight = frame.height / 2
+            guard semiWidth > 0, semiHeight > 0 else { return false }
+            let x = (point.x - frame.midX) / semiWidth
+            let y = (point.y - frame.midY) / semiHeight
+            return x * x + y * y <= 1
+        }
+    }
+
+    /// Only the four corner squares can exclude a point from a rounded rectangle: everything
+    /// else is in the cross the two inset rectangles make. So the test is the distance from the
+    /// nearest point of the inner rectangle the corner arcs are struck from.
+    private func isInsideCorners(
+        _ point: NSPoint,
+        in frame: NSRect,
+        radius: CGFloat
+    ) -> Bool {
+        guard radius > 0 else { return true }
+        let inner = frame.insetBy(dx: radius, dy: radius)
+        guard inner.width >= 0, inner.height >= 0 else { return true }
+        let x = point.x - min(max(point.x, inner.minX), inner.maxX)
+        let y = point.y - min(max(point.y, inner.minY), inner.maxY)
+        return x * x + y * y <= radius * radius
     }
 }
 
@@ -604,6 +901,7 @@ final class SemanticHierarchySceneView: NSView, ThemedComponent {
             normalizedFrame: normalized,
             shape: item.shape,
             color: item.color,
+            hierarchyDepth: depth,
             label: showsVisualLabel ? item.label : nil,
             detail: showsVisualLabel ? item.detail : nil,
             accessibilityLabel: item.accessibilityLabel,
@@ -678,8 +976,8 @@ final class SemanticHierarchySceneView: NSView, ThemedComponent {
 }
 
 /// Fixed normalized-space buckets keep pointer movement proportional to the marks near the
-/// pointer. Buckets are a candidate index, not hit geometry; the canvas applies the exact inset
-/// frame before accepting a mark. Array order is retained so the last painted mark still wins.
+/// pointer. Buckets are a candidate index, not hit geometry; the canvas applies the mark's own
+/// drawn shape before accepting it. Array order is retained so the last painted mark still wins.
 @MainActor
 private struct SemanticSceneHitIndex {
     private static let dimension = 16

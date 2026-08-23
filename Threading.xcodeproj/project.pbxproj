@@ -291,6 +291,7 @@
 				ThreadingMobile/ScreenEdgeSwipe.swift,
 				ThreadingMobile/SessionDashboard.swift,
 				ThreadingMobile/SessionDetailView.swift,
+				ThreadingMobile/SessionDraftView.swift,
 				ThreadingMobile/SessionWorkspaceView.swift,
 				ThreadingMobile/ShareChatSheet.swift,
 				ThreadingMobile/TerminalKeyBar.swift,

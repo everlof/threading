@@ -86,6 +86,14 @@ enum MobileDesign {
         /// The working orb at a row's trailing edge, standing where the age would be. Sized to
         /// the caption line it replaces so a working row is no taller than an idle one.
         static let rowWorkingOrb: CGFloat = 16
+
+        /// The draft's composer chips: the chevron that says each is a menu, and the usage ring
+        /// in the identity chip, both set to the caption line the chip's text sits on.
+        static let chipChevron: CGFloat = 9
+        static let usageRing: CGFloat = 12
+        /// The glyph on the draft's empty ground. A symbol, not a tile: large enough to name the
+        /// surface being started, drawn light and in the tertiary ink so it stays a hint.
+        static let draftHintGlyph: CGFloat = 30
     }
 
     enum Offset {

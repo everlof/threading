@@ -19,8 +19,8 @@ final class MobileSessionNavigationTransitionTests: XCTestCase {
 }
 
 /// Opening a session is one code path, whether the row was tapped or the chat was just started
-/// from the New Session sheet. Starting one and being left on the list was the bug: the created
-/// session was thrown away and only the sheet was dismissed.
+/// from a draft. Starting one and being left on the list was the bug: the created session was
+/// thrown away and only the sheet was dismissed.
 @MainActor
 final class MobileSessionOpeningTests: XCTestCase {
     private static let suiteName = "MobileSessionOpeningTests"
@@ -82,6 +82,82 @@ final class MobileSessionOpeningTests: XCTestCase {
         )
     }
 
+    // MARK: - Drafts
+
+    /// Starting a chat is navigation: the draft is a screen on the stack, pushed from the list
+    /// it was asked for in, so Back from the chat it becomes returns there.
+    func testStartingADraftPushesItOntoTheStackFromTheProjectItWasAskedIn() {
+        let model = makeModel()
+        model.navigationPath = [.project("AnotherTerminal")]
+
+        MobileSessionNavigationTransition.draft(in: "AnotherTerminal", onto: model)
+
+        guard case .draft(let draft)? = model.navigationPath.last else {
+            return XCTFail("expected a draft route on top, got \(model.navigationPath)")
+        }
+        XCTAssertEqual(draft.projectName, "AnotherTerminal")
+        XCTAssertEqual(model.navigationPath.count, 2)
+        XCTAssertEqual(model.navigationPath.first, .project("AnotherTerminal"))
+    }
+
+    /// The draft route names no session by itself; once Start is answered, the model resolves
+    /// it to the chat it became, and the path has not moved.
+    func testADraftResolvesToTheSessionItStartedWithoutMovingThePath() {
+        let model = makeModel()
+        let draft = MobileSessionDraft()
+        model.navigationPath = [.draft(draft)]
+        XCTAssertNil(model.openSessionID)
+        XCTAssertNil(model.sessionID(for: .draft(draft)))
+
+        model.noteDraftStarted(draft, session: session(surface: .conversation))
+
+        XCTAssertEqual(model.navigationPath, [.draft(draft)])
+        XCTAssertEqual(model.sessionID(for: .draft(draft)), "session-1")
+        XCTAssertEqual(model.openSessionID, "session-1")
+    }
+
+    /// The chat a draft just started is the chat on top. A notification for it, or a row tap
+    /// after the list refreshed behind the screen, must not stack a second copy over it.
+    func testPushingTheSessionADraftStartedDoesNotStackASecondCopy() {
+        let model = makeModel()
+        let draft = MobileSessionDraft()
+        let started = session(surface: .conversation)
+        model.navigationPath = [.draft(draft)]
+        model.noteDraftStarted(draft, session: started)
+
+        MobileSessionNavigationTransition.push(started, onto: model)
+
+        XCTAssertEqual(model.navigationPath, [.draft(draft)])
+    }
+
+    /// Two drafts are two screens even when they start the same chat: each resolves on its own.
+    func testADifferentDraftDoesNotInheritAnotherDraftsSession() {
+        let model = makeModel()
+        let started = MobileSessionDraft()
+        model.noteDraftStarted(started, session: session(surface: .terminal))
+
+        XCTAssertNil(model.sessionID(for: .draft(MobileSessionDraft())))
+        XCTAssertNil(model.sessionID(for: .project("AnotherTerminal")))
+        XCTAssertNil(model.sessionID(for: .terminal("terminal-1")))
+        XCTAssertNil(model.sessionID(for: nil))
+    }
+
+    /// Continuity reopens the last chat on the next launch. A chat that began as a draft is
+    /// recorded the moment Start is answered, although the path itself did not change.
+    func testAStartedDraftIsRecordedAsTheLastRouteForContinuity() {
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: continuity)
+        model.startDemo()
+        let draft = MobileSessionDraft()
+        model.navigationPath = [.draft(draft)]
+        XCTAssertNil(continuity.lastRoute)
+
+        model.noteDraftStarted(draft, session: session(surface: .conversation))
+
+        XCTAssertEqual(continuity.lastRoute?.sessionID, "session-1")
+        XCTAssertEqual(continuity.lastRoute?.hostID, model.activeHostID)
+    }
+
     private func makeModel() -> RemoteAppModel {
         RemoteAppModel(continuity: MobileSessionContinuityStore(defaults: defaults))
     }
@@ -92,7 +168,7 @@ final class MobileSessionOpeningTests: XCTestCase {
             title: "Teach this screen a new trick",
             agentKind: "claude",
             surface: surface,
-            state: "idle",
+            state: .idle,
             projectName: "AnotherTerminal"
         )
     }

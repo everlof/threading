@@ -2,6 +2,7 @@ import SwiftTerm
 import SwiftUI
 import ThreadingRemoteKit
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import ThreadingMobile
 
@@ -119,7 +120,7 @@ final class MobileSessionChromeTests: XCTestCase {
                 title: title,
                 agentKind: "claude",
                 surface: .conversation,
-                state: "idle",
+                state: .idle,
                 projectName: "AnotherTerminal"
             )
         }
@@ -135,7 +136,7 @@ final class MobileSessionChromeTests: XCTestCase {
                     title: title,
                     agentKind: "claude",
                     surface: .conversation,
-                    state: "idle",
+                    state: .idle,
                     projectName: "AnotherTerminal"
                 ),
             ]
@@ -329,47 +330,31 @@ final class MobileSessionChromeTests: XCTestCase {
     /// swipe was in the source and inert for everybody who tried it. These assert the rules the
     /// replacement follows, which is the half a picture cannot check.
 
-    func testASidewaysDragIsASwipeAndAScrollIsNot() {
-        XCTAssertEqual(
-            MobileRowSwipe.drag(.undecided, translation: CGSize(width: -40, height: 6)),
-            .swiping(-40)
-        )
-        XCTAssertEqual(
-            MobileRowSwipe.drag(.undecided, translation: CGSize(width: -6, height: -90)),
-            .scrolling
-        )
+    /// The whole gesture turns on this one question, asked before the pan begins: a sideways pan
+    /// is the row's, anything else is the list's. Declining is what lets the scroll view start —
+    /// a SwiftUI `DragGesture` recognises in every direction and stops the dashboard scrolling
+    /// wherever a drag happens to begin on a row.
+    func testASidewaysPanIsTheRowsAndAVerticalOneIsTheLists() {
+        XCTAssertTrue(MobileRowSwipe.isSwipeDirection(velocity: CGPoint(x: -420, y: 60)))
+        XCTAssertFalse(MobileRowSwipe.isSwipeDirection(velocity: CGPoint(x: -60, y: -900)))
+        // A drag at exactly 45 degrees belongs to the list: scrolling is the commoner intent,
+        // and the one whose loss is felt.
+        XCTAssertFalse(MobileRowSwipe.isSwipeDirection(velocity: CGPoint(x: -300, y: 300)))
     }
 
-    /// The wobble at the start of a scroll must not move a row, and a drag too short to be
-    /// either yet must not commit the gesture to one of them.
-    func testATooShortDragDecidesNothingYet() {
+    /// A throw is read a fifth of a second ahead, so a flick can open a row the finger stopped
+    /// short of.
+    func testAThrowIsReadAShortWayAhead() {
         XCTAssertEqual(
-            MobileRowSwipe.drag(.undecided, translation: CGSize(width: -4, height: 3)),
-            .undecided
+            MobileRowSwipe.projectedTranslation(-30, velocity: -400),
+            -110,
+            accuracy: 0.001
         )
-    }
-
-    /// A diagonal drag used to be re-judged on every event, which made the row follow the finger
-    /// and snap home again as the angle changed. A gesture answers once.
-    func testAGestureKeepsWhatItDecidedWhenTheAngleChanges() {
-        let swiping = MobileRowSwipe.drag(.undecided, translation: CGSize(width: -30, height: 2))
         XCTAssertEqual(
-            MobileRowSwipe.drag(swiping, translation: CGSize(width: -32, height: -140)),
-            .swiping(-32)
+            MobileRowSwipe.projectedTranslation(-60, velocity: 0),
+            -60,
+            accuracy: 0.001
         )
-        let scrolling = MobileRowSwipe.drag(.undecided, translation: CGSize(width: 1, height: 60))
-        XCTAssertEqual(
-            MobileRowSwipe.drag(scrolling, translation: CGSize(width: -120, height: 61)),
-            .scrolling
-        )
-    }
-
-    /// The row starts under the finger, not twelve points behind it: the travel the gesture
-    /// needed to be recognised at all is taken back out.
-    func testTheRowStartsUnderTheFingerRatherThanBehindIt() {
-        XCTAssertEqual(MobileRowSwipe.travel(forTranslation: -12), 0)
-        XCTAssertEqual(MobileRowSwipe.travel(forTranslation: -50), -38)
-        XCTAssertEqual(MobileRowSwipe.travel(forTranslation: 50), 38)
     }
 
     func testAClosedRowDoesNotFollowAFingerTowardsTheTrailingEdge() {
@@ -413,7 +398,7 @@ final class MobileSessionChromeTests: XCTestCase {
         XCTAssertEqual(
             MobileRowSwipe.release(
                 offset: -20,
-                predictedOffset: -22,
+                projectedOffset: -22,
                 rowWidth: 340,
                 allowsFullSwipe: true
             ),
@@ -422,7 +407,7 @@ final class MobileSessionChromeTests: XCTestCase {
         XCTAssertEqual(
             MobileRowSwipe.release(
                 offset: -70,
-                predictedOffset: -80,
+                projectedOffset: -80,
                 rowWidth: 340,
                 allowsFullSwipe: true
             ),
@@ -436,7 +421,7 @@ final class MobileSessionChromeTests: XCTestCase {
         XCTAssertEqual(
             MobileRowSwipe.release(
                 offset: -30,
-                predictedOffset: -900,
+                projectedOffset: -900,
                 rowWidth: 340,
                 allowsFullSwipe: true
             ),
@@ -448,7 +433,7 @@ final class MobileSessionChromeTests: XCTestCase {
         XCTAssertEqual(
             MobileRowSwipe.release(
                 offset: -260,
-                predictedOffset: -300,
+                projectedOffset: -300,
                 rowWidth: 340,
                 allowsFullSwipe: true
             ),
@@ -462,7 +447,7 @@ final class MobileSessionChromeTests: XCTestCase {
         XCTAssertEqual(
             MobileRowSwipe.release(
                 offset: -400,
-                predictedOffset: -400,
+                projectedOffset: -400,
                 rowWidth: 340,
                 allowsFullSwipe: false
             ),
@@ -479,7 +464,7 @@ final class MobileSessionChromeTests: XCTestCase {
         XCTAssertEqual(
             MobileRowSwipe.release(
                 offset: -30,
-                predictedOffset: -30,
+                projectedOffset: -30,
                 rowWidth: 0,
                 allowsFullSwipe: true
             ),
@@ -513,7 +498,7 @@ final class MobileSessionChromeTests: XCTestCase {
         XCTAssertEqual(
             MobileRowSwipe.release(
                 offset: offset,
-                predictedOffset: offset,
+                projectedOffset: offset,
                 rowWidth: 340,
                 allowsFullSwipe: true
             ),
@@ -539,5 +524,51 @@ final class MobileSessionChromeTests: XCTestCase {
         view.dropBuiltInKeyboardAccessory()
 
         XCTAssertNil(view.inputAccessoryView)
+    }
+
+    // MARK: - Files staged beside a direct terminal
+
+    /// The tray tells its owner when something changed. Dropping failures is a change only when
+    /// there were failures — and the guard is what stops the direct terminal's own handler, which
+    /// calls this from inside `onChange`, from re-entering itself once per staged file.
+    @MainActor
+    func testDroppingFailedUploadsFromATrayWithNoneAnnouncesNothing() throws {
+        let tray = ComposerAttachmentTray(
+            client: RemoteClient(
+                link: try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#tray"))
+            ),
+            sessionID: "session"
+        )
+        var changes = 0
+        tray.onChange = { changes += 1 }
+
+        tray.removeFailed()
+
+        XCTAssertEqual(changes, 0)
+    }
+
+    /// One file too many is answered with a notice and nothing else. The notice used to be the
+    /// trigger for sweeping failed chips out of the tray, so an unrelated refusal like this one
+    /// deleted files that had nothing to do with it.
+    @MainActor
+    func testRefusingAnExtraFileLeavesTheStagedOnesAlone() throws {
+        let tray = ComposerAttachmentTray(
+            client: RemoteClient(
+                link: try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#tray"))
+            ),
+            sessionID: "session"
+        )
+        let bytes = Data("staged".utf8)
+        for index in 0..<RemoteAttachmentUploadLimits.maximumPerMessage {
+            tray.add(data: bytes, name: "file-\(index).txt", type: .plainText)
+        }
+        let staged = tray.items.count
+        XCTAssertEqual(staged, RemoteAttachmentUploadLimits.maximumPerMessage)
+        XCTAssertFalse(tray.canAcceptMore)
+
+        tray.add(data: bytes, name: "one-too-many.txt", type: .plainText)
+
+        XCTAssertNotNil(tray.notice)
+        XCTAssertEqual(tray.items.count, staged, "a refusal must not disturb what is staged")
     }
 }

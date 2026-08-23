@@ -88,7 +88,7 @@ final class MobileSessionSettingsTests: XCTestCase {
             title: "Remote controls",
             agentKind: "codex",
             surface: .conversation,
-            state: "idle",
+            state: .idle,
             projectName: "Threading",
             accountID: accountID,
             limitRecovery: limitRecovery

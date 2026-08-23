@@ -142,8 +142,12 @@ struct RootView: View {
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
                         .hasPrefix("new-session") == true {
-                NewRemoteSessionView()
-                    .environmentObject(model)
+                // Met as it is shipped: a screen on a stack, with a back button where the
+                // sheet's Cancel used to be.
+                NavigationStack {
+                    SessionDraftView(draft: MobileSessionDraft())
+                        .environmentObject(model)
+                }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
                         == "themed-dialog-alert" {
                 ThemedDialogDemoView(kind: .alert)
@@ -368,7 +372,7 @@ struct RootView: View {
         title: "Remote access review",
         agentKind: "codex",
         surface: .conversation,
-        state: "idle",
+        state: .idle,
         projectName: "Threading"
     )
 
@@ -528,6 +532,8 @@ struct RootView: View {
                             description: Text("The link may have expired or the Mac may be offline.")
                         )
                     }
+                case .draft(let draft):
+                    SessionDraftView(draft: draft)
                 }
             }
         }

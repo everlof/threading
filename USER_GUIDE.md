@@ -2499,10 +2499,15 @@ bubble for a Native conversation. Rows are two lines tall, so a long chat title 
 and shown in full once the chat is open. When an agent renames a chat, its title morphs to the new
 name in both this list and the open chat's navigation bar.
 
-Starting a chat from the phone opens it. The **+** button's sheet closes onto the new chat's own
-screen rather than back onto the list, and stays there while the Mac starts the agent — a new
-session shows "Resuming on your Mac…" for as long as that takes. The New Session navigation bar
-keeps its title above the connected Mac and state, matching the two-row chat navigation title.
+Starting a chat from the phone opens it. The **+** button pushes a **New session** screen —
+Back returns to the list it was opened from — with one composer at the bottom and nothing else:
+the prompt, and under it a row of chips for the checkout, agent and account (with its usage
+ring), model, effort, speed, permissions and interface, each a menu. The composer sits on the
+keyboard's top edge while you type and follows the keyboard down; with the keyboard away it is
+one thin line, the prompt and Start. Start turns that same screen into the chat's own — nothing
+closes and nothing is pushed — and it stays there while the Mac starts the agent: a new session
+shows "Resuming on your Mac…" for as long as that takes. The New Session navigation bar keeps its
+title above the connected Mac and state, matching the two-row chat navigation title.
 An already-running chat says "Opening chat…" while its own live stream attaches; this does not
 mean the phone lost the dashboard connection. Connection phrases scroll as a complete line with
 a short traveling fade, while Reduce Motion changes them immediately.

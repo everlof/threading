@@ -335,7 +335,7 @@ final class RemoteConnectionFailureTests: XCTestCase {
                 title: "Fixture",
                 agentKind: "claude",
                 surface: .terminal,
-                state: "idle",
+                state: .idle,
                 projectName: "Fixture"
             ),
             client: RemoteClient(link: link),

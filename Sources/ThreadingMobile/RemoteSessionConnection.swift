@@ -1695,7 +1695,7 @@ final class RemoteSessionConnection: ObservableObject {
             title: "\(agentName) · AnotherTerminal",
             agentKind: isCodexFixture ? "codex" : "claude",
             surface: .terminal,
-            state: "running",
+            state: .idle,
             projectName: "AnotherTerminal"
         )
         let link = RemoteConnectionLink(string: "https://demo.invalid/#terminal-preview")!
@@ -1922,7 +1922,7 @@ final class RemoteSessionConnection: ObservableObject {
             title: "Review the new remote access feature",
             agentKind: "codex",
             surface: .conversation,
-            state: "idle",
+            state: .idle,
             projectName: "AnotherTerminal"
         )
         let link = RemoteConnectionLink(string: "https://demo.invalid/#preview")!

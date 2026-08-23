@@ -140,6 +140,20 @@ final class ComposerAttachmentTray {
         items.removeAll { $0.id == id }
     }
 
+    /// Drops every upload that failed, as one change rather than one per file.
+    ///
+    /// A surface that shows no chips has no other way to be rid of them, and a stranded failure
+    /// keeps its slot out of `RemoteAttachmentUploadLimits.maximumPerMessage` for as long as the
+    /// tray lives. Removing them one at a time would re-enter `onChange` from inside the
+    /// caller's own loop, once per file, each time with a list that had already moved beneath
+    /// it; the early return also means a tray with nothing to drop announces nothing.
+    func removeFailed() {
+        let failed = items.filter { $0.state == .failed }
+        guard !failed.isEmpty else { return }
+        for item in failed { uploads.removeValue(forKey: item.id)?.cancel() }
+        items.removeAll { $0.state == .failed }
+    }
+
     /// Clears the strip once a prompt carrying these has been accepted.
     func clear() {
         uploads.values.forEach { $0.cancel() }

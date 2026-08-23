@@ -1185,6 +1185,10 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         }
     }
 
+    func terminalSession(_ session: TerminalSession, didReceiveUserInput input: TerminalUserInput) {
+        activityTracker.noteUserInput(submitsLine: input.submitsLine)
+    }
+
     /// The one surface that can say why a bell rang: it keeps the activity tracker, so the
     /// three facts the causes are told apart by are all here.
     ///

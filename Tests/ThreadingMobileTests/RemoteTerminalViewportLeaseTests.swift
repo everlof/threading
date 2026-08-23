@@ -233,7 +233,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             title: "Codex · AnotherTerminal",
             agentKind: "codex",
             surface: .terminal,
-            state: "running",
+            state: .idle,
             projectName: "AnotherTerminal"
         )
         let connection = RemoteSessionConnection(
@@ -374,7 +374,7 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
             title: "Claude Code · AnotherTerminal",
             agentKind: "claude",
             surface: .terminal,
-            state: "running",
+            state: .idle,
             projectName: "AnotherTerminal"
         )
         let link = RemoteConnectionLink(string: "https://demo.threading.invalid/#terminal-lease")!

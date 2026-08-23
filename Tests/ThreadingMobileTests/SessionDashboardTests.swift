@@ -415,7 +415,7 @@ final class SessionDashboardTests: XCTestCase {
             title: title,
             agentKind: "claude",
             surface: .terminal,
-            state: "idle",
+            state: .idle,
             projectName: "AnotherTerminal"
         )
     }

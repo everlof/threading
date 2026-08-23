@@ -17849,6 +17849,96 @@
         }
       }
     },
+    "14.2 GiB": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "14,2 GiB"
+          }
+        }
+      }
+    },
+    "32.4 GiB": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "32,4 GiB"
+          }
+        }
+      }
+    },
+    "9.8 GiB": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "9,8 GiB"
+          }
+        }
+      }
+    },
+    "Build": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bygge"
+          }
+        }
+      }
+    },
+    "Checkout": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utcheckning"
+          }
+        }
+      }
+    },
+    "Checkout size by folder": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utcheckningens storlek per mapp"
+          }
+        }
+      }
+    },
+    "Documents": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dokument"
+          }
+        }
+      }
+    },
+    "One rooted branch of the same marks: click a circle to zoom it, the breadcrumb or Escape to come back out.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En rotad gren av samma markeringar: klicka på en cirkel för att zooma in, sökvägen eller Esc för att ta dig ut igen."
+          }
+        }
+      }
+    },
+    "SemanticHierarchySceneView": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SemanticHierarchySceneView"
+          }
+        }
+      }
+    },
     "SemanticSceneView": {
       "localizations": {
         "sv": {

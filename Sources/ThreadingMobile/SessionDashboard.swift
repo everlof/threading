@@ -587,12 +587,6 @@ struct SessionDashboard: View {
     @State private var pendingThemeID: String?
     @State private var showsArchived = false
     @State private var showsSnoozed = false
-    @State private var showsNewSession = false
-    @State private var newSessionProjectName: String?
-    /// The session Start just created, held until its sheet has finished dismissing. A push
-    /// ordered while the sheet is still on screen is dropped by the navigation stack, so the
-    /// new chat has to open from `onDismiss` rather than from the submit that made it.
-    @State private var sessionToOpenAfterStart: RemoteSessionSummaryDTO?
     @State private var renamingSession: RemoteSessionSummaryDTO?
     @State private var renameText = ""
     @State private var actionError: String?
@@ -848,14 +842,6 @@ struct SessionDashboard: View {
 
     private var dashboardSheets: some View {
         dashboardNavigation
-        .sheet(isPresented: $showsNewSession, onDismiss: openSessionStartedFromTheSheet) {
-            NewRemoteSessionView(
-                initialProjectName: newSessionProjectName,
-                onStarted: { sessionToOpenAfterStart = $0 }
-            )
-                .environmentObject(model)
-                .mobileTheme(theme)
-        }
         .sheet(item: $shareRequest) { request in
             ShareChatSheet(
                 chatTitle: request.session.title,
@@ -991,8 +977,7 @@ struct SessionDashboard: View {
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
             Button {
-                newSessionProjectName = projectName
-                showsNewSession = true
+                MobileSessionNavigationTransition.draft(in: projectName, onto: model)
             } label: {
                 Image(systemName: "plus")
                     .frame(
@@ -1122,15 +1107,6 @@ struct SessionDashboard: View {
                 .accessibilityLabel("Remote access options")
             }
         }
-    }
-
-    /// Opens the chat Start just created, once its sheet has gone. The Mac answers the create
-    /// with the whole catalogue, so the row the stack resolves the pushed id against is already
-    /// published by the time this runs; the session's own screen owns the wait for the agent.
-    private func openSessionStartedFromTheSheet() {
-        guard let session = sessionToOpenAfterStart else { return }
-        sessionToOpenAfterStart = nil
-        MobileSessionNavigationTransition.push(session, onto: model)
     }
 
     private func perform(
@@ -1713,12 +1689,13 @@ enum MobileSessionNavigationTransition: Equatable {
         surface == .terminal ? .immediate : .standard
     }
 
-    /// The one way a session's screen is opened. Tapping a row and starting a chat land here
-    /// alike, so a new session is pushed with the same transition its surface would have got
-    /// from the list. Pushing an id already on top is a no-op rather than a second copy.
+    /// The one way a session's screen is opened by id. A row, a notification and a restored
+    /// route land here alike. Pushing the session already on top is a no-op rather than a
+    /// second copy — including when the top screen is the draft that started it, which the
+    /// model resolves to the same id.
     @MainActor
     static func push(_ session: RemoteSessionSummaryDTO, onto model: RemoteAppModel) {
-        guard model.navigationPath.last != .session(session.id) else { return }
+        guard model.openSessionID != session.id else { return }
         switch forSurface(session.surface) {
         case .standard:
             model.navigationPath.append(.session(session.id))
@@ -1729,6 +1706,14 @@ enum MobileSessionNavigationTransition: Equatable {
                 model.navigationPath.append(.session(session.id))
             }
         }
+    }
+
+    /// Starting a chat is navigation, not presentation. The draft is pushed like any other
+    /// screen, and when Start is answered it becomes the session's screen where it stands
+    /// (`SessionDraftView`), so nothing is dismissed and nothing is pushed a second time.
+    @MainActor
+    static func draft(in projectName: String?, onto model: RemoteAppModel) {
+        model.navigationPath.append(.draft(MobileSessionDraft(projectName: projectName)))
     }
 }
 
@@ -2194,7 +2179,7 @@ private struct SessionRow: View {
             // other corner, and both facts belong to the tile they are badging. Hung on the tile
             // rather than on the row so the row's height never moves it.
             .overlay(alignment: .topTrailing) {
-                if session.state == "needsAttention" {
+                if session.state == .needsAttention {
                     Circle()
                         .fill(theme.warning)
                         .frame(
@@ -2243,7 +2228,7 @@ private struct SessionRow: View {
     /// Mid-turn on a live surface. The Mac reports activity only for a session it is running, but
     /// an animation claims "moving right now", so it also asks that there is somewhere to attach.
     private var isWorking: Bool {
-        session.isAvailable && !session.isArchived && session.state == "working"
+        session.isAvailable && !session.isArchived && session.state == .working
     }
 
     /// The caption's words: the state only when no glyph carries it, then the login when it is
@@ -2266,14 +2251,13 @@ private struct SessionRow: View {
 
     private var stateLabel: String {
         switch session.state {
-        case "working": return MobileL10n.string("Working")
-        case "needsAttention": return MobileL10n.string("Needs attention")
-        // The host spells its activity over the wire with `String(describing:)`, so this is
-        // `SessionActivity.limitReached` by its own name. Worth its own word here rather than
-        // falling to "Connected": away from the Mac is exactly where a session that stopped
-        // hours ago is discovered, and "Connected" is the reading that started this.
-        case "limitReached": return MobileL10n.string("Usage limit reached")
-        default: return MobileL10n.string("Connected")
+        case .working: return MobileL10n.string("Working")
+        case .awaitingUser, .needsAttention: return MobileL10n.string("Needs attention")
+        // Worth its own word here rather than falling to "Connected": away from the Mac is
+        // exactly where a session that stopped hours ago is discovered, and "Connected" is the
+        // reading that started this.
+        case .limitReached: return MobileL10n.string("Usage limit reached")
+        case .dormant, .idle, .unknown: return MobileL10n.string("Connected")
         }
     }
 
@@ -2291,7 +2275,7 @@ private struct SessionRow: View {
     private var spelledStateLabel: String? {
         if session.isArchived { return nil }
         if session.wokeAt != nil { return MobileL10n.string("Woke") }
-        if session.isAvailable, session.state == "limitReached" {
+        if session.isAvailable, session.state == .limitReached {
             return MobileL10n.string("Usage limit reached")
         }
         return nil
@@ -2302,787 +2286,5 @@ private struct SessionRow: View {
     private var surfaceLabel: String {
         if session.surface == .conversation { return MobileL10n.string("Native") }
         return MobileAgentIdentity.resolve(session.agentKind).originalUITitle
-    }
-}
-
-struct NewRemoteSessionView: View {
-    @EnvironmentObject private var appModel: RemoteAppModel
-    @Environment(\.remoteTheme) private var theme
-    @Environment(\.dismiss) private var dismiss
-    @State private var projectID = ""
-    @State private var agentID = ""
-    @State private var accountID = ""
-    @State private var modelID = ""
-    @State private var reasoningID = ""
-    @State private var speedID = ""
-    @State private var permissionID = ""
-    /// The agent's supported UI is the safe default; Native stays an explicit experimental opt-in.
-    @State private var surface = RemoteSessionSurface.terminal
-    @State private var prompt = ""
-    @State private var isSubmitting = false
-    @State private var errorMessage: String?
-    @FocusState private var promptIsFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var launchIconAnimated = false
-    @State private var promptSuggestion: String
-    private let initialProjectName: String?
-    /// Handed the session Start created, for the presenter to open once this sheet is gone.
-    private let onStarted: (RemoteSessionSummaryDTO) -> Void
-
-    private static let promptSuggestions = [
-        MobileL10n.string("Hunt down the flaky test…"),
-        MobileL10n.string("Make the impossible state impossible…"),
-        MobileL10n.string("Polish the rough edges…"),
-        MobileL10n.string("Teach this screen a new trick…"),
-        MobileL10n.string("Find the bug hiding in plain sight…"),
-    ]
-
-    init(
-        initialProjectName: String? = nil,
-        onStarted: @escaping (RemoteSessionSummaryDTO) -> Void = { _ in }
-    ) {
-        self.initialProjectName = initialProjectName
-        self.onStarted = onStarted
-        let evidenceID = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
-        let suggestion: String
-        if let evidenceID {
-            let index = evidenceID.unicodeScalars.reduce(0) { $0 + Int($1.value) }
-                % Self.promptSuggestions.count
-            suggestion = Self.promptSuggestions[index]
-        } else {
-            suggestion = Self.promptSuggestions.randomElement() ?? Self.promptSuggestions[0]
-        }
-        _promptSuggestion = State(initialValue: suggestion)
-    }
-
-    private var catalog: RemoteNewSessionCatalogDTO? {
-        appModel.me?.newSessionCatalog
-    }
-
-    private var selectedProject: RemoteProjectChoiceDTO? {
-        catalog?.projects.first { $0.id == projectID }
-    }
-
-    private var selectedAgent: RemoteAgentChoiceDTO? {
-        catalog?.agents.first { $0.id == agentID }
-    }
-
-    private var accounts: [RemoteAccountChoiceDTO] {
-        selectedAgent?.accounts ?? []
-    }
-
-    private var selectedAccount: RemoteAccountChoiceDTO? {
-        accounts.first { $0.id == accountID }
-    }
-
-    private var models: [RemoteModelChoiceDTO] {
-        selectedAccount?.models ?? selectedAgent?.models ?? []
-    }
-
-    private var selectedModel: RemoteModelChoiceDTO? {
-        models.first { $0.id == modelID }
-    }
-
-    private var hostStatusColor: Color {
-        switch appModel.phase {
-        case .online: return theme.positive
-        case .connecting: return theme.warning
-        case .idle, .offline: return theme.tertiaryLabel
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: MobileDesign.Spacing.large) {
-                        configurationStrip
-
-                        if !promptIsFocused {
-                            launchOverview
-                                .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                        }
-
-                        launchOptions
-
-                        composer
-                            .id("new-session-composer")
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: promptIsFocused) { _, isFocused in
-                    guard isFocused else { return }
-                    Task { @MainActor in
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
-                            proxy.scrollTo("new-session-composer", anchor: .bottom)
-                        }
-                    }
-                }
-            }
-            .background(theme.ground)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(theme.surface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isSubmitting)
-                }
-                ToolbarItem(placement: .principal) {
-                    MobileConnectionNavigationTitle(
-                        title: MobileL10n.string("New session"),
-                        status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
-                        statusColor: hostStatusColor
-                    )
-                }
-            }
-            .onAppear {
-                applyCatalogDefaults()
-                launchIconAnimated = true
-#if DEBUG
-                if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                    == "new-session-multiline" {
-                    prompt = "Review the keyboard lifecycle, compare the open and dismissed layouts, and summarize any remaining spacing regressions before you make changes."
-                }
-#endif
-#if DEBUG
-                if ProcessInfo.processInfo.environment[
-                    "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
-                ] == nil {
-                    promptIsFocused = true
-                }
-#else
-                promptIsFocused = true
-#endif
-            }
-            .onChange(of: agentID) { _, _ in
-                applyAgentDefaults()
-            }
-            .onChange(of: accountID) { _, _ in
-                applyAccountDefaults()
-            }
-            .onChange(of: modelID) { _, _ in
-                applyModelDefaults()
-            }
-            .interactiveDismissDisabled(isSubmitting)
-            .themedAlert(
-                "Couldn’t start session",
-                message: errorMessage ?? "",
-                isPresented: Binding(
-                    get: { errorMessage != nil },
-                    set: { if !$0 { errorMessage = nil } }
-                ),
-                actions: [ThemedDialogAction("OK")]
-            )
-        }
-        .preferredColorScheme(theme.colorScheme)
-        .tint(theme.accent)
-    }
-
-    private var composer: some View {
-        HStack(alignment: .bottom, spacing: MobileDesign.Spacing.small) {
-            promptEditor
-            sendButton
-        }
-        .padding(12)
-        .background(
-            theme.panel,
-            in: RoundedRectangle(cornerRadius: theme.panelRadius)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: theme.panelRadius)
-                .stroke(theme.border, lineWidth: theme.borderWidth)
-        )
-        .remoteThemeGlow(theme)
-    }
-
-    private var promptEditor: some View {
-        TextField(promptSuggestion, text: $prompt, axis: .vertical)
-            .focused($promptIsFocused)
-            .mobileUIEvidenceKeyboardFocus($promptIsFocused)
-            .textFieldStyle(.plain)
-            .font(.body)
-            .lineLimit(2...6)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 6)
-    }
-
-    private var sendButton: some View {
-        Button {
-            submit()
-        } label: {
-            ZStack {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 16, weight: .bold))
-                    .opacity(isSubmitting ? 0 : 1)
-                ProgressView()
-                    .tint(theme.ground)
-                    .opacity(isSubmitting ? 1 : 0)
-            }
-            .frame(width: 38, height: 38)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(canSubmit ? theme.accentForeground : theme.tertiaryLabel)
-        .background(canSubmit ? theme.accent : theme.controlHover, in: Circle())
-        .disabled(!canSubmit)
-        .accessibilityLabel("Start session")
-    }
-
-    private var launchOverview: some View {
-        VStack(spacing: MobileDesign.Spacing.medium) {
-            Image(systemName: surface == .conversation
-                ? "bubble.left.and.bubble.right.fill"
-                : "terminal.fill")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(theme.accent)
-                .frame(width: 72, height: 72)
-                .background(
-                    theme.accentMuted,
-                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                )
-                .symbolEffect(
-                    .bounce,
-                    options: .nonRepeating,
-                    value: reduceMotion ? false : launchIconAnimated
-                )
-
-            Text("Ready for a new task")
-                .font(.title3.weight(.semibold))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, MobileDesign.Spacing.large)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var launchOptions: some View {
-        VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-            Text("Run settings")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(theme.secondaryLabel)
-                .padding(.horizontal, MobileDesign.Spacing.tight)
-
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: MobileDesign.Spacing.small),
-                    GridItem(.flexible(), spacing: MobileDesign.Spacing.small),
-                ],
-                spacing: MobileDesign.Spacing.small
-            ) {
-                modelMenu
-                reasoningMenu
-                if selectedModel?.supportsFastMode == true {
-                    speedMenu
-                }
-                if !(selectedAgent?.permissionModes ?? []).isEmpty {
-                    permissionMenu
-                }
-            }
-        }
-        .padding(.bottom, MobileDesign.Spacing.medium)
-    }
-
-    private var configurationStrip: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                projectMenu
-                    .layoutPriority(1)
-                if selectedAgent?.supportsConversation == true {
-                    surfaceMenu
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-            identityMenu
-        }
-        .padding(.vertical, 12)
-    }
-
-    private var projectMenu: some View {
-        Menu {
-            ForEach(catalog?.projects ?? []) { project in
-                Button {
-                    projectID = project.id
-                } label: {
-                    Label(
-                        projectLabel(project),
-                        systemImage: project.id == projectID ? "checkmark" : "folder"
-                    )
-                }
-            }
-        } label: {
-            CompactChoiceLabel(
-                symbol: "folder",
-                title: selectedProject?.name ?? MobileL10n.string("Project"),
-                maxWidth: .infinity
-            )
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var identityMenu: some View {
-        Menu {
-            Section("Agent") {
-                ForEach(catalog?.agents ?? []) { agent in
-                    Button {
-                        agentID = agent.id
-                    } label: {
-                        Label(
-                            agent.name,
-                            systemImage: agent.id == agentID ? "checkmark" : "sparkles"
-                        )
-                    }
-                }
-            }
-            if !accounts.isEmpty {
-                Section("Account · Usage") {
-                    ForEach(accounts) { account in
-                        Button {
-                            accountID = account.id
-                        } label: {
-                            Label(
-                                accountMenuTitle(account),
-                                systemImage: account.id == accountID
-                                    ? "checkmark"
-                                    : "person.crop.circle"
-                            )
-                        }
-                    }
-                }
-            }
-        } label: {
-            AccountIdentityLabel(
-                symbol: "sparkles",
-                title: selectedIdentityLabel,
-                usage: selectedAccountUsage,
-                usageFraction: selectedAccount?.usageFraction
-            )
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var surfaceMenu: some View {
-        Menu {
-            Button {
-                surface = .conversation
-            } label: {
-                Label(
-                    "Native (Experimental)",
-                    systemImage: surface == .conversation
-                        ? "checkmark"
-                        : "bubble.left.and.bubble.right"
-                )
-            }
-            Button {
-                surface = .terminal
-            } label: {
-                Label(
-                    originalUISurfaceTitle,
-                    systemImage: surface == .terminal ? "checkmark" : "terminal"
-                )
-            }
-        } label: {
-            CompactChoiceLabel(
-                symbol: surface == .conversation
-                    ? "bubble.left.and.bubble.right"
-                    : "terminal",
-                title: selectedSurfaceTitle
-            )
-        }
-    }
-
-    private var originalUISurfaceTitle: String {
-        MobileL10n.string(
-            "%@ UI",
-            selectedAgent?.name ?? MobileL10n.string("Agent")
-        )
-    }
-
-    private var selectedSurfaceTitle: String {
-        surface == .conversation
-            ? MobileL10n.string("Native · Experimental")
-            : originalUISurfaceTitle
-    }
-
-    private var modelMenu: some View {
-        Menu {
-            if !models.isEmpty {
-                Section("Model") {
-                    Button {
-                        modelID = ""
-                    } label: {
-                        Label(
-                            "Default",
-                            systemImage: modelID.isEmpty ? "checkmark" : "circle"
-                        )
-                    }
-                    ForEach(models) { model in
-                        Button {
-                            modelID = model.id
-                        } label: {
-                            Label(
-                                model.name,
-                                systemImage: model.id == modelID ? "checkmark" : "cpu"
-                            )
-                        }
-                    }
-                }
-            }
-
-        } label: {
-            LaunchChoiceLabel(
-                symbol: "cpu",
-                caption: "Model",
-                value: selectedModel?.name ?? MobileL10n.string("Default")
-            )
-        }
-        .disabled(models.isEmpty)
-    }
-
-    private var reasoningMenu: some View {
-        Menu {
-            Button {
-                reasoningID = ""
-            } label: {
-                Label("Default", systemImage: reasoningID.isEmpty ? "checkmark" : "circle")
-            }
-            ForEach(selectedModel?.reasoning ?? []) { effort in
-                Button {
-                    reasoningID = effort.id
-                } label: {
-                    Label(
-                        effort.name,
-                        systemImage: effort.id == reasoningID
-                            ? "checkmark"
-                            : "brain.head.profile"
-                    )
-                }
-            }
-        } label: {
-            LaunchChoiceLabel(
-                symbol: "brain.head.profile",
-                caption: "Effort",
-                value: selectedReasoningName
-            )
-        }
-        .disabled(selectedModel?.reasoning.isEmpty != false)
-    }
-
-    private var selectedReasoningName: String {
-        selectedModel?.reasoning.first(where: { $0.id == reasoningID })?.name
-            ?? MobileL10n.string("Default")
-    }
-
-    private var speedMenu: some View {
-        Menu {
-            Button {
-                speedID = ""
-            } label: {
-                Label("Inherit", systemImage: speedID.isEmpty ? "checkmark" : "circle")
-            }
-            Button {
-                speedID = "standard"
-            } label: {
-                Label("Standard", systemImage: speedID == "standard" ? "checkmark" : "gauge")
-            }
-            Button {
-                speedID = "fast"
-            } label: {
-                Label("Fast", systemImage: speedID == "fast" ? "checkmark" : "bolt.fill")
-            }
-        } label: {
-            // The bolt belongs to Fast, not to the control: the menu above already draws it on
-            // that one row and a dial on Standard, and a label wearing it whatever is chosen
-            // says Fast while the value under it says otherwise.
-            LaunchChoiceLabel(
-                symbol: speedID == "fast" ? "bolt.fill" : "gauge",
-                caption: "Speed",
-                value: speedID.isEmpty ? MobileL10n.string("Inherit") : speedID.capitalized
-            )
-        }
-    }
-
-    private var permissionMenu: some View {
-        Menu {
-            Button {
-                permissionID = ""
-            } label: {
-                Label("Inherit", systemImage: permissionID.isEmpty ? "checkmark" : "circle")
-            }
-            ForEach(selectedAgent?.permissionModes ?? []) { mode in
-                Button {
-                    permissionID = mode.id
-                } label: {
-                    Label(
-                        mode.name,
-                        systemImage: mode.id == permissionID ? "checkmark" : "hand.raised"
-                    )
-                }
-            }
-        } label: {
-            LaunchChoiceLabel(
-                symbol: "hand.raised",
-                caption: "Permissions",
-                value: selectedPermissionName
-            )
-        }
-    }
-
-    private var selectedPermissionName: String {
-        selectedAgent?.permissionModes?.first(where: { $0.id == permissionID })?.name
-            ?? MobileL10n.string("Inherit")
-    }
-
-    private var selectedIdentityLabel: String {
-        guard let selectedAgent else { return MobileL10n.string("Agent") }
-        guard let selectedAccount else { return selectedAgent.name }
-        return "\(selectedAgent.name) · \(selectedAccount.name)"
-    }
-
-    private var selectedAccountUsage: String? {
-        guard let selectedAccount else { return nil }
-        if let usage = selectedAccount.usageSummary { return usage }
-        if selectedAccount.usageError != nil { return MobileL10n.string("Usage unavailable") }
-        return MobileL10n.string("Loading usage…")
-    }
-
-    private func accountMenuTitle(_ account: RemoteAccountChoiceDTO) -> String {
-        let name = account.emoji.map { "\($0) \(account.name)" } ?? account.name
-        if let usage = account.usageSummary { return "\(name)   \(usage)" }
-        if account.usageError != nil {
-            return MobileL10n.string("%@   Usage unavailable", name)
-        }
-        return MobileL10n.string("%@   Loading usage…", name)
-    }
-
-    private func projectLabel(_ project: RemoteProjectChoiceDTO) -> String {
-        guard let branch = project.branch, !branch.isEmpty else { return project.name }
-        return "\(project.name) · \(branch)"
-    }
-
-    private var canSubmit: Bool {
-        !isSubmitting
-            && !projectID.isEmpty
-            && !agentID.isEmpty
-            && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func applyCatalogDefaults() {
-        if projectID.isEmpty {
-            projectID = initialProjectName.flatMap { name in
-                catalog?.projects.first {
-                    $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
-                }?.id
-            } ?? catalog?.projects.first?.id ?? ""
-        }
-        if agentID.isEmpty {
-            agentID = catalog?.agents.first(where: { $0.id == "codex" })?.id
-                ?? catalog?.agents.first?.id
-                ?? ""
-        }
-        applyAgentDefaults()
-    }
-
-    private func applyAgentDefaults() {
-        guard let selectedAgent else { return }
-        if !accounts.contains(where: { $0.id == accountID }) {
-            accountID = accounts.first(where: { $0.id == "default" })?.id
-                ?? accounts.first?.id
-                ?? ""
-        }
-        if !selectedAgent.supportsConversation { surface = .terminal }
-        if !(selectedAgent.permissionModes ?? []).contains(where: { $0.id == permissionID }) {
-            permissionID = ""
-        }
-        applyAccountDefaults()
-    }
-
-    private func applyAccountDefaults() {
-        let defaultModelID = selectedAccount?.defaultModelID ?? selectedAgent?.defaultModelID
-        if !models.contains(where: { $0.id == modelID }) {
-            modelID = defaultModelID.flatMap { id in
-                models.contains(where: { $0.id == id }) ? id : nil
-            } ?? ""
-        }
-        applyModelDefaults()
-    }
-
-    private func applyModelDefaults() {
-        guard let selectedModel else {
-            reasoningID = ""
-            speedID = ""
-            return
-        }
-        if !selectedModel.reasoning.contains(where: { $0.id == reasoningID }) {
-            reasoningID = selectedModel.defaultReasoningID.flatMap { id in
-                selectedModel.reasoning.contains(where: { $0.id == id }) ? id : nil
-            } ?? ""
-        }
-        if selectedModel.supportsFastMode != true { speedID = "" }
-    }
-
-    private func submit() {
-        guard canSubmit else { return }
-        isSubmitting = true
-        Task {
-            defer { isSubmitting = false }
-            do {
-                let session = try await appModel.createSession(
-                    projectID: projectID,
-                    agentKind: agentID,
-                    accountHandle: accountID.isEmpty ? nil : accountID,
-                    model: modelID.isEmpty ? nil : modelID,
-                    reasoningEffort: reasoningID.isEmpty ? nil : reasoningID,
-                    fastMode: speedID == "fast" ? true : (speedID == "standard" ? false : nil),
-                    permissionMode: permissionID.isEmpty ? nil : permissionID,
-                    surface: surface,
-                    prompt: prompt
-                )
-                // Starting a chat is a request to be in it. The push waits for the sheet to
-                // finish dismissing; see the presenter's `onDismiss`.
-                onStarted(session)
-                dismiss()
-            } catch is CancellationError {
-                return
-            } catch {
-                MobileDiagnostics.logDegraded(.sessionAction, error: error)
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-}
-
-private struct LaunchChoiceLabel: View {
-    @Environment(\.remoteTheme) private var theme
-    let symbol: String
-    let caption: LocalizedStringKey
-    let value: String
-
-    var body: some View {
-        HStack(spacing: MobileDesign.Spacing.small) {
-            Image(systemName: symbol)
-                .font(.subheadline)
-                .foregroundStyle(theme.accent)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
-                Text(caption)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(theme.secondaryLabel)
-                Text(value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(theme.label)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
-            Spacer(minLength: MobileDesign.Spacing.tight)
-            Image(systemName: "chevron.down")
-                .font(.caption2)
-                .foregroundStyle(theme.tertiaryLabel)
-        }
-        .padding(.horizontal, MobileDesign.Spacing.medium)
-        .frame(maxWidth: .infinity, minHeight: 52)
-        .background(
-            theme.controlResting,
-            in: RoundedRectangle(cornerRadius: theme.controlRadius)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.controlRadius)
-                .stroke(theme.border, lineWidth: theme.borderWidth)
-        }
-    }
-}
-
-private struct CompactChoiceLabel: View {
-    let symbol: String
-    let title: String
-    var maxWidth: CGFloat? = nil
-    @Environment(\.remoteTheme) private var theme
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol)
-            Text(title)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            Image(systemName: "chevron.down")
-                .font(.caption2)
-                .foregroundStyle(theme.tertiaryLabel)
-        }
-        .font(.caption.weight(.medium))
-        .foregroundStyle(theme.label)
-        .padding(.horizontal, 8)
-        .frame(maxWidth: maxWidth, minHeight: 36)
-        .background(theme.controlResting, in: Capsule())
-    }
-}
-
-private struct AccountIdentityLabel: View {
-    let symbol: String
-    let title: String
-    let usage: String?
-    let usageFraction: Double?
-    @Environment(\.remoteTheme) private var theme
-
-    var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: symbol)
-                .frame(width: 16)
-
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-
-            Spacer(minLength: 10)
-
-            if let usage {
-                HStack(spacing: 6) {
-                    if let usageFraction {
-                        UsageProgressRing(
-                            fraction: usageFraction,
-                            tint: usageTint(for: usageFraction)
-                        )
-                    }
-                    Text(usage)
-                        .font(.caption.monospacedDigit())
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                .foregroundStyle(
-                    usageFraction.map(usageTint(for:)) ?? theme.secondaryLabel
-                )
-            }
-
-            Image(systemName: "chevron.down")
-                .font(.caption2)
-                .foregroundStyle(theme.tertiaryLabel)
-        }
-        .foregroundStyle(theme.label)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, minHeight: 42)
-        .background(theme.controlResting, in: Capsule())
-        .accessibilityElement(children: .combine)
-    }
-
-    private func usageTint(for fraction: Double) -> Color {
-        if fraction >= 0.9 { return theme.negative }
-        if fraction >= 0.75 { return theme.warning }
-        return theme.positive
-    }
-}
-
-private struct UsageProgressRing: View {
-    let fraction: Double
-    let tint: Color
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(tint.opacity(0.2), lineWidth: 2)
-            Circle()
-                .trim(from: 0, to: min(max(fraction, 0), 1))
-                .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-        .frame(width: 14, height: 14)
     }
 }

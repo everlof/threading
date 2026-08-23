@@ -1038,7 +1038,7 @@ final class HookLifecycleTests: XCTestCase {
     }
 
     @MainActor
-    func testBeingLookedAtEndsTheLaunchGrace() {
+    func testBeingLookedAtDoesNotEndTheLaunchGrace() {
         let tracker = SessionActivityTracker()
         tracker.noteUnattendedLaunch()
         tracker.markRunning()
@@ -1047,7 +1047,23 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = false
         tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
 
-        XCTAssertEqual(tracker.activity, .working, "once seen, output means what it always means")
+        XCTAssertEqual(
+            tracker.activity,
+            .idle,
+            "presenting a restored TUI does not prove that anybody started a turn"
+        )
+    }
+
+    @MainActor
+    func testUserInputEndsTheLaunchGrace() {
+        let tracker = SessionActivityTracker()
+        tracker.noteUnattendedLaunch()
+        tracker.markRunning()
+
+        tracker.noteUserInput(submitsLine: true)
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .working, "input makes later output actionable again")
     }
 
     /// A reported turn means someone is driving the session — the remote mirror can type into
@@ -1533,10 +1549,10 @@ final class HookLifecycleTests: XCTestCase {
 
     // MARK: - Asking Inside a Turn
 
-    /// The bug the sidebar wore for a whole run: a permission prompt raises `Notification`
-    /// mid-turn, so a question must not end the turn it was asked inside.
+    /// Merely presenting a permission prompt is not an answer. The old visibility edge made a
+    /// blocked session look working as soon as somebody opened it, before they chose anything.
     @MainActor
-    func testLookingAtAFlaggedSessionReturnsItToItsTurn() {
+    func testLookingAtAFlaggedSessionKeepsItWaiting() {
         let tracker = SessionActivityTracker()
         tracker.markRunning()
         tracker.isVisible = false
@@ -1549,9 +1565,53 @@ final class HookLifecycleTests: XCTestCase {
 
         XCTAssertEqual(
             tracker.activity,
-            .working,
-            "the turn is still open, and only the next prompt would ever have said so again"
+            .awaitingUser,
+            "presentation does not say whether the question was answered"
         )
+    }
+
+    /// Claude has no hook for the complementary permission-answer edge. A submitted terminal
+    /// answer is that boundary, including through a remote controller and while the Mac surface
+    /// is off screen. Without it a long, silent Bash command runs while the phone says the turn
+    /// is still waiting on input.
+    @MainActor
+    func testSubmittedInputReturnsAFlaggedSessionToItsOpenTurn() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted()
+        tracker.noteAwaitingUser()
+        tracker.noteUserInput(submitsLine: true)
+
+        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.lastCause, .userInput)
+    }
+
+    @MainActor
+    func testEditingInputDoesNotClaimAQuestionWasAnswered() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteAwaitingUser()
+        tracker.noteUserInput(submitsLine: false)
+
+        XCTAssertEqual(tracker.activity, .awaitingUser)
+    }
+
+    @MainActor
+    func testSubmittedInputDoesNotCloseAnExplicitAskTool() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = true
+
+        tracker.noteTurnStarted()
+        tracker.noteBlockingAskOpened(id: "toolu_01")
+        tracker.noteUserInput(submitsLine: true)
+
+        XCTAssertEqual(tracker.activity, .awaitingUser, "the tool's close hook owns this edge")
     }
 
     /// The other half of the same rule: a session that actually *finished* off screen goes idle
@@ -1634,7 +1694,9 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .awaitingUser)
 
         tracker.isVisible = true
+        XCTAssertEqual(tracker.activity, .awaitingUser)
 
+        tracker.noteUserInput(submitsLine: true)
         XCTAssertEqual(tracker.activity, .working)
     }
 

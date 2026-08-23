@@ -746,6 +746,222 @@ final class ExtensionContractTests: XCTestCase {
         }
     }
 
+    func testCircularHierarchyRejectsEscapedAndOverlappingMarks() {
+        let scene = ExtensionScene(
+            accessibilityLabel: "Broken circle packing",
+            hierarchy: ExtensionSceneHierarchy(rootID: "root"),
+            items: [
+                .init(
+                    id: "root",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    shape: .ellipse,
+                    label: "Root"
+                ),
+                .init(
+                    id: "left",
+                    parentID: "root",
+                    frame: .init(x: 0.1, y: 0.1, width: 0.5, height: 0.5),
+                    shape: .ellipse,
+                    label: "Left"
+                ),
+                .init(
+                    id: "overlap",
+                    parentID: "root",
+                    frame: .init(x: 0.4, y: 0.1, width: 0.4, height: 0.4),
+                    shape: .ellipse,
+                    label: "Overlap"
+                ),
+                .init(
+                    id: "escaped",
+                    parentID: "root",
+                    frame: .init(x: 0.75, y: 0.75, width: 0.2, height: 0.2),
+                    shape: .ellipse,
+                    label: "Escaped"
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(try ExtensionPanel.nodeConstraints.validate(.scene(scene))) {
+            let messages = ($0 as? ExtensionValidationError)?.issues.map(\.message) ?? []
+            XCTAssertTrue(messages.contains("must not overlap sibling 'left'"))
+            XCTAssertTrue(messages.contains("must be contained by parent 'root'"))
+        }
+    }
+
+    func testFlatSceneStillAllowsOverlappingMarks() {
+        let scene = ExtensionScene(
+            accessibilityLabel: "Bubble plot",
+            items: [
+                .init(
+                    id: "large",
+                    frame: .init(x: 0.1, y: 0.1, width: 0.5, height: 0.5),
+                    shape: .ellipse,
+                    label: "Large"
+                ),
+                .init(
+                    id: "small",
+                    frame: .init(x: 0.4, y: 0.2, width: 0.3, height: 0.3),
+                    shape: .ellipse,
+                    label: "Small"
+                )
+            ]
+        )
+
+        XCTAssertNoThrow(try ExtensionPanel.nodeConstraints.validate(.scene(scene)))
+    }
+
+    /// A cap that only appends a message is not a cap: everything after it still walked the
+    /// whole array, and the hierarchy passes are quadratic. An oversized scene is answered by
+    /// its size and nothing else, which is also the only finding worth reporting about it.
+    func testAnOversizedSceneIsAnsweredByItsSizeAlone() {
+        let scene = ExtensionScene(
+            accessibilityLabel: "Far too many marks",
+            hierarchy: ExtensionSceneHierarchy(rootID: "root"),
+            items: [
+                .init(
+                    id: "root",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    shape: .ellipse,
+                    label: "Root"
+                )
+            ] + (0..<64).map { index in
+                // Every one of these is wrong in three separate ways: stacked on its siblings,
+                // escaping its parent, and unlabelled. None of it should be reported, because
+                // the scene is refused before any of it is looked at.
+                ExtensionSceneItem(
+                    id: "n\(index)",
+                    parentID: "root",
+                    frame: .init(x: 0.9, y: 0.9, width: 0.09, height: 0.09),
+                    shape: .ellipse,
+                    label: "N"
+                )
+            }
+        )
+
+        let issues = scene.validationIssues(
+            path: "node.scene",
+            maximumItems: 8,
+            maximumTextLength: 10_000
+        )
+        XCTAssertEqual(issues.map(\.message), ["exceeds maximum item count 8"])
+    }
+
+    /// Sibling overlap is reported once per offending mark, against the first sibling it
+    /// collides with. One issue per colliding *pair* is quadratic — 499 marks in one place made
+    /// 124,751 issues for a scene inside the documented cap — and says nothing extra: the set of
+    /// marks in the wrong place is the whole finding.
+    func testOverlappingSiblingsAreNamedOncePerMarkRatherThanOncePerPair() {
+        let stacked = 12
+        let scene = ExtensionScene(
+            accessibilityLabel: "Stacked marks",
+            hierarchy: ExtensionSceneHierarchy(rootID: "root"),
+            items: [
+                .init(
+                    id: "root",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    shape: .ellipse,
+                    label: "Root"
+                )
+            ] + (0..<stacked).map { index in
+                ExtensionSceneItem(
+                    id: "n\(index)",
+                    parentID: "root",
+                    frame: .init(x: 0.3, y: 0.3, width: 0.3, height: 0.3),
+                    shape: .ellipse,
+                    label: "N"
+                )
+            }
+        )
+
+        let overlaps = scene.validationIssues(
+            path: "node.scene",
+            maximumItems: 500,
+            maximumTextLength: 10_000
+        ).filter { $0.message.hasPrefix("must not overlap sibling") }
+        XCTAssertEqual(overlaps.count, stacked - 1)
+    }
+
+    /// The packing rule is stated of circles, and the containment and overlap tests can say
+    /// nothing about an ellipse that is not one. Refuse it, rather than let it through as the
+    /// exemption it used to be: authoring every mark a hundred-thousandth off square opted a
+    /// scene out of the entire rule while still drawing as overlapping bubbles.
+    func testAHierarchyEllipseThatIsNotACircleIsRefusedRatherThanExempted() {
+        let scene = ExtensionScene(
+            accessibilityLabel: "Ovals pretending to pack",
+            hierarchy: ExtensionSceneHierarchy(rootID: "root"),
+            items: [
+                .init(
+                    id: "root",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    shape: .ellipse,
+                    label: "Root"
+                ),
+                .init(
+                    id: "left",
+                    parentID: "root",
+                    frame: .init(x: 0.05, y: 0.3, width: 0.5, height: 0.4),
+                    shape: .ellipse,
+                    label: "Left"
+                ),
+                .init(
+                    id: "right",
+                    parentID: "root",
+                    frame: .init(x: 0.45, y: 0.3, width: 0.5, height: 0.4),
+                    shape: .ellipse,
+                    label: "Right"
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(try ExtensionPanel.nodeConstraints.validate(.scene(scene))) {
+            let messages = ($0 as? ExtensionValidationError)?.issues.map(\.message) ?? []
+            XCTAssertEqual(
+                messages.filter {
+                    $0 == "must be square so an elliptical hierarchy mark is a circle"
+                }.count,
+                2
+            )
+        }
+    }
+
+    /// The tolerance has to be wider than the precision producers write coordinates at, or a
+    /// correct packing is rejected for rounding. These two circles are tangent to six decimal
+    /// places and a fraction of a millionth apart — the shape every pair in the shipped fixture
+    /// has, and the shape the old 1e-6 tolerance passed only by luck.
+    func testATangentPairSurvivesTheRoundingProducersWriteAt() {
+        let scene = ExtensionScene(
+            accessibilityLabel: "Tangent pair",
+            hierarchy: ExtensionSceneHierarchy(rootID: "root"),
+            items: [
+                .init(
+                    id: "root",
+                    frame: .init(x: 0, y: 0, width: 1, height: 1),
+                    shape: .ellipse,
+                    label: "Root"
+                ),
+                .init(
+                    id: "left",
+                    parentID: "root",
+                    frame: .init(x: 0.100000, y: 0.400000, width: 0.300000, height: 0.300000),
+                    shape: .ellipse,
+                    label: "Left"
+                ),
+                // Centres level with `left`'s at y = 0.55, and tangent to it at x = 0.400000
+                // exactly. Two units in the last place inside that is 2e-6 of overlap: refused
+                // by the tolerance this replaces, invisible at any size a scene is drawn.
+                .init(
+                    id: "right",
+                    parentID: "root",
+                    frame: .init(x: 0.399998, y: 0.450000, width: 0.200000, height: 0.200000),
+                    shape: .ellipse,
+                    label: "Right"
+                )
+            ]
+        )
+
+        XCTAssertNoThrow(try ExtensionPanel.nodeConstraints.validate(.scene(scene)))
+    }
+
     func testComposableWindowHookRequiresExactlyOneProceedAndRoundTrips() throws {
         let contract = ThreadingComponentCatalog.applicationMainWindow
         let hook = ExtensionComponentPatch(

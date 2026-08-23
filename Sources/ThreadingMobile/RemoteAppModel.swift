@@ -10,7 +10,25 @@ struct RemoteNotificationOpenRequest: Equatable, Identifiable {
     var id: String { eventID }
 }
 
-/// The phone's two durable navigation subjects.
+/// A chat being written before the Mac has a session for it.
+///
+/// Identified by the phone, because the Mac mints the session's id only when Start is tapped,
+/// and the screen has to be on the navigation stack before then. Once started, the route keeps
+/// this identity and the model resolves it to the session it became (`RemoteAppModel.sessionID`),
+/// so the screen that drafted the chat is the screen that shows it — no dismissal, no second
+/// push, and Back still returns to the list the draft was opened from.
+struct MobileSessionDraft: Hashable {
+    let id: UUID
+    /// The project page's "+" seeds the checkout; the dashboard's leaves it to the catalogue.
+    let projectName: String?
+
+    init(id: UUID = UUID(), projectName: String? = nil) {
+        self.id = id
+        self.projectName = projectName
+    }
+}
+
+/// The phone's durable navigation subjects.
 ///
 /// Projects are navigation context only; continuity persists the open chat, never a project
 /// name pretending to be a session identifier. Keeping the cases typed also lets a chat opened
@@ -19,7 +37,11 @@ enum MobileNavigationRoute: Hashable {
     case project(String)
     case session(String)
     case terminal(String)
+    /// A chat being drafted, and — once Start has been answered — the chat it started.
+    case draft(MobileSessionDraft)
 
+    /// The session this route names by itself. A draft names one only through the model,
+    /// which is where the started session's id is known; ask `RemoteAppModel.sessionID(for:)`.
     var sessionID: String? {
         guard case .session(let id) = self else { return nil }
         return id
@@ -189,16 +211,13 @@ final class RemoteAppModel: ObservableObject {
     /// here rather than being handed to a view that is not on screen yet.
     @Published private(set) var pendingInvitation: String?
     @Published var navigationPath: [MobileNavigationRoute] = [] {
-        didSet {
-            guard !isEphemeralTerminalWireFixture else { return }
-            guard let activeHostID else { return }
-            if let sessionID = navigationPath.last?.sessionID {
-                continuity.setLastRoute(hostID: activeHostID, sessionID: sessionID)
-            } else {
-                continuity.clearLastRoute()
-            }
-        }
+        didSet { recordLastRoute() }
     }
+    /// The session each draft on the stack became, by the draft's id. A draft route resolves
+    /// through this for everything that asks which chat is open — continuity, the push
+    /// dedup, a notification for the chat that was just started — so a chat that began as a
+    /// draft is the same navigation subject as one opened from its row.
+    @Published private(set) var startedDrafts: [UUID: String] = [:]
 
     private let store = RemoteHostStore()
     private let hostedConnections = HostedRemoteConnectionManager()
@@ -1483,7 +1502,7 @@ final class RemoteAppModel: ObservableObject {
                   me?.sessions.contains(where: { $0.id == event.sessionID }) == true else {
                 return
             }
-            if navigationPath.last != .session(event.sessionID) {
+            if openSessionID != event.sessionID {
                 navigationPath.append(.session(event.sessionID))
             }
             notificationOpenRequest = RemoteNotificationOpenRequest(
@@ -1497,6 +1516,38 @@ final class RemoteAppModel: ObservableObject {
     func consumeNotificationOpenRequest(eventID: String) {
         guard notificationOpenRequest?.eventID == eventID else { return }
         notificationOpenRequest = nil
+    }
+
+    /// The session a route shows, whether it was opened by id or drafted into being.
+    func sessionID(for route: MobileNavigationRoute?) -> String? {
+        switch route {
+        case .session(let id): return id
+        case .draft(let draft): return startedDrafts[draft.id]
+        case .project, .terminal, .none: return nil
+        }
+    }
+
+    /// The session the screen on top is showing, if it is showing one.
+    var openSessionID: String? {
+        sessionID(for: navigationPath.last)
+    }
+
+    /// Start was answered: the draft's screen now shows this session. The path itself does not
+    /// change — that is the point — so the route record is refreshed here, where the top route
+    /// began naming a session without moving.
+    func noteDraftStarted(_ draft: MobileSessionDraft, session: RemoteSessionSummaryDTO) {
+        startedDrafts[draft.id] = session.id
+        recordLastRoute()
+    }
+
+    private func recordLastRoute() {
+        guard !isEphemeralTerminalWireFixture else { return }
+        guard let activeHostID else { return }
+        if let sessionID = openSessionID {
+            continuity.setLastRoute(hostID: activeHostID, sessionID: sessionID)
+        } else {
+            continuity.clearLastRoute()
+        }
     }
 
     private func restoreRouteIfPossible(hostID: String, response: RemoteMeDTO) {
@@ -3065,7 +3116,7 @@ final class RemoteAppModel: ObservableObject {
                     title: "Review the new remote access feature",
                     agentKind: "codex",
                     surface: .conversation,
-                    state: "working",
+                    state: .working,
                     projectName: "AnotherTerminal",
                     isAvailable: true,
                     lastActiveAt: now,
@@ -3083,7 +3134,7 @@ final class RemoteAppModel: ObservableObject {
                     title: "Finish remote access review",
                     agentKind: "claude",
                     surface: .terminal,
-                    state: "idle",
+                    state: .idle,
                     projectName: "AnotherTerminal",
                     isAvailable: true,
                     lastActiveAt: now - 380,
@@ -3106,7 +3157,7 @@ final class RemoteAppModel: ObservableObject {
                     title: "Theme polish",
                     agentKind: "codex",
                     surface: .conversation,
-                    state: "dormant",
+                    state: .dormant,
                     projectName: "AnotherTerminal",
                     isAvailable: false,
                     lastActiveAt: now - 86_400,
@@ -3117,7 +3168,7 @@ final class RemoteAppModel: ObservableObject {
                     title: "Roadmap implementation",
                     agentKind: "claude",
                     surface: .conversation,
-                    state: "needsAttention",
+                    state: .needsAttention,
                     projectName: "Strom",
                     isAvailable: true,
                     lastActiveAt: now - 220,
@@ -3128,7 +3179,7 @@ final class RemoteAppModel: ObservableObject {
                     title: "Release to TestFlight",
                     agentKind: "codex",
                     surface: .terminal,
-                    state: "dormant",
+                    state: .dormant,
                     projectName: "Strom",
                     isAvailable: false,
                     lastActiveAt: now - 604_800,

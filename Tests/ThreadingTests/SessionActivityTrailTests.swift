@@ -121,7 +121,7 @@ final class SessionActivityTrailTests: XCTestCase {
             XCTAssertTrue(cause.isReported, "\(cause.rawValue) is the agent speaking")
         }
 
-        for cause in [SessionActivityCause.output, .quiet, .seen, .bell, .turnRefused,
+        for cause in [SessionActivityCause.output, .quiet, .seen, .userInput, .bell, .turnRefused,
                       .limitParked, .limitCleared, .dormant, .running] {
             XCTAssertFalse(cause.isReported, "\(cause.rawValue) is Threading inferring")
         }

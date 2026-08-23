@@ -90,7 +90,12 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "build",
                                         parentID: "artifact-root",
-                                        frame: .init(x: 0.06, y: 0.18, width: 0.58, height: 0.58),
+                                        frame: .init(
+                                            x: 0.100950,
+                                            y: 0.325687,
+                                            width: 0.565163,
+                                            height: 0.565163
+                                        ),
                                         shape: .ellipse,
                                         color: .category1,
                                         label: ".build",
@@ -99,7 +104,12 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "build-products",
                                         parentID: "build",
-                                        frame: .init(x: 0.09, y: 0.27, width: 0.34, height: 0.34),
+                                        frame: .init(
+                                            x: 0.339042,
+                                            y: 0.531944,
+                                            width: 0.208656,
+                                            height: 0.208656
+                                        ),
                                         shape: .ellipse,
                                         color: .category1,
                                         label: L10n.string("Products"),
@@ -109,9 +119,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "build-dependencies",
                                         parentID: "build",
-                                        frame: .init(x: 0.37, y: 0.37, width: 0.23, height: 0.23),
+                                        frame: .init(
+                                            x: 0.183957,
+                                            y: 0.617191,
+                                            width: 0.166385,
+                                            height: 0.166385
+                                        ),
                                         shape: .ellipse,
-                                        color: .category1,
+                                        color: .category2,
                                         label: L10n.string("Dependencies"),
                                         detail: L10n.string("11.7 GiB"),
                                         actionID: "inspect-artifact"
@@ -119,9 +134,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "build-index",
                                         parentID: "build",
-                                        frame: .init(x: 0.17, y: 0.55, width: 0.17, height: 0.17),
+                                        frame: .init(
+                                            x: 0.397673,
+                                            y: 0.412433,
+                                            width: 0.120140,
+                                            height: 0.120140
+                                        ),
                                         shape: .ellipse,
-                                        color: .category1,
+                                        color: .category5,
                                         label: L10n.string("Index"),
                                         detail: L10n.string("6.1 GiB"),
                                         actionID: "inspect-artifact"
@@ -129,9 +149,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "build-cache",
                                         parentID: "build",
-                                        frame: .init(x: 0.35, y: 0.59, width: 0.13, height: 0.13),
+                                        frame: .init(
+                                            x: 0.488283,
+                                            y: 0.709281,
+                                            width: 0.094823,
+                                            height: 0.094823
+                                        ),
                                         shape: .ellipse,
-                                        color: .category1,
+                                        color: .category6,
                                         label: L10n.string("Cache"),
                                         detail: L10n.string("3.8 GiB"),
                                         actionID: "inspect-artifact"
@@ -139,9 +164,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "build-other",
                                         parentID: "build",
-                                        frame: .init(x: 0.46, y: 0.57, width: 0.10, height: 0.10),
+                                        frame: .init(
+                                            x: 0.270644,
+                                            y: 0.527871,
+                                            width: 0.084252,
+                                            height: 0.084252
+                                        ),
                                         shape: .ellipse,
-                                        color: .category1,
+                                        color: .neutral,
                                         label: L10n.string("Other"),
                                         detail: L10n.string("3.0 GiB"),
                                         actionID: "inspect-artifact"
@@ -149,7 +179,12 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "sources",
                                         parentID: "artifact-root",
-                                        frame: .init(x: 0.61, y: 0.25, width: 0.34, height: 0.34),
+                                        frame: .init(
+                                            x: 0.308749,
+                                            y: 0.109150,
+                                            width: 0.218037,
+                                            height: 0.218037
+                                        ),
                                         shape: .ellipse,
                                         color: .category2,
                                         label: L10n.string("Sources"),
@@ -158,9 +193,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "threading-source",
                                         parentID: "sources",
-                                        frame: .init(x: 0.63, y: 0.29, width: 0.18, height: 0.18),
+                                        frame: .init(
+                                            x: 0.385048,
+                                            y: 0.195216,
+                                            width: 0.110833,
+                                            height: 0.110833
+                                        ),
                                         shape: .ellipse,
-                                        color: .category2,
+                                        color: .category4,
                                         label: L10n.string("Threading"),
                                         detail: L10n.string("3.1 GiB"),
                                         actionID: "inspect-artifact"
@@ -168,9 +208,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "mobile-source",
                                         parentID: "sources",
-                                        frame: .init(x: 0.785, y: 0.375, width: 0.11, height: 0.11),
+                                        frame: .init(
+                                            x: 0.339654,
+                                            y: 0.130287,
+                                            width: 0.084455,
+                                            height: 0.084455
+                                        ),
                                         shape: .ellipse,
-                                        color: .category2,
+                                        color: .category1,
                                         label: L10n.string("Mobile"),
                                         detail: L10n.string("1.8 GiB"),
                                         actionID: "inspect-artifact"
@@ -178,9 +223,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "resources",
                                         parentID: "sources",
-                                        frame: .init(x: 0.73, y: 0.45, width: 0.10, height: 0.10),
+                                        frame: .init(
+                                            x: 0.426351,
+                                            y: 0.136964,
+                                            width: 0.059719,
+                                            height: 0.059719
+                                        ),
                                         shape: .ellipse,
-                                        color: .category2,
+                                        color: .category6,
                                         label: L10n.string("Resources"),
                                         detail: L10n.string("0.9 GiB"),
                                         actionID: "inspect-artifact"
@@ -188,7 +238,12 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "other",
                                         parentID: "artifact-root",
-                                        frame: .init(x: 0.64, y: 0.61, width: 0.25, height: 0.25),
+                                        frame: .init(
+                                            x: 0.661450,
+                                            y: 0.428463,
+                                            width: 0.237600,
+                                            height: 0.237600
+                                        ),
                                         shape: .ellipse,
                                         color: .category3,
                                         label: L10n.string("Other"),
@@ -197,9 +252,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "packages",
                                         parentID: "other",
-                                        frame: .init(x: 0.66, y: 0.64, width: 0.14, height: 0.14),
+                                        frame: .init(
+                                            x: 0.738901,
+                                            y: 0.460504,
+                                            width: 0.131312,
+                                            height: 0.131312
+                                        ),
                                         shape: .ellipse,
-                                        color: .category3,
+                                        color: .category5,
                                         label: L10n.string("Packages"),
                                         detail: L10n.string("5.7 GiB"),
                                         actionID: "inspect-artifact"
@@ -207,9 +267,14 @@ enum ExtensionExperimentFixture {
                                     .init(
                                         id: "documents",
                                         parentID: "other",
-                                        frame: .init(x: 0.78, y: 0.73, width: 0.09, height: 0.09),
+                                        frame: .init(
+                                            x: 0.690287,
+                                            y: 0.558209,
+                                            width: 0.075813,
+                                            height: 0.075813
+                                        ),
                                         shape: .ellipse,
-                                        color: .category3,
+                                        color: .category2,
                                         label: L10n.string("Docs"),
                                         detail: L10n.string("1.9 GiB"),
                                         actionID: "inspect-artifact"

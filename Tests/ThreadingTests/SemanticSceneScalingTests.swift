@@ -103,6 +103,71 @@ final class SemanticSceneScalingTests: XCTestCase {
         XCTAssertTrue(canvases[0] === originalCanvas)
     }
 
+    /// Colour derivation is per *kind* of mark, not per mark.
+    ///
+    /// A hierarchy fill is mixed in Oklab from the resolved panel, which costs three surface
+    /// composites and two colour-space round trips inside an appearance push. Every mark sharing
+    /// a colour role, depth, enabled state and emphasis paints the identical result, so a
+    /// 500-mark scene was doing that five hundred times per repaint — and because hover marked
+    /// the whole view dirty, crossing from one mark to its neighbour paid all five hundred
+    /// again. This pins the bound the cache exists for; it is a count rather than a duration so
+    /// it means the same thing on every machine.
+    func testAStressedHierarchyDerivesAFillPerKindOfMarkNotPerMark() throws {
+        // The focus, and then a row of leaves under it that share a colour role and a depth.
+        // Whatever the scene costs to paint, it is one derivation for the focus and one for all
+        // the leaves together.
+        var items = [hierarchyMark(
+            id: "root",
+            parentID: nil,
+            depth: 0,
+            frame: NSRect(x: 0, y: 0, width: 1, height: 1)
+        )]
+        for index in 0..<(stressMarkCount - 1) {
+            items.append(hierarchyMark(
+                id: "leaf-\(index)",
+                parentID: "root",
+                depth: 1,
+                frame: NSRect(
+                    x: CGFloat(index % 25) / 25,
+                    y: CGFloat(index / 25) / 20,
+                    width: 1 / 25,
+                    height: 1 / 20
+                )
+            ))
+        }
+
+        let scene = SemanticSceneView(accessibilityLabel: "Stress hierarchy", items: items)
+        scene.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        scene.layoutSubtreeIfNeeded()
+        let image = try XCTUnwrap(scene.bitmapImageRepForCachingDisplay(in: scene.bounds))
+        scene.cacheDisplay(in: scene.bounds, to: image)
+
+        XCTAssertEqual(scene.derivedHierarchyFillCount, 2)
+    }
+
+    private func hierarchyMark(
+        id: String,
+        parentID: String?,
+        depth: Int,
+        frame: NSRect
+    ) -> SemanticSceneView.Item {
+        SemanticSceneView.Item(
+            id: id,
+            parentID: parentID,
+            normalizedFrame: frame,
+            shape: .ellipse,
+            color: .neutral,
+            hierarchyDepth: depth,
+            label: nil,
+            detail: nil,
+            accessibilityLabel: id,
+            accessibilityValue: nil,
+            isEnabled: true,
+            isSelected: false,
+            onActivate: nil
+        )
+    }
+
     private func item(
         id: String,
         parentID: String?,

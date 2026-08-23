@@ -260,14 +260,68 @@ public struct RemoteLimitRecoveryPolicyDTO: Codable, Equatable, Sendable {
     }
 }
 
+/// What a session is doing, as projected by the host into every remote client.
+///
+/// This is an enum in client code so activity decisions are exhaustive and misspellings do not
+/// silently become an idle-looking row. The associated unknown case is the wire-version seam: a
+/// newer Mac may add a state before an installed phone knows how to present it, and that phone
+/// must still decode and list the rest of the session catalogue. Unknown values therefore survive
+/// a decode/encode round trip instead of failing the whole response.
+public enum RemoteSessionActivity: RawRepresentable, Codable, Equatable, Hashable, Sendable {
+    case dormant
+    case idle
+    case working
+    case awaitingUser
+    case needsAttention
+    case limitReached
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "dormant": self = .dormant
+        case "idle": self = .idle
+        case "working": self = .working
+        case "awaitingUser": self = .awaitingUser
+        case "needsAttention": self = .needsAttention
+        case "limitReached": self = .limitReached
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .dormant: return "dormant"
+        case .idle: return "idle"
+        case .working: return "working"
+        case .awaitingUser: return "awaitingUser"
+        case .needsAttention: return "needsAttention"
+        case .limitReached: return "limitReached"
+        case .unknown(let rawValue): return rawValue
+        }
+    }
+
+    public var isKnown: Bool {
+        if case .unknown = self { return false }
+        return true
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 /// One session as it appears to a remote client's session list.
 public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let title: String
     public let agentKind: String
     public let surface: RemoteSessionSurface
-    /// The activity state — "dormant" / "idle" / "working" / "needsAttention".
-    public let state: String
+    public let state: RemoteSessionActivity
     public let projectName: String
     /// Whether the session currently has a live surface a client can attach to.
     public let isAvailable: Bool
@@ -307,7 +361,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         title: String,
         agentKind: String,
         surface: RemoteSessionSurface,
-        state: String,
+        state: RemoteSessionActivity,
         projectName: String,
         isAvailable: Bool = true,
         lastActiveAt: Double? = nil,
@@ -364,7 +418,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         title = try container.decode(String.self, forKey: .title)
         agentKind = try container.decode(String.self, forKey: .agentKind)
         surface = try container.decode(RemoteSessionSurface.self, forKey: .surface)
-        state = try container.decode(String.self, forKey: .state)
+        state = try container.decode(RemoteSessionActivity.self, forKey: .state)
         projectName = try container.decode(String.self, forKey: .projectName)
         // The first wire build listed only live sessions, so a missing field means available.
         isAvailable = try container.decodeIfPresent(Bool.self, forKey: .isAvailable) ?? true

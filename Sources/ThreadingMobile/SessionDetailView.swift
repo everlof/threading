@@ -26,7 +26,7 @@ enum MobileSessionOpeningFixture: String {
             title: "Remote access review",
             agentKind: "claude",
             surface: .conversation,
-            state: self == .resuming ? "dormant" : "idle",
+            state: self == .resuming ? .dormant : .idle,
             projectName: "Threading",
             isAvailable: self != .resuming
         )
@@ -785,11 +785,20 @@ struct TerminalRemoteView: View {
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
     @State private var directAttachmentTray: ComposerAttachmentTray?
-    @State private var directAttachmentItems: [ComposerAttachmentItem] = []
     @State private var directAttachmentNotice: String?
+    @State private var showsDirectAttachmentNotice = false
     @State private var directAttachmentPhotoItems: [PhotosPickerItem] = []
     @State private var isPickingDirectAttachmentPhotos = false
     @State private var isImportingDirectAttachmentFiles = false
+    @State private var isChoosingDirectAttachmentSource = false
+    @State private var pendingDirectAttachmentSource: DirectAttachmentSource?
+    /// Picks whose files are still being read. A pick is not finished when its first file is.
+    @State private var directAttachmentPicksInFlight = 0
+    @State private var directAttachmentBusyRetries = 0
+    /// Read once, when the chooser opens, rather than while the body is being evaluated: the
+    /// terminal republishes on presence, typing, the grid and canSend, and each of those would
+    /// otherwise have cost an XPC round trip to the pasteboard server.
+    @State private var clipboardOffersContent = false
     @State private var pendingDirectAttachmentInsertionID: String?
     @State private var selectionQuotes: [RemoteTerminalSelectionQuote] = []
     @StateObject private var keyBridge = TerminalKeyBridge()
@@ -844,18 +853,6 @@ struct TerminalRemoteView: View {
                     remove: removeSelectionQuote
                 )
             }
-            if allowsDirectInput,
-               !directAttachmentItems.isEmpty || directAttachmentNotice != nil {
-                DirectTerminalAttachmentTray(
-                    items: directAttachmentItems,
-                    notice: directAttachmentNotice,
-                    isPending: pendingDirectAttachmentInsertionID != nil
-                        && connection.isPromptSubmissionPending,
-                    canInsert: canInsertDirectAttachments,
-                    remove: { directAttachmentTray?.remove($0) },
-                    insert: insertDirectAttachments
-                )
-            }
             TerminalKeyBar(
                 connection: connection,
                 bridge: keyBridge,
@@ -863,14 +860,8 @@ struct TerminalRemoteView: View {
                 customize: { showsKeyboardEditor = true },
                 showsAttachmentKey: allowsDirectInput
                     && connection.supportsTerminalAttachmentInsertion,
-                canAttach: directAttachmentTray?.canAcceptMore == true
-                    || isDirectAttachmentEvidence,
-                chooseAttachmentPhotos: {
-                    isPickingDirectAttachmentPhotos = true
-                },
-                chooseAttachmentFiles: {
-                    isImportingDirectAttachmentFiles = true
-                }
+                canAttach: directAttachmentTray?.canAcceptMore == true,
+                chooseAttachmentSource: beginChoosingDirectAttachmentSource
             )
         }
         .toolbarBackground(theme.surface, for: .navigationBar)
@@ -901,6 +892,36 @@ struct TerminalRemoteView: View {
         .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
             handleDirectAttachmentInsertion(feedback)
         }
+        .onChange(of: connection.isPromptSubmissionPending) { _, isPending in
+            // A busy Mac answered "not now". This is the moment it stops being now.
+            guard !isPending else { return }
+            insertDirectAttachmentsIfReady()
+        }
+        .onChange(of: isChoosingDirectAttachmentSource) { _, isPresented in
+            guard !isPresented, let source = pendingDirectAttachmentSource else { return }
+            pendingDirectAttachmentSource = nil
+            switch source {
+            case .photos: isPickingDirectAttachmentPhotos = true
+            case .files: isImportingDirectAttachmentFiles = true
+            case .clipboard: pasteClipboardIntoTerminal()
+            }
+        }
+        .themedConfirmationDialog(
+            "Attachments",
+            isPresented: $isChoosingDirectAttachmentSource,
+            actions: directAttachmentSourceActions
+        )
+        .themedAlert(
+            "Attachment",
+            message: directAttachmentNotice,
+            isPresented: $showsDirectAttachmentNotice,
+            actions: [
+                ThemedDialogAction("OK") {
+                    directAttachmentNotice = nil
+                    directAttachmentTray?.clearNotice()
+                },
+            ]
+        )
         .photosPicker(
             isPresented: $isPickingDirectAttachmentPhotos,
             selection: $directAttachmentPhotoItems,
@@ -1015,54 +1036,102 @@ struct TerminalRemoteView: View {
 #endif
     }
 
-    private var canInsertDirectAttachments: Bool {
-        if isDirectAttachmentEvidence { return !directAttachmentItems.isEmpty }
-        return connection.phase == .connected
-            && connection.capability == .interact
-            && connection.inputControl?.canWrite != false
-            && pendingDirectAttachmentInsertionID == nil
-            && directAttachmentTray?.isSettling == false
-            && directAttachmentTray?.readyUploadIDs.isEmpty == false
+    // MARK: - Clipboard
+
+    private func beginChoosingDirectAttachmentSource() {
+        clipboardOffersContent = ComposerClipboard.general.hasContent
+        isChoosingDirectAttachmentSource = true
+    }
+
+    private var directAttachmentSourceActions: [ThemedDialogAction] {
+        var actions: [ThemedDialogAction] = []
+        // First, because it is the one that answers "the thing I just copied". The pickers are
+        // for choosing something; this is for the thing already in hand.
+        if clipboardOffersContent {
+            actions.append(ThemedDialogAction("From Clipboard") {
+                pendingDirectAttachmentSource = .clipboard
+            })
+        }
+        actions.append(ThemedDialogAction("Photo Library") {
+            pendingDirectAttachmentSource = .photos
+        })
+        actions.append(ThemedDialogAction("Files") {
+            pendingDirectAttachmentSource = .files
+        })
+        actions.append(ThemedDialogAction("Cancel", role: .cancel))
+        return actions
+    }
+
+    /// Puts whatever is on the clipboard into the live TUI.
+    ///
+    /// Files take the route the pickers take — staged, uploaded, and their workspace paths typed
+    /// at the cursor — because a program reading a PTY has nowhere to put a picture. Text is
+    /// typed at the cursor as one paste, which is all the edit menu's own Paste does and saves a
+    /// long press aimed at a single prompt line while an agent is drawing over it.
+    private func pasteClipboardIntoTerminal() {
+        let clipboard = ComposerClipboard.general
+        let files = clipboard.files()
+        if !files.isEmpty {
+            guard let tray = directAttachmentTray else { return }
+            for file in files {
+                tray.add(data: file.data, name: file.name, type: file.type)
+            }
+            return
+        }
+        if let text = clipboard.text() {
+            connection.sendTerminalKey(RemoteTerminalPaste.delimited(
+                text,
+                bracketedPaste: keyBridge.bracketedPasteActive
+            ))
+            return
+        }
+        // Nothing was taken, so say why. A raw terminal write is acknowledged by nothing, and a
+        // paste that silently did not happen is the failure this whole path exists to remove.
+        directAttachmentNotice = clipboard.holdsOversizedText()
+            ? MobileL10n.string("That is more text than one paste can carry.")
+            : MobileL10n.string("There’s nothing on the clipboard to paste.")
+        showsDirectAttachmentNotice = true
     }
 
     private func configureDirectAttachments() {
-        if isDirectAttachmentEvidence {
-            guard directAttachmentItems.isEmpty else { return }
-            var image = ComposerAttachmentItem(
-                name: "terminal-layout.png",
-                thumbnail: nil,
-                systemImage: "photo"
-            )
-            image.state = .ready(uploadID: "evidence-image")
-            var document = ComposerAttachmentItem(
-                name: "review notes.pdf",
-                thumbnail: nil,
-                systemImage: "doc.richtext"
-            )
-            document.state = .ready(uploadID: "evidence-document")
-            directAttachmentItems = [image, document]
-            return
-        }
         guard directAttachmentTray == nil, let client = model.client else { return }
         let tray = ComposerAttachmentTray(client: client, sessionID: connection.session.id)
         tray.onChange = {
-            directAttachmentItems = tray.items
-            directAttachmentNotice = tray.notice
+            // A failed upload has no chip to be dismissed from here — this surface shows no
+            // attachment strip at all — so one left in the tray holds a slot out of the
+            // message's file limit for as long as the session is open. It goes the moment it
+            // fails, on account of having failed; the notice the tray raises alongside it is
+            // what the person is actually told. Removing it because *some* notice appeared
+            // meant an unrelated one — a file that could not be read, one file too many — swept
+            // away chips that had nothing to do with it.
+            tray.removeFailed()
+            // Only ever *set* the notice from the tray, never clear it. Mirroring the tray's
+            // notice in both directions meant any change to the tray — clearing it after an
+            // insertion, most of all — silently erased a message this view had raised about the
+            // insertion itself. That is why clearing the tray used to snapshot the notice and
+            // write it back afterwards: two different facts were sharing one variable.
+            if let notice = tray.notice {
+                directAttachmentNotice = notice
+                showsDirectAttachmentNotice = true
+            }
+            insertDirectAttachmentsIfReady()
         }
         directAttachmentTray = tray
     }
 
-    private var isDirectAttachmentEvidence: Bool {
-#if DEBUG
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-            == "terminal-attachments"
-#else
-        false
-#endif
-    }
-
     private func loadDirectAttachmentPhotos(_ items: [PhotosPickerItem]) async {
         guard let tray = directAttachmentTray else { return }
+        // A pick is not finished when its first file is. Every `loadTransferable` suspends —
+        // a photo may still be coming down from iCloud — and the first file's upload can finish
+        // inside one of those gaps. Without this the tray looked settled between two photos, the
+        // first was inserted on its own, and the acceptance that followed cleared the tray and
+        // cancelled the uploads of the ones still being read: three photos chosen, one inserted,
+        // two gone, and nothing said about either.
+        directAttachmentPicksInFlight += 1
+        defer {
+            directAttachmentPicksInFlight -= 1
+            insertDirectAttachmentsIfReady()
+        }
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self),
                   let type = item.supportedContentTypes.first else {
@@ -1096,12 +1165,26 @@ struct TerminalRemoteView: View {
         }
     }
 
-    private func insertDirectAttachments() {
+    /// A direct terminal already has the TUI's own attachment affordance. Once the upload has
+    /// reached the Mac, type its path at the cursor immediately instead of asking the person to
+    /// manage a second attachment row and press a second Insert button.
+    private func insertDirectAttachmentsIfReady() {
+        guard allowsDirectInput,
+              directAttachmentPicksInFlight == 0,
+              pendingDirectAttachmentInsertionID == nil,
+              directAttachmentTray?.isSettling == false else { return }
         guard let ids = directAttachmentTray?.readyUploadIDs,
+              !ids.isEmpty,
               let requestID = connection.insertTerminalAttachments(ids) else { return }
         directAttachmentNotice = nil
         pendingDirectAttachmentInsertionID = requestID
     }
+
+    /// How long a busy Mac is waited out before its files are given up on. The terminal counts
+    /// as busy for as long as one submission is in flight, so waiting costs nothing but the
+    /// wait — and it still has to end somewhere, or a Mac answering busy forever would keep the
+    /// phone holding the same files for as long as the session stayed open.
+    private static let maximumDirectAttachmentBusyRetries = 2
 
     private func handleDirectAttachmentInsertion(
         _ feedback: RemotePromptSubmissionFeedback?
@@ -1109,86 +1192,49 @@ struct TerminalRemoteView: View {
         guard let feedback,
               feedback.requestID == pendingDirectAttachmentInsertionID else { return }
         pendingDirectAttachmentInsertionID = nil
-        if feedback.status == .accepted {
+        switch feedback.status {
+        case .accepted:
+            directAttachmentBusyRetries = 0
             directAttachmentTray?.clear()
             directAttachmentNotice = nil
             return
-        }
-        switch feedback.status {
-        case .busy, .rejected:
+        case .busy where directAttachmentBusyRetries
+            < Self.maximumDirectAttachmentBusyRetries:
+            // Busy is a moment, not a refusal: the Mac is part-way through another submission.
+            // The bytes are already on it, so discarding them charges the person a second pick
+            // for somebody else's timing. Hold them, and try again the moment the terminal
+            // stops submitting.
+            directAttachmentBusyRetries += 1
             directAttachmentNotice = MobileL10n.string(
-                "The Mac couldn’t insert these files. They’re still here."
+                "The Mac was busy. These files will be inserted in a moment."
+            )
+        case .busy, .rejected:
+            directAttachmentBusyRetries = 0
+            directAttachmentTray?.clear()
+            directAttachmentNotice = MobileL10n.string(
+                "The Mac couldn’t insert these files. Please choose them again."
             )
         case .unavailable:
+            directAttachmentBusyRetries = 0
+            directAttachmentTray?.clear()
             directAttachmentNotice = MobileL10n.string(
-                "The session changed before these files could be inserted. They’re still here."
+                "The session changed before these files could be inserted. Please choose them again."
             )
         case .conflict:
+            directAttachmentBusyRetries = 0
+            directAttachmentTray?.clear()
             directAttachmentNotice = MobileL10n.string(
-                "These files could not be retried safely. They’re still here."
+                "These files could not be inserted safely. Please choose them again."
             )
-        case .accepted:
-            break
         }
+        showsDirectAttachmentNotice = directAttachmentNotice != nil
     }
 }
 
-private struct DirectTerminalAttachmentTray: View {
-    let items: [ComposerAttachmentItem]
-    let notice: String?
-    let isPending: Bool
-    let canInsert: Bool
-    let remove: (UUID) -> Void
-    let insert: () -> Void
-    @Environment(\.remoteTheme) private var theme
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if isPending || notice != nil {
-                HStack(spacing: MobileDesign.Spacing.small) {
-                    if isPending {
-                        ProgressView().controlSize(.small)
-                    }
-                    Text(isPending ? MobileL10n.string("Sending once…") : notice ?? "")
-                }
-                .font(.caption)
-                .foregroundStyle(notice == nil ? theme.secondaryLabel : theme.warning)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, MobileDesign.Spacing.inset)
-                .padding(.top, MobileDesign.Spacing.small)
-            }
-
-            if !items.isEmpty {
-                HStack(spacing: MobileDesign.Spacing.small) {
-                    TerminalAttachmentStrip(items: items, theme: theme, remove: remove)
-                        .frame(height: ComposerAttachmentMetrics.stripHeight)
-                    Button(action: insert) {
-                        Image(systemName: "text.insert")
-                            .font(.headline)
-                            .frame(
-                                width: MobileDesign.Size.minimumTapTarget,
-                                height: MobileDesign.Size.minimumTapTarget
-                            )
-                            .background(
-                                canInsert ? theme.accent : theme.controlResting,
-                                in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                            )
-                            .foregroundStyle(
-                                canInsert ? theme.ground : theme.secondaryLabel
-                            )
-                    }
-                    .disabled(!canInsert)
-                    .accessibilityLabel(MobileL10n.string("Insert without submitting"))
-                }
-                .padding(.horizontal, MobileDesign.Spacing.inset)
-                .padding(.vertical, MobileDesign.Spacing.small)
-            }
-        }
-        .background(theme.panel)
-        .overlay(alignment: .top) {
-            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
-        }
-    }
+private enum DirectAttachmentSource {
+    case photos
+    case files
+    case clipboard
 }
 
 private struct TerminalCollaborationBar: View {

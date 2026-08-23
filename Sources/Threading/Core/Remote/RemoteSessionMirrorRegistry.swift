@@ -356,7 +356,7 @@ final class RemoteSessionMirrorRegistry {
             title: session.displayTitle,
             agentKind: session.kind.rawValue,
             surface: session.usesNativeUI ? .conversation : .terminal,
-            state: String(describing: AgentRuntime.shared.activity(
+            state: RemoteSessionActivity(AgentRuntime.shared.activity(
                 sessionID: session.id,
                 participantID: authorization.collaborationParticipantID
             )),
@@ -2866,6 +2866,23 @@ final class RemoteSessionMirrorRegistry {
                 "Remote mirror encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return #"{"type":"error","code":"encodingFailed"}"#
+        }
+    }
+}
+
+private extension RemoteSessionActivity {
+    /// The remote vocabulary is intentionally mapped case by case. Reflection made a source
+    /// rename into an undeclared wire-protocol change and let the phone compare misspellable
+    /// strings; this switch makes adding an activity fail compilation until the wire answer is
+    /// chosen deliberately.
+    init(_ activity: SessionActivity) {
+        switch activity {
+        case .dormant: self = .dormant
+        case .idle: self = .idle
+        case .working: self = .working
+        case .awaitingUser: self = .awaitingUser
+        case .needsAttention: self = .needsAttention
+        case .limitReached: self = .limitReached
         }
     }
 }

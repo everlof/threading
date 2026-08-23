@@ -87,6 +87,9 @@ enum SessionActivityCause: String {
     /// The session came on screen or left it.
     case seen
 
+    /// The user submitted terminal input while a reported turn was waiting on them.
+    case userInput
+
     /// Output crossed the byte threshold, on a session with no hooks of its own.
     case output
 
@@ -130,7 +133,7 @@ enum SessionActivityCause: String {
         case .turnStarted, .turnFinished, .turnInterrupted, .awaitingUserReported,
              .blockingAskOpened, .blockingAskClosed:
             return true
-        case .seen, .output, .quiet, .turnRefused, .limitParked, .limitCleared, .bell,
+        case .seen, .userInput, .output, .quiet, .turnRefused, .limitParked, .limitCleared, .bell,
              .dormant, .running:
             return false
         }
@@ -194,25 +197,15 @@ final class SessionActivityTracker {
     /// worth flagging.
     var isVisible: Bool = false {
         didSet {
-            // Being looked at is what ends an unattended launch: from here on the session is
-            // an ordinary one, and its output means what output always means.
-            if isVisible { launchedUnattended = false }
-
-            // Looking at a session answers whatever it was asking for. What it goes back to is
-            // the turn it is in rather than idle: an agent that asked mid-turn is still working,
-            // and nothing else would have said so again until the user's next prompt.
+            // Looking at a finished session spends its unread mark. It does not answer a
+            // question inside an open turn: presentation is not interaction, and treating it as
+            // one both cleared real prompts early and admitted a restored TUI's later repaint as
+            // fresh work. Submitted terminal input owns that edge below.
             //
-            // `openAsks` and `limitPark` are deliberately untouched. This rule is a guess — the
-            // runtime's own "waiting" notice cannot say what it is waiting for, so being looked
-            // at is the best evidence available that it was answered — and neither a named tool
-            // call nor a refused request is a guess.
-            //
-            // The park in particular is not a question the user can answer by arriving. Both of
-            // the CLI's own chooser options leave the account exactly as spent as it was, so a
-            // glance that lowered the mark would show an ordinary idle row for a session that
-            // still cannot run. What lowers it is the conversation running again, which the
-            // transcript states outright.
-            guard isVisible, awaitsUser else { return }
+            // `turnInFlight` is the distinction: after a turn finished, the same flag is its
+            // unread result and being seen spends it. `openAsks` and `limitPark` are deliberately
+            // untouched; their explicit close/recovery boundaries remain their owners.
+            guard isVisible, awaitsUser, !turnInFlight else { return }
             awaitsUser = false
             settle(.seen)
         }
@@ -264,8 +257,8 @@ final class SessionActivityTracker {
     /// lowered several times inside one turn.
     ///
     /// This is the *inferred* half of asking: it comes from a runtime's own notice, which cannot
-    /// say what it is waiting for, so being looked at and fresh output are both allowed to lower
-    /// it. `openAsks` is the half that is known outright and obeys neither.
+    /// say what it is waiting for, so submitted input and a substantial on-screen output burst
+    /// are both allowed to lower it. `openAsks` is the half known outright and obeys neither.
     private var awaitsUser = false
 
     /// Ask-shaped tool calls that have opened and not yet closed, keyed by the call.
@@ -383,7 +376,7 @@ final class SessionActivityTracker {
     /// goes quiet, and the session lands on `needsAttention` — one unread mark and one silent
     /// notification per restored session, for work nobody did. While this is set, nothing the
     /// process emits on its own raises a flag or opens an inferred turn; it clears when the
-    /// session is first looked at, or when a turn genuinely begins.
+    /// session receives user input, or when a turn genuinely begins.
     private var launchedUnattended = false
 
     private var bytesSinceQuiet = 0
@@ -484,6 +477,27 @@ final class SessionActivityTracker {
         suppressOutputUntil = Date().addingTimeInterval(ActivityDefaults.pointerQuietPeriod)
     }
 
+    /// Records input a person sent to the terminal, locally or through a remote controller.
+    ///
+    /// Presentation cannot end an unattended launch: selecting or remotely opening a restored
+    /// session provokes resize and TUI paint without starting any work. Actual input can, so the
+    /// next output is once again allowed to drive runtimes that do not report their own turns.
+    ///
+    /// A submitted line is also the direct boundary missing from a reported permission prompt.
+    /// Claude reports that it is waiting, but reports no complementary "permission answered"
+    /// event; a long, silent tool can therefore be running while the row remains blocked. A
+    /// submitted line is the provider-neutral fact that the terminal answer was committed. It
+    /// lowers only the inferred waiting flag — an ask-shaped tool call remains held by its
+    /// explicit close hook. Editing and bracketed paste still end launch grace, but do not claim
+    /// that a question has been answered.
+    func noteUserInput(submitsLine: Bool) {
+        launchedUnattended = false
+
+        guard submitsLine, awaitsUser, turnInFlight, openAsks.isEmpty else { return }
+        awaitsUser = false
+        settle(.userInput)
+    }
+
     private var isSuppressed: Bool {
         guard let suppressOutputUntil else { return false }
         return Date() < suppressOutputUntil
@@ -494,8 +508,7 @@ final class SessionActivityTracker {
     /// The agent reported that a turn began.
     ///
     /// A turn means someone is driving the session — a prompt typed through the remote
-    /// mirror reaches an unattended terminal too — so the launch grace ends here as surely
-    /// as it does on being looked at.
+    /// mirror reaches an unattended terminal too — so the launch grace ends here.
     func noteTurnStarted(turnID: String? = nil) {
         launchedUnattended = false
         adoptOwnReports()
@@ -861,7 +874,7 @@ final class SessionActivityTracker {
     /// Marks a launch nobody made by hand, so its boot noise raises no flags.
     ///
     /// Called before the launch; `markRunning` deliberately leaves the mark alone, since it
-    /// arrives a run-loop pass later. The grace ends at the first look or the first turn, so
+    /// arrives a run-loop pass later. The grace ends at the first input or the first turn, so
     /// it needs no clearing on `markDormant` either — a session that died unseen keeps it,
     /// and both ends still apply to the next process.
     func noteUnattendedLaunch() {

@@ -261,6 +261,15 @@ DTOs. It stays a string *on the wire*: a newer Mac may show a surface an install
 heard of, and that row must decode, list and round-trip rather than fail the whole payload. Leniency
 runs one way — an inbound create or switch naming an unknown surface is refused (`isKnown`) rather
 than guessed at.
+
+**The activity is a lossless enum, not a reflected name.** `RemoteSessionActivity` gives the Mac
+and iPhone exhaustive `.dormant` / `.idle` / `.working` / `.awaitingUser` / `.needsAttention` /
+`.limitReached` cases. The host maps `SessionActivity` explicitly; `String(describing:)` used to
+turn an internal case rename into an undeclared protocol change, and the phone compared those
+values against misspellable literals. The JSON remains the same plain string for installed-client
+compatibility. `.unknown(String)` preserves a newer host's value through decode and re-encode, so
+one future state cannot make an older phone lose the entire session catalogue.
+
 On a paired owner device, the dashboard's options menu also offers **Usage** when the Mac
 advertises support. It opens the Mac's prepared 7-, 30- and 90-day Overview and Limit History in a
 native iPhone sheet. The phone receives bounded semantic totals and chart points, not transcripts,
@@ -647,6 +656,26 @@ pasted block into a single token, and burying "fix this" inside it would hide wh
 `RemoteAccessDefaults.maximumTerminalInputBytes` so a client can ask the host's own question
 before sending rather than pasting into silence.
 
+**And the TUI's paperclip carries the clipboard too.** Under a direct-input TUI **From
+Clipboard** does the obvious thing for what it finds: files take the upload route, because a
+program reading a PTY has nowhere to put a picture, and text is typed at the cursor as one paste.
+That second half is the edit menu's own Paste reached without the long press — worth having on a
+screen where the thing being aimed at is one prompt line an agent is drawing over. A clipboard
+that emptied between the entry being drawn and being chosen says so, and so does one holding more
+text than a single write carries; a raw terminal write is acknowledged by nothing, so silence
+would otherwise be the only answer.
+
+**A pick is finished when its last file is, not its first.** Uploads start as each file is read,
+and the pickers read them one at a time across suspensions — a photo may still be coming down
+from iCloud. Insertion waits for the whole pick as well as for the tray to settle, because
+without that the first photo's upload could finish inside the gap before the second was staged:
+it went in alone, the acceptance that followed cleared the tray, and clearing cancels uploads
+still in flight. Three photos chosen, one inserted, two gone and nothing said. A Mac that answers
+**busy** is waited out rather than emptied — busy means one submission is already in flight, the
+bytes are on the Mac already, and the insertion is retried up to twice when the terminal stops
+submitting. `rejected`, `unavailable` and `conflict` do clear the staged files, because those do
+not become true again by waiting.
+
 **The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
 a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the
 session off its own frame and put the rest behind a scrollbar, and only resizing the *Mac* ever
@@ -805,16 +834,36 @@ sharing action.
 
 ## Starting a chat from the phone, and seeing it work
 
-**Start opens the chat it started.** The New Session sheet's Start used to create the session and
-then leave you on the dashboard, watching a row appear. The Mac answers the create with the new
-session's id *and* the whole refreshed catalogue, so the row the navigation stack resolves against
-is already published by the time the sheet closes; the push therefore needs nothing but the
-result Start already had. It waits for `onDismiss` rather than pushing from the submit, because a
-push ordered while the sheet is still on screen is dropped by the stack. Tapping a row and
-starting a chat now go through one function, so a new chat is opened with the transition its
-surface can survive — a terminal still commits its final geometry immediately rather than being
-resized through every intermediate width. The session's own screen owns the wait: a brand-new
-session is not yet running, so it shows "Resuming on your Mac…" until the agent answers.
+**Start opens the chat it started, on the screen that started it.** The draft is a route on the
+navigation stack (`MobileNavigationRoute.draft`), pushed by **+** from whichever list asked for
+it, so Back from the chat returns there. It was a sheet: Start created the session, the sheet
+dismissed, and the dashboard pushed the new chat from `onDismiss` — two motions with the list
+flashing between them, and before that, no push at all. Now the Mac answers the create with the
+new session's id *and* the whole refreshed catalogue, the model records which session the draft
+became (`noteDraftStarted`), and `SessionDraftView` fades the drafting screen out over
+`SessionDetailView` where it stands. The path does not change: the draft route keeps its identity
+and `RemoteAppModel.sessionID(for:)` resolves it, so continuity records the chat, a notification
+for it does not stack a second copy, and a row tap is the same no-op it is for the chat already on
+top. Rewriting the path entry to `.session` was rejected because it rebuilds the detail screen and
+shows its loading placeholder for a frame. The fade is the draft's, not the chat's: both live
+surfaces are UIKit-hosted and do not take SwiftUI's opacity ramp, so fading the chat in cut it in
+over a draft still fading. The session's own screen owns the wait: a brand-new session is not yet
+running, so it shows "Resuming on your Mac…" until the agent answers. Tapping a row still goes
+through `MobileSessionNavigationTransition.push`, so a terminal commits its final geometry
+immediately rather than being resized through every intermediate width.
+
+**The draft is one composer, not a form.** Every choice — checkout, agent and account, model,
+effort, speed, permissions, interface — is a chip in the composer's action row under the prompt,
+a `Menu` each, scrolling horizontally in the order they are changed. The ground above holds only
+a glyph and a line, gone once there is a prompt. The composer rides in the bottom safe-area
+inset with SwiftUI's keyboard avoidance, so it sits on the keyboard's top edge and follows the
+interactive dismissal; it is full-bleed with a hairline above it rather than a bordered panel. The
+action row unfolds with the prompt's focus and folds when the keyboard goes, leaving one line —
+the prompt and Start — on the home indicator. Opening a chip's menu does not dismiss the
+keyboard, which is what makes chips inside the composer workable at all. Focus rather than the
+keyboard's frame decides the fold because the two agree whenever it matters and focus is what
+the evidence harness drives; the `editorFrameRestored` assertion holds because the folded shape
+before the keyboard opened is the folded shape after it closed.
 
 **Connected to the Mac and attached to one chat are separate truths.** The dashboard's connected
 state means a route answered and returned the current catalogue; entering a row then opens that

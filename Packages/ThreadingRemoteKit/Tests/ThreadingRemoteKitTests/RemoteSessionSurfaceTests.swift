@@ -32,6 +32,33 @@ final class RemoteSessionSurfaceTests: XCTestCase {
 
         XCTAssertEqual(summary.surface, .conversation)
         XCTAssertNotEqual(summary.surface, .terminal)
+        XCTAssertEqual(summary.state, .idle)
+    }
+
+    func testSessionActivityUsesTypedKnownCasesWithoutChangingTheWire() throws {
+        let known: [RemoteSessionActivity] = [
+            .dormant, .idle, .working, .awaitingUser, .needsAttention, .limitReached,
+        ]
+
+        for state in known {
+            let encoded = try JSONEncoder().encode(state)
+            XCTAssertEqual(String(decoding: encoded, as: UTF8.self), "\"\(state.rawValue)\"")
+            XCTAssertEqual(
+                try JSONDecoder().decode(RemoteSessionActivity.self, from: encoded),
+                state
+            )
+            XCTAssertTrue(state.isKnown)
+        }
+    }
+
+    func testAnUnknownSessionActivitySurvivesVersionSkew() throws {
+        let encoded = Data(#""coordinating""#.utf8)
+        let state = try JSONDecoder().decode(RemoteSessionActivity.self, from: encoded)
+
+        XCTAssertEqual(state, .unknown("coordinating"))
+        XCTAssertEqual(state.rawValue, "coordinating")
+        XCTAssertFalse(state.isKnown)
+        XCTAssertEqual(try JSONEncoder().encode(state), encoded)
     }
 
     /// A newer Mac may show something this build has never heard of. The row has to survive it:
@@ -83,7 +110,7 @@ final class RemoteSessionSurfaceTests: XCTestCase {
             title: "Session",
             agentKind: "claude",
             surface: .terminal,
-            state: "idle",
+            state: .idle,
             projectName: "Project",
             account: RemoteSessionAccountDTO(
                 name: "Vera Lundborg",

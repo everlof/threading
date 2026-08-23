@@ -306,7 +306,7 @@ final class RemoteProtocolTests: XCTestCase {
             share: .init(label: "l", scope: "all", capability: "interact", expiresAt: nil),
             sessions: [RemoteSessionSummaryDTO(
                 id: "s", title: "t", agentKind: "claude", surface: .terminal,
-                state: "idle", projectName: "p", isAvailable: false, lastActiveAt: 123,
+                state: .idle, projectName: "p", isAvailable: false, lastActiveAt: 123,
                 isPinned: true,
                 terminalTheme: terminalTheme,
                 terminalThemeAssignmentID: "ocean",
@@ -433,7 +433,7 @@ final class RemoteProtocolTests: XCTestCase {
             title: "Session",
             agentKind: "codex",
             surface: .conversation,
-            state: "working",
+            state: .working,
             projectName: "Project",
             snoozedAt: start,
             snoozedUntil: deadline,
@@ -590,7 +590,7 @@ final class RemoteProtocolTests: XCTestCase {
                 title: "Changed",
                 agentKind: "codex",
                 surface: .conversation,
-                state: "working",
+                state: .working,
                 projectName: "Threading"
             )
         )

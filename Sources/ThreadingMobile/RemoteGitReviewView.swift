@@ -47,8 +47,7 @@ struct RemoteGitReviewView: View {
     private let allFilesScrollEndID = "git-review-all-files-end"
 
     private var isTurnInFlight: Bool {
-        // localization-ignore: remote activity wire discriminators, not user-facing copy.
-        session.state == "working" || session.state == "awaitingUser"
+        session.state == .working || session.state == .awaitingUser
     }
 
     init(
