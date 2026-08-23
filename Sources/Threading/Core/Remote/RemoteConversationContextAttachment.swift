@@ -5,8 +5,8 @@ extension ConversationContextAttachment {
     var remoteDTO: RemoteConversationContextAttachmentDTO {
         RemoteConversationContextAttachmentDTO(
             id: id.uuidString.lowercased(),
-            kind: kind.rawValue,
-            source: source.rawValue,
+            kind: RemoteConversationContextKind(rawValue: kind.rawValue),
+            source: RemoteConversationContextSource(rawValue: source.rawValue),
             title: title,
             excerpt: excerpt,
             comment: comment,
@@ -18,8 +18,8 @@ extension ConversationContextAttachment {
 
     init?(remoteDTO: RemoteConversationContextAttachmentDTO) {
         guard let id = UUID(uuidString: remoteDTO.id),
-              let kind = Kind(rawValue: remoteDTO.kind),
-              let source = Source(rawValue: remoteDTO.source) else { return nil }
+              let kind = Kind(rawValue: remoteDTO.kind.rawValue),
+              let source = Source(rawValue: remoteDTO.source.rawValue) else { return nil }
         let candidate = ConversationContextAttachment(
             id: id,
             kind: kind,

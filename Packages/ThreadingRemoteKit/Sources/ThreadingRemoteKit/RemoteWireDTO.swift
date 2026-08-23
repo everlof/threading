@@ -829,25 +829,22 @@ public enum RemoteSessionRole: RemoteLosslessStringToken {
 
 /// The `RemoteHostEndpointDTO.kind` vocabulary both products know today.
 ///
-/// These are constants rather than an enum on purpose. `kind` is a `String` on the wire so a
-/// newer Mac can advertise a route an installed phone has never heard of and that phone still
-/// decodes the host instead of failing the whole payload — an enum with a synthesized `Codable`
-/// would take that leniency away. The constants exist so the two products stop spelling the same
-/// words in a dozen places, and so a reader can see the whole vocabulary at once.
+/// Unknown cases remain decodable, so a newer Mac can advertise a route an installed phone has
+/// never heard of without making that phone reject the whole host payload.
 ///
 /// What each one means, and who can see the traffic on it, is the table in
 /// `docs/REMOTE_ACCESS.md` under the security model.
-public enum RemoteHostEndpointKind {
+public enum RemoteHostEndpointKind: RemoteLosslessStringToken {
     /// `127.0.0.1`. Reachable from the Mac itself only, and never advertised to another device.
-    public static let loopback = "loopback"
+    case loopback
     /// A routable address on a network the Mac is attached to, plus its `.local` name.
-    public static let lan = "lan"
+    case lan
     /// The address the Mac holds on a VPN tunnel it did not set up.
-    public static let vpn = "vpn"
+    case vpn
     /// The Mac's tailnet address or `*.ts.net` name.
-    public static let tailscale = "tailscale"
+    case tailscale
     /// A rendezvous route through the hosted service. No address of the Mac's own.
-    public static let hosted = "hosted"
+    case hosted
     /// A public tunnel origin operated by a third party.
     ///
     /// **Legacy vocabulary. No host advertises this any more**, because the Cloudflare Quick
@@ -855,11 +852,12 @@ public enum RemoteHostEndpointKind {
     /// phone remembers, and a third party terminated its TLS. The name stays because an installed
     /// phone has records that carry it and decodes this field against `known`; removing it would
     /// change what those records mean rather than what any host sends.
-    public static let relay = "relay"
+    case relay
+    case unknown(String)
 
     /// Every kind this build understands. A client uses it to notice an unknown kind rather
     /// than to reject one: an endpoint it cannot classify is ignored, not fatal.
-    public static let known: Set<String> = [loopback, lan, vpn, tailscale, hosted, relay]
+    public static let known: Set<Self> = [loopback, lan, vpn, tailscale, hosted, relay]
 
     /// The kinds that reach the Mac over a network the user is already on, whoever runs it.
     ///
@@ -868,7 +866,31 @@ public enum RemoteHostEndpointKind {
     /// addresses on it, and a tailnet address is the Mac's own address too. `hosted` is not here
     /// because it is governed by sign-in rather than by the connection policy, and `relay` is not
     /// here because a third party terminates its TLS.
-    public static let privateNetwork: Set<String> = [lan, vpn, tailscale]
+    public static let privateNetwork: Set<Self> = [lan, vpn, tailscale]
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "loopback": self = .loopback
+        case "lan": self = .lan
+        case "vpn": self = .vpn
+        case "tailscale": self = .tailscale
+        case "hosted": self = .hosted
+        case "relay": self = .relay
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .loopback: return "loopback"
+        case .lan: return "lan"
+        case .vpn: return "vpn"
+        case .tailscale: return "tailscale"
+        case .hosted: return "hosted"
+        case .relay: return "relay"
+        case .unknown(let value): return value
+        }
+    }
 }
 
 /// How a client establishes trust in what an endpoint presents.
@@ -883,9 +905,24 @@ public enum RemoteHostEndpointKind {
 /// Serve endpoint carries a public one, and no phone can be asked to know which host version
 /// meant which. Absent is the safe reading for an old host, which only ever advertised endpoints
 /// terminated by somebody with a real certificate.
-public enum RemoteHostEndpointIdentity {
+public enum RemoteHostEndpointIdentity: RemoteLosslessStringToken {
     /// The Mac's own certificate. The client checks the fingerprint and nothing else.
-    public static let pinned = "pinned"
+    case pinned
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "pinned": self = .pinned
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .pinned: return "pinned"
+        case .unknown(let value): return value
+        }
+    }
 }
 
 /// One currently usable route to the Mac's single authenticated remote-access server.
@@ -895,14 +932,19 @@ public enum RemoteHostEndpointIdentity {
 /// so an older client can ignore a future transport without failing to decode the whole host;
 /// `RemoteHostEndpointKind` names the values this build produces.
 public struct RemoteHostEndpointDTO: Codable, Equatable, Hashable, Sendable {
-    public let kind: String
+    public let kind: RemoteHostEndpointKind
     public let baseURL: URL
     public let isStable: Bool
     /// `RemoteHostEndpointIdentity.pinned`, or absent for public trust. Optional so an older
     /// phone ignores it and an older Mac, which had nothing to pin, keeps meaning what it said.
-    public let identity: String?
+    public let identity: RemoteHostEndpointIdentity?
 
-    public init(kind: String, baseURL: URL, isStable: Bool, identity: String? = nil) {
+    public init(
+        kind: RemoteHostEndpointKind,
+        baseURL: URL,
+        isStable: Bool,
+        identity: RemoteHostEndpointIdentity? = nil
+    ) {
         self.kind = kind
         self.baseURL = baseURL
         self.isStable = isStable
@@ -1296,7 +1338,7 @@ public struct RemoteUsageRangeDTO: Codable, Equatable, Sendable {
 public struct RemoteUsageCoverageDTO: Codable, Equatable, Sendable {
     public let runtimeID: String
     public let runtimeName: String
-    public let state: String
+    public let state: RemoteUsageCoverageState
     public let sourceCount: Int
     public let recordCount: Int
     public let detail: String?
@@ -1304,7 +1346,7 @@ public struct RemoteUsageCoverageDTO: Codable, Equatable, Sendable {
     public init(
         runtimeID: String,
         runtimeName: String,
-        state: String,
+        state: RemoteUsageCoverageState,
         sourceCount: Int,
         recordCount: Int,
         detail: String?
@@ -1809,14 +1851,13 @@ public enum RemoteGitReviewMode: String, Codable, Equatable, CaseIterable, Senda
 }
 
 public struct RemoteGitDiffLineDTO: Codable, Equatable, Sendable {
-    /// `context`, `addition`, or `removal`.
-    public let kind: String
+    public let kind: RemoteDiffLineKind
     public let text: String
     public let oldNumber: Int?
     public let newNumber: Int?
 
     public init(
-        kind: String,
+        kind: RemoteDiffLineKind,
         text: String,
         oldNumber: Int?,
         newNumber: Int?
@@ -1840,8 +1881,7 @@ public struct RemoteGitHunkDTO: Codable, Equatable, Sendable {
 
 public struct RemoteGitFileDiffDTO: Codable, Equatable, Identifiable, Sendable {
     public let path: String
-    /// `modified`, `added`, `deleted`, `untracked`, `renamed`, or `binary`.
-    public let change: String
+    public let change: RemoteGitFileChange
     public let renamedFrom: String?
     public let hunks: [RemoteGitHunkDTO]
     public let added: Int
@@ -1853,7 +1893,7 @@ public struct RemoteGitFileDiffDTO: Codable, Equatable, Identifiable, Sendable {
 
     public init(
         path: String,
-        change: String,
+        change: RemoteGitFileChange,
         renamedFrom: String? = nil,
         hunks: [RemoteGitHunkDTO],
         added: Int,
@@ -1941,26 +1981,23 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let path: String
     public let name: String
-    /// `image`, `pdf`, `html`, `archive`, `document`, `diagram`, or `media`. A string rather
-    /// than an enum on purpose: a phone from before a kind existed still decodes the row and
-    /// falls into its default presentation, instead of refusing the whole list — which is
-    /// exactly what happened when `media` was added, and why nothing here had to change for a
-    /// phone that predates it.
-    public let kind: String
+    /// Lossless so a phone from before a kind existed still decodes the row and falls into its
+    /// default presentation instead of refusing the whole list.
+    public let kind: RemoteAttachmentKind
     public let byteCount: Int64
     public let modifiedAt: Date?
 
     /// `agent` or `user`. Optional because a host from before provenance was recorded sends no
     /// such field, and a phone that guessed would be labelling rows with an answer nobody gave.
-    public let origin: String?
+    public let origin: RemoteAttachmentOrigin?
 
     public init(
         path: String,
         name: String,
-        kind: String,
+        kind: RemoteAttachmentKind,
         byteCount: Int64,
         modifiedAt: Date? = nil,
-        origin: String? = nil,
+        origin: RemoteAttachmentOrigin? = nil,
         id: String? = nil
     ) {
         self.id = id ?? path
@@ -1982,10 +2019,10 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? path
         self.path = path
         name = try container.decode(String.self, forKey: .name)
-        kind = try container.decode(String.self, forKey: .kind)
+        kind = try container.decode(RemoteAttachmentKind.self, forKey: .kind)
         byteCount = try container.decode(Int64.self, forKey: .byteCount)
         modifiedAt = try container.decodeIfPresent(Date.self, forKey: .modifiedAt)
-        origin = try container.decodeIfPresent(String.self, forKey: .origin)
+        origin = try container.decodeIfPresent(RemoteAttachmentOrigin.self, forKey: .origin)
     }
 }
 
@@ -2323,14 +2360,14 @@ public struct RemoteMobileDiagnosticsCaptureDTO: Codable, Equatable, Sendable {
     public let appBuild: String
     public let operatingSystem: String
     public let deviceModel: String
-    public let applicationState: String
-    public let connectionState: String
-    public let activeEndpointKind: String
+    public let applicationState: RemoteMobileApplicationState
+    public let connectionState: RemoteMobileConnectionState
+    public let activeEndpointKind: RemoteHostEndpointKind
     public let pairedHostCount: Int
     public let visibleSessionCount: Int
     public let diagnostics: [RemoteDiagnosticRecord]
     public let screenshotJPEGBase64: String?
-    public let screenshotKind: String?
+    public let screenshotKind: RemoteMobileDiagnosticsScreenshotKind?
 
     public init(
         schemaVersion: Int = Self.currentSchemaVersion,
@@ -2341,14 +2378,14 @@ public struct RemoteMobileDiagnosticsCaptureDTO: Codable, Equatable, Sendable {
         appBuild: String,
         operatingSystem: String,
         deviceModel: String,
-        applicationState: String,
-        connectionState: String,
-        activeEndpointKind: String,
+        applicationState: RemoteMobileApplicationState,
+        connectionState: RemoteMobileConnectionState,
+        activeEndpointKind: RemoteHostEndpointKind,
         pairedHostCount: Int,
         visibleSessionCount: Int,
         diagnostics: [RemoteDiagnosticRecord],
         screenshotJPEGBase64: String?,
-        screenshotKind: String?
+        screenshotKind: RemoteMobileDiagnosticsScreenshotKind?
     ) {
         self.schemaVersion = schemaVersion
         self.captureID = captureID
@@ -2447,8 +2484,8 @@ public struct RemotePresenceDTO: Codable, Equatable, Identifiable, Sendable {
     public let displayName: String
     public let deviceName: String?
     public let surface: RemoteSessionSurface?
-    /// `viewing`, `typing`, or `left`. Older clients may still send `idle`.
-    public let state: String
+    /// Older clients may still send `idle`; newer hosts normalize it to `viewing`.
+    public let state: RemotePresenceState
     public let updatedAt: Double
 
     public var id: String { presenceID ?? memberID }
@@ -2459,7 +2496,7 @@ public struct RemotePresenceDTO: Codable, Equatable, Identifiable, Sendable {
         displayName: String,
         deviceName: String? = nil,
         surface: RemoteSessionSurface? = nil,
-        state: String,
+        state: RemotePresenceState,
         updatedAt: Double = Date().timeIntervalSince1970
     ) {
         self.type = "presence"
@@ -2480,10 +2517,15 @@ public struct RemoteCollaborationParticipantDTO: Codable, Equatable, Identifiabl
 
     public let id: String
     public let displayName: String
-    public let role: String
+    public let role: RemoteCollaborationRole
     public let isOnline: Bool
 
-    public init(id: String, displayName: String, role: String, isOnline: Bool) {
+    public init(
+        id: String,
+        displayName: String,
+        role: RemoteCollaborationRole,
+        isOnline: Bool
+    ) {
         self.id = id
         self.displayName = displayName
         self.role = role
@@ -2573,8 +2615,7 @@ public struct RemoteInputControlResultDTO: Codable, Equatable, Sendable {
 public struct RemoteInputControlEventDTO: Codable, Equatable, Identifiable, Sendable {
     public let type: String
     public let id: String
-    /// `modeChanged`, `handedOff`, `reclaimed`, `requested`, or `released`.
-    public let action: String
+    public let action: RemoteInputControlEventAction
     public let actorID: String
     public let actorDisplayName: String
     public let targetID: String?
@@ -2583,7 +2624,7 @@ public struct RemoteInputControlEventDTO: Codable, Equatable, Identifiable, Send
 
     public init(
         id: String = UUID().uuidString.lowercased(),
-        action: String,
+        action: RemoteInputControlEventAction,
         actorID: String,
         actorDisplayName: String,
         targetID: String? = nil,
@@ -2995,16 +3036,14 @@ public struct RemoteComposerCapabilityDTO: Codable, Equatable, Identifiable, Sen
     public let description: String
     public let argumentHint: String
     public let aliases: [String]
-    /// "command" or "skill".
-    public let kind: String
+    public let kind: RemoteComposerCapabilityKind
     /// `true` lets an unclassified initial Claude row remain discoverable in `/skills` until
     /// the provider publishes authoritative skill membership. Missing means `kind == "skill"`
     /// for compatibility with older peers.
     public let isAvailableInSkillCatalog: Bool?
-    /// "slash" or "dollar".
-    public let trigger: String
-    /// "turn" or "command"; presentation only, execution remains on the Mac.
-    public let presentation: String
+    public let trigger: RemoteComposerCapabilityTrigger
+    /// Presentation only; execution remains on the Mac.
+    public let presentation: RemoteComposerCapabilityPresentation
     public let isEnabled: Bool
     public let unavailableReason: String?
 
@@ -3015,10 +3054,10 @@ public struct RemoteComposerCapabilityDTO: Codable, Equatable, Identifiable, Sen
         description: String,
         argumentHint: String,
         aliases: [String] = [],
-        kind: String,
+        kind: RemoteComposerCapabilityKind,
         isAvailableInSkillCatalog: Bool? = nil,
-        trigger: String,
-        presentation: String,
+        trigger: RemoteComposerCapabilityTrigger,
+        presentation: RemoteComposerCapabilityPresentation,
         isEnabled: Bool = true,
         unavailableReason: String? = nil
     ) {
@@ -3037,11 +3076,11 @@ public struct RemoteComposerCapabilityDTO: Codable, Equatable, Identifiable, Sen
     }
 
     public var invocationText: String {
-        (trigger == "dollar" ? "$" : "/") + name
+        (trigger == .dollar ? "$" : "/") + name
     }
 
     public var canBrowseAsSkill: Bool {
-        isAvailableInSkillCatalog ?? (kind == "skill")
+        isAvailableInSkillCatalog ?? (kind == .skill)
     }
 
     /// The same secondary text every visual and accessibility presentation should announce.
@@ -3056,10 +3095,8 @@ public struct RemoteComposerCapabilityDTO: Codable, Equatable, Identifiable, Sen
 /// Claude and Codex into this vocabulary, so mobile clients do not need either provider parser.
 public struct RemoteConversationContextAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
-    /// "reference" or "comment".
-    public let kind: String
-    /// "message", "code", "attachment", "workspaceFile", or "session".
-    public let source: String
+    public let kind: RemoteConversationContextKind
+    public let source: RemoteConversationContextSource
     public let title: String
     public let excerpt: String?
     public let comment: String?
@@ -3069,8 +3106,8 @@ public struct RemoteConversationContextAttachmentDTO: Codable, Equatable, Identi
 
     public init(
         id: String,
-        kind: String,
-        source: String,
+        kind: RemoteConversationContextKind,
+        source: RemoteConversationContextSource,
         title: String,
         excerpt: String? = nil,
         comment: String? = nil,
@@ -3092,8 +3129,7 @@ public struct RemoteConversationContextAttachmentDTO: Codable, Equatable, Identi
 
 public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
-    /// "user", "assistant", "thinking", "tool", or "notice".
-    public let kind: String
+    public let kind: RemoteConversationRowKind
     public let text: String?
     public let toolName: String?
     public let summary: String?
@@ -3104,7 +3140,7 @@ public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendab
 
     public init(
         id: String,
-        kind: String,
+        kind: RemoteConversationRowKind,
         text: String? = nil,
         toolName: String? = nil,
         summary: String? = nil,
@@ -3253,11 +3289,10 @@ public struct RemoteConversationPageDTO: Codable, Equatable, Sendable {
 /// A line in the edit preview attached to a permission request.
 public struct RemotePermissionDiffLineDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
-    /// "context", "addition", or "removal".
-    public let kind: String
+    public let kind: RemoteDiffLineKind
     public let text: String
 
-    public init(id: String, kind: String, text: String) {
+    public init(id: String, kind: RemoteDiffLineKind, text: String) {
         self.id = id
         self.kind = kind
         self.text = text

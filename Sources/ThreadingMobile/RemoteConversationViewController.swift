@@ -134,7 +134,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }()
 
     private var showsCapabilityCatalog = false
-    private var capabilityKindFilter: String?
+    private var capabilityKindFilter: RemoteComposerCapabilityKind?
     private var preservedSkillArguments: String?
     private var pendingSubmissionID: String?
     private var submissionNotice: String?
@@ -506,7 +506,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         }, for: .touchUpInside)
         requestControlButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            _ = connection.changeInputControl(action: "request")
+            _ = connection.changeInputControl(action: .request)
         }, for: .touchUpInside)
     }
 
@@ -718,13 +718,13 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private func updatePresence() {
         let people = Array(connection.presence.values)
-        let typingNames = uniqueNames(people.filter { $0.state == "typing" })
+        let typingNames = uniqueNames(people.filter { $0.state == .typing })
         let viewingNames = uniqueNames(people)
         let text: String?
         if notifications.typingIndicatorsEnabled, !typingNames.isEmpty {
-            text = presenceText(names: typingNames, action: "typing")
+            text = presenceText(names: typingNames, action: .typing)
         } else if notifications.peoplePresenceEnabled, !viewingNames.isEmpty {
-            text = presenceText(names: viewingNames, action: "viewing")
+            text = presenceText(names: viewingNames, action: .viewing)
         } else {
             text = nil
         }
@@ -754,15 +754,15 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private func inputControlActions(_ state: RemoteInputControlStateDTO) -> [UIAction] {
         var actions: [UIAction] = []
         if state.canManage, state.mode != .collaborative {
-            actions.append(controlAction(title: MobileL10n.string("Collaborative"), action: "collaborative"))
+            actions.append(controlAction(title: MobileL10n.string("Collaborative"), action: .collaborative))
         }
         if state.canManage, !state.canWrite {
-            actions.append(controlAction(title: MobileL10n.string("Reclaim control"), action: "reclaim"))
+            actions.append(controlAction(title: MobileL10n.string("Reclaim control"), action: .reclaim))
         }
         if state.mode == .collaborative, state.canManage {
             actions.append(controlAction(
                 title: MobileL10n.string("Focus on me"),
-                action: "focused",
+                action: .focused,
                 targetID: state.currentParticipantID
             ))
         }
@@ -770,7 +770,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             for participant in state.participants where participant.id != state.controllerID {
                 actions.append(controlAction(
                     title: MobileL10n.string("Hand off to %@", participant.displayName),
-                    action: "handoff",
+                    action: .handoff,
                     targetID: participant.id
                 ))
             }
@@ -778,7 +778,11 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         return actions
     }
 
-    private func controlAction(title: String, action: String, targetID: String? = nil) -> UIAction {
+    private func controlAction(
+        title: String,
+        action: RemoteInputControlAction,
+        targetID: String? = nil
+    ) -> UIAction {
         UIAction(title: title) { [weak self] _ in
             guard let self else { return }
             _ = connection.changeInputControl(action: action, targetID: targetID)
@@ -907,7 +911,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             )
         } else if showsCapabilityCatalog {
             items = connection.composerCapabilities.sorted {
-                if $0.kind != $1.kind { return $0.kind == "command" }
+                if $0.kind != $1.kind { return $0.kind == .command }
                 return $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
                     == .orderedAscending
             }
@@ -915,7 +919,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             return []
         }
         guard let capabilityKindFilter else { return items }
-        return capabilityKindFilter == "skill"
+        return capabilityKindFilter == .skill
             ? items.filter(\.canBrowseAsSkill)
             : items.filter { $0.kind == capabilityKindFilter }
     }
@@ -1070,9 +1074,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         guard let skill = connection.composerCapabilities.first(where: \.canBrowseAsSkill)
         else { return }
         preservedSkillArguments = arguments
-        textView.text = skill.trigger == "dollar" ? "$" : "/"
+        textView.text = skill.trigger == .dollar ? "$" : "/"
         showsCapabilityCatalog = true
-        capabilityKindFilter = "skill"
+        capabilityKindFilter = .skill
         textDidChange()
     }
 
@@ -1236,19 +1240,19 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         return MobileL10n.string("%@ on %@", presence.displayName, deviceName)
     }
 
-    private func presenceText(names: [String], action: String) -> String {
+    private func presenceText(names: [String], action: RemotePresenceState) -> String {
         if names.count == 1 {
-            return action == "typing"
+            return action == .typing
                 ? MobileL10n.string("%@ is typing…", names[0])
                 : MobileL10n.string("%@ is here", names[0])
         }
         if names.count == 2 {
             let joined = names.joined(separator: MobileL10n.string(" and "))
-            return action == "typing"
+            return action == .typing
                 ? MobileL10n.string("%@ are typing…", joined)
                 : MobileL10n.string("%@ are here", joined)
         }
-        return action == "typing"
+        return action == .typing
             ? MobileL10n.string("%lld people are typing…", Int64(names.count))
             : MobileL10n.string("%lld people are here", Int64(names.count))
     }

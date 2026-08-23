@@ -32,10 +32,10 @@ final class MobileConnectionDiagnosticsTests: XCTestCase {
 
     func testTheHistoryKeepsTransitionsRatherThanOneSnapshot() {
         let base = Date(timeIntervalSince1970: 1_000)
-        MobileConnectionStateLog.record("idle", at: base)
-        MobileConnectionStateLog.record("connecting", at: base.addingTimeInterval(2))
-        MobileConnectionStateLog.record("online", at: base.addingTimeInterval(5))
-        MobileConnectionStateLog.record("offline", at: base.addingTimeInterval(9))
+        MobileConnectionStateLog.record(.idle, at: base)
+        MobileConnectionStateLog.record(.connecting, at: base.addingTimeInterval(2))
+        MobileConnectionStateLog.record(.online, at: base.addingTimeInterval(5))
+        MobileConnectionStateLog.record(.offline, at: base.addingTimeInterval(9))
 
         XCTAssertEqual(
             MobileConnectionStateLog.summary(now: base.addingTimeInterval(10)),
@@ -46,7 +46,7 @@ final class MobileConnectionDiagnosticsTests: XCTestCase {
     func testRepeatedStatesDoNotFillTheRing() {
         let base = Date(timeIntervalSince1970: 1_000)
         for offset in 0..<50 {
-            MobileConnectionStateLog.record("connecting", at: base.addingTimeInterval(Double(offset)))
+            MobileConnectionStateLog.record(.connecting, at: base.addingTimeInterval(Double(offset)))
         }
 
         XCTAssertEqual(
@@ -59,7 +59,7 @@ final class MobileConnectionDiagnosticsTests: XCTestCase {
     /// running for a week must not push a longer value into it than one launched a minute ago.
     func testTheRingIsBoundedAndItsValueFitsTheReportField() throws {
         let base = Date(timeIntervalSince1970: 1_000)
-        let states = ["idle", "connecting", "online", "offline"]
+        let states: [RemoteMobileConnectionState] = [.idle, .connecting, .online, .offline]
         for offset in 0..<200 {
             MobileConnectionStateLog.record(
                 states[offset % states.count],
@@ -76,7 +76,7 @@ final class MobileConnectionDiagnosticsTests: XCTestCase {
 
     func testAgesAreClampedSoOneOldEntryCannotWidenTheValue() {
         let base = Date(timeIntervalSince1970: 0)
-        MobileConnectionStateLog.record("idle", at: base)
+        MobileConnectionStateLog.record(.idle, at: base)
 
         XCTAssertEqual(
             MobileConnectionStateLog.summary(now: base.addingTimeInterval(10_000_000)),

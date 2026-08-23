@@ -476,37 +476,37 @@ struct RemoteGitReviewView: View {
             .contains("massive") == true
         let first = RemoteGitFileDiffDTO(
             path: "Sources/ThreadingMobile/RemoteGitReviewView.swift",
-            change: "modified",
+            change: .modified,
             hunks: [
                 RemoteGitHunkDTO(
                     header: "@@ -34,5 +34,8 @@ struct RemoteGitReviewView: View",
                     lines: [
                         .init(
-                            kind: "context",
+                            kind: .context,
                             text: "    @State private var searchText = \"\"",
                             oldNumber: 34,
                             newNumber: 34
                         ),
                         .init(
-                            kind: "removal",
+                            kind: .removal,
                             text: "    @State private var isLoading = false",
                             oldNumber: 35,
                             newNumber: nil
                         ),
                         .init(
-                            kind: "addition",
+                            kind: .addition,
                             text: "    @State private var isLoadingReview = false",
                             oldNumber: nil,
                             newNumber: 35
                         ),
                         .init(
-                            kind: "addition",
+                            kind: .addition,
                             text: "    @State private var isLoadingFiles = false",
                             oldNumber: nil,
                             newNumber: 36
                         ),
                         .init(
-                            kind: "context",
+                            kind: .context,
                             text: "    @State private var errorMessage: String?",
                             oldNumber: 36,
                             newNumber: 37
@@ -519,31 +519,31 @@ struct RemoteGitReviewView: View {
         )
         let second = RemoteGitFileDiffDTO(
             path: "Packages/ThreadingRemoteKit/Sources/ThreadingRemoteKit/RemoteWireDTO.swift",
-            change: "modified",
+            change: .modified,
             hunks: [
                 RemoteGitHunkDTO(
                     header: "@@ -560,2 +560,5 @@",
                     lines: [
                         .init(
-                            kind: "context",
+                            kind: .context,
                             text: "// MARK: - Git review",
                             oldNumber: 560,
                             newNumber: 560
                         ),
                         .init(
-                            kind: "addition",
+                            kind: .addition,
                             text: "public enum RemoteGitReviewMode: String, Codable {",
                             oldNumber: nil,
                             newNumber: 561
                         ),
                         .init(
-                            kind: "addition",
+                            kind: .addition,
                             text: "    case unstaged, staged, branch, lastTurn",
                             oldNumber: nil,
                             newNumber: 562
                         ),
                         .init(
-                            kind: "addition",
+                            kind: .addition,
                             text: "}",
                             oldNumber: nil,
                             newNumber: 563
@@ -635,11 +635,11 @@ private extension RemoteGitFileDiffDTO {
 
     var diffChange: DiffFile.Change {
         switch change {
-        case "added": return .added
-        case "deleted": return .deleted
-        case "untracked": return .untracked
-        case "renamed": return .renamed(from: renamedFrom ?? "")
-        case "binary": return .binary
+        case .added: return .added
+        case .deleted: return .deleted
+        case .untracked: return .untracked
+        case .renamed: return .renamed(from: renamedFrom ?? "")
+        case .binary: return .binary
         default: return .modified
         }
     }
@@ -650,8 +650,8 @@ private extension RemoteGitDiffLineDTO {
         DiffLine(
             kind: {
                 switch kind {
-                case "addition": return .added
-                case "removal": return .removed
+                case .addition: return .added
+                case .removal: return .removed
                 default: return .context
                 }
             }(),

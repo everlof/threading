@@ -70,7 +70,7 @@ enum RemoteAccessDoor: String, CaseIterable, Sendable {
     }
 
     /// The wire vocabulary an address on this door is advertised under.
-    var endpointKind: String {
+    var endpointKind: RemoteHostEndpointKind {
         switch self {
         case .loopback: return RemoteHostEndpointKind.loopback
         case .lan: return RemoteHostEndpointKind.lan

@@ -846,14 +846,17 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
     @discardableResult
-    func changeInputControl(action: String, targetID: String? = nil) -> String? {
+    func changeInputControl(
+        action: RemoteInputControlAction,
+        targetID: String? = nil
+    ) -> String? {
         guard phase == .connected, capability == .interact,
               supportsFocusedInputControl else { return nil }
         let requestID = UUID().uuidString
         do {
             try send(RemoteClientMessage(
                 type: "inputControl",
-                state: action,
+                state: action.rawValue,
                 recipientID: targetID,
                 requestID: requestID
             ))
@@ -930,7 +933,10 @@ final class RemoteSessionConnection: ObservableObject {
         if typing {
             if !isReportingTyping {
                 isReportingTyping = true
-                try? send(RemoteClientMessage(type: "presence", state: "typing"))
+                try? send(RemoteClientMessage(
+                    type: "presence",
+                    state: RemotePresenceUpdate.typing.rawValue
+                ))
             }
             typingIdleTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(2))
@@ -939,22 +945,26 @@ final class RemoteSessionConnection: ObservableObject {
             }
         } else if isReportingTyping {
             isReportingTyping = false
-            try? send(RemoteClientMessage(type: "presence", state: "idle"))
+            try? send(RemoteClientMessage(
+                type: "presence",
+                state: RemotePresenceUpdate.idle.rawValue
+            ))
         }
     }
 
     func decidePermission(_ permission: RemotePermissionRequestDTO, allow: Bool) {
         guard phase == .connected, capability == .interact, permission.canDecide else { return }
+        let decision: RemotePermissionDecision = allow ? .allow : .deny
         do {
             try send(RemoteClientMessage(
                 type: "permission",
                 id: permission.id,
-                decision: allow ? "allow" : "deny"
+                decision: decision.rawValue
             ))
             MobileDiagnostics.record(.permissionDecisionSent, fields: [
                 .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
                 .trace: permission.id,
-                .result: allow ? "allow" : "deny",
+                .result: decision.rawValue,
             ])
         } catch {
             fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
@@ -1331,7 +1341,7 @@ final class RemoteSessionConnection: ObservableObject {
             }
         case "presence":
             if let update = try? JSONDecoder().decode(RemotePresenceDTO.self, from: data) {
-                if update.state == "left" {
+                if update.state == .left {
                     presence[update.id] = nil
                 } else {
                     presence[update.id] = update
@@ -1563,7 +1573,7 @@ final class RemoteSessionConnection: ObservableObject {
     private var destinationFields: [RemoteDiagnosticField: String] {
         [
             .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
-            .transport: PairedRemoteHost.endpointKind(for: client.link.baseURL),
+            .transport: PairedRemoteHost.endpointKind(for: client.link.baseURL).rawValue,
             .origin: MobileDiagnostics.originDigest(client.link.baseURL),
         ]
     }
@@ -1676,7 +1686,7 @@ final class RemoteSessionConnection: ObservableObject {
                 .init(
                     id: RemoteCollaborationParticipantDTO.ownerID,
                     displayName: "David",
-                    role: "owner",
+                    role: .owner,
                     isOnline: true
                 ),
             ],
@@ -1864,7 +1874,7 @@ final class RemoteSessionConnection: ObservableObject {
             displayName: "Anna",
             deviceName: "iPhone",
             surface: .terminal,
-            state: "typing"
+            state: .typing
         )
         let ipad = RemotePresenceDTO(
             presenceID: "terminal-ipad",
@@ -1872,12 +1882,12 @@ final class RemoteSessionConnection: ObservableObject {
             displayName: "David",
             deviceName: "iPad",
             surface: .terminal,
-            state: "viewing"
+            state: .viewing
         )
         connection.presence = [anna.id: anna, ipad.id: ipad]
         connection.attentionRecipients = [
-            .init(id: "member-anna", displayName: "Anna", role: "member", isOnline: true),
-            .init(id: "member-priya", displayName: "Priya", role: "member", isOnline: false),
+            .init(id: "member-anna", displayName: "Anna", role: .member, isOnline: true),
+            .init(id: "member-priya", displayName: "Priya", role: .member, isOnline: false),
         ]
         connection.inputControl = RemoteInputControlStateDTO(
             mode: .focused,
@@ -1888,8 +1898,8 @@ final class RemoteSessionConnection: ObservableObject {
             canManage: true,
             canHandOff: true,
             participants: [
-                .init(id: "owner", displayName: "David", role: "owner", isOnline: true),
-                .init(id: "member-anna", displayName: "Anna", role: "member", isOnline: true),
+                .init(id: "owner", displayName: "David", role: .owner, isOnline: true),
+                .init(id: "member-anna", displayName: "Anna", role: .member, isOnline: true),
             ],
             revision: 2
         )
@@ -1956,24 +1966,24 @@ final class RemoteSessionConnection: ObservableObject {
         let coreRows: [RemoteConversationRowDTO] = [
                 .init(
                     id: "0",
-                    kind: "user",
+                    kind: .user,
                     text: "Review the remote access work, fix what you find, and make the iPhone experience feel native."
                 ),
                 .init(
                     id: "1",
-                    kind: "assistant",
+                    kind: .assistant,
                     text: "I found two concrete issues in the first pass: dormant sessions could not be resumed remotely, and native conversations were being flattened into a terminal-shaped experience."
                 ),
                 .init(
                     id: "2",
-                    kind: "tool",
+                    kind: .tool,
                     toolName: "Bash",
                     summary: "xcodebuild ThreadingMobile",
                     result: "Build Succeeded"
                 ),
                 .init(
                     id: "3",
-                    kind: "assistant",
+                    kind: .assistant,
                     text: """
                     Both are fixed. Initial terminal output is buffered until SwiftTerm mounts:
 
@@ -1992,24 +2002,24 @@ final class RemoteSessionConnection: ObservableObject {
         let contentRows: [RemoteConversationRowDTO] = [
             .init(
                 id: "content-user",
-                kind: "user",
+                kind: .user,
                 text: "Review the keyboard lifecycle, quote the relevant file, and run the focused tests."
             ),
             .init(
                 id: "content-thinking",
-                kind: "thinking",
+                kind: .thinking,
                 text: "I need to trace first-responder ownership and compare the editor frame before and after dismissal."
             ),
             .init(
                 id: "content-tool-success",
-                kind: "tool",
+                kind: .tool,
                 toolName: "Read",
                 summary: "RemoteConversationViewController.swift · 164 lines",
                 result: "Found keyboard frame observation and the composer bottom constraint."
             ),
             .init(
                 id: "content-tool-error",
-                kind: "tool",
+                kind: .tool,
                 toolName: "Bash",
                 summary: "swift test --filter KeyboardLifecycleTests",
                 result: "Exit 1 · editor stayed 291 pt above its baseline",
@@ -2017,12 +2027,12 @@ final class RemoteSessionConnection: ObservableObject {
             ),
             .init(
                 id: "content-notice",
-                kind: "notice",
+                kind: .notice,
                 text: "The connection recovered. Tool output before the reconnect was preserved."
             ),
             .init(
                 id: "content-assistant",
-                kind: "assistant",
+                kind: .assistant,
                 text: """
                 Keyboard lifecycle passed: focus waits for `keyboardDidShow`, dismissal waits for
                 `keyboardDidHide`, and the composer returns to its original visual anchor.
@@ -2032,12 +2042,12 @@ final class RemoteSessionConnection: ObservableObject {
         let richContentRows: [RemoteConversationRowDTO] = [
             .init(
                 id: "rich-user",
-                kind: "user",
+                kind: .user,
                 text: "Show the release result with the structure and code intact."
             ),
             .init(
                 id: "rich-assistant",
-                kind: "assistant",
+                kind: .assistant,
                 text: """
                 ## Release review
 
@@ -2059,29 +2069,29 @@ final class RemoteSessionConnection: ObservableObject {
         let attachmentRows: [RemoteConversationRowDTO] = [
             .init(
                 id: "attachment-user",
-                kind: "user",
+                kind: .user,
                 text: "Compare the visual review with the implementation and keep the linked evidence together.",
                 contextAttachments: [
                     .init(
                         id: "attachment-image",
-                        kind: "reference",
-                        source: "attachment",
+                        kind: .reference,
+                        source: .attachment,
                         title: "keyboard-dismissed.png",
                         excerpt: "1179 × 2556 PNG · 184 KB",
                         locator: "screenshots/keyboard-dismissed.png"
                     ),
                     .init(
                         id: "attachment-pdf",
-                        kind: "reference",
-                        source: "attachment",
+                        kind: .reference,
+                        source: .attachment,
                         title: "threading-ui-review.pdf",
                         excerpt: "12-page review · 843 KB",
                         locator: "artifacts/threading-ui-review.pdf"
                     ),
                     .init(
                         id: "attachment-code",
-                        kind: "comment",
-                        source: "code",
+                        kind: .comment,
+                        source: .code,
                         title: "RemoteConversationViewController.swift",
                         comment: "Keep the composer anchored after keyboard dismissal.",
                         locator: "Sources/ThreadingMobile/RemoteConversationViewController.swift",
@@ -2092,7 +2102,7 @@ final class RemoteSessionConnection: ObservableObject {
             ),
             .init(
                 id: "attachment-assistant",
-                kind: "assistant",
+                kind: .assistant,
                 text: "The image, PDF, and code reference remain attached to the originating prompt, including their provenance and bounded locators."
             ),
         ]
@@ -2110,13 +2120,13 @@ final class RemoteSessionConnection: ObservableObject {
                 case 0:
                     return RemoteConversationRowDTO(
                         id: String(index),
-                        kind: "user",
+                        kind: .user,
                         text: "Remote prompt \(index): verify the deterministic cross-device fixture."
                     )
                 case 1, 5, 9:
                     return RemoteConversationRowDTO(
                         id: String(index),
-                        kind: "tool",
+                        kind: .tool,
                         toolName: index.isMultiple(of: 2) ? "Read" : "Bash",
                         summary: "Sources/Remote/Fixture\(index).swift",
                         result: "Completed deterministic operation \(index)."
@@ -2124,7 +2134,7 @@ final class RemoteSessionConnection: ObservableObject {
                 default:
                     return RemoteConversationRowDTO(
                         id: String(index),
-                        kind: "assistant",
+                        kind: .assistant,
                         text: """
                         ### Cross-device result \(index)
 
@@ -2141,7 +2151,7 @@ final class RemoteSessionConnection: ObservableObject {
             let history = (0..<396).map { index in
                 RemoteConversationRowDTO(
                     id: String(index),
-                    kind: index.isMultiple(of: 7) ? "tool" : "assistant",
+                    kind: index.isMultiple(of: 7) ? .tool : .assistant,
                     text: index.isMultiple(of: 7) ? nil : "Cached fixture message \(index).",
                     toolName: index.isMultiple(of: 7) ? "Read" : nil,
                     summary: index.isMultiple(of: 7) ? "Sources/Feature\(index).swift" : nil,
@@ -2151,12 +2161,12 @@ final class RemoteSessionConnection: ObservableObject {
             rows = history + [
                 .init(
                     id: "396",
-                    kind: "user",
+                    kind: .user,
                     text: "Please review this very long conversation on a compact phone, including dynamic type, code, and a permission request without losing my reading position."
                 ),
                 .init(
                     id: "397",
-                    kind: "assistant",
+                    kind: .assistant,
                     text: """
                     The timeline now keeps only visible cells alive. Markdown is parsed once off \
                     the main actor and cached, while live tokens update one synthetic row.
@@ -2176,14 +2186,14 @@ final class RemoteSessionConnection: ObservableObject {
                 ),
                 .init(
                     id: "398",
-                    kind: "tool",
+                    kind: .tool,
                     toolName: "Bash",
                     summary: "xcodebuild -scheme ThreadingMobile test",
                     result: "Executed the focused performance and protocol fixtures successfully."
                 ),
                 .init(
                     id: "399",
-                    kind: "notice",
+                    kind: .notice,
                     text: "Fixture contains 400 rows; only visible collection cells are mounted."
                 ),
             ]
@@ -2195,7 +2205,7 @@ final class RemoteSessionConnection: ObservableObject {
             rows = (0..<28).map { index in
                 RemoteConversationRowDTO(
                     id: "latest-\(index)",
-                    kind: index.isMultiple(of: 5) ? "user" : "assistant",
+                    kind: index.isMultiple(of: 5) ? .user : .assistant,
                     text: index.isMultiple(of: 5)
                         ? "Checkpoint \(index): keep my reading position while more work arrives."
                         : "Verified checkpoint \(index). The timeline remains virtualized and the latest-message control only appears away from the bottom."
@@ -2207,12 +2217,12 @@ final class RemoteSessionConnection: ObservableObject {
             rows = [
                 .init(
                     id: "stream-user",
-                    kind: "user",
+                    kind: .user,
                     text: "Check the compact layout while the agent is still responding."
                 ),
                 .init(
                     id: "stream-tool",
-                    kind: "tool",
+                    kind: .tool,
                     toolName: "Bash",
                     summary: "xcodebuild -scheme ThreadingMobile build",
                     result: "Build Succeeded"
@@ -2228,9 +2238,9 @@ final class RemoteSessionConnection: ObservableObject {
                 displayName: "Review",
                 description: "Review uncommitted changes",
                 argumentHint: "[instructions]",
-                kind: "command",
-                trigger: "slash",
-                presentation: "turn"
+                kind: .command,
+                trigger: .slash,
+                presentation: .turn
             ),
             RemoteComposerCapabilityDTO(
                 id: "codex.skill:release",
@@ -2238,9 +2248,9 @@ final class RemoteSessionConnection: ObservableObject {
                 displayName: "Release",
                 description: "Prepare and verify a release",
                 argumentHint: "[version]",
-                kind: "skill",
-                trigger: "dollar",
-                presentation: "turn"
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn
             ),
             RemoteComposerCapabilityDTO(
                 id: RemoteComposerCatalog.skillsCommandID,
@@ -2248,9 +2258,9 @@ final class RemoteSessionConnection: ObservableObject {
                 displayName: "Skills",
                 description: "Browse skills available in this conversation",
                 argumentHint: "",
-                kind: "command",
-                trigger: "slash",
-                presentation: "command"
+                kind: .command,
+                trigger: .slash,
+                presentation: .command
             ),
         ]
         connection.composerCapabilities = capabilities
@@ -2291,7 +2301,7 @@ final class RemoteSessionConnection: ObservableObject {
                 displayName: "Anna",
                 deviceName: "Anna’s iPhone",
                 surface: .conversation,
-                state: "typing"
+                state: .typing
             )
             let ipad = RemotePresenceDTO(
                 presenceID: "presence-ipad",
@@ -2299,12 +2309,12 @@ final class RemoteSessionConnection: ObservableObject {
                 displayName: "David’s iPad",
                 deviceName: "David’s iPad",
                 surface: .conversation,
-                state: "viewing"
+                state: .viewing
             )
             connection.presence = [anna.id: anna, ipad.id: ipad]
             connection.attentionRecipients = [
-                .init(id: "member-anna", displayName: "Anna", role: "member", isOnline: true),
-                .init(id: "member-priya", displayName: "Priya", role: "member", isOnline: false),
+                .init(id: "member-anna", displayName: "Anna", role: .member, isOnline: true),
+                .init(id: "member-priya", displayName: "Priya", role: .member, isOnline: false),
             ]
             connection.attentionEvents = [
                 .init(
@@ -2329,17 +2339,17 @@ final class RemoteSessionConnection: ObservableObject {
                 canManage: true,
                 canHandOff: true,
                 participants: [
-                    .init(id: "owner", displayName: "David", role: "owner", isOnline: true),
+                    .init(id: "owner", displayName: "David", role: .owner, isOnline: true),
                     .init(
                         id: "member-anna",
                         displayName: "Anna",
-                        role: "member",
+                        role: .member,
                         isOnline: true
                     ),
                     .init(
                         id: "member-priya",
                         displayName: "Priya",
-                        role: "member",
+                        role: .member,
                         isOnline: false
                     ),
                 ],
@@ -2357,12 +2367,12 @@ final class RemoteSessionConnection: ObservableObject {
             rows: [
                 .init(
                     id: "0",
-                    kind: "user",
+                    kind: .user,
                     text: "Update the connection state without losing the first terminal frame."
                 ),
                 .init(
                     id: "1",
-                    kind: "assistant",
+                    kind: .assistant,
                     text: "I have the fix ready. This edit needs your approval before I apply it."
                 ),
             ],
@@ -2378,12 +2388,12 @@ final class RemoteSessionConnection: ObservableObject {
                     ? "scripts/ui-evidence-ios.sh --only native-conversation --verify-keyboard-lifecycle --report .build/ui-evidence-ios-reports/review/index.html"
                     : "RemoteSessionConnection.swift",
                 diff: usesLongFixture ? [
-                    .init(id: "0", kind: "context", text: "# This command runs deterministic local fixtures only."),
-                    .init(id: "1", kind: "addition", text: "THREADING_UI_EVIDENCE_VERIFY_KEYBOARD=1 scripts/ui-evidence-ios.sh"),
-                    .init(id: "2", kind: "addition", text: "open .build/ui-evidence-ios-reports/latest/report/index.html"),
+                    .init(id: "0", kind: .context, text: "# This command runs deterministic local fixtures only."),
+                    .init(id: "1", kind: .addition, text: "THREADING_UI_EVIDENCE_VERIFY_KEYBOARD=1 scripts/ui-evidence-ios.sh"),
+                    .init(id: "2", kind: .addition, text: "open .build/ui-evidence-ios-reports/latest/report/index.html"),
                 ] : [
-                    .init(id: "0", kind: "removal", text: "onTerminalOutput?(data)"),
-                    .init(id: "1", kind: "addition", text: "pendingTerminalOutput.append(data)"),
+                    .init(id: "0", kind: .removal, text: "onTerminalOutput?(data)"),
+                    .init(id: "1", kind: .addition, text: "pendingTerminalOutput.append(data)"),
                 ]
             )
         ))

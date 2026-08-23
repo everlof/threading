@@ -56,18 +56,18 @@ struct RemoteConversationRowProjection {
         case .userMessage(let message):
             return RemoteConversationRowDTO(
                 id: id,
-                kind: "user",
+                kind: .user,
                 text: message.text,
                 contextAttachments: message.context.map(\.remoteDTO)
             )
         case .assistant(let markdown):
-            return RemoteConversationRowDTO(id: id, kind: "assistant", text: markdown)
+            return RemoteConversationRowDTO(id: id, kind: .assistant, text: markdown)
         case .thinking(let text):
-            return RemoteConversationRowDTO(id: id, kind: "thinking", text: text)
+            return RemoteConversationRowDTO(id: id, kind: .thinking, text: text)
         case .toolCall(let call):
             return RemoteConversationRowDTO(
                 id: id,
-                kind: "tool",
+                kind: .tool,
                 toolName: call.name,
                 summary: call.summary,
                 result: call.result?.text,
@@ -78,7 +78,7 @@ struct RemoteConversationRowProjection {
         case .notice(let text, let kind):
             return RemoteConversationRowDTO(
                 id: id,
-                kind: "notice",
+                kind: .notice,
                 text: text,
                 isError: kind == .error
             )
@@ -90,7 +90,7 @@ struct RemoteConversationRowProjection {
             }
             return RemoteConversationRowDTO(
                 id: id,
-                kind: "notice",
+                kind: .notice,
                 text: text,
                 isError: outcome == .failed
             )
@@ -2224,10 +2224,14 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                         description: capability.description,
                         argumentHint: capability.argumentHint,
                         aliases: capability.aliases,
-                        kind: capability.kind.rawValue,
+                        kind: RemoteComposerCapabilityKind(rawValue: capability.kind.rawValue),
                         isAvailableInSkillCatalog: capability.isAvailableInSkillCatalog,
-                        trigger: capability.trigger.rawValue,
-                        presentation: capability.presentation.rawValue,
+                        trigger: RemoteComposerCapabilityTrigger(
+                            rawValue: capability.trigger.rawValue
+                        ),
+                        presentation: RemoteComposerCapabilityPresentation(
+                            rawValue: capability.presentation.rawValue
+                        ),
                         isEnabled: capability.isEnabled,
                         unavailableReason: capability.unavailableReason
                     )
@@ -2251,7 +2255,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     /// Resolves only the permission card that is currently visible. Queued requests remain
     /// ordered and receive their own fresh id when promoted.
-    func resolveRemotePermission(id: String, decision: String) -> Bool {
+    func resolveRemotePermission(id: String, decision: RemotePermissionDecision) -> Bool {
         activePermissionCard?.resolveRemote(id: id, decision: decision) ?? false
     }
 

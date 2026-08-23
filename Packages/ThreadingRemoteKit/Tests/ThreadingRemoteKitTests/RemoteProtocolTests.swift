@@ -92,11 +92,11 @@ final class RemoteProtocolTests: XCTestCase {
 
     func testHumanAttentionProtocolStaysSeparateFromPromptAndTerminalInput() throws {
         let participants = RemoteCollaborationParticipantsDTO(participants: [
-            .init(id: "member-anna", displayName: "Anna", role: "member", isOnline: false),
+            .init(id: "member-anna", displayName: "Anna", role: .member, isOnline: false),
             .init(
                 id: RemoteCollaborationParticipantDTO.ownerID,
                 displayName: "David’s Mac",
-                role: "owner",
+                role: .owner,
                 isOnline: true
             ),
         ])
@@ -208,7 +208,7 @@ final class RemoteProtocolTests: XCTestCase {
             displayName: "Kalle",
             deviceName: "Kalle’s iPhone",
             surface: .conversation,
-            state: "typing",
+            state: .typing,
             updatedAt: 123
         )
         XCTAssertEqual(
@@ -695,8 +695,8 @@ final class RemoteProtocolTests: XCTestCase {
     func testConversationContextAttachmentsRoundTripAndRemainAdditive() throws {
         let attachment = RemoteConversationContextAttachmentDTO(
             id: "a9143d6f-b539-468d-8cd7-b244cfc50e26",
-            kind: "comment",
-            source: "attachment",
+            kind: .comment,
+            source: .attachment,
             title: "layout.png",
             excerpt: "Image attachment",
             comment: "The spacing above the toolbar feels too large.",
@@ -704,7 +704,7 @@ final class RemoteProtocolTests: XCTestCase {
         )
         let row = RemoteConversationRowDTO(
             id: "7",
-            kind: "user",
+            kind: .user,
             text: "Please address the comment above.",
             contextAttachments: [attachment]
         )
@@ -896,10 +896,10 @@ final class RemoteProtocolTests: XCTestCase {
     func testConversationSnapshotRoundTrips() throws {
         let snapshot = RemoteConversationSnapshotDTO(
             rows: [
-                .init(id: "0", kind: "user", text: "Fix the failing test"),
+                .init(id: "0", kind: .user, text: "Fix the failing test"),
                 .init(
                     id: "1",
-                    kind: "tool",
+                    kind: .tool,
                     toolName: "Bash",
                     summary: "swift test",
                     result: "All tests passed"
@@ -913,8 +913,8 @@ final class RemoteProtocolTests: XCTestCase {
                 summary: "Sources/App.swift",
                 filePath: "Sources/App.swift",
                 diff: [
-                    .init(id: "0", kind: "removal", text: "let old = true"),
-                    .init(id: "1", kind: "addition", text: "let fixed = true"),
+                    .init(id: "0", kind: .removal, text: "let old = true"),
+                    .init(id: "1", kind: .addition, text: "let fixed = true"),
                 ]
             )
         )
@@ -1005,19 +1005,19 @@ final class RemoteProtocolTests: XCTestCase {
             files: [
                 RemoteGitFileDiffDTO(
                     path: "Sources/App.swift",
-                    change: "modified",
+                    change: .modified,
                     hunks: [
                         RemoteGitHunkDTO(
                             header: "@@ -1,2 +1,2 @@",
                             lines: [
                                 RemoteGitDiffLineDTO(
-                                    kind: "removal",
+                                    kind: .removal,
                                     text: "let old = true",
                                     oldNumber: 1,
                                     newNumber: nil
                                 ),
                                 RemoteGitDiffLineDTO(
-                                    kind: "addition",
+                                    kind: .addition,
                                     text: "let new = true",
                                     oldNumber: nil,
                                     newNumber: 1
@@ -1239,7 +1239,7 @@ final class RemoteProtocolTests: XCTestCase {
             RemoteAttachmentDTO(
                 path: "art/final report.pdf",
                 name: "final report.pdf",
-                kind: "pdf",
+                kind: .pdf,
                 byteCount: 4_096,
                 modifiedAt: Date(timeIntervalSince1970: 123),
                 id: "attachment-1"
@@ -1247,7 +1247,7 @@ final class RemoteProtocolTests: XCTestCase {
             RemoteAttachmentDTO(
                 path: "images/result.png",
                 name: "result.png",
-                kind: "image",
+                kind: .image,
                 byteCount: 512
             ),
         ])
@@ -1404,8 +1404,8 @@ final class RemoteProtocolTests: XCTestCase {
             id: "mac-1",
             name: "Studio Mac",
             endpoints: [
-                .init(kind: "tailscale", baseURL: privateURL, isStable: true),
-                .init(kind: "relay", baseURL: relayURL, isStable: true),
+                .init(kind: .tailscale, baseURL: privateURL, isStable: true),
+                .init(kind: .relay, baseURL: relayURL, isStable: true),
             ],
             connectionPolicy: .preferPrivate
         )
@@ -1424,17 +1424,17 @@ final class RemoteProtocolTests: XCTestCase {
 
     func testEndpointSelectionPrefersPrivateAndMigratesToAStableRelay() throws {
         let privateEndpoint = RemoteHostEndpointDTO(
-            kind: "tailscale",
+            kind: .tailscale,
             baseURL: try XCTUnwrap(URL(string: "https://mac.example.ts.net:8443/")),
             isStable: true
         )
         let quickRelay = RemoteHostEndpointDTO(
-            kind: "relay",
+            kind: .relay,
             baseURL: try XCTUnwrap(URL(string: "https://quick.trycloudflare.com/")),
             isStable: false
         )
         let stableRelay = RemoteHostEndpointDTO(
-            kind: "relay",
+            kind: .relay,
             baseURL: try XCTUnwrap(URL(string: "https://threading.example.com/")),
             isStable: true
         )
@@ -1465,12 +1465,12 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(decoded, .privateOnly)
 
         let unsafe = RemoteHostEndpointDTO(
-            kind: "tailscale",
+            kind: .tailscale,
             baseURL: try XCTUnwrap(URL(string: "http://mac.example.ts.net:8443/")),
             isStable: true
         )
         let relay = RemoteHostEndpointDTO(
-            kind: "relay",
+            kind: .relay,
             baseURL: try XCTUnwrap(URL(string: "https://relay.example.com/")),
             isStable: true
         )
@@ -1485,13 +1485,13 @@ final class RemoteProtocolTests: XCTestCase {
             RemoteCollaborationParticipantDTO(
                 id: "owner",
                 displayName: "David",
-                role: "owner",
+                role: .owner,
                 isOnline: true
             ),
             RemoteCollaborationParticipantDTO(
                 id: "member-anna",
                 displayName: "Anna",
-                role: "member",
+                role: .member,
                 isOnline: true
             ),
         ]
@@ -1529,7 +1529,7 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(decoded.data)
 
         let event = RemoteInputControlEventDTO(
-            action: "requested",
+            action: .requested,
             actorID: "member-anna",
             actorDisplayName: "Anna",
             targetID: "owner",

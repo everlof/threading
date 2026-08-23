@@ -59,7 +59,7 @@ final class PermissionRequestViewTests: XCTestCase {
 
         XCTAssertEqual(card.remoteRequest.toolName, "Edit")
         XCTAssertEqual(card.remoteRequest.filePath, "/tmp/App.swift")
-        XCTAssertEqual(card.remoteRequest.diff.map(\.kind), ["removal", "addition"])
+        XCTAssertEqual(card.remoteRequest.diff.map(\.kind), [.removal, .addition])
     }
 
     func testRemoteDecisionMustMatchTheActiveCardAndSettlesOnlyOnce() {
@@ -72,10 +72,9 @@ final class PermissionRequestViewTests: XCTestCase {
         }
         let id = card.remoteRequest.id
 
-        XCTAssertFalse(card.resolveRemote(id: "stale-id", decision: "allow"))
-        XCTAssertFalse(card.resolveRemote(id: id, decision: "always"))
-        XCTAssertTrue(card.resolveRemote(id: id, decision: "allow"))
-        XCTAssertFalse(card.resolveRemote(id: id, decision: "deny"))
+        XCTAssertFalse(card.resolveRemote(id: "stale-id", decision: .allow))
+        XCTAssertTrue(card.resolveRemote(id: id, decision: .allow))
+        XCTAssertFalse(card.resolveRemote(id: id, decision: .deny))
         XCTAssertEqual(decisions, ["allow"])
     }
 
@@ -113,7 +112,7 @@ final class PermissionRequestViewTests: XCTestCase {
         XCTAssertFalse(remote.canDecide)
         XCTAssertEqual(remote.unavailableReason, RemoteConversationWirePolicy.localReviewReason)
         XCTAssertTrue(remote.diff.isEmpty)
-        XCTAssertFalse(card.resolveRemote(id: remote.id, decision: "allow"))
+        XCTAssertFalse(card.resolveRemote(id: remote.id, decision: .allow))
         XCTAssertFalse(card.resolveManager(id: remote.id, decision: .allow))
         XCTAssertEqual(decisionCount, 0)
     }

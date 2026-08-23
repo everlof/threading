@@ -26,7 +26,7 @@ final class MobileDiagnosticsCaptureStoreTests: XCTestCase {
     func testCapturePolicyRejectsInvalidOrOversizedScreenshots() {
         let now = Date()
         XCTAssertFalse(MobileDiagnosticsCaptureStore.accepts(
-            capture(now: now, screenshot: Data("not a jpeg".utf8), screenshotKind: "incident"),
+            capture(now: now, screenshot: Data("not a jpeg".utf8), screenshotKind: .incident),
             now: now
         ))
 
@@ -37,7 +37,7 @@ final class MobileDiagnosticsCaptureStoreTests: XCTestCase {
         ))
         oversized.append(contentsOf: [0xFF, 0xD9])
         XCTAssertFalse(MobileDiagnosticsCaptureStore.accepts(
-            capture(now: now, screenshot: oversized, screenshotKind: "incident"),
+            capture(now: now, screenshot: oversized, screenshotKind: .incident),
             now: now
         ))
     }
@@ -344,10 +344,10 @@ final class MobileDiagnosticsCaptureStoreTests: XCTestCase {
     private func capture(
         now: Date,
         requestID: String = UUID().uuidString.lowercased(),
-        endpointKind: String = RemoteHostEndpointKind.lan,
+        endpointKind: RemoteHostEndpointKind = .lan,
         fields: [String: String] = ["transport": "websocket"],
         screenshot: Data? = nil,
-        screenshotKind: String? = nil
+        screenshotKind: RemoteMobileDiagnosticsScreenshotKind? = nil
     ) -> RemoteMobileDiagnosticsCaptureDTO {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -360,8 +360,8 @@ final class MobileDiagnosticsCaptureStoreTests: XCTestCase {
             appBuild: "1",
             operatingSystem: "iOS Test",
             deviceModel: "iPhone-test",
-            applicationState: "active",
-            connectionState: "online",
+            applicationState: .active,
+            connectionState: .online,
             activeEndpointKind: endpointKind,
             pairedHostCount: 1,
             visibleSessionCount: 2,

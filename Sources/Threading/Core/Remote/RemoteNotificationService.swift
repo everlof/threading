@@ -22,6 +22,30 @@ final class RemoteNotificationService {
         case member(id: String, name: String)
     }
 
+    private enum RequestedRecipient: Equatable {
+        case requester
+        case owner
+        case everyone
+        case memberID(String)
+        case named(String)
+
+        init(_ rawValue: String?) {
+            let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let normalized = trimmed.lowercased()
+            switch normalized {
+            case "", "requester", "me": self = .requester
+            case "owner": self = .owner
+            case "everyone", "all": self = .everyone
+            default:
+                if normalized.hasPrefix("member:") {
+                    self = .memberID(String(normalized.dropFirst("member:".count)))
+                } else {
+                    self = .named(trimmed)
+                }
+            }
+        }
+    }
+
     private struct Subscription {
         let deviceID: String
         let deviceToken: String
@@ -100,15 +124,12 @@ final class RemoteNotificationService {
         sessionID: SessionID,
         recipient rawRecipient: String?
     ) -> Bool {
-        let normalized = rawRecipient?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        switch normalized {
-        case "owner", "everyone", "all":
+        switch RequestedRecipient(rawRecipient) {
+        case .owner, .everyone:
             return true
-        case nil, "", "requester", "me":
+        case .requester:
             return (currentActorBySession[sessionID] ?? .owner) == .owner
-        default:
+        case .memberID, .named:
             return false
         }
     }
@@ -266,14 +287,12 @@ final class RemoteNotificationService {
                 && (destination.kind == .session
                     || $0.authorization.principal == .ownerDevice)
         }
-        let requested = rawRecipient?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = requested?.lowercased()
+        let requestedRecipient = RequestedRecipient(rawRecipient)
 
         let predicate: (Subscription) -> Bool
         let label: String
-        switch normalized {
-        case nil, "", "requester", "me":
+        switch requestedRecipient {
+        case .requester:
             switch currentActorBySession[sessionID] ?? .owner {
             case .owner:
                 predicate = { $0.authorization.principal == .ownerDevice }
@@ -282,24 +301,23 @@ final class RemoteNotificationService {
                 predicate = { $0.authorization.member?.id == id }
                 label = name
             }
-        case "owner":
+        case .owner:
             predicate = { $0.authorization.principal == .ownerDevice }
             label = "the owner"
-        case "everyone", "all":
+        case .everyone:
             predicate = { _ in true }
             label = "everyone in this chat"
-        default:
-            let memberID = normalized.flatMap { normalized in
-                normalized.hasPrefix("member:")
-                    ? String(normalized.dropFirst("member:".count))
-                    : nil
-            }
-            let matches = available.filter {
-                if let memberID {
-                    return $0.authorization.member?.id.lowercased() == memberID
+        case .memberID, .named:
+            let matches = available.filter { subscription in
+                switch requestedRecipient {
+                case .memberID(let memberID):
+                    return subscription.authorization.member?.id.lowercased() == memberID
+                case .named(let name):
+                    return subscription.authorization.member?.displayName
+                        .caseInsensitiveCompare(name) == .orderedSame
+                default:
+                    return false
                 }
-                return $0.authorization.member?.displayName
-                    .caseInsensitiveCompare(requested ?? "") == .orderedSame
             }
             let identities = Set(matches.compactMap { $0.authorization.member?.id })
             guard identities.count == 1, let id = identities.first else {
@@ -310,7 +328,13 @@ final class RemoteNotificationService {
                 return .unavailable(reason: suffix)
             }
             predicate = { $0.authorization.member?.id == id }
-            label = matches.first?.authorization.member?.displayName ?? requested ?? "member"
+            let fallbackLabel: String
+            switch requestedRecipient {
+            case .memberID(let memberID): fallbackLabel = memberID
+            case .named(let name): fallbackLabel = name
+            default: fallbackLabel = "member"
+            }
+            label = matches.first?.authorization.member?.displayName ?? fallbackLabel
         }
 
         let recipients = available.filter(predicate)

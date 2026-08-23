@@ -454,11 +454,11 @@ final class SessionDashboardTests: XCTestCase {
             link: link,
             lastConnectedAt: Date(),
             endpoints: [
-                RemoteHostEndpointDTO(kind: "tailscale", baseURL: tailnet, isStable: true),
-                RemoteHostEndpointDTO(kind: "lan", baseURL: local, isStable: true),
+                RemoteHostEndpointDTO(kind: .tailscale, baseURL: tailnet, isStable: true),
+                RemoteHostEndpointDTO(kind: .lan, baseURL: local, isStable: true),
             ],
             connectionPolicy: .privateOnly,
-            activeEndpointKind: "tailscale",
+            activeEndpointKind: .tailscale,
             pinnedFingerprint: fingerprint.hex
         )
     }

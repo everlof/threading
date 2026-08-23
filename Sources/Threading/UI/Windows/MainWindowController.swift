@@ -1672,7 +1672,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                             details: Self.uncleanExitMessage(escalation: escalation)
                         )
                         let outcome = await submitter.submit(
-                            trigger: "postCrash",
+                            trigger: .postCrash,
                             draft: draft
                         )
                         showCrashReportSubmissionOutcome(outcome)

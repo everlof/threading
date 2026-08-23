@@ -341,7 +341,7 @@ final class RemoteHostDiscovery {
         let diagnosticFields: [RemoteDiagnosticField: String] = [
             .trace: trace,
             .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
-            .transport: RemoteHostEndpointKind.lan,
+            .transport: RemoteHostEndpointKind.lan.rawValue,
             .phase: "discovery.resolve",
             .timeoutMS: MobileDiagnostics.milliseconds(RemoteDiscoveryLimits.resolveTimeout),
         ]

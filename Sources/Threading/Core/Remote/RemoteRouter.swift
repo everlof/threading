@@ -95,33 +95,25 @@ struct RemoteRouter {
 
     /// The session id in `/api/session/<id>/resume`, else nil.
     static func resumeSessionID(forPath path: String) -> String? {
-        let prefix = "/api/session/"
-        let suffix = "/resume"
-        guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
-        let id = path.dropFirst(prefix.count).dropLast(suffix.count)
-        return id.isEmpty || id.contains("/") ? nil : String(id)
+        sessionID(forPath: path, action: .resume)
     }
 
     /// The terminal id in `/api/terminal/<id>/resume`, else nil.
     static func resumeTerminalID(forPath path: String) -> String? {
-        terminalID(forPath: path, action: "resume")
+        terminalID(forPath: path, action: .resume)
     }
 
     static func shareTerminalID(forPath path: String) -> String? {
-        terminalID(forPath: path, action: "share")
+        terminalID(forPath: path, action: .share)
     }
 
     static func unshareTerminalID(forPath path: String) -> String? {
-        terminalID(forPath: path, action: "unshare")
+        terminalID(forPath: path, action: .unshare)
     }
 
     /// The session id in `/api/session/<id>/theme`, else nil.
     static func themeSessionID(forPath path: String) -> String? {
-        let prefix = "/api/session/"
-        let suffix = "/theme"
-        guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
-        let id = path.dropFirst(prefix.count).dropLast(suffix.count)
-        return id.isEmpty || id.contains("/") ? nil : String(id)
+        sessionID(forPath: path, action: .theme)
     }
 
     /// The stable setting identity in `/api/settings/<identity>`, else nil. The identity is
@@ -133,39 +125,39 @@ struct RemoteRouter {
     }
 
     static func renameSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "rename")
+        sessionID(forPath: path, action: .rename)
     }
 
     static func pinnedSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "pinned")
+        sessionID(forPath: path, action: .pinned)
     }
 
     static func archivedSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "archived")
+        sessionID(forPath: path, action: .archived)
     }
 
     static func snoozedSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "snoozed")
+        sessionID(forPath: path, action: .snoozed)
     }
 
     static func surfaceSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "surface")
+        sessionID(forPath: path, action: .surface)
     }
 
     static func accountSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "account")
+        sessionID(forPath: path, action: .account)
     }
 
     static func limitRecoverySessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "limit-recovery")
+        sessionID(forPath: path, action: .limitRecovery)
     }
 
     static func shareSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "share")
+        sessionID(forPath: path, action: .share)
     }
 
     static func unshareSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "unshare")
+        sessionID(forPath: path, action: .unshare)
     }
 
     struct GitReviewRoute: Equatable {
@@ -175,7 +167,7 @@ struct RemoteRouter {
 
     static func gitReviewRoute(forPath path: String) -> GitReviewRoute? {
         let prefix = "/api/session/"
-        let marker = "/git-review/"
+        let marker = "/\(RemoteSessionRouteAction.gitReview.rawValue)/"
         guard path.hasPrefix(prefix),
               let markerRange = path.range(of: marker, options: .backwards) else {
             return nil
@@ -191,39 +183,39 @@ struct RemoteRouter {
     }
 
     static func repositoryFilesSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "repository-files")
+        sessionID(forPath: path, action: .repositoryFiles)
     }
 
     static func repositoryFileSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "repository-file")
+        sessionID(forPath: path, action: .repositoryFile)
     }
 
     static func attachmentsSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "attachments")
+        sessionID(forPath: path, action: .attachments)
     }
 
     static func attachmentSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "attachment")
+        sessionID(forPath: path, action: .attachment)
     }
 
     static func attachmentUploadSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "attachment-upload")
+        sessionID(forPath: path, action: .attachmentUpload)
     }
 
     static func workspaceSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "workspace")
+        sessionID(forPath: path, action: .workspace)
     }
 
     static func browserPreviewSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "browser-preview")
+        sessionID(forPath: path, action: .browserPreview)
     }
 
     static func extensionPanelSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "extension-panel")
+        sessionID(forPath: path, action: .extensionPanel)
     }
 
     static func extensionPanelResourceSessionID(forPath path: String) -> String? {
-        sessionID(forPath: path, action: "extension-panel-resource")
+        sessionID(forPath: path, action: .extensionPanelResource)
     }
 
     static func queryValue(named name: String, in rawPath: String) -> String? {
@@ -236,17 +228,23 @@ struct RemoteRouter {
         return components.queryItems?.first(where: { $0.name == name })?.value
     }
 
-    private static func sessionID(forPath path: String, action: String) -> String? {
+    private static func sessionID(
+        forPath path: String,
+        action: RemoteSessionRouteAction
+    ) -> String? {
         let prefix = "/api/session/"
-        let suffix = "/\(action)"
+        let suffix = "/\(action.rawValue)"
         guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
         let id = path.dropFirst(prefix.count).dropLast(suffix.count)
         return id.isEmpty || id.contains("/") ? nil : String(id)
     }
 
-    private static func terminalID(forPath path: String, action: String) -> String? {
+    private static func terminalID(
+        forPath path: String,
+        action: RemoteTerminalRouteAction
+    ) -> String? {
         let prefix = "/api/terminal/"
-        let suffix = "/\(action)"
+        let suffix = "/\(action.rawValue)"
         guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
         let id = path.dropFirst(prefix.count).dropLast(suffix.count)
         return id.isEmpty || id.contains("/") ? nil : String(id)

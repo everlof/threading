@@ -1716,34 +1716,16 @@ private struct DashboardRowGroup: View {
     }
 }
 
-enum MobileSessionNavigationTransition: Equatable {
-    case standard
-    case immediate
-
-    /// A terminal transition cannot manufacture intermediate widths. Every width becomes a
-    /// SwiftTerm grid, a remote viewport lease, a PTY resize and a full-screen agent repaint.
-    /// Native conversations own width-independent rows and keep the platform transition.
-    static func forSurface(_ surface: RemoteSessionSurface) -> Self {
-        surface == .terminal ? .immediate : .standard
-    }
-
+enum MobileSessionNavigationTransition {
     /// The one way a session's screen is opened by id. A row, a notification and a restored
     /// route land here alike. Pushing the session already on top is a no-op rather than a
     /// second copy — including when the top screen is the draft that started it, which the
-    /// model resolves to the same id.
+    /// model resolves to the same id. Terminal layout stability belongs to its UIKit host, so
+    /// both terminal and Native destinations retain the ordinary system navigation transition.
     @MainActor
     static func push(_ session: RemoteSessionSummaryDTO, onto model: RemoteAppModel) {
         guard model.openSessionID != session.id else { return }
-        switch forSurface(session.surface) {
-        case .standard:
-            model.navigationPath.append(.session(session.id))
-        case .immediate:
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                model.navigationPath.append(.session(session.id))
-            }
-        }
+        model.navigationPath.append(.session(session.id))
     }
 
     /// Starting a chat is navigation, not presentation. The draft is pushed like any other

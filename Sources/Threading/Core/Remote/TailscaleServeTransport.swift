@@ -481,7 +481,7 @@ final class TailscaleServeTransport: RemoteTailnetTransport {
     /// Mac's own tailnet address and MagicDNS name on the sticky port instead, with the pin.
     nonisolated static func origin(fromStatusJSON data: Data) -> URL? {
         guard let status = try? JSONDecoder().decode(TailscaleStatus.self, from: data),
-              status.backendState.lowercased() == "running",
+              status.backendState == .running,
               let name = magicDNSName(status.local?.dnsName) else {
             return nil
         }
@@ -511,15 +511,15 @@ final class TailscaleServeTransport: RemoteTailnetTransport {
         guard let status = try? JSONDecoder().decode(TailscaleStatus.self, from: output) else {
             return .unknown
         }
-        switch status.backendState.lowercased() {
-        case "running":
+        switch status.backendState {
+        case .running:
             return TailscaleHostFacts(
                 state: .running,
                 magicDNSName: magicDNSName(status.local?.dnsName)
             )
-        case "needslogin", "needsmachineauth", "loggedout":
+        case .needsLogin, .needsMachineAuth, .loggedOut:
             return TailscaleHostFacts(state: .signedOut, magicDNSName: nil)
-        case "stopped", "starting", "nomap":
+        case .stopped, .starting, .noMap:
             return TailscaleHostFacts(state: .stopped, magicDNSName: nil)
         default:
             return .unknown
@@ -543,17 +543,17 @@ final class TailscaleServeTransport: RemoteTailnetTransport {
         guard let status = try? JSONDecoder().decode(TailscaleStatus.self, from: data) else {
             return .statusUnavailable
         }
-        switch status.backendState.lowercased() {
-        case "running":
+        switch status.backendState {
+        case .running:
             guard let name = status.local?.dnsName.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ), !name.isEmpty else {
                 return .statusUnavailable
             }
             return nil
-        case "needslogin", "needsmachineauth", "loggedout":
+        case .needsLogin, .needsMachineAuth, .loggedOut:
             return .signedOut
-        case "stopped", "starting", "nomap":
+        case .stopped, .starting, .noMap:
             return .stopped
         default:
             return .statusUnavailable
@@ -654,7 +654,7 @@ private final class CommandOutputCollector: @unchecked Sendable {
 }
 
 private struct TailscaleStatus: Decodable {
-    let backendState: String
+    let backendState: TailscaleBackendState
     let local: Local?
 
     struct Local: Decodable {
@@ -668,6 +668,31 @@ private struct TailscaleStatus: Decodable {
     private enum CodingKeys: String, CodingKey {
         case backendState = "BackendState"
         case local = "Self"
+    }
+}
+
+private enum TailscaleBackendState: Decodable, Equatable {
+    case running
+    case needsLogin
+    case needsMachineAuth
+    case loggedOut
+    case stopped
+    case starting
+    case noMap
+    case unknown(String)
+
+    init(from decoder: Decoder) throws {
+        let rawValue = try decoder.singleValueContainer().decode(String.self)
+        switch rawValue.lowercased() {
+        case "running": self = .running
+        case "needslogin": self = .needsLogin
+        case "needsmachineauth": self = .needsMachineAuth
+        case "loggedout": self = .loggedOut
+        case "stopped": self = .stopped
+        case "starting": self = .starting
+        case "nomap": self = .noMap
+        default: self = .unknown(rawValue)
+        }
     }
 }
 

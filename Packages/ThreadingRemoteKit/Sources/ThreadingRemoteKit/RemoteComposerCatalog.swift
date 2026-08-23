@@ -12,20 +12,20 @@ public enum RemoteComposerCatalog {
 /// wire package makes the iPhone and future web/native clients agree on aliases, case folding,
 /// ordering, and when ordinary prose stops being a command query.
 public struct RemoteComposerCompletionQuery: Equatable, Sendable {
-    public let trigger: String
+    public let trigger: RemoteComposerCapabilityTrigger
     public let fragment: String
 
-    public init(trigger: String, fragment: String) {
+    public init(trigger: RemoteComposerCapabilityTrigger, fragment: String) {
         self.trigger = trigger
         self.fragment = fragment
     }
 
     public static func parse(_ text: String) -> RemoteComposerCompletionQuery? {
         guard let first = text.first else { return nil }
-        let trigger: String
+        let trigger: RemoteComposerCapabilityTrigger
         switch first {
-        case "/": trigger = "slash"
-        case "$": trigger = "dollar"
+        case "/": trigger = .slash
+        case "$": trigger = .dollar
         default: return nil
         }
 
@@ -36,14 +36,14 @@ public struct RemoteComposerCompletionQuery: Equatable, Sendable {
 
     public func suggestions(
         from capabilities: [RemoteComposerCapabilityDTO],
-        matchingKind kind: String? = nil
+        matchingKind kind: RemoteComposerCapabilityKind? = nil
     ) -> [RemoteComposerCapabilityDTO] {
         let needle = folded(fragment)
         let ranked = capabilities
             .filter { capability in
                 guard capability.trigger == trigger else { return false }
                 if let kind {
-                    if kind == "skill" {
+                    if kind == .skill {
                         guard capability.canBrowseAsSkill else { return false }
                     } else {
                         guard capability.kind == kind else { return false }
@@ -69,7 +69,7 @@ public struct RemoteComposerCompletionQuery: Equatable, Sendable {
     }
 
     private func score(_ capability: RemoteComposerCapabilityDTO, needle: String) -> Int {
-        guard !needle.isEmpty else { return capability.kind == "command" ? 0 : 1 }
+        guard !needle.isEmpty else { return capability.kind == .command ? 0 : 1 }
         let name = folded(capability.name)
         if name == needle { return 0 }
         if name.hasPrefix(needle) { return 1 }

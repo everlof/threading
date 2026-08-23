@@ -10,6 +10,14 @@ enum MobileIssueReportTrigger: String {
     case shake
     case diagnostics
     case connectionRecovery
+
+    var publicTrigger: PublicIssueReportTrigger {
+        switch self {
+        case .shake: .shake
+        case .diagnostics: .diagnostics
+        case .connectionRecovery: .connectionRecovery
+        }
+    }
 }
 
 struct MobileIssueReportRequest: Identifiable {
@@ -495,7 +503,7 @@ struct MobileIssueReportView: View {
         let submission = PublicIssueReportSubmissionDTO(
             id: UUID().uuidString.lowercased(),
             createdAt: ISO8601DateFormatter().string(from: Date()),
-            trigger: request.trigger.rawValue,
+            trigger: request.trigger.publicTrigger,
             description: reporterNote.publicReportPrefix(
                 maximumUTF8Bytes: PublicIssueReportPolicy.maximumDescriptionBytes
             ),
@@ -1064,8 +1072,8 @@ extension MobileDiagnostics {
             .lowPowerMode: process.isLowPowerModeEnabled ? "enabled" : "disabled",
             .thermalState: thermalState(process.thermalState),
             .physicalMemoryMB: String(process.physicalMemory / 1_048_576),
-            .applicationState: applicationState(UIApplication.shared.applicationState),
-            .connectionState: connectionState(model.phase),
+            .applicationState: applicationState(UIApplication.shared.applicationState).rawValue,
+            .connectionState: connectionState(model.phase).rawValue,
             .connectionStateHistory: MobileConnectionStateLog.summary() ?? "none",
             .pairedHostCount: String(model.hosts.count),
             .visibleSessionCount: String(model.me?.sessions.count ?? 0),
@@ -1148,21 +1156,23 @@ extension MobileDiagnostics {
         }
     }
 
-    private static func applicationState(_ state: UIApplication.State) -> String {
+    private static func applicationState(
+        _ state: UIApplication.State
+    ) -> RemoteMobileApplicationState {
         switch state {
-        case .active: return "active"
-        case .inactive: return "inactive"
-        case .background: return "background"
-        @unknown default: return "unknown"
+        case .active: return .active
+        case .inactive: return .inactive
+        case .background: return .background
+        @unknown default: return .unknown("unknown")
         }
     }
 
-    static func connectionState(_ phase: RemoteAppModel.Phase) -> String {
+    static func connectionState(_ phase: RemoteAppModel.Phase) -> RemoteMobileConnectionState {
         switch phase {
-        case .idle: return "idle"
-        case .connecting: return "connecting"
-        case .online: return "online"
-        case .offline: return "offline"
+        case .idle: return .idle
+        case .connecting: return .connecting
+        case .online: return .online
+        case .offline: return .offline
         }
     }
 

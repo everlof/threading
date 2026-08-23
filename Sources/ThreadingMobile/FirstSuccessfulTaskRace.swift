@@ -16,8 +16,8 @@ enum PrivateNetworkRouteRacePlan {
     ) -> [[RemoteHostConnectionCandidate]] {
         guard !candidates.isEmpty else { return [] }
 
-        var kindOrder: [String] = []
-        var candidatesByKind: [String: [RemoteHostConnectionCandidate]] = [:]
+        var kindOrder: [RemoteHostEndpointKind] = []
+        var candidatesByKind: [RemoteHostEndpointKind: [RemoteHostConnectionCandidate]] = [:]
         for candidate in candidates {
             if candidatesByKind[candidate.kind] == nil {
                 kindOrder.append(candidate.kind)

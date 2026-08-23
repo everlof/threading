@@ -70,7 +70,7 @@ protocol AgentConversationRuntimeSurface:
     var onAttention: (() -> Void)? { get set }
     var conversationRootProcessIdentifier: pid_t? { get }
 
-    func resolveRemotePermission(id: String, decision: String) -> Bool
+    func resolveRemotePermission(id: String, decision: RemotePermissionDecision) -> Bool
     func resolveManagerPermission(id: String, decision: ControlPermissionDecision) -> Bool
     func terminate(preservingViewport: Bool)
     func removeFromPresentation()
@@ -690,7 +690,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     func resolveRemotePermission(
         sessionID: SessionID,
         id: String,
-        decision: String
+        decision: RemotePermissionDecision
     ) -> Bool {
         conversations[sessionID]?.resolveRemotePermission(id: id, decision: decision) == true
     }
@@ -707,7 +707,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             summary: request.summary,
             filePath: request.filePath,
             diff: request.diff.compactMap { line in
-                guard let kind = ControlPermissionDiffLine.Kind(rawValue: line.kind) else {
+                guard let kind = ControlPermissionDiffLine.Kind(rawValue: line.kind.rawValue) else {
                     return nil
                 }
                 return ControlPermissionDiffLine(kind: kind, text: line.text)

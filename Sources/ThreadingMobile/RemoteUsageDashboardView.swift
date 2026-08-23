@@ -1136,29 +1136,29 @@ struct RemoteUsageDashboardView: View {
         return theme.categorical(index)
     }
 
-    private func coverageSymbol(_ state: String) -> String {
+    private func coverageSymbol(_ state: RemoteUsageCoverageState) -> String {
         switch state {
-        case "complete": return "checkmark.circle.fill"
-        case "partial": return "circle.lefthalf.filled"
-        case "failed": return "xmark.octagon.fill"
+        case .complete: return "checkmark.circle.fill"
+        case .partial: return "circle.lefthalf.filled"
+        case .failed: return "xmark.octagon.fill"
         default: return "questionmark.circle"
         }
     }
 
-    private func coverageTitle(_ state: String) -> String {
+    private func coverageTitle(_ state: RemoteUsageCoverageState) -> String {
         switch state {
-        case "complete": return MobileL10n.string("Complete")
-        case "partial": return MobileL10n.string("Partial")
-        case "failed": return MobileL10n.string("Failed")
+        case .complete: return MobileL10n.string("Complete")
+        case .partial: return MobileL10n.string("Partial")
+        case .failed: return MobileL10n.string("Failed")
         default: return MobileL10n.string("Unavailable")
         }
     }
 
-    private func coverageColor(_ state: String) -> Color {
+    private func coverageColor(_ state: RemoteUsageCoverageState) -> Color {
         switch state {
-        case "complete": return theme.positive
-        case "partial": return theme.warning
-        case "failed": return theme.negative
+        case .complete: return theme.positive
+        case .partial: return theme.warning
+        case .failed: return theme.negative
         default: return theme.secondaryLabel
         }
     }
@@ -1298,7 +1298,7 @@ enum RemoteUsageDemo {
                 .init(
                     runtimeID: "codex",
                     runtimeName: "Codex",
-                    state: "complete",
+                    state: .complete,
                     sourceCount: 2,
                     recordCount: 2_814,
                     detail: nil
@@ -1306,7 +1306,7 @@ enum RemoteUsageDemo {
                 .init(
                     runtimeID: "claude",
                     runtimeName: "Claude Code",
-                    state: "complete",
+                    state: .complete,
                     sourceCount: 1,
                     recordCount: 1_492,
                     detail: nil
@@ -1314,7 +1314,7 @@ enum RemoteUsageDemo {
                 .init(
                     runtimeID: "openCode",
                     runtimeName: "OpenCode",
-                    state: "partial",
+                    state: .partial,
                     sourceCount: 1,
                     recordCount: 186,
                     detail: "Only resumable sessions known to Threading were measured."

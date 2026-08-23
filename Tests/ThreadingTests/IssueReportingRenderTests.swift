@@ -900,7 +900,7 @@ final class IssueReportingRenderTests: XCTestCase {
         return PublicIssueReportSubmissionDTO(
             id: UUID().uuidString.lowercased(),
             createdAt: ISO8601DateFormatter().string(from: Date()),
-            trigger: "manual",
+            trigger: .manual,
             description: "The composer stopped responding.",
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report)
         )

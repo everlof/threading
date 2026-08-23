@@ -146,12 +146,12 @@ final class RemoteAppModel: ObservableObject {
     enum ConnectionProgress: Equatable {
         case preparingRoutes
         case tryingRoute(
-            kind: String,
-            previousKind: String?,
+            kind: RemoteHostEndpointKind,
+            previousKind: RemoteHostEndpointKind?,
             number: Int,
             total: Int
         )
-        case loadingSessions(routeKind: String)
+        case loadingSessions(routeKind: RemoteHostEndpointKind)
         /// One complete bounded route race ended, but automatic recovery is already scheduled.
         /// This is not yet the settled recovery surface: the dashboard keeps the same compact
         /// progress anatomy and says exactly why it is waiting.
@@ -169,7 +169,7 @@ final class RemoteAppModel: ObservableObject {
     /// answers in well under a second, and naming the route that fast reads as a stutter; naming
     /// it *after* something failed is the answer to "what is it doing now".
     struct RouteWalkStatus: Equatable, Sendable {
-        let kind: String
+        let kind: RemoteHostEndpointKind
         let attempt: Int
         let total: Int
         let followsFailure: Bool
@@ -316,18 +316,18 @@ final class RemoteAppModel: ObservableObject {
                 lastConnectedAt: Date(),
                 endpoints: [
                     RemoteHostEndpointDTO(
-                        kind: "tailscale",
+                        kind: .tailscale,
                         baseURL: link.baseURL,
                         isStable: true
                     ),
                     RemoteHostEndpointDTO(
-                        kind: "lan",
+                        kind: .lan,
                         baseURL: URL(string: "https://192.168.1.42:8760/")!,
                         isStable: true
                     ),
                 ],
                 connectionPolicy: .privateOnly,
-                activeEndpointKind: "tailscale"
+                activeEndpointKind: .tailscale
             )
             if demoMode == "sessions-offline" {
                 // A public, deterministic certificate fingerprint gives the recovery fixture the
@@ -349,12 +349,12 @@ final class RemoteAppModel: ObservableObject {
                 link: studioLink,
                 lastConnectedAt: Date().addingTimeInterval(-600),
                 endpoints: [RemoteHostEndpointDTO(
-                    kind: "tailscale",
+                    kind: .tailscale,
                     baseURL: studioLink.baseURL,
                     isStable: true
                 )],
                 connectionPolicy: .privateOnly,
-                activeEndpointKind: "tailscale"
+                activeEndpointKind: .tailscale
             )
             hosts = [host, studio]
             activeHostID = host.id
@@ -517,14 +517,14 @@ final class RemoteAppModel: ObservableObject {
         _ invitationLink: RemoteConnectionLink,
         displayName: String,
         trace: String,
-        transport: String,
+        transport: RemoteHostEndpointKind,
         recordsStart: Bool = true
     ) async throws {
         phase = .connecting
         let startedAt = MobileDiagnostics.monotonicNow()
         let pairingFields: [RemoteDiagnosticField: String] = [
             .trace: trace,
-            .transport: transport,
+            .transport: transport.rawValue,
             .origin: MobileDiagnostics.originDigest(invitationLink.baseURL),
             .phase: "pairing.accept",
             .timeoutMS: MobileDiagnostics.milliseconds(RemoteClient.defaultRequestTimeout),
@@ -712,7 +712,7 @@ final class RemoteAppModel: ObservableObject {
         let startedAt = MobileDiagnostics.monotonicNow()
         let pairingFields: [RemoteDiagnosticField: String] = [
             .trace: trace,
-            .transport: RemoteHostEndpointKind.hosted,
+            .transport: RemoteHostEndpointKind.hosted.rawValue,
             .phase: "pairing.prepare",
             .timeoutMS: MobileDiagnostics.milliseconds(PeerTransportBounds.negotiationTimeout),
         ]
@@ -734,7 +734,7 @@ final class RemoteAppModel: ObservableObject {
                 progress: { phase in
                     MobileDiagnostics.recordConnectivity(.hostRouteProgress, fields: [
                         .trace: trace,
-                        .transport: RemoteHostEndpointKind.hosted,
+                        .transport: RemoteHostEndpointKind.hosted.rawValue,
                         .phase: "pairing.hosted.\(phase.rawValue)",
                         .result: "stage",
                         .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
@@ -1036,7 +1036,7 @@ final class RemoteAppModel: ObservableObject {
             fields: refreshBaseFields.merging([
                 .result: "succeeded",
                 .durationMS: MobileDiagnostics.elapsedMilliseconds(since: refreshStartedAt),
-                .transport: connection.kind,
+                .transport: connection.kind.rawValue,
                 .origin: MobileDiagnostics.originDigest(successfulLink.baseURL),
                 .protocolVersion: String(response.serverProtocol.version),
                 .minimumProtocolVersion: String(response.serverProtocol.minimumSupported),
@@ -1595,7 +1595,7 @@ final class RemoteAppModel: ObservableObject {
         RemoteHostTrust.register(discoveredHost: host, at: resolution.baseURL)
         MobileDiagnostics.recordConnectivity(.hostDiscoveryMatched, fields: [
             .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
-            .transport: RemoteHostEndpointKind.lan,
+            .transport: RemoteHostEndpointKind.lan.rawValue,
             .phase: "resolve",
             .result: "matched",
             .origin: MobileDiagnostics.originDigest(resolution.baseURL),
@@ -1630,7 +1630,7 @@ final class RemoteAppModel: ObservableObject {
         let isHosted: Bool
         /// The product name of the way in this attempt belongs to. Port-walk attempts keep the
         /// same kind, so presentation advances only when the route actually changes.
-        let kind: String
+        let kind: RemoteHostEndpointKind
         /// Which advertised door this attempt belongs to, so the rest of a port walk can be
         /// abandoned once that door has answered. Nil for the hosted route, which is one
         /// rendezvous rather than an address with ports on it.
@@ -1647,7 +1647,7 @@ final class RemoteAppModel: ObservableObject {
         init(
             link: RemoteConnectionLink,
             isHosted: Bool,
-            kind: String,
+            kind: RemoteHostEndpointKind,
             doorID: String?,
             wave: RemoteRouteWave? = nil,
             diagnosticAttempt: Int? = nil,
@@ -1667,7 +1667,7 @@ final class RemoteAppModel: ObservableObject {
         let response: RemoteMeDTO
         let link: RemoteConnectionLink
         let isHosted: Bool
-        let kind: String
+        let kind: RemoteHostEndpointKind
     }
 
     private func fetchMe(
@@ -1898,7 +1898,7 @@ final class RemoteAppModel: ObservableObject {
         guard skipped > 0 else { return }
         var fields: [RemoteDiagnosticField: String] = [
             .trace: trace,
-            .transport: candidate.kind,
+            .transport: candidate.kind.rawValue,
             .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
             .phase: phase,
             .kind: "candidate",
@@ -1922,7 +1922,7 @@ final class RemoteAppModel: ObservableObject {
         let baseFields: [RemoteDiagnosticField: String] = [
             .trace: trace,
             .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
-            .transport: RemoteHostEndpointKind.hosted,
+            .transport: RemoteHostEndpointKind.hosted.rawValue,
             .phase: "prepare",
             .timeoutMS: MobileDiagnostics.milliseconds(PeerTransportBounds.negotiationTimeout),
         ]
@@ -2005,7 +2005,7 @@ final class RemoteAppModel: ObservableObject {
         let startedAt = MobileDiagnostics.monotonicNow()
         var baseFields: [RemoteDiagnosticField: String] = [
             .trace: trace,
-            .transport: candidate.kind,
+            .transport: candidate.kind.rawValue,
             .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
             .phase: "request",
             .kind: candidate.doorID == nil ? "hosted" : "candidate",
@@ -2102,7 +2102,7 @@ final class RemoteAppModel: ObservableObject {
             var routeFields: [RemoteDiagnosticField: String] = [
                 .trace: requestID,
                 .peer: peer,
-                .transport: candidate.kind,
+                .transport: candidate.kind.rawValue,
                 .origin: MobileDiagnostics.originDigest(candidate.link.baseURL),
                 .phase: "mutation.request",
                 .result: "started",
@@ -2129,7 +2129,7 @@ final class RemoteAppModel: ObservableObject {
                 invalidateRefreshes()
                 if let index = hosts.firstIndex(where: { $0.id == hostID }),
                    (candidate.isHosted
-                        ? hosts[index].activeEndpointKind != "hosted"
+                        ? hosts[index].activeEndpointKind != .hosted
                         : hosts[index].link != candidate.link) {
                     hosts[index].merge(
                         identity: nil,
@@ -2214,7 +2214,7 @@ final class RemoteAppModel: ObservableObject {
 
     private func connectionCandidates(
         for host: PairedRemoteHost,
-        routeWillBegin: ((String) -> Void)? = nil,
+        routeWillBegin: ((RemoteHostEndpointKind) -> Void)? = nil,
         trace: String? = nil
     ) async -> (candidates: [ConnectionCandidate], error: Error?) {
         var candidates: [ConnectionCandidate] = []
@@ -2300,7 +2300,7 @@ final class RemoteAppModel: ObservableObject {
         let fields: [RemoteDiagnosticField: String] = [
             .trace: trace,
             .peer: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
-            .transport: PairedRemoteHost.endpointKind(for: successfulLink.baseURL),
+            .transport: PairedRemoteHost.endpointKind(for: successfulLink.baseURL).rawValue,
             .origin: MobileDiagnostics.originDigest(successfulLink.baseURL),
             .phase: "refresh.provisionHosted",
             .timeoutMS: MobileDiagnostics.milliseconds(RemoteClient.defaultRequestTimeout),
@@ -2432,7 +2432,7 @@ final class RemoteAppModel: ObservableObject {
         themeEventsDiagnosticFields = [
             .trace: trace,
             .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
-            .transport: PairedRemoteHost.endpointKind(for: link.baseURL),
+            .transport: PairedRemoteHost.endpointKind(for: link.baseURL).rawValue,
             .origin: MobileDiagnostics.originDigest(link.baseURL),
             .surface: "events",
         ]

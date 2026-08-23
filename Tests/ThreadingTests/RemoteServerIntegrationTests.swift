@@ -216,13 +216,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             RemoteCollaborationParticipantDTO(
                 id: "owner",
                 displayName: "Owner",
-                role: "owner",
+                role: .owner,
                 isOnline: true
             ),
             RemoteCollaborationParticipantDTO(
                 id: "anna",
                 displayName: "Anna",
-                role: "member",
+                role: .member,
                 isOnline: false
             ),
         ]
@@ -404,9 +404,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 displayName: "Status",
                 description: "Show status",
                 argumentHint: "",
-                kind: "command",
-                trigger: "slash",
-                presentation: "command",
+                kind: .command,
+                trigger: .slash,
+                presentation: .command,
                 isEnabled: true
             )],
             permission: nil,
@@ -778,17 +778,17 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 canManage: true,
                 canHandOff: true,
                 participants: [
-                    .init(id: "owner", displayName: "David", role: "owner", isOnline: true),
+                    .init(id: "owner", displayName: "David", role: .owner, isOnline: true),
                     .init(
                         id: "member-anna",
                         displayName: "Anna",
-                        role: "member",
+                        role: .member,
                         isOnline: true
                     ),
                     .init(
                         id: "member-jonas",
                         displayName: "Jonas",
-                        role: "member",
+                        role: .member,
                         isOnline: false
                     ),
                 ],
@@ -2066,9 +2066,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                     displayName: "Release",
                     description: "Private project release workflow",
                     argumentHint: "",
-                    kind: "skill",
-                    trigger: "dollar",
-                    presentation: "turn"
+                    kind: .skill,
+                    trigger: .dollar,
+                    presentation: .turn
                 )]
             ),
             for: viewer
@@ -2249,9 +2249,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 appBuild: "1",
                 operatingSystem: "iOS Test",
                 deviceModel: "iPhone-test",
-                applicationState: "active",
-                connectionState: "online",
-                activeEndpointKind: RemoteHostEndpointKind.lan,
+                applicationState: .active,
+                connectionState: .online,
+                activeEndpointKind: .lan,
                 pairedHostCount: 1,
                 visibleSessionCount: 1,
                 diagnostics: [RemoteDiagnosticRecord(
@@ -2770,8 +2770,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         ))
         let context = RemoteConversationContextAttachmentDTO(
             id: UUID().uuidString,
-            kind: "comment",
-            source: "attachment",
+            kind: .comment,
+            source: .attachment,
             title: "layout.png",
             comment: "Reduce the padding."
         )
@@ -2781,8 +2781,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         ))
         let oversizedContext = RemoteConversationContextAttachmentDTO(
             id: UUID().uuidString,
-            kind: "comment",
-            source: "attachment",
+            kind: .comment,
+            source: .attachment,
             title: "layout.png",
             comment: String(
                 repeating: "c",
@@ -2806,7 +2806,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let rows = (0..<300).map {
             RemoteConversationRowDTO(
                 id: String($0),
-                kind: "assistant",
+                kind: .assistant,
                 text: hostileText
             )
         }
@@ -2818,7 +2818,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let encoded = try JSONEncoder().encode(bounded)
 
         XCTAssertLessThan(encoded.count, RemoteAccessDefaults.outboundHighWaterBytes)
-        XCTAssertEqual(bounded.rows.first?.kind, "notice")
+        XCTAssertEqual(bounded.rows.first?.kind, .notice)
         XCTAssertEqual(bounded.rows.last?.id, "299")
         XCTAssertLessThanOrEqual(
             bounded.streamingText.utf8.count,
@@ -2828,7 +2828,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
     func testConversationInitialWindowAndOlderPageMeetWithoutSyntheticRows() {
         let rows = (0..<220).map {
-            RemoteConversationRowDTO(id: String($0), kind: "assistant", text: "Row \($0)")
+            RemoteConversationRowDTO(id: String($0), kind: .assistant, text: "Row \($0)")
         }
         let complete = RemoteConversationSnapshotDTO(rows: rows, canSend: true)
         let initial = RemoteConversationWirePolicy.initial(complete, revision: 9)
@@ -2842,7 +2842,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(initial.hasEarlier)
         XCTAssertEqual(initial.rows.first?.id, "60")
         XCTAssertEqual(initial.rows.last?.id, "219")
-        XCTAssertFalse(initial.rows.contains(where: { $0.kind == "notice" }))
+        XCTAssertFalse(initial.rows.contains(where: { $0.kind == .notice }))
         XCTAssertEqual(page.rows.first?.id, "0")
         XCTAssertEqual(page.rows.last?.id, "59")
         XCTAssertFalse(page.hasEarlier)
@@ -2851,8 +2851,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     func testConversationDeltaNamesOnlyAppendedAndUpdatedRows() throws {
         let previous = RemoteConversationSnapshotDTO(
             rows: [
-                .init(id: "0", kind: "user", text: "Test"),
-                .init(id: "1", kind: "tool", toolName: "Bash", summary: "swift test"),
+                .init(id: "0", kind: .user, text: "Test"),
+                .init(id: "1", kind: .tool, toolName: "Bash", summary: "swift test"),
             ],
             streamingText: "Run",
             canSend: false
@@ -2862,12 +2862,12 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 previous.rows[0],
                 .init(
                     id: "1",
-                    kind: "tool",
+                    kind: .tool,
                     toolName: "Bash",
                     summary: "swift test",
                     result: "Passed"
                 ),
-                .init(id: "2", kind: "assistant", text: "Done"),
+                .init(id: "2", kind: .assistant, text: "Done"),
             ],
             canSend: true
         )
@@ -2886,7 +2886,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     }
 
     func testConversationMetadataDeltaRequiresStableRowCountAndCarriesNoRows() throws {
-        let rows = [RemoteConversationRowDTO(id: "0", kind: "assistant", text: "Settled")]
+        let rows = [RemoteConversationRowDTO(id: "0", kind: .assistant, text: "Settled")]
         let previous = RemoteConversationSnapshotDTO(
             rows: rows,
             streamingText: "A",
@@ -2955,9 +2955,9 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 description: String(repeating: "d", count: 2_000),
                 argumentHint: "[task]",
                 aliases: ["alias-\(index)"],
-                kind: "skill",
-                trigger: "dollar",
-                presentation: "turn"
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn
             )
         }
         let current = RemoteConversationSnapshotDTO(
@@ -3018,13 +3018,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             case 0:
                 return RemoteConversationRowDTO(
                     id: String(index),
-                    kind: "user",
+                    kind: .user,
                     text: "Remote prompt \(index): continue the cross-device performance run."
                 )
             case 1, 5, 9:
                 return RemoteConversationRowDTO(
                     id: String(index),
-                    kind: "tool",
+                    kind: .tool,
                     toolName: index.isMultiple(of: 2) ? "Read" : "Bash",
                     summary: "Sources/Remote/Fixture\(index).swift",
                     result: "Completed deterministic operation \(index)."
@@ -3032,7 +3032,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             default:
                 return RemoteConversationRowDTO(
                     id: String(index),
-                    kind: "assistant",
+                    kind: .assistant,
                     text: """
                     ### Cross-device result \(index)
 
@@ -3123,7 +3123,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
         let appended = RemoteConversationRowDTO(
             id: String(rowCount),
-            kind: "assistant",
+            kind: .assistant,
             text: "The remote writer appended one more result."
         )
         let advanced = RemoteConversationSnapshotDTO(rows: rows + [appended], canSend: true)
@@ -3612,7 +3612,7 @@ private final class RecordingRemoteRuntimeStatus: RemoteRuntimeStatus {
     func resolveRemotePermission(
         sessionID: SessionID,
         id: String,
-        decision: String
+        decision: RemotePermissionDecision
     ) -> Bool {
         runtime.resolveRemotePermission(sessionID: sessionID, id: id, decision: decision)
     }

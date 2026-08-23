@@ -1242,12 +1242,12 @@ private struct TerminalCollaborationBar: View {
 
     var body: some View {
         let people = Array(connection.presence.values)
-        let typing = uniqueNames(people.filter { $0.state == "typing" })
+        let typing = uniqueNames(people.filter { $0.state == .typing })
         let viewing = uniqueNames(people)
         let label = notifications.typingIndicatorsEnabled && !typing.isEmpty
-            ? label(for: typing, action: "typing")
+            ? label(for: typing, action: .typing)
             : notifications.peoplePresenceEnabled && !viewing.isEmpty
-                ? label(for: viewing, action: "viewing")
+                ? label(for: viewing, action: .viewing)
                 : nil
         if label != nil || canAskForInput {
             HStack(spacing: MobileDesign.Spacing.small) {
@@ -1288,19 +1288,19 @@ private struct TerminalCollaborationBar: View {
         Array(Set(people.map(remotePresenceLabel))).sorted()
     }
 
-    private func label(for names: [String], action: String) -> String {
+    private func label(for names: [String], action: RemotePresenceState) -> String {
         if names.count == 1 {
-            return action == "typing"
+            return action == .typing
                 ? MobileL10n.string("%@ is typing…", names[0])
                 : MobileL10n.string("%@ is here", names[0])
         }
         if names.count == 2 {
             let joined = names.joined(separator: MobileL10n.string(" and "))
-            return action == "typing"
+            return action == .typing
                 ? MobileL10n.string("%@ are typing…", joined)
                 : MobileL10n.string("%@ are here", joined)
         }
-        return action == "typing"
+        return action == .typing
             ? MobileL10n.string("%lld people are typing…", Int64(names.count))
             : MobileL10n.string("%lld people are here", Int64(names.count))
     }
@@ -1655,7 +1655,7 @@ private struct LegacyConversationRemoteView: View {
     @State private var draft = ""
     @State private var keyboardOverlap: CGFloat = 0
     @State private var showsCapabilityCatalog = false
-    @State private var capabilityKindFilter: String?
+    @State private var capabilityKindFilter: RemoteComposerCapabilityKind?
     @State private var preservedSkillArguments: String?
     @State private var pendingSubmissionID: String?
     @State private var submissionNotice: String?
@@ -1775,7 +1775,7 @@ private struct LegacyConversationRemoteView: View {
             )
         } else if showsCapabilityCatalog {
             items = connection.composerCapabilities.sorted {
-                if $0.kind != $1.kind { return $0.kind == "command" }
+                if $0.kind != $1.kind { return $0.kind == .command }
                 return $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
                     == .orderedAscending
             }
@@ -1783,7 +1783,7 @@ private struct LegacyConversationRemoteView: View {
             return []
         }
         guard let capabilityKindFilter else { return items }
-        if capabilityKindFilter == "skill" {
+        if capabilityKindFilter == .skill {
             return items.filter(\.canBrowseAsSkill)
         }
         return items.filter { $0.kind == capabilityKindFilter }
@@ -1842,18 +1842,18 @@ private struct LegacyConversationRemoteView: View {
         guard let skill = connection.composerCapabilities.first(where: \.canBrowseAsSkill)
         else { return }
         preservedSkillArguments = arguments
-        draft = skill.trigger == "dollar" ? "$" : "/"
+        draft = skill.trigger == .dollar ? "$" : "/"
         showsCapabilityCatalog = true
-        capabilityKindFilter = "skill"
+        capabilityKindFilter = .skill
     }
 
     @ViewBuilder
     private var presenceBanner: some View {
         let people = Array(connection.presence.values)
-        let typingNames = uniqueNames(people.filter { $0.state == "typing" })
+        let typingNames = uniqueNames(people.filter { $0.state == .typing })
         let viewingNames = uniqueNames(people)
         if notifications.typingIndicatorsEnabled, !typingNames.isEmpty {
-            let label = presenceLabel(names: typingNames, action: "typing")
+            let label = presenceLabel(names: typingNames, action: .typing)
             Text(label)
                 .font(.caption)
                 .foregroundStyle(theme.secondaryLabel)
@@ -1864,7 +1864,7 @@ private struct LegacyConversationRemoteView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel(label.replacingOccurrences(of: "…", with: ""))
         } else if notifications.peoplePresenceEnabled, !viewingNames.isEmpty {
-            let label = presenceLabel(names: viewingNames, action: "viewing")
+            let label = presenceLabel(names: viewingNames, action: .viewing)
             Text(label)
                 .font(.caption)
                 .foregroundStyle(theme.secondaryLabel)
@@ -1942,19 +1942,19 @@ private struct LegacyConversationRemoteView: View {
         )
     }
 
-    private func presenceLabel(names: [String], action: String) -> String {
+    private func presenceLabel(names: [String], action: RemotePresenceState) -> String {
         if names.count == 1 {
-            return action == "typing"
+            return action == .typing
                 ? MobileL10n.string("%@ is typing…", names[0])
                 : MobileL10n.string("%@ is here", names[0])
         }
         if names.count == 2 {
             let joined = names.joined(separator: MobileL10n.string(" and "))
-            return action == "typing"
+            return action == .typing
                 ? MobileL10n.string("%@ are typing…", joined)
                 : MobileL10n.string("%@ are here", joined)
         }
-        return action == "typing"
+        return action == .typing
             ? MobileL10n.string("%lld people are typing…", Int64(names.count))
             : MobileL10n.string("%lld people are here", Int64(names.count))
     }
@@ -2164,7 +2164,7 @@ private struct InputControlBar: View {
 
                     if state.mode == .focused, !state.canWrite, !state.canManage {
                         Button(MobileL10n.string("Request control")) {
-                            send(action: "request")
+                            send(action: .request)
                         }
                         .buttonStyle(.borderless)
                         .font(.caption.weight(.semibold))
@@ -2175,18 +2175,18 @@ private struct InputControlBar: View {
                         Menu {
                             if state.canManage, state.mode != .collaborative {
                                 Button(MobileL10n.string("Collaborative")) {
-                                    send(action: "collaborative")
+                                    send(action: .collaborative)
                                 }
                             }
                             if state.canManage, !state.canWrite {
                                 Button(MobileL10n.string("Reclaim control")) {
-                                    send(action: "reclaim")
+                                    send(action: .reclaim)
                                 }
                             }
                             if state.mode == .collaborative, state.canManage {
                                 Button(MobileL10n.string("Focus on me")) {
                                     send(
-                                        action: "focused",
+                                        action: .focused,
                                         targetID: state.currentParticipantID
                                     )
                                 }
@@ -2201,7 +2201,7 @@ private struct InputControlBar: View {
                                         MobileL10n.string("Hand off to %@", participant.displayName)
                                     ) {
                                         send(
-                                            action: "handoff",
+                                            action: .handoff,
                                             targetID: participant.id
                                         )
                                     }
@@ -2255,7 +2255,7 @@ private struct InputControlBar: View {
         }
     }
 
-    private func send(action: String, targetID: String? = nil) {
+    private func send(action: RemoteInputControlAction, targetID: String? = nil) {
         resultNotice = nil
         pendingRequestID = connection.changeInputControl(
             action: action,
@@ -2483,7 +2483,7 @@ private struct ConversationCapabilityList: View {
                                     }
                                     Spacer(minLength: MobileDesign.Spacing.small)
                                     // localization-ignore: `skill` is a wire enum discriminator.
-                                    Text(item.kind == "skill"
+                                    Text(item.kind == .skill
                                         ? MobileL10n.string("Skill")
                                         : MobileL10n.string("Command"))
                                         .font(.caption2.weight(.medium))

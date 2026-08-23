@@ -238,20 +238,20 @@ extension RemoteAppModel {
               activeHost?.activeEndpointKind == RemoteHostEndpointKind.lan,
               let client else { return }
 
-        let screenshot: (Data, String)?
+        let screenshot: (Data, RemoteMobileDiagnosticsScreenshotKind)?
         switch request.screenshotPolicy {
         case .none:
             screenshot = nil
         case .latestIncident:
             screenshot = MobileDiagnosticsIncidentRecorder.shared.latestJPEG().map {
-                ($0, "incident")
+                ($0, .incident)
             }
         case .current:
             screenshot = MobileScreenCapture.currentScreen()?
                 .mobileDiagnosticsJPEG(
                     maximumBytes: MobileDiagnosticsIncidentRecorder.maximumImageBytes
                 )
-                .map { ($0, "current") }
+                .map { ($0, .current) }
         }
 
         let records = Array(MobileDiagnostics.journal.records().suffix(
@@ -271,7 +271,7 @@ extension RemoteAppModel {
                 UIApplication.shared.applicationState
             ),
             connectionState: MobileDiagnostics.connectionState(phase),
-            activeEndpointKind: RemoteHostEndpointKind.lan,
+            activeEndpointKind: .lan,
             pairedHostCount: min(hosts.count, 64),
             visibleSessionCount: min(me?.sessions.count ?? 0, 10_000),
             diagnostics: records,
@@ -290,17 +290,22 @@ extension RemoteAppModel {
     }
 
     private func sendMobileDiagnosticsSignal(type: String, on task: URLSessionWebSocketTask) {
-        let message = RemoteClientMessage(type: type, state: RemoteHostEndpointKind.lan)
+        let message = RemoteClientMessage(
+            type: type,
+            state: RemoteHostEndpointKind.lan.rawValue
+        )
         guard let data = try? JSONEncoder().encode(message) else { return }
         task.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
     }
 
-    private static func mobileDiagnosticsApplicationState(_ state: UIApplication.State) -> String {
+    private static func mobileDiagnosticsApplicationState(
+        _ state: UIApplication.State
+    ) -> RemoteMobileApplicationState {
         switch state {
-        case .active: return "active"
-        case .inactive: return "inactive"
-        case .background: return "background"
-        @unknown default: return "unknown"
+        case .active: return .active
+        case .inactive: return .inactive
+        case .background: return .background
+        @unknown default: return .unknown("unknown")
         }
     }
 

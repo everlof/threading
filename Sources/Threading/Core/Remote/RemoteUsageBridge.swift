@@ -32,7 +32,7 @@ enum RemoteUsageBridge {
                 RemoteUsageCoverageDTO(
                     runtimeID: $0.runtimeID,
                     runtimeName: $0.runtimeName,
-                    state: $0.state.rawValue,
+                    state: RemoteUsageCoverageState(rawValue: $0.state.rawValue),
                     sourceCount: $0.sourceCount,
                     recordCount: $0.recordCount,
                     detail: $0.detail

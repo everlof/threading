@@ -89,12 +89,17 @@ enum ShareChatStage {
     case chooseRole
     case link(SharedSessionLink)
 
+    enum Identity: Hashable {
+        case chooseRole
+        case link
+    }
+
     /// A stable name for the stage, so the sheet can crossfade between two of them without
     /// comparing the invitation inside one.
-    var identity: String {
+    var identity: Identity {
         switch self {
-        case .chooseRole: return "role"
-        case .link: return "link"
+        case .chooseRole: return .chooseRole
+        case .link: return .link
         }
     }
 

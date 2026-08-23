@@ -121,7 +121,7 @@ struct MacIssueReportSubmitter {
     }
 
     func submit(
-        trigger: String,
+        trigger: PublicIssueReportTrigger,
         draft: DeveloperIssueReportDraft,
         screenshot: NSImage? = nil
     ) async -> DeveloperIssueReportSubmission {
@@ -133,7 +133,7 @@ struct MacIssueReportSubmitter {
         }
 
         MacRemoteDiagnostics.record(.issueReportSubmissionStarted, fields: [
-            .reason: trigger,
+            .reason: trigger.rawValue,
             .surface: "developerInbox",
         ])
 
@@ -158,7 +158,7 @@ struct MacIssueReportSubmitter {
             // configuration can never make true.
             guard await outbox.isDeliveryConfigured else {
                 MacRemoteDiagnostics.record(.issueReportSubmissionDeferred, fields: [
-                    .reason: trigger,
+                    .reason: trigger.rawValue,
                     .result: "saved",
                     .surface: "developerInbox",
                 ])
@@ -182,7 +182,7 @@ struct MacIssueReportSubmitter {
             switch try await outbox.enqueueAndDeliver(submission) {
             case .delivered(let receipt):
                 MacRemoteDiagnostics.record(.issueReportSubmissionSucceeded, fields: [
-                    .reason: trigger,
+                    .reason: trigger.rawValue,
                     .result: "delivered",
                     .surface: "developerInbox",
                 ])
@@ -192,7 +192,7 @@ struct MacIssueReportSubmitter {
                     .issueReportSubmissionDeferred,
                     level: .warning,
                     fields: [
-                        .reason: trigger,
+                        .reason: trigger.rawValue,
                         .result: "queued",
                         .surface: "developerInbox",
                     ]
@@ -200,7 +200,7 @@ struct MacIssueReportSubmitter {
                 return .queued
             case .saved(let records):
                 MacRemoteDiagnostics.record(.issueReportSubmissionDeferred, fields: [
-                    .reason: trigger,
+                    .reason: trigger.rawValue,
                     .result: "saved",
                     .surface: "developerInbox",
                 ])
@@ -211,7 +211,7 @@ struct MacIssueReportSubmitter {
                 .issueReportSubmissionFailed,
                 level: .error,
                 fields: [
-                    .reason: trigger,
+                    .reason: trigger.rawValue,
                     .result: "failed",
                     .surface: "developerInbox",
                 ]

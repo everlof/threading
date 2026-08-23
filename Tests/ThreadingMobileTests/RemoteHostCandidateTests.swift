@@ -902,7 +902,7 @@ final class RemoteHostCandidateTests: XCTestCase {
             endpoint(.tailscale, "https://mac.tail1234.ts.net:8760/"),
         ], policy: .privateOnly)
         let candidates = connectionCandidates(host)
-        var attempted: [String] = []
+        var attempted: [RemoteHostEndpointKind] = []
 
         _ = try? await RemoteAppModel.walk(
             candidates,
@@ -1047,7 +1047,7 @@ final class RemoteHostCandidateTests: XCTestCase {
         return urls.compactMap { string in
             guard let url = URL(string: string),
                   let link = RemoteConnectionLink(baseURL: url, token: bearer) else { return nil }
-            let kind: String
+            let kind: RemoteHostEndpointKind
             switch url.host {
             case "100.83.41.7", incidentTailnetName: kind = RemoteHostEndpointKind.tailscale
             case "vpn-mac.internal": kind = RemoteHostEndpointKind.vpn
@@ -1140,7 +1140,7 @@ final class RemoteHostCandidateTests: XCTestCase {
     private enum Kind {
         case lan, vpn, tailscale, relay
 
-        var wireValue: String {
+        var wireValue: RemoteHostEndpointKind {
             switch self {
             case .lan: return RemoteHostEndpointKind.lan
             case .vpn: return RemoteHostEndpointKind.vpn

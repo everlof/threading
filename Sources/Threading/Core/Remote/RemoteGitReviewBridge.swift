@@ -202,26 +202,26 @@ enum RemoteGitReviewBridge {
             ))
         }
 
-        let change: String
+        let change: RemoteGitFileChange
         let renamedFrom: String?
         switch file.change {
         case .modified:
-            change = "modified"
+            change = .modified
             renamedFrom = nil
         case .added:
-            change = "added"
+            change = .added
             renamedFrom = nil
         case .deleted:
-            change = "deleted"
+            change = .deleted
             renamedFrom = nil
         case .untracked:
-            change = "untracked"
+            change = .untracked
             renamedFrom = nil
         case .renamed(let source):
-            change = "renamed"
+            change = .renamed
             renamedFrom = source
         case .binary:
-            change = "binary"
+            change = .binary
             renamedFrom = nil
         }
 
@@ -237,11 +237,11 @@ enum RemoteGitReviewBridge {
     }
 
     private static func project(_ line: GitDiffLine) -> RemoteGitDiffLineDTO {
-        let kind: String
+        let kind: RemoteDiffLineKind
         switch line.kind {
-        case .context: kind = "context"
-        case .added: kind = "addition"
-        case .removed: kind = "removal"
+        case .context: kind = .context
+        case .added: kind = .addition
+        case .removed: kind = .removal
         }
 
         let cap = GitReviewDefaults.lineCharacterCap

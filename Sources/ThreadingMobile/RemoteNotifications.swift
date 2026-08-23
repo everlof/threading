@@ -1198,7 +1198,7 @@ final class RemoteNotificationManager: ObservableObject {
             let fields: [RemoteDiagnosticField: String] = [
                 .trace: requestID,
                 .peer: peer,
-                .transport: PairedRemoteHost.endpointKind(for: link.baseURL),
+                .transport: PairedRemoteHost.endpointKind(for: link.baseURL).rawValue,
                 .origin: MobileDiagnostics.originDigest(link.baseURL),
                 .phase: "notificationRegistration.request",
                 .timeoutMS: MobileDiagnostics.milliseconds(timeout),

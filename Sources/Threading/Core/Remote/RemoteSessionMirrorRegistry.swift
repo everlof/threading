@@ -998,7 +998,7 @@ final class RemoteSessionMirrorRegistry {
         guard let sessionID = sessionByConnection.removeValue(forKey: key) else { return }
         let departingParticipantID = connection.authenticatedPeer?.authorization
             .collaborationParticipantID
-        broadcastPresence("left", from: connection, sessionID: sessionID)
+        broadcastPresence(.left, from: connection, sessionID: sessionID)
         releaseViewport(for: connection, target: .session(sessionID))
         mirrors[sessionID]?.subscribers.removeValue(forKey: key)
         presenceIDs[key] = nil
@@ -1652,7 +1652,7 @@ final class RemoteSessionMirrorRegistry {
             let controllerID = current.controllerID
             let controllerName = participants.first(where: { $0.id == controllerID })?.displayName
             broadcastInputControlEvent(RemoteInputControlEventDTO(
-                action: "requested",
+                action: .requested,
                 actorID: actorID,
                 actorDisplayName: actorDisplayName,
                 targetID: controllerID,
@@ -1669,12 +1669,12 @@ final class RemoteSessionMirrorRegistry {
         focusedControllerReleaseTasks[sessionID]?.cancel()
         focusedControllerReleaseTasks[sessionID] = nil
 
-        let eventAction: String
+        let eventAction: RemoteInputControlEventAction
         switch action {
-        case .collaborative, .focused: eventAction = "modeChanged"
-        case .handoff: eventAction = "handedOff"
-        case .reclaim: eventAction = "reclaimed"
-        case .request: eventAction = "requested"
+        case .collaborative, .focused: eventAction = .modeChanged
+        case .handoff: eventAction = .handedOff
+        case .reclaim: eventAction = .reclaimed
+        case .request: eventAction = .requested
         }
         broadcastInputControlEvent(RemoteInputControlEventDTO(
             action: eventAction,
@@ -1744,7 +1744,7 @@ final class RemoteSessionMirrorRegistry {
         var participants = [RemoteCollaborationParticipantDTO(
             id: RemoteCollaborationParticipantDTO.ownerID,
             displayName: RemoteHostIdentity.current.name,
-            role: "owner",
+            role: .owner,
             isOnline: true
         )]
         var membersByID = Dictionary(uniqueKeysWithValues:
@@ -1755,7 +1755,7 @@ final class RemoteSessionMirrorRegistry {
                     (member.id, RemoteCollaborationParticipantDTO(
                         id: member.id,
                         displayName: member.displayName,
-                        role: "member",
+                        role: .member,
                         isOnline: subscribers.contains {
                             $0.authenticatedPeer?.authorization.member?.id == member.id
                         }
@@ -1772,13 +1772,13 @@ final class RemoteSessionMirrorRegistry {
             membersByID[member.id] = RemoteCollaborationParticipantDTO(
                 id: member.id,
                 displayName: member.displayName,
-                role: "member",
+                role: .member,
                 isOnline: true
             )
         }
         participants.append(contentsOf: membersByID.values)
         return participants.sorted {
-            if $0.role != $1.role { return $0.role == "owner" }
+            if $0.role != $1.role { return $0.role == .owner }
             return $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
                 == .orderedAscending
         }
@@ -1878,7 +1878,7 @@ final class RemoteSessionMirrorRegistry {
             released.revision &+= 1
             self.inputControls[sessionID] = released
             self.broadcastInputControlEvent(RemoteInputControlEventDTO(
-                action: "released",
+                action: .released,
                 actorID: RemoteCollaborationParticipantDTO.ownerID,
                 actorDisplayName: RemoteHostIdentity.current.name,
                 targetID: RemoteCollaborationParticipantDTO.ownerID,
@@ -1894,16 +1894,19 @@ final class RemoteSessionMirrorRegistry {
     }
 
     func updatePresence(
-        _ state: String,
+        _ state: RemotePresenceUpdate,
         from connection: RemoteConnection,
         sessionID: SessionID
     ) {
-        guard state == "typing" || state == "idle",
-              mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
+        guard mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
               connection.authenticatedPeer?.authorization.capability == .interact else {
             return
         }
-        broadcastPresence(state, from: connection, sessionID: sessionID)
+        broadcastPresence(
+            state == .typing ? .typing : .viewing,
+            from: connection,
+            sessionID: sessionID
+        )
     }
 
     /// Sends a human-only attention request. This method has no reference to either prompt
@@ -2007,7 +2010,7 @@ final class RemoteSessionMirrorRegistry {
         }
         EventLog.shared.record(.remote, "Collaboration attention requested", [
             "session": sessionID.uuidString,
-            "recipient": recipient.role,
+            "recipient": recipient.role.rawValue,
             "live": String(liveRecipients),
             "registered": String(optedInDevices),
         ])
@@ -2714,7 +2717,7 @@ final class RemoteSessionMirrorRegistry {
     }
 
     private func broadcastPresence(
-        _ state: String,
+        _ state: RemotePresenceState,
         from connection: RemoteConnection,
         sessionID: SessionID
     ) {
@@ -2725,19 +2728,18 @@ final class RemoteSessionMirrorRegistry {
         // piece of live state the sharing pane can show that a list of names cannot.
         let key = ObjectIdentifier(connection)
         let wasTyping = typingConnections[sessionID]?.contains(key) ?? false
-        if state == "typing" {
+        if state == .typing {
             typingConnections[sessionID, default: []].insert(key)
         } else {
             typingConnections[sessionID]?.remove(key)
         }
-        if wasTyping != (state == "typing") { followersChanged(sessionID) }
+        if wasTyping != (state == .typing) { followersChanged(sessionID) }
 
-        let normalizedState = state == "idle" ? "viewing" : state
         let message = encode(presenceUpdate(
             for: connection,
             key: key,
             surface: mirror.surface,
-            state: normalizedState
+            state: state
         ))
         let source = ObjectIdentifier(connection)
         for (key, subscriber) in mirror.subscribers where key != source {
@@ -2756,7 +2758,7 @@ final class RemoteSessionMirrorRegistry {
             for: connection,
             key: source,
             surface: mirror.surface,
-            state: "viewing"
+            state: .viewing
         ))
         let typing = typingConnections[sessionID] ?? []
         for (key, subscriber) in mirror.subscribers where key != source {
@@ -2764,7 +2766,7 @@ final class RemoteSessionMirrorRegistry {
                 for: subscriber,
                 key: key,
                 surface: mirror.surface,
-                state: typing.contains(key) ? "typing" : "viewing"
+                state: typing.contains(key) ? .typing : .viewing
             )))
             subscriber.sendText(newcomer)
         }
@@ -2794,7 +2796,7 @@ final class RemoteSessionMirrorRegistry {
             participants.append(RemoteCollaborationParticipantDTO(
                 id: RemoteCollaborationParticipantDTO.ownerID,
                 displayName: RemoteHostIdentity.current.name,
-                role: "owner",
+                role: .owner,
                 isOnline: subscribers.contains {
                     $0.authenticatedPeer?.authorization.principal == .ownerDevice
                 }
@@ -2807,14 +2809,14 @@ final class RemoteSessionMirrorRegistry {
             participants.append(RemoteCollaborationParticipantDTO(
                 id: member.id,
                 displayName: member.displayName,
-                role: "member",
+                role: .member,
                 isOnline: subscribers.contains {
                     $0.authenticatedPeer?.authorization.member?.id == member.id
                 }
             ))
         }
         return participants.sorted {
-            if $0.role != $1.role { return $0.role == "owner" }
+            if $0.role != $1.role { return $0.role == .owner }
             return $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
                 == .orderedAscending
         }
@@ -2824,7 +2826,7 @@ final class RemoteSessionMirrorRegistry {
         for connection: RemoteConnection,
         key: ObjectIdentifier,
         surface: RemoteSessionSurface,
-        state: String
+        state: RemotePresenceState
     ) -> RemotePresenceDTO {
         let peer = connection.authenticatedPeer
         let authorization = peer?.authorization

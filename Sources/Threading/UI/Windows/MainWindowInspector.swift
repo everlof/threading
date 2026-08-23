@@ -43,7 +43,7 @@ extension MainWindowController {
 
         if let submitter = issueReportSubmitter {
             sheet.onSubmitReport = { draft in
-                await submitter.submit(trigger: "manual", draft: draft)
+                await submitter.submit(trigger: .manual, draft: draft)
             }
         }
 #if DEBUG
@@ -209,7 +209,7 @@ extension MainWindowController {
         if let submitter = issueReportSubmitter {
             sheet.onSubmitReport = { draft, screenshot in
                 await submitter.submit(
-                    trigger: "manual",
+                    trigger: .manual,
                     draft: draft,
                     screenshot: screenshot
                 )

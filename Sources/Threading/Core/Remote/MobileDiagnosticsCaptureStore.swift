@@ -507,13 +507,14 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
               capture.appBuild.utf8.count <= 64,
               capture.operatingSystem.utf8.count <= 160,
               capture.deviceModel.utf8.count <= 64,
-              ["active", "inactive", "background", "unknown"].contains(
-                capture.applicationState
-              ),
-              ["idle", "connecting", "online", "offline"].contains(
-                capture.connectionState
-              ),
-              capture.activeEndpointKind == RemoteHostEndpointKind.lan,
+              capture.applicationState == .active
+                || capture.applicationState == .inactive
+                || capture.applicationState == .background,
+              capture.connectionState == .idle
+                || capture.connectionState == .connecting
+                || capture.connectionState == .online
+                || capture.connectionState == .offline,
+              capture.activeEndpointKind == .lan,
               (0...64).contains(capture.pairedHostCount),
               (0...10_000).contains(capture.visibleSessionCount),
               !capture.diagnostics.isEmpty,
@@ -524,7 +525,7 @@ final class MobileDiagnosticsCaptureStore: @unchecked Sendable {
               ) else { return false }
 
         if let encoded = capture.screenshotJPEGBase64 {
-            guard capture.screenshotKind == "current" || capture.screenshotKind == "incident",
+            guard capture.screenshotKind == .current || capture.screenshotKind == .incident,
                   let image = Data(base64Encoded: encoded),
                   !image.isEmpty,
                   image.count <= maximumScreenshotBytes,

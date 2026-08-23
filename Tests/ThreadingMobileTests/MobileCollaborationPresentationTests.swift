@@ -27,7 +27,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
     func testAcceptedParticipantKeepsCollaborationVisibleWhileAway() {
         let state = inputControlState(participants: [
             owner,
-            .init(id: "member-anna", displayName: "Anna", role: "member", isOnline: false),
+            .init(id: "member-anna", displayName: "Anna", role: .member, isOnline: false),
         ])
 
         XCTAssertTrue(MobileCollaborationPresentation.showsInputControl(
@@ -52,7 +52,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
         let guest = RemoteCollaborationParticipantDTO(
             id: "member-anna",
             displayName: "Anna",
-            role: "member",
+            role: .member,
             isOnline: true
         )
         let state = inputControlState(
@@ -155,7 +155,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
     }
 
     private var owner: RemoteCollaborationParticipantDTO {
-        .init(id: "owner", displayName: "David", role: "owner", isOnline: true)
+        .init(id: "owner", displayName: "David", role: .owner, isOnline: true)
     }
 
     private func inputControlState(

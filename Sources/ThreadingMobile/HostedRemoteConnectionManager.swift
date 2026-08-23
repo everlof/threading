@@ -65,7 +65,7 @@ actor HostedRemoteConnectionManager {
                     MobileDiagnostics.recordConnectivity(.hostRouteProgress, fields: [
                         .trace: trace,
                         .peer: peer,
-                        .transport: RemoteHostEndpointKind.hosted,
+                        .transport: RemoteHostEndpointKind.hosted.rawValue,
                         .phase: "hosted.\(phase.rawValue)",
                         .result: "stage",
                         .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),

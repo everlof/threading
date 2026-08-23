@@ -17,7 +17,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// picker. Optional fields keep Keychain records written by older versions decodable.
     var endpoints: [RemoteHostEndpointDTO]? = nil
     var connectionPolicy: RemoteHostConnectionPolicy? = nil
-    var activeEndpointKind: String? = nil
+    var activeEndpointKind: RemoteHostEndpointKind? = nil
     /// Optional zero-setup direct route. It is protected by the same Keychain item as the
     /// Mac-issued remote capability and never copied into an ordinary share link.
     var hostedServiceURL: URL? = nil
@@ -159,7 +159,7 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// a guest capability holds: a one-chat share is told the door it was minted against and no
     /// others. An explicitly empty list is different: the Mac currently authorizes no endpoint
     /// under its policy, so falling back to a remembered address here would violate it.
-    private var advertisedAddresses: [(kind: String, baseURL: URL)] {
+    private var advertisedAddresses: [(kind: RemoteHostEndpointKind, baseURL: URL)] {
         guard let endpoints else {
             return [(Self.endpointKind(for: link.baseURL), link.baseURL)]
         }
@@ -178,10 +178,10 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// walk. Every other address of a route already represented contributes itself and nothing
     /// else. Each address is still attempted exactly once, whichever wave first claimed it.
     private static func candidates(
-        forAddressesInOrder addresses: [(kind: String, baseURL: URL)],
+        forAddressesInOrder addresses: [(kind: RemoteHostEndpointKind, baseURL: URL)],
         token: String
     ) -> [RemoteHostConnectionCandidate] {
-        var leadingKinds: Set<String> = []
+        var leadingKinds: Set<RemoteHostEndpointKind> = []
         var seen: Set<URL> = []
         var byWave: [RemoteRouteWave: [RemoteHostConnectionCandidate]] = [:]
         for address in addresses {
@@ -227,20 +227,20 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
         return result
     }
 
-    static func connectionLabel(forEndpointKind kind: String) -> String {
+    static func connectionLabel(forEndpointKind kind: RemoteHostEndpointKind) -> String {
         switch kind {
-        case RemoteHostEndpointKind.tailscale: return MobileL10n.string("Tailscale")
-        case RemoteHostEndpointKind.relay: return MobileL10n.string("Relay")
-        case RemoteHostEndpointKind.lan: return MobileL10n.string("LAN")
-        case RemoteHostEndpointKind.vpn: return MobileL10n.string("VPN")
-        case RemoteHostEndpointKind.hosted: return MobileL10n.string("Direct")
+        case .tailscale: return MobileL10n.string("Tailscale")
+        case .relay: return MobileL10n.string("Relay")
+        case .lan: return MobileL10n.string("LAN")
+        case .vpn: return MobileL10n.string("VPN")
+        case .hosted: return MobileL10n.string("Direct")
         default: return MobileL10n.string("Direct")
         }
     }
 
     /// A route name after a verb. Every route is a compact, established network term, so the
     /// same label works both as a standalone value and inside a status sentence.
-    static func connectionLabelInSentence(forEndpointKind kind: String) -> String {
+    static func connectionLabelInSentence(forEndpointKind kind: RemoteHostEndpointKind) -> String {
         connectionLabel(forEndpointKind: kind)
     }
 
@@ -337,7 +337,10 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// The guess reads an address; the advertised list is the Mac saying which door this is.
     /// They differ for exactly the cases that matter: a VPN address is in a private range and a
     /// tailnet address is not `.ts.net` when it is written as `100.x`.
-    private func kind(ofAdvertised baseURL: URL, in advertised: [RemoteHostEndpointDTO]?) -> String {
+    private func kind(
+        ofAdvertised baseURL: URL,
+        in advertised: [RemoteHostEndpointDTO]?
+    ) -> RemoteHostEndpointKind {
         advertised?.first { $0.baseURL == baseURL }?.kind ?? Self.endpointKind(for: baseURL)
     }
 
@@ -347,8 +350,8 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     /// A public host answers `relay` because that is what an address outside every private range
     /// used to be. No current Mac has one, so in practice this reaches the last case only for a
     /// record written by an older pairing.
-    static func endpointKind(for baseURL: URL) -> String {
-        guard let host = baseURL.host?.lowercased() else { return "direct" }
+    static func endpointKind(for baseURL: URL) -> RemoteHostEndpointKind {
+        guard let host = baseURL.host?.lowercased() else { return .unknown("direct") }
         if host.hasSuffix(".ts.net") { return RemoteHostEndpointKind.tailscale }
         if RemoteLocalNetworkAddress.isPrivate(host) { return RemoteHostEndpointKind.lan }
         return RemoteHostEndpointKind.relay
@@ -394,7 +397,7 @@ struct RemoteHostConnectionCandidate: Equatable, Sendable {
     let link: RemoteConnectionLink
     /// The Mac's semantic name for this door. It follows every fallback attempt so presentation
     /// can collapse a sticky-port walk back to one human route such as "LAN".
-    let kind: String
+    let kind: RemoteHostEndpointKind
     /// Attempts sharing this identifier are the same advertised door at another port of the
     /// sticky range. An answer from one of them ends the walk over the rest.
     let doorID: String
@@ -419,7 +422,7 @@ struct RemoteHostConnectionCandidate: Equatable, Sendable {
     /// working route ninety seconds late.
     static func attempts(
         baseURL: URL,
-        kind: String,
+        kind: RemoteHostEndpointKind,
         token: String,
         doorID: String,
         wave: RemoteRouteWave = .route,

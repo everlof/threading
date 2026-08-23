@@ -36,7 +36,7 @@ protocol RemoteRuntimeStatus: Sendable {
     func resolveRemotePermission(
         sessionID: SessionID,
         id: String,
-        decision: String
+        decision: RemotePermissionDecision
     ) -> Bool
 }
 

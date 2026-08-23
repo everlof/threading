@@ -1252,9 +1252,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func mobileDiagnosticsPeer(
         _ connection: RemoteConnection,
-        routeKind: String?
+        routeKind rawRouteKind: String?
     ) -> (deviceID: String, deviceName: String?)? {
-        guard routeKind == RemoteHostEndpointKind.lan,
+        guard let rawRouteKind,
+              RemoteHostEndpointKind(rawValue: rawRouteKind) == .lan,
               connection.routedSessionID == RemoteRouter.themeEventsRouteID,
               let peer = connection.authenticatedPeer,
               peer.authorization.canManageHost,
@@ -2257,10 +2258,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return RemoteAttachmentDTO(
                     path: attachment.relativePath,
                     name: attachment.name,
-                    kind: attachment.kind.rawValue,
+                    kind: RemoteAttachmentKind(rawValue: attachment.kind.rawValue),
                     byteCount: Int64(size),
                     modifiedAt: values.contentModificationDate,
-                    origin: attachment.origin.rawValue,
+                    origin: RemoteAttachmentOrigin(rawValue: attachment.origin.rawValue),
                     id: attachment.id
                 )
             }
@@ -3343,16 +3344,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handlePermission(
         _ connection: RemoteConnection,
         id: String?,
-        decision: String?
+        decision rawDecision: String?
     ) {
         guard let authorization = connection.authorization,
               authorization.canApprovePermissions else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
-        guard let id, let decision,
+        guard let id, let rawDecision,
+              let decision = RemotePermissionDecision(rawValue: rawDecision),
               RemoteInboundPolicy.acceptsPermissionID(id),
-              decision == "allow" || decision == "deny",
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed) else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidPermissionDecision")))
@@ -3377,7 +3378,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             self.services.eventLog.recordRemoteEvent("Remote permission decision", [
                 "session": sessionID.uuidString,
-                "decision": decision,
+                "decision": decision.rawValue,
                 "device": connection.deviceID ?? "unknown",
             ])
             var fields: [RemoteDiagnosticField: String] = [
@@ -3386,7 +3387,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     sessionID.uuidString,
                     prefix: "session"
                 ),
-                .result: decision,
+                .result: decision.rawValue,
             ]
             if let device = connection.deviceID {
                 fields[.peer] = MacRemoteDiagnostics.pseudonym(
@@ -3479,10 +3480,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
-    private func handlePresence(_ connection: RemoteConnection, state: String?) {
+    private func handlePresence(_ connection: RemoteConnection, state rawState: String?) {
         guard let authorization = connection.authorization,
               authorization.capability == .interact,
-              let state, state == "typing" || state == "idle",
+              let rawState,
+              let state = RemotePresenceUpdate(rawValue: rawState),
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed) else {
             return

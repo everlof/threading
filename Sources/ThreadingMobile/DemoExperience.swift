@@ -145,7 +145,7 @@ final class DemoSessionScript {
     // MARK: - Conversation
 
     private func appendUserTurn(_ text: String) {
-        rows.append(RemoteConversationRowDTO(id: rowID(), kind: "user", text: text))
+        rows.append(RemoteConversationRowDTO(id: rowID(), kind: .user, text: text))
         deliverSnapshot(streamingText: "", canSend: false)
 
         let reply = Self.replies[replyIndex % Self.replies.count]
@@ -171,7 +171,7 @@ final class DemoSessionScript {
             }
             self.rows.append(RemoteConversationRowDTO(
                 id: self.rowID(),
-                kind: "assistant",
+                kind: .assistant,
                 text: reply.text
             ))
             self.deliverSnapshot()
@@ -233,26 +233,26 @@ final class DemoSessionScript {
         [
             RemoteConversationRowDTO(
                 id: "0",
-                kind: "user",
+                kind: .user,
                 text: session.title
             ),
             RemoteConversationRowDTO(
                 id: "1",
-                kind: "assistant",
+                kind: .assistant,
                 text: "I looked at where this stands. Two things needed attention: the sidebar "
                     + "lost its selection across a relaunch, and one render test asserted a "
                     + "fixture nothing ships."
             ),
             RemoteConversationRowDTO(
                 id: "2",
-                kind: "tool",
+                kind: .tool,
                 toolName: "Bash",
                 summary: "scripts/test.sh",
                 result: "Executed 3,517 tests, with 0 failures"
             ),
             RemoteConversationRowDTO(
                 id: "3",
-                kind: "assistant",
+                kind: .assistant,
                 text: "Both are fixed and the fast suite is green. This conversation is demo "
                     + "data. Pair your own Mac and this screen drives the real thing. Try "
                     + "sending a message below."
@@ -269,7 +269,7 @@ final class DemoSessionScript {
             func row(id: String) -> RemoteConversationRowDTO {
                 RemoteConversationRowDTO(
                     id: id,
-                    kind: "tool",
+                    kind: .tool,
                     toolName: name,
                     summary: summary,
                     result: result

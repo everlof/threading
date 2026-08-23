@@ -265,7 +265,7 @@ final class ExecutionAuditTests: XCTestCase {
         let event = try XCTUnwrap(ACPProviderExecutionAdapter.event(
             update: update,
             operation: "Run checks",
-            kind: "execute",
+            kind: .execute,
             phase: .progressed,
             asInput: false
         ))

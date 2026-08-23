@@ -22,7 +22,7 @@ final class MobileIssueReportOutboxTests: XCTestCase {
         return PublicIssueReportSubmissionDTO(
             id: id,
             createdAt: ISO8601DateFormatter().string(from: Date()),
-            trigger: "diagnostics",
+            trigger: .diagnostics,
             description: "Connectivity fixture",
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report)
         )
@@ -70,7 +70,7 @@ final class MobileIssueReportOutboxTests: XCTestCase {
         let submission = PublicIssueReportSubmissionDTO(
             id: reportID,
             createdAt: now,
-            trigger: "diagnostics",
+            trigger: .diagnostics,
             description: "Connectivity fixture",
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report)
         )

@@ -19,9 +19,9 @@ final class RemoteConversationStateTests: XCTestCase {
             displayName: "compact",
             description: "Reduce context",
             argumentHint: "",
-            kind: "command",
-            trigger: "slash",
-            presentation: "command"
+            kind: .command,
+            trigger: .slash,
+            presentation: .command
         )
         let skill = RemoteComposerCapabilityDTO(
             id: "codex.skill:release",
@@ -29,9 +29,9 @@ final class RemoteConversationStateTests: XCTestCase {
             displayName: "Release",
             description: "Prepare a release",
             argumentHint: "[version]",
-            kind: "skill",
-            trigger: "dollar",
-            presentation: "turn"
+            kind: .skill,
+            trigger: .dollar,
+            presentation: .turn
         )
         var state = RemoteConversationState(
             composerCapabilities: [compact],
@@ -65,9 +65,9 @@ final class RemoteConversationStateTests: XCTestCase {
                 description: "Review changes",
                 argumentHint: "",
                 aliases: ["inspect"],
-                kind: "command",
-                trigger: "slash",
-                presentation: "turn"
+                kind: .command,
+                trigger: .slash,
+                presentation: .turn
             ),
             RemoteComposerCapabilityDTO(
                 id: "skill:inspect",
@@ -75,9 +75,9 @@ final class RemoteConversationStateTests: XCTestCase {
                 displayName: "Inspect UI",
                 description: "Inspect a screen",
                 argumentHint: "[screen]",
-                kind: "skill",
-                trigger: "dollar",
-                presentation: "turn"
+                kind: .skill,
+                trigger: .dollar,
+                presentation: .turn
             )
         ]
 
@@ -95,9 +95,9 @@ final class RemoteConversationStateTests: XCTestCase {
             displayName: "Blocked",
             description: "Ordinary description",
             argumentHint: "",
-            kind: "skill",
-            trigger: "dollar",
-            presentation: "turn",
+            kind: .skill,
+            trigger: .dollar,
+            presentation: .turn,
             isEnabled: false,
             unavailableReason: "Disabled by policy"
         )
@@ -110,9 +110,9 @@ final class RemoteConversationStateTests: XCTestCase {
                 displayName: "Command \(index)",
                 description: "",
                 argumentHint: "",
-                kind: "command",
-                trigger: "slash",
-                presentation: "command"
+                kind: .command,
+                trigger: .slash,
+                presentation: .command
             )
         }
         let query = try XCTUnwrap(RemoteComposerCompletionQuery.parse("/"))
@@ -128,10 +128,10 @@ final class RemoteConversationStateTests: XCTestCase {
                 displayName: "Provisional",
                 description: "",
                 argumentHint: "",
-                kind: "command",
+                kind: .command,
                 isAvailableInSkillCatalog: true,
-                trigger: "slash",
-                presentation: "command"
+                trigger: .slash,
+                presentation: .command
             ),
             RemoteComposerCapabilityDTO(
                 id: "claude.skill:release",
@@ -139,13 +139,13 @@ final class RemoteConversationStateTests: XCTestCase {
                 displayName: "Release",
                 description: "",
                 argumentHint: "",
-                kind: "skill",
-                trigger: "slash",
-                presentation: "turn"
+                kind: .skill,
+                trigger: .slash,
+                presentation: .turn
             ),
         ]
         XCTAssertEqual(
-            query.suggestions(from: commands + skills, matchingKind: "skill").map(\.id),
+            query.suggestions(from: commands + skills, matchingKind: .skill).map(\.id),
             skills.map(\.id),
             "The skill filter must run before the rendered-row limit"
         )
@@ -155,8 +155,8 @@ final class RemoteConversationStateTests: XCTestCase {
         var state = RemoteConversationState()
         state.apply(RemoteConversationSnapshotDTO(
             rows: [
-                .init(id: "8", kind: "user", text: "Run it"),
-                .init(id: "9", kind: "tool", toolName: "Bash", summary: "swift test"),
+                .init(id: "8", kind: .user, text: "Run it"),
+                .init(id: "9", kind: .tool, toolName: "Bash", summary: "swift test"),
             ],
             streamingText: "Working",
             canSend: false,
@@ -168,12 +168,12 @@ final class RemoteConversationStateTests: XCTestCase {
             baseRevision: 4,
             revision: 5,
             appendedRows: [
-                .init(id: "10", kind: "assistant", text: "All green.")
+                .init(id: "10", kind: .assistant, text: "All green.")
             ],
             updatedRows: [
                 .init(
                     id: "9",
-                    kind: "tool",
+                    kind: .tool,
                     toolName: "Bash",
                     summary: "swift test",
                     result: "Passed"
@@ -210,16 +210,16 @@ final class RemoteConversationStateTests: XCTestCase {
     func testHistoryPagesPrependIdempotently() {
         var state = RemoteConversationState(
             rows: [
-                .init(id: "2", kind: "assistant", text: "Two"),
-                .init(id: "3", kind: "assistant", text: "Three"),
+                .init(id: "2", kind: .assistant, text: "Two"),
+                .init(id: "3", kind: .assistant, text: "Three"),
             ],
             hasEarlier: true
         )
         let page = RemoteConversationPageDTO(
             rows: [
-                .init(id: "0", kind: "user", text: "Zero"),
-                .init(id: "1", kind: "assistant", text: "One"),
-                .init(id: "2", kind: "assistant", text: "Two"),
+                .init(id: "0", kind: .user, text: "Zero"),
+                .init(id: "1", kind: .assistant, text: "One"),
+                .init(id: "2", kind: .assistant, text: "Two"),
             ],
             beforeRowID: "2",
             hasEarlier: false
@@ -233,7 +233,7 @@ final class RemoteConversationStateTests: XCTestCase {
 
     func testTenThousandStreamingDeltasDoNotRebuildRows() {
         let rows = (0..<1_000).map {
-            RemoteConversationRowDTO(id: String($0), kind: "assistant", text: "Message \($0)")
+            RemoteConversationRowDTO(id: String($0), kind: .assistant, text: "Message \($0)")
         }
         let state = RemoteConversationState(rows: rows, revision: 1)
 

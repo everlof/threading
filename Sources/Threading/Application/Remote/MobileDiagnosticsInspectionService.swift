@@ -195,8 +195,9 @@ final class MobileDiagnosticsInspectionService {
             "iOS checkup (\(freshness); \(Self.age(capture.capturedAt)))",
             "Device: \(stored.deviceName) — \(capture.deviceModel)",
             "App: \(capture.appVersion) (\(capture.appBuild)); OS: \(capture.operatingSystem)",
-            "State: app \(capture.applicationState); connection \(capture.connectionState); "
-                + "route \(capture.activeEndpointKind)",
+            "State: app \(capture.applicationState.rawValue); connection "
+                + "\(capture.connectionState.rawValue); route "
+                + capture.activeEndpointKind.rawValue,
             "Inventory: \(capture.pairedHostCount) paired Mac(s); "
                 + "\(capture.visibleSessionCount) visible session(s)",
             "Capture: \(capture.capturedAt); cached on Mac: \(stored.storedAt)",
@@ -213,7 +214,7 @@ final class MobileDiagnosticsInspectionService {
         let screenshot = capture.screenshotJPEGBase64.flatMap { Data(base64Encoded: $0) }
         lines.append(screenshot == nil
             ? "Screenshot: none in this capture."
-            : "Screenshot: attached (\(capture.screenshotKind ?? "diagnostic evidence")).")
+            : "Screenshot: attached (\(capture.screenshotKind?.rawValue ?? "diagnostic evidence")).")
         lines.append(
             "Privacy boundary: no prompts, terminal output, paths, credentials, or notification "
                 + "text are represented in these diagnostics."

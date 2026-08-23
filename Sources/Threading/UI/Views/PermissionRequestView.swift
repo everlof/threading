@@ -160,11 +160,11 @@ final class PermissionRequestView: NSView {
         let diff = (EditDiff.lines(forTool: request.toolName, input: request.foundationInput) ?? [])
             .enumerated()
             .map { index, line in
-                let kind: String
+                let kind: RemoteDiffLineKind
                 switch line.kind {
-                case .context: kind = "context"
-                case .added: kind = "addition"
-                case .removed: kind = "removal"
+                case .context: kind = .context
+                case .added: kind = .addition
+                case .removed: kind = .removal
                 }
                 return RemotePermissionDiffLineDTO(
                     id: String(index),
@@ -183,21 +183,19 @@ final class PermissionRequestView: NSView {
 
     /// Resolves the same card from an authenticated interactive client. It deliberately offers
     /// only one-shot allow or deny; session-wide policy remains a local Mac decision.
-    func resolveRemote(id: String, decision: String) -> Bool {
+    func resolveRemote(id: String, decision: RemotePermissionDecision) -> Bool {
         guard id == remoteID, !isResolved, remoteRequest.canDecide else { return false }
         switch decision {
-        case "allow":
+        case .allow:
             settle(
                 .allow(reason: "Approved from a paired Threading device."),
                 note: L10n.string("Allowed remotely.")
             )
-        case "deny":
+        case .deny:
             settle(
                 .deny(reason: "The user declined from a paired Threading device."),
                 note: L10n.string("Denied remotely.")
             )
-        default:
-            return false
         }
         return true
     }

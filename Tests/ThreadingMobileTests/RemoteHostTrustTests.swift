@@ -547,7 +547,11 @@ final class RemoteHostTrustTests: XCTestCase {
         )
     }
 
-    private func endpoint(kind: String, _ url: String, pinned: Bool) -> RemoteHostEndpointDTO {
+    private func endpoint(
+        kind: RemoteHostEndpointKind,
+        _ url: String,
+        pinned: Bool
+    ) -> RemoteHostEndpointDTO {
         RemoteHostEndpointDTO(
             kind: kind,
             baseURL: URL(string: url)!,

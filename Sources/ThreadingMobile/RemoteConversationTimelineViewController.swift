@@ -702,7 +702,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
                     theme: theme,
                     toggleExpansion: { [weak self] in self?.toggleRow(id) }
                 )
-                if row.kind == "assistant", parsedDocuments[id] == nil {
+                if row.kind == .assistant, parsedDocuments[id] == nil {
                     prepareMarkdown(for: row)
                 }
                 return cell
@@ -751,7 +751,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
             let state = connection.conversationStore.state
             let activeIDs = Set(state.rows.map(\.id))
             let assistantSources = Dictionary(uniqueKeysWithValues: state.rows.compactMap { row in
-                row.kind == "assistant" ? (row.id, row.text ?? "") : nil
+                row.kind == .assistant ? (row.id, row.text ?? "") : nil
             })
             for (id, source) in markdownSources
             where assistantSources[id] != source {
@@ -934,7 +934,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private func prefetchMarkdown(ids: Set<String>? = nil) {
         let candidates = connection.conversationStore.state.rows.reversed().compactMap {
             row -> (id: String, source: String)? in
-            guard row.kind == "assistant", ids == nil || ids?.contains(row.id) == true else {
+            guard row.kind == .assistant, ids == nil || ids?.contains(row.id) == true else {
                 return nil
             }
             let source = row.text ?? ""
@@ -1677,12 +1677,12 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
         streamingReuseIdentifier,
     ]
 
-    static func reuseIdentifier(for kind: String) -> String {
+    static func reuseIdentifier(for kind: RemoteConversationRowKind) -> String {
         switch kind {
-        case "user": return "\(reuseIdentifierBase).user"
-        case "assistant": return "\(reuseIdentifierBase).assistant"
-        case "thinking": return "\(reuseIdentifierBase).thinking"
-        case "tool": return "\(reuseIdentifierBase).tool"
+        case .user: return "\(reuseIdentifierBase).user"
+        case .assistant: return "\(reuseIdentifierBase).assistant"
+        case .thinking: return "\(reuseIdentifierBase).thinking"
+        case .tool: return "\(reuseIdentifierBase).tool"
         default: return "\(reuseIdentifierBase).notice"
         }
     }
@@ -1717,7 +1717,7 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
         toggleExpansion: @escaping () -> Void
     ) {
         switch row.kind {
-        case "user":
+        case .user:
             if let view = hostedView as? RemoteUserMessageView {
                 view.configure(
                     text: row.text ?? "",
@@ -1731,7 +1731,7 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
                     theme: theme
                 ))
             }
-        case "assistant":
+        case .assistant:
             if let view = hostedView as? RemoteAssistantMessageView {
                 view.configure(source: row.text ?? "", document: markdown, theme: theme)
             } else {
@@ -1741,7 +1741,7 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
                     theme: theme
                 ))
             }
-        case "thinking":
+        case .thinking:
             install(RemoteExpandableMessageView(
                 title: "Reasoning",
                 text: row.text ?? "",
@@ -1749,7 +1749,7 @@ private final class RemoteConversationRowCell: UICollectionViewCell {
                 theme: theme,
                 toggle: toggleExpansion
             ))
-        case "tool":
+        case .tool:
             if let view = hostedView as? RemoteToolMessageView {
                 view.configure(
                     row: row,
@@ -2049,8 +2049,8 @@ private final class RemoteUserMessageView: UIView {
             contextStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        let references = context.filter { $0.kind == "reference" }.count
-        let comments = context.filter { $0.kind == "comment" }.count
+        let references = context.filter { $0.kind == .reference }.count
+        let comments = context.filter { $0.kind == .comment }.count
         if references > 0 {
             contextStack.addArrangedSubview(contextPill(
                 symbol: "quote.bubble",
@@ -2827,10 +2827,10 @@ private final class RemotePermissionDiffView: UIView {
         let color: UIColor
         let marker: String
         switch line.kind {
-        case "addition":
+        case .addition:
             color = theme.uiDiffAdded
             marker = "+"
-        case "removal":
+        case .removal:
             color = theme.uiDiffRemoved
             marker = "−"
         default:

@@ -198,7 +198,9 @@ struct RootView: View {
                     attachmentDemo.dropFirst("attachment-detail-".count)
                 )
                 NavigationStack {
-                    RemoteAttachmentPreviewDemo(kind: attachmentKind)
+                    RemoteAttachmentPreviewDemo(
+                        kind: RemoteAttachmentKind(rawValue: attachmentKind)
+                    )
                 }
             } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "workspace" {
                 SessionWorkspaceView(
@@ -429,33 +431,33 @@ struct RootView: View {
         RemoteAttachmentDTO(
             path: "artifacts/threading-ui-review.pdf",
             name: "threading-ui-review.pdf",
-            kind: "pdf",
+            kind: .pdf,
             byteCount: 842_761,
-            origin: "agent",
+            origin: .agent,
             id: "attachment-review"
         ),
         RemoteAttachmentDTO(
             path: "screenshots/keyboard-dismissed.png",
             name: "keyboard-dismissed.png",
-            kind: "image",
+            kind: .image,
             byteCount: 184_320,
-            origin: "user",
+            origin: .user,
             id: "attachment-keyboard"
         ),
         RemoteAttachmentDTO(
             path: "reports/ui-evidence.html",
             name: "ui-evidence.html",
-            kind: "html",
+            kind: .html,
             byteCount: 32_914,
-            origin: "agent",
+            origin: .agent,
             id: "attachment-report"
         ),
         RemoteAttachmentDTO(
             path: "exports/diagnostics.zip",
             name: "diagnostics.zip",
-            kind: "archive",
+            kind: .archive,
             byteCount: 1_204_981,
-            origin: "user",
+            origin: .user,
             id: "attachment-diagnostics"
         ),
     ]

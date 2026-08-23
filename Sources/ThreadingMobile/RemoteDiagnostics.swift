@@ -310,13 +310,13 @@ enum MobileConnectionStateLog {
     static let maximumAgeSeconds = 99_999
 
     private struct Entry {
-        let state: String
+        let state: RemoteMobileConnectionState
         let at: Date
     }
 
     private static var entries: [Entry] = []
 
-    static func record(_ state: String, at moment: Date = Date()) {
+    static func record(_ state: RemoteMobileConnectionState, at moment: Date = Date()) {
         guard entries.last?.state != state else { return }
         entries.append(Entry(state: state, at: moment))
         if entries.count > capacity {
@@ -329,7 +329,7 @@ enum MobileConnectionStateLog {
         guard !entries.isEmpty else { return nil }
         return entries.map { entry in
             let age = max(0, Int(now.timeIntervalSince(entry.at)))
-            return "\(entry.state)-\(min(age, maximumAgeSeconds))"
+            return "\(entry.state.rawValue)-\(min(age, maximumAgeSeconds))"
         }.joined(separator: ":")
     }
 

@@ -7,7 +7,7 @@ final class RemoteConversationStoreTests: XCTestCase {
     func testToolDisclosureStaysCompactAndMaterializesOutputOnlyWhenExpanded() throws {
         let row = RemoteConversationRowDTO(
             id: "tool-a",
-            kind: "tool",
+            kind: .tool,
             toolName: "Bash",
             summary: "swift test --filter KeyboardLifecycleTests",
             result: "All focused tests passed"
@@ -53,7 +53,7 @@ final class RemoteConversationStoreTests: XCTestCase {
     func testRunningToolHasNoFalseDisclosureAction() throws {
         let row = RemoteConversationRowDTO(
             id: "tool-running",
-            kind: "tool",
+            kind: .tool,
             toolName: "Read",
             summary: "RemoteConversationViewController.swift"
         )
@@ -74,7 +74,7 @@ final class RemoteConversationStoreTests: XCTestCase {
     @MainActor
     func testIdenticalReplacementAdvancesRevisionWithoutNotifyingTimeline() {
         let store = RemoteConversationStore()
-        let row = RemoteConversationRowDTO(id: "row-a", kind: "user", text: "Hello")
+        let row = RemoteConversationRowDTO(id: "row-a", kind: .user, text: "Hello")
         store.replace(with: snapshot(rows: [row], revision: 1))
 
         var changes: [RemoteConversationStore.Change] = []
@@ -89,11 +89,11 @@ final class RemoteConversationStoreTests: XCTestCase {
     @MainActor
     func testStableIdentitiesReportOnlyChangedRows() {
         let store = RemoteConversationStore()
-        let first = RemoteConversationRowDTO(id: "row-a", kind: "user", text: "Before")
-        let second = RemoteConversationRowDTO(id: "row-b", kind: "assistant", text: "Stable")
+        let first = RemoteConversationRowDTO(id: "row-a", kind: .user, text: "Before")
+        let second = RemoteConversationRowDTO(id: "row-b", kind: .assistant, text: "Stable")
         store.replace(with: snapshot(rows: [first, second], revision: 1))
 
-        let updated = RemoteConversationRowDTO(id: "row-a", kind: "user", text: "After")
+        let updated = RemoteConversationRowDTO(id: "row-a", kind: .user, text: "After")
         let change = store.replace(with: snapshot(rows: [updated, second], revision: 2))
 
         XCTAssertEqual(
@@ -113,8 +113,8 @@ final class RemoteConversationStoreTests: XCTestCase {
     @MainActor
     func testChangedIdentityOrderRequiresStructuralReset() {
         let store = RemoteConversationStore()
-        let first = RemoteConversationRowDTO(id: "row-a", kind: "user", text: "First")
-        let second = RemoteConversationRowDTO(id: "row-b", kind: "assistant", text: "Second")
+        let first = RemoteConversationRowDTO(id: "row-a", kind: .user, text: "First")
+        let second = RemoteConversationRowDTO(id: "row-b", kind: .assistant, text: "Second")
         store.replace(with: snapshot(rows: [first, second], revision: 1))
 
         let change = store.replace(with: snapshot(rows: [second, first], revision: 2))
@@ -125,11 +125,11 @@ final class RemoteConversationStoreTests: XCTestCase {
     @MainActor
     func testStructuralReplacementStillNamesChangedRetainedRows() {
         let store = RemoteConversationStore()
-        let first = RemoteConversationRowDTO(id: "row-a", kind: "user", text: "Before")
+        let first = RemoteConversationRowDTO(id: "row-a", kind: .user, text: "Before")
         store.replace(with: snapshot(rows: [first], revision: 1))
 
-        let updated = RemoteConversationRowDTO(id: "row-a", kind: "user", text: "After")
-        let inserted = RemoteConversationRowDTO(id: "row-b", kind: "assistant", text: "New")
+        let updated = RemoteConversationRowDTO(id: "row-a", kind: .user, text: "After")
+        let inserted = RemoteConversationRowDTO(id: "row-b", kind: .assistant, text: "New")
         let change = store.replace(with: snapshot(rows: [updated, inserted], revision: 2))
 
         XCTAssertEqual(change, .reset(updated: ["row-a"]))
@@ -138,7 +138,7 @@ final class RemoteConversationStoreTests: XCTestCase {
     @MainActor
     func testReplacementClearsHistoryLoadingWithoutResettingRows() {
         let store = RemoteConversationStore()
-        let row = RemoteConversationRowDTO(id: "row-a", kind: "user", text: "Hello")
+        let row = RemoteConversationRowDTO(id: "row-a", kind: .user, text: "Hello")
         let initial = snapshot(rows: [row], revision: 1, hasEarlier: true)
         store.replace(with: initial)
         XCTAssertEqual(store.beginLoadingEarlier(), "row-a")

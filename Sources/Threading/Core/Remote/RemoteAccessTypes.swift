@@ -202,14 +202,6 @@ struct RemoteAuthorization: Equatable, Sendable {
     }
 }
 
-enum RemoteInputControlAction: String {
-    case collaborative
-    case focused
-    case handoff
-    case reclaim
-    case request
-}
-
 struct RemoteInputControlRecord: Equatable {
     var mode: RemoteInputControlMode
     var controllerID: String?
@@ -988,10 +980,10 @@ enum RemoteConversationWirePolicy {
                 aliases: capability.aliases.prefix(12).map {
                     truncated($0, toUTF8Bytes: 256)
                 },
-                kind: capability.kind == "skill" ? "skill" : "command",
+                kind: capability.kind,
                 isAvailableInSkillCatalog: capability.isAvailableInSkillCatalog,
-                trigger: capability.trigger == "dollar" ? "dollar" : "slash",
-                presentation: capability.presentation == "command" ? "command" : "turn",
+                trigger: capability.trigger,
+                presentation: capability.presentation,
                 isEnabled: capability.isEnabled,
                 unavailableReason: capability.unavailableReason.map {
                     truncated($0, toUTF8Bytes: 512)
@@ -1079,7 +1071,7 @@ enum RemoteConversationWirePolicy {
             result.insert(
                 RemoteConversationRowDTO(
                     id: "remote-truncated",
-                    kind: "notice",
+                    kind: .notice,
                     text: omittedNotice
                 ),
                 at: 0
@@ -1102,7 +1094,9 @@ enum RemoteConversationWirePolicy {
         }
 
         let id = take(row.id, maximum: 256) ?? ""
-        let kind = take(row.kind, maximum: 64) ?? ""
+        let kind = RemoteConversationRowKind(
+            rawValue: take(row.kind.rawValue, maximum: 64) ?? ""
+        )
         let toolName = take(row.toolName, maximum: 256)
         let summary = take(row.summary, maximum: 8 * 1024)
         let text = take(row.text, maximum: RemoteAccessDefaults.maximumRemoteConversationFieldBytes)
@@ -1120,7 +1114,7 @@ enum RemoteConversationWirePolicy {
     }
 
     private static func contentBytes(in row: RemoteConversationRowDTO) -> Int {
-        [row.id, row.kind, row.text, row.toolName, row.summary, row.result]
+        [row.id, row.kind.rawValue, row.text, row.toolName, row.summary, row.result]
             .compactMap { $0 }
             .reduce(0) { $0 + $1.utf8.count }
     }
