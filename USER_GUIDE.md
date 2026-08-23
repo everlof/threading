@@ -386,8 +386,9 @@ without drawing a partial chart as though it were complete.
 
 The app includes [`scc`](https://github.com/boyter/scc); there is nothing else to install.
 Readings refresh on their own shortly after launch, when a session stops working, periodically
-while the app runs, and on hover when aged. Code counts honour `.gitignore`, skip minified and
-generated files, and neither measurement runs while a session in the project is working.
+while the app runs, and on hover when aged. Code counts honour Git's ignore sources — including
+local `.git/info/exclude` and global excludes — skip minified and generated files, and neither
+measurement runs while a session in the project is working.
 
 ### Managing
 **Hover a project row** — a **+** and **⋯** fade in at its trailing edge. The **+** opens a

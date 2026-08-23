@@ -166,11 +166,14 @@ or waits for a process on the main actor. Code composition and Git activity have
 utility queues, in-flight suppression, and freshness clocks, so a slow repository cannot turn
 crossing sidebar rows into a process queue or delay another metric. A working project is skipped.
 
-The bundled scc process has a 30-second/32-MiB output bound. Git activity is exactly two bounded
-queries: one latest commit and at most 20,001 timestamps covering twelve seven-day buckets, each
-with a 15-second/512-KiB bound. The 20,001st timestamp proves truncation; the UI reports
-`20,000+` and withholds the biased chart. No view cardinality is proportional to files or commits:
-the card retains at most the fixed language legend plus twelve bars.
+The bundled scc process has a 30-second/32-MiB output bound. Its Git-ignore preflight returns
+directory roots rather than walking ignored subtrees into a file roster; both that output and the
+expanded exclusion arguments stop at 128 KiB, with a 15-second process bound. An overflow fails
+the reading closed instead of launching scc with a partial ignore answer. Git activity is exactly
+two bounded queries: one latest commit and at most 20,001 timestamps covering twelve seven-day
+buckets, each with a 15-second/512-KiB bound. The 20,001st timestamp proves truncation; the UI
+reports `20,000+` and withholds the biased chart. No view cardinality is proportional to files or
+commits: the card retains at most the fixed language legend plus twelve bars.
 
 Completion persistence follows the same scaling rule. The main actor publishes one changed
 reading and enqueues that exact identity in O(1); a dedicated utility writer owns its own cache

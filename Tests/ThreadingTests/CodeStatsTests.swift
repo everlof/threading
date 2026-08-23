@@ -202,6 +202,44 @@ final class CodeStatsTests: XCTestCase {
         XCTAssertEqual(swift.code, 1)
     }
 
+    func testBundledSCCHonorsEveryGitIgnoreSourceAndKeepsMetadataExcluded() throws {
+        let directory = try makeGitRepository()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try Data("Tracked.swift\nIgnored+.swift\n".utf8)
+            .write(to: directory.appendingPathComponent(".gitignore"))
+        try Data("struct TrackedSource {}\n".utf8)
+            .write(to: directory.appendingPathComponent("Tracked.swift"))
+        try git(["add", "--force", ".gitignore", "Tracked.swift"], in: directory)
+
+        try Data("struct IgnoredByGitignore {}\n".utf8)
+            .write(to: directory.appendingPathComponent("Ignored+.swift"))
+
+        let configuredExcludes = directory.appendingPathComponent(
+            ".git/info/threading-configured-excludes"
+        )
+        try Data("Configured*.swift\n".utf8).write(to: configuredExcludes)
+        try git(["config", "core.excludesFile", configuredExcludes.path], in: directory)
+        try Data("struct IgnoredByConfiguredExcludesFile {}\n".utf8)
+            .write(to: directory.appendingPathComponent("ConfiguredSource.swift"))
+
+        let localClone = directory.appendingPathComponent(".tmp,local", isDirectory: true)
+        try FileManager.default.createDirectory(at: localClone, withIntermediateDirectories: true)
+        try Data("struct IgnoredByInfoExclude {}\n".utf8)
+            .write(to: localClone.appendingPathComponent("NestedCloneCopy.swift"))
+        try Data("/.tmp,local/\n".utf8).write(
+            to: directory.appendingPathComponent(".git/info/exclude")
+        )
+
+        try Data("struct GitMetadataIsNotProjectSource {}\n".utf8)
+            .write(to: directory.appendingPathComponent(".git/ShouldNeverCount.swift"))
+
+        let stats = try XCTUnwrap(CodeStatsRunner.measure(folder: directory.path))
+        let swift = try XCTUnwrap(stats.languages.first { $0.name == "Swift" })
+        XCTAssertEqual(swift.files, 1)
+        XCTAssertEqual(swift.code, 1)
+    }
+
     func testBundledSCCSkipsAFolderThatDisappeared() {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("Threading-CodeStats-Missing-\(UUID().uuidString)")

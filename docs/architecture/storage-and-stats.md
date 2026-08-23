@@ -273,14 +273,25 @@ The app no longer depends on a user-installed executable or a Finder-launched pr
 [`releasing.md`](releasing.md#apple-silicon-only)). Xcode embeds and re-signs it; CI and release
 verify the architecture and the exact version. Its MIT license is part of the
 verified legal-notice bundle. The app invokes it from the project directory with `--no-min-gen`,
-so minified and generated bundles do not dominate the bar while scc's normal `.gitignore`,
-`.ignore`, and `.sccignore` handling keeps ignored dependencies out. It also passes
-`--exclude-dir .claude/worktrees`: [Claude Code creates](https://code.claude.com/docs/en/worktrees)
+so minified and generated bundles do not dominate the bar. In a Git checkout, Git owns the ignore
+answer: a bounded `git ls-files --others --ignored --exclude-standard --directory -z` preflight
+resolves worktree `.gitignore` files, `.git/info/exclude`, and the user's global excludes into
+exact ignored files and directory roots. scc receives that roster with its own `.gitignore`
+parser disabled, while its additional `.ignore` and `.sccignore` sources remain active. This is why
+a nested clone hidden locally from `git status` does not become a second copy of the project in the
+language totals — and why a tracked file remains countable even if a later ignore pattern matches
+its name. The roster has a 15-second/128-KiB output bound and its expanded scc arguments have a
+separate 128-KiB bound; either overflow fails the new reading closed and leaves the last cache
+intact rather than publishing a partial exclusion as a precise total.
+
+Threading also excludes `.claude/worktrees` whether or not the repository has adopted Claude's
+recommended ignore rule: [Claude Code creates](https://code.claude.com/docs/en/worktrees)
 `--worktree`, isolated-subagent and desktop worktrees there by default, and each is a complete
-nested checkout. Claude recommends adding that path to `.gitignore`, but the reading must be right
-before every repository adopts the rule; a local `.git/info/exclude` entry can also hide it from
-Git status and is not an ignore source scc reads. The exclusion names that worktree root exactly
-rather than hiding the rest of `.claude`, which may contain real project configuration.
+nested checkout. The exclusion names that root exactly rather than hiding the rest of `.claude`,
+which may contain real project configuration. `--exclude-dir` replaces scc's built-in list rather
+than extending it, so Threading restates `.git`, `.hg`, and `.svn` explicitly before adding that
+rule and Git's resolved directories; otherwise the fix for one nested checkout makes repository
+metadata countable.
 
 `ProjectStatsService` gives code composition and Git activity separate persisted caches,
 utility queues, in-flight sets, and freshness clocks. A large bounded history query therefore
