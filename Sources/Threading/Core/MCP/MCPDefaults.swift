@@ -87,6 +87,91 @@ enum MCPDefaults {
             + " curl \(common) \"\(loopbackURL)\"; } )"
     }
 
+    // MARK: - The Broker Hook
+
+    /// The whole `PreToolUse` broker command: post the request, and refuse in words when there
+    /// was nothing to post it to.
+    ///
+    /// Both providers run this. Claude gets it in a per-session `--settings` file and Codex in
+    /// the shared `hooks.json`, but the endpoint and the answer are one — `MCPServer`
+    /// `routePermission` replies to both with `PermissionDecision.hookResponse` — so the
+    /// fallback for an absent app is one fragment too.
+    ///
+    /// **`||` is the whole contract.** The deny runs only where the POST could not be made, so
+    /// an app that answered is never followed by a second object on stdout; the CLI reads the
+    /// first one it is given. **The pair is braced** because a call site may guard it: Codex's
+    /// is `[ -n "$THREADING_BROKER_TOOLS" ] && …`, and `guard && post || deny` prints a refusal
+    /// for every *unrouted* Codex run — the user's own terminal sessions, which have Codex's own
+    /// approval prompt and must be left alone. Braced here rather than at the call site so the
+    /// precedence is settled once.
+    ///
+    /// The timeout is the permission one by construction: this fragment builds nothing else.
+    static func hookBrokerCommand(payloadVariable: String, endpointSuffix: String) -> String {
+        "{ " + hookPostCommand(
+            payloadVariable: payloadVariable,
+            endpointSuffix: endpointSuffix,
+            timeout: permissionTimeout
+        ) + " || " + hookDenyFallback + "; }"
+    }
+
+    /// What a broker hook prints when the app could not be reached at all.
+    ///
+    /// A hook that says nothing is *also* a refusal, but a mute one: the CLI falls back to its
+    /// own headless behaviour — `PermissionDecision.hookResponse` records what that means — and
+    /// the model learns only that a tool did not run, so the turn stalls on something it can
+    /// neither explain nor work around. `printf` exits 0, which matters as much as the bytes do:
+    /// these CLIs read a `PreToolUse` hook's exit status as a decision of its own.
+    static let hookDenyFallback = "printf '%s' " + singleQuoted(hookDenyResponseJSON)
+
+    /// The reason that reaches the model when Threading is not there to be asked.
+    ///
+    /// Written for the model rather than for a person — it is carried in a tool result, never
+    /// into the interface, so it is deliberately not an `L10n` key — and in the same voice the
+    /// stdio bridge uses for a tool call with no app behind it (`BridgeDefaults`
+    /// `unavailableToolText`): name the condition, say it is temporary, say what to do instead.
+    /// An agent told only "denied" retries the same call until the turn ends.
+    ///
+    /// Plain ASCII, deliberately: this sentence is the one part of the fragment that is prose,
+    /// and the fragment is shell text embedded in two provider files, one of which the user
+    /// approves by the hash of its bytes.
+    static let hookDenyReason = """
+        Threading is not running, so it could not ask whether this tool may run, and the tool \
+        was not run. This is temporary and needs no restart of this session: permission can be \
+        asked again as soon as the app is open. Tell the user Threading is closed and continue \
+        without this tool.
+        """
+
+    /// The exact bytes a running app would have answered with, for the launch where there is no
+    /// app to answer at all.
+    ///
+    /// Built *from* `PermissionDecision.hookResponse` rather than transcribed, so the shape the
+    /// server returns and the shape an absent server falls back to cannot drift apart. Sorted
+    /// keys only make it deterministic, which a fragment written into two provider files and
+    /// compared byte-for-byte has to be.
+    static let hookDenyResponseJSON: String = {
+        let response = PermissionDecision.deny(reason: hookDenyReason).hookResponse
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: response,
+            options: [.sortedKeys]
+        ), let json = String(data: data, encoding: .utf8) else {
+            // `hookResponse` is strings all the way down; serialising it cannot fail for any
+            // input this type can hold. Failing loudly beats emitting an empty `printf`, which
+            // would be exactly the silence this fragment exists to remove.
+            preconditionFailure("A permission decision must serialise as JSON")
+        }
+        return json
+    }()
+
+    /// Quotes a literal for a POSIX shell, so it survives both the Claude settings file and the
+    /// shared `hooks.json` it is embedded in as JSON.
+    ///
+    /// A single quote cannot be escaped inside single quotes — the sequence closes the string,
+    /// contributes one escaped quote and opens a new one. Spelled out rather than left to the
+    /// current text happening to contain none, because that text is a sentence somebody will
+    /// reword.
+    private static func singleQuoted(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
 
     /// Set only for sessions Threading renders itself, and read by Codex's `PreToolUse` hook.
     ///

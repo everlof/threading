@@ -358,10 +358,15 @@ enum MCPSessionRegistry {
 
         if brokersPermissions {
             let payload = "threading_hook_payload"
-            let command = "\(payload)=$(cat); " + MCPDefaults.hookPostCommand(
+
+            // The broker's builder, not the plain POST one: an unreachable app answers this
+            // hook with a typed deny rather than with silence. Only this command gets it. The
+            // lifecycle commands below end in `>/dev/null 2>&1 || true` precisely so they can
+            // never speak, and a fallback that printed there would be read as context or as a
+            // reason to keep going.
+            let command = "\(payload)=$(cat); " + MCPDefaults.hookBrokerCommand(
                 payloadVariable: payload,
-                endpointSuffix: "\(MCPDefaults.permissionPathPrefix)\(token)",
-                timeout: MCPDefaults.permissionTimeout
+                endpointSuffix: "\(MCPDefaults.permissionPathPrefix)\(token)"
             )
 
             // No matcher: every tool is offered, and `PermissionPolicy` decides which are

@@ -198,6 +198,12 @@ Terminal sessions are outside all of this. `brokersPermissions` is false for the
 (`AgentLauncher`), so there is no `PreToolUse` hook and no call to see coming; a terminal agent's
 system prompt still arrives the way it always did.
 
+A brokered session whose *app* has gone is refused a step earlier, in the hook rather than in the
+broker: the generated `PreToolUse` command falls through to a typed deny
+(`MCPDefaults.hookBrokerCommand`) so an agent still running with Threading closed is told why in
+words instead of being blocked in silence. The two layers and why they stay separate are in
+[`native-conversations.md`](native-conversations.md).
+
 ## A manager may answer one exact child request, not set child policy
 
 A user-appointed manager has to be able to clear the condition an attention notice reports. A

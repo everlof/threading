@@ -123,8 +123,20 @@ final class MCPSocketListenerTests: XCTestCase {
         payload: String,
         environment: [String: String]
     ) {
+        XCTAssertEqual(hookAnswer(command, payload: payload, environment: environment).status, 0)
+    }
+
+    /// The same run, with the hook's stdout kept: for a `PreToolUse` broker, that *is* the
+    /// decision.
+    private func hookAnswer(
+        _ command: String,
+        payload: String,
+        environment: [String: String]
+    ) -> (output: String, status: Int32) {
         let finished = expectation(description: "generated hook finished")
-        let status = OSAllocatedUnfairLock<Int32?>(initialState: nil)
+        let result = OSAllocatedUnfairLock<(output: String, status: Int32)>(
+            initialState: (output: "", status: -1)
+        )
 
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
@@ -134,24 +146,28 @@ final class MCPSocketListenerTests: XCTestCase {
                 _, replacement in replacement
             }
             let input = Pipe()
+            let output = Pipe()
             process.standardInput = input
-            process.standardOutput = FileHandle.nullDevice
+            process.standardOutput = output
             process.standardError = FileHandle.nullDevice
 
             do {
                 try process.run()
                 input.fileHandleForWriting.write(Data(payload.utf8))
                 try? input.fileHandleForWriting.close()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                status.withLock { $0 = process.terminationStatus }
+                result.withLock {
+                    $0 = (String(decoding: data, as: UTF8.self), process.terminationStatus)
+                }
             } catch {
-                status.withLock { $0 = -1 }
+                result.withLock { $0 = ("\(error)", -1) }
             }
             finished.fulfill()
         }
 
         wait(for: [finished], timeout: 30)
-        XCTAssertEqual(status.withLock { $0 }, 0)
+        return result.withLock { $0 }
     }
 
     // MARK: - Routing
@@ -240,6 +256,74 @@ final class MCPSocketListenerTests: XCTestCase {
         ))
 
         XCTAssertEqual(reply.status, 202)
+    }
+
+    /// The other half of the broker hook's fallback, proved against a listener that is there.
+    ///
+    /// The generated command answers for an absent app by printing a deny, and `||` is what
+    /// keeps that from happening whenever the POST succeeded. Asserted end to end — real
+    /// settings file, real rendezvous, real `PermissionBroker` — because the failure this
+    /// guards against is two decisions on one stdout, which no reading of the fragment catches.
+    @MainActor
+    func testAnAnsweredBrokerHookCarriesOnlyTheAppsOwnDecision() throws {
+        let server = startedServer(at: socketPath)
+        defer { server.stop() }
+        waitForRendezvous(server)
+        XCTAssertEqual(server.socketPath, socketPath, "the rendezvous never bound")
+
+        let sessionID = SessionID()
+        let token = MCPSessionRegistry.token(for: sessionID)
+        defer { MCPSessionRegistry.remove(sessionID: sessionID) }
+
+        let previousPresenter = PermissionBroker.present
+        PermissionBroker.present = { _, completion in
+            completion(.allow(reason: "Approved by the fixture."))
+        }
+        defer { PermissionBroker.present = previousPresenter }
+
+        let settingsPath = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+            for: sessionID,
+            brokersPermissions: true,
+            reportsLifecycle: false
+        ))
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: settingsPath) }
+
+        let settingsData = try Data(contentsOf: URL(fileURLWithPath: settingsPath))
+        let settings = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: settingsData) as? [String: Any]
+        )
+        let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        let groups = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+        let registrations = try XCTUnwrap(groups.first?["hooks"] as? [[String: Any]])
+        let command = try XCTUnwrap(registrations.first?["command"] as? String)
+
+        let answer = hookAnswer(
+            command,
+            payload: #"{"tool_name":"Write","tool_input":{"file_path":"/tmp/slice2"}}"#,
+            environment: [
+                MCPDefaults.socketEnvironmentKey: socketPath,
+                MCPDefaults.portEnvironmentKey: "",
+                MCPDefaults.sessionTokenEnvironmentKey: token
+            ]
+        )
+
+        XCTAssertEqual(answer.status, 0)
+
+        let decision = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(answer.output.utf8)) as? [String: Any],
+            "the answered hook printed something unparseable: \(answer.output)"
+        )
+        let output = try XCTUnwrap(decision["hookSpecificOutput"] as? [String: Any])
+        XCTAssertEqual(output["permissionDecision"] as? String, "allow")
+        XCTAssertNotEqual(
+            output["permissionDecisionReason"] as? String,
+            MCPDefaults.hookDenyReason,
+            "the fallback answered over the app"
+        )
+        XCTAssertFalse(
+            answer.output.contains(MCPDefaults.hookDenyResponseJSON),
+            "a second decision followed the app's own: \(answer.output)"
+        )
     }
 
     // MARK: - Binding

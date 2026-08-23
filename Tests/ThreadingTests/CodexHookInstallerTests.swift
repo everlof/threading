@@ -428,6 +428,127 @@ final class CodexHookInstallerTests: XCTestCase {
         XCTAssertTrue(command.contains("--max-time \(Int(MCPDefaults.permissionTimeout))"))
     }
 
+    /// A brokered Codex session whose Threading is gone is refused **in words**.
+    ///
+    /// Measured on 0.144.6: a `deny` reply stops the tool and its reason reaches the model. The
+    /// reply is the same object `MCPServer.routePermission` sends, because both providers post
+    /// to one endpoint and are answered by one `PermissionDecision.hookResponse`.
+    func testAnUnreachableAppDeniesInWordsWithTheAppsOwnAnswer() throws {
+        let answer = try shellAnswer(
+            CodexHookInstaller.permissionCommand(),
+            payload: #"{"tool_name":"shell","tool_input":{"command":["ls"]}}"#,
+            environment: [
+                "PATH": "/usr/bin:/bin",
+                MCPDefaults.brokerEnvironmentKey: "1",
+                MCPDefaults.sessionTokenEnvironmentKey: "codex-fixture-token",
+                MCPDefaults.socketEnvironmentKey: "/nonexistent/threading-slice2.sock",
+                MCPDefaults.portEnvironmentKey: ""
+            ]
+        )
+
+        XCTAssertEqual(answer.status, 0)
+
+        let decision = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(answer.output.utf8)) as? [String: Any],
+            "the hook printed something Codex cannot parse: \(answer.output)"
+        )
+        let output = try XCTUnwrap(decision["hookSpecificOutput"] as? [String: Any])
+        XCTAssertEqual(output["permissionDecision"] as? String, "deny")
+        XCTAssertFalse((output["permissionDecisionReason"] as? String ?? "").isEmpty)
+        XCTAssertEqual(
+            decision as NSDictionary,
+            PermissionDecision.deny(reason: MCPDefaults.hookDenyReason).hookResponse as NSDictionary
+        )
+    }
+
+    /// And the run this file is *shared* with says nothing at all.
+    ///
+    /// `hooks.json` is read by every Codex under the account, including the user's own terminal
+    /// sessions, which have Codex's own approval prompt. `guard && post || deny` would refuse
+    /// every tool call in those; the guard and the deny therefore share one brace group.
+    func testAnUnroutedCodexRunPrintsNoDecisionAtAll() throws {
+        let answer = try shellAnswer(
+            CodexHookInstaller.permissionCommand(),
+            payload: #"{"tool_name":"shell"}"#,
+            environment: [
+                "PATH": "/usr/bin:/bin",
+                MCPDefaults.sessionTokenEnvironmentKey: "codex-fixture-token",
+                MCPDefaults.socketEnvironmentKey: "/nonexistent/threading-slice2.sock",
+                MCPDefaults.portEnvironmentKey: ""
+            ]
+        )
+
+        XCTAssertEqual(answer.status, 0)
+        XCTAssertEqual(answer.output, "", "a session Threading does not broker was answered for")
+    }
+
+    /// The lifecycle commands are byte-identical to what they were before the permission hook
+    /// gained its fallback — asserted against frozen text, since a rewrite of this file costs
+    /// the user their Codex trust decision.
+    func testLifecycleCommandsAreUnchangedByThePermissionFallback() {
+        for event in HookLifecycleEvent.allCases where event.codexRegistration.isSupported {
+            XCTAssertEqual(
+                CodexHookInstaller.command(for: event),
+                Self.frozenLifecycleCommand(
+                    event: event,
+                    timeout: Int(MCPDefaults.lifecycleTimeout(for: event))
+                ),
+                "the \(event.rawValue) command is no longer byte-identical"
+            )
+        }
+    }
+
+    /// Runs one generated hook the way Codex does, and reads back what it said.
+    private func shellAnswer(
+        _ command: String,
+        payload: String,
+        environment: [String: String]
+    ) throws -> (output: String, status: Int32) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        process.environment = environment
+
+        let input = Pipe()
+        let output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+
+        try process.run()
+        input.fileHandleForWriting.write(Data(payload.utf8))
+        try input.fileHandleForWriting.close()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        return (String(decoding: data, as: UTF8.self), process.terminationStatus)
+    }
+
+    /// The lifecycle command exactly as it read before the permission hook's fallback existed.
+    ///
+    /// Spelled out rather than built from `MCPDefaults.hookPostCommand`, because the property is
+    /// that the builder's output still reaches these commands unchanged; comparing a generator
+    /// against itself would pass through any change to it.
+    private static func frozenLifecycleCommand(
+        event: HookLifecycleEvent,
+        timeout: Int
+    ) -> String {
+        let suffix = "/lifecycle/$THREADING_SESSION_TOKEN?event=\(event.rawValue)"
+        let common = "-s --max-time \(timeout)"
+            + " -H 'Content-Type: application/json' --data-binary @-"
+
+        return "threading_payload=$(cat);"
+            + " [ -n \"$THREADING_SESSION_TOKEN\" ] &&"
+            + " ( { [ -n \"$THREADING_MCP_SOCKET\" ] &&"
+            + " printf '%s' \"$threading_payload\" |"
+            + " curl \(common) --unix-socket \"$THREADING_MCP_SOCKET\""
+            + " \"http://localhost\(suffix)\"; }"
+            + " || { [ -n \"$THREADING_MCP_PORT\" ] &&"
+            + " printf '%s' \"$threading_payload\" |"
+            + " curl \(common) \"http://127.0.0.1:$THREADING_MCP_PORT\(suffix)\"; } )"
+            + " >/dev/null 2>&1; true # threading-lifecycle"
+    }
+
     // MARK: - Uninstalling
 
     func testUninstallRemovesOnlyOurEntries() throws {

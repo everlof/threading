@@ -497,6 +497,36 @@ tool added in a future release prompts rather than slipping through unasked. Cla
 broker through its blocking `PreToolUse` hook; Codex app-server approval requests are answered
 over the same JSON-RPC connection.
 
+**Having nobody to ask is answered twice, at two different distances**, and the two rules live in
+different files because they are answerable in different processes:
+
+- **The app is running and this conversation has no window to ask in.**
+  `PermissionBroker.decideIgnoringSystemGrant` denies with "Threading has no window available to
+  ask for permission." It is the one place every transport converges — Claude's hook, Codex's
+  app-server approval and ACP's `session/request_permission` all end here — so the rule is stated
+  once and covers all three.
+- **The app is not running at all.** Nothing converges, because nothing is reached: the hook's
+  `curl` connects to neither the rendezvous nor the port. That used to print nothing and exit
+  with curl's status, which is safe but *mute* — the CLI falls back to its own headless
+  behaviour, which means the tool is blocked with the model told nothing, and the turn stalls on
+  a refusal it cannot explain or work around. The generated command now ends in
+  `|| printf '%s' '{…}'` (`MCPDefaults.hookBrokerCommand`), so an unreachable app answers with
+  the same `hookSpecificOutput` object `MCPServer.routePermission` would have sent — built *from*
+  `PermissionDecision.deny` rather than transcribed, so the two cannot drift — carrying a reason
+  in the stdio bridge's voice: Threading is closed, this is temporary, continue without the tool.
+  Exit status 0, because the status is a decision to these CLIs and only stdout should be saying
+  anything.
+
+Three properties keep the fallback from answering anything it should not. `||` binds it to the
+POST's failure, so an app that replied is never followed by a second object on the same stdout.
+It reaches **only** the broker command: the lifecycle hooks end in `>/dev/null 2>&1 || true`
+precisely so they can never speak, and a deny printed by an observational hook would answer a
+question nobody asked it. And in Codex's shared `hooks.json` the surface guard and the deny sit
+inside one brace group, because `guard && post || deny` refuses every tool call in the runs the
+file is *shared* with — the user's own terminal Codex sessions, which have Codex's own approval
+prompt. Adding it changed that file's text once, which costs the user one re-approval; see
+[`session-activity.md`](session-activity.md).
+
 For shell execution, the tool name alone cannot make that decision. `ShellCommandPolicy` admits
 only vetted reader commands and rejects every segment if an argument can write or execute. Process
 lookup belongs to that reader vocabulary: `pgrep` only inspects the process table, so probes such

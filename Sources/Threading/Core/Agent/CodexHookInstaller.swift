@@ -188,16 +188,22 @@ enum CodexHookInstaller {
     /// itself: a terminal session raises Codex's own approval prompt, which the user can see and
     /// answer. Exporting the variable for one surface and not the other is what scopes a shared
     /// file to a single surface. Saying nothing leaves Codex's normal flow untouched.
+    ///
+    /// **A launch with no app behind it answers `deny` in words**, through
+    /// `MCPDefaults.hookBrokerCommand` — the guard and the deny sit inside one brace group, so a
+    /// Codex run that is not ours still says nothing at all. Adding that changed this command's
+    /// text once, which is a one-time renewal of the user's Codex hook trust: the file is
+    /// rewritten on the next launch and the `EventLog` line at the rewrite ("Rewrote Codex
+    /// hooks, trust must be renewed") is what answers "these worked yesterday".
     static func permissionCommand() -> String {
         let endpoint = "\(MCPDefaults.permissionPathPrefix)"
             + "$\(MCPDefaults.sessionTokenEnvironmentKey)"
 
         return "\(Key.payloadVariable)=$(cat);"
             + " [ -n \"$\(MCPDefaults.brokerEnvironmentKey)\" ] &&"
-            + " " + MCPDefaults.hookPostCommand(
+            + " " + MCPDefaults.hookBrokerCommand(
                 payloadVariable: Key.payloadVariable,
-                endpointSuffix: endpoint,
-                timeout: MCPDefaults.permissionTimeout
+                endpointSuffix: endpoint
             ) + ";"
             + " true \(MCPDefaults.hookMarker)"
     }

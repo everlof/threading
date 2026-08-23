@@ -1,4 +1,5 @@
 import XCTest
+import os
 
 @testable import Threading
 
@@ -276,6 +277,260 @@ final class MCPSessionRegistryTests: XCTestCase {
     ).call
     XCTAssertFalse(MCPToolCatalog.admits(call, forOperations: regular))
     XCTAssertTrue(MCPToolCatalog.admits(call, forOperations: ControlOperation.managerOperations))
+  }
+
+  // MARK: - The Broker Hook With No App To Ask
+
+  /// The case this exists for: the agent is running and Threading is not.
+  ///
+  /// The hook used to print nothing and exit with curl's status, which leaves the CLI applying
+  /// its own headless behaviour — blocked, with the model told nothing and the turn stalled on
+  /// a tool it cannot explain. Now it answers in the app's own words, and the words are the
+  /// *same* object a running app would have sent, which is why this compares against
+  /// `PermissionDecision.hookResponse` rather than against a transcription of it.
+  @MainActor
+  func testAnUnreachableAppTurnsTheBrokerHookIntoATypedDeny() throws {
+    let sessionID = SessionID()
+    defer { MCPSessionRegistry.remove(sessionID: sessionID) }
+
+    let command = try brokerCommand(for: sessionID)
+    let run = runHook(command, payload: Self.preToolUsePayload, environment: [
+      "PATH": Self.hookPath,
+      MCPDefaults.socketEnvironmentKey: "/nonexistent/threading-slice2.sock",
+      MCPDefaults.portEnvironmentKey: "",
+      MCPDefaults.sessionTokenEnvironmentKey: MCPSessionRegistry.token(for: sessionID)
+    ])
+
+    XCTAssertEqual(run.status, 0, "a hook that exits non-zero is read as a failure, not a deny")
+
+    let answer = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(run.output.utf8)) as? [String: Any],
+      "the hook printed something the CLI cannot parse: \(run.output)"
+    )
+    let output = try XCTUnwrap(answer["hookSpecificOutput"] as? [String: Any])
+
+    // Spelled out rather than compared to our constants: these three keys are Claude's, and a
+    // rename on our side would silently stop reaching the CLI.
+    XCTAssertEqual(output["hookEventName"] as? String, "PreToolUse")
+    XCTAssertEqual(output["permissionDecision"] as? String, "deny")
+    XCTAssertFalse(
+      (output["permissionDecisionReason"] as? String ?? "").isEmpty,
+      "a deny with no reason is as mute as no answer at all"
+    )
+
+    let expected = PermissionDecision.deny(reason: MCPDefaults.hookDenyReason).hookResponse
+    XCTAssertEqual(
+      answer as NSDictionary,
+      expected as NSDictionary,
+      "the fallback drifted from what a running app answers with"
+    )
+  }
+
+  /// The `||` is the whole contract: an app that answered is never followed by a second object.
+  ///
+  /// Driven through a stand-in `curl` rather than a listener, because the property under test is
+  /// the shell's, not the server's — a successful POST must leave the hook's stdout untouched.
+  @MainActor
+  func testABrokerAnswerIsNeverFollowedByTheFallback() throws {
+    let sessionID = SessionID()
+    defer { MCPSessionRegistry.remove(sessionID: sessionID) }
+
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("thr-broker-\(UUID().uuidString.prefix(8))", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+
+    let allowed = #"{"hookSpecificOutput":{"permissionDecision":"allow"}}"#
+    let curl = directory.appendingPathComponent("curl")
+    try Data("#!/bin/sh\nprintf '%s' '\(allowed)'\n".utf8).write(to: curl)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: curl.path)
+
+    let command = try brokerCommand(for: sessionID)
+    let run = runHook(command, payload: Self.preToolUsePayload, environment: [
+      "PATH": "\(directory.path):\(Self.hookPath)",
+      MCPDefaults.socketEnvironmentKey: "/nonexistent/threading-slice2.sock",
+      MCPDefaults.portEnvironmentKey: "",
+      MCPDefaults.sessionTokenEnvironmentKey: MCPSessionRegistry.token(for: sessionID)
+    ])
+
+    XCTAssertEqual(run.status, 0)
+    XCTAssertEqual(
+      run.output,
+      allowed,
+      "the app's answer was followed by a second decision on the same stdout"
+    )
+  }
+
+  /// The lifecycle commands are **byte-identical** to what they were before the broker gained a
+  /// fallback, asserted against frozen text rather than against the builder that produces them.
+  ///
+  /// Their silence is load-bearing in three separate ways: Claude feeds a `UserPromptSubmit`
+  /// hook's stdout back to the model as context, reads a non-zero `Stop` as a reason to keep
+  /// going, and reads a `PreToolUse` hook's own exit status as a decision. A deny printed by an
+  /// observational hook would answer a question nobody asked it.
+  @MainActor
+  func testTheFallbackReachesTheBrokerHookAndNoOtherCommand() throws {
+    let sessionID = SessionID()
+    defer { MCPSessionRegistry.remove(sessionID: sessionID) }
+    let token = MCPSessionRegistry.token(for: sessionID)
+
+    let groups = try hookGroups(
+      for: sessionID,
+      brokersPermissions: true,
+      reportsLifecycle: true
+    )
+    var lifecycleCommands: [String] = []
+
+    for event in HookLifecycleEvent.allCases {
+      let registration = event.claudeRegistration
+      guard registration.isSupported else { continue }
+
+      let expected = Self.frozenLifecycleCommand(
+        token: token,
+        event: event,
+        timeout: Int(MCPDefaults.lifecycleTimeout(for: event))
+      )
+      for name in registration.eventNames {
+        let commands = try XCTUnwrap(groups[name], "\(name) carried no hooks")
+        XCTAssertTrue(
+          commands.contains(expected),
+          "the \(name) command for \(event.rawValue) is no longer byte-identical"
+        )
+        lifecycleCommands.append(expected)
+      }
+    }
+
+    XCTAssertFalse(lifecycleCommands.isEmpty, "the fixture registered no lifecycle hooks")
+    for command in lifecycleCommands {
+      XCTAssertFalse(
+        command.contains(MCPDefaults.hookDenyResponseJSON),
+        "an observational hook can now speak: \(command)"
+      )
+    }
+
+    let allCommands = groups.values.flatMap { $0 }
+    XCTAssertEqual(
+      allCommands.filter { $0.contains(MCPDefaults.hookDenyResponseJSON) }.count,
+      1,
+      "exactly one command — the broker's — may answer for an absent app"
+    )
+  }
+
+  // MARK: - Broker Hook Helpers
+
+  /// A minimal `PreToolUse` event, in the shape both CLIs write to the hook's stdin.
+  private static let preToolUsePayload = #"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#
+
+  /// Spelled out so a hook runs against the system's own tools and nothing the developer's
+  /// shell happens to put earlier on the path.
+  private static let hookPath = "/usr/bin:/bin"
+
+  /// The `PreToolUse` command out of the settings file a brokered launch is given.
+  @MainActor
+  private func brokerCommand(for sessionID: SessionID) throws -> String {
+    let groups = try hookGroups(
+      for: sessionID,
+      brokersPermissions: true,
+      reportsLifecycle: false
+    )
+    return try XCTUnwrap(groups["PreToolUse"]?.first, "no broker hook was written")
+  }
+
+  /// Every hook command in a written settings file, by hook name.
+  @MainActor
+  private func hookGroups(
+    for sessionID: SessionID,
+    brokersPermissions: Bool,
+    reportsLifecycle: Bool
+  ) throws -> [String: [String]] {
+    let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
+      for: sessionID,
+      brokersPermissions: brokersPermissions,
+      reportsLifecycle: reportsLifecycle
+    ))
+    addTeardownBlock { try? FileManager.default.removeItem(atPath: path) }
+
+    let data = try Data(contentsOf: URL(fileURLWithPath: path))
+    let settings = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+
+    return hooks.compactMapValues { value in
+      (value as? [[String: Any]])?.flatMap { group in
+        (group["hooks"] as? [[String: Any]])?.compactMap { $0["command"] as? String } ?? []
+      }
+    }
+  }
+
+  /// The lifecycle command exactly as it read before the broker's fallback existed.
+  ///
+  /// Frozen as text rather than built from `MCPDefaults.hookPostCommand`, because the property
+  /// is that this builder's output still reaches these hooks unchanged — comparing a generator
+  /// against itself would pass through any change to it.
+  private static func frozenLifecycleCommand(
+    token: String,
+    event: HookLifecycleEvent,
+    timeout: Int
+  ) -> String {
+    let suffix = "/lifecycle/\(token)?event=\(event.rawValue)"
+    let common = "-s --max-time \(timeout)"
+      + " -H 'Content-Type: application/json' --data-binary @-"
+
+    return "threading_hook_payload=$(cat); "
+      + "( { [ -n \"$THREADING_MCP_SOCKET\" ] &&"
+      + " printf '%s' \"$threading_hook_payload\" |"
+      + " curl \(common) --unix-socket \"$THREADING_MCP_SOCKET\""
+      + " \"http://localhost\(suffix)\"; }"
+      + " || { [ -n \"$THREADING_MCP_PORT\" ] &&"
+      + " printf '%s' \"$threading_hook_payload\" |"
+      + " curl \(common) \"http://127.0.0.1:$THREADING_MCP_PORT\(suffix)\"; } )"
+      + " >/dev/null 2>&1 || true"
+  }
+
+  /// Runs a generated hook the way a CLI does: `/bin/sh -c`, the event on stdin, stdout read
+  /// back as the answer.
+  ///
+  /// Off the main queue and joined through an expectation, because a hook that does reach a
+  /// listener is answered by code hopping to main — blocking there would deadlock against the
+  /// thing under test.
+  private func runHook(
+    _ command: String,
+    payload: String,
+    environment: [String: String]
+  ) -> (output: String, status: Int32) {
+    let finished = expectation(description: "the generated hook finished")
+    let result = OSAllocatedUnfairLock<(output: String, status: Int32)>(
+      initialState: (output: "", status: -1)
+    )
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/bin/sh")
+      process.arguments = ["-c", command]
+      process.environment = environment
+
+      let input = Pipe()
+      let output = Pipe()
+      process.standardInput = input
+      process.standardOutput = output
+      process.standardError = FileHandle.nullDevice
+
+      do {
+        try process.run()
+        input.fileHandleForWriting.write(Data(payload.utf8))
+        try? input.fileHandleForWriting.close()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        result.withLock {
+          $0 = (String(decoding: data, as: UTF8.self), process.terminationStatus)
+        }
+      } catch {
+        result.withLock { $0 = ("\(error)", -1) }
+      }
+      finished.fulfill()
+    }
+
+    wait(for: [finished], timeout: 30)
+    return result.withLock { $0 }
   }
 }
 

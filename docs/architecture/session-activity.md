@@ -123,6 +123,19 @@ carrying the prompt text. Terminal sessions additionally carry a *tool-scoped, o
 `PreToolUse`/`PostToolUse` pair for the tools that ask the user outright — see "A runtime's own
 'I am waiting'" below, which is where the difference between that pair and the broker is drawn.
 
+**The brokering `PreToolUse` command is the one that answers for itself.** It is built by
+`MCPDefaults.hookBrokerCommand`, which is the same POST with `|| printf '%s' '{…}'` after it: an
+agent whose Threading has been quit is denied in words rather than left to the CLI's own headless
+behaviour, which blocks the tool and tells the model nothing. The fallback goes **only** there.
+Every lifecycle command still ends in `>/dev/null 2>&1 || true` and is byte-identical to what it
+was before the fallback existed, because their silence is three separate contracts: Claude feeds
+a `UserPromptSubmit` hook's stdout back as context, reads a non-zero `Stop` as a reason to keep
+going, and reads a `PreToolUse` hook's exit status as a decision. A frozen-text test holds them
+there. The deny payload itself is `PermissionDecision.deny(reason:)`'s own `hookResponse`, so the
+answer an absent app gives cannot drift from the one a running app sends; see
+[`native-conversations.md`](native-conversations.md) for the second layer, the app that is
+present but has no window.
+
 Reporting is on by default to preserve the richer terminal state, but it is observational and
 optional. Off with no Remote Control override means no Claude settings file at all; off with an
 override writes that key without a `hooks` dictionary. Native Claude still writes `PreToolUse`
@@ -1063,6 +1076,14 @@ The `PreToolUse` entry is written **unconditionally** and guarded on
 was the obvious alternative and is wrong: `hooks.json` would be rewritten every time a session
 changed surface, and every rewrite costs the user's trust decision. An entry that is inert
 until an environment variable appears is how one shared file serves two surfaces.
+
+That guard and the absent-app deny (`MCPDefaults.hookBrokerCommand`) share **one brace group**,
+which is not tidiness: `guard && post || deny` is left-to-right, so an unexported guard would
+fall straight through to the refusal and deny every tool call in the runs this file is shared
+with — the user's own terminal Codex sessions, which have Codex's own approval prompt. A test
+runs the emitted command with no broker variable and asserts it prints nothing at all. Adding
+the fallback changed this command's text once, so it is one more one-time trust renewal of the
+kind above; the `EventLog` line at the rewrite is what explains it.
 
 **A hook is invisible by construction**, which is the same problem `ProjectIconResearch` has and
 is answered the same way: every run leaves a record. `EventLog.Category.hooks` is the durable
