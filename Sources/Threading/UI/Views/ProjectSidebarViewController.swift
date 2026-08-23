@@ -744,13 +744,23 @@ extension ProjectSidebarViewController {
         // presented: the complete first tree lands synchronously in this call. Replace only the
         // list's bottom constraint while constructing it, keeping the final width and the rest
         // of the window in force, then restore the real viewport before the next display pass.
+        //
+        // The scroll view itself cannot be literally zero-height: AppKit constrains its document
+        // to the clip view inside `contentInsets`, so a zero frame contradicts any themed edge or
+        // content breathing. Keep the *content viewport* at zero by retaining those chrome insets
+        // in the temporary frame. That preserves the virtualization boundary without asking
+        // Auto Layout to break one of the scroll view's internal constraints.
         guard let bottomConstraint = scrollViewBottomConstraint,
               scrollView.frame.height > 0 else {
             reload()
             return
         }
 
-        let suppressedHeight = scrollView.heightAnchor.constraint(equalToConstant: 0)
+        let insets = scrollView.contentInsets
+        let suppressedFrameHeight = max(0, insets.top + insets.bottom)
+        let suppressedHeight = scrollView.heightAnchor.constraint(
+            equalToConstant: suppressedFrameHeight
+        )
         bottomConstraint.isActive = false
         suppressedHeight.isActive = true
         view.layoutSubtreeIfNeeded()
