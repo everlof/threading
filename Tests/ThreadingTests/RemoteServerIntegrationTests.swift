@@ -1711,7 +1711,15 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     func testUsageIsAdvertisedAndReadableOnlyToWholeHostOwner() throws {
         let meProbe = try XCTUnwrap(get("/api/me", bearer: "goodtoken"))
         let me = try JSONDecoder().decode(RemoteMeDTO.self, from: meProbe.body)
-        XCTAssertEqual(me.features, [RemoteRESTFeature.usageDashboard.rawValue])
+        // Membership, not the whole list. This test is about who may be told that usage exists,
+        // and pinning the exact array made it fail the moment an unrelated feature was added that
+        // every principal legitimately gets — saying "usage leaked" when nothing about usage had
+        // changed. What must hold is that the owner is told, and below, that a guest is not.
+        XCTAssertEqual(
+            me.features?.contains(RemoteRESTFeature.usageDashboard.rawValue),
+            true,
+            "The whole-host owner is the one principal that may be told the dashboard exists"
+        )
 
         let overviewProbe = try XCTUnwrap(get("/api/usage?limit=1", bearer: "goodtoken"))
         XCTAssertEqual(overviewProbe.status, 200)
@@ -1762,7 +1770,10 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
                 RemoteMeDTO.self,
                 from: try XCTUnwrap(get("/api/me", bearer: token)).body
             )
-            XCTAssertNil(guestMe.features)
+            XCTAssertFalse(
+                guestMe.features?.contains(RemoteRESTFeature.usageDashboard.rawValue) ?? false,
+                "A guest share must never be told the usage dashboard exists"
+            )
         }
         XCTAssertEqual(try XCTUnwrap(get("/api/usage", bearer: "revoked")).status, 401)
     }
