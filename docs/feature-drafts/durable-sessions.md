@@ -11,8 +11,17 @@
 > only from the path that actually bound. The second hop was measured rather than assumed
 > ([`performance.md`](../architecture/performance.md)): a small reply costs 0.4 ms through the
 > bridge; the 234 KB `tools/list` costs 30 ms against 5 ms direct, once or twice per session.
-> Next is step 3 of §9 — make the bridge the default, then retire the TCP endpoint. The **PTY
-> host** (§4) remains unscheduled and should not start until the bridge has settled.
+> **Part two is built** (2026-08-23): `threading-ptyd` and all ten slices of its plan — the sweep
+> exception, the typed deny, `ThreadingPTYHostKit`, the daemon, the client, the host-backed
+> session, detach/reattach with the durable grid, launchd registration with retire-on-upgrade,
+> the visibility surface, and native conversations over pipes (resumed from the transcript rather
+> than reattached; re-adoption is the named follow-up). See
+> [`pty-host.md`](../architecture/pty-host.md) for every decision. `ptyHostEnabled` ships **off**,
+> presented on Settings ▸ Advanced, and must stay off-by-default until TCC attribution of the
+> daemon's children is verified on a SIP-enabled Mac ([`permissions.md`](../architecture/permissions.md)
+> R1 — this development Mac has SIP disabled, so it cannot answer). Step 3 of §9 — make the
+> bridge the default, then retire the TCP endpoint — remains open, wanting a per-launch
+> transport journal line first.
 
 Part of the [drafts index](README.md). Read alongside
 [`crash-recovery.md`](../architecture/crash-recovery.md) (what a launch decides and what it
@@ -402,6 +411,7 @@ The reason the second part is worth its cost is not only the reboot case.
 3. **Make the bridge the default, then retire the TCP endpoint** once nothing launches against
    it. Not started.
 4. **The daemon**, off by default and per-session opt-in first, with the Recovery Mode exception
-   landing ahead of it. Native conversations decided at this point, not later.
+   landing ahead of it. Native conversations decided at this point, not later. **Built**
+   (2026-08-23, ten slices; gated on the R1 TCC probe before any default-on).
 5. **Then, and only then**, the things §6 lists — scheduled work without a window, phone
    independence, persisted scrollback — each on its own slice.

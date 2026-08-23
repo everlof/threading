@@ -115,9 +115,9 @@ reshuffling it is a line move.
   behind the hidden `mcpStdioBridgeEnabled` setting, default off, with the hop measured in
   `performance.md`; the durable decisions are in `mcp-and-display.md`, `session-activity.md`,
   `persistence.md` and `REMOTE_ACCESS.md`. Making the bridge the default and retiring the TCP
-  endpoint is next. Part two, the PTY host, is unscheduled and gated on the bridge having
-  settled, because until the bridge is reconnectable durability only buys a live process nothing
-  can address. The one slice that depended on neither — a grace period on the remote viewport
+  endpoint is next. **Part two, the PTY host, is built** (2026-08-23, `pty-host.md`): sessions
+  survive a quit under the opt-in `ptyHostEnabled`, which stays off-by-default until TCC
+  attribution is verified on a SIP-enabled Mac. The one slice that depended on neither — a grace period on the remote viewport
   lease, so a phone re-entering a chat stops reflowing the agent — shipped with part one.
 
 ### Shipped — pointers remain
