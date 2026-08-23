@@ -200,6 +200,13 @@ own `verdict`. A run that verifies nothing signals nothing and takes nothing: th
 held by something this launch cannot name, and the alert says so rather than claiming Threading is
 already running, which is the one thing that is definitely not true.
 
+`verdict` is the **single gate**, which is why both this path and `verifiedHolders` go through it
+rather than re-deriving the rule: a record whose `owner` is the PTY host is skipped as
+`heldByHost` before the probe is even consulted, so the exception reaches the launch sweep, a
+recovery launch and this takeover by construction rather than by three checks agreeing. It is in
+the sweep ahead of the host that will write those records, because the launch sweep runs
+unconditionally: a host that landed first would have its children ended by the next launch.
+
 ### Why the taken-over launch reads as unclean, and why that is right
 
 The takeover necessarily happens **before** `EventLog.beginLaunch()` — nothing may write into the
@@ -300,7 +307,7 @@ or a store.
 | Still runs | Why |
 |---|---|
 | The single-instance lock, the marker, the ledger, the policy | Recovery owns the state like any other launch |
-| `OrphanedAgentChildSweep` | It kills leftovers, which is recovery-aligned, and a leftover child holding a PTY is a plausible cause |
+| `OrphanedAgentChildSweep` | It kills leftovers, which is recovery-aligned, and a leftover child holding a PTY is a plausible cause — **except one recorded as the PTY host's**, which `verdict` skips as `heldByHost`: that child is running because it was told to keep running while the app was away, so it is neither a leftover nor a plausible cause, and a recovery launch is the last one that should end work it did not start |
 | `MetricKitDiagnostics`, `MainThreadStallMonitor` | Pure observation, and this is when it matters most |
 | `AppThemeRefresh`'s observers, `AppIconPresenter` | Cheap; a recovery screen that ignores Increase Contrast is worse for its reader, and under System the icon resolves to the shipped one with no special case |
 | The menu bar | Gated by `RecoveryModeCommandPolicy` |

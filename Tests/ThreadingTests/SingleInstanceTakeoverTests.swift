@@ -175,13 +175,18 @@ final class SingleInstanceTakeoverTests: XCTestCase {
 
     // MARK: - Releasing a lock the owner's children inherited
 
-    private func childRecord(pid: Int32, executable: String = "claude") -> AgentChildRecord {
+    private func childRecord(
+        pid: Int32,
+        executable: String = "claude",
+        owner: AgentChildOwner? = nil
+    ) -> AgentChildRecord {
         AgentChildRecord(
             pid: pid,
             startTime: ProcessStartTime(seconds: UInt64(pid), microseconds: 1),
             sessionID: nil,
             executable: executable,
-            recordedAt: Date(timeIntervalSince1970: 0)
+            recordedAt: Date(timeIntervalSince1970: 0),
+            owner: owner
         )
     }
 
@@ -276,6 +281,37 @@ final class SingleInstanceTakeoverTests: XCTestCase {
         )
 
         XCTAssertEqual(holders.map(\.pid), [11, 13])
+    }
+
+    // MARK: - Children the Background Host Holds
+
+    /// This path adds no rule of its own: it asks `OrphanedAgentChildSweep.verdict`, so the
+    /// host-held exception arrives here without a line of code in this file. The alert must not
+    /// offer to end work the app never started and cannot account for.
+    func testAHostHeldChildIsNeverOfferedAsALockHolder() {
+        let holders = SingleInstanceTakeover.verifiedHolders(
+            in: [childRecord(pid: 11), childRecord(pid: 12, owner: .ptyHost)],
+            probe: ledgerProbe(alive: [11, 12])
+        )
+
+        XCTAssertEqual(holders.map(\.pid), [11])
+    }
+
+    func testReleasingTheLockNeverSignalsAHostHeldChild() {
+        let recorder = Recorder()
+
+        let outcome = SingleInstanceTakeover.releaseOrphanedLock(
+            records: [childRecord(pid: 12, owner: .ptyHost)],
+            probe: { pid in
+                XCTFail("pid \(pid) belongs to the host and must not be probed")
+                return .absent
+            },
+            signalGroup: { recorder.signals.append(SentSignal(pid: $0, number: SIGKILL)) },
+            acquireLock: { _ in true }
+        )
+
+        XCTAssertEqual(outcome, .nothingToEnd)
+        XCTAssertTrue(recorder.signals.isEmpty)
     }
 
     // MARK: - What is left behind

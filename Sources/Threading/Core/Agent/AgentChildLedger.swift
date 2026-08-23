@@ -1,6 +1,19 @@
 import Darwin
 import Foundation
 
+// MARK: - Agent Child Owner
+
+/// Which process is responsible for ending a recorded child.
+///
+/// The ledger's whole point is that somebody must end an unowned child, and until now that was
+/// always this app. A child spawned by the PTY host (`threading-ptyd`) is recorded so a launch
+/// can *see* it — in a list of holders, in a diagnostic — but the host owns its ending, and a
+/// second process signalling it is exactly the double-ownership this file exists to avoid.
+enum AgentChildOwner: String, Codable, Sendable {
+    case app
+    case ptyHost
+}
+
 // MARK: - Agent Child Record
 
 /// One process-group leader this launch started, named well enough to be recognised after a
@@ -21,6 +34,22 @@ struct AgentChildRecord: Codable, Equatable, Sendable {
     /// Enough to say what was killed without recording where it was installed.
     let executable: String
     let recordedAt: Date
+    /// Who may end this child. **Absent means `.app`**, and absent is how every app-owned
+    /// record is written.
+    ///
+    /// Optional rather than a defaulted `.app`, because the migration property has to be a
+    /// property of the *type* rather than of a build: a nil encodes to no key at all, so a
+    /// record this build writes for its own child is byte-identical to one written before the
+    /// field existed, and the file on disk right now needs no migration to keep meaning what it
+    /// meant. Writing `"owner":"app"` into every record would rewrite the whole ledger on the
+    /// first save of a build nobody has opted into anything with, and would leave two on-disk
+    /// spellings of one fact for the sweep to agree about.
+    ///
+    /// Read through `resolvedOwner`; nothing decides anything on the raw optional.
+    var owner: AgentChildOwner?
+
+    /// The owner the sweep acts on. Absent is `.app` — see `owner`.
+    var resolvedOwner: AgentChildOwner { owner ?? .app }
 }
 
 // MARK: - Agent Child Ledger
@@ -38,10 +67,16 @@ struct AgentChildRecord: Codable, Equatable, Sendable {
 /// orphans themselves. `OrphanedAgentChildSweep` cannot tell the two apart from the file alone,
 /// and must not try.
 ///
-/// PTY sessions are deliberately absent. SwiftTerm launches through `forkpty`, so that child
-/// already leads its own session with a controlling terminal and dies of `SIGHUP` when the
-/// master descriptor closes with the app. It needs no ledger because the kernel already owns
-/// the ending.
+/// PTY sessions the *app* launches are deliberately absent. SwiftTerm launches through
+/// `forkpty`, so that child already leads its own session with a controlling terminal and dies
+/// of `SIGHUP` when the master descriptor closes with the app. It needs no ledger because the
+/// kernel already owns the ending.
+///
+/// That reasoning ends where the master descriptor stops closing with the app. A PTY held open
+/// by the host outlives this process on purpose, so the kernel owns nothing here and the child
+/// *is* recorded — with `owner == .ptyHost`, which `OrphanedAgentChildSweep.verdict` reads as
+/// "visible, never signalled". Recording it is what lets a launch name what is still running;
+/// the owner field is what stops the same launch killing it.
 ///
 /// Writes are **synchronous**, for `EventLog`'s reason: the record that matters most is always
 /// the one written immediately before the process died, and an asynchronous hand-off is exactly

@@ -799,10 +799,15 @@ died: `AgentRuntime.terminateAll()` runs from `applicationShouldTerminate`, whic
 `SIGKILL` never reaches, so the CLI reparented to launchd and stayed there — alive, unowned,
 unreaped, holding a model conversation open, with nothing anywhere recording that it existed.
 
-**PTY sessions are deliberately excluded.** SwiftTerm launches through `forkpty`, so that child
-already leads its own session with a controlling terminal, and the kernel sends it `SIGHUP` when
-the master descriptor closes with the app. The ending is already owned; a second mechanism over
-the top would only be a second thing to get wrong.
+**PTY sessions are deliberately excluded, for as long as the app holds the master descriptor.**
+SwiftTerm launches through `forkpty`, so that child already leads its own session with a
+controlling terminal, and the kernel sends it `SIGHUP` when the master descriptor closes with the
+app. The ending is already owned; a second mechanism over the top would only be a second thing to
+get wrong. A PTY held open by the background host outlives the app on purpose, so the kernel owns
+nothing there and that child *is* recorded — with `owner == .ptyHost`, which
+`OrphanedAgentChildSweep.verdict` reads as `heldByHost` and skips before it probes the pid. The
+record is there so a launch can name what is still running; the owner is what stops the same
+launch killing it.
 
 Three pieces close it for the native path, and all three are shared — there is no per-runtime
 branch anywhere in them, because "this process is ours and it is still running" is not a fact

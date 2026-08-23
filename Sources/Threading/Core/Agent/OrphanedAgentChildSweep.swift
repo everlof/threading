@@ -43,6 +43,9 @@ enum OrphanedAgentChildSweep {
         case processGone
         case startTimeMismatch
         case identityUnreadable
+        /// The record names a child of the PTY host, whose ending the host owns. Not a refusal:
+        /// nothing about this child is in doubt, and there is nothing here to verify.
+        case heldByHost
     }
 
     struct Summary: Equatable {
@@ -59,8 +62,31 @@ enum OrphanedAgentChildSweep {
     /// The whole rule, separated from the killing so it can be tested without one.
     ///
     /// Fail closed: only an exact match on both halves of the identity authorises a signal.
-    static func verdict(for record: AgentChildRecord, probe: AgentChildProbe) -> Verdict {
-        switch probe {
+    ///
+    /// **The single gate.** All three sweepers reach a signal through here — the launch sweep in
+    /// `run()`, the same call in a recovery launch (`LaunchPlan` does not gate it), and
+    /// `SingleInstanceTakeover`'s `verifiedHolders` / `releaseOrphanedLock`. A rule added here
+    /// therefore reaches all three by construction, and a second check beside one of them would
+    /// be a way for them to disagree.
+    ///
+    /// The probe is an `@autoclosure` because ownership is settled **before** the machine is
+    /// asked anything: a child the PTY host holds is not this app's to look up, let alone to
+    /// signal. Evaluating the argument at the call site would leave "never signalled" true and
+    /// "never probed" quietly false.
+    static func verdict(
+        for record: AgentChildRecord,
+        probe: @autoclosure () -> AgentChildProbe
+    ) -> Verdict {
+        // Ownership first. Everything below reasons about a pid this app spawned and may end;
+        // a host-held child is recorded so a launch can see it, never so a launch can kill it.
+        //
+        // The whole record is in hand here, which is the room the companion rule R4 anticipates
+        // — an unreclaimable host-held child eventually becoming sweepable — needs. That policy
+        // is deliberately not written yet: nothing can be unreclaimable until there is a host to
+        // hold it, and when it is written it is a change inside this function and nowhere else.
+        guard record.resolvedOwner == .app else { return .skip(.heldByHost) }
+
+        switch probe() {
         case .absent:
             return .skip(.processGone)
         case .unreadable:

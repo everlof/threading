@@ -55,6 +55,55 @@ final class AgentChildLedgerTests: XCTestCase {
         XCTAssertNil(records.first?.sessionID)
     }
 
+    // MARK: - Who Owns the Ending
+
+    func testAHostHeldChildRoundTripsWithItsOwner() {
+        let record = makeRecord(pid: 4323, owner: .ptyHost)
+        XCTAssertTrue(AgentChildLedger(url: url).record(record))
+
+        guard case .loaded(let records) = AgentChildLedger(url: url).consumeInheritedRecords()
+        else { return XCTFail("expected a readable ledger") }
+        XCTAssertEqual(records, [record])
+        XCTAssertEqual(records.first?.resolvedOwner, .ptyHost)
+    }
+
+    /// The migration property, from the writing end: an app-owned record writes no owner key at
+    /// all, so this build's file is byte-identical in shape to every file already on disk and
+    /// there is exactly one spelling of "the app owns it" for the sweep to agree about.
+    func testAnAppOwnedRecordWritesNoOwnerKeyAtAll() throws {
+        XCTAssertTrue(AgentChildLedger(url: url).record(makeRecord(pid: 4324)))
+
+        let written = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(written.contains("owner"), "a nil owner is an absent key, not a default")
+    }
+
+    /// And from the reading end: a record written before the field existed still means what it
+    /// meant, which is the only thing standing between this change and a launch that stops
+    /// sweeping real orphans.
+    func testARecordWrittenBeforeTheOwnerFieldExistedReadsAsTheApps() throws {
+        try Data(
+            """
+            {
+              "formatVersion" : 1,
+              "value" : [
+                {
+                  "pid" : 4325,
+                  "startTime" : { "seconds" : 1700000000, "microseconds" : 123456 },
+                  "sessionID" : "A1B2C3D4",
+                  "executable" : "claude",
+                  "recordedAt" : "2023-11-14T22:13:20Z"
+                }
+              ]
+            }
+            """.utf8
+        ).write(to: url)
+
+        guard case .loaded(let records) = AgentChildLedger(url: url).consumeInheritedRecords()
+        else { return XCTFail("an older ledger must still be readable") }
+        XCTAssertNil(records.first?.owner)
+        XCTAssertEqual(records.first?.resolvedOwner, .app)
+    }
+
     func testClearingARecordEmptiesTheLedgerForTheNextLaunch() {
         let ledger = AgentChildLedger(url: url)
         ledger.record(makeRecord(pid: 11))
@@ -172,7 +221,8 @@ final class AgentChildLedgerTests: XCTestCase {
 
     private func makeRecord(
         pid: Int32,
-        executable: String = "claude"
+        executable: String = "claude",
+        owner: AgentChildOwner? = nil
     ) -> AgentChildRecord {
         AgentChildRecord(
             pid: pid,
@@ -180,7 +230,8 @@ final class AgentChildLedgerTests: XCTestCase {
             sessionID: UUID().uuidString,
             executable: executable,
             // Whole seconds: the store round-trips through ISO 8601, which carries no more.
-            recordedAt: Date(timeIntervalSince1970: 1_700_000_000)
+            recordedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            owner: owner
         )
     }
 }
