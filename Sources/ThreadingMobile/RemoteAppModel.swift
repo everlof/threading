@@ -3199,7 +3199,7 @@ final class RemoteAppModel: ObservableObject {
                     id: "a98a5b1a-cdc3-43ea-9fd3-40bc03f3b1f8",
                     title: "Development server",
                     projectName: "AnotherTerminal",
-                    state: "working",
+                    state: .working,
                     isAvailable: true,
                     createdAt: now - 90,
                     terminalTheme: demoTerminalTheme,
@@ -3210,7 +3210,7 @@ final class RemoteAppModel: ObservableObject {
                     id: "60f1a622-d187-4875-b1ca-3705ae53394c",
                     title: "Terminal",
                     projectName: "Strom",
-                    state: "dormant",
+                    state: .dormant,
                     isAvailable: false,
                     createdAt: now - 7_200,
                     terminalTheme: demoTerminalTheme

@@ -321,7 +321,7 @@ final class RemoteProtocolTests: XCTestCase {
                 id: "terminal-1",
                 title: "Server",
                 projectName: "Threading",
-                state: "working",
+                state: .working,
                 isAvailable: true,
                 createdAt: 124,
                 isShared: true,
@@ -607,7 +607,7 @@ final class RemoteProtocolTests: XCTestCase {
                 id: "terminal-1",
                 title: "Server",
                 projectName: "Threading",
-                state: "idle",
+                state: .idle,
                 isAvailable: true
             )
         )

@@ -313,7 +313,7 @@ final class RemoteSessionMirrorRegistry {
             id: terminal.id.uuidString,
             title: ProjectTerminalTitle.displayTitle(for: terminal),
             projectName: projectName,
-            state: running ? (busy ? "working" : "idle") : "dormant",
+            state: running ? (busy ? .working : .idle) : .dormant,
             isAvailable: running,
             createdAt: terminal.createdAt.timeIntervalSince1970,
             isShared: RemoteAccessCoordinator.shared.hasTerminalShares(terminal.id),

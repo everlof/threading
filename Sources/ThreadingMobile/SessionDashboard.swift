@@ -2106,8 +2106,8 @@ struct MobileTerminalRowPresentation: Equatable {
     /// The whole state in words, for VoiceOver.
     let availabilityLabel: String
 
-    static func resolve(state: String, isAvailable: Bool) -> Self {
-        let isWorking = isAvailable && state == "working"
+    static func resolve(state: RemoteTerminalActivity, isAvailable: Bool) -> Self {
+        let isWorking = isAvailable && state == .working
         let label: String
         if isWorking {
             label = MobileL10n.string("Working")

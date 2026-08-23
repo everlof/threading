@@ -343,7 +343,7 @@ final class SessionDashboardTests: XCTestCase {
     /// terminal the Mac happened to give the same UUID would still be two rows.
     func testDashboardRowsFollowTheArrangementOrderAndKeepTheirKinds() {
         let chat = session(id: "same", title: "Licensing strategy")
-        let shell = terminal(id: "same", title: "Development server", state: "idle")
+        let shell = terminal(id: "same", title: "Development server", state: .idle)
 
         let chatsFirst = DashboardRowItem.rows(
             sessions: [chat], terminals: [shell], order: SessionTypeDirection.chatsFirst.contentTypes
@@ -374,24 +374,24 @@ final class SessionDashboardTests: XCTestCase {
     /// mark — and spelled only for VoiceOver. "Ready" and "Stopped" used to sit in the trailing
     /// column where a chat shows its age.
     func testTerminalRowShowsItsStateAndSpellsItOnlyForVoiceOver() {
-        let working = MobileTerminalRowPresentation.resolve(state: "working", isAvailable: true)
+        let working = MobileTerminalRowPresentation.resolve(state: .working, isAvailable: true)
         XCTAssertTrue(working.isWorking)
         XCTAssertFalse(working.isDimmed)
         XCTAssertEqual(working.availabilityLabel, MobileL10n.string("Working"))
 
-        let ready = MobileTerminalRowPresentation.resolve(state: "idle", isAvailable: true)
+        let ready = MobileTerminalRowPresentation.resolve(state: .idle, isAvailable: true)
         XCTAssertFalse(ready.isWorking)
         XCTAssertFalse(ready.isDimmed)
         XCTAssertEqual(ready.availabilityLabel, MobileL10n.string("Ready"))
 
-        let stopped = MobileTerminalRowPresentation.resolve(state: "dormant", isAvailable: false)
+        let stopped = MobileTerminalRowPresentation.resolve(state: .dormant, isAvailable: false)
         XCTAssertFalse(stopped.isWorking)
         XCTAssertTrue(stopped.isDimmed)
         XCTAssertEqual(stopped.availabilityLabel, MobileL10n.string("Stopped"))
 
         // The Mac reports "working" only for a shell it is running; a stale word over a shell
         // that is not available must not animate a mark that claims "moving right now".
-        let staleWorking = MobileTerminalRowPresentation.resolve(state: "working", isAvailable: false)
+        let staleWorking = MobileTerminalRowPresentation.resolve(state: .working, isAvailable: false)
         XCTAssertFalse(staleWorking.isWorking)
         XCTAssertTrue(staleWorking.isDimmed)
     }
@@ -423,14 +423,14 @@ final class SessionDashboardTests: XCTestCase {
     private func terminal(
         id: String,
         title: String,
-        state: String
+        state: RemoteTerminalActivity
     ) -> RemoteProjectTerminalSummaryDTO {
         RemoteProjectTerminalSummaryDTO(
             id: id,
             title: title,
             projectName: "AnotherTerminal",
             state: state,
-            isAvailable: state != "dormant"
+            isAvailable: state != .dormant
         )
     }
 

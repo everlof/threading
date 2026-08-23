@@ -471,12 +471,45 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
 /// Kept separate from `RemoteSessionSummaryDTO`: a shell has no agent, transcript, archive,
 /// workspace, permission-approval, or native-conversation lifecycle. Older clients ignore the
 /// optional `RemoteMeDTO.terminals` field instead of mistaking these UUIDs for chat sessions.
+public enum RemoteTerminalActivity: RawRepresentable, Codable, Equatable, Hashable, Sendable {
+    case dormant
+    case idle
+    case working
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "dormant": self = .dormant
+        case "idle": self = .idle
+        case "working": self = .working
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .dormant: return "dormant"
+        case .idle: return "idle"
+        case .working: return "working"
+        case .unknown(let rawValue): return rawValue
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 public struct RemoteProjectTerminalSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let title: String
     public let projectName: String
-    /// "dormant", "idle", or "working".
-    public let state: String
+    public let state: RemoteTerminalActivity
     public let isAvailable: Bool
     public let createdAt: Double?
     public let isShared: Bool
@@ -489,7 +522,7 @@ public struct RemoteProjectTerminalSummaryDTO: Codable, Equatable, Identifiable,
         id: String,
         title: String,
         projectName: String,
-        state: String,
+        state: RemoteTerminalActivity,
         isAvailable: Bool,
         createdAt: Double? = nil,
         isShared: Bool = false,
