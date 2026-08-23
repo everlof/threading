@@ -516,6 +516,11 @@ external data reaches eager AppKit work.
 | Resolved | Git Review during live resize | The 8,985-file fixture now drives 48 distinct widths through the real layout callback. Complete-index height invalidation averages 6.08 ms, with 6.66 ms p95 and 10.49 ms max, while preserving correct offscreen wrapping estimates and scrollbar extent. |
 | Resolved | Session status card provider, usage and attachment scale | Checkout bursts debounce for 500 ms; provider reads cache the unchanged branch + HEAD for 15 seconds and poll every 30 seconds only while checks are pending. Transcript usage scans and lifetime-cell indexing run off-main; a refresh visits only the selected parent/child identities, remembers 32 recent sessions, and retains six model details. The card itself stays fixed-row. Subagents annotates its existing virtualized rows. Attachment projection bounds before view configuration at three recent rows plus one optional View all route, independent of the session's attachment count. |
 | Resolved | Account settings cold discovery | A fresh-process fixture separates real home-directory/login-marker/shell-alias discovery from page construction. Five accounts take 6.61 ms to discover, 12.31 ms to render and 8.14 ms to lay out; the seven-second cache makes subsequent callers lock-cheap. |
+| Resolved | Accounts settings inventory | Provider discovery has no view-layer ceiling. Accounts and their closed limit folds are value rows in one grouped table; a 120-account fixture exceeds 240 rows while materializing less than half the inventory and passing the theme-boundary audit. |
+| Resolved | Usage Windows account fleet | The settings page keeps stable account-row identities. A 120-account fixture scrolls into the fleet, then proves an account-usage or poke event evaluates only the named account instead of rebuilding every row. |
+| Resolved | Storage settings findings | Project and checkout discovery has no product cap. The page retains one value-row inventory and virtualizes checkout, disclosure and artifact rows; a 120-checkout fixture preserves its deep scroll position across a scan event, while an action retains exact artifact IDs rather than encoding provider-sized coordinates in control tags. |
+| Resolved | Keyboard provider commands | Extension commands and project scripts are value rows whose shortcut recorders exist only in visible cells. A 2,000-command expanded fixture produces 2,004 virtual rows, materializes less than half, and preserves its deep clip origin across registry refresh. |
+| Resolved | Single-account usage popover | Providers may report one limit window per model. The popover keeps fixed header/footer chrome around a bounded virtual table; a 2,001-window fixture materializes fewer than 40 rows and preserves its deep clip origin when readings refresh. Observation time is injected once per refresh so every visible row and the footer describe the same instant. |
 | Resolved | Usage dashboard | The report scans off-main with per-source metadata caches, aggregates to 90-day cells and globally deduplicates cached plus fresh records. The breakdown uses virtual table rows, the 180-day journal loads through an actor, and both history analysis and the reusable chart enforce adversarial point budgets. The million-record profile and measured gates live in [`usage-dashboard.md`](usage-dashboard.md#scaling-gate-and-measurements). |
 | Resolved | Attachment preview cold open | The pane installs only the selected format's surface on first use, and its document boundary independently installs PDFKit or Quick Look only when that renderer is selected. Regression coverage pins the unused renderers as absent. |
 | Resolved | Agent charts | `ChartSpec` caps the product at 240 marks and one drawn chart view owns prepared geometry. Maximum-contract decode/update work stays below 0.45 ms per spec and synchronous paint below 5.5 ms per sampled frame. |
@@ -527,9 +532,10 @@ loading any manifest. Those safety/cardinality ceilings now feed a viewport-owne
 table; they are not used as an excuse to retain 256 AppKit cards.
 
 The same sweep found bounded uses that should not be "fixed" merely because they match a text
-search: Advanced, General, Profile and most Keyboard settings are fixed-schema; Keyboard already
-branches before constructing collapsed command detail; Usage virtualizes repeating breakdown rows
-and bounds both retained report cells and chart geometry;
+search: Advanced, General, Profile and Keyboard's core preferences are fixed-schema. Keyboard's
+extension-command and project-script folds coordinate disclosure only; expanded provider content
+is virtualized rather than constructed inside the fold. Usage virtualizes repeating breakdown and
+provider-window rows and bounds both retained report cells and chart geometry;
 File and project trees use virtual outline cells; conversation Markdown uses virtual or bounded
 block pages, with independently bounded list/table pages;
 and cell hosts removing old subviews during reuse is the intended ownership boundary.
