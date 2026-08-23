@@ -213,8 +213,8 @@ final class SettingsRowLayoutTests: XCTestCase {
         ])
         container.layoutSubtreeIfNeeded()
 
-        let subtitle = try XCTUnwrap(subtitle)
-        let subtitleFrame = subtitle.convert(subtitle.bounds, to: built)
+        let subtitleLabel = try XCTUnwrap(subtitle)
+        let subtitleFrame = subtitleLabel.convert(subtitleLabel.bounds, to: built)
         let controlFrame = control.convert(control.bounds, to: built)
         XCTAssertGreaterThan(subtitleFrame.width, SettingsUIDefaults.controlWidth)
         XCTAssertGreaterThanOrEqual(controlFrame.minX, subtitleFrame.minX)
