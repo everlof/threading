@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Deliberately empty, and that is the decision this file records.
+
+	     com.apple.security.app-sandbox is ABSENT, and cannot be otherwise. This process opens
+	     pseudo-terminals and forks the user's agent CLIs into them; a PTY cannot be opened from
+	     inside the App Sandbox, which is the same reason Threading itself is unsandboxed —
+	     permissions.md: "The sandbox is not a choice that can be revisited." A sandboxed daemon
+	     would fail at the first forkpty and be indistinguishable from one that never started.
+
+	     There is no com.apple.developer.* key of any kind. A restricted entitlement on an
+	     ad-hoc-signed build is an AMFI kill rather than a warning, and this binary is ad-hoc
+	     signed on any machine with no team configured — which is every clean checkout.
+
+	     The containment that does apply is the directory's. The rendezvous and the state
+	     directory are 0700 under the user's Application Support, so only this user's processes
+	     can reach the socket at all, and no frame carries a token or a capability because none
+	     is needed: reaching the socket is the authorization. Nothing here weakens that.
+
+	     Hardened runtime is on (ENABLE_HARDENED_RUNTIME = YES) with no exceptions: the daemon
+	     loads no plug-ins, allocates no JIT pages, and disables no library validation. -->
+</dict>
+</plist>

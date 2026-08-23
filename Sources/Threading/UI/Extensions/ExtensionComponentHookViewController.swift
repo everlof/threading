@@ -67,7 +67,24 @@ final class ExtensionComponentHookViewController: NSViewController {
             return
         }
 
+        // **This container is sized by constraints, so it must not also be sized by its frame.**
+        //
+        // A fresh `NSView` starts with `translatesAutoresizingMaskIntoConstraints` on and a zero
+        // frame, which AppKit turns into *required* `width == 0` / `height == 0`. Against the
+        // required inset constraints below — and against `fixedWidth`, which states the popover's
+        // 300pt outright — that is unsatisfiable from the first layout pass, and
+        // `customizationHost.refresh()` at the end of this method takes one before any parent has
+        // handed the view a frame.
+        //
+        // It cost nothing visible and roughly 8,000 breaks an hour in the log: every hover over a
+        // sidebar row builds one of these, so `Unable to simultaneously satisfy constraints` for
+        // `ComponentContentContainer` and everything under it was the ordinary sound of using the
+        // app, and buried anything else worth reading there. The no-inset branch above already
+        // returns a constraint-sized view — `ComponentContentContainer` turns translation off in
+        // its own initializer — so this is the contract the callers already have, stated on the
+        // one path that had forgotten it.
         let container = containerView ?? NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(contentContainer)
         NSLayoutConstraint.activate([
             contentContainer.topAnchor.constraint(

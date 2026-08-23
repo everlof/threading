@@ -187,6 +187,81 @@ final class MediaInspectorTests: XCTestCase {
         XCTAssertEqual(inspector.selectedIndex, 1, "radio-style arrow navigation did not move")
     }
 
+    /// A long filmstrip must arrive at its settled geometry. Selecting a thumbnail may change
+    /// which item is visible, but it must not be the first event that lays the strip out.
+    func testLongCollectionRailDoesNotMoveOnFirstSelection() throws {
+        let fixture = try imageFiles(count: 1)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let image = try XCTUnwrap(fixture.items.first?.image)
+        let items = (0..<27).map { index in
+            MediaInspectorItem(
+                url: fixture.items[0].url,
+                title: "Frame \(index + 1).png",
+                image: image
+            )
+        }
+
+        let root = ThemedSurfaceView()
+        root.frame = NSRect(x: 0, y: 0, width: 1_960, height: 1_040)
+        root.translatesAutoresizingMaskIntoConstraints = true
+        let source = ThemedImagePreview(frame: NSRect(x: 20, y: 20, width: 200, height: 160))
+        source.translatesAutoresizingMaskIntoConstraints = true
+        source.image = image
+        source.fileURL = items[0].url
+        source.inspectorSelectionProvider = {
+            MediaInspectorSelection(items: items, selectedIndex: 0)
+        }
+        root.addSubview(source)
+
+        let window = fullSizeContentWindow(hosting: root)
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+        XCTAssertTrue(source.performPrimaryAction())
+        root.layoutSubtreeIfNeeded()
+
+        let inspector = try XCTUnwrap(
+            root.subviews.compactMap { $0 as? MediaInspectorView }.first
+        )
+        let thumbnailLabels = Set(items.map(\.title))
+        let thumbnails = descendants(of: inspector)
+            .filter {
+                $0.accessibilityRole() == .radioButton
+                    && thumbnailLabels.contains($0.accessibilityLabel() ?? "")
+            }
+            .sorted { inspector.convert($0.frame, from: $0.superview).minX
+                < inspector.convert($1.frame, from: $1.superview).minX }
+        XCTAssertEqual(thumbnails.count, items.count)
+        let firstThumbnail = try XCTUnwrap(thumbnails.first)
+        let before = thumbnails.map { inspector.convert($0.frame, from: $0.superview) }
+        for frame in before {
+            XCTAssertEqual(
+                frame.width,
+                Design.Size.mediaInspectorThumbnail,
+                accuracy: 0.5,
+                "the first layout compressed a fixed-size thumbnail"
+            )
+            XCTAssertEqual(
+                frame.height,
+                Design.Size.mediaInspectorThumbnail,
+                accuracy: 0.5,
+                "the first layout compressed a fixed-size thumbnail"
+            )
+        }
+        for (leading, trailing) in zip(before, before.dropFirst()) {
+            XCTAssertEqual(
+                trailing.minX - leading.maxX,
+                Design.Spacing.small,
+                accuracy: 0.5,
+                "the first layout did not preserve the filmstrip spacing"
+            )
+        }
+
+        XCTAssertTrue(firstThumbnail.accessibilityPerformPress())
+        root.layoutSubtreeIfNeeded()
+        let after = thumbnails.map { inspector.convert($0.frame, from: $0.superview) }
+
+        XCTAssertEqual(before, after, "the first selection settled stale thumbnail frames")
+    }
+
     /// The filmstrip is part of the inspector, including the spacing between its thumbnails.
     /// Only the dimmed ground *outside* the surface is a dismissal target; a transparent gap in
     /// a child view must not turn into a hole through to that ground.
@@ -632,6 +707,54 @@ final class MediaInspectorTests: XCTestCase {
 
         XCTAssertEqual(written, themes.count * appearances.count)
         print("Rendered media inspector storybook to \(directory.path)")
+    }
+
+    /// The shipping overlay on its first frame, with enough items to overflow the filmstrip.
+    /// This is deliberately captured before any thumbnail or navigation interaction.
+    func testRendersLongCollectionRailOnFirstLayout() throws {
+        let fixture = try imageFiles(count: 1)
+        defer {
+            AppThemePalette.set(.system)
+            try? FileManager.default.removeItem(at: fixture.directory)
+        }
+        let image = try XCTUnwrap(fixture.items.first?.image)
+        let items = (0..<27).map { index in
+            MediaInspectorItem(
+                url: fixture.items[0].url,
+                title: "Frame \(index + 1).png",
+                image: image
+            )
+        }
+        let directory = renderDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        AppThemePalette.set(.system)
+        let root = ThemedSurfaceView()
+        root.frame = NSRect(x: 0, y: 0, width: 960, height: 640)
+        root.translatesAutoresizingMaskIntoConstraints = true
+        root.appearance = NSAppearance(named: .darkAqua)
+        root.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+        let source = ThemedImagePreview(frame: NSRect(x: 20, y: 20, width: 120, height: 90))
+        source.translatesAutoresizingMaskIntoConstraints = true
+        source.image = image
+        source.fileURL = items[0].url
+        root.addSubview(source)
+
+        let window = fullSizeContentWindow(hosting: root)
+        window.appearance = root.appearance
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+        XCTAssertTrue(MediaInspectorPresenter.present(
+            MediaInspectorSelection(items: items, selectedIndex: 0),
+            from: source
+        ))
+
+        AppThemeRefresh.repaint(root)
+        let data = try XCTUnwrap(render(root))
+        let output = directory.appendingPathComponent(
+            "media-inspector-long-filmstrip-system-dark.png"
+        )
+        try data.write(to: output)
+        print("Rendered long media inspector filmstrip to \(output.path)")
     }
 
     /// The picture the wash exists for: the strip of window a full-height surface cannot cover,

@@ -95,6 +95,7 @@ final class PTYHostFrameTests: XCTestCase {
             )),
             .kill(PTYHostKill(id: identity, escalate: true)),
             .exited(PTYHostExited(id: identity, status: 9, signalled: true)),
+            .foreground(PTYHostForeground(id: identity, processGroup: 4712)),
             .lost(PTYHostLost(ids: [identity], since: Date(timeIntervalSince1970: 1_770_000_500))),
             .retire,
             .journalTail(PTYHostJournalTail(maxBytes: 32 * 1024)),
@@ -117,7 +118,7 @@ final class PTYHostFrameTests: XCTestCase {
             let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
             seen.insert(try XCTUnwrap(object["type"] as? String))
         }
-        XCTAssertEqual(seen.count, 18, "every frame in the protocol table needs a fixture")
+        XCTAssertEqual(seen.count, 19, "every frame in the protocol table needs a fixture")
     }
 
     // MARK: - The discriminator

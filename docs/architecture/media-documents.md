@@ -315,7 +315,11 @@ Three decisions worth their words:
   while the source document can be reopened and changed.
 - **The first layout is the real layout.** The notes document is flipped and top-anchored before
   its first frame. A reopened list of several notes cannot begin below the viewport and wait for
-  collection-arrow navigation to provoke a second layout pass.
+  collection-arrow navigation to provoke a second layout pass. The collection filmstrip follows
+  the same rule: `NSScrollView` replaces a newly installed document view's frame with its initial
+  viewport, so the rail seeds its full content extent only after that handoff and settles the
+  stack against the first usable viewport. A click may change selection; it may not be the first
+  event that restores fixed thumbnail sizes or spacing.
 
 `ChatImageAnnotationHost` is held **strongly** by `MediaInspectorSession`: the view's reference is
 weak, and a host built on demand by the default provider has no other owner. It keys documents by

@@ -870,6 +870,28 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Background PTY Host
+
+    /// Whether a session's PTY may live in the `threading-ptyd` background host rather than in
+    /// this process.
+    ///
+    /// Hidden and off by default: this is §9 step 4 of
+    /// `docs/feature-drafts/durable-sessions.md`, and it **must stay off** until the TCC
+    /// attribution question (R1/P4 of the PTY-host design) has been answered on a SIP-enabled
+    /// Mac. A launchd agent is not a supervised child of Threading, and if its children do not
+    /// inherit Threading's file-access grants the feature reads to the user as "agents stopped
+    /// being able to open my files". `defaults write codes.threading ptyHostEnabled -bool true`
+    /// turns it on for the next session launch.
+    ///
+    /// Read through `PTYHostDecision.live(settings:bundle:)`, which snapshots it at the
+    /// main-actor composition boundary together with the bundle's helper path and the rendezvous.
+    var ptyHostEnabled: Bool {
+        get { AppSettingDefinitions.ptyHostEnabled.read(from: defaults) ?? false }
+        set {
+            AppSettingDefinitions.ptyHostEnabled.write(newValue, to: defaults)
+        }
+    }
+
     // MARK: - Agent Hooks
 
     /// Whether Claude sessions report turn boundaries and subagent lifecycle back to Threading.

@@ -95,6 +95,19 @@ public enum PTYHostFrame: Codable, Equatable, Sendable {
     /// Daemon → app: it ended.
     case exited(PTYHostExited)
 
+    /// Daemon → app: a different process group owns the terminal now.
+    ///
+    /// The one question the app can no longer answer for itself about a host-backed session.
+    /// `TerminalSession` reads `tcgetpgrp` off the descriptor it owns to decide whether the
+    /// title belongs to the shell or to whatever it is running, and a host-backed session has no
+    /// descriptor to read. The daemon holds the master, so this is one syscall with no parsing —
+    /// it learns nothing about the byte stream by answering it.
+    ///
+    /// Pushed on change, never polled by the app: checked after each coalesced output burst and
+    /// on a slow timer while at least one watcher is attached, and not at all while detached,
+    /// because a detached session has nobody to tell.
+    case foreground(PTYHostForeground)
+
     /// Daemon → app: a restart could not account for these. The honest half of the failure model
     /// — when the daemon dies its children lose their master fd and the CLIs exit, so the design
     /// goal is to *say* what was lost rather than pretend nothing was (D12).
@@ -256,6 +269,10 @@ public enum PTYHostSpawnRefusal: String, Codable, Equatable, Sendable {
     case executableUnavailable
     case retiring
     case capacity
+    /// A `channel` this build does not implement — `.pipes` until native conversations are hosted
+    /// (D6). A refusal rather than a silent `.pty`: a conversation transport quietly given a
+    /// pseudo-terminal would look like a working session producing unparseable output.
+    case unsupportedChannel
 }
 
 public struct PTYHostSpawnRefused: Codable, Equatable, Sendable {
@@ -451,6 +468,19 @@ public struct PTYHostExited: Codable, Equatable, Sendable {
     }
 }
 
+/// Which process group currently owns a session's terminal.
+public struct PTYHostForeground: Codable, Equatable, Sendable {
+    public let id: PTYHostSessionIdentity
+    /// `pid_t`, spelled `Int32` so this package needs no `Darwin` import to describe it. Zero is
+    /// never sent: a terminal with no foreground group is reported by not sending the frame.
+    public let processGroup: Int32
+
+    public init(id: PTYHostSessionIdentity, processGroup: Int32) {
+        self.id = id
+        self.processGroup = processGroup
+    }
+}
+
 public struct PTYHostLost: Codable, Equatable, Sendable {
     public let ids: [PTYHostSessionIdentity]
     /// The last moment the daemon can vouch for them — its own previous journal write.
@@ -522,6 +552,7 @@ extension PTYHostFrame {
         case detach
         case kill
         case exited
+        case foreground
         case lost
         case retire
         case journalTail
@@ -554,6 +585,7 @@ extension PTYHostFrame {
         case .detach: self = .detach(try Self.body(container, raw))
         case .kill: self = .kill(try Self.body(container, raw))
         case .exited: self = .exited(try Self.body(container, raw))
+        case .foreground: self = .foreground(try Self.body(container, raw))
         case .lost: self = .lost(try Self.body(container, raw))
         case .retire: self = .retire
         case .journalTail: self = .journalTail(try Self.body(container, raw))
@@ -602,6 +634,9 @@ extension PTYHostFrame {
             try container.encode(value, forKey: .body)
         case .exited(let value):
             try container.encode(FrameType.exited, forKey: .type)
+            try container.encode(value, forKey: .body)
+        case .foreground(let value):
+            try container.encode(FrameType.foreground, forKey: .type)
             try container.encode(value, forKey: .body)
         case .lost(let value):
             try container.encode(FrameType.lost, forKey: .type)

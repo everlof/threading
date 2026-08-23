@@ -988,9 +988,9 @@ struct TerminalRemoteView: View {
             }
         }
         .background(terminalBackground)
-        // The terminal owns the padding colour so the inset reads as breathing room rather
-        // than a second application panel under every authored chrome.
-        .padding(MobileDesign.Spacing.small)
+        // `TerminalViewRepresentable` owns this inset inside its stable-width UIKit host. Keeping
+        // it outside in SwiftUI would make the host guess how much of the navigation viewport a
+        // travelling destination will eventually receive.
         .background(terminalBackground)
     }
 

@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 struct TerminalViewRepresentable: UIViewRepresentable {
-    typealias UIViewType = RemoteTerminalView
+    typealias UIViewType = RemoteTerminalLayoutView
 
     @ObservedObject var connection: RemoteSessionConnection
     let theme: RemoteTerminalThemeDTO?
@@ -30,11 +30,18 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         )
     }
 
-    func makeUIView(context: Context) -> RemoteTerminalView {
+    func makeUIView(context: Context) -> RemoteTerminalLayoutView {
         let resolvedFontSize = MobileTerminalFontSize.resolvedPreference(fontSize)
+        let contentInset = MobileDesign.Spacing.small
+        let containerFrame = UIScreen.main.bounds
         let view = RemoteTerminalView(
-            frame: UIScreen.main.bounds,
+            frame: containerFrame.insetBy(dx: contentInset, dy: contentInset),
             font: UIFont.monospacedSystemFont(ofSize: CGFloat(resolvedFontSize), weight: .regular)
+        )
+        let container = RemoteTerminalLayoutView(
+            frame: containerFrame,
+            terminalView: view,
+            contentInset: contentInset
         )
         view.terminalDelegate = context.coordinator
         view.dropBuiltInKeyboardAccessory()
@@ -72,41 +79,47 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             }
 #endif
         }
-        return view
+        return container
     }
 
-    func updateUIView(_ uiView: RemoteTerminalView, context: Context) {
+    func updateUIView(_ uiView: RemoteTerminalLayoutView, context: Context) {
+        let terminalView = uiView.terminalView
         context.coordinator.bindRenderer(to: connection)
         context.coordinator.allowsInput = allowsDirectInput
         context.coordinator.initialScrollProgress = initialScrollProgress
         context.coordinator.onScrollProgress = onScrollProgress
-        uiView.setAllowsKeyboardInput(allowsDirectInput)
+        terminalView.setAllowsKeyboardInput(allowsDirectInput)
         // The key bar's show control follows this answer, and nothing else republishes it when
         // input mode flips on a live view.
         keyBridge.refreshKeyboardAvailability()
-        uiView.allowMouseReporting = allowsDirectInput
-        uiView.configureFontSizing(onChange: onFontSizeChange)
-        uiView.configureSelectionMenu(quoteSelection: quoteSelection, canPaste: allowsDirectInput)
-        uiView.applyPreferredFontSize(MobileTerminalFontSize.resolvedPreference(fontSize))
+        terminalView.allowMouseReporting = allowsDirectInput
+        terminalView.configureFontSizing(onChange: onFontSizeChange)
+        terminalView.configureSelectionMenu(
+            quoteSelection: quoteSelection,
+            canPaste: allowsDirectInput
+        )
+        terminalView.applyPreferredFontSize(MobileTerminalFontSize.resolvedPreference(fontSize))
         let ownsViewport = connection.capability == .interact
-        uiView.setUsesLocalViewport(ownsViewport)
+        terminalView.setUsesLocalViewport(ownsViewport)
         if !ownsViewport {
-            uiView.setAuthoritativeGrid(
+            terminalView.setAuthoritativeGrid(
                 cols: connection.terminalColumns,
                 rows: connection.terminalRows
             )
         }
-        Self.apply(theme, to: uiView)
+        Self.apply(theme, to: terminalView)
     }
 
-    static func dismantleUIView(_ uiView: RemoteTerminalView, coordinator: Coordinator) {
+    static func dismantleUIView(_ uiView: RemoteTerminalLayoutView, coordinator: Coordinator) {
+        let terminalView = uiView.terminalView
+        uiView.cancelPendingLayout()
         coordinator.captureViewport()
-        coordinator.unbindRenderer(from: uiView)
+        coordinator.unbindRenderer(from: terminalView)
         coordinator.detach()
         // SwiftTerm 2 keeps a display driver and renderer graph per view. This representable is
         // being permanently dismantled, not merely moved between windows, so close that graph
         // through the dependency's explicit lifecycle seam.
-        _ = uiView.updateUiClosed()
+        _ = terminalView.updateUiClosed()
     }
 
     /// Installs the palette only when it changed. `updateUIView` runs for every published
@@ -334,6 +347,162 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         }
         nonisolated func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
         nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+    }
+}
+
+/// Keeps SwiftTerm at one settled width while its SwiftUI navigation destination is travelling.
+///
+/// `NavigationStack` proposes every intermediate width during a push or an interactive Back.
+/// That is ordinary presentation geometry for most views, but a terminal interprets every width
+/// as a new grid and can consequently reflow both its local emulator and the Mac's PTY dozens of
+/// times during one gesture. The structural host clips the already-laid-out terminal instead.
+/// Once a non-navigation width has held still, it commits that one useful width to SwiftTerm.
+/// Height remains live so the terminal continues to follow the keyboard and safe area.
+final class RemoteTerminalLayoutView: UIView {
+    let terminalView: RemoteTerminalView
+    let contentInset: CGFloat
+
+    private(set) var settledTerminalWidth: CGFloat
+    private(set) var pendingTerminalWidth: CGFloat?
+#if DEBUG
+    private(set) var terminalWidthApplicationCount = 0
+#endif
+    private var widthSettleTask: Task<Void, Never>?
+    private var observesTransitionCompletion = false
+
+    init(
+        frame: CGRect,
+        terminalView: RemoteTerminalView,
+        contentInset: CGFloat
+    ) {
+        self.terminalView = terminalView
+        self.contentInset = contentInset
+        settledTerminalWidth = max(0, terminalView.bounds.width)
+        super.init(frame: frame)
+        clipsToBounds = true
+        addSubview(terminalView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let coordinator = enclosingTransitionCoordinator
+        updateTerminalFrame(for: bounds.size, holdsWidth: coordinator != nil)
+        observeCompletion(of: coordinator)
+    }
+
+    /// Internal so the high-frequency contract can be exercised without manufacturing a UIKit
+    /// navigation controller and an interactive gesture in a unit test.
+    func updateTerminalFrame(for containerSize: CGSize, holdsWidth: Bool) {
+        let proposedWidth = contentWidth(for: containerSize.width)
+        let proposedHeight = max(0, containerSize.height - contentInset * 2)
+
+        if settledTerminalWidth <= 0 {
+            applyTerminalWidth(proposedWidth)
+        } else if abs(proposedWidth - settledTerminalWidth) <= Self.widthEpsilon {
+            pendingTerminalWidth = nil
+            widthSettleTask?.cancel()
+            widthSettleTask = nil
+        } else {
+            pendingTerminalWidth = proposedWidth
+            if holdsWidth {
+                widthSettleTask?.cancel()
+                widthSettleTask = nil
+            } else {
+                scheduleWidthSettle()
+            }
+        }
+
+        terminalView.frame = CGRect(
+            x: contentInset,
+            y: contentInset,
+            width: settledTerminalWidth,
+            height: proposedHeight
+        )
+    }
+
+    func settlePendingWidth() {
+        widthSettleTask?.cancel()
+        widthSettleTask = nil
+        let finalWidth = pendingTerminalWidth ?? contentWidth(for: bounds.width)
+        applyTerminalWidth(finalWidth)
+        setNeedsLayout()
+    }
+
+    func cancelPendingLayout() {
+        widthSettleTask?.cancel()
+        widthSettleTask = nil
+        pendingTerminalWidth = nil
+    }
+
+    /// A completed pop is teardown, not a useful terminal resize. A cancelled pop and a push both
+    /// leave this host on screen and therefore commit only the width at which navigation settled.
+    func transitionDidComplete(isCancelled: Bool, terminalWasSource: Bool) {
+        observesTransitionCompletion = false
+        guard isCancelled || !terminalWasSource else {
+            cancelPendingLayout()
+            return
+        }
+        pendingTerminalWidth = contentWidth(for: bounds.width)
+        settlePendingWidth()
+    }
+
+    private static let widthEpsilon: CGFloat = 0.5
+
+    private func contentWidth(for containerWidth: CGFloat) -> CGFloat {
+        max(0, containerWidth - contentInset * 2)
+    }
+
+    private func applyTerminalWidth(_ width: CGFloat) {
+        guard abs(width - settledTerminalWidth) > Self.widthEpsilon else {
+            pendingTerminalWidth = nil
+            return
+        }
+        settledTerminalWidth = width
+        pendingTerminalWidth = nil
+#if DEBUG
+        terminalWidthApplicationCount += 1
+#endif
+    }
+
+    private func scheduleWidthSettle() {
+        widthSettleTask?.cancel()
+        widthSettleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: RemoteMobileConnectionDefaults.viewportSettleDelay)
+            guard !Task.isCancelled else { return }
+            self?.settlePendingWidth()
+        }
+    }
+
+    private var enclosingTransitionCoordinator: UIViewControllerTransitionCoordinator? {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let controller = current as? UIViewController,
+               let coordinator = controller.transitionCoordinator {
+                return coordinator
+            }
+            responder = current.next
+        }
+        return window?.rootViewController?.transitionCoordinator
+    }
+
+    private func observeCompletion(
+        of coordinator: UIViewControllerTransitionCoordinator?
+    ) {
+        guard let coordinator, !observesTransitionCompletion else { return }
+        observesTransitionCompletion = true
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            guard let self else { return }
+            let terminalWasSource = context.view(forKey: .from).map {
+                $0 === self || self.isDescendant(of: $0)
+            } ?? false
+            self.transitionDidComplete(
+                isCancelled: context.isCancelled,
+                terminalWasSource: terminalWasSource
+            )
+        }
     }
 }
 

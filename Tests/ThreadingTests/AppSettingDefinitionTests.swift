@@ -187,6 +187,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "mcpStdioBridgeEnabled",
                 valueType: .boolean
             ),
+            .ptyHostEnabled: .init(
+                key: "ptyHostEnabled",
+                valueType: .boolean
+            ),
             .workspaceNavigatorSelection: .init(
                 key: "workspaceNavigatorSelection",
                 valueType: .data

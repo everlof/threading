@@ -1422,22 +1422,37 @@ enum Design {
     /// These exist because the app made 150 direct calls to `NSColor.secondaryLabelColor` and
     /// friends — more than ten times the number of surface tokens — so a theme that reached
     /// only the surfaces would have repainted the containers and left every word in them alone.
+    ///
+    /// **A tier states how quiet a word is, not whether it can be read** — and for a long time
+    /// that was all it stated. Every tier below `label` is an alpha (`AppTheme.derive`; AppKit's
+    /// own under System), and nothing composited any of them against the ground they land on, so
+    /// `quaternary` drew an attachments row's timestamp at **1.34:1** in dark mode. Each tier now
+    /// gives back as little of its own transparency as a stated floor requires; see
+    /// `LabelLegibility` for the floors, why four other contrast gates all missed this, and what
+    /// the rule costs.
     @MainActor
     enum Text {
+
+        /// The theme's own ink on the theme's own ground — the one tier that is not held to a
+        /// floor here.
+        ///
+        /// Not an oversight and not an exemption: a label that cannot be read on its own ground
+        /// is a broken *theme* rather than a tier that drifted, and the app already refuses one
+        /// (`AppThemeTests.testAThemeWhoseSyntaxVanishesAgainstItsGroundIsRefused`). Holding it
+        /// here would let the design system quietly overrule a theme's primary decision, and it
+        /// would move the ceiling every other tier is measured up to.
         static var label: NSColor { AppThemePalette.color(.label) }
-        static var secondary: NSColor { AppThemePalette.color(.secondaryLabel) }
-        static var tertiary: NSColor {
-            Accessibility.color(
-                .tertiaryLabel,
-                increasedContrastRole: .secondaryLabel
-            )
-        }
-        static var quaternary: NSColor {
-            Accessibility.color(
-                .quaternaryLabel,
-                increasedContrastRole: .tertiaryLabel
-            )
-        }
+
+        /// Supporting sentences. Read, so held at `readingRatio`.
+        static var secondary: NSColor { LabelLegibility.tier(.secondary) }
+
+        /// Metadata read for its content — a path, a subtitle, a name under a name. Also read,
+        /// so also `readingRatio`.
+        static var tertiary: NSColor { LabelLegibility.tier(.tertiary) }
+
+        /// Stamps, counts and marks — the tier whose job is to sit back. Glanced at, so
+        /// `glanceRatio`: low enough to stay quiet, high enough to stay words.
+        static var quaternary: NSColor { LabelLegibility.tier(.quaternary) }
 
         /// Text over an emphasized selection.
         ///
@@ -1465,18 +1480,52 @@ enum Design {
         /// ground it is drawn on. Which of black and white is used is decided by *measuring* both
         /// against that ground rather than by a luminance threshold, so a mid-tone terminal gets
         /// the one that actually reads rather than the one a constant guessed at.
+        ///
+        /// **The alphas below are a starting point, not the answer.** They were the answer, and
+        /// they were four constants chosen against no particular ground while the whole purpose
+        /// of this function is that the ground is not known in advance. On a dark backdrop they
+        /// are generous; on the ground this most often answers for — an emphasized selection,
+        /// through `Design.Ink.selection` — they are not. White at 28% over the system's selected
+        /// blue is **1.71:1**, which is what put an attachments row's timestamp at 1.20:1 the
+        /// moment the row was clicked. Each tier is now held to the same floors the themed tiers
+        /// take, over the one ground it was asked about; see `LabelLegibility`.
+        ///
+        /// `label` is held here even though the themed `label` is not, and the difference is
+        /// authorship: there the colour is the theme's own decision about its own ground, here it
+        /// is a constant this file picked.
         static func on(_ background: NSColor) -> Design.Ink {
             let light = ThemeContrast.ratio(.white, background) >= ThemeContrast.ratio(.black, background)
             let base: NSColor = light ? .white : .black
             // The tiers are further apart on a dark ground than a light one: black fades to
             // nothing on paper long before white does on ink.
             let increased = Accessibility.increasesContrast
+            let reading = LabelLegibility.Defaults.readingRatio
+            let glance = increased ? reading : LabelLegibility.Defaults.glanceRatio
+
+            /// Each rung held over `background`, and never past the rung above it — so a ladder
+            /// with no headroom left compresses from the bottom instead of inverting.
+            func rung(_ alpha: CGFloat, at floor: CGFloat, under ceiling: NSColor?) -> NSColor {
+                LabelLegibility.held(
+                    base.withAlphaComponent(alpha),
+                    at: floor,
+                    over: [background],
+                    ceiling: ceiling?.usingColorSpace(.sRGB)?.alphaComponent ?? 1
+                )
+            }
+
+            let label = rung(increased ? 1 : (light ? 0.95 : 0.88), at: reading, under: nil)
+            let secondary = rung(increased ? 0.82 : (light ? 0.70 : 0.62), at: reading, under: label)
+            let tertiary = rung(increased ? 0.68 : (light ? 0.50 : 0.44), at: reading, under: secondary)
             return Design.Ink(
                 base: base,
-                label: base.withAlphaComponent(increased ? 1 : (light ? 0.95 : 0.88)),
-                secondary: base.withAlphaComponent(increased ? 0.82 : (light ? 0.70 : 0.62)),
-                tertiary: base.withAlphaComponent(increased ? 0.68 : (light ? 0.50 : 0.44)),
-                quaternary: base.withAlphaComponent(increased ? 0.54 : (light ? 0.32 : 0.28))
+                label: label,
+                secondary: secondary,
+                tertiary: tertiary,
+                quaternary: rung(
+                    increased ? 0.54 : (light ? 0.32 : 0.28),
+                    at: glance,
+                    under: tertiary
+                )
             )
         }
     }

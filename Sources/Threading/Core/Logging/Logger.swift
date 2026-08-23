@@ -75,6 +75,11 @@ enum ThreadingLogger {
     /// Remote access — the tunnel, its loopback server, connections and auth decisions.
     static let remote = Logger(subsystem: subsystem, category: "remote")
 
+    /// The `threading-ptyd` background PTY host — availability, the hello gate, the frame pump.
+    /// Its own category because the link is invisible by construction: when it degrades, every
+    /// session goes on working with an in-process PTY and nothing on screen says why.
+    static let ptyHost = Logger(subsystem: subsystem, category: "ptyHost")
+
     /// GitHub connectivity — credential resolution, the app connection, brokered reads.
     static let github = Logger(subsystem: subsystem, category: "github")
 

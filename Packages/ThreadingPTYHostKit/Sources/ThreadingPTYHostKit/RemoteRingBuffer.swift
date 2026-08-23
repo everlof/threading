@@ -21,7 +21,12 @@ import Foundation
 public struct RemoteRingBuffer: Sendable {
 
     private var storage: [UInt8]
-    private let capacity: Int
+
+    /// How many bytes the ring holds at most. Public because the host has to answer an aggregate
+    /// question about every ring it owns — 64 detached sessions at 512 KiB is 32 MiB resident in
+    /// a process the user can see — and a per-item bound it cannot read is not a bound it can
+    /// enforce.
+    public let capacity: Int
     /// The index the next byte is written to; also the oldest byte's index once full.
     private var head = 0
     private var filled = 0
@@ -93,6 +98,25 @@ public struct RemoteRingBuffer: Sendable {
         guard behind <= UInt64(filled) else { return nil }
         guard behind > 0 else { return Data() }
         return tail(Int(behind))
+    }
+
+    /// The same stream in a smaller ring, keeping the newest bytes it can hold.
+    ///
+    /// The aggregate cap has to be able to give memory back, and the only history worth keeping
+    /// when it does is the most recent. **`totalBytesWritten` is carried over**, which is the
+    /// whole reason this is a method rather than "build a new ring and append the tail": the
+    /// count is a rejoining watcher's entire notion of where it was, and a ring that reset it
+    /// would answer "you are nought bytes behind" to a watcher that had missed everything — an
+    /// `.exact` replay of a screen that never existed.
+    ///
+    /// Growing is allowed and keeps everything; the caller decides which it is doing.
+    public func resized(to newCapacity: Int) -> RemoteRingBuffer {
+        precondition(newCapacity > 0, "A ring buffer needs a positive capacity")
+        var resized = RemoteRingBuffer(capacity: newCapacity)
+        let kept = min(filled, newCapacity)
+        if kept > 0 { resized.append(tail(kept)) }
+        resized.totalBytesWritten = totalBytesWritten
+        return resized
     }
 
     /// The newest `length` bytes, oldest first. `length` is always `<= filled`.

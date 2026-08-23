@@ -300,15 +300,24 @@ entered chat lagged its socket by 1.2–12.8 s (06:27:34 → 06:27:47). Entries 
 pinch, applied exactly one lease and connected in 60–150 ms — the slowdown tracked the small font
 because that is when the gesture crosses the most boundaries and the grid is largest.
 
-The contract now: the local renderer follows every crossing immediately (the pinch stays live),
-but the wire sees only the first grid of a lease — entering still sizes the agent at once — and
-after that the grid that has held still for
+The contract now: the local renderer follows every deliberate font crossing immediately (the
+pinch stays live), but navigation motion is not a sequence of terminal widths.
+`RemoteTerminalLayoutView` keeps one settled content width and is clipped by the travelling
+destination for both push and interactive Back; its update is O(1), retains one terminal view,
+and commits only the final width after the coordinator completes with that terminal still on
+screen (or after the same quiet period when UIKit exposes no coordinator). A completed Back
+discards the outgoing width before teardown. Height stays live for the keyboard and safe area. The wire
+sees only the first grid of a lease — entering still sizes the agent at once — and after that the
+grid that has held still for
 `RemoteMobileConnectionDefaults.viewportSettleDelay` (150 ms; crossings inside a moving gesture
 arrive 10–60 ms apart in the journal). Release and disconnect cancel a pending settle so a
 dismissed chat never resizes the Mac afterwards. The browser client has debounced its fit at
 80 ms all along; the iOS client simply never had the same settling.
 `RemoteTerminalViewportLeaseTests` holds the boundary: a storm leases once, with the settled
-grid; the first grid is immediate; release cancels.
+grid; the first grid is immediate; release cancels. `RemoteTerminalLayoutViewTests` holds the
+local half: a navigation-width storm leaves SwiftTerm on one grid, a coordinator-less storm
+commits only its last width, and keyboard height still follows its container without changing
+columns.
 
 The Mac's authoritative desktop grid is renderer input during attach, never a phone viewport
 lease. It may legitimately exceed the phone protocol's 240-column ceiling. SwiftTerm's

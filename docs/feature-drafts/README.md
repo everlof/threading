@@ -60,6 +60,15 @@ reshuffling it is a line move.
   slice rather than blocking the ready paths.
 - [Browser Focus](browser-focus.md) — let the live browser fill the main window while retaining a
   compact, live conversation dock. Implementation-ready and self-contained.
+- [Glanceable iOS surfaces](ios-glanceable-surfaces.md) — put Usage and a running session on the
+  Lock Screen, the Home Screen and the Dynamic Island, through one widget extension reading a
+  bounded app-group snapshot the phone writes. The Usage widget is the shippable first slice: the
+  projection already exists, it needs no new push type and no hosted service, and it carries all
+  the structural work (the target, the app group, the theme crossing into a second process). The
+  Live Activity is a later slice on the same target. Whether a permission may be allowed inline
+  from the Dynamic Island is a product call left deliberately open: the design carries both
+  configurations from the start, ships Deny plus Open to review as the default, and reserves the
+  one content-state field an inline Allow would need rather than populating it.
 - [CCS launch profiles and GLM](ccs-launch-profiles-and-glm.md) — adopt CCS-managed launch
   profiles without importing credentials, with route-safe account support and a gated GLM path.
   The account-profile slice is ready once its persistence downgrade guard lands; the API/GLM

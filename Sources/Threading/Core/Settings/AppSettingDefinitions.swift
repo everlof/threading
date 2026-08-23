@@ -45,6 +45,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case disabledToolGroupIDs
     case usesContainedExtensionLauncher
     case usesMCPStdioBridge
+    case ptyHostEnabled
     case workspaceNavigatorSelection
     case reportsClaudeLifecycleEvents
     case installsCodexHooks
@@ -950,6 +951,27 @@ enum AppSettingDefinitions {
         persistenceKey: "mcpStdioBridgeEnabled",
         absence: .falseValue
     )
+    /// Whether a session's PTY may live in the `threading-ptyd` background host.
+    ///
+    /// Behavioural rather than presented: no `presentations`, so `remotePolicy` resolves to
+    /// `.hidden` and this produces no Settings row and does not cross to the phone's mirror.
+    /// `defaults write codes.threading ptyHostEnabled -bool true` turns it on.
+    ///
+    /// **Off by default, and it must stay off.** §9 step 4 of
+    /// `docs/feature-drafts/durable-sessions.md` ships the host behind a setting, and there is a
+    /// second, harder gate on top of it: the daemon is a launchd agent, not a supervised child of
+    /// Threading, and macOS attributes file access by *directly spawned, supervised* children
+    /// (`permissions.md`). Whether an agent spawned by the daemon inherits Threading's TCC grants
+    /// is unanswerable on the machine this was written on — `csrutil status` is disabled there, so
+    /// every arm of the experiment passed trivially. Until R1/P4 of the PTY-host design has been
+    /// run on a **SIP-enabled** Mac and the answer written into `permissions.md`, turning this on
+    /// by default risks agents that silently cannot read the user's files. Off is the only
+    /// defensible default until then.
+    static let ptyHostEnabled = AppSettingDescriptor<Bool>(
+        identity: .ptyHostEnabled,
+        persistenceKey: "ptyHostEnabled",
+        absence: .falseValue
+    )
     static let workspaceNavigatorSelection = AppSettingDescriptor<Data>(
         identity: .workspaceNavigatorSelection,
         persistenceKey: "workspaceNavigatorSelection",
@@ -1264,7 +1286,7 @@ enum AppSettingDefinitions {
         .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
         .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
-        .init(usesMCPStdioBridge),
+        .init(usesMCPStdioBridge), .init(ptyHostEnabled),
         .init(workspaceNavigatorSelection), .init(reportsClaudeLifecycleEvents),
         .init(installsCodexHooks), .init(readsClaudeLoginFromKeychain),
         .init(suppressesClaudeStatusLine), .init(bypassesCodexHookTrust),

@@ -206,4 +206,43 @@ final class RemoteRingBufferTests: XCTestCase {
         XCTAssertEqual(ring.snapshot(), data("cdefgh"))
         XCTAssertEqual(ring.snapshot(from: 4), data("efgh"))
     }
+
+    // MARK: - Resizing
+
+    /// Shrinking keeps the newest bytes and, above all, the write count: that number is a
+    /// rejoining watcher's whole notion of where it was.
+    func testResizingSmallerKeepsTheNewestBytesAndTheWriteCount() {
+        var ring = RemoteRingBuffer(capacity: 8)
+        ring.append(data("abcdefgh"))
+        let total = ring.totalBytesWritten
+
+        let smaller = ring.resized(to: 4)
+        XCTAssertEqual(smaller.capacity, 4)
+        XCTAssertEqual(smaller.count, 4)
+        XCTAssertEqual(smaller.snapshot(), data("efgh"))
+        XCTAssertEqual(smaller.totalBytesWritten, total)
+        // The offsets it can still answer for are exactly the ones it still holds.
+        XCTAssertEqual(smaller.snapshot(from: total - 4), data("efgh"))
+        XCTAssertNil(smaller.snapshot(from: total - 5))
+    }
+
+    /// A shrunk ring goes on being a ring: the next append wraps inside the new capacity.
+    func testAResizedRingKeepsWrapping() {
+        var ring = RemoteRingBuffer(capacity: 8)
+        ring.append(data("abcdefgh"))
+        var smaller = ring.resized(to: 4)
+        smaller.append(data("ij"))
+        XCTAssertEqual(smaller.snapshot(), data("ghij"))
+        XCTAssertEqual(smaller.totalBytesWritten, 10)
+    }
+
+    /// Growing keeps everything and refuses nothing it could answer before.
+    func testResizingLargerKeepsEverything() {
+        var ring = RemoteRingBuffer(capacity: 4)
+        ring.append(data("abcd"))
+        let larger = ring.resized(to: 16)
+        XCTAssertEqual(larger.capacity, 16)
+        XCTAssertEqual(larger.snapshot(), data("abcd"))
+        XCTAssertEqual(larger.totalBytesWritten, 4)
+    }
 }

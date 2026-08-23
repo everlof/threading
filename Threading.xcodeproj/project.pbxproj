@@ -14,6 +14,15 @@
 		7A0000010000000000000001 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000011 /* Packages/ThreadingWasmRuntime/Sources/ThreadingWasmExtensionRunner/main.swift */; };
 		7A0000010000000000000002 /* ThreadingWasmRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 7A0000010000000000000091 /* ThreadingWasmRuntime */; };
 		7A0000010000000000000003 /* threading-wasm-extension-runner in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7A0000010000000000000014 /* threading-wasm-extension-runner */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		7C000003000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B001 /* main.swift */; };
+		7C000003000000000000A002 /* BridgeDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B002 /* BridgeDefaults.swift */; };
+		7C000003000000000000A003 /* BridgeOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B003 /* BridgeOutput.swift */; };
+		7C000003000000000000A004 /* UnixHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B004 /* UnixHTTPClient.swift */; };
+		7C000003000000000000A005 /* ServerSentEventReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B005 /* ServerSentEventReader.swift */; };
+		7C000003000000000000A006 /* JSONRPCLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B006 /* JSONRPCLine.swift */; };
+		7C000003000000000000A007 /* CatalogueCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B007 /* CatalogueCache.swift */; };
+		7C000003000000000000A008 /* MCPBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B008 /* MCPBridge.swift */; };
+		7C000003000000000000A009 /* threading-mcp-bridge in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B011 /* threading-mcp-bridge */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
 		A09CD2FDD17E4E72005ECE03 /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
@@ -29,33 +38,34 @@
 		A61300010000000000000001 /* SessionDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61300010000000000000002 /* SessionDashboardTests.swift */; };
 		A61400010000000000000001 /* MobileCollaborationPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */; };
 		A61500010000000000000001 /* MobileSessionChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61500010000000000000002 /* MobileSessionChromeTests.swift */; };
+		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
+		A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61700010000000000000002 /* RemoteConnectionFailureTests.swift */; };
+		A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */; };
 		A61900010000000000000001 /* RemoteTerminalScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61900010000000000000002 /* RemoteTerminalScrollTests.swift */; };
 		A62000010000000000000001 /* TerminalKeyboardDismissalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */; };
-		A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63600010000000000000002 /* RemoteTerminalTapTests.swift */; };
-		A64200010000000000000001 /* RemoteTerminalSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */; };
-		A63700010000000000000001 /* MobileNavigationTitleMorphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */; };
-		A63800010000000000000001 /* MobileIssueReportOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */; };
 		A62100010000000000000001 /* MobileWorkingOrbTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62100010000000000000002 /* MobileWorkingOrbTests.swift */; };
 		A62200010000000000000001 /* MobileSessionNavigationTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */; };
 		A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62300010000000000000002 /* MobileAgentIdentityTests.swift */; };
+		A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000002 /* RemoteHostTrustTests.swift */; };
+		A63100010000000000000101 /* MobileInvitationRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000102 /* MobileInvitationRouteTests.swift */; };
+		A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000202 /* ShareChatFlowTests.swift */; };
+		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
+		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
+		A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */; };
+		A63500010000000000000001 /* MobileSettingsIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63500010000000000000002 /* MobileSettingsIdentityTests.swift */; };
+		A63600010000000000000001 /* RemoteTerminalTapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63600010000000000000002 /* RemoteTerminalTapTests.swift */; };
+		A63700010000000000000001 /* MobileNavigationTitleMorphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */; };
+		A63800010000000000000001 /* MobileIssueReportOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */; };
+		A64200010000000000000001 /* RemoteTerminalSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */; };
 		A69900010000000000000001 /* RemoteTerminalViewportLeaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A69900010000000000000002 /* RemoteTerminalViewportLeaseTests.swift */; };
 		A70000010000000000000001 /* MobileTerminalWireFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */; };
 		A70100010000000000000001 /* MobileSessionConnectionPoolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70100010000000000000002 /* MobileSessionConnectionPoolTests.swift */; };
 		A70200010000000000000001 /* MobileHostRefreshSingleFlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */; };
 		A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */; };
 		A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70400010000000000000002 /* ComposerClipboardTests.swift */; };
+		A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */; };
 		A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */; };
 		A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */; };
-		A61600010000000000000001 /* MobileThemeChromeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61600010000000000000002 /* MobileThemeChromeTests.swift */; };
-		A61700010000000000000001 /* RemoteConnectionFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61700010000000000000002 /* RemoteConnectionFailureTests.swift */; };
-		A61800010000000000000001 /* MobileConnectionDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */; };
-		A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000002 /* RemoteHostTrustTests.swift */; };
-		A63100010000000000000101 /* MobileInvitationRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000102 /* MobileInvitationRouteTests.swift */; };
-		A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000202 /* ShareChatFlowTests.swift */; };
-		A63500010000000000000001 /* MobileSettingsIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63500010000000000000002 /* MobileSettingsIdentityTests.swift */; };
-		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
-		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
-		A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
@@ -79,15 +89,6 @@
 		F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000009 /* ThreadingRemoteKit */; };
 		F1000001000000000000042 /* BorderBeamKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000011 /* BorderBeamKit */; };
-		7C000003000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B001 /* main.swift */; };
-		7C000003000000000000A002 /* BridgeDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B002 /* BridgeDefaults.swift */; };
-		7C000003000000000000A003 /* BridgeOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B003 /* BridgeOutput.swift */; };
-		7C000003000000000000A004 /* UnixHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B004 /* UnixHTTPClient.swift */; };
-		7C000003000000000000A005 /* ServerSentEventReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B005 /* ServerSentEventReader.swift */; };
-		7C000003000000000000A006 /* JSONRPCLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B006 /* JSONRPCLine.swift */; };
-		7C000003000000000000A007 /* CatalogueCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B007 /* CatalogueCache.swift */; };
-		7C000003000000000000A008 /* MCPBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B008 /* MCPBridge.swift */; };
-		7C000003000000000000A009 /* threading-mcp-bridge in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000003000000000000B011 /* threading-mcp-bridge */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -111,6 +112,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 7A0000010000000000000051;
 			remoteInfo = ThreadingWasmExtensionRunner;
+		};
+		7C000003000000000000C004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7C000003000000000000C003;
+			remoteInfo = ThreadingMCPBridge;
 		};
 		95814D89024CC2AED2A443AC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -139,13 +147,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = F6000001000000000000001;
 			remoteInfo = Threading;
-		};
-		7C000003000000000000C004 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = F8000001000000000000001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7C000003000000000000C003;
-			remoteInfo = ThreadingMCPBridge;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -182,52 +183,6 @@
 		7A0000010000000000000012 /* Targets/WasmRunner/Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Targets/WasmRunner/Info.plist; sourceTree = SOURCE_ROOT; };
 		7A0000010000000000000013 /* Targets/WasmRunner/threading-wasm-extension-runner.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "Targets/WasmRunner/threading-wasm-extension-runner.entitlements"; sourceTree = SOURCE_ROOT; };
 		7A0000010000000000000014 /* threading-wasm-extension-runner */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = "threading-wasm-extension-runner"; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000010000000000000002 /* ThreadingMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThreadingMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000010000000000000015 /* Sources/Threading/AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Sources/Threading/AppIcon.icon; sourceTree = "<group>"; };
-		A61100010000000000000002 /* RemoteUsageDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteUsageDashboardTests.swift; sourceTree = "<group>"; };
-		A61200010000000000000002 /* RemoteConversationStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteConversationStoreTests.swift; sourceTree = "<group>"; };
-		A61300010000000000000002 /* SessionDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionDashboardTests.swift; sourceTree = "<group>"; };
-		A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileCollaborationPresentationTests.swift; sourceTree = "<group>"; };
-		A61500010000000000000002 /* MobileSessionChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionChromeTests.swift; sourceTree = "<group>"; };
-		A61900010000000000000002 /* RemoteTerminalScrollTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalScrollTests.swift; sourceTree = "<group>"; };
-		A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardDismissalTests.swift; sourceTree = "<group>"; };
-		A63600010000000000000002 /* RemoteTerminalTapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalTapTests.swift; sourceTree = "<group>"; };
-		A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalSelectionTests.swift; sourceTree = "<group>"; };
-		A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileNavigationTitleMorphTests.swift; sourceTree = "<group>"; };
-		A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileIssueReportOutboxTests.swift; sourceTree = "<group>"; };
-		A62100010000000000000002 /* MobileWorkingOrbTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileWorkingOrbTests.swift; sourceTree = "<group>"; };
-		A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionNavigationTransitionTests.swift; sourceTree = "<group>"; };
-		A62300010000000000000002 /* MobileAgentIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAgentIdentityTests.swift; sourceTree = "<group>"; };
-		A69900010000000000000002 /* RemoteTerminalViewportLeaseTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalViewportLeaseTests.swift; sourceTree = "<group>"; };
-		A61600010000000000000002 /* MobileThemeChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeChromeTests.swift; sourceTree = "<group>"; };
-		A61700010000000000000002 /* RemoteConnectionFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteConnectionFailureTests.swift; sourceTree = "<group>"; };
-		A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileConnectionDiagnosticsTests.swift; sourceTree = "<group>"; };
-		A6563DF6216A83E7016B0C5B /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
-		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A63100010000000000000002 /* RemoteHostTrustTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostTrustTests.swift; sourceTree = "<group>"; };
-		A63100010000000000000102 /* MobileInvitationRouteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileInvitationRouteTests.swift; sourceTree = "<group>"; };
-		A63100010000000000000202 /* ShareChatFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareChatFlowTests.swift; sourceTree = "<group>"; };
-		A63500010000000000000002 /* MobileSettingsIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSettingsIdentityTests.swift; sourceTree = "<group>"; };
-		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
-		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
-		A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostDiscoveryTests.swift; sourceTree = "<group>"; };
-		A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileTerminalWireFixtureTests.swift; sourceTree = "<group>"; };
-		A70100010000000000000002 /* MobileSessionConnectionPoolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionConnectionPoolTests.swift; sourceTree = "<group>"; };
-		A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileHostRefreshSingleFlightTests.swift; sourceTree = "<group>"; };
-		A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteExtensionSceneScalingTests.swift; sourceTree = "<group>"; };
-		A70400010000000000000002 /* ComposerClipboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerClipboardTests.swift; sourceTree = "<group>"; };
-		A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentPreviewFailureTests.swift; sourceTree = "<group>"; };
-		A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentThumbnailRequestStateTests.swift; sourceTree = "<group>"; };
-		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
-		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		B70000010000000000000001 /* Sources/Threading/Resources/Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
-		C0D100010000000000000002 /* ThreadingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		C20CE9CA503B8DC639CAB992 /* threading-extension-helper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-extension-helper"; sourceTree = BUILT_PRODUCTS_DIR; };
-		D2E000010000000000000002 /* ThreadingNotificationE2ETests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingNotificationE2ETests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeliveryE2ETests.swift; sourceTree = "<group>"; };
-		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
-		F2000001000000000000038 /* Threading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threading.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		F446C4C52994905237C3BE9B /* threading-extension-helper-network.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-extension-helper-network.entitlements"; sourceTree = "<group>"; };
 		7C000003000000000000B001 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		7C000003000000000000B002 /* BridgeDefaults.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BridgeDefaults.swift; sourceTree = "<group>"; };
 		7C000003000000000000B003 /* BridgeOutput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BridgeOutput.swift; sourceTree = "<group>"; };
@@ -239,6 +194,53 @@
 		7C000003000000000000B009 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C000003000000000000B010 /* threading-mcp-bridge.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-mcp-bridge.entitlements"; sourceTree = "<group>"; };
 		7C000003000000000000B011 /* threading-mcp-bridge */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-mcp-bridge"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000010000000000000002 /* ThreadingMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThreadingMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000010000000000000015 /* Sources/Threading/AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Sources/Threading/AppIcon.icon; sourceTree = "<group>"; };
+		A61100010000000000000002 /* RemoteUsageDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteUsageDashboardTests.swift; sourceTree = "<group>"; };
+		A61200010000000000000002 /* RemoteConversationStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteConversationStoreTests.swift; sourceTree = "<group>"; };
+		A61300010000000000000002 /* SessionDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionDashboardTests.swift; sourceTree = "<group>"; };
+		A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileCollaborationPresentationTests.swift; sourceTree = "<group>"; };
+		A61500010000000000000002 /* MobileSessionChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionChromeTests.swift; sourceTree = "<group>"; };
+		A61600010000000000000002 /* MobileThemeChromeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeChromeTests.swift; sourceTree = "<group>"; };
+		A61700010000000000000002 /* RemoteConnectionFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteConnectionFailureTests.swift; sourceTree = "<group>"; };
+		A61800010000000000000002 /* MobileConnectionDiagnosticsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileConnectionDiagnosticsTests.swift; sourceTree = "<group>"; };
+		A61900010000000000000002 /* RemoteTerminalScrollTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalScrollTests.swift; sourceTree = "<group>"; };
+		A62000010000000000000002 /* TerminalKeyboardDismissalTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TerminalKeyboardDismissalTests.swift; sourceTree = "<group>"; };
+		A62100010000000000000002 /* MobileWorkingOrbTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileWorkingOrbTests.swift; sourceTree = "<group>"; };
+		A62200010000000000000002 /* MobileSessionNavigationTransitionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionNavigationTransitionTests.swift; sourceTree = "<group>"; };
+		A62300010000000000000002 /* MobileAgentIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAgentIdentityTests.swift; sourceTree = "<group>"; };
+		A63100010000000000000002 /* RemoteHostTrustTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostTrustTests.swift; sourceTree = "<group>"; };
+		A63100010000000000000102 /* MobileInvitationRouteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileInvitationRouteTests.swift; sourceTree = "<group>"; };
+		A63100010000000000000202 /* ShareChatFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareChatFlowTests.swift; sourceTree = "<group>"; };
+		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
+		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
+		A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostDiscoveryTests.swift; sourceTree = "<group>"; };
+		A63500010000000000000002 /* MobileSettingsIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSettingsIdentityTests.swift; sourceTree = "<group>"; };
+		A63600010000000000000002 /* RemoteTerminalTapTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalTapTests.swift; sourceTree = "<group>"; };
+		A63700010000000000000002 /* MobileNavigationTitleMorphTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileNavigationTitleMorphTests.swift; sourceTree = "<group>"; };
+		A63800010000000000000002 /* MobileIssueReportOutboxTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileIssueReportOutboxTests.swift; sourceTree = "<group>"; };
+		A64200010000000000000002 /* RemoteTerminalSelectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalSelectionTests.swift; sourceTree = "<group>"; };
+		A6563DF6216A83E7016B0C5B /* ThreadingExtensionHelperNetwork */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = text; path = ThreadingExtensionHelperNetwork; sourceTree = BUILT_PRODUCTS_DIR; };
+		A69900010000000000000002 /* RemoteTerminalViewportLeaseTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalViewportLeaseTests.swift; sourceTree = "<group>"; };
+		A70000010000000000000002 /* MobileTerminalWireFixtureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileTerminalWireFixtureTests.swift; sourceTree = "<group>"; };
+		A70100010000000000000002 /* MobileSessionConnectionPoolTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileSessionConnectionPoolTests.swift; sourceTree = "<group>"; };
+		A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileHostRefreshSingleFlightTests.swift; sourceTree = "<group>"; };
+		A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteExtensionSceneScalingTests.swift; sourceTree = "<group>"; };
+		A70400010000000000000002 /* ComposerClipboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerClipboardTests.swift; sourceTree = "<group>"; };
+		A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalLayoutViewTests.swift; sourceTree = "<group>"; };
+		A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentPreviewFailureTests.swift; sourceTree = "<group>"; };
+		A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentThumbnailRequestStateTests.swift; sourceTree = "<group>"; };
+		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
+		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B70000010000000000000001 /* Sources/Threading/Resources/Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/Threading/Resources/Fonts; sourceTree = "<group>"; };
+		C0D100010000000000000002 /* ThreadingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C20CE9CA503B8DC639CAB992 /* threading-extension-helper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-extension-helper"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2E000010000000000000002 /* ThreadingNotificationE2ETests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingNotificationE2ETests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2E000010000000000000003 /* NotificationDeliveryE2ETests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeliveryE2ETests.swift; sourceTree = "<group>"; };
+		DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+		F2000001000000000000038 /* Threading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threading.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F446C4C52994905237C3BE9B /* threading-extension-helper-network.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-extension-helper-network.entitlements"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -426,6 +428,24 @@
 			name = "Wasm Runner";
 			sourceTree = "<group>";
 		};
+		7C000003000000000000C001 /* MCP Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				7C000003000000000000B001 /* main.swift */,
+				7C000003000000000000B002 /* BridgeDefaults.swift */,
+				7C000003000000000000B003 /* BridgeOutput.swift */,
+				7C000003000000000000B004 /* UnixHTTPClient.swift */,
+				7C000003000000000000B005 /* ServerSentEventReader.swift */,
+				7C000003000000000000B006 /* JSONRPCLine.swift */,
+				7C000003000000000000B007 /* CatalogueCache.swift */,
+				7C000003000000000000B008 /* MCPBridge.swift */,
+				7C000003000000000000B009 /* Info.plist */,
+				7C000003000000000000B010 /* threading-mcp-bridge.entitlements */,
+			);
+			name = "MCP Bridge";
+			path = Targets/MCPBridge;
+			sourceTree = "<group>";
+		};
 		B2000001000000000000000F /* Mobile Tests */ = {
 			isa = PBXGroup;
 			children = (
@@ -460,6 +480,7 @@
 				A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */,
 				A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */,
 				A70400010000000000000002 /* ComposerClipboardTests.swift */,
+				A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */,
 				A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */,
 				A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */,
 			);
@@ -539,24 +560,6 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		7C000003000000000000C001 /* MCP Bridge */ = {
-			isa = PBXGroup;
-			children = (
-				7C000003000000000000B001 /* main.swift */,
-				7C000003000000000000B002 /* BridgeDefaults.swift */,
-				7C000003000000000000B003 /* BridgeOutput.swift */,
-				7C000003000000000000B004 /* UnixHTTPClient.swift */,
-				7C000003000000000000B005 /* ServerSentEventReader.swift */,
-				7C000003000000000000B006 /* JSONRPCLine.swift */,
-				7C000003000000000000B007 /* CatalogueCache.swift */,
-				7C000003000000000000B008 /* MCPBridge.swift */,
-				7C000003000000000000B009 /* Info.plist */,
-				7C000003000000000000B010 /* threading-mcp-bridge.entitlements */,
-			);
-			name = "MCP Bridge";
-			path = Targets/MCPBridge;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -616,6 +619,21 @@
 			);
 			productName = ThreadingWasmExtensionRunner;
 			productReference = 7A0000010000000000000014 /* threading-wasm-extension-runner */;
+			productType = "com.apple.product-type.tool";
+		};
+		7C000003000000000000C003 /* ThreadingMCPBridge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7C000003000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingMCPBridge" */;
+			buildPhases = (
+				7C000003000000000000C002 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ThreadingMCPBridge;
+			productName = ThreadingMCPBridge;
+			productReference = 7C000003000000000000B011 /* threading-mcp-bridge */;
 			productType = "com.apple.product-type.tool";
 		};
 		A20000010000000000000001 /* ThreadingMobile */ = {
@@ -771,21 +789,6 @@
 			productName = Threading;
 			productReference = F2000001000000000000038 /* Threading.app */;
 			productType = "com.apple.product-type.application";
-		};
-		7C000003000000000000C003 /* ThreadingMCPBridge */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 7C000003000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingMCPBridge" */;
-			buildPhases = (
-				7C000003000000000000C002 /* Sources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = ThreadingMCPBridge;
-			productName = ThreadingMCPBridge;
-			productReference = 7C000003000000000000B011 /* threading-mcp-bridge */;
-			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -1053,6 +1056,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7C000003000000000000C002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7C000003000000000000A001 /* main.swift in Sources */,
+				7C000003000000000000A002 /* BridgeDefaults.swift in Sources */,
+				7C000003000000000000A003 /* BridgeOutput.swift in Sources */,
+				7C000003000000000000A004 /* UnixHTTPClient.swift in Sources */,
+				7C000003000000000000A005 /* ServerSentEventReader.swift in Sources */,
+				7C000003000000000000A006 /* JSONRPCLine.swift in Sources */,
+				7C000003000000000000A007 /* CatalogueCache.swift in Sources */,
+				7C000003000000000000A008 /* MCPBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A20000010000000000000005 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1095,6 +1113,7 @@
 				A70200010000000000000001 /* MobileHostRefreshSingleFlightTests.swift in Sources */,
 				A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */,
 				A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */,
+				A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */,
 				A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */,
 				A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */,
 			);
@@ -1132,21 +1151,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		7C000003000000000000C002 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				7C000003000000000000A001 /* main.swift in Sources */,
-				7C000003000000000000A002 /* BridgeDefaults.swift in Sources */,
-				7C000003000000000000A003 /* BridgeOutput.swift in Sources */,
-				7C000003000000000000A004 /* UnixHTTPClient.swift in Sources */,
-				7C000003000000000000A005 /* ServerSentEventReader.swift in Sources */,
-				7C000003000000000000A006 /* JSONRPCLine.swift in Sources */,
-				7C000003000000000000A007 /* CatalogueCache.swift in Sources */,
-				7C000003000000000000A008 /* MCPBridge.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -1167,6 +1171,12 @@
 			name = ThreadingWasmExtensionRunner;
 			target = 7A0000010000000000000051 /* ThreadingWasmExtensionRunner */;
 			targetProxy = 7A0000010000000000000021 /* PBXContainerItemProxy */;
+		};
+		7C000003000000000000C005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = ThreadingMCPBridge;
+			target = 7C000003000000000000C003 /* ThreadingMCPBridge */;
+			targetProxy = 7C000003000000000000C004 /* PBXContainerItemProxy */;
 		};
 		A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -1191,12 +1201,6 @@
 			name = Threading;
 			target = F6000001000000000000001 /* Threading */;
 			targetProxy = D2E000010000000000000007 /* PBXContainerItemProxy */;
-		};
-		7C000003000000000000C005 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = ThreadingMCPBridge;
-			target = 7C000003000000000000C003 /* ThreadingMCPBridge */;
-			targetProxy = 7C000003000000000000C004 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1315,6 +1319,52 @@
 				PRODUCT_NAME = "threading-wasm-extension-runner";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		7C000003000000000000C006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Targets/MCPBridge/threading-mcp-bridge.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Targets/MCPBridge/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.mcp-bridge";
+				PRODUCT_NAME = "threading-mcp-bridge";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7C000003000000000000C007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Targets/MCPBridge/threading-mcp-bridge.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Targets/MCPBridge/Info.plist",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.mcp-bridge";
+				PRODUCT_NAME = "threading-mcp-bridge";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -1796,52 +1846,6 @@
 			};
 			name = Release;
 		};
-		7C000003000000000000C006 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Targets/MCPBridge/threading-mcp-bridge.entitlements";
-				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
-				CODE_SIGN_STYLE = Automatic;
-				ENABLE_HARDENED_RUNTIME = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/MCPBridge/Info.plist",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.mcp-bridge";
-				PRODUCT_NAME = "threading-mcp-bridge";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		7C000003000000000000C007 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "Targets/MCPBridge/threading-mcp-bridge.entitlements";
-				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
-				CODE_SIGN_STYLE = Automatic;
-				ENABLE_HARDENED_RUNTIME = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/MCPBridge/Info.plist",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.mcp-bridge";
-				PRODUCT_NAME = "threading-mcp-bridge";
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1877,6 +1881,15 @@
 			buildConfigurations = (
 				7A0000010000000000000082 /* Release */,
 				7A0000010000000000000081 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7C000003000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingMCPBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7C000003000000000000C007 /* Release */,
+				7C000003000000000000C006 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1931,15 +1944,6 @@
 			buildConfigurations = (
 				F7000001000000000000006 /* Debug */,
 				F7000001000000000000007 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		7C000003000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingMCPBridge" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				7C000003000000000000C007 /* Release */,
-				7C000003000000000000C006 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

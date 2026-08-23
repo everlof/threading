@@ -2,22 +2,6 @@ import ThreadingRemoteKit
 import XCTest
 @testable import ThreadingMobile
 
-final class MobileSessionNavigationTransitionTests: XCTestCase {
-    func testTerminalSessionNavigationCommitsFinalGeometryImmediately() {
-        XCTAssertEqual(
-            MobileSessionNavigationTransition.forSurface(.terminal),
-            .immediate
-        )
-    }
-
-    func testNativeConversationKeepsTheStandardNavigationTransition() {
-        XCTAssertEqual(
-            MobileSessionNavigationTransition.forSurface(.conversation),
-            .standard
-        )
-    }
-}
-
 /// Opening a session is one code path, whether the row was tapped or the chat was just started
 /// from a draft. Starting one and being left on the list was the bug: the created session was
 /// thrown away and only the sheet was dismissed.

@@ -628,6 +628,104 @@ final class SessionAttachmentComparisonTests: XCTestCase {
         )
     }
 
+    /// **The words in a row can be read, selected or not — measured on drawn pixels.**
+    ///
+    /// This is the assertion the screenshot became. A row's timestamp and origin mark are set in
+    /// `Design.Text.quaternary`, and in dark System that tier was white at 10%: the chronology
+    /// this pane exists to show drew at **1.34:1** over the panel, and at **1.20:1** once the row
+    /// was selected — so clicking a row made its own metadata harder to read, not easier.
+    ///
+    /// Read off the raster rather than off the colours, because the two halves failed for
+    /// different reasons and only pixels catch both at once: the tier itself was never measured
+    /// against a ground (`LabelLegibility`), and the cell was never told the row had painted an
+    /// accent under it (`ThemedTableRowView.contentInk`). Asserting on `textColor` would have
+    /// passed on the second one right up until the row was drawn.
+    func testARowsQuietestWordsReadOnTheirOwnRowSelectedOrNot() throws {
+        let pane = try laidOutPane(showing: [
+            try writePNG(named: "timeline.png", color: .systemTeal),
+            try writePNG(named: "contact.png", color: .systemOrange)
+        ])
+        let table = try table(of: pane)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+
+        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            // Row 0 is selected and row 1 is not, so one render answers both halves.
+            var measured: [CGFloat] = []
+            NSAppearance(named: appearanceName)?.performAsCurrentDrawingAppearance {
+                pane.view.appearance = NSAppearance(named: appearanceName)
+                pane.view.wantsLayer = true
+                pane.view.layer?.backgroundColor = Design.Surface.background.cgColor
+                AppThemeRefresh.repaint(pane.view)
+                pane.view.layoutSubtreeIfNeeded()
+                measured = (0...1).compactMap { try? timestampContrast(ofRow: $0, in: table) }
+            }
+
+            XCTAssertEqual(measured.count, 2, "\(name): the list drew no rows to measure")
+            for (row, ratio) in measured.enumerated() {
+                XCTAssertGreaterThanOrEqual(
+                    ratio,
+                    LabelLegibility.Defaults.glanceRatio - 0.15,
+                    "\(name): the \(row == 0 ? "selected" : "unselected") row's timestamp "
+                        + "drew at \(String(format: "%.2f", ratio)):1"
+                )
+            }
+        }
+    }
+
+    /// The contrast between a row's **timestamp** and the ground it was drawn on, taken off the
+    /// raster.
+    ///
+    /// The label is *located* rather than guessed at: its frame is converted into the table's
+    /// coordinates and the scan runs inside it, with the ground read from a column just outside
+    /// its leading edge at the same height. A first version of this swept a band and a quarter of
+    /// the width instead, and reported 1.43:1 on a row whose timestamp is plainly legible in the
+    /// rendered PNG beside it — it had found the row's own bottom edge. A measurement that can
+    /// miss its subject is not evidence.
+    ///
+    /// The value returned is the *strongest* pixel in the label, because a glyph's stem is
+    /// antialiased down toward the ground at its edges and only its core carries the colour that
+    /// was actually asked for.
+    private func timestampContrast(ofRow row: Int, in table: NSTableView) throws -> CGFloat {
+        let cell = try XCTUnwrap(
+            table.view(atColumn: 0, row: row, makeIfNecessary: true) as? SessionAttachmentRowView,
+            "the list built no row \(row)"
+        )
+        let clock = try XCTUnwrap(
+            descendants(of: cell)
+                .compactMap { $0 as? NSTextField }
+                .filter { !$0.isHidden && $0.stringValue.contains(":") }
+                .max { $0.frame.minX < $1.frame.minX },
+            "row \(row) is not showing a time at all"
+        )
+        let frame = cell.convert(clock.bounds, from: clock)
+
+        table.display()
+        let rep = try XCTUnwrap(table.bitmapImageRepForCachingDisplay(in: table.bounds))
+        table.cacheDisplay(in: table.bounds, to: rep)
+
+        // The rep is backing-scaled, so a point coordinate has to be taken through the same scale
+        // the raster was made at rather than used as a pixel index.
+        let scale = CGFloat(rep.pixelsWide) / table.bounds.width
+        let inTable = table.convert(frame, from: cell)
+        func pixel(_ x: CGFloat, _ y: CGFloat) -> NSColor? {
+            rep.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB)
+        }
+
+        let ground = try XCTUnwrap(
+            pixel(inTable.minX - Design.Spacing.small, inTable.midY),
+            "nothing was drawn beside row \(row)'s time"
+        )
+
+        var strongest: CGFloat = 1
+        for y in stride(from: inTable.minY, to: inTable.maxY, by: 1 / scale) {
+            for x in stride(from: inTable.minX, to: inTable.maxX, by: 1 / scale) {
+                guard let ink = pixel(x, y) else { continue }
+                strongest = max(strongest, ThemeContrast.ratio(ink, ground))
+            }
+        }
+        return strongest
+    }
+
     /// The horizontal run a row actually paints, in the table's own points.
     ///
     /// Read off a cached bitmap rather than from a frame, because what is being checked is what

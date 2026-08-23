@@ -620,6 +620,55 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
         selectionPath.fill()
     }
 
+    /// **The ink that reads on whatever this row actually painted.**
+    ///
+    /// `SelectionSurface.quiet` exists so a cell does not *have* to ask — it holds the fill back
+    /// until `Design.Text.label` reads on it, which is the promise a row can keep for cells it
+    /// cannot reach. That promise covers tier one. It does not cover the tiers below it, and it
+    /// does not cover **System** at all, where the four lines above hand the highlight back to
+    /// AppKit and an opaque accent lands under cells still inking themselves from the chrome's
+    /// ground. Measured on the attachments pane: a row's timestamp at `Design.Text.quaternary`
+    /// drew at 1.20:1 the moment the row was selected, against 1.34:1 unselected — so selecting a
+    /// row made its own metadata *less* legible.
+    ///
+    /// A cell that wants the rest of the ladder asks for it here rather than working out which of
+    /// those two worlds it is in. That is the whole point: the row is the only thing that knows
+    /// what it painted, so the row is what says so — the same argument `Design.Ink.primaryAction`
+    /// makes one control further in.
+    ///
+    /// Returns the chrome's own ink for an unselected row.
+    ///
+    /// **Measured against the painted ground even where `quiet` hands back the chrome's ink.**
+    /// Those two answers differ only for the two themes `quiet` has to hold back — Windows 98 and
+    /// Platinum — and there the chrome's ink is the right answer for a cell that *cannot* ask and
+    /// the wrong one for a cell that has: it keeps tier one legible and leaves the rest where they
+    /// were. Windows 98's quaternary on its held-back navy measured 1.18:1. A cell that took the
+    /// trouble to ask gets the ladder measured on what is actually under it.
+    var contentInk: Design.Ink {
+        guard let ground = selectionGround else { return .chrome }
+        return Design.Text.on(ground)
+    }
+
+    /// The opaque colour a **selected** row ends up showing, or `nil` when it is not selected.
+    ///
+    /// Also the answer a test asserts against, so the fixture and the row cannot disagree about
+    /// which of the two selection strengths was in force — `isEmphasized` is not simply what it
+    /// was set to (see `ListSelectionStrength`), and a test that recomputed the fill by hand was
+    /// measuring ink against a ground the row had not painted.
+    var selectionGround: NSColor? {
+        guard isSelected else { return nil }
+        guard AppThemeLibrary.current.isSystem else {
+            return SelectionSurface.quiet(over: resolvedGround()).ground
+        }
+        // AppKit's own fill, at the strength AppKit is drawing it — a selected row in a window
+        // that is not in front is a pale grey, and ink measured against the emphasized blue would
+        // be white on it.
+        let fill = isEmphasized
+            ? Design.Surface.selectionFill
+            : Design.Surface.selectionFillUnemphasized
+        return fill.composited(over: resolvedGround())
+    }
+
     /// The theme's control corner, inset just off the row's edges so the fill reads as a surface
     /// the row is sitting on rather than as a band ruled across the list — and so a rounded
     /// theme's corner has somewhere to turn. The same silhouette rule the sidebar's rows follow,

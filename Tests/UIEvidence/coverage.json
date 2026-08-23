@@ -652,6 +652,27 @@
       }
     },
     {
+      "id": "media-inspector-filmstrip",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Media inspector filmstrip",
+      "description": "The real media inspector overlay on its first frame with a 27-item collection, before any interaction can settle stale thumbnail geometry.",
+      "states": ["First frame", "Overflowing 27-item filmstrip", "Selected item visible"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Dark"],
+        "sizes": ["960×640-point product shell"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/MediaInspectorTests.swift",
+        "test": "ThreadingTests/MediaInspectorTests/testRendersLongCollectionRailOnFirstLayout"
+      },
+      "capture": {
+        "glob": "media-inspector-long-filmstrip-*.png"
+      }
+    },
+    {
       "id": "image-comparison",
       "kind": "surface",
       "status": "implemented",

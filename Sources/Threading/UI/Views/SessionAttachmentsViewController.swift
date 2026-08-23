@@ -2343,7 +2343,15 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
 
 // MARK: - Row
 
-final class SessionAttachmentRowView: NSView {
+/// **An `NSTableCellView` rather than a plain `NSView`, and that is a colour decision.**
+///
+/// A plain view in a list is never told that the row under it is selected: AppKit propagates
+/// `interiorBackgroundStyle` to cell views and to nothing else. So every label here went on
+/// inking itself from the chrome's ground after the row had painted an accent under it — which
+/// is how the pane's quietest tier came to draw at 1.20:1 on a selected row, *worse* than the
+/// 1.34:1 it drew at unselected. Adopting the class is how the row gets to say what it painted;
+/// `ThemedTableRowView.contentInk` is what it says.
+final class SessionAttachmentRowView: NSTableCellView {
 
     /// A drag is over this row and would open a comparison against it.
     ///
@@ -2373,7 +2381,47 @@ final class SessionAttachmentRowView: NSView {
     }
 
     /// The line the drop caption takes the place of.
-    private var pathLabel: NSView?
+    private var pathLabel: NSTextField?
+
+    /// The rest of the row's words, held so the ink can be re-asked when the ground moves.
+    private var nameLabel: NSTextField?
+    private var originLabel: NSTextField?
+    private var momentLabel: NSTextField?
+    private var playMarkView: NSImageView?
+
+    /// Selection changes the colour under every word in the row, so every word is asked again.
+    ///
+    /// The ink comes from the row rather than from `Design.Text`, because only the row knows
+    /// whether it painted the theme's accent, AppKit's, a held-back wash, or nothing at all —
+    /// see `ThemedTableRowView.contentInk`. The tiers each label takes are unchanged: the
+    /// hierarchy is the same sentence, measured against the ground it is actually on.
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet {
+            guard backgroundStyle != oldValue else { return }
+            applyInk()
+        }
+    }
+
+    private func applyInk() {
+        let ink = (superview as? ThemedTableRowView)?.contentInk ?? .chrome
+        nameLabel?.textColor = ink.label
+        pathLabel?.textColor = ink.tertiary
+        originLabel?.textColor = ink.quaternary
+        momentLabel?.textColor = ink.quaternary
+        playMarkView?.contentTintColor = ink.label
+        // The drop caption says "the thing you are aiming at" in the accent — which is the one
+        // colour it cannot use over a row already filled with that accent. On a selected row the
+        // ground's own brightest ink says it instead, and says it just as loudly.
+        dropLabel.textColor = backgroundStyle == .emphasized ? ink.label : Design.Surface.accent
+    }
+
+    /// The row joins the list already selected when the pane restores a choice, and
+    /// `backgroundStyle` is set before that superview exists. Asking once more on arrival is what
+    /// keeps a restored selection from drawing chrome ink over an accent.
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        applyInk()
+    }
 
     private lazy var dropLabel: NSTextField = {
         let label = NSTextField(labelWithString: L10n.string("Drop to compare"))
@@ -2466,6 +2514,10 @@ final class SessionAttachmentRowView: NSView {
         if let playMark { addSubview(playMark) }
         addSubview(dropLabel)
         pathLabel = path
+        nameLabel = name
+        originLabel = origin
+        momentLabel = moment
+        playMarkView = playMark
 
         // One element, read as one sentence: four separate labels would be announced as four
         // unrelated strings with no hint that the last two are the provenance and the moment of

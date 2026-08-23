@@ -484,6 +484,7 @@ final class MediaInspectorView: NSView, ThemedComponent {
     private let zoomLabel = NSTextField(labelWithString: "")
     private let zoomModeControl = ThemedSegmentedControl()
     private var thumbnails: [MediaInspectorThumbnail] = []
+    private var railSelectionNeedsReveal = false
     private var railHeightConstraint: NSLayoutConstraint?
     private var menuSession: AnyObject?
     private var themeRedraw: ThemeRedraw?
@@ -636,20 +637,20 @@ final class MediaInspectorView: NSView, ThemedComponent {
             bottom: Design.Spacing.small,
             right: Design.Spacing.inset
         )
-        // `NSScrollView` initially installs its document view at a zero frame. An `NSStackView`
-        // immediately solves its arranged-subview constraints against that frame, briefly
-        // breaking the thumbnails' fixed targets before our first layout. Seed the honest
-        // content extent up front; `layout()` will widen it to the viewport when appropriate.
-        railStack.frame = NSRect(
-            x: 0,
-            y: 0,
-            width: Design.Spacing.inset * 2
-                + CGFloat(items.count) * Design.Size.mediaInspectorThumbnail
-                + CGFloat(max(0, items.count - 1)) * Design.Spacing.small,
-            height: Design.Size.mediaInspectorRailHeight
-        )
         if items.count > 1 {
             railScrollView.documentView = railStack
+            // Installing a document view replaces its frame with the scroll view's initial
+            // zero-sized viewport. Seed the honest content extent *after* that handoff, before
+            // the stack receives its arranged subviews, so their fixed targets are never solved
+            // against the transient zero width. `layout()` widens it to the viewport when needed.
+            railStack.frame = NSRect(
+                x: 0,
+                y: 0,
+                width: Design.Spacing.inset * 2
+                    + CGFloat(items.count) * Design.Size.mediaInspectorThumbnail
+                    + CGFloat(max(0, items.count - 1)) * Design.Spacing.small,
+                height: Design.Size.mediaInspectorRailHeight
+            )
         }
 
         setupAnnotating()
@@ -883,13 +884,19 @@ final class MediaInspectorView: NSView, ThemedComponent {
     override func layout() {
         super.layout()
         guard items.count > 1 else { return }
-        let desiredWidth = max(railScrollView.bounds.width, railStack.fittingSize.width)
+        let viewport = railScrollView.contentSize
+        let desiredWidth = max(viewport.width, railStack.fittingSize.width)
         railStack.frame = NSRect(
             x: 0,
             y: 0,
             width: desiredWidth,
-            height: railScrollView.contentSize.height
+            height: viewport.height
         )
+        // Changing an `NSStackView`'s document frame does not synchronously reposition its
+        // arranged subviews. Settle them on the first real viewport layout; otherwise the first
+        // click is the event that moves the filmstrip into its shipping positions.
+        railStack.layoutSubtreeIfNeeded()
+        revealSelectedThumbnailIfPossible()
     }
 
     override func keyDown(with event: NSEvent) {
@@ -1083,8 +1090,17 @@ final class MediaInspectorView: NSView, ThemedComponent {
         for (index, thumbnail) in thumbnails.enumerated() {
             thumbnail.isSelected = index == selectedIndex
         }
-        guard thumbnails.indices.contains(selectedIndex) else { return }
+        railSelectionNeedsReveal = true
+        revealSelectedThumbnailIfPossible()
+    }
+
+    private func revealSelectedThumbnailIfPossible() {
+        guard railSelectionNeedsReveal,
+              thumbnails.indices.contains(selectedIndex),
+              railScrollView.contentSize.width > 0,
+              railScrollView.contentSize.height > 0 else { return }
         railStack.layoutSubtreeIfNeeded()
+        railSelectionNeedsReveal = false
         railScrollView.contentView.scrollToVisible(thumbnails[selectedIndex].frame)
         railScrollView.reflectScrolledClipView(railScrollView.contentView)
     }

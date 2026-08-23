@@ -1,7 +1,7 @@
 import Foundation
 import ThreadingRemoteKit
 
-private enum RemoteMobileConnectionDefaults {
+enum RemoteMobileConnectionDefaults {
     static let conversationPageRows = 64
     /// How much of the Mac's replay this phone asks for when it joins a terminal.
     ///
