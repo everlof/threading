@@ -82,10 +82,27 @@ final class UsageReadingLabelTests: XCTestCase {
         XCTAssertFalse(line.isAccessibilityElement())
     }
 
+    /// A provider may expose one window per model. Compact chrome names the bounded projection
+    /// and its cut; it must not build a multi-thousand-run attributed string merely to discover
+    /// that only a few readings fit beside the composer controls.
+    func testAProviderSizedInventoryBecomesABoundedStatedProjection() {
+        let readings = (0..<2_001).map { reading("M\($0)", "42%") }
+        let line = label(readings)
+
+        XCTAssertEqual(line.drawableReadingCount(in: .greatestFiniteMagnitude), 3)
+        XCTAssertEqual(
+            line.plainValue,
+            "M0 42% · M1 42% · M2 42% · "
+                + L10n.format("%d more windows", 1_998)
+        )
+        XCTAssertLessThan(line.intrinsicContentSize.width, 500)
+        XCTAssertFalse(line.plainValue.contains("M2000"))
+    }
+
     // MARK: - What Is Said
 
-    /// A screen reader hears every window whether or not the row had room for it, which is what
-    /// makes dropping one a *drawing* decision rather than a loss of information.
+    /// A screen reader hears every window in the compact projection whether or not the row had
+    /// room for it, which makes width pressure a drawing decision rather than lost information.
     func testTheSpokenValueIsTheWholeReadingHoweverNarrowTheRow() {
         let line = label([reading("5h", "86%"), reading("7d", "41%")])
         line.frame = NSRect(x: 0, y: 0, width: 20, height: 16)

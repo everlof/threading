@@ -15,9 +15,10 @@ import AppKit
 ///
 /// So the unit that gives way is the **window**, never the character. Given room for one reading
 /// it states one, complete; given room for none it draws nothing and leaves the row to the
-/// controls, which is the honest form of "there is no space for this". The full line stays on the
-/// accessibility value and on whatever tooltip the host set, so nothing is lost to a screen
-/// reader by the row being narrow.
+/// controls, which is the honest form of "there is no space for this". Compact chrome has a
+/// separate cardinality boundary from the virtual usage detail: it names at most three windows
+/// and states the omitted count. A provider-sized inventory must not turn one toolbar label,
+/// tooltip, or accessibility value into thousands of attributed runs.
 ///
 /// The intrinsic width is always the **whole** line, which is what keeps the choice stable: the
 /// view is handed `min(full, available)` by its row, so a window that widens hands it more and
@@ -34,6 +35,10 @@ final class UsageReadingLabel: NSView, InkSourced {
     let inkSource: InkSource
     private var themeRedraw: ThemeRedraw?
 
+    /// A one-line reading has room for the common account pair plus one model-scoped limit.
+    /// Complete provider inventories belong to the virtual usage popover.
+    static let maximumReadings = 3
+
     /// The windows to state, in the order the line prints them.
     var readings: [AccountUsage.Reading] = [] {
         didSet {
@@ -42,18 +47,17 @@ final class UsageReadingLabel: NSView, InkSourced {
         }
     }
 
-    /// Every window this line is about, whether or not there was room to draw them all. What
-    /// VoiceOver reads, and what a host puts on a tooltip.
+    /// The same bounded projection the line draws. VoiceOver and tooltips state an omitted count
+    /// instead of eagerly spelling a provider-sized inventory that cannot be acted on here.
     var plainValue: String {
-        readings.map { "\($0.name) \($0.value)" }
-            .joined(separator: UsageDefaults.segmentSeparator)
+        Self.plainSummary(readings: readings)
     }
 
     private var ink: Design.Ink { inkSource.ink }
 
     override var intrinsicContentSize: NSSize {
         guard !readings.isEmpty else { return NSSize(width: 0, height: 0) }
-        let size = line(count: readings.count).size()
+        let size = line(count: min(readings.count, Self.maximumReadings)).size()
         return NSSize(width: ceil(size.width), height: ceil(size.height))
     }
 
@@ -105,7 +109,11 @@ final class UsageReadingLabel: NSView, InkSourced {
     /// width a stack view hands out, which otherwise drops the last window of a line that fits.
     func drawableReadingCount(in width: CGFloat) -> Int {
         var fitting = 0
-        for count in stride(from: readings.count, through: 1, by: -1)
+        for count in stride(
+            from: min(readings.count, Self.maximumReadings),
+            through: 1,
+            by: -1
+        )
         where line(count: count).size().width <= width + 0.5 {
             fitting = count
             break
@@ -114,7 +122,12 @@ final class UsageReadingLabel: NSView, InkSourced {
     }
 
     private func line(count: Int) -> NSAttributedString {
-        Self.summary(readings: Array(readings.prefix(count)), ink: ink)
+        let maximum = min(readings.count, Self.maximumReadings)
+        return Self.summary(
+            readings: Array(readings.prefix(count)),
+            omittedCount: count == maximum ? readings.count - maximum : 0,
+            ink: ink
+        )
     }
 
     /// `5h 43% · 7d 73%`: each window as a quiet name and its value, the value tinted by that
@@ -125,6 +138,26 @@ final class UsageReadingLabel: NSView, InkSourced {
     /// and two compositions of one sentence is how a promise like that quietly stops being true.
     /// Consumes `AccountUsage.Reading`, so the stale-value and severity rules stay the model's.
     static func summary(readings: [AccountUsage.Reading], ink: Design.Ink) -> NSAttributedString {
+        let visible = Array(readings.prefix(maximumReadings))
+        return summary(
+            readings: visible,
+            omittedCount: readings.count - visible.count,
+            ink: ink
+        )
+    }
+
+    static func plainSummary(readings: [AccountUsage.Reading]) -> String {
+        let visible = readings.prefix(maximumReadings).map { "\($0.name) \($0.value)" }
+        let omitted = readings.count - visible.count
+        return (visible + (omitted > 0 ? [L10n.format("%d more windows", omitted)] : []))
+            .joined(separator: UsageDefaults.segmentSeparator)
+    }
+
+    private static func summary(
+        readings: [AccountUsage.Reading],
+        omittedCount: Int,
+        ink: Design.Ink
+    ) -> NSAttributedString {
         let result = NSMutableAttributedString()
 
         func append(_ text: String, font: NSFont, color: NSColor) {
@@ -154,6 +187,21 @@ final class UsageReadingLabel: NSView, InkSourced {
                 reading.value,
                 font: Design.Typography.control(),
                 color: reading.severity == .normal ? ink.secondary : reading.severity.glyphColor
+            )
+        }
+
+        if omittedCount > 0 {
+            result.append(gap(Design.Spacing.small, font: Design.Typography.control()))
+            append(
+                UsageDefaults.segmentMark,
+                font: Design.Typography.control(),
+                color: ink.tertiary
+            )
+            result.append(gap(Design.Spacing.small, font: Design.Typography.control()))
+            append(
+                L10n.format("%d more windows", omittedCount),
+                font: Design.Typography.caption(),
+                color: ink.tertiary
             )
         }
 

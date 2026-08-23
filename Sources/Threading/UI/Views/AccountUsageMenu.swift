@@ -95,7 +95,11 @@ enum AccountUsageMenu {
         item.metrics = identityMetrics(for: usage, at: now, limits: limits)
         item.trailingDetail = resetColumn(for: usage, metering: model, at: now)
 
-        let scoped = scopedSegments(for: usage, at: now, limits: limits)
+        var scoped = scopedSegments(for: usage, at: now, limits: limits)
+        appendOmittedWindows(
+            max(0, usage.windows.count - UsageReadingLabel.maximumReadings),
+            to: &scoped
+        )
         if !scoped.isEmpty { item.setSubtitle(scoped) }
     }
 
@@ -121,9 +125,10 @@ enum AccountUsageMenu {
         at now: Date = Date(),
         limits: [CustomLimit] = []
     ) -> [ThemedMenuMetric] {
-        CustomLimitBounds.retinted(
-            usage.readings(of: usage.windows, at: now),
-            of: usage.windows,
+        let windows = Array(usage.windows.prefix(UsageReadingLabel.maximumReadings))
+        return CustomLimitBounds.retinted(
+            usage.readings(of: windows, at: now),
+            of: windows,
             in: limits
         ).map { reading in
             ThemedMenuMetric(
@@ -164,14 +169,17 @@ enum AccountUsageMenu {
         at now: Date = Date(),
         limits: [CustomLimit] = []
     ) -> [ThemedMenuSubtitleSegment] {
-        readingSegments(
+        let windows = Array(usage.modelWindows.prefix(UsageReadingLabel.maximumReadings))
+        var segments = readingSegments(
             CustomLimitBounds.retinted(
-                usage.readings(of: usage.modelWindows, at: now),
-                of: usage.modelWindows,
+                usage.readings(of: windows, at: now),
+                of: windows,
                 in: limits
             ),
             joining: false
         )
+        appendOmittedWindows(usage.modelWindows.count - windows.count, to: &segments)
+        return segments
     }
 
     /// The whole identity row as one plain line — what a tooltip and VoiceOver get, and what a
@@ -298,14 +306,16 @@ enum AccountUsageMenu {
         if let plan = usage.planLabel, !plan.isEmpty {
             segments.append(ThemedMenuSubtitleSegment(plan))
         }
+        let windows = Array(usage.windows.prefix(UsageReadingLabel.maximumReadings))
         segments += readingSegments(
             CustomLimitBounds.retinted(
-                usage.readings(at: now, metering: nil),
-                of: usage.windows,
+                usage.readings(of: windows, at: now),
+                of: windows,
                 in: limits
             ),
             joining: !segments.isEmpty
         )
+        appendOmittedWindows(usage.windows.count - windows.count, to: &segments)
         if let reset = resetLine(for: usage, metering: nil, at: now) {
             if !segments.isEmpty { segments.append(separator) }
             segments.append(ThemedMenuSubtitleSegment(reset, .muted))
@@ -353,18 +363,20 @@ enum AccountUsageMenu {
     ) -> [ThemedMenuSubtitleSegment] {
         let scoped = usage.scopedWindows(metering: model)
         guard !scoped.isEmpty else { return [] }
+        let visible = Array(scoped.prefix(UsageReadingLabel.maximumReadings))
 
         // The model menu is the one surface where a *scoped* limit is actionable — a spent Fable
         // window is escaped by picking something else — so it is also where a line drawn on one
         // has to be visible.
         var segments = readingSegments(
             CustomLimitBounds.retinted(
-                usage.readings(of: scoped, at: now),
-                of: scoped,
+                usage.readings(of: visible, at: now),
+                of: visible,
                 in: limits
             ),
             joining: false
         )
+        appendOmittedWindows(scoped.count - visible.count, to: &segments)
 
         if let binding = usage.bindingWindow(at: now, metering: model),
            binding.scopeName != nil,
@@ -402,6 +414,21 @@ enum AccountUsageMenu {
             segments.append(ThemedMenuSubtitleSegment(reading.value, tone(for: reading.severity)))
         }
         return segments
+    }
+
+    /// Compact menu rows keep a constant amount of attributed and column state. The virtual
+    /// account popover owns the complete inventory; the row states when that inventory was cut
+    /// instead of silently pretending its first few windows are all the provider reported.
+    private static func appendOmittedWindows(
+        _ count: Int,
+        to segments: inout [ThemedMenuSubtitleSegment]
+    ) {
+        guard count > 0 else { return }
+        if !segments.isEmpty { segments.append(separator) }
+        segments.append(ThemedMenuSubtitleSegment(
+            L10n.format("%d more windows", count),
+            .muted
+        ))
     }
 
     private static func tone(for severity: UsageSeverity) -> ThemedMenuSubtitleSegment.Tone {

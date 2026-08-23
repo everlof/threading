@@ -3117,6 +3117,32 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
     }
 
+    /// A union across provider rows is still external cardinality. The fixed-width menu admits
+    /// a constant comparison plan, and an excluded provider value cannot widen that plan.
+    @MainActor
+    func testProviderSizedMetricColumnsStayInsideTheMenuContract() {
+        AppThemePalette.set(.system)
+        let entries: [ThemedMenuEntry] = (0..<2_000).map { index in
+            var item = ThemedMenuItem(title: "Account \(index)")
+            item.metrics = [ThemedMenuMetric(
+                label: "W\(index)",
+                value: index == 1_999 ? String(repeating: "9", count: 2_000) : "42%",
+                fraction: 0.42
+            )]
+            return .item(item)
+        }
+
+        XCTAssertEqual(
+            ThemedMenuMetrics.metricColumns(entries),
+            ["W0", "W1", "W2"]
+        )
+        XCTAssertLessThan(
+            ThemedMenuMetrics.metricColumnWidth(entries),
+            ThemedMenuLayout.maximumWidth / 2,
+            "an excluded metric still widened every menu row"
+        )
+    }
+
     /// The columns come out of the *title's* width, so a menu at its cap truncates the name and
     /// never a number.
     ///

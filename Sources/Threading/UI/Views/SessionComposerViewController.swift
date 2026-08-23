@@ -1598,7 +1598,9 @@ final class SessionComposerViewController: NSViewController {
         usageLabel.readings = readings
         usageLabel.toolTip = usageDetail(
             accountName: AccountName.display(for: account),
-            usage: usage,
+            planLabel: usage.planLabel,
+            readings: readings,
+            observedAt: usage.observedAt,
             at: now
         )
         usageLabel.isHidden = false
@@ -1610,27 +1612,27 @@ final class SessionComposerViewController: NSViewController {
         usageLabel.isHidden = true
     }
 
-    /// Everything the panel this replaced spent a block of the pane on: whose account it is,
-    /// what each window stands at and when it comes back, and how old the reading is.
+    /// The compact line's same bounded projection, plus whose reading it is and how old it is.
     ///
-    /// A tooltip rather than a column, because the detail is what a user reaches for once —
-    /// while the line beside the send is what they glance at every time.
-    private func usageDetail(accountName: String, usage: AccountUsage, at now: Date) -> String {
+    /// A provider can report one limit per model. Enumerating that inventory here made a tooltip
+    /// and its accessibility text scale with provider data even though the complete, actionable
+    /// inventory already belongs to the virtual usage popover.
+    private func usageDetail(
+        accountName: String,
+        planLabel: String?,
+        readings: [AccountUsage.Reading],
+        observedAt: Date,
+        at now: Date
+    ) -> String {
         var lines = [
-            [accountName, usage.planLabel ?? ""]
+            [accountName, planLabel ?? ""]
                 .filter { !$0.isEmpty }
                 .joined(separator: UsageDefaults.segmentSeparator)
         ].filter { !$0.isEmpty }
 
-        for window in usage.windows + usage.modelWindows {
-            var parts = ["\(window.compactName) \(AccountUsage.value(of: window, at: now))"]
-            if let resetsAt = window.resetsAt, !window.isExpired(at: now) {
-                parts.append(UsageFormat.resets(until: resetsAt, from: now))
-            }
-            lines.append(parts.joined(separator: UsageDefaults.segmentSeparator))
-        }
+        lines.append(UsageReadingLabel.plainSummary(readings: readings))
 
-        lines.append(ComposerDefaults.updatedTitle(UsageFormat.age(of: usage.observedAt, at: now)))
+        lines.append(ComposerDefaults.updatedTitle(UsageFormat.age(of: observedAt, at: now)))
         return lines.joined(separator: "\n")
     }
 

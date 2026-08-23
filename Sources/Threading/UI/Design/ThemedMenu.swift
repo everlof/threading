@@ -2288,6 +2288,11 @@ enum ThemedMenuMetrics {
     /// against the band's solid fill.
     static let metricTrackOpacity: CGFloat = 0.45
 
+    /// A 440-point menu cannot carry a provider-sized union of metric columns. Three preserves
+    /// the common account pair plus one additional window while leaving a readable title slot.
+    /// Callers keep omitted values in the row's bounded subtitle/tooltip projection.
+    static let maximumMetricColumns = 3
+
     /// The columns this menu reserves, in first-seen order.
     ///
     /// A union across every row rather than per row: a plan metering one window and a plan
@@ -2301,6 +2306,7 @@ enum ThemedMenuMetrics {
             guard case .item(let item) = entry else { continue }
             for metric in item.metrics where seen.insert(metric.label).inserted {
                 ordered.append(metric.label)
+                if ordered.count == maximumMetricColumns { return ordered }
             }
         }
         return ordered
@@ -2311,9 +2317,10 @@ enum ThemedMenuMetrics {
     /// ones put the second column's bar at a different offset on rows whose first column is
     /// absent — and a bar that moves sideways between rows cannot be compared by length.
     static func metricColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+        let admitted = Set(metricColumns(entries))
         let all = entries.flatMap { entry -> [ThemedMenuMetric] in
             guard case .item(let item) = entry else { return [] }
-            return item.metrics
+            return item.metrics.filter { admitted.contains($0.label) }
         }
         guard !all.isEmpty else { return 0 }
 

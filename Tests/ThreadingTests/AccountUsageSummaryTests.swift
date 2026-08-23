@@ -388,6 +388,41 @@ final class AccountUsageSummaryTests: XCTestCase {
         XCTAssertEqual(empty.spokenSummary, "Everlof")
     }
 
+    /// Provider cardinality belongs to the virtual popover, not to the fixed menu row. The row
+    /// retains a constant number of metric/attributed values and says what it omitted.
+    @MainActor
+    func testProviderSizedWindowsStayBoundedInCompactMenus() {
+        let windows = (0..<2_000).map { index in
+            window(id: "W\(index)", fraction: 0.42, resetsIn: 54_000)
+        }
+        var usage = makeUsage(windows: windows)
+        usage.modelWindows = (0..<2_000).map { index in
+            AccountUsage.Window(
+                id: "Fable-\(index)",
+                label: "7d · Fable-\(index)",
+                fraction: 0.43,
+                resetsAt: now.addingTimeInterval(54_000),
+                windowDuration: UsageDefaults.sevenDaySeconds
+            )
+        }
+
+        var item = ThemedMenuItem(title: "Provider Scale")
+        AccountUsageMenu.apply(usage, to: &item, at: now)
+
+        XCTAssertEqual(item.metrics.count, UsageReadingLabel.maximumReadings)
+        XCTAssertLessThanOrEqual(item.subtitleSegments?.count ?? 0, 12)
+        XCTAssertTrue(
+            item.subtitle?.contains(L10n.format("%d more windows", 1_997)) == true
+        )
+        XCTAssertLessThan(item.spokenSummary.count, 300)
+
+        let scoped = AccountUsageMenu.scopedSegments(for: usage, at: now)
+        XCTAssertLessThan(scoped.count, 12)
+        XCTAssertTrue(
+            scoped.map(\.text).joined().contains(L10n.format("%d more windows", 1_997))
+        )
+    }
+
     /// Banked resets are stated only when the account has some — a zero is what every account
     /// without them reports, and announcing it on all of them is noise.
     func testResetCreditsReadOnlyWhenPresent() {
