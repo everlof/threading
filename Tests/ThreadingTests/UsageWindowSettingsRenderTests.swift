@@ -88,6 +88,62 @@ final class UsageWindowSettingsRenderTests: XCTestCase {
         }
     }
 
+    /// Account discovery is an unbounded provider input, while the Settings viewport is not.
+    /// A reading names one account, so it must materialize neither the fleet nor its neighbours.
+    @MainActor
+    func testAChangedAccountRefreshesOnlyItsVirtualRow() {
+        let accounts = (0..<120).map { index in
+            AgentAccount(
+                provider: .claude,
+                handle: AccountHandle(storedName: "usage-window-\(index)"),
+                configPath: "/tmp/usage-window-\(index)",
+                displayName: "Account \(index)"
+            )
+        }
+        var evaluated: [AccountID] = []
+        let controller = UsageWindowPreferencesViewController(
+            accountsProvider: { accounts },
+            decisionProvider: { account in
+                evaluated.append(account.id)
+                return .hold(.disabled)
+            }
+        )
+        let host = laidOut(controller.view, width: 440, height: 700)
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+
+        controller.scrollAccountToVisibleForTesting(accounts[73].id)
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(controller.virtualRowCountForTesting, accounts.count)
+        XCTAssertGreaterThan(controller.materializedRowCountForTesting, 0)
+        XCTAssertLessThan(
+            controller.materializedRowCountForTesting,
+            controller.virtualRowCountForTesting / 2
+        )
+
+        evaluated.removeAll()
+        NotificationCenter.default.post(AccountUsageDidChange(accountID: accounts[73].id))
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(evaluated, [accounts[73].id])
+
+        controller.scrollAccountToVisibleForTesting(accounts[42].id)
+        host.layoutSubtreeIfNeeded()
+        evaluated.removeAll()
+        NotificationCenter.default.post(UsageWindowPokeDidChange(accountIDs: [accounts[42].id]))
+        host.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(evaluated, [accounts[42].id])
+    }
+
     // MARK: - The Diagram
 
     /// The picture and the screen reader say the same thing.

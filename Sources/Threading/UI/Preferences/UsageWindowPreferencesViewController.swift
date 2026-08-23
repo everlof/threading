@@ -11,11 +11,37 @@ import AppKit
 /// picture come first and the controls come second, rather than the usual way round.
 final class UsageWindowPreferencesViewController: NSViewController {
 
+    typealias AccountsProvider = @MainActor () -> [AgentAccount]
+    typealias DecisionProvider = @MainActor (AgentAccount) -> UsageWindowDecision
+
+    private enum PresentationRow {
+        case explanation
+        case diagram
+        case schedule
+        case scheduledSend
+        case limitRecovery
+        case curfew
+        case accountsCaption
+        case noAccounts
+        case account(Int)
+        case ledgerCaption
+        case ledger(Int)
+        case footnote
+    }
+
     // MARK: - Properties
 
     private let appEvents = AppEventObservations()
 
-    /// The wrap-up template, retained across rebuilds.
+    /// Discovery can return any number of isolated provider logins. Keep only their cheap value
+    /// records here; AppKit owns the much smaller set of controls intersecting the viewport.
+    private let accountsProvider: AccountsProvider
+    private let decisionProvider: DecisionProvider
+    private var accounts: [AgentAccount] = []
+    private var records: [UsageWindowPoker.Record] = []
+    private var presentationRows: [PresentationRow] = []
+
+    /// The wrap-up template, retained across row refreshes.
     ///
     /// Every other control on this page is rebuilt from the value it shows, which is correct for
     /// a switch and wrong for free text: a usage reading landing while somebody is halfway
@@ -37,74 +63,70 @@ final class UsageWindowPreferencesViewController: NSViewController {
     /// True only while the field's own commit is being written. See `commitWindDownText`.
     private var isCommittingWindDownText = false
 
+    /// An external curfew edit can arrive while this field owns AppKit's field editor. The value
+    /// rows may refresh immediately, but replacing that one row would tear the editor out from
+    /// under a keystroke, so its refresh waits for editing to end.
+    private var hasDeferredCurfewRefresh = false
+
+    private lazy var tableView: ThemedGroupedTableView = {
+        let table = ThemedGroupedTableView()
+        let column = NSTableColumn(
+            identifier: NSUserInterfaceItemIdentifier("UsageWindowSettingsContent")
+        )
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.style = .plain
+        table.selectionHighlightStyle = .none
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        table.intercellSpacing = .zero
+        table.rowHeight = UsageWindowPreferencesDefaults.estimatedRowHeight
+        table.usesAutomaticRowHeights = true
+        table.autoresizingMask = [.width]
+        table.delegate = self
+        table.dataSource = self
+        return table
+    }()
+
+    private lazy var scrollView: ThemedScrollView = {
+        let scroll = ThemedScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.documentView = tableView
+        return scroll
+    }()
+
     private static let time: DateFormatter = {
         let formatter = DateFormatter()
         formatter.setLocalizedDateFormatFromTemplate("j:mm")
         return formatter
     }()
 
+    init(
+        accountsProvider: @escaping AccountsProvider = { UsageWindowPoker.eligibleAccounts },
+        decisionProvider: @escaping DecisionProvider = {
+            UsageWindowPoker.shared.decide(account: $0)
+        }
+    ) {
+        self.accountsProvider = accountsProvider
+        self.decisionProvider = decisionProvider
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     // MARK: - Lifecycle
 
     override func loadView() {
         view = NSView()
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-
-        // Three sources move this page: the poke itself, the schedule behind it, and the usage
-        // reading every hold reason is computed from.
-        appEvents.observe(UsageWindowPokeDidChange.self) { [weak self] _ in self?.rebuild() }
-        appEvents.observe(UsageWindowScheduleDidChange.self) { [weak self] _ in self?.rebuild() }
-        appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in self?.rebuild() }
-
-        // The curfew defaults and the standing quiet hours are edited on this page and read by
-        // the menu, the strip and the engine, so the page follows the store rather than its own
-        // last write — a curfew lifted from a chat, or a window edited in another window, has to
-        // reach the "Tonight" line here too.
-        appEvents.observe(CurfewSettingsDidChange.self) { [weak self] _ in
-            guard let self, !self.isCommittingWindDownText else { return }
-            self.rebuild()
-        }
-
-        // Built on load rather than only on appearance, so the page has its content the moment
-        // it has a view. The observers above keep it current from there.
-        rebuild()
-    }
-
-    override func viewWillAppear() {
-        super.viewWillAppear()
-        rebuild()
-
-        // The page's whole subject is the state of a window, so it asks for a fresh reading on
-        // the way in rather than drawing whatever was last cached.
-        for account in UsageWindowPoker.eligibleAccounts {
-            AccountUsageService.shared.refresh(account)
-        }
-    }
-
-    // MARK: - Build
-
-    private func rebuild() {
-        view.subviews.forEach { $0.removeFromSuperview() }
-
-        var sections: [NSView] = [
-            SettingsUI.note(UsageWindowStrings.explanation),
-            diagramSection(),
-            scheduleSection()
-        ]
-
-        sections.append(scheduledSendSection())
-        sections.append(limitRecoverySection())
-        sections.append(curfewSection())
-        sections.append(accountsSection())
-        if let ledger = ledgerSection() { sections.append(ledger) }
-        sections.append(SettingsUI.note(UsageWindowStrings.footnote))
-
-        let page = SettingsUI.page(
+        let page = SettingsUI.listPage(
             title: UsageWindowStrings.title,
             summary: UsageWindowStrings.summary,
-            sections: sections
+            body: scrollView
         )
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -114,6 +136,184 @@ final class UsageWindowPreferencesViewController: NSViewController {
             page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
+        reloadPresentationRows()
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        // Each event names the state that moved. Refresh only the value rows derived from that
+        // state; the page, its scroll position and every unrelated editor remain installed.
+        appEvents.observe(UsageWindowPokeDidChange.self) { [weak self] event in
+            self?.refreshAfterPoke(event)
+        }
+        appEvents.observe(UsageWindowScheduleDidChange.self) { [weak self] _ in
+            self?.reloadRows { row in
+                switch row {
+                case .diagram, .schedule, .account: true
+                default: false
+                }
+            }
+        }
+        appEvents.observe(AccountUsageDidChange.self) { [weak self] event in
+            self?.refreshUsage(accountID: event.accountID)
+        }
+        appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
+            self?.reloadPresentationRows()
+        }
+
+        // The curfew defaults and the standing quiet hours are edited on this page and read by
+        // the menu, the strip and the engine, so the page follows the store rather than its own
+        // last write — a curfew lifted from a chat, or a window edited in another window, has to
+        // reach the "Tonight" line here too.
+        appEvents.observe(CurfewSettingsDidChange.self) { [weak self] _ in
+            guard let self, !self.isCommittingWindDownText else { return }
+            self.refreshCurfewRows()
+        }
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        reloadPresentationRows()
+
+        // The page's whole subject is the state of a window, so it asks for a fresh reading on
+        // the way in rather than drawing whatever was last cached.
+        for account in accounts {
+            AccountUsageService.shared.refresh(account)
+        }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            for cell in rowView.subviews {
+                (cell as? ThemedVirtualTableCell)?.setColumnWidth(width)
+            }
+        }
+    }
+
+    // MARK: - Build
+
+    /// Rebuilds the cheap row identity model only when account or ledger membership can change.
+    /// Fixed sections stay one identity each, and a long account list remains values rather than
+    /// an equally long retained control tree.
+    private func reloadPresentationRows() {
+        accounts = accountsProvider()
+        records = Array(UsageWindowPoker.shared.records.suffix(
+            UsageWindowPreferencesDefaults.shownRecords
+        ).reversed())
+
+        var rows: [PresentationRow] = [
+            .explanation,
+            .diagram,
+            .schedule,
+            .scheduledSend,
+            .limitRecovery,
+            .curfew,
+            .accountsCaption
+        ]
+        if accounts.isEmpty {
+            rows.append(.noAccounts)
+        } else {
+            rows.append(contentsOf: accounts.indices.map(PresentationRow.account))
+        }
+        if !records.isEmpty {
+            rows.append(.ledgerCaption)
+            rows.append(contentsOf: records.indices.map(PresentationRow.ledger))
+        }
+        rows.append(.footnote)
+        presentationRows = rows
+        updateCardDecorations()
+        tableView.reloadData()
+    }
+
+    private func refreshAfterPoke(_ event: UsageWindowPokeDidChange) {
+        syncLedgerRows()
+        reloadRows { row in
+            switch row {
+            case .account(let index):
+                return accounts.indices.contains(index)
+                    && event.accountIDs.contains(accounts[index].id)
+            case .ledger:
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    /// The ledger is the only structural part a poke can change. Insert or remove precisely that
+    /// bounded run so a first record does not make NSTableView discard unrelated visible rows.
+    private func syncLedgerRows() {
+        let newRecords = Array(UsageWindowPoker.shared.records.suffix(
+            UsageWindowPreferencesDefaults.shownRecords
+        ).reversed())
+        let oldLedgerRows = presentationRows.indices.filter {
+            switch presentationRows[$0] {
+            case .ledgerCaption, .ledger: true
+            default: false
+            }
+        }
+        let newRowCount = newRecords.isEmpty ? 0 : newRecords.count + 1
+        records = newRecords
+
+        guard oldLedgerRows.count != newRowCount else { return }
+        tableView.beginUpdates()
+        if let first = oldLedgerRows.first, let last = oldLedgerRows.last {
+            let range = first ... last
+            presentationRows.removeSubrange(range)
+            tableView.removeRows(
+                at: IndexSet(integersIn: first ..< last + 1),
+                withAnimation: []
+            )
+        }
+        if !records.isEmpty,
+           let insertion = presentationRows.firstIndex(where: {
+               if case .footnote = $0 { true } else { false }
+           }) {
+            let rows: [PresentationRow] = [.ledgerCaption]
+                + records.indices.map(PresentationRow.ledger)
+            presentationRows.insert(contentsOf: rows, at: insertion)
+            tableView.insertRows(
+                at: IndexSet(integersIn: insertion ..< insertion + rows.count),
+                withAnimation: []
+            )
+        }
+        tableView.endUpdates()
+        updateCardDecorations()
+    }
+
+    private func refreshUsage(accountID: AccountID) {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }) else { return }
+        let subjectChanged = subjectAccount?.id == accountID
+        reloadRows { row in
+            switch row {
+            case .account(let index): index == accountIndex
+            case .diagram, .schedule: subjectChanged
+            default: false
+            }
+        }
+    }
+
+    private func refreshCurfewRows() {
+        let editing = windDownField.currentEditor() != nil
+        if editing { hasDeferredCurfewRefresh = true }
+        reloadRows { row in
+            switch row {
+            case .curfew: !editing
+            case .account: true
+            default: false
+            }
+        }
+    }
+
+    private func reloadRows(where shouldReload: (PresentationRow) -> Bool) {
+        let rows = IndexSet(presentationRows.indices.filter {
+            shouldReload(presentationRows[$0])
+        })
+        guard !rows.isEmpty else { return }
+        tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
     }
 
     // MARK: - Scheduled Sends
@@ -151,7 +351,7 @@ final class UsageWindowPreferencesViewController: NSViewController {
         guard let raw = sender.selectedItem?.representedValue as? String,
               let policy = ScheduledResetPolicy(rawValue: raw) else { return }
         ScheduledResetSettings.policy = policy
-        rebuild()
+        reloadRows { if case .scheduledSend = $0 { true } else { false } }
     }
 
     // MARK: - Limit Recovery
@@ -191,7 +391,7 @@ final class UsageWindowPreferencesViewController: NSViewController {
         guard let raw = sender.selectedItem?.representedValue as? String,
               let policy = LimitRecoveryPolicy(rawValue: raw) else { return }
         LimitRecoverySettings.policy = policy
-        rebuild()
+        reloadRows { if case .limitRecovery = $0 { true } else { false } }
     }
 
     // MARK: - Curfew
@@ -579,40 +779,29 @@ final class UsageWindowPreferencesViewController: NSViewController {
 
     // MARK: - Accounts
 
-    private func accountsSection() -> NSView {
-        let accounts = UsageWindowPoker.eligibleAccounts
-
-        guard !accounts.isEmpty else {
-            return SettingsUI.section(
-                UsageWindowStrings.accountsCaption,
-                SettingsCard(rows: [
-                    SettingsUI.fullRow(SettingsUI.note(UsageWindowStrings.noAccounts))
-                ])
-            )
-        }
-
-        let rows = accounts.map { account in
-            SettingsUI.row(
-                title: AccountName.display(for: account),
-                subtitle: state(of: account),
-                control: accountControls(for: account),
-                localizes: false
-            )
-        }
-
-        return SettingsUI.section(UsageWindowStrings.accountsCaption, SettingsCard(rows: rows))
+    private func accountRow(for account: AgentAccount) -> NSView {
+        let decision = decisionProvider(account)
+        return SettingsUI.row(
+            title: AccountName.display(for: account),
+            subtitle: state(of: decision),
+            control: accountControls(for: account, decision: decision),
+            localizes: false
+        )
     }
 
     /// Try-it-now beside the switch. A feature whose whole promise lands at 07:00 tomorrow is one
     /// nobody can tell is working, so the button spends one message to prove it.
-    private func accountControls(for account: AgentAccount) -> NSView {
+    private func accountControls(
+        for account: AgentAccount,
+        decision: UsageWindowDecision
+    ) -> NSView {
         let poke = SettingsUI.button(
             UsageWindowStrings.pokeNow,
             target: self,
             action: #selector(pokeNowClicked)
         )
         poke.identifier = NSUserInterfaceItemIdentifier(account.id.rawValue)
-        poke.isEnabled = canPokeNow(account)
+        poke.isEnabled = canPokeNow(decision)
 
         let toggle = SettingsUI.toggle(
             isOn: UsageWindowSettings.shared.isEnabled(account.id),
@@ -629,8 +818,8 @@ final class UsageWindowPreferencesViewController: NSViewController {
     }
 
     /// What this account is doing about its window right now, in one line.
-    private func state(of account: AgentAccount) -> String {
-        switch UsageWindowPoker.shared.decide(account: account) {
+    private func state(of decision: UsageWindowDecision) -> String {
+        switch decision {
         case .poke:
             return UsageWindowStrings.readyToPoke
         case .hold(let reason):
@@ -674,8 +863,8 @@ final class UsageWindowPreferencesViewController: NSViewController {
         }
     }
 
-    private func canPokeNow(_ account: AgentAccount) -> Bool {
-        switch UsageWindowPoker.shared.decide(account: account) {
+    private func canPokeNow(_ decision: UsageWindowDecision) -> Bool {
+        switch decision {
         case .poke:
             return true
         case .hold(let reason):
@@ -692,29 +881,18 @@ final class UsageWindowPreferencesViewController: NSViewController {
 
     // MARK: - Ledger
 
-    /// What the poke has actually done, most recent first. Absent until it has done something,
-    /// because an empty card claiming to be a history is noise.
-    private func ledgerSection() -> NSView? {
-        let records = UsageWindowPoker.shared.records.suffix(
-            UsageWindowPreferencesDefaults.shownRecords
-        ).reversed()
-        guard !records.isEmpty else { return nil }
-
-        let rows = records.map { record in
-            SettingsUI.row(
-                title: recordTitle(record),
-                subtitle: record.detail,
-                localizes: false
-            )
-        }
-
-        return SettingsUI.section(UsageWindowStrings.ledgerCaption, SettingsCard(rows: rows))
+    private func ledgerRow(for record: UsageWindowPoker.Record) -> NSView {
+        SettingsUI.row(
+            title: recordTitle(record),
+            subtitle: record.detail,
+            localizes: false
+        )
     }
 
     private func recordTitle(_ record: UsageWindowPoker.Record) -> String {
         let name = AccountID(rawValue: record.accountID)
             .flatMap { id in
-                UsageWindowPoker.eligibleAccounts.first { $0.id == id }
+                accounts.first { $0.id == id }
             }
             .map { AccountName.display(for: $0) } ?? record.accountID
 
@@ -729,7 +907,6 @@ final class UsageWindowPreferencesViewController: NSViewController {
 
     /// The account the diagram is drawn for: the first enabled one, else the first there is.
     private var subjectAccount: AgentAccount? {
-        let accounts = UsageWindowPoker.eligibleAccounts
         return accounts.first { UsageWindowSettings.shared.isEnabled($0.id) } ?? accounts.first
     }
 
@@ -803,11 +980,147 @@ final class UsageWindowPreferencesViewController: NSViewController {
     @objc private func pokeNowClicked(_ sender: ThemedButton) {
         guard let raw = sender.identifier?.rawValue,
               let id = AccountID(rawValue: raw),
-              let account = UsageWindowPoker.eligibleAccounts.first(where: { $0.id == id })
+              let account = accounts.first(where: { $0.id == id })
         else { return }
 
         UsageWindowPoker.shared.pokeNow(account: account)
-        rebuild()
+        refreshAfterPoke(UsageWindowPokeDidChange(accountIDs: [id]))
+    }
+
+    // MARK: - Scaling Evidence
+
+    /// Stress-fixture observability: cheap row identities versus live AppKit cells.
+    var virtualRowCountForTesting: Int { presentationRows.count }
+
+    var materializedRowCountForTesting: Int {
+        var count = 0
+        tableView.enumerateAvailableRowViews { _, _ in count += 1 }
+        return count
+    }
+
+    func scrollAccountToVisibleForTesting(_ accountID: AccountID) {
+        guard let accountIndex = accounts.firstIndex(where: { $0.id == accountID }),
+              let row = presentationRows.firstIndex(where: {
+                  if case .account(let index) = $0 { index == accountIndex } else { false }
+              }) else { return }
+        tableView.scrollRowToVisible(row)
+        tableView.layoutSubtreeIfNeeded()
+    }
+}
+
+// MARK: - Virtualized Page
+
+extension UsageWindowPreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
+    func numberOfRows(in _: NSTableView) -> Int {
+        presentationRows.count
+    }
+
+    func tableView(_: NSTableView, shouldSelectRow _: Int) -> Bool {
+        false
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor _: NSTableColumn?,
+        row tableRow: Int
+    ) -> NSView? {
+        guard presentationRows.indices.contains(tableRow) else { return nil }
+        let identifier = NSUserInterfaceItemIdentifier("UsageWindowSettingsVirtualRow")
+        let host = tableView.makeView(
+            withIdentifier: identifier,
+            owner: self
+        ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+        host.install(
+            content(for: presentationRows[tableRow]),
+            columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
+            horizontalInset: Design.Size.glowGutter,
+            topInset: topInset(forRowAt: tableRow),
+            bottomInset: bottomInset(forRowAt: tableRow)
+        )
+        return host
+    }
+
+    private func content(for row: PresentationRow) -> NSView {
+        switch row {
+        case .explanation:
+            return SettingsUI.note(UsageWindowStrings.explanation)
+        case .diagram:
+            return diagramSection()
+        case .schedule:
+            return scheduleSection()
+        case .scheduledSend:
+            return scheduledSendSection()
+        case .limitRecovery:
+            return limitRecoverySection()
+        case .curfew:
+            return curfewSection()
+        case .accountsCaption:
+            return SettingsUI.caption(UsageWindowStrings.accountsCaption)
+        case .noAccounts:
+            return SettingsUI.fullRow(SettingsUI.note(UsageWindowStrings.noAccounts))
+        case .account(let index):
+            guard accounts.indices.contains(index) else { return NSView() }
+            return accountRow(for: accounts[index])
+        case .ledgerCaption:
+            return SettingsUI.caption(UsageWindowStrings.ledgerCaption)
+        case .ledger(let index):
+            guard records.indices.contains(index) else { return NSView() }
+            return ledgerRow(for: records[index])
+        case .footnote:
+            return SettingsUI.note(UsageWindowStrings.footnote)
+        }
+    }
+
+    private func updateCardDecorations() {
+        var accountBounds: (first: Int, last: Int)?
+        var ledgerBounds: (first: Int, last: Int)?
+        for (index, row) in presentationRows.enumerated() {
+            switch row {
+            case .noAccounts, .account:
+                if var bounds = accountBounds {
+                    bounds.last = index
+                    accountBounds = bounds
+                } else {
+                    accountBounds = (index, index)
+                }
+            case .ledger:
+                if var bounds = ledgerBounds {
+                    bounds.last = index
+                    ledgerBounds = bounds
+                } else {
+                    ledgerBounds = (index, index)
+                }
+            default:
+                break
+            }
+        }
+
+        tableView.cardDecorations = [accountBounds, ledgerBounds].compactMap { bounds in
+            bounds.map { ThemedTableCardDecoration(rows: $0.first ... $0.last) }
+        }
+    }
+
+    private func topInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        switch presentationRows[index] {
+        case .noAccounts, .account, .ledger:
+            return 0
+        default:
+            return Design.Spacing.large
+        }
+    }
+
+    private func bottomInset(forRowAt index: Int) -> CGFloat {
+        guard presentationRows.indices.contains(index) else { return 0 }
+        switch presentationRows[index] {
+        case .accountsCaption, .ledgerCaption:
+            return Design.Spacing.small
+        case .footnote:
+            return Design.Spacing.large
+        default:
+            return 0
+        }
     }
 }
 
@@ -821,6 +1134,9 @@ extension UsageWindowPreferencesViewController: NSTextFieldDelegate {
     func controlTextDidEndEditing(_ notification: Notification) {
         guard notification.object as? NSTextField === windDownField else { return }
         commitWindDownText()
+        guard hasDeferredCurfewRefresh else { return }
+        hasDeferredCurfewRefresh = false
+        reloadRows { if case .curfew = $0 { true } else { false } }
     }
 }
 
@@ -838,6 +1154,8 @@ enum UsageWindowPreferencesDefaults {
     static let everyDay: Set<Int> = [1, 2, 3, 4, 5, 6, 7]
 
     static let shownRecords = 8
+
+    static let estimatedRowHeight: CGFloat = 72
 
     static let boundarySeparator = ", "
 }

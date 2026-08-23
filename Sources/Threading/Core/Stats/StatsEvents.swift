@@ -52,7 +52,9 @@ struct UsageWindowScheduleDidChange: AppEvent {
 }
 
 /// A poke fired, failed, or the standing reason it is holding changed — the signal the settings
-/// page redraws its ledger on.
+/// page refreshes those accounts and its bounded ledger from. The identities are payload rather
+/// than an invitation to rediscover every account and redraw the whole page.
 struct UsageWindowPokeDidChange: AppEvent {
     static let name = Notification.Name("ThreadingUsageWindowPokeDidChange")
+    let accountIDs: Set<AccountID>
 }

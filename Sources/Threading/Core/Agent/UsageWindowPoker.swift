@@ -142,7 +142,7 @@ final class UsageWindowPoker {
     /// Internal rather than private so a test can drive one tick at a chosen moment instead of
     /// waiting a minute for one.
     func evaluate(now: Date = Date()) {
-        var changed = false
+        var changed: Set<AccountID> = []
 
         for account in Self.eligibleAccounts {
             let key = account.id.rawValue
@@ -150,17 +150,19 @@ final class UsageWindowPoker {
 
             switch decision {
             case .poke:
-                if holds.removeValue(forKey: key) != nil { changed = true }
+                if holds.removeValue(forKey: key) != nil { changed.insert(account.id) }
                 fire(account: account, now: now)
             case .hold(let reason):
                 if holds[key] != reason {
                     holds[key] = reason
-                    changed = true
+                    changed.insert(account.id)
                 }
             }
         }
 
-        if changed { NotificationCenter.default.post(UsageWindowPokeDidChange()) }
+        if !changed.isEmpty {
+            NotificationCenter.default.post(UsageWindowPokeDidChange(accountIDs: changed))
+        }
     }
 
     /// The decision for one account, exposed so the settings page can show today's plan without
@@ -292,7 +294,7 @@ final class UsageWindowPoker {
         // Read the window straight back, so the page can show what the poke bought and the next
         // tick decides against fact rather than against a stale reading.
         AccountUsageService.shared.refresh(account, force: true)
-        NotificationCenter.default.post(UsageWindowPokeDidChange())
+        NotificationCenter.default.post(UsageWindowPokeDidChange(accountIDs: [account.id]))
     }
 
     private func append(_ record: Record) {
