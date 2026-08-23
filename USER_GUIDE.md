@@ -626,6 +626,20 @@ The file you dropped is never altered or moved. Turn it off under
 at — you may be dropping that HEIC onto a half-typed `sips` command — so drops there are the
 plain path they always were.
 
+**Dropped words are taken too.** A selection dragged out of a browser, an editor or a note lands
+on the terminal exactly as ⌘V of the same words would: as one paste, so a running agent reads a
+dropped paragraph as text to edit rather than as the Return each of its line breaks would
+otherwise be. A shell that never asked for bracketed paste runs what it is given, which is what
+pasting into a shell has always done. The composer took dropped text all along; the terminal
+simply was not being offered it.
+
+**A file the drag only promises arrives a moment later.** Finder hands over a path because the
+file is already on disk; Photos, Messages, Mail and a video on a web page hand over a *promise* to
+write the file if you accept the drop. Those drags used to be refused everywhere, so a clip
+dragged out of Photos looked broken while the same clip dragged from Finder worked. Now the drop
+is taken and the file is written to a directory of its own, keeping its name, and the path or
+thumbnail appears when its bytes do. Nothing is written while you are still dragging.
+
 Whatever you type into the composer is kept as a **draft** for that project, saved as you
 type. Switch projects, quit, or lose the app to a crash, and the text is still there when you
 come back to it. Starting the session clears the draft — and writes the prompt to the

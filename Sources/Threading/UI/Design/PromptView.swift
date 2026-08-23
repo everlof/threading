@@ -703,7 +703,10 @@ final class PromptView: NSView, ThemedComponent {
             dismissCompletions()
             return
         }
-        registerForDraggedTypes([.fileURL, .png, .tiff, SessionReferencePasteboard.type])
+        registerForDraggedTypes(
+            [.fileURL, .png, .tiff, SessionReferencePasteboard.type]
+                + DroppedFilePromise.readableTypes
+        )
     }
 
     // MARK: - Public Methods
@@ -1059,9 +1062,11 @@ final class PromptView: NSView, ThemedComponent {
         return canRead ? .copy : []
     }
 
-    /// Files always; a dragged sidebar session only when an owner is there to brief it.
+    /// Files always — carried or promised — and a dragged sidebar session only when an owner is
+    /// there to brief it.
     private func canAcceptDrop(_ pasteboard: NSPasteboard) -> Bool {
         if PromptAttachment.canRead(pasteboard) { return true }
+        if DroppedFilePromise.canRead(pasteboard) { return true }
         return onSessionReferenceDrop != nil && SessionReferencePasteboard.canRead(pasteboard)
     }
 
@@ -1094,9 +1099,16 @@ final class PromptView: NSView, ThemedComponent {
             }
         }
         let paths = PromptAttachment.paths(from: sender.draggingPasteboard)
-        guard !paths.isEmpty else { return false }
-        insertAttachments(paths)
-        return true
+        if !paths.isEmpty {
+            insertAttachments(paths)
+            return true
+        }
+        // A promised file — dragged out of Photos, Messages, Mail — is written after the drop is
+        // taken, so the attachment appears when its bytes do. The composer holds nothing in the
+        // meantime: a drop that never arrives leaves the prompt exactly as it was.
+        return DroppedFilePromise.receive(from: sender.draggingPasteboard) { [weak self] delivered in
+            self?.insertAttachments(delivered)
+        }
     }
 
     // MARK: - Actions
@@ -2087,27 +2099,38 @@ private final class PromptTextView: ThemedTextView {
     override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
         let paths = PromptAttachment.paths(from: pboard)
 
-        guard !paths.isEmpty else {
-            return super.readSelection(from: pboard, type: type)
+        if !paths.isEmpty {
+            onAttach?(paths)
+            return true
         }
 
-        onAttach?(paths)
-        return true
+        // Promised rather than carried: taken here, attached when the source has written it.
+        // Falling through to `super` for one of these would insert the promise's placeholder
+        // text into the prompt, which is the shape of "the drop worked" over nothing at all.
+        let promised = DroppedFilePromise.receive(from: pboard) { [weak self] delivered in
+            self?.onAttach?(delivered)
+        }
+        if promised { return true }
+
+        return super.readSelection(from: pboard, type: type)
     }
 
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
-        [.fileURL, .png, .tiff] + super.readablePasteboardTypes
+        [.fileURL, .png, .tiff] + DroppedFilePromise.readableTypes + super.readablePasteboardTypes
     }
 
     override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
-        [.fileURL, .png, .tiff] + super.acceptableDragTypes
+        [.fileURL, .png, .tiff] + DroppedFilePromise.readableTypes + super.acceptableDragTypes
     }
 
     /// Reported by what the composer would *take*, not by what the editor would accept:
     /// `super` answers yes to a plain-text drag too, and a box that lights its attachment
     /// affordance for text it will simply insert is promising the wrong thing.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        onDropTargetChange?(PromptAttachment.canRead(sender.draggingPasteboard))
+        let pasteboard = sender.draggingPasteboard
+        onDropTargetChange?(
+            PromptAttachment.canRead(pasteboard) || DroppedFilePromise.canRead(pasteboard)
+        )
         return super.draggingEntered(sender)
     }
 

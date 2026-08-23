@@ -144,14 +144,64 @@ final class TerminalDropPasteTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
     }
 
-    /// A pasteboard carrying neither a file nor an image is refused, so the drop falls through
-    /// rather than pasting an empty string into whatever is running.
-    func testNothingUsableWritesNothing() {
+    /// Dragged words arrive as a paste, exactly as ⌘V of the same selection would.
+    ///
+    /// They used to arrive as nothing at all: `.string` was missing from the terminal's
+    /// registration, so AppKit never routed the drag here to be answered.
+    func testDroppedTextArrivesAsAPaste() {
         enableBracketedPaste()
         pasteboard.setString("just text", forType: .string)
 
+        XCTAssertTrue(view.accept(pasteboard))
+
+        XCTAssertEqual(recorder.text, "\u{1b}[200~just text\u{1b}[201~")
+    }
+
+    /// Bracketed paste is what keeps a dropped paragraph from submitting itself: the program
+    /// receives the newlines inside one paste rather than as the Return each would otherwise be.
+    func testDroppedLinesAreOnePasteRatherThanReturns() {
+        enableBracketedPaste()
+        pasteboard.setString("first\nsecond", forType: .string)
+
+        XCTAssertTrue(view.accept(pasteboard))
+
+        XCTAssertEqual(recorder.text, "\u{1b}[200~first\nsecond\u{1b}[201~")
+    }
+
+    /// Finder offers a file's name as text beside its URL, so the two flavours arrive together
+    /// and the order they are read in decides what the agent is handed. The path wins: it is the
+    /// half the reader on the other end can open.
+    func testADragCarryingBothTakesThePathRatherThanTheName() {
+        enableBracketedPaste()
+        pasteboard.writeObjects([URL(fileURLWithPath: "/tmp/shot.png") as NSURL])
+        pasteboard.setString("shot.png", forType: .string)
+
+        XCTAssertTrue(view.accept(pasteboard))
+
+        XCTAssertEqual(recorder.text, "\u{1b}[200~/tmp/shot.png \u{1b}[201~")
+    }
+
+    /// A pasteboard carrying nothing this terminal reads is refused, so the drop falls through
+    /// rather than pasting an empty string into whatever is running.
+    func testNothingUsableWritesNothing() {
+        enableBracketedPaste()
+        pasteboard.setString("", forType: .string)
+        pasteboard.setString("x", forType: NSPasteboard.PasteboardType("codes.threading.tests.other"))
+
         XCTAssertFalse(view.accept(pasteboard))
         XCTAssertEqual(recorder.text, "")
+    }
+
+    /// What the terminal is offered at all. AppKit answers a drag from the registration alone, so
+    /// a flavour missing here is not a drop this view refuses — it is one it never sees.
+    func testTheTerminalIsOfferedText_FilesAndPromises() {
+        let registered = view.registeredDraggedTypes
+
+        XCTAssertTrue(registered.contains(.string), "\(registered)")
+        XCTAssertTrue(registered.contains(.fileURL), "\(registered)")
+        for type in DroppedFilePromise.readableTypes {
+            XCTAssertTrue(registered.contains(type), "\(type.rawValue) missing from \(registered)")
+        }
     }
 
     // MARK: - The Setting

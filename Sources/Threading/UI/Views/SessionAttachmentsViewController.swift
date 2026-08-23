@@ -477,7 +477,7 @@ final class SessionAttachmentsViewController: NSViewController {
         // allowed. Naming one of them here is how the promise in the comment above becomes a
         // gesture that quietly does nothing at the other end.
         tableView.setDraggingSourceOperationMask([.copy, .generic], forLocal: true)
-        tableView.registerForDraggedTypes([.fileURL, .png, .tiff])
+        tableView.registerForDraggedTypes([.fileURL, .png, .tiff] + DroppedFilePromise.readableTypes)
         // The rows draw the drop themselves — a row says *what* dropping there would do, which a
         // blue ring around it cannot. See `SessionAttachmentRowView.isDropTarget`.
         tableView.draggingDestinationFeedbackStyle = .none
@@ -2079,6 +2079,32 @@ final class SessionAttachmentsViewController: NSViewController {
         onCompare?(pair.old, pair.new)
     }
 
+    /// The second half of a drop whose picture was promised: file what arrived, then compare.
+    ///
+    /// Everything the carried route asks is asked again rather than assumed from the moment of the
+    /// release: the promised file may not be a kind the store admits, the row may have gone while
+    /// the source was writing, and the picture that lands may be the row's own file. The delivered
+    /// copy is left where it was written — a promise is handed to us in the temporary directory
+    /// macOS reaps, and `discardMintedOriginals` deletes only names this app minted itself.
+    private func compare(_ target: SessionAttachment, withDelivered paths: [String]) {
+        guard let projectRoot = projectRootProvider(),
+              allAttachments.contains(where: { $0.id == target.id }),
+              AttachmentComparison.canCompare(target) else { return }
+
+        let images = paths.filter {
+            AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: $0)) == .image
+        }
+        guard !images.isEmpty else { return }
+
+        let recorded = PromptAttachment.record(
+            paths: images,
+            sessionID: sessionID,
+            projectRoot: projectRoot
+        )
+        guard let source = recorded.first(where: { $0.id != target.id }) else { return }
+        compare(target, with: source)
+    }
+
     /// The other side of a comparison, from whatever a drag was carrying.
     ///
     /// A row of this list is already an attachment and is simply found again. Anything else is
@@ -2256,13 +2282,21 @@ extension SessionAttachmentsViewController: NSTableViewDataSource {
         // the row *above* the one that said "Drop to compare" — and if that row is a PDF, on the
         // dead-end comparison `canCompare` exists to prevent.
         let target = attachments[row]
-        guard canDrop(info.draggingPasteboard, on: target),
-              let source = comparisonSource(from: info.draggingPasteboard, excluding: target),
-              source.id != target.id else {
-            return false
+        let pasteboard = info.draggingPasteboard
+        guard canDrop(pasteboard, on: target) else { return false }
+
+        if let source = comparisonSource(from: pasteboard, excluding: target),
+           source.id != target.id {
+            compare(target, with: source)
+            return true
         }
-        compare(target, with: source)
-        return true
+
+        // A picture the drag promised rather than carried. Its bytes are written after the drop,
+        // so the comparison opens when they land — and the row is asked for again then, because
+        // the list is live for the whole of that wait.
+        return DroppedFilePromise.receive(from: pasteboard) { [weak self] delivered in
+            self?.compare(target, withDelivered: delivered)
+        }
     }
 }
 

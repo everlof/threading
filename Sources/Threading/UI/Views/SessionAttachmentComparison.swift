@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 // MARK: - What may be compared, and which way round
 
@@ -95,7 +96,19 @@ enum AttachmentComparisonDrop {
     /// is the failure this type's own comments call worse than never offering.
     static func canRead(_ pasteboard: NSPasteboard) -> Bool {
         if carriesFiles(pasteboard) { return !imageURLs(from: pasteboard).isEmpty }
+        if promisesImage(pasteboard) { return true }
         return pasteboard.availableType(from: [.png, .tiff]) != nil
+    }
+
+    /// Whether the drag is promising a picture it has not written yet — which is what a photo
+    /// dragged out of Photos, Messages or Mail is.
+    ///
+    /// Asked of the promised *content type* rather than of a file name, because a promise carries
+    /// its type from the start and its names only once the files exist. The delivered paths are
+    /// filtered again by `AttachmentReferenceDetector`, since the store admits extensions rather
+    /// than type conformances and a drag may promise an image kind it does not take.
+    static func promisesImage(_ pasteboard: NSPasteboard) -> Bool {
+        DroppedFilePromise.contentTypes(in: pasteboard).contains { $0.conforms(to: .image) }
     }
 
     /// Whether the drag is carrying files at all — the question that decides which half of

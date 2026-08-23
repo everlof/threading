@@ -268,7 +268,10 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
         installScroller(ThemedScroller(frame: .zero, inkSource: .backdrop))
         configureForEmojiRendering()
         setupContextMenu()
-        registerForDraggedTypes([.fileURL, .png, .tiff, SessionReferencePasteboard.type])
+        registerForDraggedTypes(
+            [.fileURL, .png, .tiff, .string, SessionReferencePasteboard.type]
+                + DroppedFilePromise.readableTypes
+        )
     }
 
     /// SwiftTerm 2 parses a local process through a private direct-delivery adapter. The public
@@ -308,6 +311,12 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// SwiftTerm's view registers no dragged types of its own, so before this the terminal
     /// pane refused every drop while the composer beside it accepted them — the one surface
     /// in the app where an image was most likely to be dropped.
+    ///
+    /// Text is taken as well, and registering it is the whole fix: with `.string` missing from
+    /// the list below, AppKit never routed a dragged selection here at all, so a paragraph
+    /// dragged out of a browser onto a running agent did nothing while ⌘V of the same words
+    /// worked. The composer never had that gap because its editor is an `NSTextView` and
+    /// inherits the text flavours from `super`.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         canAccept(sender.draggingPasteboard) ? .copy : []
     }
@@ -331,8 +340,14 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// string that means different things on different rows is worse than none, and a drop
     /// that quietly chose one would bring that back. `dropReader` rather than
     /// `effectiveDropReader`: the image-conversion setting says nothing about who is reading.
+    ///
+    /// Text is offered to every reader, and asked for by *flavour* rather than by reading it: a
+    /// drag is answered on every frame of the pointer's travel, and a dragged selection can be a
+    /// whole document. The string itself is copied once, in `accept(_:)`.
     private func canAccept(_ pasteboard: NSPasteboard) -> Bool {
         if PromptAttachment.canRead(pasteboard) { return true }
+        if DroppedFilePromise.canRead(pasteboard) { return true }
+        if pasteboard.availableType(from: [.string]) != nil { return true }
         return dropReader != .shell && SessionReferencePasteboard.canRead(pasteboard)
     }
 
@@ -363,6 +378,41 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             }
         }
         let paths = PromptAttachment.paths(from: pasteboard)
+        if !paths.isEmpty { return acceptFiles(paths) }
+
+        // A drag that promised its files instead of carrying them — out of Photos, Messages,
+        // Mail, a Safari `<video>`. The bytes are written after the drop, so the answer here is
+        // only that the drop was taken; the paths reach the same route as any other file when
+        // they land.
+        let promised = DroppedFilePromise.receive(from: pasteboard) { [weak self] delivered in
+            guard let self else { return }
+            // The gate is asked again rather than carried over: a phone can take the PTY
+            // between the release and the last byte being written, and this is local input
+            // arriving late, not input that has already been accepted.
+            guard self.acceptsLocalInput?() ?? true else {
+                self.onLocalInputBlocked?()
+                return
+            }
+            _ = self.acceptFiles(delivered)
+        }
+        if promised { return true }
+
+        // Dropped text, exactly as ⌘V would put it there — a drop *is* a paste, which is the
+        // rule the file route above follows too. So bracketed paste protects a TUI from reading
+        // a pasted newline as Return, and a shell with bracketed paste off runs what it is
+        // given, which is what pasting into a shell has always done.
+        //
+        // Answered last, because a drag can carry both: Finder offers a file's name as text
+        // beside its URL, and the path is what the reader on the other end can open.
+        if let text = pasteboard.string(forType: .string), !text.isEmpty {
+            pasteText(text)
+            return true
+        }
+        return false
+    }
+
+    /// The file route, shared by a drag that carried its paths and one that promised them.
+    private func acceptFiles(_ paths: [String]) -> Bool {
         guard !paths.isEmpty else { return false }
 
         // As a paste rather than as typing, which is the difference between a dropped
