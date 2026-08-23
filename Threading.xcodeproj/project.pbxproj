@@ -275,6 +275,7 @@
 				ThreadingMobile/PairingView.swift,
 				ThreadingMobile/ProjectTerminalDetailView.swift,
 				ThreadingMobile/RemoteAppModel.swift,
+				ThreadingMobile/RemoteAttachmentThumbnailStore.swift,
 				ThreadingMobile/RemoteAttachmentsView.swift,
 				ThreadingMobile/RemoteBrowserFollowView.swift,
 				ThreadingMobile/RemoteClient.swift,
