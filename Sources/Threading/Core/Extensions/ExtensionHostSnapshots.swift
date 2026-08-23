@@ -146,8 +146,8 @@ final class LiveExtensionHostSnapshotProvider:
         if let terminalRoot = AgentRuntime.shared.terminalRootProcessIdentifier(for: sessionID) {
             agentRoot = terminalRoot
         } else {
-            agentRoot = AgentRuntime.shared.conversation(for: sessionID)?
-                .stream.rootProcessIdentifier
+            agentRoot = AgentRuntime.shared.conversationRuntimeSurface(for: sessionID)?
+                .conversationRootProcessIdentifier
         }
         let shellRoot = shellRootProvider?(sessionID)
         let reader = runtimeReaders[sessionID] ?? {

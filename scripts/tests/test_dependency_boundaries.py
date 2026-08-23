@@ -41,11 +41,24 @@ class DependencyBoundaryTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Core must not use a controller-returning lookup", result.stderr)
 
-    def test_keeps_only_the_exact_project_terminal_lookup_debt(self) -> None:
+    def test_accepts_core_with_only_typed_runtime_capabilities(self) -> None:
         result = self.run_checker(self.fixture_repository())
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("8 ratcheted concrete-controller references remain", result.stdout)
+        self.assertIn("0 ratcheted concrete-controller references remain", result.stdout)
+
+    def test_rejects_concrete_ui_controller_type_in_core(self) -> None:
+        repository = self.fixture_repository()
+        self.write(
+            repository,
+            "Sources/Threading/Core/Agent/AgentRuntime.swift",
+            "let surface: ConversationViewController?\n",
+        )
+
+        result = self.run_checker(repository)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ConversationViewController appears 1 time(s)", result.stderr)
 
     def fixture_repository(self) -> pathlib.Path:
         temporary = tempfile.TemporaryDirectory()
@@ -65,23 +78,17 @@ class DependencyBoundaryTests(unittest.TestCase):
         self.write(
             repository,
             "Sources/Threading/Core/Agent/AgentRuntime.swift",
-            "let a: ConversationViewController?\nlet b: ConversationViewController?\n"
-            "let c: ConversationViewController?\nlet d: ConversationViewController?\n",
+            "protocol AgentConversationRuntimeSurface {}\n",
         )
         self.write(
             repository,
             "Sources/Threading/Core/Session/ProjectTerminalRuntime.swift",
-            "final class ProjectTerminalRuntime {\n"
-            "  let one: ProjectTerminalViewController?\n"
-            "  let two: ProjectTerminalViewController?\n"
-            "  let three: ProjectTerminalViewController?\n"
-            "  func controller(for terminalID: TerminalID) -> ProjectTerminalViewController? { nil }\n"
-            "}\n",
+            "protocol ProjectTerminalRuntimeSurface {}\n",
         )
         self.write(
             repository,
             "Sources/Threading/Core/Session/TerminalNaming.swift",
-            "let title = ProjectTerminalRuntime.shared.controller(for: terminal.id)\n",
+            "let title = runtime.foregroundProcessName(for: terminal.id)\n",
         )
         return repository
 

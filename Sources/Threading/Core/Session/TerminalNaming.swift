@@ -164,9 +164,7 @@ enum ProjectTerminalTitle {
             directory: terminal.currentDirectory,
             projectRoot: projectRoot,
             foregroundProcess: ProjectTerminalRuntime.shared
-                .controller(for: terminal.id)?
-                .session
-                .foregroundProcessName,
+                .foregroundProcessName(for: terminal.id),
             shellPath: ProfileStorage.shared.defaultProfile.shellPath
         )
     }

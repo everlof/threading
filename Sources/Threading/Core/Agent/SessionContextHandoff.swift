@@ -46,7 +46,7 @@ protocol SessionContextDestinationQuerying {
 
 extension AgentRuntime: SessionContextDestinationQuerying {
     func contextReceiver(for sessionID: SessionID) -> (any SessionContextReceiving)? {
-        conversation(for: sessionID)
+        conversationRuntimeSurface(for: sessionID)
     }
 
 }

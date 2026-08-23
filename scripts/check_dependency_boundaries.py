@@ -11,34 +11,13 @@ import sys
 
 APPLICATION_TYPES = {"AppDelegate", "MainWindowController"}
 
-# Existing concrete-controller debt is explicit and ratcheted. A lower count fails too so the
-# allowlist is reduced in the same coherent slice that removes a dependency.
-ALLOWED_CORE_UI_REFERENCES = {
-    ("Core/Agent/AgentRuntime.swift", "ConversationViewController"): 4,
-    ("Core/Session/ProjectTerminalRuntime.swift", "ProjectTerminalViewController"): 4,
-}
+# Core owns typed runtime capabilities; concrete application/UI types have no allowed debt.
+ALLOWED_CORE_UI_REFERENCES: dict[tuple[str, str], int] = {}
 
 # A controller-returning lookup is still an upward dependency when Swift infers the return type
-# and the concrete controller name never appears in the caller. The standalone project-terminal
-# owner is the only remaining lookup debt; its declaration and one consumer are exact ratchets.
+# and the concrete controller name never appears in the caller.
 CONTROLLER_LOOKUP = re.compile(r"\bcontroller\s*\(\s*for\b")
-ALLOWED_CORE_CONTROLLER_LOOKUPS = {
-    "Core/Session/ProjectTerminalRuntime.swift": (
-        "project-terminal controller declaration",
-        re.compile(
-            r"\bfunc\s+controller\s*\(\s*for\s+terminalID\s*:\s*TerminalID\s*\)\s*"
-            r"->\s*ProjectTerminalViewController\?"
-        ),
-        1,
-    ),
-    "Core/Session/TerminalNaming.swift": (
-        "project-terminal controller lookup",
-        re.compile(
-            r"\bProjectTerminalRuntime\s*\.\s*shared\s*\.\s*controller\s*\(\s*for\s*:"
-        ),
-        1,
-    ),
-}
+ALLOWED_CORE_CONTROLLER_LOOKUPS: dict[str, tuple[str, re.Pattern[str], int]] = {}
 
 # Remote transport consumes typed application capabilities. It must not regain the terminal
 # implementation even through a value whose name contains no controller.

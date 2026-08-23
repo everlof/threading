@@ -53,6 +53,29 @@ protocol AgentTerminalRuntimeSurface:
     func removeFromPresentation()
 }
 
+/// The application/runtime surface retained for a natively rendered conversation.
+///
+/// UI owns the AppKit controller and provider-specific stream. Core retains only the live
+/// capabilities shared by lifecycle, delivery, context handoff, remote control, and process
+/// inspection. Keeping this parallel to `AgentTerminalRuntimeSurface` makes renderer choice a
+/// runtime detail instead of an upward dependency on either concrete controller.
+@MainActor
+protocol AgentConversationRuntimeSurface:
+    AppMessageReceiving,
+    SessionContextReceiving,
+    RemoteConversationSurface
+{
+    var activity: SessionActivity { get }
+    var isVisible: Bool { get set }
+    var onAttention: (() -> Void)? { get set }
+    var conversationRootProcessIdentifier: pid_t? { get }
+
+    func resolveRemotePermission(id: String, decision: String) -> Bool
+    func resolveManagerPermission(id: String, decision: ControlPermissionDecision) -> Bool
+    func terminate(preservingViewport: Bool)
+    func removeFromPresentation()
+}
+
 /// Tracks the live terminal runtimes backing agent sessions.
 ///
 /// Runtime surfaces are cached per session so switching away in the sidebar and back does not
@@ -100,12 +123,12 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     private var fixtureLaunchPlanProviders: [SessionID: AgentLaunchPlanProvider] = [:]
 #endif
 
-    /// Live conversation controllers, for sessions Threading renders itself.
+    /// Live conversation runtimes, for sessions Threading renders itself.
     ///
     /// Kept separate from `controllers` rather than behind a shared protocol: the two drive
     /// the CLI in different ways and share almost no surface beyond starting and stopping.
     /// A session appears in exactly one of the two.
-    private var conversations: [SessionID: ConversationViewController] = [:]
+    private var conversations: [SessionID: any AgentConversationRuntimeSurface] = [:]
 
     /// Provider-neutral child timelines outlive either renderer.
     ///
@@ -167,6 +190,35 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         }
         controllers[sessionID] = surface
         return true
+    }
+
+    /// The typed runtime value behind UI's concrete native-conversation adapter lookup.
+    func conversationRuntimeSurface(
+        for sessionID: SessionID
+    ) -> (any AgentConversationRuntimeSurface)? {
+        conversations[sessionID]
+    }
+
+    /// Registers the UI-created native adapter once. Attention is wired at the same ownership
+    /// edge so every renderer enters Core with the complete lifecycle contract installed.
+    @discardableResult
+    func registerConversationRuntimeSurface(
+        _ surface: any AgentConversationRuntimeSurface,
+        for sessionID: SessionID
+    ) -> Bool {
+        guard conversations[sessionID] == nil else { return false }
+        surface.onAttention = { [weak self] in
+            self?.noteSessionAttention(sessionID)
+        }
+        conversations[sessionID] = surface
+        return true
+    }
+
+    /// UI needs the same current-session projection that Core was previously passing into the
+    /// concrete constructor. Exposing the model seam preserves one source of current truth
+    /// without exposing controller construction in the opposite direction.
+    func conversationSessionProjection() -> CurrentSessionProjection {
+        currentSessionProjection
     }
 
     func fixtureLaunchPlanProvider(for sessionID: SessionID) -> AgentLaunchPlanProvider? {
@@ -630,13 +682,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     // MARK: - Conversations
 
-    func conversation(for sessionID: SessionID) -> ConversationViewController? {
-        conversations[sessionID]
-    }
-
-    /// The projection/submission seam consumed by Core's remote transport. Other UI owners may
-    /// still ask for the concrete controller while that larger runtime ownership edge remains;
-    /// remote code deliberately cannot.
+    /// The projection/submission seam consumed by Core's remote transport.
     func remoteConversationSurface(for sessionID: SessionID) -> (any RemoteConversationSurface)? {
         conversations[sessionID]
     }
@@ -646,13 +692,13 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         id: String,
         decision: String
     ) -> Bool {
-        conversation(for: sessionID)?.resolveRemotePermission(id: id, decision: decision) == true
+        conversations[sessionID]?.resolveRemotePermission(id: id, decision: decision) == true
     }
 
     /// The same bounded evidence paired clients receive, projected into Core's control contract.
     /// Raw provider arguments stay behind the permission card boundary.
     func pendingControlPermission(sessionID: SessionID) -> ControlPendingPermission? {
-        guard let request = conversation(for: sessionID)?.remoteSnapshot.permission else {
+        guard let request = conversations[sessionID]?.remoteSnapshot.permission else {
             return nil
         }
         return ControlPendingPermission(
@@ -677,7 +723,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         decision: ControlPermissionDecision,
         managerID: SessionID
     ) -> Bool {
-        guard conversation(for: sessionID)?.resolveManagerPermission(
+        guard conversations[sessionID]?.resolveManagerPermission(
             id: id,
             decision: decision
         ) == true else { return false }
@@ -701,38 +747,10 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         return state
     }
 
-    /// Returns the cached conversation for a session, creating one if needed.
-    func makeConversation(
-        for agentSession: AgentSession,
-        in project: Project
-    ) -> ConversationViewController? {
-        if let existing = conversations[agentSession.id] {
-            return existing
-        }
-
-#if DEBUG
-        let fixtureLaunchPlanProvider = fixtureLaunchPlanProviders[agentSession.id]
-#else
-        let fixtureLaunchPlanProvider: AgentLaunchPlanProvider? = nil
-#endif
-        guard let conversation = ConversationViewController(
-            agentSession: agentSession,
-            project: project,
-            currentSessionProjection: currentSessionProjection,
-            subagentState: subagentState(for: agentSession.id),
-            launchPlanProvider: fixtureLaunchPlanProvider
-        ) else { return nil }
-        conversation.onAttention = { [weak self] in
-            self?.noteSessionAttention(agentSession.id)
-        }
-        conversations[agentSession.id] = conversation
-        return conversation
-    }
-
     /// Terminates the agent but keeps the terminal so its final output stays visible.
     func terminate(sessionID: SessionID) {
         controllers[sessionID]?.terminate()
-        conversations[sessionID]?.terminate()
+        conversations[sessionID]?.terminate(preservingViewport: true)
     }
 
     /// Terminates the agent and releases its terminal, returning the session to dormant.
@@ -762,7 +780,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             subagentStates[sessionID]?.stopWorking(
                 message: "Stopped when the session process ended."
             )
-            conversation.view.removeFromSuperview()
+            conversation.removeFromPresentation()
         }
 
         guard let controller = controllers[sessionID] else { return }
@@ -807,7 +825,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
         for sessionID in conversations.keys {
             RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
-            conversations[sessionID]?.terminate()
+            conversations[sessionID]?.terminate(preservingViewport: true)
         }
         conversations.removeAll()
 

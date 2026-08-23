@@ -71,7 +71,7 @@ extension AppMessageReceiving {
 /// **A conversation that exists is not a conversation that is running.** Both questions below ask
 /// `isRunning` as well as existence, and for months neither did. `TerminalContainerViewController`
 /// deliberately *keeps* a `ConversationViewController` after its agent exits — the transcript is
-/// worth more than a dormant placeholder — so `AgentRuntime.conversation(for:)` goes on answering
+/// worth more than a dormant placeholder — so the runtime surface goes on answering
 /// for a session with no process. Without the check, `submit` fell through its `stream.canSend`
 /// guard into `enqueue`, which took the message and answered true, and `hasTurnInFlight` is false
 /// for a dead session: `deliver` therefore reported **`.sentNow`** for a message no transport had
@@ -156,7 +156,7 @@ enum SessionMessageDelivery {
     /// as a torn-down terminal, and `list_sessions` calling it `chat` invited exactly the send
     /// `deliver` could not honour.
     static func surface(for sessionID: SessionID) -> ControlSessionOverview.Surface {
-        if let conversation = AgentRuntime.shared.conversation(for: sessionID),
+        if let conversation = AgentRuntime.shared.conversationRuntimeSurface(for: sessionID),
            conversation.isRunning {
             return .chat
         }
@@ -210,7 +210,7 @@ enum SessionMessageDelivery {
     ) {
         deliver(
             prompt,
-            chat: AgentRuntime.shared.conversation(for: sessionID),
+            chat: AgentRuntime.shared.conversationRuntimeSurface(for: sessionID),
             terminal: liveTerminalTarget(for: sessionID),
             origin: origin,
             completion: completion
@@ -248,7 +248,7 @@ enum SessionMessageDelivery {
     ) -> Outcome {
         deliver(
             prompt,
-            chat: AgentRuntime.shared.conversation(for: sessionID),
+            chat: AgentRuntime.shared.conversationRuntimeSurface(for: sessionID),
             terminal: liveTerminalTarget(for: sessionID),
             origin: origin
         )
@@ -300,7 +300,7 @@ enum SessionMessageDelivery {
     static func steer(_ text: String, to sessionID: SessionID) -> SteerOutcome {
         steer(
             ConversationPrompt(text: text),
-            chat: AgentRuntime.shared.conversation(for: sessionID)
+            chat: AgentRuntime.shared.conversationRuntimeSurface(for: sessionID)
         )
     }
 

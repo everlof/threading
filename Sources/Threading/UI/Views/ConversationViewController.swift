@@ -3761,3 +3761,46 @@ private enum ConversationControlDefaults {
         }
     }
 }
+
+// MARK: - Agent Runtime Composition
+
+extension ConversationViewController: AgentConversationRuntimeSurface {
+    var conversationRootProcessIdentifier: pid_t? {
+        stream.rootProcessIdentifier
+    }
+
+    func removeFromPresentation() {
+        view.removeFromSuperview()
+    }
+}
+
+extension AgentRuntime {
+    /// UI's concrete adapter lookup. Core and remote transport use the narrower runtime
+    /// capabilities on `AgentRuntime` and never acquire this controller.
+    func conversation(for sessionID: SessionID) -> ConversationViewController? {
+        conversationRuntimeSurface(for: sessionID) as? ConversationViewController
+    }
+
+    /// Returns the cached conversation for a session, creating it at the UI composition edge.
+    func makeConversation(
+        for agentSession: AgentSession,
+        in project: Project
+    ) -> ConversationViewController? {
+        if let existing = conversation(for: agentSession.id) {
+            return existing
+        }
+
+        guard let conversation = ConversationViewController(
+            agentSession: agentSession,
+            project: project,
+            currentSessionProjection: conversationSessionProjection(),
+            subagentState: subagentState(for: agentSession.id),
+            launchPlanProvider: fixtureLaunchPlanProvider(for: agentSession.id)
+        ) else { return nil }
+        precondition(
+            registerConversationRuntimeSurface(conversation, for: agentSession.id),
+            "A conversation runtime must have one UI adapter"
+        )
+        return conversation
+    }
+}

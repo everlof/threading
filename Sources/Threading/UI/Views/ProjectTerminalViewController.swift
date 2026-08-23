@@ -225,3 +225,34 @@ extension ProjectTerminalViewController: TerminalSessionDelegate {
         notifyRunningState()
     }
 }
+
+// MARK: - Project Terminal Runtime Composition
+
+extension ProjectTerminalViewController: ProjectTerminalRuntimeSurface {
+    var foregroundProcessName: String? { session.foregroundProcessName }
+    var remoteTerminalSurface: any RemoteTerminalSurface { session }
+
+    func removeFromPresentation() {
+        view.removeFromSuperview()
+        removeFromParent()
+    }
+}
+
+extension ProjectTerminalRuntime {
+    /// UI's concrete adapter lookup. Core retains only `ProjectTerminalRuntimeSurface`.
+    func controller(for terminalID: TerminalID) -> ProjectTerminalViewController? {
+        runtimeSurface(for: terminalID) as? ProjectTerminalViewController
+    }
+
+    /// Returns the cached controller for a terminal, creating it at the UI composition edge.
+    func makeController(for terminal: ProjectTerminal) -> ProjectTerminalViewController {
+        if let existing = controller(for: terminal.id) { return existing }
+
+        let controller = ProjectTerminalViewController(terminal: terminal)
+        precondition(
+            registerRuntimeSurface(controller, for: terminal.id),
+            "A project terminal runtime must have one UI adapter"
+        )
+        return controller
+    }
+}
