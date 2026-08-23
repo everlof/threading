@@ -91,6 +91,67 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertEqual(generalWidth, usageWidth, accuracy: 0.5)
     }
 
+    /// The fixed title band and the scrolling body are one width contract. A summary whose
+    /// natural width plus two actions exceeds a squeezed pane must truncate inside that band;
+    /// it must not make the page wider and silently move the body and its controls beyond the
+    /// scroll clip.
+    func testFixedHeaderKeepsActionsAndBodyInsideAConstrainedPane() throws {
+        let width: CGFloat = 420
+        let summary = "38.1 GB reclaimable in 12 directories · measured 12 min ago · only 31 GB free"
+        let rescan = SettingsUI.button(
+            "Rescan",
+            target: self,
+            action: #selector(noop),
+            localizes: false
+        )
+        let remove = SettingsUI.button(
+            "Remove All…",
+            target: self,
+            action: #selector(noop),
+            localizes: false
+        )
+        let body = NSView()
+        let page = SettingsUI.listPage(
+            title: "Storage",
+            summary: summary,
+            actions: [rescan, remove],
+            body: body,
+            localizes: false
+        )
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 300))
+        page.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(page)
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: width),
+            host.heightAnchor.constraint(equalToConstant: 300),
+            page.topAnchor.constraint(equalTo: host.topAnchor),
+            page.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        defer { window.close() }
+        host.layoutSubtreeIfNeeded()
+
+        let rescanFrame = rescan.convert(rescan.bounds, to: page)
+        let removeFrame = remove.convert(remove.bounds, to: page)
+        XCTAssertLessThan(rescanFrame.maxX, removeFrame.minX)
+        XCTAssertLessThanOrEqual(
+            removeFrame.maxX,
+            page.bounds.maxX - Design.Size.glowGutter + 0.5,
+            "the summary moved the header actions beyond the pane"
+        )
+        XCTAssertEqual(body.frame.width, width, accuracy: 0.5)
+        XCTAssertEqual(page.frame.width, width, accuracy: 0.5)
+    }
+
     /// The regression this was written for: a wrapping label has no intrinsic width, so against
     /// anything willing to grow it collapses to its narrowest wrap and stays there. Measured on
     /// the Themes page, the App theme description wrapped to the same six lines at 420pt and at

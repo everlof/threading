@@ -218,13 +218,20 @@ enum SettingsUI {
         actions: [NSView],
         localizes: Bool
     ) -> (view: NSView, summaryField: NSTextField?) {
-        var labelViews: [NSView] = [heading(title, localizes: localizes)]
+        let heading = heading(title, localizes: localizes)
+        // The header's trailing actions are operable content; a long destination summary must
+        // truncate before it pushes them—or the page and its scrolling body—past the pane.
+        // `lineBreakMode` only chooses *how* a field shortens after Auto Layout gives it less
+        // room. The low resistance is what permits that smaller width in the first place.
+        heading.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        var labelViews: [NSView] = [heading]
         var summaryField: NSTextField?
         if let summary {
             let line = NSTextField(labelWithString: localized(summary, if: localizes))
             line.applyFont(.subheading)
             line.textColor = Design.Text.secondary
             line.lineBreakMode = .byTruncatingTail
+            line.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             labelViews.append(line)
             summaryField = line
         }
@@ -234,6 +241,7 @@ enum SettingsUI {
         labels.alignment = .leading
         labels.spacing = Design.Spacing.hairline
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let row = NSStackView()
         row.orientation = .horizontal
