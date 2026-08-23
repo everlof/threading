@@ -637,6 +637,26 @@
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skriv ett kommando" } } }
     },
+    "Already used by %@": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Används redan av %@" } } }
+    },
+    "Choose a session": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj en session" } } }
+    },
+    "Choose a session to continue.": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Välj en session för att fortsätta." } } }
+    },
+    "Click shortcut to edit": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Klicka på kortkommandot för att ändra" } } }
+    },
+    "Press shortcut   Delete Clear   Escape Cancel": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Tryck kortkommando   Delete Rensa   Escape Avbryt" } } }
+    },
     "Turn on Group Sessions by Branch first.": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktivera Gruppera sessioner efter gren först." } } }
@@ -648,6 +668,14 @@
     "↑↓ Move   Return Run   Escape Close": {
       "extractionState": "manual",
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "↑↓ Flytta   Retur Kör   Escape Stäng" } } }
+    },
+    "↑↓ Move   Return Run   Escape Back": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "↑↓ Flytta   Retur Kör   Escape Tillbaka" } } }
+    },
+    "↑↓ Move   Tab or Return Choose Session   Escape Close": {
+      "extractionState": "manual",
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "↑↓ Flytta   Tabb eller Retur Välj session   Escape Stäng" } } }
     },
     "Session is snoozed": {
       "extractionState": "manual",

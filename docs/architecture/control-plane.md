@@ -366,6 +366,22 @@ implementing commands beside it. Invocation enumerates again before dispatch, so
 selection, missing surface, or disabled extension becomes an honest refusal with its current
 reason. `CommandRegistryDidChange` causes an open palette to discard removed extension rows.
 
+A session-scoped command whose only missing prerequisite is session identity additionally carries
+a `HostCommandInputRequest`. Menus still see its unavailable state and remain disabled. An
+interactive frontend may ask the plane for bounded, lightweight `HostCommandInputOption` values,
+collect a `HostCommandInputValue`, and invoke a `HostCommandInvocationRequest`. The plane checks
+the target against a fresh option snapshot before the one AppDelegate invoker receives it. Direct
+entity operations such as close and rename act on that explicit id; commands whose implementation
+is inherently a visible surface select the session first and then use their ordinary current-
+session path. Commands requiring more specific state — a visible conversation, browser, terminal
+or Git Review — do not advertise a session input that could not satisfy them.
+
+Entering the session step projects the in-memory store once into strings and ids. Search then runs
+off the main thread, checks cancellation every 128 values, and returns at most 100 rows to the
+virtual table. Expected use is tens to hundreds of sessions; the pure search boundary is exercised
+with 25,000 options so view construction remains proportional to the visible cap rather than the
+workspace size.
+
 The palette removes its overlay and key monitor before invoking a command because that command
 may synchronously present a sheet, popover or another in-window surface. It retains its controller
 until the invocation returns: success finalizes dismissal, while a dynamic refusal refreshes and

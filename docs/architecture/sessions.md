@@ -528,10 +528,12 @@ the conversation. `SessionNaming` holds the rules; three names remain, resolved 
    straight into the terminal. Empty until then; the display falls back to "New Session".
 
 The explicit rename is also the registry command `session.rename`, editable and bound to ⌘R by
-default. The Project menu routes it to the selected session, while the sidebar row, pane-header
-menu and terminal context menu keep their target-specific route. Each draws the registry's current
-binding and keeps the same clear-to-follow-the-agent rename contract. A rebind therefore changes
-both what fires and what every action menu promises.
+default. The Project menu routes it to the selected session. With no session selected, the command
+palette advances to a searchable session input and targets the chosen id directly; Close Session
+uses the same path. The sidebar row, pane-header menu and terminal context menu keep their target-
+specific route. Each draws the registry's current binding and keeps the same clear-to-follow-the-
+agent rename contract. A rebind therefore changes both what fires and what every action menu
+promises.
 
 Claude records both kinds of title in the transcript as different record types, measured
 across this machine's transcripts rather than assumed: `ai-title` is the CLI's own name,

@@ -978,6 +978,31 @@
       }
     },
     {
+      "id": "command-palette",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Command palette",
+      "description": "The real in-window command palette with a compact result viewport, a stable trailing shortcut column, direct shortcut recording, and the searchable session-valued next input used when no chat is selected.",
+      "states": [
+        "Command list and inline shortcuts",
+        "Filtered session target input",
+        "Shortcut recording"
+      ],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["760×520-point native shell"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/CommandPaletteRenderTests.swift",
+        "test": "ThreadingTests/CommandPaletteRenderTests/testRendersCommandSessionAndShortcutStatesInTheNativeShell"
+      },
+      "capture": {
+        "glob": "command-palette-*.png"
+      }
+    },
+    {
       "id": "manager-role-and-grants",
       "kind": "surface",
       "status": "implemented",

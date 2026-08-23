@@ -142,9 +142,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// It deliberately re-resolves window context each time either closure runs.
     private lazy var hostCommandPlane = HostCommandPlane(
         catalog: { [weak self] in self?.hostCommandCatalog() ?? [] },
-        invoke: { [weak self] id in
-            self?.performHostCommand(id: id)
-                ?? .refused(commandID: id, reason: L10n.string("The application is unavailable."))
+        inputOptions: { [weak self] commandID, input in
+            self?.hostCommandInputOptions(commandID: commandID, input: input) ?? []
+        },
+        invokeRequest: { [weak self] request in
+            self?.performHostCommand(request)
+                ?? .refused(
+                    commandID: request.commandID,
+                    reason: L10n.string("The application is unavailable.")
+                )
         }
     )
 
@@ -2472,23 +2478,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     private func commandIsAvailable(_ command: AppCommand) -> Bool {
-        hostCommandAvailability(for: command).isAvailable
+        hostCommandState(for: command).availability.isAvailable
     }
 
     private func hostCommandCatalog() -> [HostCommandDescriptor] {
         CommandRegistry.shared.all.map { command in
-            command.hostDescriptor(
+            let state = hostCommandState(for: command)
+            return command.hostDescriptor(
                 shortcut: ShortcutOverrideStore.shared.shortcut(for: command)?.displayString,
-                availability: hostCommandAvailability(for: command)
+                availability: state.availability,
+                nextInput: state.nextInput
             )
         }
     }
 
-    private func hostCommandAvailability(
-        for command: AppCommand
-    ) -> HostCommandDescriptor.Availability {
+    private func hostCommandInputOptions(
+        commandID: String,
+        input: HostCommandInputRequest
+    ) -> [HostCommandInputOption] {
+        guard input.kind == .session else { return [] }
+        return mainWindowController?.commandSessionOptions(for: commandID) ?? []
+    }
+
+    private struct HostCommandState {
+        let availability: HostCommandDescriptor.Availability
+        let nextInput: HostCommandInputRequest?
+
+        static let available = HostCommandState(availability: .available, nextInput: nil)
+
+        static func unavailable(_ reason: String) -> HostCommandState {
+            HostCommandState(availability: .unavailable(reason: reason), nextInput: nil)
+        }
+
+        static func needsSession() -> HostCommandState {
+            HostCommandState(
+                availability: .unavailable(reason: L10n.string("Select a session first.")),
+                nextInput: HostCommandInputRequest(
+                    kind: .session,
+                    prompt: L10n.string("Choose a session to continue."),
+                    searchPlaceholder: L10n.string("Choose a session")
+                )
+            )
+        }
+    }
+
+    /// Resolves both menu availability and the palette's optional next input. Commands that
+    /// need more than a session (a visible browser or review, for example) keep that specific
+    /// refusal; commands whose only missing value is session identity become a second palette
+    /// step while remaining disabled in the menu bar.
+    private func hostCommandState(for command: AppCommand) -> HostCommandState {
         if RecoveryMode.isActive, !RecoveryModeCommandPolicy.allows(commandID: command.id) {
-            return .unavailable(reason: L10n.string("This command is unavailable in Recovery Mode."))
+            return .unavailable(L10n.string("This command is unavailable in Recovery Mode."))
         }
         // A script is available exactly while its declaration still resolves to something
         // runnable in the active checkout; the service's reason beats any scope inference.
@@ -2496,94 +2536,95 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let availability = ProjectScriptService.shared.availability(commandID: command.id)
             guard availability.invocation != nil else {
                 return .unavailable(
-                    reason: availability.reason ?? L10n.string("This command is unavailable.")
+                    availability.reason ?? L10n.string("This command is unavailable.")
                 )
             }
         }
+
+        // These commands require a particular active surface, not merely any session. Name the
+        // real prerequisite before the scope gate so the palette never offers an input that
+        // cannot make the command runnable by itself.
+        switch command.id {
+        case AppCommands.ID.jumpToReviewFile:
+            guard mainWindowController?.canJumpToReviewFile == true else {
+                return .unavailable(L10n.string("Show a Git Review with changed files first."))
+            }
+        case AppCommands.ID.previousTurn, AppCommands.ID.nextTurn,
+             AppCommands.ID.previousStep, AppCommands.ID.nextStep:
+            guard mainWindowController?.isShowingConversation == true else {
+                return .unavailable(L10n.string("The active surface is not a conversation."))
+            }
+        case AppCommands.ID.saveBaseline:
+            guard mainWindowController?.canSaveVisibleBrowserBaseline == true else {
+                return .unavailable(L10n.string("Show a browser before saving a baseline."))
+            }
+        case AppCommands.ID.biggerText, AppCommands.ID.smallerText:
+            guard mainWindowController?.canAdjustTerminalText == true else {
+                return .unavailable(L10n.string("The active surface is not a terminal."))
+            }
+        case AppCommands.ID.currentTheme:
+            guard MCPToolCatalog.hasEnabledThemeTools else {
+                return .unavailable(L10n.string("Theme tools are disabled."))
+            }
+        default:
+            break
+        }
+
         switch command.scope {
         case .application: break
         case .project where mainWindowController?.currentProjectID == nil:
-            return .unavailable(reason: L10n.string("Select a project first."))
+            return .unavailable(L10n.string("Select a project first."))
         case .session where mainWindowController?.currentSessionID == nil:
-            return .unavailable(reason: L10n.string("Select a session first."))
+            return .needsSession()
         case .project, .session: break
         }
 
         switch command.id {
         case AppCommands.ID.closeTab:
             guard mainWindowController?.canCloseActiveTab == true else {
-                return .unavailable(reason: L10n.string("There is no tab to close."))
+                return .unavailable(L10n.string("There is no tab to close."))
             }
         case AppCommands.ID.find:
             guard mainWindowController?.canShowFind == true else {
-                return .unavailable(reason: L10n.string("Find is unavailable on the active surface."))
-            }
-        case AppCommands.ID.jumpToReviewFile:
-            guard mainWindowController?.canJumpToReviewFile == true else {
-                return .unavailable(reason: L10n.string("Show a Git Review with changed files first."))
+                return .unavailable(L10n.string("Find is unavailable on the active surface."))
             }
         case AppCommands.ID.openIn:
             guard mainWindowController?.currentFolderURL != nil else {
-                return .unavailable(reason: L10n.string("The current surface has no checkout."))
+                return .unavailable(L10n.string("The current surface has no checkout."))
             }
         case AppCommands.ID.navigateBack:
             guard mainWindowController?.canGoBack == true else {
-                return .unavailable(reason: L10n.string("There is no previous location."))
+                return .unavailable(L10n.string("There is no previous location."))
             }
         case AppCommands.ID.navigateForward:
             guard mainWindowController?.canGoForward == true else {
-                return .unavailable(reason: L10n.string("There is no next location."))
-            }
-        case AppCommands.ID.previousTurn, AppCommands.ID.nextTurn,
-             AppCommands.ID.previousStep, AppCommands.ID.nextStep:
-            guard mainWindowController?.isShowingConversation == true else {
-                return .unavailable(reason: L10n.string("The active surface is not a conversation."))
+                return .unavailable(L10n.string("There is no next location."))
             }
         case AppCommands.ID.loneBranchHeadings:
             guard AppSettings.shared.groupsSessionsByBranch else {
-                return .unavailable(reason: L10n.string("Turn on Group Sessions by Branch first."))
-            }
-        case AppCommands.ID.saveBaseline:
-            guard mainWindowController?.canSaveVisibleBrowserBaseline == true else {
-                return .unavailable(reason: L10n.string("Show a browser before saving a baseline."))
-            }
-        case AppCommands.ID.biggerText, AppCommands.ID.smallerText:
-            guard mainWindowController?.canAdjustTerminalText == true else {
-                return .unavailable(reason: L10n.string("The active surface is not a terminal."))
+                return .unavailable(L10n.string("Turn on Group Sessions by Branch first."))
             }
         case AppCommands.ID.previousTab, AppCommands.ID.nextTab:
             guard mainWindowController?.canSelectAdjacentTab == true else {
-                return .unavailable(reason: L10n.string("There is no other tab to select."))
-            }
-        case AppCommands.ID.currentTheme:
-            guard MCPToolCatalog.hasEnabledThemeTools else {
-                return .unavailable(reason: L10n.string("Theme tools are disabled."))
+                return .unavailable(L10n.string("There is no other tab to select."))
             }
         case AppCommands.ID.checkForUpdates:
             guard AppUpdater.shared.canCheckForUpdates else {
-                return .unavailable(reason: L10n.string("An update check is already running."))
-            }
-        case AppCommands.ID.closeSession:
-            guard mainWindowController?.currentSessionID != nil else {
-                return .unavailable(reason: L10n.string("Select a session first."))
+                return .unavailable(L10n.string("An update check is already running."))
             }
         case AppCommands.ID.newManager:
             guard mainWindowController?.currentProjectID != nil else {
-                return .unavailable(reason: L10n.string("Select a project first."))
+                return .unavailable(L10n.string("Select a project first."))
             }
         case AppCommands.ID.makeManager:
-            guard let sessionID = mainWindowController?.currentSessionID else {
-                return .unavailable(reason: L10n.string("Select a session first."))
-            }
+            guard let sessionID = mainWindowController?.currentSessionID else { return .needsSession() }
             guard !ControlGrantStore.shared.isManager(sessionID) else {
-                return .unavailable(reason: L10n.string("The selected chat is already a manager."))
+                return .unavailable(L10n.string("The selected chat is already a manager."))
             }
         case AppCommands.ID.revokeManager:
-            guard let sessionID = mainWindowController?.currentSessionID else {
-                return .unavailable(reason: L10n.string("Select a session first."))
-            }
+            guard let sessionID = mainWindowController?.currentSessionID else { return .needsSession() }
             guard ControlGrantStore.shared.isManager(sessionID) else {
-                return .unavailable(reason: L10n.string("The selected chat is not a manager."))
+                return .unavailable(L10n.string("The selected chat is not a manager."))
             }
         default:
             break
@@ -2591,20 +2632,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if let number = Int(command.id.replacingOccurrences(of: "tab.select.", with: "")),
            AppCommands.ID.selectTabNumbers.contains(number),
            mainWindowController?.canSelectTab(atIndex: number - 1) != true {
-            return .unavailable(
-                reason: L10n.format("Tab %lld is not available.", Int64(number))
-            )
+            return .unavailable(L10n.format("Tab %lld is not available.", Int64(number)))
         }
         return .available
     }
 
     /// Authoritative command implementation. Selectors below are adapters for AppKit's menu and
     /// responder chain; the palette calls this same function through `HostCommandPlane`.
-    private func performHostCommand(id: String) -> HostCommandInvocationOutcome {
+    private func performHostCommand(
+        _ request: HostCommandInvocationRequest
+    ) -> HostCommandInvocationOutcome {
+        let id = request.commandID
         guard let command = CommandRegistry.shared.command(id: id) else {
             return .refused(commandID: id, reason: L10n.string("This command is no longer available."))
         }
-        let availability = hostCommandAvailability(for: command)
+
+        if let input = request.input {
+            guard input.kind == .session,
+                  command.scope == .session,
+                  let sessionID = SessionID(uuidString: input.id),
+                  let controller = mainWindowController,
+                  controller.isCommandTargetSessionAvailable(sessionID) else {
+                return .refused(
+                    commandID: id,
+                    reason: L10n.string("That session is no longer available.")
+                )
+            }
+
+            if case .extensionCommand = command.origin {
+                let context = ExtensionCommandContext(
+                    projectID: controller.projectID(forCommandTarget: sessionID)?
+                        .uuidString.lowercased(),
+                    sessionID: sessionID.uuidString.lowercased()
+                )
+                ExtensionCommandInvoker.perform(
+                    command,
+                    context: context,
+                    window: controller.window
+                )
+                return .invoked(commandID: id)
+            }
+
+            switch id {
+            case AppCommands.ID.closeSession:
+                controller.closeSession(sessionID)
+                return .invoked(commandID: id)
+            case AppCommands.ID.renameSession:
+                controller.renameSession(sessionID)
+                return .invoked(commandID: id)
+            case AppCommands.ID.makeManager:
+                guard !ControlGrantStore.shared.isManager(sessionID) else {
+                    return .refused(
+                        commandID: id,
+                        reason: L10n.string("The selected chat is already a manager.")
+                    )
+                }
+                controller.makeSessionManager(sessionID)
+                return .invoked(commandID: id)
+            case AppCommands.ID.revokeManager:
+                guard ControlGrantStore.shared.isManager(sessionID) else {
+                    return .refused(
+                        commandID: id,
+                        reason: L10n.string("The selected chat is not a manager.")
+                    )
+                }
+                controller.revokeManagerRole(for: sessionID)
+                return .invoked(commandID: id)
+            default:
+                guard controller.performAfterSelectingSession(sessionID, action: { [weak self] in
+                    _ = self?.performHostCommand(
+                        HostCommandInvocationRequest(commandID: id)
+                    )
+                }) else {
+                    return .refused(
+                        commandID: id,
+                        reason: L10n.string("That session is no longer available.")
+                    )
+                }
+                return .invoked(commandID: id)
+            }
+        }
+
+        let availability = hostCommandState(for: command).availability
         guard availability.isAvailable else {
             return .refused(
                 commandID: id,
@@ -2699,10 +2808,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         guard commandPaletteController == nil, let window = mainWindowController?.window else { return }
         let controller = CommandPaletteViewController(
             catalog: { [weak self] in self?.hostCommandPlane.commands() ?? [] },
-            invoke: { [weak self] id in
-                self?.hostCommandPlane.invoke(commandID: id)
-                    ?? .refused(commandID: id, reason: L10n.string("The application is unavailable."))
-            }
+            inputOptions: { [weak self] commandID in
+                self?.hostCommandPlane.inputOptions(commandID: commandID) ?? []
+            },
+            invokeRequest: { [weak self] request in
+                self?.hostCommandPlane.invoke(request)
+                    ?? .refused(
+                        commandID: request.commandID,
+                        reason: L10n.string("The application is unavailable.")
+                    )
+            },
+            shortcutEditing: CommandPaletteShortcutEditing(
+                shortcut: { commandID in
+                    CommandRegistry.shared.command(id: commandID).flatMap {
+                        ShortcutOverrideStore.shared.shortcut(for: $0)
+                    }
+                },
+                record: { commandID, shortcut in
+                    guard let command = CommandRegistry.shared.command(id: commandID),
+                          command.isEditable else {
+                        return L10n.string("This command is unavailable.")
+                    }
+                    if let shortcut,
+                       let owner = ShortcutOverrideStore.shared.conflict(
+                           for: shortcut,
+                           excluding: command
+                       ) {
+                        return L10n.format("Already used by %@", owner.title)
+                    }
+                    ShortcutOverrideStore.shared.setShortcut(shortcut, for: command)
+                    return nil
+                }
+            )
         )
         commandPaletteController = controller
         controller.onDismiss = { [weak self, weak controller] in

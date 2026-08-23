@@ -10,7 +10,9 @@ final class HostCommandPlaneTests: XCTestCase {
         id: String,
         title: String,
         shortcut: String? = nil,
-        availability: HostCommandDescriptor.Availability = .available
+        availability: HostCommandDescriptor.Availability = .available,
+        nextInput: HostCommandInputRequest? = nil,
+        shortcutEditable: Bool = false
     ) -> HostCommandDescriptor {
         HostCommandDescriptor(
             id: id,
@@ -21,7 +23,17 @@ final class HostCommandPlaneTests: XCTestCase {
             origin: .builtIn,
             scope: .application,
             risk: .ordinary,
-            availability: availability
+            availability: availability,
+            nextInput: nextInput,
+            shortcutEditable: shortcutEditable
+        )
+    }
+
+    private var sessionInput: HostCommandInputRequest {
+        HostCommandInputRequest(
+            kind: .session,
+            prompt: "Choose a session to continue.",
+            searchPlaceholder: "Choose a session"
         )
     }
 
@@ -80,6 +92,45 @@ final class HostCommandPlaneTests: XCTestCase {
         XCTAssertEqual(invocations, 0)
     }
 
+    func testInvocationRequiresAndRevalidatesTheCollectedSession() {
+        var options = [HostCommandInputOption(id: "alpha", title: "Alpha", detail: "Demo")]
+        var invoked: [HostCommandInvocationRequest] = []
+        let plane = HostCommandPlane(
+            catalog: {
+                [self.descriptor(
+                    id: "session.close",
+                    title: "Close Session",
+                    availability: .unavailable(reason: "Select a session first."),
+                    nextInput: self.sessionInput
+                )]
+            },
+            inputOptions: { _, _ in options },
+            invokeRequest: {
+                invoked.append($0)
+                return .invoked(commandID: $0.commandID)
+            }
+        )
+
+        XCTAssertEqual(
+            plane.invoke(commandID: "session.close"),
+            .refused(commandID: "session.close", reason: sessionInput.prompt)
+        )
+
+        let request = HostCommandInvocationRequest(
+            commandID: "session.close",
+            input: HostCommandInputValue(kind: .session, id: "alpha")
+        )
+        XCTAssertEqual(plane.invoke(request), .invoked(commandID: "session.close"))
+        XCTAssertEqual(invoked, [request])
+
+        options.removeAll()
+        XCTAssertEqual(
+            plane.invoke(request),
+            .refused(commandID: "session.close", reason: "That selection is no longer available.")
+        )
+        XCTAssertEqual(invoked, [request], "a stale session target must not reach the command")
+    }
+
     func testHostProjectionRetainsRegistryIdentityMetadataAndResolvedShortcut() throws {
         let registry = CommandRegistry(builtInCommands: [])
         registry.replaceExtensionCommands(
@@ -126,6 +177,25 @@ final class HostCommandPlaneTests: XCTestCase {
         )
     }
 
+    func testLargeSessionTargetFilteringIsCappedAndSearchesProjectDetail() {
+        let options = (0..<25_000).map {
+            HostCommandInputOption(id: "session-\($0)", title: "Session \($0)", detail: "Project \($0)")
+        } + [HostCommandInputOption(id: "exact", title: "Needle", detail: "Special Project")]
+
+        XCTAssertEqual(
+            HostCommandInputSearch.results(in: options, matching: "needle").map(\.id),
+            ["exact"]
+        )
+        XCTAssertEqual(
+            HostCommandInputSearch.results(in: options, matching: "special project").map(\.id),
+            ["exact"]
+        )
+        XCTAssertEqual(
+            HostCommandInputSearch.results(in: options, matching: "").count,
+            HostCommandInputSearch.maximumResults
+        )
+    }
+
     func testPaletteKeyboardSelectionInvokesTheSelectedStableID() {
         var invoked: [String] = []
         let controller = CommandPaletteViewController(
@@ -152,6 +222,110 @@ final class HostCommandPlaneTests: XCTestCase {
         XCTAssertEqual(controller.selectedCommandIDForTesting, "enabled")
         controller.confirmSelectionForTesting()
         XCTAssertEqual(invoked, ["enabled"])
+    }
+
+    func testPaletteAdvancesInlineAndInvokesTheFilteredSession() {
+        var invoked: [HostCommandInvocationRequest] = []
+        let controller = CommandPaletteViewController(
+            catalog: {
+                [self.descriptor(
+                    id: "session.close",
+                    title: "Close Session",
+                    availability: .unavailable(reason: "Select a session first."),
+                    nextInput: self.sessionInput
+                )]
+            },
+            inputOptions: { _ in
+                [
+                    HostCommandInputOption(id: "alpha", title: "Alpha", detail: "Inbox"),
+                    HostCommandInputOption(id: "beta", title: "Beta", detail: "Website"),
+                ]
+            },
+            invokeRequest: {
+                invoked.append($0)
+                return .invoked(commandID: $0.commandID)
+            },
+            shortcutEditing: nil
+        )
+        _ = controller.view
+        drainMainRunLoop(until: { controller.visibleCommandIDsForTesting == ["session.close"] })
+
+        controller.confirmSelectionForTesting()
+        drainMainRunLoop(until: { controller.visibleInputIDsForTesting.count == 2 })
+        XCTAssertTrue(controller.isCollectingInputForTesting)
+
+        controller.setSearchQueryForTesting("web")
+        drainMainRunLoop(until: { controller.visibleInputIDsForTesting == ["beta"] })
+        controller.confirmSelectionForTesting()
+
+        XCTAssertEqual(
+            invoked,
+            [HostCommandInvocationRequest(
+                commandID: "session.close",
+                input: HostCommandInputValue(kind: .session, id: "beta")
+            )]
+        )
+    }
+
+    func testPaletteEditsAnInlineShortcutWithoutInvokingItsCommand() throws {
+        var shortcuts = ["session.close": KeyboardShortcut(key: "w", modifiers: [.command])]
+        var recorded: [(String, KeyboardShortcut?)] = []
+        var invocations = 0
+        let controller = CommandPaletteViewController(
+            catalog: {
+                [self.descriptor(
+                    id: "session.close",
+                    title: "Close Session",
+                    shortcut: shortcuts["session.close"]?.displayString,
+                    shortcutEditable: true
+                )]
+            },
+            inputOptions: { _ in [] },
+            invokeRequest: {
+                invocations += 1
+                return .invoked(commandID: $0.commandID)
+            },
+            shortcutEditing: CommandPaletteShortcutEditing(
+                shortcut: { shortcuts[$0] },
+                record: { id, shortcut in
+                    shortcuts[id] = shortcut
+                    recorded.append((id, shortcut))
+                    return nil
+                }
+            )
+        )
+        let window = makePaletteWindow()
+        defer {
+            controller.dismiss()
+            window.contentView = nil
+        }
+        controller.present(in: window)
+        drainMainRunLoop(until: {
+            controller.shortcutRecorderForTesting(commandID: "session.close") != nil
+        })
+
+        let recorder = try XCTUnwrap(
+            controller.shortcutRecorderForTesting(commandID: "session.close")
+        )
+        XCTAssertTrue(recorder.performPrimaryAction())
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.option, .command],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "k",
+            charactersIgnoringModifiers: "k",
+            isARepeat: false,
+            keyCode: 40
+        ))
+        recorder.keyDown(with: event)
+
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertEqual(recorded.first?.0, "session.close")
+        XCTAssertEqual(recorded.first?.1, KeyboardShortcut(key: "k", modifiers: [.option, .command]))
+        XCTAssertEqual(invocations, 0)
     }
 
     func testPaletteRemovesItsPresentationBeforeInvokingACommand() {

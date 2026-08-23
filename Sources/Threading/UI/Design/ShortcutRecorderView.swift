@@ -14,6 +14,12 @@ import AppKit
 /// are the two the platform already teaches.
 final class ShortcutRecorderView: ThemedControl {
 
+    enum Presentation {
+        case persistent
+        /// Quiet shortcut text that reveals its control plate on hover, focus or recording.
+        case inline
+    }
+
     // MARK: - Properties
 
     /// The chord shown when not recording. Setting it redraws but does not report.
@@ -24,19 +30,28 @@ final class ShortcutRecorderView: ThemedControl {
     /// Reports a captured chord, or nil when the user cleared it. Not called for a cancel.
     var onRecord: ((KeyboardShortcut?) -> Void)?
 
+    var onRecordingChange: ((Bool) -> Void)?
+
     /// Drawn under the chord when the binding collides with another command.
     var conflictText: String? {
         didSet { needsDisplay = true }
     }
 
-    private var isRecording = false {
-        didSet { needsDisplay = true }
+    private(set) var isRecording = false {
+        didSet {
+            guard isRecording != oldValue else { return }
+            needsDisplay = true
+            onRecordingChange?(isRecording)
+        }
     }
+
+    private let presentation: Presentation
 
     // MARK: - Initialization
 
-    init(shortcut: KeyboardShortcut?) {
+    init(shortcut: KeyboardShortcut?, presentation: Presentation = .persistent) {
         self.shortcut = shortcut
+        self.presentation = presentation
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
     }
@@ -51,6 +66,7 @@ final class ShortcutRecorderView: ThemedControl {
 
     override func performPrimaryAction() -> Bool {
         guard isEnabled else { return false }
+        window?.makeFirstResponder(self)
         isRecording = true
         return true
     }
@@ -102,11 +118,11 @@ final class ShortcutRecorderView: ThemedControl {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        let appearance = surfaceAppearance
         let shape = ThemedSurface.draw(
             bounds,
-            fill: isRecording ? Design.Surface.accent.withAlphaComponent(ShortcutRecorderDefaults.armedFill)
-                              : Design.Surface.controlResting,
-            border: isRecording ? Design.Surface.accent : Design.Surface.border,
+            fill: appearance.fill,
+            border: appearance.border,
             radius: Design.Radius.control
         )
 
@@ -116,7 +132,7 @@ final class ShortcutRecorderView: ThemedControl {
 
     private func drawLabel() {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
+        paragraph.alignment = presentation == .inline ? .right : .center
         // Measured and drawn with the same attributes, and told to truncate: a title a hair too
         // wide for its rect otherwise wraps and draws its tail below the control.
         paragraph.lineBreakMode = .byTruncatingTail
@@ -147,7 +163,24 @@ final class ShortcutRecorderView: ThemedControl {
         if isRecording { return Design.Text.label }
         guard isEnabled else { return Design.Text.quaternary }
         if conflictText != nil { return Design.Status.negative }
+        if presentation == .inline, !isHovered, !hasKeyboardFocus {
+            return shortcut == nil ? Design.Text.tertiary : Design.Text.secondary
+        }
         return shortcut == nil ? Design.Text.tertiary : Design.Text.label
+    }
+
+    private var surfaceAppearance: (fill: NSColor, border: NSColor?) {
+        if isRecording {
+            return (
+                Design.Surface.accent.withAlphaComponent(ShortcutRecorderDefaults.armedFill),
+                Design.Surface.accent
+            )
+        }
+        if presentation == .inline {
+            guard isHovered || hasKeyboardFocus else { return (.clear, nil) }
+            return (Design.Surface.controlHover, Design.Surface.border)
+        }
+        return (Design.Surface.controlResting, Design.Surface.border)
     }
 
     override var intrinsicContentSize: NSSize {

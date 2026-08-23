@@ -49,6 +49,68 @@ struct HostCommandDescriptor: Equatable, Sendable {
     let scope: Scope
     let risk: Risk
     let availability: Availability
+    /// The next value a frontend may collect when the command has no implicit context.
+    /// Menus still treat the command as unavailable; an interactive frontend can advance to
+    /// this input without inventing command semantics of its own.
+    let nextInput: HostCommandInputRequest?
+    let shortcutEditable: Bool
+
+    init(
+        id: String,
+        title: String,
+        detail: String?,
+        group: String,
+        shortcut: String?,
+        origin: Origin,
+        scope: Scope,
+        risk: Risk,
+        availability: Availability,
+        nextInput: HostCommandInputRequest? = nil,
+        shortcutEditable: Bool = false
+    ) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.group = group
+        self.shortcut = shortcut
+        self.origin = origin
+        self.scope = scope
+        self.risk = risk
+        self.availability = availability
+        self.nextInput = nextInput
+        self.shortcutEditable = shortcutEditable
+    }
+}
+
+struct HostCommandInputRequest: Equatable, Sendable {
+    enum Kind: String, Equatable, Sendable {
+        case session
+    }
+
+    let kind: Kind
+    let prompt: String
+    let searchPlaceholder: String
+}
+
+struct HostCommandInputOption: Equatable, Sendable {
+    let id: String
+    let title: String
+    let detail: String?
+}
+
+struct HostCommandInputValue: Equatable, Sendable {
+    let kind: HostCommandInputRequest.Kind
+    let id: String
+}
+
+struct HostCommandInvocationRequest: Equatable, Sendable {
+    let commandID: String
+    let input: HostCommandInputValue?
+
+    init(commandID: String, input: HostCommandInputValue? = nil) {
+        self.commandID = commandID
+        self.input = input
+    }
 }
 
 extension AppCommand {
@@ -56,7 +118,8 @@ extension AppCommand {
     /// shortcut settings and palettes therefore cannot drift on identity or presentation.
     func hostDescriptor(
         shortcut: String?,
-        availability: HostCommandDescriptor.Availability
+        availability: HostCommandDescriptor.Availability,
+        nextInput: HostCommandInputRequest? = nil
     ) -> HostCommandDescriptor {
         let hostOrigin: HostCommandDescriptor.Origin
         switch origin {
@@ -80,7 +143,9 @@ extension AppCommand {
             origin: hostOrigin,
             scope: HostCommandDescriptor.Scope(rawValue: scope.rawValue) ?? .application,
             risk: HostCommandDescriptor.Risk(rawValue: risk.rawValue) ?? .ordinary,
-            availability: availability
+            availability: availability,
+            nextInput: nextInput,
+            shortcutEditable: isEditable
         )
     }
 }
@@ -95,33 +160,79 @@ enum HostCommandInvocationOutcome: Equatable, Sendable {
 @MainActor
 final class HostCommandPlane {
     typealias CatalogProvider = @MainActor () -> [HostCommandDescriptor]
-    typealias Invoker = @MainActor (String) -> HostCommandInvocationOutcome
+    typealias InputProvider = @MainActor (
+        String,
+        HostCommandInputRequest
+    ) -> [HostCommandInputOption]
+    typealias Invoker = @MainActor (HostCommandInvocationRequest) -> HostCommandInvocationOutcome
 
     private let catalogProvider: CatalogProvider
+    private let inputProvider: InputProvider
     private let invoker: Invoker
 
-    init(catalog: @escaping CatalogProvider, invoke: @escaping Invoker) {
+    init(
+        catalog: @escaping CatalogProvider,
+        invoke: @escaping @MainActor (String) -> HostCommandInvocationOutcome
+    ) {
         catalogProvider = catalog
-        invoker = invoke
+        inputProvider = { _, _ in [] }
+        invoker = { invoke($0.commandID) }
+    }
+
+    init(
+        catalog: @escaping CatalogProvider,
+        inputOptions: @escaping InputProvider,
+        invokeRequest: @escaping Invoker
+    ) {
+        catalogProvider = catalog
+        inputProvider = inputOptions
+        invoker = invokeRequest
     }
 
     func commands() -> [HostCommandDescriptor] {
         catalogProvider()
     }
 
+    func inputOptions(commandID: String) -> [HostCommandInputOption] {
+        guard let command = catalogProvider().first(where: { $0.id == commandID }),
+              let request = command.nextInput else { return [] }
+        return inputProvider(commandID, request)
+    }
+
     /// Re-enumerates before invoking. An extension can disappear and a project/session/surface
     /// can change after a palette row was drawn; the stale row never becomes permission.
     func invoke(commandID: String) -> HostCommandInvocationOutcome {
-        guard let current = catalogProvider().first(where: { $0.id == commandID }) else {
-            return .refused(commandID: commandID, reason: "This command is no longer available.")
+        invoke(HostCommandInvocationRequest(commandID: commandID))
+    }
+
+    func invoke(_ request: HostCommandInvocationRequest) -> HostCommandInvocationOutcome {
+        guard let current = catalogProvider().first(where: { $0.id == request.commandID }) else {
+            return .refused(
+                commandID: request.commandID,
+                reason: "This command is no longer available."
+            )
         }
+
+        if let nextInput = current.nextInput {
+            guard let input = request.input, input.kind == nextInput.kind else {
+                return .refused(commandID: current.id, reason: nextInput.prompt)
+            }
+            guard inputProvider(current.id, nextInput).contains(where: { $0.id == input.id }) else {
+                return .refused(
+                    commandID: current.id,
+                    reason: "That selection is no longer available."
+                )
+            }
+            return invoker(request)
+        }
+
         guard current.availability.isAvailable else {
             return .refused(
-                commandID: commandID,
+                commandID: request.commandID,
                 reason: current.availability.disabledReason ?? "This command is unavailable."
             )
         }
-        return invoker(commandID)
+        return invoker(request)
     }
 }
 
@@ -162,6 +273,45 @@ enum HostCommandSearch {
             else if origin.contains(query) { score = 50 }
             else { continue }
             ranked.append((score, command))
+        }
+        return ranked.sorted { left, right in
+            if left.0 != right.0 { return left.0 < right.0 }
+            return left.1.title.localizedStandardCompare(right.1.title) == .orderedAscending
+        }
+        .prefix(boundedLimit)
+        .map(\.1)
+    }
+}
+
+enum HostCommandInputSearch {
+    static let maximumResults = HostCommandSearch.maximumResults
+
+    static func results(
+        in options: [HostCommandInputOption],
+        matching rawQuery: String,
+        limit: Int = maximumResults
+    ) -> [HostCommandInputOption] {
+        let boundedLimit = max(0, min(limit, maximumResults))
+        guard boundedLimit > 0 else { return [] }
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines).folded
+        guard !query.isEmpty else { return Array(options.prefix(boundedLimit)) }
+
+        var ranked: [(Int, HostCommandInputOption)] = []
+        ranked.reserveCapacity(min(options.count, maximumResults * 2))
+        for (index, option) in options.enumerated() {
+            if index.isMultiple(of: 128), Task.isCancelled { return [] }
+            let title = option.title.folded
+            let detail = option.detail?.folded ?? ""
+            let id = option.id.folded
+            let score: Int
+            if title == query { score = 0 }
+            else if title.hasPrefix(query) { score = 10 }
+            else if title.split(separator: " ").contains(where: { $0.hasPrefix(query) }) { score = 20 }
+            else if title.contains(query) { score = 30 }
+            else if detail.contains(query) { score = 40 }
+            else if id.contains(query) { score = 50 }
+            else { continue }
+            ranked.append((score, option))
         }
         return ranked.sorted { left, right in
             if left.0 != right.0 { return left.0 < right.0 }

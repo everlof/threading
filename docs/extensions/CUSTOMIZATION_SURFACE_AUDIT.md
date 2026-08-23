@@ -32,6 +32,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
+| Command palette | — | host-only | command identity and availability, focus/dismissal, bounded search, shortcut ownership/conflicts, explicit target collection and last-moment invocation checks | Host-only |
 | Mobile terminal key bar | — | host-only | PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
 | Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
@@ -76,6 +77,13 @@ contracts. Threading owns persisted project membership, chat-versus-terminal cla
 stable order inside each type, direction persistence and the navigation destination; allowing a
 replacement control to contradict any of those facts would make the same terminal appear to have
 different ownership across surfaces.
+
+The command palette remains host-only even though extensions may contribute semantic commands to
+its registry. Threading owns the query and keyboard state, the 100-row presentation cap, shortcut
+conflict policy, input prompts, session-target revalidation, overlay dismissal and the one host
+invoker. An extension may customize its command's published title, detail, icon, scope and default
+shortcut through the command contract; it may not replace the shell and visually claim a disabled
+command, stolen shortcut or stale target is executable.
 
 The mobile terminal key bar is host-only even though its key layout is deliberately customizable
 by the person using that phone. Its presentation is inseparable from permission-gated PTY writes,

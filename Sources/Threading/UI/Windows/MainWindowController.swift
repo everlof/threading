@@ -3375,7 +3375,69 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Opens the rename prompt for the chat currently shown in the main pane.
     func renameCurrentSession() {
         guard let currentSessionID else { return }
-        sidebarViewController.promptToRenameSession(currentSessionID)
+        renameSession(currentSessionID)
+    }
+
+    func renameSession(_ sessionID: SessionID) {
+        guard isCommandTargetSessionAvailable(sessionID) else { return }
+        sidebarViewController.promptToRenameSession(sessionID)
+    }
+
+    /// Lightweight values for the palette's virtualized second step. The project store already
+    /// owns these records in memory; only strings and stable ids cross into the command plane.
+    func commandSessionOptions(for commandID: String) -> [HostCommandInputOption] {
+        var options: [HostCommandInputOption] = []
+        for project in environment.projectStore.projects {
+            for session in project.sessions where !session.isArchived {
+                if commandID == AppCommands.ID.makeManager,
+                   ControlGrantStore.shared.isManager(session.id) {
+                    continue
+                }
+                if commandID == AppCommands.ID.revokeManager,
+                   !ControlGrantStore.shared.isManager(session.id) {
+                    continue
+                }
+                options.append(HostCommandInputOption(
+                    id: session.id.uuidString.lowercased(),
+                    title: session.displayTitle,
+                    detail: "\(project.name) · \(session.kind.displayName)"
+                ))
+            }
+        }
+        return options
+    }
+
+    func isCommandTargetSessionAvailable(_ sessionID: SessionID) -> Bool {
+        environment.projectStore.session(withID: sessionID)?.isArchived == false
+    }
+
+    func projectID(forCommandTarget sessionID: SessionID) -> ProjectID? {
+        environment.projectStore.project(forSessionID: sessionID)?.id
+    }
+
+    /// Surface commands still act through their ordinary current-session implementation. The
+    /// sidebar deliberately presents on the next main-loop turn; queueing behind that turn keeps
+    /// the command from briefly acting on the page the user was leaving.
+    @discardableResult
+    func performAfterSelectingSession(
+        _ sessionID: SessionID,
+        action: @escaping @MainActor () -> Void
+    ) -> Bool {
+        guard isCommandTargetSessionAvailable(sessionID) else { return false }
+        if currentSessionID == sessionID {
+            action()
+            return true
+        }
+
+        sidebarViewController.select(sessionID: sessionID)
+        DispatchQueue.main.async { [weak self] in
+            guard self?.currentSessionID == sessionID else {
+                SystemAlert.refuse()
+                return
+            }
+            action()
+        }
+        return true
     }
 
     /// The dedicated header button always points to the surface not currently on screen.
@@ -3718,8 +3780,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     func makeCurrentSessionManager() {
-        guard let sessionID = currentSessionID,
-              !ControlGrantStore.shared.isManager(sessionID),
+        guard let sessionID = currentSessionID else { return }
+        makeSessionManager(sessionID)
+    }
+
+    func makeSessionManager(_ sessionID: SessionID) {
+        guard !ControlGrantStore.shared.isManager(sessionID),
               let session = environment.projectStore.session(withID: sessionID)
         else { return }
         let projectName = environment.projectStore.project(forSessionID: sessionID)?.name
@@ -3743,6 +3809,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     func revokeCurrentManagerRole() {
         guard let sessionID = currentSessionID else { return }
+        revokeManagerRole(for: sessionID)
+    }
+
+    func revokeManagerRole(for sessionID: SessionID) {
+        guard isCommandTargetSessionAvailable(sessionID) else { return }
         _ = ControlGrantStore.shared.revokeManager(sessionID: sessionID)
     }
 
@@ -3781,7 +3852,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Closes the current session's terminal, leaving it dormant and resumable.
     func closeCurrentSession() {
-        sessionCoordinator.closeCurrentSession()
+        guard let currentSessionID else { return }
+        closeSession(currentSessionID)
+    }
+
+    func closeSession(_ sessionID: SessionID) {
+        guard isCommandTargetSessionAvailable(sessionID) else { return }
+        sessionCoordinator.closeSession(sessionID)
     }
 
     func increaseFontSize() {

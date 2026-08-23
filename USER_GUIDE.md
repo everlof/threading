@@ -1111,7 +1111,8 @@ app default.
 ### Project scripts
 
 A repository can check in a versioned `.threading.json` at its root to name up to 32 commands.
-Valid commands appear under **Project ▸ Scripts** and in the **Command Palette** (**Cmd+K**).
+Valid commands appear under **Project ▸ Scripts** and in the **Command Palette**
+(**Cmd+Shift+P**).
 Each script has a stable lowercase ID, display name and one-line command; it may also name an SF
 Symbol, a checkout-relative working directory, and an HTTP(S) preview URL. The complete schema is
 checked in at `docs/schemas/threading-project.schema.json`.
@@ -4778,13 +4779,30 @@ options and **Check for Updates** — a newer build is a perfectly good fix for 
 If a launch you asked to try normally also fails, or if the recovery launch itself fails, the
 screen says so and leads with the offers further down the list instead.
 
+## Command Palette
+
+Press **Cmd+Shift+P** to search app, extension, and project-script commands. Use the arrow keys to
+move and Return to run. The result area shows at most six rows at once and scrolls when there are
+more.
+
+Session commands do not require you to select a chat first. If a command such as **Close Session**
+or **Rename Session** only needs a session and none is selected, press **Tab or Return** to move to
+an inline session search, type part of the chat, project, or provider name, and press Return on the
+target. Escape returns to the command query; a command that needs a specific visible surface still
+says so instead of offering an unusable session choice.
+
+Shortcuts are right-aligned in each command row. Click an editable shortcut (including **—** for
+an unbound command), then press the new combination. Delete clears it and Escape cancels. A chord
+already owned by another command is refused inline. The change is the same persistent override
+shown by menus and **Settings ▸ Keyboard**.
+
 ## Keyboard Shortcuts
 
 ### Projects & Sessions
 | Action | Shortcut |
 |--------|----------|
 | New Session (opens the composer) | Cmd+N |
-| Command Palette | Cmd+K |
+| Command Palette | Cmd+Shift+P |
 | Start the session being composed (Return breaks the line, unless you changed Settings ▸ Keyboard ▸ Composer) | Cmd+Return |
 | Add Existing Project | Cmd+Shift+N |
 | Open in External App (this checkout, in the app you last chose) | Cmd+O |
@@ -4856,10 +4874,11 @@ Option is otherwise left to the keyboard layout rather than claimed as a Meta ke
 
 ### Changing shortcuts
 
-**Settings ▸ Keyboard** lists every command and the keys it answers to. Click a shortcut and
-press the combination you want; Escape cancels and Delete removes the shortcut entirely. A
-change takes effect immediately — the menu bar is updated in place rather than at next launch.
-Dropdown and right-click menu actions show that same live binding in a trailing shortcut column.
+**Settings ▸ Keyboard** lists every command and the keys it answers to. The Command Palette also
+lets you edit its right-aligned shortcut column directly. Click a shortcut and press the
+combination you want; Escape cancels and Delete removes the shortcut entirely. A change takes
+effect immediately — the menu bar is updated in place rather than at next launch. Dropdown and
+right-click menu actions show that same live binding in a trailing shortcut column.
 
 Threading's own commands can be rebound. The system ones (Quit, Cut, Copy, Paste, Full Screen and
 the like) are listed but fixed, so the page can answer "what already owns this key" without
