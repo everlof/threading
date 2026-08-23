@@ -81,7 +81,7 @@ struct RemoteAttachmentsView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .accessibilityLabel("Close attachments")
+                    .accessibilityLabel(MobileL10n.string("Close attachments"))
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -91,7 +91,7 @@ struct RemoteAttachmentsView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(isLoading)
-                .accessibilityLabel("Refresh attachments")
+                .accessibilityLabel(MobileL10n.string("Refresh attachments"))
             }
         }
         .background(theme.ground)

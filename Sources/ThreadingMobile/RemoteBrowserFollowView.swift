@@ -72,7 +72,7 @@ struct RemoteBrowserFollowView: View {
                     }
                 }
                 .disabled(isLoading)
-                .accessibilityLabel("Refresh browser preview")
+                .accessibilityLabel(MobileL10n.string("Refresh browser preview"))
             }
         }
         .task(id: activity.changeSequence) {

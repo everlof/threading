@@ -396,7 +396,7 @@ struct SessionDetailView: View {
                                 : "bubble.left.and.bubble.right"
                         )
                     }
-                    .accessibilityLabel("Native, experimental")
+                    .accessibilityLabel(MobileL10n.string("Native, experimental"))
                     Button {
                         confirmSurfaceSwitch(to: .terminal)
                     } label: {

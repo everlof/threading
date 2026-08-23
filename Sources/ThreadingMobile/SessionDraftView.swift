@@ -428,7 +428,7 @@ private struct SessionDraftComposerScreen: View {
             in: Circle()
         )
         .disabled(!canSubmit)
-        .accessibilityLabel("Start session")
+        .accessibilityLabel(MobileL10n.string("Start session"))
     }
 
     /// A chat gets one of the task suggestions; a manager is briefed, not tasked.
@@ -458,7 +458,7 @@ private struct SessionDraftComposerScreen: View {
         // frame. A fresh identity per value is a fresh button, measured for what it says.
         .id(projectID)
         .disabled(isSubmitting)
-        .accessibilityLabel("Project")
+        .accessibilityLabel(MobileL10n.string("Project"))
         .accessibilityValue(selectedProject?.name ?? "")
     }
 
@@ -479,7 +479,7 @@ private struct SessionDraftComposerScreen: View {
         }
         .id(role)
         .disabled(isSubmitting)
-        .accessibilityLabel("Role")
+        .accessibilityLabel(MobileL10n.string("Role"))
         .accessibilityValue(role.title)
     }
 
@@ -521,7 +521,7 @@ private struct SessionDraftComposerScreen: View {
             )
         }
         .disabled(isSubmitting)
-        .accessibilityLabel("Agent")
+        .accessibilityLabel(MobileL10n.string("Agent"))
         .accessibilityValue(selectedIdentityAccessibilityValue)
     }
 
@@ -553,7 +553,7 @@ private struct SessionDraftComposerScreen: View {
             )
         }
         .disabled(isSubmitting)
-        .accessibilityLabel("Interface")
+        .accessibilityLabel(MobileL10n.string("Interface"))
         .accessibilityValue(selectedSurfaceTitle)
     }
 
@@ -645,7 +645,7 @@ private struct SessionDraftComposerScreen: View {
         }
         .id(runSummary)
         .disabled(models.isEmpty && selectedModel == nil)
-        .accessibilityLabel("Model and effort")
+        .accessibilityLabel(MobileL10n.string("Model and effort"))
         .accessibilityValue(runSummary)
     }
 
@@ -686,7 +686,7 @@ private struct SessionDraftComposerScreen: View {
             DraftIconMenuLabel(symbol: "hand.raised", isSet: !permissionID.isEmpty)
         }
         .disabled(isSubmitting)
-        .accessibilityLabel("Permissions")
+        .accessibilityLabel(MobileL10n.string("Permissions"))
         .accessibilityValue(selectedPermissionName)
     }
 

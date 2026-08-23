@@ -399,7 +399,7 @@ struct RemoteUsageDashboardView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityHint("Shows this window's history below")
+                    .accessibilityHint(MobileL10n.string("Shows this window's history below"))
                 }
                 if activeWindows.isEmpty {
                     Text("No active windows")
@@ -960,7 +960,7 @@ struct RemoteUsageDashboardView: View {
                 }
                 .frame(height: 250)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Limit history chart")
+                .accessibilityLabel(MobileL10n.string("Limit history chart"))
                 .accessibilityValue(limitChartSummary(detail))
 
                 LazyVGrid(

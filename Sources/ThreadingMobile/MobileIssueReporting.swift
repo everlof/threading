@@ -131,7 +131,7 @@ struct MobileIssueReportView: View {
                                     RoundedRectangle(cornerRadius: 12)
                                         .stroke(theme.border, lineWidth: 1)
                                 }
-                                .accessibilityLabel("Screenshot that will be shared")
+                                .accessibilityLabel(MobileL10n.string("Screenshot that will be shared"))
                         }
                     } else if request.screenshotWasRequested {
                         Label("The current screen couldn’t be captured", systemImage: "photo.badge.exclamationmark")

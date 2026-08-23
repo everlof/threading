@@ -1430,7 +1430,7 @@ struct NotificationOnboardingCard: View {
                 .tint(theme.accent)
                 .foregroundStyle(theme.ground)
                 .disabled(isRequesting)
-                .accessibilityLabel("Turn on notifications")
+                .accessibilityLabel(MobileL10n.string("Turn on notifications"))
             }
         }
         .padding(18)

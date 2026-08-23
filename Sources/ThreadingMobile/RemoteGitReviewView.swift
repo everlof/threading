@@ -96,7 +96,7 @@ struct RemoteGitReviewView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .accessibilityLabel("Close review")
+                    .accessibilityLabel(MobileL10n.string("Close review"))
                 }
             }
 
@@ -145,7 +145,7 @@ struct RemoteGitReviewView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(isLoadingReview || isLoadingFiles)
-                .accessibilityLabel("Refresh review")
+                .accessibilityLabel(MobileL10n.string("Refresh review"))
             }
         }
         .task(id: mode) {
@@ -343,7 +343,7 @@ struct RemoteGitReviewView: View {
         }
         .buttonStyle(.plain)
         .transition(.scale(scale: 0.82).combined(with: .opacity))
-        .accessibilityLabel("Scroll to the end of the repository")
+        .accessibilityLabel(MobileL10n.string("Scroll to the end of the repository"))
         .padding(.horizontal, 16)
         .padding(.bottom, 10)
     }

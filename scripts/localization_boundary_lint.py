@@ -686,6 +686,15 @@ def audit_mobile(root: pathlib.Path) -> list[Finding]:
                 if key is not None:
                     if key:
                         used_keys.add(key)
+                    if (
+                        terminal in {"accessibilityLabel", "accessibilityHint"}
+                        and "MobileL10n.string(" not in expression
+                    ):
+                        findings.append(Finding(
+                            relative_path,
+                            line_number(source, offset),
+                            f'SwiftUI "{terminal}" literal must resolve through MobileL10n',
+                        ))
                     continue
                 values = literal_values(expression)
                 if (

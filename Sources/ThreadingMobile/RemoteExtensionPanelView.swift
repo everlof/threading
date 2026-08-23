@@ -71,7 +71,7 @@ struct RemoteExtensionPanelView: View {
                 Button { Task { await load() } } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .accessibilityLabel("Refresh extension panel")
+                .accessibilityLabel(MobileL10n.string("Refresh extension panel"))
             }
         }
         .task(id: "\(session.id)|\(extensionIdentifier)|\(panelID)") {

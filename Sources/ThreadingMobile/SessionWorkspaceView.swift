@@ -118,7 +118,7 @@ struct SessionWorkspaceView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .accessibilityLabel("Close workspace")
+                    .accessibilityLabel(MobileL10n.string("Close workspace"))
                 }
             }
         }

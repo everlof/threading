@@ -968,7 +968,7 @@ struct SessionDashboard: View {
                         )
                         .background(theme.controlResting, in: Circle())
                 }
-                .accessibilityLabel("Choose Mac")
+                .accessibilityLabel(MobileL10n.string("Choose Mac"))
             }
         }
         ToolbarItem(placement: .principal) {
@@ -1099,7 +1099,7 @@ struct SessionDashboard: View {
                         )
                         .background(theme.controlResting, in: Circle())
                 }
-                .accessibilityLabel("Remote access options")
+                .accessibilityLabel(MobileL10n.string("Remote access options"))
             }
         }
     }
@@ -1638,7 +1638,7 @@ private struct ProjectWorkGroup: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Shows this project’s sessions")
+                .accessibilityHint(MobileL10n.string("Shows this project’s sessions"))
                 Spacer(minLength: MobileDesign.Spacing.tight)
                 if let startNewSession {
                     NewSessionButton(
@@ -1780,7 +1780,7 @@ private struct SessionListItem: View {
                 } preview: {
                     liftedRow
                 }
-                .accessibilityHint("Long press for session actions")
+                .accessibilityHint(MobileL10n.string("Long press for session actions"))
         } else {
             sessionRow
         }
@@ -1909,7 +1909,7 @@ private struct SessionListItem: View {
                             : "bubble.left.and.bubble.right"
                     )
                 }
-                .accessibilityLabel("Native, experimental")
+                .accessibilityLabel(MobileL10n.string("Native, experimental"))
                 Button {
                     action(.surface(.terminal), session)
                 } label: {
@@ -2248,7 +2248,7 @@ private struct SessionRow: View {
                 Image(systemName: "pin.fill")
                     .font(.caption2)
                     .foregroundStyle(theme.accent)
-                    .accessibilityLabel("Pinned")
+                    .accessibilityLabel(MobileL10n.string("Pinned"))
             }
             if isWorking {
                 DashboardWorkingIndicator()

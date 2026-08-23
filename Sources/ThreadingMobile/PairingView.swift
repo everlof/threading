@@ -182,7 +182,7 @@ struct PairingView: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Paste")
+                .accessibilityLabel(MobileL10n.string("Paste"))
             }
 
             Button {
