@@ -20,7 +20,12 @@ enum PTYHostDefaults {
 
     /// The directory holding the rendezvous socket, the daemon's own journal and its
     /// `sessions.jsonl` state. A sibling of `bridge/`, created `0700`.
-    static let directoryName = "pty"
+    ///
+    /// Taken from the package both processes link rather than spelled again here: the launchd
+    /// plist cannot name a home-relative path, so the daemon derives this same directory from
+    /// `PTYHostDefaultLocations` when it is started with `--default-locations`, and two copies of
+    /// the name would be two places for "where is the socket" to disagree.
+    static let directoryName = PTYHostDefaultLocations.directoryName
 
     /// Owner-only. See the type's note: this is the boundary itself.
     static let directoryPermissions = 0o700
@@ -30,8 +35,9 @@ enum PTYHostDefaults {
     static let filePermissions = 0o600
 
     /// The rendezvous. One per user, byte-identical across launches, which is what lets the app
-    /// find a daemon it did not start.
-    static let socketFileName = "ptyd.sock"
+    /// find a daemon it did not start — and shared with the daemon through
+    /// `PTYHostDefaultLocations` for the reason `directoryName` gives.
+    static let socketFileName = PTYHostDefaultLocations.socketFileName
 
     /// The `product-type.tool` daemon, shipped in the app bundle beside the other helpers.
     ///

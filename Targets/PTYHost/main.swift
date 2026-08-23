@@ -1,10 +1,11 @@
 import Darwin
 import Dispatch
 import Foundation
+import ThreadingPTYHostKit
 
 // MARK: - Arguments
 
-/// The daemon's entire configuration, and both halves of it come from the caller.
+/// The daemon's entire configuration, and both halves of it normally come from the caller.
 ///
 /// **The daemon has no path policy of its own.** Where the rendezvous lives and where the state
 /// directory is are one decision, made in the app beside the other owner-only directories under
@@ -16,26 +17,51 @@ import Foundation
 /// So a malformed command line is refused rather than defaulted: the app builds it, so getting it
 /// wrong is a bug in the app, and a daemon listening somewhere nobody is looking would be
 /// indistinguishable from one that never started.
+///
+/// **`--default-locations` is the one exception, and it exists for launchd.** The plist that
+/// registers this daemon is a file inside the signed app bundle — one copy for every account on
+/// the machine, unwritable at runtime without breaking the seal — and launchd passes
+/// `ProgramArguments` to `execvp` verbatim, so it cannot carry a home-relative path and will not
+/// expand `~`. The flag asks the daemon to derive the same two paths the app would have named,
+/// from the names both ends share in `PTYHostDefaultLocations`. It takes no value, is refused
+/// alongside `--socket`/`--state`, and is used by the plist and by nothing else: every test still
+/// names its own scratch rendezvous explicitly.
 struct PTYHostArguments {
     let socketPath: String
     let stateDirectory: String
 
-    static let usage = "usage: threading-ptyd --socket <path> --state <dir>"
+    static let usage = """
+        usage: threading-ptyd --socket <path> --state <dir>
+               threading-ptyd \(PTYHostDefaultLocations.defaultLocationsArgument)
+        """
 
     private enum Flag {
         static let socket = "--socket"
         static let state = "--state"
     }
 
-    /// Parses the arguments after `argv[0]`. Both flags are required, may appear once, and must
-    /// carry a non-empty value; anything else answers nil.
+    /// Parses the arguments after `argv[0]`.
+    ///
+    /// Either both value flags are present, once each and with a non-empty value, or
+    /// `--default-locations` is present alone. Anything else — a half-named pair, both forms at
+    /// once, an unknown flag — answers nil, because a daemon that guessed would listen somewhere
+    /// nobody is looking.
     static func parse(_ arguments: [String]) -> PTYHostArguments? {
         var socketPath: String?
         var stateDirectory: String?
+        var usesDefaultLocations = false
 
         var index = arguments.startIndex
         while index < arguments.endIndex {
             let flag = arguments[index]
+
+            if flag == PTYHostDefaultLocations.defaultLocationsArgument {
+                guard !usesDefaultLocations else { return nil }
+                usesDefaultLocations = true
+                index = arguments.index(after: index)
+                continue
+            }
+
             let valueIndex = arguments.index(after: index)
             guard valueIndex < arguments.endIndex else { return nil }
             let value = arguments[valueIndex]
@@ -52,6 +78,20 @@ struct PTYHostArguments {
                 return nil
             }
             index = arguments.index(after: valueIndex)
+        }
+
+        if usesDefaultLocations {
+            // Not a fallback for a half-named command line: mixing the two would let a typo in
+            // `--socket` quietly become "the default one", which is the failure the required
+            // flags exist to prevent.
+            guard socketPath == nil, stateDirectory == nil else { return nil }
+            guard let directory = PTYHostDefaultLocations.directory() else { return nil }
+            return PTYHostArguments(
+                socketPath: directory
+                    .appendingPathComponent(PTYHostDefaultLocations.socketFileName, isDirectory: false)
+                    .path,
+                stateDirectory: directory.path
+            )
         }
 
         guard let socketPath, let stateDirectory else { return nil }

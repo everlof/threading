@@ -151,6 +151,140 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
         try watcher.kill(PTYHostKill(id: session, escalate: true))
     }
 
+    // MARK: - The upgrade handshake
+
+    /// P2, end to end: replacing the bundle leaves launchd's registration pointing at a path
+    /// whose binary has changed, and the daemon already running keeps executing the old image.
+    /// Nothing in the OS ends it. This is the ask that does.
+    func testAStaleDaemonHoldingNothingIsRetiredAndExitsOnItsOwn() throws {
+        let socketPath = try startDaemon()
+
+        let decision = PTYHostUpgradeCheck.run(
+            socketPath: socketPath,
+            ownBuild: "slice8-a-different-build (999)",
+            eventLog: EventLog(directory: scratch)
+        )
+        XCTAssertEqual(decision, .retire)
+
+        // The unlink is immediate and is the point of the frame: a replacement binary has to be
+        // able to bind the path while this process is still finishing its work.
+        XCTAssertTrue(
+            waitFor { !FileManager.default.fileExists(atPath: socketPath) },
+            "a retiring daemon unlinks its rendezvous before it drains"
+        )
+        XCTAssertTrue(
+            waitFor { self.daemon?.isRunning == false },
+            "a retiring daemon holding nothing exits, which is what lets KeepAlive exec the new binary"
+        )
+    }
+
+    /// The other half, and the reason `retire` is not a kill: a daemon of the wrong build that is
+    /// holding somebody's agents keeps them.
+    func testAStaleDaemonHoldingASessionIsLeftRunning() throws {
+        let socketPath = try startDaemon()
+        let journal = EventLog(directory: scratch)
+        let recorder = PTYHostEventRecorder()
+        let holder = PTYHostClient(
+            socketPath: socketPath,
+            build: PTYHostBuild.string(for: .main),
+            events: recorder.events,
+            eventLog: journal
+        )
+        self.client = holder
+        try holder.connect()
+        let held = PTYHostSessionIdentity.agentSession(SessionID())
+        try holder.spawn(
+            PTYHostSpawnRequest(
+                id: held,
+                channel: .pty(grid: PTYHostGrid(cols: 80, rows: 24)),
+                executable: "/bin/sh",
+                arguments: ["-c", "printf hi; sleep 30"],
+                environment: ["TERM=xterm-256color", "PATH=/usr/bin:/bin"],
+                cwd: NSTemporaryDirectory()
+            )
+        )
+        XCTAssertTrue(recorder.waitForOutput(2), "the child has to be running to be held")
+
+        XCTAssertEqual(
+            PTYHostUpgradeCheck.run(
+                socketPath: socketPath,
+                ownBuild: "slice8-a-different-build (999)",
+                eventLog: journal
+            ),
+            .leave(.holdsSessions(1))
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: socketPath),
+            "nothing was retired, so the rendezvous is still there"
+        )
+        XCTAssertEqual(daemon?.isRunning, true)
+
+        // And the count that decision rested on is the one the removal decision reads, which is
+        // what stops turning the hidden key off from killing a working agent.
+        XCTAssertEqual(
+            PTYHostUpgradeCheck.heldSessions(
+                socketPath: socketPath,
+                ownBuild: PTYHostBuild.string(for: .main),
+                eventLog: journal
+            ),
+            1
+        )
+        XCTAssertEqual(
+            PTYHostRegistration.removalDecision(heldSessions: 1),
+            .leave(heldSessions: 1)
+        )
+
+        // Ended here rather than left for teardown: killing the daemon orphans its children, and
+        // a `sleep` reparented to launchd outlives this process (the R4 finding).
+        try holder.kill(PTYHostKill(id: held, escalate: true))
+    }
+
+    /// The ordinary launch: the daemon is the one this build installed, so there is nothing to do
+    /// and nothing is said.
+    func testADaemonOfThisBuildIsLeftAlone() throws {
+        let socketPath = try startDaemon()
+        let journal = EventLog(directory: scratch)
+
+        let client = PTYHostClient(
+            socketPath: socketPath,
+            build: PTYHostBuild.string(for: .main),
+            events: .ignored,
+            eventLog: journal
+        )
+        let hello = try client.connect()
+        client.close()
+
+        XCTAssertEqual(
+            PTYHostUpgradeCheck.run(
+                socketPath: socketPath,
+                ownBuild: hello.build,
+                eventLog: journal
+            ),
+            .leave(.sameBuild)
+        )
+        XCTAssertEqual(daemon?.isRunning, true)
+    }
+
+    /// Nothing is listening. Every caller's answer to that is to leave the daemon alone, which is
+    /// also what happens when there was never a daemon at all.
+    func testNothingListeningIsNotADecision() {
+        let socketPath = scratch.appendingPathComponent("absent.sock").path
+        XCTAssertNil(
+            PTYHostUpgradeCheck.run(
+                socketPath: socketPath,
+                ownBuild: PTYHostBuild.string(for: .main),
+                eventLog: EventLog(directory: scratch)
+            )
+        )
+        XCTAssertNil(
+            PTYHostUpgradeCheck.heldSessions(
+                socketPath: socketPath,
+                ownBuild: PTYHostBuild.string(for: .main),
+                eventLog: EventLog(directory: scratch)
+            )
+        )
+    }
+
     // MARK: - Helpers
 
     /// Starts the shipped daemon against a scratch rendezvous.

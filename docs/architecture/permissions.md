@@ -75,6 +75,45 @@ The consequence for the Info.plist: `NSDesktopFolderUsageDescription`,
 the user is told *why*, and they apply to unsandboxed apps too — the file dialog does not excuse
 them, because the process that trips the gate later is the agent, not the open panel.
 
+### The PTY host daemon breaks the parent relationship, and that is unverified
+
+`threading-ptyd` ([`pty-host.md`](pty-host.md)) exists to hold an agent's pseudo-terminal while
+Threading is closed, so a session it spawns is **not a directly spawned, supervised child of
+Threading**. It is a child of a launchd agent: `ppid = 1`, `uid` the user's, `cwd = /`,
+`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, outside the app's process tree entirely, related to the app
+only through the Background Task Management record's `Parent Identifier`. There is no inheritance
+path by which it could pick up Threading's grants the way the rule above describes.
+
+**Whether TCC then attributes its file access to `threading-ptyd`, to Threading, or to nothing at
+all was not measured, and cannot be measured on this machine.** `csrutil status` reports SIP
+**disabled** here, so TCC's file protections are not enforced: a probe run on 2026-08-23 read
+`~/Documents` and even `TCC.db` successfully from a plain terminal, from the agent's own program,
+from a binary the agent spawned directly, and from a `forkpty` grandchild — no prompt, no denial,
+nothing to attribute. Every arm passed because there was nothing to pass.
+
+The one launchd datapoint this document already records points the other way and is worth
+re-reading here: for Bonjour, "the same binary registers when run from a terminal (exempt) and
+silently registers nothing as a launchd agent (not exempt), with no alert shown". A privilege that
+the app holds and its launchd agent does not is exactly the shape this risk has. Expect the
+daemon's children to be prompted — or denied — under the *daemon's* identity, and design against
+that until it is measured.
+
+**So `AppSettings.ptyHostEnabled` must not default on until this has been run on a SIP-enabled
+Mac.** It ships off, it is a hidden key
+(`defaults write codes.threading ptyHostEnabled -bool true`), and every way the host is
+unavailable degrades to today's in-process `forkpty`. The experiment to run there is small: turn
+the key on, start a Claude session, have it read a file under `~/Documents`, and watch which
+application the prompt names and what the read returns.
+
+**The fallback if it fails is designed and costs one frame.** Invert who forks: the *app* calls
+`forkpty`, so the child is Threading's and is attributed to Threading, and passes the master
+descriptor to the daemon over `SCM_RIGHTS`. The daemon holds a dup, so the master never closes
+when Threading exits and the child never gets `SIGHUP` — the same mechanism, used in our favour.
+The protocol keeps room for that `adopt` frame beside `spawn`. Its cost is that the daemon cannot
+`waitpid` a child it did not fork (it detects end of file on the master and probes the pid
+instead) and that **a session cannot be started while the app is closed** — which forfeits nothing
+that has shipped, because v1 never spawns while detached anyway.
+
 ## The Local Network permission is in play, for one reason: Bonjour
 
 Threading's own listeners never needed it. `MCPServer` and `ExtensionHostService` set

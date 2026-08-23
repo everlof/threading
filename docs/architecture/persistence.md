@@ -751,6 +751,18 @@ that has already cost one day's journal 23 unparseable lines. The app reads a bo
 daemon's journal through a `journalTail` frame rather than sharing the file. See
 [`pty-host.md`](pty-host.md).
 
+**The daemon's launchd registration adds nothing to this directory, and that is deliberate.** What
+records that the agent is registered is launchd's own Background Task Management store and the
+Login Items row, both keyed by the label `codes.threading.ptyd` and neither of them Threading's to
+write; the app reads the state back through `SMAppService.status` rather than keeping a copy that
+could disagree with it. The plist the registration reads is a **sealed resource inside the app
+bundle** (`Contents/Library/LaunchAgents/codes.threading.ptyd.plist`), which is also why the
+daemon derives its production paths from a `--default-locations` flag instead of having them
+written into a per-user plist: a file inside a signed bundle is one copy shared by every account
+and unwritable at runtime. So the registration is the second piece of this app's state living
+outside the usual containers, beside the extension helpers' quarantine flags — see
+[`releasing.md`](releasing.md#what-remains-open).
+
 Security capabilities are the deliberate third category. Native owner-device records, including
 their 256-bit bearers, live in one versioned login-Keychain item with
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`; the paired iPhone keeps its side in its own

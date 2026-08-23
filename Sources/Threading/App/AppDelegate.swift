@@ -627,6 +627,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // restoration and the scheduled-message services live.
         guard plan.startsBackgroundServices else { return }
 
+        // The PTY host's launchd agent, aligned with `AppSettings.ptyHostEnabled`. Deliberately
+        // here: after the single-instance lock, after the launch-mode decision, and below the
+        // recovery guard — a launch that came up because the last one did not must not install
+        // something that outlives it. Started unconditionally and gated on its own key, like the
+        // branch follower and the usage poker, so turning the key on takes effect without a
+        // restart; with the key off — which is every launch until R1 in `permissions.md` is
+        // answered on a SIP-enabled Mac — it short-circuits before touching launchd. Registration
+        // is attempted and never required: every failure leaves sessions on the in-process PTY.
+        PTYHostRegistrationCoordinator.shared.start(settings: environment.settings)
+
         // One sweep of the runtime inventory, at most once a day and re-checked while the app
         // keeps running. Process and network work stay off-main; a found result waits for a
         // visible, active main window before its toast clock starts.

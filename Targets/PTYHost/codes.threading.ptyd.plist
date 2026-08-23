@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The per-user launchd agent for threading-ptyd, registered through
+	     SMAppService.agent(plistName:) from Contents/Library/LaunchAgents. Everything here was
+	     measured against a throwaway `-probe` label on 2026-08-23 rather than assumed; the
+	     `launchctl print` field each key produces is named beside it. -->
+
+	<key>Label</key>
+	<string>codes.threading.ptyd</string>
+
+	<!-- BundleProgram, not Program: the path is resolved relative to the app bundle, so a
+	     wholesale bundle replacement (the post-commit autoinstall, or a Sparkle update) leaves
+	     the registration valid instead of pointing at a deleted absolute path. launchd accepts
+	     Contents/Helpers exactly as readily as Contents/MacOS — both arms of the probe reported
+	     `program identifier = … (mode: 2)` and ran — so the daemon ships beside the other four
+	     helpers rather than in the app's own executable directory. -->
+	<key>BundleProgram</key>
+	<string>Contents/Helpers/threading-ptyd</string>
+
+	<!-- The daemon requires `--socket <path> --state <dir>` and refuses a half-named command
+	     line, because where those live is the app's decision. launchd cannot express it: this
+	     file is inside the signed bundle, shared by every account on the machine, and
+	     ProgramArguments reaches execvp verbatim with no `~` expansion. So the plist asks for the
+	     derivation by name and the daemon derives ~/Library/Application Support/Threading/pty
+	     from PTYHostDefaultLocations, which the app composes its own paths from too. Nothing else
+	     passes this flag; every test names its own scratch rendezvous.
+
+	     argv[0] is the bundle-relative program, which is what launchd passes when only
+	     BundleProgram is set — verified: `arguments = { Contents/Helpers/threading-ptyd,
+	     --default-locations }`. -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>Contents/Helpers/threading-ptyd</string>
+		<string>--default-locations</string>
+	</array>
+
+	<!-- KeepAlive is the upgrade mechanism, not just resilience: launchd binds a registration to
+	     a path rather than to a code identity, so a replaced bundle leaves the old daemon running
+	     the deleted binary's image. The app sends `retire` when the daemon holds no sessions, the
+	     daemon unlinks its socket and exits, and KeepAlive then execs whatever binary is on disk.
+	     RunAtLoad is false and deliberately kept — KeepAlive already starts the job at load
+	     (`immediate reason = speculative`), and the pair states the intent: this daemon is kept
+	     running, it is not "run once at login". -->
+	<key>KeepAlive</key>
+	<true/>
+	<key>RunAtLoad</key>
+	<false/>
+
+	<!-- Crash-loop containment. A daemon that dies inside this window is restarted on a delay
+	     rather than instantly, which is what stops a poisoned start from becoming a restart
+	     storm; the daemon's own rule — a bad frame closes one connection and never the process —
+	     is the other half. `launchctl print` reports it as `minimum runtime = 10`. -->
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<!-- How long launchd waits after SIGTERM before SIGKILL, at logout or on unregister. The
+	     daemon does not trap SIGTERM: its children are the user's agent CLIs and the session is
+	     going away with them, so there is nothing to drain that will still exist. Ten seconds is
+	     a bound on a teardown, not a budget for one. Reported as `exit timeout = 10`. -->
+	<key>ExitTimeOut</key>
+	<integer>10</integer>
+
+	<!-- The daemon holds a person's working agents, so it must not be filed under the background
+	     band that macOS throttles. Reported as `spawn type = interactive (4)`, jetsam priority
+	     40. -->
+	<key>ProcessType</key>
+	<string>Interactive</string>
+
+	<!-- What makes the Login Items row read as Threading rather than as a loose helper somebody
+	     does not recognise, and what ties the Background Task Management record to the app. -->
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>codes.threading</string>
+	</array>
+
+	<!-- Deliberately no StandardOutPath/StandardErrorPath. The daemon keeps its own dated journal
+	     in the same 0700 pty/ directory and prunes it after seven days; a launchd-redirected
+	     stream would be a second, unpruned file that nothing reads and that no retention rule
+	     covers. The app pulls a bounded tail through the `journalTail` frame instead of sharing a
+	     file. -->
+</dict>
+</plist>

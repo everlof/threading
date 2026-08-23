@@ -55,6 +55,18 @@ enum PTYHostUnavailability: Equatable, Sendable {
     /// `notRegistered`.
     case notFound
 
+    /// launchd has the registration and is waiting for the user to allow it in System Settings ▸
+    /// General ▸ Login Items.
+    ///
+    /// **Also set by registration, not by this probe**, and the one unavailability with an action
+    /// attached to it: `PTYHostRegistration.openLoginItemsSettings()` takes the user to the row.
+    /// Never observed on this machine — every measured registration from an ad-hoc Debug bundle
+    /// went straight to `enabled` with the Background Task Management record already
+    /// `[enabled, allowed, notified]` — but a managed Mac can require the approval, and a feature
+    /// that silently does nothing because a switch is off somewhere else is exactly what the
+    /// separate reasons exist to prevent.
+    case requiresApproval
+
     /// The journal token. Public in a log line: a cause, never a path or a user's text.
     var token: String {
         switch self {
@@ -65,6 +77,7 @@ enum PTYHostUnavailability: Equatable, Sendable {
         case .protocolMismatch(let compatibility): return "protocolMismatch.\(compatibility.rawValue)"
         case .notRegistered: return "notRegistered"
         case .notFound: return "notFound"
+        case .requiresApproval: return "requiresApproval"
         }
     }
 }

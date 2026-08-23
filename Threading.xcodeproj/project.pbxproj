@@ -33,6 +33,7 @@
 		7C000005000000000000A008 /* PTYHostState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000005000000000000B008 /* PTYHostState.swift */; };
 		7C000005000000000000A009 /* threading-ptyd in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000005000000000000B011 /* threading-ptyd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C000005000000000000A010 /* ThreadingPTYHostKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000005000000000000C010 /* ThreadingPTYHostKit */; };
+		7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C000006000000000000B001 /* codes.threading.ptyd.plist */; };
 		89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
 		A09CD2FDD17E4E72005ECE03 /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
@@ -184,6 +185,17 @@
 			name = "Embed Extension Helpers";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7C000006000000000000C001 /* Embed Launch Agents */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Library/LaunchAgents;
+			dstSubfolderSpec = 1;
+			files = (
+				7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */,
+			);
+			name = "Embed Launch Agents";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -222,6 +234,7 @@
 		7C000005000000000000B008 /* PTYHostState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PTYHostState.swift; sourceTree = "<group>"; };
 		7C000005000000000000B009 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7C000005000000000000B010 /* threading-ptyd.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-ptyd.entitlements"; sourceTree = "<group>"; };
+		7C000006000000000000B001 /* codes.threading.ptyd.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = codes.threading.ptyd.plist; sourceTree = "<group>"; };
 		7C000005000000000000B011 /* threading-ptyd */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-ptyd"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000010000000000000002 /* ThreadingMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThreadingMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000010000000000000015 /* Sources/Threading/AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Sources/Threading/AppIcon.icon; sourceTree = "<group>"; };
@@ -496,6 +509,7 @@
 				7C000005000000000000B008 /* PTYHostState.swift */,
 				7C000005000000000000B009 /* Info.plist */,
 				7C000005000000000000B010 /* threading-ptyd.entitlements */,
+				7C000006000000000000B001 /* codes.threading.ptyd.plist */,
 			);
 			name = "PTY Host";
 			path = Targets/PTYHost;
@@ -834,6 +848,7 @@
 				E77200010000000000000001 /* Embed Legal Notices */,
 				E77100010000000000000001 /* Embed Extension SDK */,
 				877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */,
+				7C000006000000000000C001 /* Embed Launch Agents */,
 				E77300010000000000000001 /* Embed UI Scenario Helper */,
 			);
 			buildRules = (

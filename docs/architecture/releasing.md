@@ -288,14 +288,19 @@ and 24.5 MB. The second slice was half of the product, spread over every binary 
 |---|---|---|---|
 | `Threading` (stripped) | 59.0 MB | 28.4 MB | 25.3 → 12.1 MB |
 | `WebRTC.framework` (prebuilt; the app uses its data channel only) | 27.1 MB | 11.8 MB | 12.1 → 5.5 MB |
-| `Helpers` (`scc`, wasm runner, two extension helpers) | 10.9 MB | 5.3 MB | 4.2 → 2.0 MB |
+| `Helpers` (`scc`, wasm runner, two extension helpers) [^helpers] | 10.9 MB | 5.3 MB | 4.2 → 2.0 MB |
 | `Resources` | 7.4 MB | 7.4 MB | 3.7 MB |
 | `Sparkle.framework` | 2.8 MB | 1.6 MB | 0.9 → 0.5 MB |
 
 Three things make it so, because any one of them alone would not:
 
+[^helpers]: Measured on 2026-08-08, when `Contents/Helpers` held four binaries. It holds six
+    now — `threading-mcp-bridge` and `threading-ptyd` were added since — and the row has not been
+    re-measured. Nothing in the argument turns on the figure; the thinning ratio is what it is
+    about.
+
 1. **`ARCHS[sdk=macosx*] = arm64` at the project level** builds every Mac target — the app and
-   its three helpers — for one slice, in every configuration; the iOS targets are untouched.
+   its six helpers — for one slice, in every configuration; the iOS targets are untouched.
    Swift packages built inside the workspace do not read the project's `ARCHS`, though: with
    only the project setting, every package still compiled an `x86_64` slice the link then
    discarded — 139 compiles in one archive. `release.sh` and `autoinstall.sh` therefore also
@@ -334,9 +339,35 @@ server rejection into an immediate failure naming the binary:
 | no `get-task-allow` | notarization rejects a debuggable binary outright |
 | `lipo -archs` is exactly `arm64` | a second slice is 20 MB that no supported Mac can run — see [Apple silicon only](#apple-silicon-only) |
 
-Nine binaries pass today: `Threading`, its three helpers, and Sparkle's five — `Sparkle`,
+Twelve binaries pass today: `Threading`, its six helpers — `scc`, the wasm runner, the two
+extension helpers, `threading-mcp-bridge` and `threading-ptyd` — and Sparkle's five: `Sparkle`,
 `Autoupdate`, `Updater`, `Downloader` and `Installer`. The loop is a `find` over the bundle
-rather than a list, which is why adding Sparkle needed no change to it.
+rather than a list, which is why adding Sparkle needed no change to it, and why the PTY host
+daemon needed none either.
+
+### The launch agent's plist is a resource, not code
+
+`Contents/Library/LaunchAgents/codes.threading.ptyd.plist` is the file
+`SMAppService.agent(plistName:)` reads to register `threading-ptyd`
+([`pty-host.md`](pty-host.md#registration-and-retirement)). It is copied by a **Copy Files** phase
+into the app wrapper and it is *not* signed separately: a plist under `Contents/Library` is a
+sealed resource of the app, covered by the app's own signature and by `codesign --verify --deep
+--strict`. Nothing about the export changes for it.
+
+**A helper is different, and this is the trap.** `codesign` treats everything under
+`Contents/Helpers` as nested code — **including a shell script** — and refuses to seal the bundle
+if any of it is unsigned ("code object is not signed at all / In subcomponent: …"). Anything ever
+added there needs its own `CodeSignOnCopy`, which is what the **Embed Extension Helpers** phase
+already sets for all six binaries.
+
+**`BundleProgram` is bundle-relative on purpose, and that is what makes the swap safe.** launchd
+binds a registration to a *path*, not to a code identity (measured 2026-08-23): replacing the
+whole bundle leaves `SMAppService.status` at `enabled` and the job still resolvable, because the
+path it resolves — `Contents/Helpers/threading-ptyd` inside `/Applications/Threading.app` — is
+still there. An absolute `Program` would have been fine too until the day the app moved. What the
+swap does *not* do is update the running daemon: launchd execs the new binary only on the next
+start, so the old one goes on executing the deleted image. That is what `retire` is for, and the
+app asks for it once per launch — see the [upgrade decision](pty-host.md#registration-and-retirement).
 
 Packaging uses `ditto -c -k --keepParent --sequesterRsrc`, not `zip`. Sparkle unpacks with the
 same tool, and only `ditto` preserves the symlinks and extended attributes inside a signed
@@ -398,8 +429,8 @@ phase was needed.
 `Autoupdate`, `Sparkle`, `Updater.app/Contents/MacOS/Updater`, and the `Downloader.xpc` and
 `Installer.xpc` services. `scripts/release.sh` verifies them without modification, because its
 check is a `find` over the bundle rather than a list of known binaries. With the bundled `scc`
-helper, the export signs all ten executables (five app-side, five Sparkle) as Developer ID,
-hardened and timestamped. The release gate separately verifies that `Contents/Helpers/scc` is
+helper, the MCP bridge and the PTY host daemon, the export signs all twelve executables (seven
+app-side, five Sparkle) as Developer ID, hardened and timestamped. The release gate separately verifies that `Contents/Helpers/scc` is
 the expected official arm64 build after signing.
 
 ### The UI is ours, with one documented exception
@@ -541,8 +572,12 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
 
 - Does an update need to preserve anything beyond `~/Library/Application Support/Threading`?
   Sparkle replaces the bundle, so the SQLite store and settings survive, but the extension
-  helpers' quarantine state is worth checking against a real upgrade — that is the one piece of
-  this app's state that lives outside the usual containers.
+  helpers' quarantine state is worth checking against a real upgrade — that is one of two pieces
+  of this app's state that live outside the usual containers. The other is now the PTY host's
+  launchd registration, and that one is answered: it is path-bound, so a wholesale bundle
+  replacement leaves it `enabled` and valid (measured 2026-08-23 across an autoinstall-shaped
+  swap). The registration surviving is not the same as the *daemon* being upgraded, which is why
+  `retire` exists.
 - ~~Whether Threading is distributed publicly at all.~~ Decided (2026-08-08): **public**, GPLv3
   (root `LICENSE`; the vendored SwiftTerm and the submodule forks stay MIT under their own
   files; `Service/ThreadingControlPlane/` is FSL-1.1-ALv2 — see the next entry). The model is

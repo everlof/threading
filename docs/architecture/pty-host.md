@@ -488,13 +488,15 @@ working becomes unexplainable.
 | `protocolMismatch(_)` | a daemon answered and the gate refused it | in-process PTY |
 | `notRegistered` | launchd knows the label and the service is off | in-process PTY |
 | `notFound` | launchd has never seen the label | in-process PTY |
+| `requiresApproval` | registered, and waiting for the user in System Settings ▸ Login Items | in-process PTY |
 
-The last two are **set by registration, not by the probe**. `PTYHostAvailability.resolve` has no
+The last three are **set by registration, not by the probe**. `PTYHostAvailability.resolve` has no
 `SMAppService` and deliberately none — a launch-path call into a framework that can block is not
 what a probe is for — so they are spelled out now and filled in by the registration slice. They
-are two cases rather than one because P2 measured the difference: launchd binds a registration to
-a *path*, so "seen, currently off" and "never seen" want different fixes and only one of them is
-re-registering.
+are separate cases rather than one because P2 measured the difference: launchd binds a
+registration to a *path*, so "seen, currently off" and "never seen" want different fixes and only
+one of them is re-registering — and `requiresApproval` wants neither, only the user's switch.
+[Registration and retirement](#registration-and-retirement) is where they are filled in.
 
 **The order is the design, not tidiness.** `disabled` is decided first and touches nothing at all
 — while the feature is off, which is every launch until R1 is answered, asking costs a
@@ -581,6 +583,155 @@ damaged it once already.
 and speaks the real codec: no daemon binary, no `SMAppService`, no PTY, no window.
 `PTYHostDaemonIntegrationTests` is the thin layer above it that meets the real
 `threading-ptyd`, and skips when the helper is not in the bundle.
+
+## Registration and retirement
+
+The daemon starts itself, or it does not and every PTY runs in-process. Registration is
+`SMAppService.agent(plistName:)` against
+`Contents/Library/LaunchAgents/codes.threading.ptyd.plist`, which the app bundle ships through a
+**Copy Files** phase and seals as an ordinary resource — it is not nested code and is not signed
+separately, unlike anything under `Contents/Helpers`, which `codesign` treats as code even when
+it is a shell script.
+
+Measured on 2026-08-23 from a Debug, ad-hoc-signed bundle, which is the least favourable case:
+`register()` returns without throwing, `status` goes straight to `enabled`, launchd starts the
+helper as a child of pid 1, and there is **no approval step at all** — the Background Task
+Management record is already `[enabled, allowed, notified]`, so the user is told afterwards rather
+than asked first. `unregister()` is clean and **kills the running helper**, which is a fact the
+"turn it off" path is built around rather than a detail.
+
+### The plist, key by key
+
+| Key | Value | Why |
+|---|---|---|
+| `Label` | `codes.threading.ptyd` | what launchd addresses; the file name is what `SMAppService` addresses, and both have to name one service |
+| `BundleProgram` | `Contents/Helpers/threading-ptyd` | bundle-relative, so replacing the whole bundle leaves the registration valid. launchd accepts `Contents/Helpers` exactly as readily as `Contents/MacOS` — both arms of the probe reported `program identifier = … (mode: 2)` and ran |
+| `ProgramArguments` | `[Contents/Helpers/threading-ptyd, --default-locations]` | see below; `argv[0]` is the bundle-relative program, which is what launchd passes anyway |
+| `KeepAlive` | `true` | the upgrade mechanism, not only resilience — it is what execs the new binary after a `retire` |
+| `RunAtLoad` | `false` | kept beside `KeepAlive` to state the intent. `KeepAlive` already starts the job at load (`immediate reason = speculative`); this is a daemon that is kept running, not one that runs once at login |
+| `ThrottleInterval` | `10` | crash-loop containment; reported as `minimum runtime = 10`. The other half is the daemon's own rule that a bad frame closes one connection and never the process |
+| `ExitTimeOut` | `10` | how long launchd waits after `SIGTERM` before `SIGKILL`, at logout or unregister. The daemon does not trap `SIGTERM`: its children are the user's agents and the session is going with them |
+| `ProcessType` | `Interactive` | a process holding somebody's working agents must not sit in the throttled background band. Reported as `spawn type = interactive (4)`, jetsam priority 40 |
+| `AssociatedBundleIdentifiers` | `[codes.threading]` | what makes the Login Items row read as Threading rather than as a loose helper nobody recognises |
+| `StandardOutPath` / `StandardErrorPath` | **absent** | the daemon keeps its own dated journal in `pty/` and prunes it after seven days; a launchd redirect would be a second file nothing reads and no retention rule covers |
+
+### `--default-locations`, and why the daemon has one derivation after all
+
+The daemon requires `--socket <path> --state <dir>` and refuses a half-named command line, because
+where those live is the app's decision and a daemon listening somewhere nobody is looking is
+indistinguishable from one that never started. launchd cannot express that decision: the plist is
+a file **inside the signed bundle**, one copy shared by every account on the machine and
+unwritable at runtime without breaking the seal, and `ProgramArguments` reaches `execvp` verbatim
+with no `~` expansion.
+
+The two ways out were to write a per-user plist outside the bundle at registration time — which
+forfeits `SMAppService`, whose whole contract is a plist the bundle ships — or to let the program
+derive the paths when it is asked to. It is the second, and the ask is explicit: a
+`--default-locations` flag that the plist uses and **nothing else does**, mutually exclusive with
+`--socket`/`--state` rather than a fallback for them, so a typo cannot quietly become "the default
+one". Every test still names its own scratch rendezvous, which is what keeps a test daemon off the
+socket the developer's running app is listening on.
+
+The names both processes derive from live in `PTYHostDefaultLocations`, in the package both ends
+link, so "where is the socket" has one answer even though two processes ask it. The app composes
+its own paths from those names through `PTYHostLocation` (which additionally redirects under a
+hosted test bundle); the daemon derives
+`~/Library/Application Support/Threading/pty` from `FileManager` rather than from `$HOME`, because
+a launchd agent's environment is whatever launchd chose to hand it. A test pins the two
+derivations to each other, because nothing else does.
+
+Verified end to end on 2026-08-23: launched with `--default-locations` the daemon created the
+`0700` directory, bound `…/pty/ptyd.sock` and journalled it; `--default-locations --socket …`,
+`--socket` alone and a repeated flag each exit `64` with the usage line.
+
+### Where registration happens in a launch
+
+In `applicationDidFinishLaunching`, **after** `SingleInstanceLock.acquire()` and **after** the
+launch-mode decision, below the `plan.startsBackgroundServices` guard. Recovery therefore never
+reaches it, and `PTYHostRegistration` refuses recovery again on its own — a guard that exists only
+at the call site is a guard the next call site does not have. A recovery launch that registered
+would be installing something that outlives it at the exact moment the last launch did not come
+back.
+
+A **hosted test bundle never registers either**, and that refusal is sharper than it looks: the
+bundle a test runs in *is* the shipping app, so `SMAppService.agent(plistName:)` from a test would
+address the developer's own Threading, register their login item, and start a daemon on their
+machine — and `unregister()` would then kill it. `PTYHostRegistrationCoordinator` refuses before it
+so much as reads `status`, and `PTYHostRegistrationTests` asserts the call count is zero. The one
+real registration this feature has ever performed was from a throwaway bundle with a `-probe`
+label, unregistered afterwards.
+
+Registration is **idempotent**: an `enabled` status is answered without calling `register()`, so
+the ordinary launch costs one status read. The setting is followed with `AppSettingsDidChange`,
+reconciled from the current value, the way every other behavioural key is — so turning the key on
+takes effect without a restart.
+
+`SMAppService.Status` becomes a `PTYHostUnavailability` in one place:
+
+| Status | Availability | Note |
+|---|---|---|
+| `enabled` | *candidate* — nothing to report | whether a daemon is listening is the socket probe's question |
+| `requiresApproval` | `.requiresApproval` | the one reason with an action attached: `PTYHostRegistration.openLoginItemsSettings()`. Never seen on this machine; a managed Mac can require it |
+| `notRegistered` | `.notRegistered` | launchd has seen the label and it is off — registering again is the fix |
+| `notFound` | `.notFound` | launchd has never seen it |
+| anything newer | `.notRegistered` | journalled with its raw value; `@unknown default` is handled once |
+
+### Retiring a daemon the last bundle left behind
+
+**launchd binds a registration to a path, not to a code identity.** Measured: replacing the whole
+bundle leaves `status` at `enabled` and the running daemon executing the deleted binary's image;
+launchd execs the new binary only on the next start. Nothing in the OS will end it, and this
+repository replaces `/Applications/Threading.app` several times a day.
+
+So the app asks, once per launch, off the main actor: connect, `hello`, `list`, and then one pure
+decision.
+
+| `hello` build | protocol gate | sessions held | Decision |
+|---|---|---|---|
+| same as the app's | compatible | any | leave — replacing a process with its own image buys nothing, and this is the ordinary answer |
+| different | compatible | 0 | **`retire`** — the daemon unlinks its socket, exits, and `KeepAlive` starts the binary on disk. That is the upgrade |
+| different | compatible | *n* > 0 | leave, journalled as "a stale PTY host holds *n* sessions; it retires when idle" |
+| any | `peerTooOld` | any | refuse. The handshake has already sent `retire`; saying it twice is a second retirement |
+| any | `selfTooOld` | any | refuse, and **never retire**. Retiring a daemon newer than this app would take working agents down in order to install an older host |
+
+`PTYHostUpgradePolicy.decide(peerBuild:ownBuild:compatibility:heldSessions:)` is that table and
+nothing else — no I/O, four value arguments, because every interesting case is a combination
+rather than a code path. `PTYHostUpgradeCheck` is its one caller with a socket: it uses the
+shipping `PTYHostClient` rather than a simplified dialect, because a check that spoke less than the
+link does could reach a conclusion about a daemon the link then refuses. Nothing listening, a
+refused connect, or a `list` that misses its deadline are all "no decision", and every caller's
+response to that is to leave the daemon alone.
+
+After sending `retire` the check waits for the daemon to hang up rather than closing on top of the
+frame: the write is asynchronous and `close()` stops the channel. A retiring daemon with nothing
+to drain exits immediately, so the wait is the ending rather than a delay.
+
+### Turning it off
+
+`unregister()` kills the running helper, and the running helper may be holding a person's agents.
+Turning a hidden preference off must not be a way to end somebody's turn, so the off path counts
+first:
+
+- **nothing held, or nothing answered** — unregister. There is no daemon to kill.
+- **sessions held** — leave the registration in place, journal `leftForRunningSessions`, and stop
+  using the host. With the key off, `AppSettings.ptyHostEnabled` short-circuits the availability
+  decision before anything connects, so the app is already on the in-process path; the next launch
+  that finds the daemon idle removes the registration.
+
+Deliberately **not** `retire` in that second case. Retiring unlinks the socket, and a user who
+turns the key back on would then be unable to reach the sessions still running under it — the
+opposite of what the daemon is for.
+
+Nothing new goes on disk for any of this. The registration's state is launchd's: the Background
+Task Management record and the Login Items row, both keyed by the label, and neither of them
+Threading's to write.
+
+### What registration does not cover
+
+No UI. The Advanced page's controls, the Background Sessions list and the quit question are the
+visibility surface, and they are the next slice. And the hidden key stays **off by default** until
+R1 — TCC attribution of a launchd agent's children — has been run on a SIP-enabled Mac; see
+[`permissions.md`](permissions.md#the-pty-host-daemon-breaks-the-parent-relationship-and-that-is-unverified).
 
 ## What is not decided here
 
