@@ -521,6 +521,39 @@ if rg -n --pcre2 '^(?!\s*//).*SettingsUIDefaults\.pageWidth' \
   failed=1
 fi
 
+# The PTY host daemon is describable on one page, and this is what keeps it that way.
+#
+# `threading-ptyd` holds every hosted agent on the machine in one process. Its whole safety
+# argument is that it owns four things per session — the child, the ring, the last window size,
+# the exit status — and parses nothing: no projects, no themes, no transcripts, no accounts, no
+# policy, no settings, no SQLite store, no journal of the app's, and no terminal emulation. A
+# daemon that grew any of those would be a second writer to state the app reconciles, which this
+# repository has already paid for twice: a concurrent `ProjectDatabase.save` deleted a user's real
+# projects, and two processes appending to one journal left 23 unparseable lines.
+#
+# So the import list is the boundary, and the identifier list names the specific temptations. It
+# is a lint rather than a note in a document because "the daemon should just log to the same place
+# as the app" is a one-line change that reads as an improvement.
+if rg -n --pcre2 '^\s*(?:@[A-Za-z_]+\s+)?import\s+(?!(?:Foundation|Darwin|Dispatch|ThreadingPTYHostKit)\s*$)' \
+  "${repository_directory}/Targets/PTYHost" \
+  --glob '*.swift'; then
+  echo "architecture-boundary: threading-ptyd may import only Foundation, Darwin, Dispatch and" >&2
+  echo "  ThreadingPTYHostKit — the wire contract is the only thing it shares with the app" >&2
+  failed=1
+fi
+
+# Comment lines are skipped rather than the files holding them: the notes explaining why the
+# daemon has its own journal, and why it never opens the app's store, have to be able to name
+# what they are refusing.
+if rg -n --pcre2 '^(?!\s*//).*\b(?:SwiftTerm|AppKit|ProjectStore|AppSettings|TerminalTheme|EventLog)\b' \
+  "${repository_directory}/Targets/PTYHost" \
+  --glob '*.swift'; then
+  echo "architecture-boundary: threading-ptyd owns the child, the ring, the grid and the exit" >&2
+  echo "  status, and nothing else — no store, no settings, no theme, no emulation, and its own" >&2
+  echo "  journal in its own directory" >&2
+  failed=1
+fi
+
 if (( failed )); then
   exit 1
 fi

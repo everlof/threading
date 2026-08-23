@@ -35,7 +35,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `sessions` | ← | 0 | `[PTYHostSessionSummary]` — `id`, `pid`, `startedAt`, `executable`, `grid`, `isAttached`, `exit` |
 | `spawn` | → | 0 | `id`, `channel` (`.pty(grid:)` \| `.pipes`), `executable`, `arguments`, `execName`, `environment`, `cwd` |
 | `spawned` | ← | 0 | `id`, `pid`, `startTime` |
-| `spawnRefused` | ← | 0 | `id`, `reason` (`alreadyExists`, `executableUnavailable`, `retiring`, `capacity`) |
+| `spawnRefused` | ← | 0 | `id`, `reason` (`alreadyExists`, `executableUnavailable`, `retiring`, `capacity`, `unsupportedChannel`) |
 | `attach` | → | 0 | `id`, `replayBudget` |
 | `attached` | ← | 0 | `id`, `pid`, `grid`, `replay` (`.exact(fromOffset:)` \| `.cut` \| `.none`), `totalBytesWritten` |
 | *(replay bytes)* | ← | 1 | screen seed ‖ ring slice ‖ mode seed, in that order |
@@ -45,6 +45,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `detach` | → | 0 | `id`, `screenSeed`, `modeSeed`, `ringOffset` |
 | `kill` | → | 0 | `id`, `escalate` |
 | `exited` | ← | 0 | `id`, `status`, `signalled` |
+| `foreground` | ← | 0 | `id`, `processGroup` |
 | `lost` | ← | 0 | `ids`, `since` |
 | `retire` | → | 0 | — |
 | `journalTail` | → | 0 | `maxBytes` |
@@ -69,11 +70,13 @@ whole `ViewportLeases` structure are remote-access authorization concerns, and t
 receives one resolved grid and never learns there were leases. No title, cwd or activity — the
 app parses those, from the emulator it still owns.
 
-**Deferred but shaped for.** `channel: .pipes` for native conversations over pipes; the
-compression bit in `flags`; a `foreground` push frame (the daemon holds the master fd, so
-`tcgetpgrp` is one syscall it *can* answer) which is what would let standalone terminals and
-shell drawers be hosted too. Each is a frame or a field that already exists, so none of them
-bumps the protocol.
+**Deferred but shaped for.** `channel: .pipes` for native conversations over pipes, and the
+compression bit in `flags`. Each is a frame or a field that already exists, so neither bumps the
+protocol. `foreground` was deferred too and then was not: the app decides title ownership from
+`tcgetpgrp` on a descriptor a host-backed session does not have, so the frame landed in v1 — the
+daemon holds the master, and one syscall with no parsing in it is a question it can answer.
+Hosting `.projectTerminal`, `.sessionShell` and `.ephemeral` terminals is what that unblocks, and
+stays out of these slices.
 
 ### Two rules the frames encode
 
@@ -224,6 +227,246 @@ on the other.
 path **immediately** so a new binary can bind it, keep serving already-attached connections, and
 `exit(0)` when the last session ends. Killing the old daemon on a bundle change is not an option
 under consideration — that is killing working agents, which is the bug the feature exists to fix.
+
+## The daemon
+
+`Targets/PTYHost` builds `threading-ptyd`, embedded in `Contents/Helpers` beside the other
+helpers. **It builds and is tested; it is not registered with launchd and nothing in the app
+starts it.** `PTYHostDaemonTests` runs the shipping binary by hand against a scratch socket, and
+`SMAppService` is a later slice.
+
+Its command line is `--socket <path> --state <dir>`, both required, anything else `exit(64)`. The
+daemon has no path policy of its own for the same reason `threading-mcp-bridge` has none: where
+the rendezvous and the state directory live is one decision, made in the app beside the other
+owner-only directories, and a daemon that derived either would be a second place for that decision
+to be wrong. It is also what lets a test start one without going anywhere near the socket the
+developer's running app is listening on.
+
+Everything after startup happens on **one serial queue**. Accepts, decoded frames, bytes read off
+a master, and every timer land there, so none of the state needs a lock and the two orderings that
+matter — a replay before the live output that follows it, a ring append before the fan-out that
+reads it — are answered by construction rather than by care. The only work elsewhere is the kernel
+I/O itself: each session's master is a `DispatchIO` channel with its own queue that hands its
+bursts back.
+
+### What it owns, and what it must never own
+
+Per session: the `forkpty` child (pid, process group, master descriptor), the raw output ring, the
+last window size, the exit status, the launch record, the detach seed, and the spawn environment
+it was given. That is the list. It never owns projects, themes, transcripts, accounts, policy,
+settings, the SQLite store, the app's journal, or any terminal emulation, and **it parses nothing**
+— bytes are copied into a ring and copied out to watchers. The one syscall it makes *about* a
+terminal is `tcgetpgrp`, which has no bytes in it.
+
+`scripts/check_architecture_boundaries.sh` enforces both halves: files under `Targets/PTYHost` may
+import only `Foundation`, `Darwin`, `Dispatch` and `ThreadingPTYHostKit`, and may not name
+`SwiftTerm`, `AppKit`, `ProjectStore`, `AppSettings`, `TerminalTheme` or `EventLog` outside a
+comment. It is a lint rather than a paragraph because "the daemon should just log where the app
+logs" is a one-line change that reads as an improvement, and this repository has already paid for
+that mistake twice — a concurrent `ProjectDatabase.save` deleted a user's real projects, and two
+processes appending to one journal left 23 unparseable lines.
+
+### Connection binding
+
+The 8-byte header carries no session id, so the connection carries it instead. A connection is
+either **unbound** — it may send `hello`, `list`, `spawn`, `attach`, `retire` and `journalTail` —
+or **bound to exactly one session** by a successful `spawn` or `attach`. After that, raw `output`
+and `input` frames on it belong to that session, and `resize`, `detach` and `kill` must name the
+bound id. Naming a different one is an `error(notAttached, sessionMismatch)` and a close: a
+connection and an app that disagree about what is attached would send every later keystroke to
+whichever of them is wrong.
+
+A session may have several bound connections — the app, a test, later the phone's mirror — and
+output fans out to all of them.
+
+**`hello` is the first frame on every connection**, in both directions. Anything before it is
+refused with `malformedFrame` / `beforeHello` and the connection closes, so the version gate
+cannot be got around by asking a question first. An incompatible peer gets `helloRefused` naming
+which side has to move, and then the close.
+
+A close **flushes what is already queued**. Almost every close here follows an `error` frame
+explaining it, and a close that discarded the queue would deliver the disconnection without the
+reason. The one exception is the backpressure close below, where the peer is by definition not
+draining.
+
+### Spawn and the environment
+
+`spawn` with `channel: .pty(grid:)` forks under a new pseudo-terminal sized by that grid — never a
+placeholder, for the 2×1 reason above — using `executable`, `arguments`, `execName`, `environment`
+and `cwd` **verbatim**. The daemon adds nothing and removes nothing: it inherits launchd's
+environment rather than the user's, and the composition rules stay in the app where the measured
+leakage list and the login-shell command line already live. `.pipes` is refused with
+`spawnRefused(unsupportedChannel)` until native conversations are hosted; a duplicate id is
+`alreadyExists`; a missing or non-executable file is `executableUnavailable`, checked before the
+fork so the answer is a refusal rather than an exit status.
+
+The reply is `spawned(id, pid, startTime)`, where the start time is read straight back out of the
+kernel with `proc_pidinfo` — the same pair the app's orphan sweep uses, because a pid on its own
+does not identify a process. The spawning connection becomes bound and attached.
+
+`forkpty` gives the child its own session, so the child is a session leader and its process group
+id is its pid; the daemon never has to track a group separately. Between fork and exec the child
+does only async-signal-safe work: it puts every terminal-relevant signal disposition back to the
+default (an ignored disposition survives `exec`, and a child that inherited the daemon's ignored
+`SIGPIPE` would be a terminal where ^C does nothing), enters the working directory, and execs. A
+working directory that cannot be entered **ends the child** with status 126 rather than starting it
+somewhere else: an agent writing files into whatever `/` happens to be is worse than a launch that
+failed and said so.
+
+Every long-lived descriptor is `FD_CLOEXEC` — the listener, each master, the journal and the state
+file. This is not hygiene: `crash-recovery.md` records ten agent CLIs each holding a descriptor of
+the app's long after the app was gone, and this process is about to become the parent of exactly
+that kind of child.
+
+### Output, the ring and backpressure
+
+A master is read on its own channel in bursts of at most 64 KiB, well inside the wire's 1 MiB
+bound, so a repaint crosses as several frames rather than one a slow watcher cannot use yet. Each
+burst is **appended to the ring first** and then fanned out: the ring is the stream, and a byte
+that reached a watcher without reaching the ring is a byte a rejoin cannot account for. A burst for
+a **detached** session therefore costs one append and one comparison — the frame is never built and
+nothing is allocated per watcher, because there are none.
+
+**The PTY read never waits for a watcher.** A connection whose queued writes pass
+`maximumPendingWriteBytes` (4 MiB — eight full rings) is closed and journalled. The alternative is
+waiting for it, which stops the child producing the bytes, and a stalled agent is a worse outcome
+than a terminal that has to reattach.
+
+Input is bounded the same way and in the other direction: a session with more than
+`maximumPendingInputBytes` (1 MiB) outstanding towards its child has a child that has stopped
+reading, and a larger buffer would only move the failure, so the input is dropped and journalled.
+
+The ring is 512 KiB per session with a **32 MiB aggregate cap**, because a per-item cap is not an
+aggregate bound: 64 detached sessions at half a mebibyte each is 32 MiB resident in a process the
+user can see in Activity Monitor. Past the cap the **oldest detached** session's ring is halved
+towards a 32 KiB floor and every shrink is journalled. An attached session is never shrunk —
+somebody is watching it, and the cost is a rejoin they can see — so if everything is attached the
+cap is exceeded and the journal says so, which is the honest answer.
+`RemoteRingBuffer.resized(to:)` carries `totalBytesWritten` across the shrink, because that count
+is a rejoining watcher's whole notion of where it was.
+
+### The join replay
+
+`attach(id, replayBudget)` answers `attached(id, pid, grid, replay, totalBytesWritten)` and then
+writes the replay bytes as `output` frames, on that connection, before any live output. The
+ordering needs no barrier: every frame is queued from the one serial queue and a channel performs
+its writes in the order they were submitted.
+
+- A stored detach seed whose offset the ring can still prove → `.exact(fromOffset:)`, and the
+  bytes are the screen seed, then `snapshot(from:)`, then the mode seed.
+- Otherwise → `.cut`: `CAN` (0x18) then the ring tail within the stated budget, and a stored mode
+  seed still goes last if there is one.
+- An empty ring → `.none`.
+
+**A close without a `detach` clears the seed**, so the next attach is a cut. The daemon cannot know
+how much of the ring a watcher that vanished had applied, and an honest cut the app re-derives from
+is better than a replay of a screen nobody handed over.
+
+**The daemon answers no terminal query.** A `DA2`, an `XTGETTCAP` or an `OSC 11` from the child
+lands in the ring like any other byte and is answered, once and late, by the app's own emulator on
+the exact-replay branch — those bytes have never reached an emulator, and `ringOffset` is what
+proves it. On the cut branch the app feeds the tail with its replies suppressed, because history is
+not a live query and a stale `DA` reply sent to a program that already got one is worse than
+silence. This is affordable only because **v1 never spawns while detached**: the app composes and
+spawns every session with its emulator attached, so a startup query is answered then, as it is
+today. Spawning with the app closed is the slice that would have to decide between a fixed query
+table in the daemon and `COLORFGBG`/`TERM` in the spawn environment; it is out of scope until then.
+
+A session that has already exited is still worth attaching to: the watcher gets `attached`, the
+replay, and then `exited`. It is owed the ending *after* the history rather than instead of it.
+
+### The last window size
+
+`resize` sets the grid, applies `TIOCSWINSZ` and raises `SIGWINCH` on the foreground group; the
+grid is then the session's durable window size, kept indefinitely while nobody is attached. **An
+attach never resizes** — the watcher is told the grid and adopts it. `PTYHostDaemonTests` asserts
+both halves by asking the child what `stty size` says, which is the only assertion that can tell a
+daemon that resized the terminal from one that sent the right frames.
+
+### Foreground
+
+`foreground(id, processGroup)` is pushed whenever `tcgetpgrp` changes: after each coalesced output
+burst, and on a 1 Hz timer while at least one watcher is attached, never while detached, because a
+detached session has nobody to tell. It exists because `TerminalSession` decides title ownership
+from `tcgetpgrp` on a descriptor it owns, and a host-backed session has no descriptor to read —
+the daemon holds the master, so this is the one question it can answer for the app without
+learning anything about the byte stream.
+
+### Exit, kill and release
+
+`kill(id, escalate)` sends `SIGTERM` to the process **group**, and `SIGKILL` to the group after a
+2-second grace when asked to escalate. The group rather than the process, because an agent CLI's
+own children are in it and signalling the leader alone is how orphans are made.
+
+An exit is noticed through `EVFILT_PROC`/`NOTE_EXIT` and reaped with a non-blocking `waitpid`,
+retried on the queue rather than waited for. **The `exited` frame waits for the output that
+preceded it**: the child's last write is usually still in the terminal buffer when the kernel
+reports the exit, and a watcher told "it ended" before it is shown the ending has lost exactly the
+bytes it most wanted. The wait ends at end of file on the master, or after a bounded grace, because
+a surviving grandchild can hold the slave open indefinitely.
+
+The session is then **held**, not dropped: for five seconds once somebody has seen the ending, so a
+watcher that reconnects a moment later still learns how it ended rather than being told the id is
+unknown; for half an hour if nobody was attached, because the app may be closed; and at once if the
+daemon is retiring, since it is being replaced and the app has already been told. Release closes
+the master, cancels the timers, unbinds any watcher still holding it, and is journalled.
+
+### Retire
+
+`retire` stops accepting, closes the listener and **unlinks the socket immediately** so a
+replacement binary can bind the path, keeps serving what is already attached, and `exit(0)`s when
+the last session ends — after a short flush, because writes are asynchronous and exiting the
+instant the last session is released can truncate the frame that said so.
+
+**A daemon that has not been asked to retire never exits on its own**, however idle it is. launchd
+binds the registration to the path rather than to the code, so an exit is an upgrade only when
+somebody asked for one; a daemon that exited when it went idle would be replaced by whatever binary
+is on disk at a moment nobody chose.
+
+### The state file, and what a restart lost
+
+`sessions.jsonl` in the state directory is append-only over `O_APPEND`, one versioned record per
+lifecycle edge — `spawned`, `exited`, `lost` — written **synchronously, before the edge is reported
+to anybody**. The record that matters most is always the one written immediately before the process
+died, and a child nobody wrote down is a child a restart cannot even say it lost. It is read
+leniently: a line that does not parse is skipped and counted, because the file exists to be
+readable after a crash truncated a write, and refusing it whole would throw away every session
+before the damaged line.
+
+On start, every `spawned` with no ending is probed by pid **and** kernel start time. Neither outcome
+is "carry on": a child of a dead daemon has no master anybody holds, so there is nothing to attach
+to it and nothing to read from it. Each is recorded as `lost` and reported in a `lost` frame after
+every `hello`, for this daemon's whole life — repeatedly rather than once-and-acknowledged, because
+an acknowledgement is a fourth state to get wrong for no gain: the app's answer is idempotent, and a
+second Threading or a support tool is owed the same answer as the first.
+
+**A survivor's process group is killed there.** "They all died with the host" turned out to be
+false: measured on 2026-08-23, a `sleep` spawned by this daemon and orphaned by `kill -9` of it went
+on running as `Ss+`, session leader of a terminal nothing holds, reparented to launchd — the
+`SIGHUP` the failure model assumed does not reach a process that never touches the tty. This is the
+only place that can end it, because the app's orphan sweep skips host-held children by design
+(Slice 1's `heldByHost`), and an agent still working in a session no surface can reach is worse
+than one that ended. It is R4 in the design's risk register, answered.
+
+### Failure model
+
+- **A restart restores the service, not the work.** The honest goal is to say what was lost, which
+  is what `sessions.jsonl` and the `lost` frame are for.
+- **A bad frame closes one connection.** A malformed control frame, an oversize length, an unknown
+  kind, a frame the daemon is supposed to be the one sending — each is journalled and ends that one
+  connection. The process never exits on input, because `KeepAlive` plus a poisoned frame is a
+  restart storm, and the other sessions are somebody's working agents.
+- **`SIGPIPE` is ignored process-wide** and `SO_NOSIGPIPE` is set on every socket. Either alone is
+  one edit away from being removed by somebody who saw only the other.
+- **The daemon unlinks a stale socket, not the app.** It is the only process that may be listening
+  there, so it is the only one that can tell a leftover file from a live listener without a race.
+- **The state directory is created `0700` and set `0700` again**, because it may already exist from
+  a run with a different mask. That directory is the whole authorization boundary: no frame carries
+  a token, and this is why none needs to.
+- **The daemon's journal is its own**, in its own directory, pruned by itself after seven days, and
+  read by the app only as a bounded tail through `journalTail`. The app's journal prunes any
+  `.jsonl` it finds in its own directory, and two processes appending to one file has damaged a
+  journal here before.
 
 ## Availability and degradation
 

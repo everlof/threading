@@ -148,6 +148,14 @@ final class PTYHostConnection: @unchecked Sendable {
             _ = shutdown(descriptor, SHUT_RDWR)
         } else {
             io.close(flags: [])
+            // Ends *our* reading, not the peer's: the channel closes only once its outstanding
+            // operations finish, and this connection always has one outstanding read of
+            // unbounded length. Without this the daemon would wait for the client to close and
+            // the client would wait for the daemon, the descriptor would never be released, and
+            // the frame explaining the close would be the last thing the client never learned
+            // it had received. The write side stays open, so what is queued still goes out
+            // before the channel's cleanup releases the descriptor.
+            _ = shutdown(descriptor, SHUT_RD)
             endWhenDrained()
         }
         onClosed?()
@@ -173,18 +181,10 @@ final class PTYHostConnection: @unchecked Sendable {
         }
     }
 
-    /// Ends the socket once everything queued has reached the kernel.
+    /// The bound on waiting for a queued frame to reach the kernel.
     ///
-    /// `close(flags: [])` alone is not enough and the reason is worth writing down: the channel
-    /// closes when its *outstanding operations* finish, and this connection always has one
-    /// outstanding read of unbounded length, which finishes only at end of file. So a daemon
-    /// waiting for the client and a client waiting for the daemon would both wait forever, the
-    /// descriptor would never be released, and the client would never learn it had been dropped.
-    /// `shutdown` ends the read, which lets the channel close and its cleanup handler release
-    /// the descriptor — after the queued frame explaining the close has been written.
-    ///
-    /// The deadline is the bound on that wait: a peer that has stopped reading must not hold a
-    /// descriptor open by not draining the last error frame it will ever be sent.
+    /// A peer that has stopped reading must not be able to hold a descriptor open by never
+    /// draining the last frame it will ever be sent, so the wait ends either way.
     private func endWhenDrained() {
         if pendingWriteBytes <= 0 {
             _ = shutdown(descriptor, SHUT_RDWR)

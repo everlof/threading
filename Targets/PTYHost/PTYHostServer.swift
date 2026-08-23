@@ -107,7 +107,6 @@ final class PTYHostServer: @unchecked Sendable {
         static let to = "to"
         static let cols = "cols"
         static let rows = "rows"
-        static let group = "group"
         static let lines = "lines"
         static let executable = "executable"
     }
@@ -838,7 +837,8 @@ final class PTYHostServer: @unchecked Sendable {
             Field.session: session.id.description,
             Field.pid: String(session.pid),
             Field.status: String(value),
-            Field.signalled: signalled ? "true" : "false"
+            Field.signalled: signalled ? "true" : "false",
+            Field.detail: session.wasKilled ? "afterKill" : "onItsOwn"
         ])
         deliverExitIfReady(session)
     }
@@ -851,17 +851,17 @@ final class PTYHostServer: @unchecked Sendable {
     /// bounded grace, because a surviving grandchild can hold the slave open indefinitely.
     private func deliverExitIfReady(_ session: PTYSession) {
         guard let exit = session.exit, !session.exitDelivered else { return }
-        guard session.masterFinished else {
-            let elapsed = Date().timeIntervalSince(exit.at)
-            let remaining = PTYHostDefaults.exitDrainGrace - elapsed
-            guard remaining <= 0 else {
+        if !session.masterFinished {
+            // Not yet drained. Wait for end of file, and no longer than the grace — a surviving
+            // grandchild holding the slave open must delay the ending, never withhold it.
+            let remaining = PTYHostDefaults.exitDrainGrace - Date().timeIntervalSince(exit.at)
+            if remaining > 0 {
                 queue.asyncAfter(deadline: .now() + remaining) { [weak self, weak session] in
                     guard let self, let session else { return }
                     deliverExitIfReady(session)
                 }
                 return
             }
-            return
         }
 
         session.exitDelivered = true
@@ -941,7 +941,7 @@ final class PTYHostServer: @unchecked Sendable {
         journal.record(.retiring, [Field.session: String(sessions.count)])
 
         // Sessions that have already ended are the ones nothing is waiting for.
-        for session in sessions.values where session.exitDelivered { release(session) }
+        for session in Array(sessions.values) where session.exitDelivered { release(session) }
         finishRetirementIfDrained()
     }
 

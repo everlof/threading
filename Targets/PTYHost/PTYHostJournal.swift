@@ -12,7 +12,6 @@ import Foundation
 enum PTYHostJournalEvent: String {
     case started
     case listening
-    case stateUnreadable
     case stateLineSkipped
     case lostSession
     case lostSessionStillRunning
@@ -84,7 +83,13 @@ final class PTYHostJournalFile: @unchecked Sendable {
     /// Appends one line. Never throws and never fails loudly: a daemon that cannot write its log
     /// still holds working agents, and dropping the line is the smaller loss.
     func record(_ event: PTYHostJournalEvent, _ fields: [String: String] = [:]) {
-        var object: [String: String] = fields
+        // Every value is bounded here rather than at each call site. One of them is a path the
+        // user chose, and a journal line is a thing that reaches a support report.
+        var object = fields.mapValues { value in
+            value.utf8.count <= PTYHostDefaults.maximumJournalDetailBytes
+                ? value
+                : String(value.prefix(PTYHostDefaults.maximumJournalDetailBytes))
+        }
         object[Key.event] = event.rawValue
         object[Key.at] = Self.timestamp.string(from: Date())
         guard let data = try? JSONSerialization.data(
