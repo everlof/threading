@@ -861,7 +861,9 @@ struct TerminalRemoteView: View {
                 showsAttachmentKey: allowsDirectInput
                     && connection.supportsTerminalAttachmentInsertion,
                 canAttach: directAttachmentTray?.canAcceptMore == true,
-                chooseAttachmentSource: beginChoosingDirectAttachmentSource
+                chooseAttachmentSource: beginChoosingDirectAttachmentSource,
+                isChoosingAttachmentSource: $isChoosingDirectAttachmentSource,
+                attachmentSourceActions: directAttachmentSourceActions
             )
         }
         .toolbarBackground(theme.surface, for: .navigationBar)
@@ -906,11 +908,6 @@ struct TerminalRemoteView: View {
             case .clipboard: pasteClipboardIntoTerminal()
             }
         }
-        .themedConfirmationDialog(
-            "Attachments",
-            isPresented: $isChoosingDirectAttachmentSource,
-            actions: directAttachmentSourceActions
-        )
         .themedAlert(
             "Attachment",
             message: directAttachmentNotice,

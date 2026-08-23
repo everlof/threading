@@ -427,7 +427,12 @@ extension View {
         )
     }
 
-    /// Presents the operating system's action sheet, anchored to the bottom of the screen.
+    /// Presents the operating system's action sheet.
+    ///
+    /// **Attach it to the control the sheet came from.** The system anchors the sheet to the view
+    /// this modifier decorates and draws its tail at that view, so held on a screen's root the
+    /// tail points at the middle of the screen and the sheet reads as a message from nothing.
+    /// A chooser opened by a button belongs on that button.
     ///
     /// This is the one place in `ThreadingMobile` that may say `confirmationDialog`;
     /// `check_mobile_theme_boundaries.py` enforces that, for the same reason the settings row

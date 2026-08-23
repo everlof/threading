@@ -327,10 +327,16 @@ struct TerminalKeyBar: View {
     let customize: () -> Void
     let showsAttachmentKey: Bool
     let canAttach: Bool
-    /// The owner presents the source chooser from its stable hierarchy. Keeping the chooser out
-    /// of this key's transient menu also lets the owner wait for that sheet to dismiss before it
-    /// presents Photos or Files.
+    /// Asks the owner to open the source chooser: it reads the clipboard once, there, and then
+    /// raises `isChoosingAttachmentSource`.
     let chooseAttachmentSource: () -> Void
+    /// The chooser is presented *by this key*, because the system anchors an action sheet to the
+    /// view its modifier decorates. Held on the owner's root view it pointed its tail at the
+    /// middle of the terminal; held here it points at the paperclip that was tapped. Photos and
+    /// Files still present from the owner's stable hierarchy once this has dismissed, so the key
+    /// going away with the sheet cannot take a picker with it.
+    @Binding var isChoosingAttachmentSource: Bool
+    let attachmentSourceActions: [ThemedDialogAction]
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var theme
     @State private var isKeyboardVisible = false
@@ -408,6 +414,11 @@ struct TerminalKeyBar: View {
         }
         .disabled(!canAttach)
         .accessibilityLabel(MobileL10n.string("Attachments"))
+        .themedConfirmationDialog(
+            "Attachments",
+            isPresented: $isChoosingAttachmentSource,
+            actions: attachmentSourceActions
+        )
     }
 
     @ViewBuilder
