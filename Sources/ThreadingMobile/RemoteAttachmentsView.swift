@@ -373,9 +373,10 @@ struct RemoteAttachmentPreview: View {
             )
             errorMessage = nil
         } catch {
+            guard let message = RemoteAttachmentPreviewFailure.message(for: error) else { return }
             MobileDiagnostics.logDegraded(.attachmentContent, error: error)
             data = nil
-            errorMessage = error.localizedDescription
+            errorMessage = message
         }
     }
 }
