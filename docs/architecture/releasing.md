@@ -45,51 +45,61 @@ development-signed bundle carrying `get-task-allow`. That is fine — it is not 
 anyone ships — but it means "did the entitlement change work?" cannot be answered by looking at
 a local Release build. See [`permissions.md`](permissions.md).
 
-## A Developer ID build still needs a provisioning profile
+## Sign in with Apple cannot be shipped by Developer ID
 
-Developer ID distribution usually needs no profile at all, which is why this went unnoticed until
-the pipeline was first exercised on 23 August 2026. Threading ships
-`com.apple.developer.applesignin` — Sign in with Apple, genuinely used by the hosted-access flow
-(`RemoteHostedAppleSignIn`, `HostedServiceSignInButton`) — and a restricted `com.apple.developer.*`
-entitlement has to be authorised by a profile whatever the distribution method. So the export
-needs one, and the entitlement cannot simply be dropped.
+Threading shipped `com.apple.developer.applesignin` for the hosted-access flow. It was removed on
+23 August 2026, the first day the release pipeline was ever exercised, because it cannot be
+delivered by the way this app is distributed — and until it went, no release could be exported at
+all.
 
-`scripts/release.sh` used to ask for `signingStyle = automatic`, which mints a profile by asking
-the Apple ID signed into Xcode. That can work on a developer's Mac and can *never* work in
-Actions: the runner is given the certificate and no account whatsoever. The first tagged release
-would have spent a full archive to arrive at
+A restricted `com.apple.developer.*` entitlement has to be authorised by a provisioning profile
+whatever the distribution method, so a Developer ID build needs one the moment it ships a
+capability. Sign in with Apple never reaches a Developer ID profile. The App ID has the capability
+enabled, and the portal's profile page lists it:
 
-```
-error: exportArchive Cannot create a Developer ID provisioning profile for "codes.threading".
-error: exportArchive No profiles for 'codes.threading' were found
-```
+> Enabled Capabilities: In-App Purchase, Push Notifications, Sign In with Apple
 
-which reads like a missing certificate and is not. Signing is now `manual` with the profile named
-explicitly (`THREADING_PROVISIONING_PROFILE`, default `Threading Provisioning Profile`), so the
-export uses what is installed in `~/Library/MobileDevice/Provisioning Profiles` and asks no
-account anything. The workflow writes it there from the `APPLE_PROVISIONING_PROFILE` secret, and
-deletes it afterwards beside the Sparkle key.
-
-**A profile is a snapshot, not a live view.** The first profile issued for `codes.threading`
-carried `aps-environment` but not `applesignin`, because Push had been enabled on the App ID and
-Sign in with Apple had not yet been. Ticking the capability afterwards does not reach a profile
-that already exists — it must be re-issued — and the App ID page shows the capability enabled
-either way, so the identifier looks correct while every signing attempt refuses:
+That line describes the **App ID**, not the profile — note it also lists In-App Purchase, which
+produces no entitlement either. The profile's own entitlements dict, which is what `exportArchive`
+reads, carries only:
 
 ```
-error: exportArchive Provisioning profile "Threading Provisioning Profile" doesn't include
-       the com.apple.developer.applesignin entitlement.
+keychain-access-groups
+com.apple.developer.aps-environment      ← Push does cross over
+com.apple.application-identifier
+com.apple.developer.team-identifier
 ```
 
-That is the trap: the portal shows the truth about the *identifier* and tells you nothing about
-the *profile*. Whenever a capability is added, re-issue the profile and re-upload the secret.
+Re-issuing does not change it; two regenerations produced two UUIDs and the same four keys. So the
+export refuses, and the message names a feature the portal insists is enabled:
 
-`release.sh` therefore checks the installed profile before it archives — it must exist, be a
-Developer ID profile (`ProvisionsAllDevices`), match `TEAM.bundle-id`, and carry every
-`com.apple.developer.*` key the entitlements file asks for. Only those: `com.apple.security.cs.*`
-are hardened-runtime flags a profile never mentions, and demanding them would fail every build.
-It is the same bargain as the embedded-binary sweep further down — the check costs nothing where
-it stands and saves a ten-minute archive when it fires.
+```
+error: exportArchive "Threading.app" requires a provisioning profile with the
+       Sign In with Apple feature.
+```
+
+**The bypass is a trap.** `codesign` will sign the entitlement with no profile at all — the bundle
+verifies and satisfies its designated requirement — so it is tempting to skip `exportArchive` and
+sign by hand. The result is an entitlement no embedded profile authorises, which the system
+refuses at runtime. That ships a sign-in button that still does not work, and takes on re-signing
+Sparkle's nested bundles inside-out, which the export otherwise does for free.
+
+Nothing working was lost by removing it: the entitlement had never been in a distributed build,
+because it never could be. The supported path for direct distribution is the web flow — a Services
+ID with `ASWebAuthenticationSession` — and that is what hosted sign-in needs before the button
+means anything outside a development build.
+
+**What this bought.** It was the only `com.apple.developer.*` key in the entitlements file, so
+there are now none, and a Developer ID export needs no profile whatsoever: no profile secret in
+Actions, and no Xcode account for automatic signing to ask for one. `scripts/release.sh` signs
+manually against the certificate alone.
+
+The preflight stays, because the next restricted capability will hit this again. Before archiving,
+it reads the entitlements file, and if a `com.apple.developer.*` key is present it requires an
+installed profile that is a Developer ID profile, matches `TEAM.bundle-id`, and carries that key —
+otherwise it says so in two seconds instead of after a ten-minute archive. With nothing restricted
+it prints that no profile is needed and stands aside. It ignores `com.apple.security.cs.*`, which
+are hardened-runtime flags no profile mentions and demanding them would fail every build.
 
 ## Keeping /Applications on master
 
