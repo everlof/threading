@@ -221,6 +221,132 @@ final class LaunchFailureViewTests: XCTestCase {
 
     // MARK: - Private Methods
 
+    // MARK: - Not Holding Its Pane
+
+    /// The real host, because this defect is invisible without it.
+    ///
+    /// A component tested outside the container it ships in can pass while being unusable, and
+    /// this is that case twice over. A detached fixture is a flexible layout root: the first
+    /// version of this test pinned a plain `NSView` host at `.defaultLow`, and the host came back
+    /// **0 points wide** while the surface inside it sat at 800 — a fixture with no opinion the
+    /// engine was obliged to honour. And a fixture that states its width at `.required` is
+    /// *stronger* than the pull being tested, so it cannot see the defect either.
+    ///
+    /// So the fixture is the arrangement the app ships: a window-width split view whose panes
+    /// divide it at their items' holding priorities. The session pane keeps AppKit's default 250
+    /// so it is the pane absorbing a resize; its neighbour sits one step above at 260, exactly as
+    /// `SidebarDefaults.holdingPriority` does.
+    private func splitFixture(width: CGFloat) -> (
+        split: NSSplitViewController, pane: NSView, view: LaunchFailureView
+    ) {
+        let split = NSSplitViewController()
+        split.view.frame = NSRect(
+            origin: .zero,
+            size: NSSize(width: width, height: Render.size.height)
+        )
+
+        let neighbour = NSViewController()
+        neighbour.view = NSView()
+        let neighbourItem = NSSplitViewItem(viewController: neighbour)
+        neighbourItem.minimumThickness = SidebarDefaults.minWidth
+        neighbourItem.holdingPriority = SidebarDefaults.holdingPriority
+
+        let pane = NSViewController()
+        pane.view = NSView()
+        let view = makeView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        pane.view.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: pane.view.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: pane.view.trailingAnchor),
+            view.topAnchor.constraint(equalTo: pane.view.topAnchor),
+            view.bottomAnchor.constraint(equalTo: pane.view.bottomAnchor)
+        ])
+        let paneItem = NSSplitViewItem(viewController: pane)
+        paneItem.minimumThickness = MainWindowDefaults.minContentWidth
+
+        split.addSplitViewItem(neighbourItem)
+        split.addSplitViewItem(paneItem)
+
+        // The window's width, which is a statement nothing in a pane may outrank.
+        split.view.widthAnchor.constraint(equalToConstant: width).isActive = true
+        split.view.heightAnchor.constraint(equalToConstant: Render.size.height).isActive = true
+        split.view.layoutSubtreeIfNeeded()
+
+        return (split, pane.view, view)
+    }
+
+    /// The column, which is the only thing on this surface with a width of its own.
+    private func column(in view: LaunchFailureView) -> NSStackView? {
+        view.subviews.compactMap { $0 as? NSStackView }.first
+    }
+
+    /// This shipped, and it was not subtle: a session that failed to launch held its pane at
+    /// exactly `wellMaximumWidth + horizontalInset`, 800pt, through window resizes and through
+    /// the divider, while the sidebar swelled to 1759pt of a 2560pt window to take every
+    /// remaining point. The surface said `stack.width == self.width - inset` at `.defaultHigh`
+    /// while being capped at `wellMaximumWidth`, and the only way to satisfy that pair is to hold
+    /// the *pane* at 800.
+    func testTheSurfaceDoesNotHoldItsPaneAtTheColumnsOwnWidth() {
+        let fixture = splitFixture(width: 1600)
+        let held = LaunchFailureDefaults.wellMaximumWidth + PlaceholderDefaults.horizontalInset
+
+        XCTAssertGreaterThan(
+            fixture.pane.bounds.width, held,
+            "the failure surface held its pane at the column's own measure (\(held)pt)"
+        )
+        XCTAssertEqual(
+            fixture.split.splitViewItems
+                .map { $0.viewController.view.bounds.width }
+                .reduce(0, +) + fixture.split.splitView.dividerThickness,
+            1600, accuracy: 1,
+            "the panes should still divide the window between them"
+        )
+        XCTAssertEqual(
+            column(in: fixture.view)?.bounds.width ?? 0,
+            LaunchFailureDefaults.wellMaximumWidth, accuracy: 0.5,
+            "the column should stop at its cap, not keep growing with the pane"
+        )
+    }
+
+    /// The other half of the same rule: below the column's own measure the pane keeps its margin,
+    /// and the column is what gives way. Stated at `.required` here, which is what a pane that
+    /// genuinely has that width says.
+    func testANarrowPaneKeepsItsMarginAndTheColumnGivesWayFirst() {
+        let view = makeView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalToConstant: 500),
+            view.heightAnchor.constraint(equalToConstant: Render.size.height)
+        ])
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            column(in: view)?.bounds.width ?? 0,
+            500 - PlaceholderDefaults.horizontalInset, accuracy: 0.5,
+            "the column should be inset from a pane too narrow for its own measure"
+        )
+    }
+
+    /// The structural form of the rule, so the next width added here cannot reintroduce it:
+    /// pane content states its own measure, and only a `<=` may mention the pane's width.
+    func testNothingOnTheSurfaceStatesAnEqualityAgainstThePanesOwnWidth() {
+        let view = makeView()
+
+        let pulls = view.constraints.filter { constraint in
+            guard constraint.relation == .equal else { return false }
+            let mentionsPaneWidth =
+                (constraint.firstItem === view && constraint.firstAttribute == .width)
+                    || (constraint.secondItem === view && constraint.secondAttribute == .width)
+            return mentionsPaneWidth
+        }
+
+        XCTAssertTrue(
+            pulls.isEmpty,
+            "an equality against the surface's own width holds the pane at that width: \(pulls)"
+        )
+    }
+
     /// Painted onto a ground, because the pane behind this surface is filled by the container
     /// (`applyPaneBackground(.chrome)`) and a picture drawn on transparency reports contrast the
     /// app never shows. The first render of this component was read against nothing at all,

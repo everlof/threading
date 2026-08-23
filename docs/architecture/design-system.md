@@ -51,9 +51,15 @@ command IDs, values, and schemas are never localized.
 The global command palette is a design-system surface, not menu chrome rebuilt in feature code.
 `CommandPaletteViewController` uses `ThemedSearchField`, `ThemedTableView`, `ThemedScrollView` and
 `ThemedSurfaceView`; its table owns the viewport while descriptor values remain lightweight. The
-palette caps presentation at 100 rows, filters on a cancellable background task, preserves the
-resolved shortcut spelling, and exposes disabled reasons to both visible detail and accessibility.
-It owns focus, Escape, arrows and Return only; command meaning stays in the host command plane.
+palette caps presentation at 100 rows, filters on a cancellable background task and holds a
+compact six-row maximum that shrinks when a filtered result or next input needs fewer rows.
+Shortcut controls occupy one explicit trailing column; editable commands use
+`ShortcutRecorderView(.inline)`, so the same conflict-checked store operation as Keyboard Settings
+is available without turning the row itself into a recorder. When a descriptor carries a next
+session input, Tab or Return advances in place to a searchable session list and Escape returns to
+the preserved command query. Disabled reasons, prompts and selection remain visible and
+accessible. The controller owns this focus and presentation state; command meaning and target
+revalidation stay in the host command plane.
 
 Four consequences worth knowing before adding UI:
 
@@ -3148,7 +3154,7 @@ scroll, not acting. A component that quietly eats the list's scroll is a worse b
 being fixed — see the [Scaling Gate](../../CLAUDE.md#scaling-gate).
 
 So the swipe is a `UIPanGestureRecognizer`, which can *decline* a touch. It goes on the enclosing
-scroll view, for the reason [`ScreenEdgeSwipe`](../../Sources/ThreadingMobile/ScreenEdgeSwipe.swift)
+scroll view, for the reason [`SessionWorkspaceDrawer`](../../Sources/ThreadingMobile/SessionWorkspaceDrawer.swift)
 gives — a recogniser sees only touches in its own view or a descendant, and a SwiftUI background
 is a sibling of the content in front of it — and a row-sized, non-interactive representable in the
 row's background says *where* the row is, so the delegate can ask whether a touch is this row's
@@ -3179,3 +3185,36 @@ where the row sits for a finger this far along, how far a throw is read ahead, a
 go closes, opens, or performs. `MobileSessionChromeTests` asserts those directly — including that
 an unmeasured row (`rowWidth == 0`, before the first layout) has no full swipe at all, since a
 threshold taken from zero archives a chat on the first points of any sideways drag.
+
+## 2026-08-23 — a pane's content held the pane, and the split view had no say
+
+Reported as "the macOS app just feels broken and I have no idea why, it's impossible to get the
+terminal's width beyond 800px", with a screenshot of a sidebar swollen to 1759pt of a 2560pt
+window. The first guess from the report — an element inspected at 1739×26 inside the sidebar's
+selected row — was the wrong end of it, and so was the second: the sidebar's floor is *measured*
+(`MainWindowController.updateSidebarMinimumThickness`), which makes it the obvious ratchet, and it
+was innocent. Read live from the running app, every split item's `maximumThickness` was
+`unspecifiedDimension` and the floors were 207 / 320 / 82. Nothing was configured to do this.
+
+`constraintsAffectingLayoutForOrientation(.horizontal)` on the session pane named it in two lines:
+`NSStackView.width <= 720` and `NSStackView.width <= LaunchFailureView.width - 80`. The pane was
+showing the launch-failure surface, whose column said `stack.width == self.width - inset` at
+`.defaultHigh` while being capped at 720. An equality is two-way. Capped on one side, it stops
+saying "stretch the column to the pane" and starts saying "hold the pane at 800".
+
+**A pane is sized by its split item's `holdingPriority`, and that is `defaultLow`-shaped by
+design.** The session pane keeps AppKit's 250 precisely so it is the one absorbing a window
+resize; the sidebar and display panel sit at 260 for the reasons `TerminalConstants` records.
+Content pulling at 750 outranks the lot. Forced to 207 and 100 with 1624 points free, the session
+pane still took exactly 800 and left the rest as dead space.
+
+Nothing was logged, because nothing was unsatisfiable. This is the failure mode where every
+assertion passes and the app is visibly wrong: the split view was obeying a legal constraint that
+outranked its own, and the user experienced it as a maximum width on the terminal.
+
+**The rule: pane content states its own measure, and only a `<=` may mention the pane's width.**
+`ScheduledSessionPlaceholderView` and `ThemedChartPlaceholderView` were already written that way,
+which is what a fix looks like when the house pattern already exists and one component drifted
+from it. The regression boundary states its host's width at `.defaultLow`, and that is the whole
+point of the test: a fixture that pins its host at `.required` is stronger than the pull and
+cannot see this defect at all.

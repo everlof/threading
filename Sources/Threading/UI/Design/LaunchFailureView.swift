@@ -144,17 +144,41 @@ final class LaunchFailureView: NSView, ThemedComponent {
 
         addSubview(stack)
 
-        // **The column needs a definite width, not a cap.** A vertical `NSStackView` aligned
-        // `.centerX` gives each arranged view its *fitting* width, so a well constrained only
-        // "no wider than the pane" comes out as wide as whichever sibling happens to be widest
-        // — the settings section that shipped at a third of its pane made exactly this mistake
-        // (see design-system.md). So the column is pulled out to the pane and capped, and the
-        // well and the wrapping labels are held to it.
+        // **The column needs a definite width, not a cap — and it states that width itself.**
+        //
+        // A vertical `NSStackView` aligned `.centerX` gives each arranged view its *fitting*
+        // width, so a well constrained only "no wider than the pane" comes out as wide as
+        // whichever sibling happens to be widest: the settings section that shipped at a third
+        // of its pane made exactly this mistake (see design-system.md). So the column takes a
+        // definite preferred measure, and the well and the wrapping labels are held to it.
+        //
+        // That measure is a **constant, never a fraction of the pane**, and the difference is
+        // the whole of the bug this shape used to have. `stack.width == self.width - inset` is
+        // two-way: with the column also capped at `wellMaximumWidth`, the equality stops saying
+        // "stretch the column to the pane" and starts saying "hold the pane at
+        // `wellMaximumWidth + horizontalInset`". `NSSplitView` sizes a pane through its item's
+        // `holdingPriority`, and the session pane deliberately keeps the default 250 so that it
+        // is the pane absorbing a window resize (`MainWindowDefaults`,
+        // `SidebarDefaults.holdingPriority`) — which `.defaultHigh` beats outright. Measured in
+        // the running app: with one session in the window failed to launch, the session pane sat
+        // at exactly 800pt through window resizes and through the divider, the sidebar swelling
+        // to take every remaining point, and no drag could widen it. Pane content states its own
+        // measure; only `<=` may mention the pane.
+        //
+        // The inset is a preference *above* that measure, so a pane between the two still keeps
+        // its margin, and the one required ceiling carries no constant — a negative constant on
+        // a required ceiling is unsatisfiable during a zero-width construction pass, which
+        // `ThemedChartPlaceholderView` records the cost of.
         let columnWidth = stack.widthAnchor.constraint(
-            equalTo: widthAnchor,
+            equalToConstant: LaunchFailureDefaults.wellMaximumWidth
+        )
+        columnWidth.priority = LaunchFailureDefaults.columnWidthPriority
+
+        let insetWidth = stack.widthAnchor.constraint(
+            lessThanOrEqualTo: widthAnchor,
             constant: -PlaceholderDefaults.horizontalInset
         )
-        columnWidth.priority = .defaultHigh
+        insetWidth.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -168,10 +192,8 @@ final class LaunchFailureView: NSView, ThemedComponent {
                 constant: -Design.Spacing.pane
             ),
             columnWidth,
-            stack.widthAnchor.constraint(
-                lessThanOrEqualTo: widthAnchor,
-                constant: -PlaceholderDefaults.horizontalInset
-            ),
+            insetWidth,
+            stack.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
             stack.widthAnchor.constraint(
                 lessThanOrEqualToConstant: LaunchFailureDefaults.wellMaximumWidth
             ),
@@ -279,4 +301,11 @@ enum LaunchFailureDefaults {
 
     /// Beyond this the well stops being a quotation and starts being a document.
     static let wellMaximumWidth: CGFloat = 720
+
+    /// The column's own measure, one step below the inset that keeps it off the pane's edge, so
+    /// a pane narrower than `wellMaximumWidth + PlaceholderDefaults.horizontalInset` spends the
+    /// difference on the margin rather than on the column. Both yield to the required ceilings.
+    static let columnWidthPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
+    )
 }

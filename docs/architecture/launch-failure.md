@@ -101,6 +101,37 @@ Selection no longer retries. The retry is a button on the surface, which is a de
 a side effect of navigating, and it clears the record first so the gate that sent us there does
 not refuse it.
 
+### The column states its own width, and the pane keeps its own
+
+The column is capped at `LaunchFailureDefaults.wellMaximumWidth` (720) so the well stays a
+quotation rather than a document, and it takes a *definite* preferred width rather than a cap,
+because a `.centerX` stack given only "no wider than the pane" comes out as wide as whichever
+sibling happens to be widest.
+
+That preferred width is a **constant**, and it has to be. It was first written as
+`stack.width == self.width - horizontalInset` at `.defaultHigh`, which reads as "stretch the
+column to the pane" and is not what a two-way constraint says: with the column also capped at 720,
+the only way to satisfy it is to hold *the pane* at 800. `NSSplitView` sizes a pane through its
+item's `holdingPriority`, and the session pane deliberately keeps AppKit's default 250 so that it
+is the pane absorbing a window resize, with the sidebar and display panel one step above at 260
+(`SidebarDefaults.holdingPriority`). `.defaultHigh` beats all of it.
+
+Measured in the running app, with one session in the window failed to launch: the session pane sat
+at exactly 800pt through a 2560→1933pt window resize and through the divider, while the sidebar
+swelled to 1759pt to take every remaining point, and no drag could widen the terminal. Nothing was
+logged, because nothing was unsatisfiable — the split view was obeying a legal constraint that
+outranked its own. It read as "the terminal has a maximum width".
+
+**The rule this leaves: pane content states its own measure, and only a `<=` may mention the
+pane's width.** `ScheduledSessionPlaceholderView` and `ThemedChartPlaceholderView` were already
+written this way; the latter also records why the one *required* ceiling carries no negative
+constant (a zero-width construction pass makes `width <= -80` unsatisfiable). The inset sits one
+priority step above the column's own measure, so a pane between 720 and 800 spends the difference
+on its margin rather than on the column.
+`LaunchFailureViewTests.testAWidePaneKeepsTheWidthItWasGivenRatherThanTheColumnsOwn` is the
+regression boundary, and it states its host's width at `.defaultLow` on purpose: a fixture that
+pins the host at `.required` cannot see this defect at all.
+
 ## Reporting
 
 **Report a Problem…** prefills the existing sheet (`ReportProblemViewController` →
