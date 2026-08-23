@@ -1,5 +1,13 @@
 import Foundation
 
+public enum PublicIssueReportTrigger: String, Codable, Equatable, Hashable, Sendable {
+    case shake
+    case diagnostics
+    case connectionRecovery
+    case manual
+    case postCrash
+}
+
 /// The deliberately small wire contract accepted by Threading's public report intake.
 ///
 /// This is separate from the paired-Mac remote protocol: a public report contains prose and may
@@ -12,7 +20,7 @@ public struct PublicIssueReportSubmissionDTO: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let id: String
     public let createdAt: String
-    public let trigger: String
+    public let trigger: PublicIssueReportTrigger
     public let description: String
     public let diagnostics: PublicIssueReportDiagnosticsDTO
     public let screenshotPreviewBase64: String?
@@ -22,7 +30,7 @@ public struct PublicIssueReportSubmissionDTO: Codable, Equatable, Sendable {
         schemaVersion: Int = Self.currentSchemaVersion,
         id: String,
         createdAt: String,
-        trigger: String,
+        trigger: PublicIssueReportTrigger,
         description: String,
         diagnostics: PublicIssueReportDiagnosticsDTO,
         screenshotPreviewBase64: String? = nil,
@@ -111,14 +119,10 @@ public enum PublicIssueReportPolicy {
     public static let maximumScreenshotPreviewBytes = 12 * 1_024
 
     public static func accepts(_ submission: PublicIssueReportSubmissionDTO) -> Bool {
-        let allowedTriggers = Set([
-            "shake", "diagnostics", "connectionRecovery", "manual", "postCrash",
-        ])
         guard submission.schemaVersion == PublicIssueReportSubmissionDTO.currentSchemaVersion,
               UUID(uuidString: submission.id) != nil,
               submission.id == submission.id.lowercased(),
               ISO8601DateFormatter().date(from: submission.createdAt) != nil,
-              allowedTriggers.contains(submission.trigger),
               !submission.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               submission.description.utf8.count <= maximumDescriptionBytes,
               submission.diagnostics.schemaVersion == RemoteDiagnosticReport.currentSchemaVersion,

@@ -19,7 +19,7 @@ final class PublicIssueReportingTests: XCTestCase {
         let submission = PublicIssueReportSubmissionDTO(
             id: UUID().uuidString.lowercased(),
             createdAt: ISO8601DateFormatter().string(from: Date()),
-            trigger: "shake",
+            trigger: .shake,
             description: "The composer stopped responding.",
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report),
             screenshotPreviewBase64: Data([0xff, 0xd8, 0xff]).base64EncodedString()
@@ -29,7 +29,7 @@ final class PublicIssueReportingTests: XCTestCase {
         let fakeJPEG = PublicIssueReportSubmissionDTO(
             id: UUID().uuidString.lowercased(),
             createdAt: ISO8601DateFormatter().string(from: Date()),
-            trigger: "shake",
+            trigger: .shake,
             description: "The composer stopped responding.",
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report),
             screenshotPreviewBase64: Data("not a jpeg".utf8).base64EncodedString(),
@@ -39,7 +39,7 @@ final class PublicIssueReportingTests: XCTestCase {
     }
 
     func testSubmissionAcceptsMacManualAndCrashTriggers() {
-        for trigger in ["manual", "postCrash"] {
+        for trigger in [PublicIssueReportTrigger.manual, .postCrash] {
             XCTAssertTrue(PublicIssueReportPolicy.accepts(makeSubmission(
                 trigger: trigger,
                 source: .macOSHost
@@ -49,7 +49,7 @@ final class PublicIssueReportingTests: XCTestCase {
 
     func testSubmissionAcceptsConnectionRecoveryTriggerFromIOS() {
         XCTAssertTrue(PublicIssueReportPolicy.accepts(makeSubmission(
-            trigger: "connectionRecovery",
+            trigger: .connectionRecovery,
             source: .iOSClient
         )))
     }
@@ -73,7 +73,7 @@ final class PublicIssueReportingTests: XCTestCase {
         let submission = PublicIssueReportSubmissionDTO(
             id: UUID().uuidString.lowercased(),
             createdAt: ISO8601DateFormatter().string(from: Date()),
-            trigger: "diagnostics",
+            trigger: .diagnostics,
             description: "The connection failed.",
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report)
         )
@@ -127,7 +127,7 @@ final class PublicIssueReportingTests: XCTestCase {
         let submission = PublicIssueReportSubmissionDTO(
             id: UUID().uuidString.lowercased(),
             createdAt: now,
-            trigger: "manual",
+            trigger: .manual,
             description: "A paired client disconnected.",
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report)
         )
@@ -168,7 +168,7 @@ final class PublicIssueReportingTests: XCTestCase {
 
     private func makeSubmission(
         description: String = "The composer stopped responding.",
-        trigger: String = "diagnostics",
+        trigger: PublicIssueReportTrigger = .diagnostics,
         source: RemoteDiagnosticSource = .iOSClient
     ) -> PublicIssueReportSubmissionDTO {
         PublicIssueReportSubmissionDTO(

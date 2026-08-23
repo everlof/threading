@@ -152,6 +152,34 @@ public enum RemoteUsageLimitResetCause: RemoteLosslessStringToken {
     }
 }
 
+public enum RemoteUsageCoverageState: RemoteLosslessStringToken {
+    case complete
+    case partial
+    case unavailable
+    case failed
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "complete": self = .complete
+        case "partial": self = .partial
+        case "unavailable": self = .unavailable
+        case "failed": self = .failed
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .complete: return "complete"
+        case .partial: return "partial"
+        case .unavailable: return "unavailable"
+        case .failed: return "failed"
+        case .unknown(let value): return value
+        }
+    }
+}
+
 public enum RemoteShareScope: RemoteLosslessStringToken {
     case all
     case session
@@ -260,6 +288,497 @@ public enum RemoteNotificationDelivery: RemoteLosslessStringToken {
         switch self {
         case .push: return "push"
         case .live: return "live"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+// MARK: - Remote content
+
+public enum RemoteDiffLineKind: RemoteLosslessStringToken {
+    case context
+    case addition
+    case removal
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "context": self = .context
+        case "addition": self = .addition
+        case "removal": self = .removal
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .context: return "context"
+        case .addition: return "addition"
+        case .removal: return "removal"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteGitFileChange: RemoteLosslessStringToken {
+    case modified
+    case added
+    case deleted
+    case untracked
+    case renamed
+    case binary
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "modified": self = .modified
+        case "added": self = .added
+        case "deleted": self = .deleted
+        case "untracked": self = .untracked
+        case "renamed": self = .renamed
+        case "binary": self = .binary
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .modified: return "modified"
+        case .added: return "added"
+        case .deleted: return "deleted"
+        case .untracked: return "untracked"
+        case .renamed: return "renamed"
+        case .binary: return "binary"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteAttachmentKind: RemoteLosslessStringToken {
+    case image
+    case pdf
+    case html
+    case archive
+    case document
+    case diagram
+    case video
+    case media
+    case text
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "image": self = .image
+        case "pdf": self = .pdf
+        case "html": self = .html
+        case "archive": self = .archive
+        case "document": self = .document
+        case "diagram": self = .diagram
+        case "video": self = .video
+        case "media": self = .media
+        case "text": self = .text
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .image: return "image"
+        case .pdf: return "pdf"
+        case .html: return "html"
+        case .archive: return "archive"
+        case .document: return "document"
+        case .diagram: return "diagram"
+        case .video: return "video"
+        case .media: return "media"
+        case .text: return "text"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteAttachmentOrigin: RemoteLosslessStringToken {
+    case agent
+    case user
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "agent": self = .agent
+        case "user": self = .user
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .agent: return "agent"
+        case .user: return "user"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteComposerCapabilityKind: RemoteLosslessStringToken {
+    case command
+    case skill
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "command": self = .command
+        case "skill": self = .skill
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .command: return "command"
+        case .skill: return "skill"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteComposerCapabilityTrigger: RemoteLosslessStringToken {
+    case slash
+    case dollar
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "slash": self = .slash
+        case "dollar": self = .dollar
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .slash: return "slash"
+        case .dollar: return "dollar"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteComposerCapabilityPresentation: RemoteLosslessStringToken {
+    case turn
+    case command
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "turn": self = .turn
+        case "command": self = .command
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .turn: return "turn"
+        case .command: return "command"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteConversationContextKind: RemoteLosslessStringToken {
+    case reference
+    case comment
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "reference": self = .reference
+        case "comment": self = .comment
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .reference: return "reference"
+        case .comment: return "comment"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteConversationContextSource: RemoteLosslessStringToken {
+    case message
+    case code
+    case attachment
+    case workspaceFile
+    case session
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "message": self = .message
+        case "code": self = .code
+        case "attachment": self = .attachment
+        case "workspaceFile": self = .workspaceFile
+        case "session": self = .session
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .message: return "message"
+        case .code: return "code"
+        case .attachment: return "attachment"
+        case .workspaceFile: return "workspaceFile"
+        case .session: return "session"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteConversationRowKind: RemoteLosslessStringToken {
+    case user
+    case assistant
+    case thinking
+    case tool
+    case notice
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "user": self = .user
+        case "assistant": self = .assistant
+        case "thinking": self = .thinking
+        case "tool": self = .tool
+        case "notice": self = .notice
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .user: return "user"
+        case .assistant: return "assistant"
+        case .thinking: return "thinking"
+        case .tool: return "tool"
+        case .notice: return "notice"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+// MARK: - Routes
+
+/// Fixed path components shared by the remote client and host router.
+public enum RemoteSessionRouteAction: String, Codable, Equatable, Hashable, Sendable {
+    case resume
+    case theme
+    case rename
+    case pinned
+    case archived
+    case snoozed
+    case surface
+    case account
+    case limitRecovery = "limit-recovery"
+    case share
+    case unshare
+    case gitReview = "git-review"
+    case repositoryFiles = "repository-files"
+    case repositoryFile = "repository-file"
+    case attachments
+    case attachment
+    case attachmentThumbnail = "attachment-thumbnail"
+    case attachmentUpload = "attachment-upload"
+    case workspace
+    case browserPreview = "browser-preview"
+    case extensionPanel = "extension-panel"
+    case extensionPanelResource = "extension-panel-resource"
+}
+
+public enum RemoteTerminalRouteAction: String, Codable, Equatable, Hashable, Sendable {
+    case resume
+    case share
+    case unshare
+}
+
+// MARK: - Collaboration
+
+/// Presence projected by the host. Unknown values remain decodable across host/client skew.
+public enum RemotePresenceState: RemoteLosslessStringToken {
+    case viewing
+    case typing
+    case left
+    /// Legacy client spelling accepted by hosts before they normalize it to `viewing`.
+    case idle
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "viewing": self = .viewing
+        case "typing": self = .typing
+        case "left": self = .left
+        case "idle": self = .idle
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .viewing: return "viewing"
+        case .typing: return "typing"
+        case .left: return "left"
+        case .idle: return "idle"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+/// The closed presence vocabulary a client may send to a host.
+public enum RemotePresenceUpdate: String, Codable, Equatable, Hashable, Sendable {
+    case typing
+    case idle
+}
+
+public enum RemotePermissionDecision: String, Codable, Equatable, Hashable, Sendable {
+    case allow
+    case deny
+}
+
+public enum RemoteMobileApplicationState: RemoteLosslessStringToken {
+    case active
+    case inactive
+    case background
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "active": self = .active
+        case "inactive": self = .inactive
+        case "background": self = .background
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .active: return "active"
+        case .inactive: return "inactive"
+        case .background: return "background"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteMobileConnectionState: RemoteLosslessStringToken {
+    case idle
+    case connecting
+    case online
+    case offline
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "idle": self = .idle
+        case "connecting": self = .connecting
+        case "online": self = .online
+        case "offline": self = .offline
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .idle: return "idle"
+        case .connecting: return "connecting"
+        case .online: return "online"
+        case .offline: return "offline"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteMobileDiagnosticsScreenshotKind: RemoteLosslessStringToken {
+    case current
+    case incident
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "current": self = .current
+        case "incident": self = .incident
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .current: return "current"
+        case .incident: return "incident"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+public enum RemoteCollaborationRole: RemoteLosslessStringToken {
+    case owner
+    case member
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "owner": self = .owner
+        case "member": self = .member
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .owner: return "owner"
+        case .member: return "member"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+/// The closed input-control vocabulary a client may send to a host.
+public enum RemoteInputControlAction: String, Codable, Equatable, Hashable, Sendable {
+    case collaborative
+    case focused
+    case handoff
+    case reclaim
+    case request
+}
+
+/// An input-control event projected by the host.
+public enum RemoteInputControlEventAction: RemoteLosslessStringToken {
+    case modeChanged
+    case handedOff
+    case reclaimed
+    case requested
+    case released
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "modeChanged": self = .modeChanged
+        case "handedOff": self = .handedOff
+        case "reclaimed": self = .reclaimed
+        case "requested": self = .requested
+        case "released": self = .released
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .modeChanged: return "modeChanged"
+        case .handedOff: return "handedOff"
+        case .reclaimed: return "reclaimed"
+        case .requested: return "requested"
+        case .released: return "released"
         case .unknown(let value): return value
         }
     }

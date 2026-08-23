@@ -283,15 +283,15 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public func resumeTerminalURL(terminalID: String) -> URL {
-        terminalActionURL(terminalID: terminalID, action: "resume")
+        terminalActionURL(terminalID: terminalID, action: .resume)
     }
 
     public func terminalShareURL(terminalID: String) -> URL {
-        terminalActionURL(terminalID: terminalID, action: "share")
+        terminalActionURL(terminalID: terminalID, action: .share)
     }
 
     public func terminalUnshareURL(terminalID: String) -> URL {
-        terminalActionURL(terminalID: terminalID, action: "unshare")
+        terminalActionURL(terminalID: terminalID, action: .unshare)
     }
 
     public func sessionThemeURL(sessionID: String) -> URL {
@@ -302,53 +302,53 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public func renameSessionURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "rename")
+        sessionActionURL(sessionID: sessionID, action: .rename)
     }
 
     public func pinnedSessionURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "pinned")
+        sessionActionURL(sessionID: sessionID, action: .pinned)
     }
 
     public func archivedSessionURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "archived")
+        sessionActionURL(sessionID: sessionID, action: .archived)
     }
 
     public func snoozedSessionURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "snoozed")
+        sessionActionURL(sessionID: sessionID, action: .snoozed)
     }
 
     public func sessionSurfaceURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "surface")
+        sessionActionURL(sessionID: sessionID, action: .surface)
     }
 
     public func sessionAccountURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "account")
+        sessionActionURL(sessionID: sessionID, action: .account)
     }
 
     public func sessionLimitRecoveryURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "limit-recovery")
+        sessionActionURL(sessionID: sessionID, action: .limitRecovery)
     }
 
     public func sessionShareURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "share")
+        sessionActionURL(sessionID: sessionID, action: .share)
     }
 
     public func sessionUnshareURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "unshare")
+        sessionActionURL(sessionID: sessionID, action: .unshare)
     }
 
     public func gitReviewURL(sessionID: String, mode: RemoteGitReviewMode) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "git-review")
+        sessionActionURL(sessionID: sessionID, action: .gitReview)
             .appendingPathComponent(mode.rawValue)
     }
 
     public func repositoryFilesURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "repository-files")
+        sessionActionURL(sessionID: sessionID, action: .repositoryFiles)
     }
 
     public func repositoryFileURL(sessionID: String, path: String) -> URL? {
         var components = URLComponents(
-            url: sessionActionURL(sessionID: sessionID, action: "repository-file"),
+            url: sessionActionURL(sessionID: sessionID, action: .repositoryFile),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [URLQueryItem(name: "path", value: path)]
@@ -356,12 +356,23 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public func attachmentsURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "attachments")
+        sessionActionURL(sessionID: sessionID, action: .attachments)
     }
 
     public func attachmentURL(sessionID: String, id: String) -> URL? {
         var components = URLComponents(
-            url: sessionActionURL(sessionID: sessionID, action: "attachment"),
+            url: sessionActionURL(sessionID: sessionID, action: .attachment),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "id", value: id)]
+        return components?.url
+    }
+
+    /// A bounded raster of one attachment, for a ledger cell. Offered only by a Mac whose
+    /// `features` include `RemoteRESTFeature.attachmentThumbnails`.
+    public func attachmentThumbnailURL(sessionID: String, id: String) -> URL? {
+        var components = URLComponents(
+            url: sessionActionURL(sessionID: sessionID, action: .attachmentThumbnail),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [URLQueryItem(name: "id", value: id)]
@@ -370,16 +381,16 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
 
     /// Where a composing client hands over file bytes before naming them in a prompt.
     public func attachmentUploadURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "attachment-upload")
+        sessionActionURL(sessionID: sessionID, action: .attachmentUpload)
     }
 
     public func workspaceURL(sessionID: String) -> URL {
-        sessionActionURL(sessionID: sessionID, action: "workspace")
+        sessionActionURL(sessionID: sessionID, action: .workspace)
     }
 
     public func browserPreviewURL(sessionID: String, tabID: String) -> URL? {
         var components = URLComponents(
-            url: sessionActionURL(sessionID: sessionID, action: "browser-preview"),
+            url: sessionActionURL(sessionID: sessionID, action: .browserPreview),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [URLQueryItem(name: "tab", value: tabID)]
@@ -392,7 +403,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         panelID: String
     ) -> URL? {
         var components = URLComponents(
-            url: sessionActionURL(sessionID: sessionID, action: "extension-panel"),
+            url: sessionActionURL(sessionID: sessionID, action: .extensionPanel),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -409,7 +420,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         path: String
     ) -> URL? {
         var components = URLComponents(
-            url: sessionActionURL(sessionID: sessionID, action: "extension-panel-resource"),
+            url: sessionActionURL(sessionID: sessionID, action: .extensionPanelResource),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
@@ -432,18 +443,24 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         webSocketURL(pathComponents: ["ws", "terminal", terminalID])
     }
 
-    private func sessionActionURL(sessionID: String, action: String) -> URL {
+    private func sessionActionURL(
+        sessionID: String,
+        action: RemoteSessionRouteAction
+    ) -> URL {
         baseURL
             .appendingPathComponent("api/session")
             .appendingPathComponent(sessionID)
-            .appendingPathComponent(action)
+            .appendingPathComponent(action.rawValue)
     }
 
-    private func terminalActionURL(terminalID: String, action: String) -> URL {
+    private func terminalActionURL(
+        terminalID: String,
+        action: RemoteTerminalRouteAction
+    ) -> URL {
         baseURL
             .appendingPathComponent("api/terminal")
             .appendingPathComponent(terminalID)
-            .appendingPathComponent(action)
+            .appendingPathComponent(action.rawValue)
     }
 
     private func webSocketURL(pathComponents: [String]) -> URL? {
