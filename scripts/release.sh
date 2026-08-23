@@ -125,7 +125,8 @@ if [[ $NOTARIZE -eq 1 ]]; then
         || fail "notarytool profile '$NOTARY_PROFILE' not found — see the header of this script"
 fi
 
-# The provisioning profile, checked against the entitlements it has to authorise.
+# The provisioning profile, checked against the entitlements it has to authorise — and, today,
+# confirming there are none, so no profile is needed and none is named in ExportOptions.plist.
 #
 # Same bargain as the embedded-binary sweep below: exportArchive only reports this after the
 # archive is built, so an unauthorised entitlement costs a full release build to discover. It is
@@ -151,6 +152,13 @@ required = {
     key for key in plistlib.loads(Path(entitlements_path).read_bytes())
     if key.startswith("com.apple.developer.")
 }
+
+# Nothing restricted, nothing to authorise. Developer ID needs no profile in that case, and
+# demanding one would fail a release that is correct — which is the state this app is in since
+# Sign in with Apple was dropped: it cannot cross into a Developer ID profile at all.
+if not required:
+    print("  no restricted entitlements — Developer ID needs no profile")
+    sys.exit(0)
 
 candidates = sorted(Path(directory).glob("*.provisionprofile")) if Path(directory).is_dir() else []
 for path in candidates:
@@ -287,11 +295,6 @@ cat > "$BUILD_DIR/ExportOptions.plist" <<PLIST
 	<string>manual</string>
 	<key>signingCertificate</key>
 	<string>Developer ID Application</string>
-	<key>provisioningProfiles</key>
-	<dict>
-		<key>$BUNDLE_ID</key>
-		<string>$PROVISIONING_PROFILE</string>
-	</dict>
 </dict>
 </plist>
 PLIST
