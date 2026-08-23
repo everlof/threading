@@ -730,6 +730,55 @@ enum SettingsUI {
         )
     }
 
+    /// A settings row whose explanation keeps the card's full readable width and whose control
+    /// sits on a second, trailing-aligned line. Use this when the control and the sentence each
+    /// need more than half of the constrained pane: forcing both into `row` can keep every edge
+    /// technically inside the card while wrapping the explanation a few words at a time.
+    static func stackedControlRow(
+        title: String,
+        subtitle: String,
+        control: NSView,
+        subtitleField: inout NSTextField?,
+        localizes: Bool = true
+    ) -> NSView {
+        let displayTitle = localized(title, if: localizes)
+        let titleLabel = NSTextField(labelWithString: displayTitle)
+        titleLabel.applyFont(.body)
+        titleLabel.textColor = Design.Text.label
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let subtitleLabel = wrappingSubtitle(localized(subtitle, if: localizes))
+        subtitleField = subtitleLabel
+        let labels = NSStackView(views: [titleLabel, subtitleLabel])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = Design.Spacing.hairline
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        fill(labels)
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        holdsItsWidth(control)
+        let controlLine = NSStackView(views: [spacer, control])
+        controlLine.orientation = .horizontal
+        controlLine.alignment = .centerY
+        controlLine.distribution = .fill
+
+        let column = NSStackView(views: [labels, controlLine])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.medium
+        NSLayoutConstraint.activate([
+            labels.widthAnchor.constraint(equalTo: column.widthAnchor),
+            controlLine.widthAnchor.constraint(equalTo: column.widthAnchor)
+        ])
+
+        let result = padded(column)
+        SettingsRowAnchor.tag(result, title: displayTitle)
+        return result
+    }
+
     /// A control that spans the row's full width, such as a text field with a Choose button.
     static func fullRow(_ content: NSView) -> NSView {
         padded(content)

@@ -186,7 +186,10 @@ final class KeyboardPreferencesViewController: NSViewController {
         )
 
         var detail: NSTextField?
-        let row = SettingsUI.row(
+        // Both halves carry meaning: the sentence explains Return's context-sensitive default,
+        // and the chooser names it. At the constrained settings width they do not belong in two
+        // squeezed columns merely because both technically fit inside the card.
+        let row = SettingsUI.stackedControlRow(
             title: Strings.returnKeyTitle,
             subtitle: AppSettings.promptReturnKey.settingsDetail,
             control: returnKeyPopUp,

@@ -183,6 +183,47 @@ final class SettingsRowLayoutTests: XCTestCase {
                                     "the control was squeezed by the labels beside it")
     }
 
+    /// Some controls need the standard 220-point measure while their explanation is a sentence,
+    /// not a label. The stacked contract gives each the width it needs instead of satisfying the
+    /// card edges with an unreadably narrow text column.
+    func testAStackedControlRowKeepsLongCopyReadableAtConstrainedWidth() throws {
+        let width: CGFloat = 420
+        let control = popUp()
+        control.translatesAutoresizingMaskIntoConstraints = false
+        control.widthAnchor.constraint(
+            equalToConstant: SettingsUIDefaults.controlWidth
+        ).isActive = true
+        var subtitle: NSTextField?
+        let built = SettingsUI.stackedControlRow(
+            title: "When writing a prompt, press Return to",
+            subtitle: "A box with a send control in it sends; a note attached to a report "
+                + "takes a line break.",
+            control: control,
+            subtitleField: &subtitle,
+            localizes: false
+        )
+        built.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 240))
+        container.addSubview(built)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: width),
+            built.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            built.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            built.topAnchor.constraint(equalTo: container.topAnchor)
+        ])
+        container.layoutSubtreeIfNeeded()
+
+        let subtitle = try XCTUnwrap(subtitle)
+        let subtitleFrame = subtitle.convert(subtitle.bounds, to: built)
+        let controlFrame = control.convert(control.bounds, to: built)
+        XCTAssertGreaterThan(subtitleFrame.width, SettingsUIDefaults.controlWidth)
+        XCTAssertGreaterThanOrEqual(controlFrame.minX, subtitleFrame.minX)
+        XCTAssertLessThanOrEqual(
+            controlFrame.maxX,
+            width - Design.Spacing.inset + 0.5
+        )
+    }
+
     /// A long title is allowed to truncate; moving the setting's control outside the card is
     /// not. This is the exact pressure shape the 420pt General-page evidence exposed.
     func testALongTitleKeepsTheControlInsideANarrowRow() throws {
