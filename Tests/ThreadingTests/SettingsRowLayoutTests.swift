@@ -130,14 +130,9 @@ final class SettingsRowLayoutTests: XCTestCase {
             page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: host.trailingAnchor)
         ])
-        let window = NSWindow(
-            contentRect: host.bounds,
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = host
-        defer { window.close() }
+        // This is a pure Auto Layout contract, so keep it detached. Hosting a transient window
+        // makes XCTest's invalid-object checker race AppKit's autoreleased window bookkeeping at
+        // the end of the test; the two explicit host dimensions are the actual constraints here.
         host.layoutSubtreeIfNeeded()
 
         let rescanFrame = rescan.convert(rescan.bounds, to: page)
