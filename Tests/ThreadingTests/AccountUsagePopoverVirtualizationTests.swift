@@ -15,7 +15,8 @@ final class AccountUsagePopoverVirtualizationTests: XCTestCase {
         let controller = AccountUsagePopoverViewController(
             account: account,
             isEmbedded: true,
-            readingProvider: { _ in reading }
+            readingProvider: { _ in reading },
+            nowProvider: { self.now }
         )
         let host = laidOut(controller.view, width: UsagePopoverDefaults.contentWidth, height: 360)
         let window = NSWindow(
@@ -73,7 +74,8 @@ final class AccountUsagePopoverVirtualizationTests: XCTestCase {
             appearance.performAsCurrentDrawingAppearance {
                 let controller = AccountUsagePopoverViewController(
                     account: fixtureAccount,
-                    readingProvider: { _ in self.fixtureReading(count: 30, fractionOffset: 0) }
+                    readingProvider: { _ in self.fixtureReading(count: 30, fractionOffset: 0) },
+                    nowProvider: { self.now }
                 )
                 let host = laidOut(controller.view, width: UsagePopoverDefaults.width, height: 400)
                 let window = NSWindow(

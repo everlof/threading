@@ -14,6 +14,8 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
     private let account: AgentAccount
     private let isEmbedded: Bool
     private let readingProvider: (AgentAccount) -> AccountUsageReading
+    private let nowProvider: () -> Date
+    private var renderedAt = Date()
     private var windows: [AccountUsage.Window] = []
     private let contentStack = NSStackView()
     private let nameLabel = NSTextField(labelWithString: "")
@@ -60,11 +62,13 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
     init(
         account: AgentAccount,
         isEmbedded: Bool = false,
-        readingProvider: ((AgentAccount) -> AccountUsageReading)? = nil
+        readingProvider: ((AgentAccount) -> AccountUsageReading)? = nil,
+        nowProvider: @escaping () -> Date = Date.init
     ) {
         self.account = account
         self.isEmbedded = isEmbedded
         self.readingProvider = readingProvider ?? { AccountUsageService.shared.reading(for: $0) }
+        self.nowProvider = nowProvider
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -173,11 +177,12 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         let origin = scrollView.contentView.bounds.origin
         let reading = readingProvider(account)
         let usage = reading.usage
+        renderedAt = nowProvider()
 
         nameLabel.stringValue = "\(account.provider.displayName) — \(account.displayName)"
         planLabel.stringValue = usage?.planLabel ?? ""
         planLabel.isHidden = planLabel.stringValue.isEmpty
-        footerLabel.stringValue = footerText(reading: reading)
+        footerLabel.stringValue = footerText(reading: reading, now: renderedAt)
 
         // Provider-scoped model windows have no product cardinality ceiling. Keep all of their
         // value identities so the user can reach every limit, but let AppKit own the native
@@ -209,6 +214,7 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
         host.install(
             UsageWindowRow(
                 window: windows[row],
+                now: renderedAt,
                 limits: CustomLimitSettings.shared.rules(for: account.id)
             ),
             columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width
@@ -218,9 +224,9 @@ final class AccountUsagePopoverViewController: NSViewController, NSTableViewData
 
     /// The freshness line, with the source named when the reading is second-hand — a cached
     /// value observed an hour ago should say so rather than posing as live.
-    private func footerText(reading: AccountUsageReading) -> String {
+    private func footerText(reading: AccountUsageReading, now: Date) -> String {
         if let usage = reading.usage {
-            var text = L10n.format("Updated %@", UsageFormat.age(of: usage.observedAt))
+            var text = L10n.format("Updated %@", UsageFormat.age(of: usage.observedAt, at: now))
             if usage.source == .localCache {
                 text += L10n.string(" · via Claude's status-line feed")
             }
