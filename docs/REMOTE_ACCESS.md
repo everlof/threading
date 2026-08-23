@@ -634,6 +634,19 @@ the quote and not Paste, since nothing it sends arrives. `RemoteTerminalSelectio
 `RemoteTerminalSelectionQuoteTests` pin this; the `terminal-selection-quote` evidence capture
 shows the handles, the themed selection and the chip together.
 
+**The draft box needed the same rule, and did not have it.** The quotes were delimited and what
+was *typed* beside them never was — and the host writes a submitted line into the PTY as it
+stands before appending Return, so a draft carrying a line break arrived as several Returns: the
+first line submitted and the rest landed in whatever the agent asked next. Typing cannot produce
+a line break there, because Return sends; pasting is the only way one gets in, which is exactly
+the case that broke. `submissionText` now delimits a multi-line draft too, trimming the blank
+edges the host's own trim can no longer see past the delimiters. The quotes stay a separate
+block from the instruction rather than being folded into one: an agent's prompt collapses a
+pasted block into a single token, and burying "fix this" inside it would hide what was asked.
+`RemoteTerminalPaste` owns the delimiters and the 64 KB write bound now, shared with
+`RemoteAccessDefaults.maximumTerminalInputBytes` so a client can ask the host's own question
+before sending rather than pasting into silence.
+
 **The browser client takes the same lease.** It shipped without one, rendering the Mac's grid at
 a fixed 13px into whatever box the window happened to be: a browser narrower than the Mac ran the
 session off its own frame and put the rest behind a scrollbar, and only resizing the *Mac* ever
@@ -909,6 +922,27 @@ paths at the current cursor without Return. The explicit step matters because an
 finish after the person has moved the TUI cursor. Neither mode lets asynchronous transfer mutate
 the terminal unexpectedly. This is the only route by which a remote client can cause the Mac to
 keep a file, so it is worth saying exactly what it does and where it stops.
+
+**The clipboard is the third source, because it is where the thing already is.** Photos and
+Files are both places to go *looking*, and a picture copied out of a web page, a message or
+another app's share sheet is in neither until somebody saves it somewhere first. Pasting one into
+the composer did nothing at all — `UITextView` asks whether it can insert *text*, so a
+picture-only clipboard left the edit menu with no Paste in it to begin with. The
+composer's text view now offers Paste for that clipboard and hands it to the attachment strip
+instead of to the sentence, and the paperclip carries **From Clipboard** beside the two pickers
+for the same act reached the other way. Text is untouched by both: it keeps the text view's own
+paste, insertion point and undo and all. `ComposerClipboard` is the one reader —
+`ComposerClipboardTests` pins what it takes, what it skips and the cap.
+
+Two properties are load-bearing there. **Asking what the pasteboard holds is not reading it:**
+since iOS 16 reading a *value* raises the system's paste notification, while the `has…` flags and
+the type list raise nothing, so availability is answered from metadata and the value is read only
+once somebody has chosen the entry — a control that prompted merely by being drawn would teach
+people to refuse the prompt. And the item count comes from **whatever another app put there**, so
+it is capped at the eight a message carries *before* anything is read, rather than by the tray
+refusing the ninth file after its bytes were already copied out of the pasteboard server. A file
+copied in another app arrives as a URL rather than as bytes, which is the one case where the size
+is knowable in advance; it is refused on `fileSize` without ever being read.
 
 **The bytes go over first, and the prompt names them afterwards.** `POST …/attachment-upload`
 carries one chunk of base64 inside the same JSON envelope every other mutation uses; chunk 0

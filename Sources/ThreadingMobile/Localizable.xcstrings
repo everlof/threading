@@ -2113,6 +2113,16 @@
         }
       }
     },
+    "From Clipboard": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Från urklipp"
+          }
+        }
+      }
+    },
     "For your own Mac, open Threading → Settings → Remote Access and scan the pairing code. You can also paste a one-chat link someone shared with you. Owner pairing can manage your Mac; a shared-chat link never can.": {
       "localizations": {
         "sv": {
@@ -5595,6 +5605,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ kunde inte skickas till din Mac."
+          }
+        }
+      }
+    },
+    "There’s nothing on the clipboard to attach.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det finns inget i urklipp att bifoga."
           }
         }
       }

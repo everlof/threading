@@ -142,7 +142,10 @@ enum RemoteAccessDefaults {
     /// the ceiling is generous rather than exact: sixteen times the answer's own limit leaves
     /// room for any real name plus padding, and refuses the frame-sized ones outright.
     static let maximumNameInputBytes = maximumMemberNameBytes * 16
-    static let maximumTerminalInputBytes = 64 * 1024
+    /// Shared with the composing clients rather than restated here: a phone that pastes a whole
+    /// file into a PTY gets no acknowledgement back for a raw write, so it has to ask the same
+    /// question before sending instead of pasting into silence.
+    static let maximumTerminalInputBytes = RemoteTerminalPaste.maximumBytes
     static let maximumPromptBytes = 256 * 1024
     static let maximumPermissionIDBytes = 256
     static let maximumThemeIDBytes = 256

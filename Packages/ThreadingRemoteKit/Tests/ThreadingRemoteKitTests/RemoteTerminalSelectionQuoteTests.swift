@@ -102,4 +102,95 @@ final class RemoteTerminalSelectionQuoteTests: XCTestCase {
             "Fix it"
         )
     }
+
+    /// The host writes a submitted line into the PTY as it stands and appends Return, so a draft
+    /// holding line breaks used to arrive as several Returns — the first line submitting and the
+    /// rest landing wherever the agent went next. Pasting is the only way a line break reaches
+    /// that box, since Return sends it.
+    func testAPastedMultiLineDraftTravelsAsOnePaste() {
+        XCTAssertEqual(
+            RemoteTerminalSelectionQuote.submissionText(
+                for: [],
+                draft: "def run():\n    return 1",
+                bracketedPaste: true
+            ),
+            Fixture.bracketStart + "def run():\n    return 1" + Fixture.bracketEnd
+        )
+    }
+
+    func testAPastedDraftLosesTheBlankEdgesTheHostWouldHaveTrimmed() {
+        XCTAssertEqual(
+            RemoteTerminalSelectionQuote.submissionText(
+                for: [],
+                draft: "\none\ntwo\n\n",
+                bracketedPaste: true
+            ),
+            Fixture.bracketStart + "one\ntwo" + Fixture.bracketEnd,
+            "delimiters hide the ends from the host's own trim, so they are trimmed here"
+        )
+    }
+
+    func testAMultiLineDraftGoesInAsTypedWhenTheProgramNeverAskedForBracketedPaste() {
+        XCTAssertEqual(
+            RemoteTerminalSelectionQuote.submissionText(
+                for: [],
+                draft: "one\ntwo",
+                bracketedPaste: false
+            ),
+            "one\ntwo",
+            "a program that did not arm the mode cannot read the delimiters"
+        )
+    }
+
+    /// The quotes stay their own paste and the instruction stays separate: an agent's prompt
+    /// collapses a pasted block into one token, and folding the instruction inside it would
+    /// hide what the person actually asked for.
+    func testQuotesAndAPastedDraftRemainTwoBlocks() throws {
+        let quote = try XCTUnwrap(RemoteTerminalSelectionQuote(selectedText: "one\ntwo"))
+
+        XCTAssertEqual(
+            RemoteTerminalSelectionQuote.submissionText(
+                for: [quote],
+                draft: "fix this\nand this",
+                bracketedPaste: true
+            ),
+            Fixture.bracketStart + "one\ntwo" + Fixture.bracketEnd
+                + " " + Fixture.bracketStart + "fix this\nand this" + Fixture.bracketEnd
+        )
+    }
+}
+
+/// Bracketed paste is the only thing standing between a block of text and a program reading
+/// every line break in it as Return.
+final class RemoteTerminalPasteTests: XCTestCase {
+
+    func testTextIsDelimitedOnlyWhenTheProgramAskedForIt() {
+        XCTAssertEqual(
+            RemoteTerminalPaste.delimited("ls -la", bracketedPaste: true),
+            "\u{1b}[200~ls -la\u{1b}[201~"
+        )
+        XCTAssertEqual(RemoteTerminalPaste.delimited("ls -la", bracketedPaste: false), "ls -la")
+    }
+
+    func testEmptyTextIsNeverDelimited() {
+        XCTAssertEqual(RemoteTerminalPaste.delimited("", bracketedPaste: true), "")
+    }
+
+    func testOnlyTextWithLineBreaksCountsAsAPaste() {
+        XCTAssertFalse(RemoteTerminalPaste.carriesLineBreaks("one line"))
+        XCTAssertTrue(RemoteTerminalPaste.carriesLineBreaks("one\ntwo"))
+        XCTAssertTrue(RemoteTerminalPaste.carriesLineBreaks("one\r\ntwo"))
+    }
+
+    /// A raw terminal write is acknowledged by nothing, so a client that does not ask this
+    /// question before sending pastes into silence.
+    func testAWriteLargerThanTheHostAcceptsDoesNotFit() {
+        let atLimit = String(repeating: "a", count: RemoteTerminalPaste.maximumBytes)
+        XCTAssertTrue(RemoteTerminalPaste.fits(atLimit))
+        XCTAssertFalse(RemoteTerminalPaste.fits(atLimit + "a"))
+        XCTAssertFalse(
+            RemoteTerminalPaste.fits(String(repeating: "é", count: RemoteTerminalPaste.maximumBytes)),
+            "the bound is bytes, not characters"
+        )
+    }
 }

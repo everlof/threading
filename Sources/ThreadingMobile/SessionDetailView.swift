@@ -1281,6 +1281,11 @@ private struct TerminalLineComposer: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var isPickingPhotos = false
     @State private var isImportingFiles = false
+    /// Whether the clipboard is holding a file worth offering. A `Menu` has no moment of
+    /// opening to hang the question on, so it is answered when this composer appears and again
+    /// whenever the pasteboard could have changed — rather than on every body evaluation, which
+    /// a live terminal performs constantly.
+    @State private var clipboardOffersFiles = false
     @FocusState private var draftIsFocused: Bool
 
     var body: some View {
@@ -1308,6 +1313,17 @@ private struct TerminalLineComposer: View {
 
             HStack(alignment: .center, spacing: MobileDesign.Spacing.small) {
                 Menu {
+                    // Text pastes into the draft itself, at the insertion point, the way the
+                    // system has always done it. This entry is for what that cannot carry: a
+                    // picture has no text to insert, and a copied one is in neither picker.
+                    if clipboardOffersFiles {
+                        Button(action: stageClipboardFiles) {
+                            Label(
+                                MobileL10n.string("From Clipboard"),
+                                systemImage: "doc.on.clipboard"
+                            )
+                        }
+                    }
                     // A PhotosPicker inside a Menu is torn down with the menu before its sheet
                     // can present; the item requests presentation and .photosPicker below shows it.
                     Button {
@@ -1373,6 +1389,18 @@ private struct TerminalLineComposer: View {
         }
         .onAppear(perform: restoreDraft)
         .onAppear(perform: configureAttachments)
+        .onAppear(perform: refreshClipboardOffer)
+        // A pasteboard written in another app raises no notification here, so returning to the
+        // foreground is the moment that has to ask again; the local notification covers a copy
+        // made inside this app without waiting for a trip through the switcher.
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)
+        ) { _ in refreshClipboardOffer() }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIApplication.didBecomeActiveNotification
+            )
+        ) { _ in refreshClipboardOffer() }
         .onChange(of: photoItems) { _, items in
             Task { await loadPhotos(items) }
         }
@@ -1465,6 +1493,24 @@ private struct TerminalLineComposer: View {
             submissionNotice = tray.notice
         }
         attachmentTray = tray
+    }
+
+    private func refreshClipboardOffer() {
+        clipboardOffersFiles = ComposerClipboard.general.hasFiles
+    }
+
+    private func stageClipboardFiles() {
+        guard let tray = attachmentTray else { return }
+        let files = ComposerClipboard.general.files()
+        guard !files.isEmpty else {
+            // Between drawing the entry and choosing it, the clipboard changed under it.
+            refreshClipboardOffer()
+            submissionNotice = MobileL10n.string("There’s nothing on the clipboard to attach.")
+            return
+        }
+        for file in files {
+            tray.add(data: file.data, name: file.name, type: file.type)
+        }
     }
 
     private func loadPhotos(_ items: [PhotosPickerItem]) async {

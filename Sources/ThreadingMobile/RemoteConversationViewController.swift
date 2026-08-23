@@ -493,6 +493,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         attachButton.addAction(UIAction { [weak self] _ in
             self?.presentAttachmentSources()
         }, for: .touchUpInside)
+        textView.offersFiles = { ComposerClipboard.general.hasFiles }
+        textView.pasteFiles = { [weak self] in self?.stageClipboardFiles() ?? false }
         attachmentStrip.onRemove = { [weak self] id in
             self?.attachmentTray?.remove(id)
         }
@@ -992,6 +994,15 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         guard let tray = attachmentTray, tray.canAcceptMore else { return }
 
         let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        // Read once, here, where somebody has just asked to attach something: the answer decides
+        // whether the entry is drawn at all, and asking on every layout pass would be an XPC
+        // round trip to the pasteboard server for a menu nobody opened.
+        if ComposerClipboard.general.hasFiles {
+            sheet.addAction(UIAlertAction(
+                title: MobileL10n.string("From Clipboard"),
+                style: .default
+            ) { [weak self] _ in _ = self?.stageClipboardFiles() })
+        }
         sheet.addAction(UIAlertAction(
             title: MobileL10n.string("Photo Library"),
             style: .default
@@ -1007,6 +1018,24 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         sheet.overrideUserInterfaceStyle = overrideUserInterfaceStyle
         sheet.view.tintColor = theme.uiAccent
         present(sheet, animated: true)
+    }
+
+    /// Stages whatever the clipboard is holding as files, and says whether it held any.
+    ///
+    /// The same method serves the paste and the menu entry, because they are the same act: one
+    /// is reached through the text view's edit menu and the other through the paperclip, and
+    /// both mean "the thing I copied belongs in this message".
+    @discardableResult
+    private func stageClipboardFiles() -> Bool {
+        guard configureAttachmentTray(), let tray = attachmentTray, tray.canAcceptMore else {
+            return false
+        }
+        let files = ComposerClipboard.general.files()
+        guard !files.isEmpty else { return false }
+        for file in files {
+            tray.add(data: file.data, name: file.name, type: file.type)
+        }
+        return true
     }
 
     private func presentPhotoPicker() {
@@ -1238,8 +1267,37 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 }
 
-private final class IntrinsicTextView: UITextView {
+/// The composer's own text view: it measures itself, and it knows that a paste is not always
+/// text. The clipboard itself is deliberately not reachable from here — the composer that owns
+/// the attachment tray answers both questions — so this stays a view with no opinion about
+/// where a file goes.
+final class IntrinsicTextView: UITextView {
+    /// Whether the clipboard is holding something only the attachment strip could take.
+    var offersFiles: () -> Bool = { false }
+    /// Takes such a paste, and answers whether it did.
+    var pasteFiles: () -> Bool = { false }
+
     private var measuredWidth: CGFloat = 0
+
+    /// Offers Paste for a clipboard holding only files.
+    ///
+    /// `UITextView` asks whether it can insert *text*, so a picture-only clipboard left the edit
+    /// menu with no Paste in it at all — and a picture copied out of a web page or a message is
+    /// in neither of the composer's other two doors until somebody saves it somewhere first.
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), offersFiles() { return true }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    /// Takes a pasted picture or file as an attachment, and leaves text alone.
+    ///
+    /// Text keeps the text view's own paste — insertion point, undo, smart substitution and all.
+    /// This runs inside the system's own paste command, which is also what keeps the read of the
+    /// pasteboard exempt from the "allow paste" prompt.
+    override func paste(_ sender: Any?) {
+        if pasteFiles() { return }
+        super.paste(sender)
+    }
 
     override var intrinsicContentSize: CGSize {
         // Auto Layout asks for an intrinsic height once before the horizontal stack has a width.

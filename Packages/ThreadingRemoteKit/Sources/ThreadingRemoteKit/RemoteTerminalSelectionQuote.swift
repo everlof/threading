@@ -12,8 +12,6 @@ public struct RemoteTerminalSelectionQuote: Equatable, Hashable, Identifiable, S
     public static let maximumPerMessage = 8
     /// The longest preview a chip shows before an ellipsis.
     public static let previewLength = 60
-    static let bracketedPasteStart = "\u{1b}[200~"
-    static let bracketedPasteEnd = "\u{1b}[201~"
     static let quoteSeparator = "\n\n"
     static let draftSeparator = " "
 
@@ -69,8 +67,7 @@ public struct RemoteTerminalSelectionQuote: Equatable, Hashable, Identifiable, S
     ) -> String {
         guard !quotes.isEmpty else { return "" }
         let body = quotes.map(\.text).joined(separator: quoteSeparator)
-        guard bracketedPaste else { return body }
-        return bracketedPasteStart + body + bracketedPasteEnd
+        return RemoteTerminalPaste.delimited(body, bracketedPaste: bracketedPaste)
     }
 
     /// One composed line for the atomic terminal submission: the quotes first, then whatever
@@ -81,10 +78,28 @@ public struct RemoteTerminalSelectionQuote: Equatable, Hashable, Identifiable, S
         bracketedPaste: Bool
     ) -> String {
         let quoted = insertionText(for: quotes, bracketedPaste: bracketedPaste)
-        guard !quoted.isEmpty else { return draft }
+        guard !quoted.isEmpty else { return typedText(draft, bracketedPaste: bracketedPaste) }
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return quoted }
-        return quoted + draftSeparator + typed
+        return quoted + draftSeparator + typedText(typed, bracketedPaste: bracketedPaste)
+    }
+
+    /// What the person typed, delimited as a paste when it carries line breaks.
+    ///
+    /// The host writes a submitted line into the PTY as it stands and appends Return, so a
+    /// draft holding a line break arrives as several Returns: the first line submits and the
+    /// rest land in whatever the agent asked next. Pasting is the only way a line break gets
+    /// into that box — Return sends — so this is the composer's half of the same rule the
+    /// quotes already follow. A single-line draft is typing, and is left exactly as typed.
+    private static func typedText(_ draft: String, bracketedPaste: Bool) -> String {
+        guard bracketedPaste, RemoteTerminalPaste.carriesLineBreaks(draft) else { return draft }
+        // The host trims the ends of an undelimited line before writing it. Delimiters would
+        // hide that trim from it, so the blank edges a pasted block usually carries are dropped
+        // here instead of arriving as leading and trailing Returns inside the paste.
+        return RemoteTerminalPaste.delimited(
+            draft.trimmingCharacters(in: .newlines),
+            bracketedPaste: true
+        )
     }
 
     private static func trimmingTrailingWhitespace(_ line: String) -> String {
