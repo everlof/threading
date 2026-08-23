@@ -3219,6 +3219,16 @@ from it. The regression boundary states its host's width at `.defaultLow`, and t
 point of the test: a fixture that pins its host at `.required` is stronger than the pull and
 cannot see this defect at all.
 
+Settings repeated the same fault in its shared installer: two edge equalities at 750 combined
+with the 1,124pt canvas cap to hold the workspace pane at exactly 1,164pt. It now states 1,124 as
+the page's own preference and preserves its narrow-pane inset with a width ceiling. The shipping
+host regression in `SettingsRowLayoutTests` deliberately puts that installer back inside an
+`NSSplitViewController`; at a 2,000pt window the content pane must grow beyond 1,164 while the
+canvas remains centred at its cap. A detached page under a required-width host would miss the
+same legal-priority failure again. This canvas and split geometry remain deliberately host-owned:
+extensions may contribute Settings sections, but they do not choose the workspace pane's measure
+or override the shared canvas contract.
+
 ## 2026-08-23 — a label tier said how quiet a word was, never whether it could be read
 
 Reported as **"the contrast on these timestamps to the right is BAD"**, on the attachments pane.

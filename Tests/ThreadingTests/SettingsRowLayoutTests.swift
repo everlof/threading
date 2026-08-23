@@ -59,6 +59,38 @@ final class SettingsRowLayoutTests: XCTestCase {
         return control
     }
 
+    /// The host Settings actually ships in: the workspace pane of a split view, whose default
+    /// holding priority is deliberately lower than the sidebar's. A required width on a detached
+    /// fixture cannot expose content pulling this pane to its own preferred measure.
+    private func settingsSplitFixture(width: CGFloat) -> (
+        split: NSSplitViewController, pane: NSView, page: NSView
+    ) {
+        let split = NSSplitViewController()
+        split.view.frame = NSRect(x: 0, y: 0, width: width, height: 700)
+
+        let neighbour = NSViewController()
+        neighbour.view = NSView()
+        let neighbourItem = NSSplitViewItem(viewController: neighbour)
+        neighbourItem.minimumThickness = SidebarDefaults.minWidth
+        neighbourItem.holdingPriority = SidebarDefaults.holdingPriority
+
+        let pane = NSViewController()
+        pane.view = NSView()
+        let page = NSView()
+        SettingsUI.install(page: page, in: pane.view)
+        let paneItem = NSSplitViewItem(viewController: pane)
+        paneItem.minimumThickness = MainWindowDefaults.minContentWidth
+
+        split.addSplitViewItem(neighbourItem)
+        split.addSplitViewItem(paneItem)
+
+        split.view.widthAnchor.constraint(equalToConstant: width).isActive = true
+        split.view.heightAnchor.constraint(equalToConstant: 700).isActive = true
+        split.view.layoutSubtreeIfNeeded()
+
+        return (split, pane.view, page)
+    }
+
     // MARK: - Tests
 
     /// Settings is one navigable surface, so changing destinations must replace content without
@@ -89,6 +121,36 @@ final class SettingsRowLayoutTests: XCTestCase {
         XCTAssertEqual(generalWidth, SettingsUIDefaults.pageWidth, accuracy: 0.5)
         XCTAssertEqual(usageWidth, SettingsUIDefaults.pageWidth, accuracy: 0.5)
         XCTAssertEqual(generalWidth, usageWidth, accuracy: 0.5)
+    }
+
+    /// Settings is content *inside* the workspace pane; its common canvas may cap itself, but it
+    /// may not become the pane's preferred width. This is the launch-failure regression in the
+    /// other durable surface: edge equalities above the split item's holding priority fixed the
+    /// pane at `pageWidth + margins`, leaving the sidebar to absorb every wider-window point.
+    func testSettingsCanvasDoesNotHoldTheWorkspacePaneAtItsOwnWidth() {
+        let width: CGFloat = 2_000
+        let fixture = settingsSplitFixture(width: width)
+        let heldWidth = SettingsUIDefaults.pageWidth + Design.Spacing.large * 2
+
+        XCTAssertGreaterThan(
+            fixture.pane.bounds.width,
+            heldWidth,
+            "the Settings canvas held the workspace pane at its own measure (\(heldWidth)pt)"
+        )
+        XCTAssertEqual(
+            fixture.page.bounds.width,
+            SettingsUIDefaults.pageWidth,
+            accuracy: 0.5,
+            "a wide pane should centre the shared canvas at its own capped width"
+        )
+        XCTAssertEqual(
+            fixture.split.splitViewItems
+                .map { $0.viewController.view.bounds.width }
+                .reduce(0, +) + fixture.split.splitView.dividerThickness,
+            width,
+            accuracy: 1,
+            "the panes should still divide the window between them"
+        )
     }
 
     /// The fixed title band and the scrolling body are one width contract. A summary whose

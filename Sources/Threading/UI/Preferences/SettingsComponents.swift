@@ -127,15 +127,12 @@ enum SettingsUI {
     /// glow gutters the page pads itself with, so cards and the Usage dashboard share the same
     /// visible edges.
     ///
-    /// **The page fills the pane and is capped, rather than preferring a width.** That was a
-    /// `width == pageWidth` at `.defaultHigh` with nothing else asking for a width, so a page
-    /// whose content did not itself add up to the canvas got its *fitting* width instead: the
-    /// engine dropped the preference — the lowest-priority constraint in the set — and settled on
-    /// whatever the cards happened to need. Remote Access rendered about 690 points wide in the
-    /// states with no pairing code, with every card 594 points inside a 1,124-point canvas, which
-    /// is the drifting-edges defect `design-system.md` says this cap exists to prevent. Filling
-    /// to the margins states the width from the pane rather than from the content, so there is no
-    /// fitting size for the engine to fall back to.
+    /// The page states its own preferred width and only uses one-way inequalities against the
+    /// pane. An equality such as `page.width == pane.width - margins`, even below required, gives
+    /// the split view a preferred pane width stronger than its holding priority. Settings then
+    /// keeps the workspace pane at exactly the canvas plus its margins while the sidebar absorbs
+    /// every extra point. A width ceiling preserves the inset in a narrow pane without letting
+    /// content choose the pane's measure.
     ///
     /// - Parameter top: where the page starts, for a pane with a header strip above it. The
     ///   host's own top edge when there is none.
@@ -149,42 +146,34 @@ enum SettingsUI {
         if content.superview !== host { host.addSubview(content) }
 
         let pageWidth = SettingsUIDefaults.pageWidth
-        let fills = [
-            content.leadingAnchor.constraint(
-                equalTo: host.leadingAnchor,
-                constant: Design.Spacing.large
-            ),
-            content.trailingAnchor.constraint(
-                equalTo: host.trailingAnchor,
-                constant: -Design.Spacing.large
-            )
-        ]
-        for constraint in fills { constraint.priority = .defaultHigh }
+        // Keep a comfortable inset when the pane can afford it, but do not make either page edge
+        // equal to the pane. Only a <= relationship may mention the host's width here: content
+        // inside a split item must never supply that item's preferred measure.
+        let insetWidth = content.widthAnchor.constraint(
+            lessThanOrEqualTo: host.widthAnchor,
+            constant: -Design.Spacing.large * 2
+        )
+        insetWidth.priority = .defaultHigh
 
-        // The fallback, one step below the fill. In a pane wider than the canvas the fill fights
-        // the cap and is dropped, and *something* has to state a width after that or the page
-        // falls back to its own fitting size. A pane exactly `pageWidth + 2 * large` wide is the
-        // case that proves it: the fill and the cap are then numerically identical, either can
-        // give, and what the page came out at depended on which.
+        // One step below the inset ceiling, the canvas states its own stable measure. This keeps
+        // pages with little intrinsic content from collapsing to their fitting size after the
+        // pane grows wider than the cap.
         let preferred = content.widthAnchor.constraint(equalToConstant: pageWidth)
         preferred.priority = NSLayoutConstraint.Priority(
             NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
         )
 
-        let constraints = fills + [
+        let constraints = [
+            insetWidth,
             preferred,
             content.topAnchor.constraint(equalTo: top ?? host.topAnchor),
             content.bottomAnchor.constraint(equalTo: host.bottomAnchor),
             content.centerXAnchor.constraint(equalTo: host.centerXAnchor),
             content.widthAnchor.constraint(lessThanOrEqualToConstant: pageWidth),
-            content.leadingAnchor.constraint(
-                greaterThanOrEqualTo: host.leadingAnchor,
-                constant: Design.Spacing.large
-            ),
-            content.trailingAnchor.constraint(
-                lessThanOrEqualTo: host.trailingAnchor,
-                constant: -Design.Spacing.large
-            )
+            // This required ceiling deliberately has no negative inset. AppKit constructs some
+            // hosts at zero width; the optional inset may yield there, while required constraints
+            // remain satisfiable and the page can never escape the pane.
+            content.widthAnchor.constraint(lessThanOrEqualTo: host.widthAnchor)
         ]
         NSLayoutConstraint.activate(constraints)
         return constraints
