@@ -19,6 +19,9 @@ say "Checking repository boundaries"
 "${script_directory}/check_theme_boundaries.sh"
 "${script_directory}/check_bundled_scc.sh"
 
+say "Scanning history for secrets"
+"${script_directory}/check_secrets.sh"
+
 say "Checking Debug entitlements"
 debug_entitlements="${repository_directory}/Sources/Threading/Resources/Threading-Debug.entitlements"
 if /usr/libexec/PlistBuddy -c Print "${debug_entitlements}" \

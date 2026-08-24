@@ -167,9 +167,43 @@ weeks later as a record that will not decode.
 ## Shipping contract
 
 `scripts/ci.sh` is the canonical non-interactive gate: structural policy, localization and theme
-boundaries, SwiftLint, every local contract/runtime package, and the off-screen app test plan
-under complete concurrency checking. GitHub Actions and `scripts/release.sh` call the same entry
-point so local, CI, and shipping definitions cannot drift.
+boundaries, the secret scan, SwiftLint, every local contract/runtime package, and the off-screen
+app test plan under complete concurrency checking. GitHub Actions and `scripts/release.sh` call
+the same entry point so local, CI, and shipping definitions cannot drift.
+
+### The secret scan is the one gate that fails closed forever
+
+`scripts/check_secrets.sh` runs gitleaks over *git*, never over the working directory. That is
+not a preference: `gitleaks dir .` walks DerivedData, `.build`, `node_modules` and xcbuilddata
+attachments, which measured 2.87 GB and 8m50s here and reported findings in artifacts nobody
+can commit, against 125 MB and 26s for the entire history.
+
+Two callers, two scopes. `ci.sh` scans the whole history, because CI is the release gate and
+should prove the whole artifact. The pre-push hook scans only the range being pushed, which is
+sub-second for an ordinary push, and it runs *before* the test level and *regardless of*
+`THREADING_SKIP_TESTS` — the variable is named for what it skips, and skipping this one
+deliberately means `git push --no-verify`.
+
+The ordering is the point. Every other gate here catches something a later commit can repair.
+This one does not: a credential pushed to a public remote is burned the moment it lands,
+because GitHub keeps unreachable commits addressable by their sha and a force-push does not
+remove them. So the response to a finding is **rotate first, rewrite second**, and the hook's
+failure message says so rather than leaving the reader to work it out.
+
+Policy is `.gitleaks.toml`, and it allows exactly two kinds of exception. A **path** is
+allowlisted only when it cannot structurally hold one of our secrets: vendored upstream trees,
+generated reference material, dependency caches. A **value** is allowlisted only when
+publishing it is the point, and there is exactly one — Sparkle's public EdDSA key, which ships
+in Info.plist because verifying an update requires it.
+
+Everything else that is a false positive goes in `.gitleaksignore`, pinned by
+`commit:path:rule:line`. That is deliberately the narrow instrument: a fingerprint does not
+generalise, so the same shape appearing in a new commit still fails. Widening `.gitleaks.toml`
+to silence one finding is how a scanner quietly stops scanning.
+
+A scan that examines nothing must not read as a clean scan. gitleaks reports an unresolvable
+revision on stderr and still exits 0 with "no leaks found", so the script resolves every
+revision itself with `git rev-parse --verify` first and fails loudly when one does not exist.
 
 The release script must preserve command exit status, verify the version read from the exported
 bundle, inspect every nested executable's signing/runtime/timestamp/entitlements, and require a

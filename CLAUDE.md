@@ -461,6 +461,12 @@ is one line; the logic is `scripts/pre_push.sh`, which is versioned and reviewab
 pushes skip the gate. Bypass deliberately with `THREADING_SKIP_TESTS=1 git push` — prefer it over
 `--no-verify`, which also skips Git LFS.
 
+The same hook runs `scripts/check_secrets.sh` over the range being pushed first, and that half
+is **not** covered by `THREADING_SKIP_TESTS`: it costs under a second, and it is the only gate
+whose failure cannot be repaired by a later commit, because a credential pushed to a public
+remote stays addressable by sha. See
+[`reliability-and-type-safety.md`](docs/architecture/reliability-and-type-safety.md#the-secret-scan-is-the-one-gate-that-fails-closed-forever).
+
 **Never run `git push` to try something out.** `submodule.recurse` is true, so a push recurses
 into `Packages/Vendor/LabelMorph` and `Packages/Vendor/ThinkingOrbs` and publishes them to their real GitHub
 remotes — even when the outer push targets a local throwaway path, and even though the main repo

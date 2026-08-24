@@ -1,0 +1,41 @@
+# Secret scanning policy. Run through scripts/check_secrets.sh, which is called by
+# scripts/ci.sh and by the pre-push hook; see docs/architecture/reliability-and-type-safety.md.
+#
+# Two rules govern what belongs here:
+#
+#   1. Allowlist a *path* only when it cannot structurally hold one of our secrets — vendored
+#      upstream code, generated reference trees, dependency caches. Never allowlist a directory
+#      just because it is noisy today.
+#   2. Allowlist a *value* only when publishing it is the point. There is exactly one, below.
+#
+# A finding that is a false positive but does not fit either rule belongs in .gitleaksignore,
+# pinned by fingerprint, so the next occurrence of the same shape still fails.
+
+title = "Threading"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Vendored code, generated trees, dependency caches, and Sparkle's public key"
+
+paths = [
+    # Our three forks and the vendored terminal: upstream's content, upstream's problem.
+    '''^Packages/Vendor/''',
+    # Dependency and plugin caches. Present only in a working tree, never committed.
+    '''(^|/)\.build/''',
+    '''(^|/)node_modules/''',
+    '''(^|/)\.wrangler/''',
+    # A captured copy of another project's reference material, kept for comparison.
+    '''^docs/references/chrome/\.generated/''',
+    # The bundled browser client is upstream xterm.js.
+    '''(^|/)Resources/RemoteClient/''',
+]
+
+regexes = [
+    # Sparkle's *public* EdDSA key. It ships in Info.plist because verifying an update
+    # requires it; publishing it is what it is for. The private half lives in the login
+    # keychain under account `mjukis-threading` and is never in this repository.
+    # See docs/architecture/releasing.md, "Keys".
+    '''18EoXEv3Y17zr3HN/HUNBN7TqSy4RTLYhmNkZkJPon8=''',
+]

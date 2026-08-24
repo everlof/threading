@@ -12,6 +12,12 @@ Three boundary lints run inside every ordinary `xcodebuild` and will fail the bu
 architecture boundaries, the AppKit theme boundary (`docs/THEME_BOUNDARY.md` — feature code
 never constructs stock controls), and localization coverage.
 
+A fourth gate runs on push rather than on build: `scripts/check_secrets.sh` scans the commits
+you are pushing for credentials (`brew install gitleaks`). If it fires on something real,
+rotate the credential before doing anything else — a secret pushed to a public remote is burned
+even if the commit is removed afterwards. If it fires on a false positive, pin that one finding
+by fingerprint in `.gitleaksignore` rather than widening `.gitleaks.toml`.
+
 ## Building and testing
 
 ```bash

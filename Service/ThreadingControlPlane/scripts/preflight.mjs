@@ -84,12 +84,23 @@ if (countMatches(
 ) !== 0) {
   failures.push("iOS must obtain its control-plane URL from each validated pairing link");
 }
-const appleSignInEntitlement = /<key>com\.apple\.developer\.applesignin<\/key>\s*<array>\s*<string>Default<\/string>\s*<\/array>/u;
-if (/<key>com\.apple\.developer\./u.test(debugEntitlements)) {
+// Neither macOS configuration may carry a restricted entitlement, and for two different
+// reasons. Debug is ad-hoc signed, so one makes the app unlaunchable. Release is distributed by
+// Developer ID, which cannot authorise `com.apple.developer.applesignin` at all: the capability
+// never reaches a Developer ID provisioning profile, so `exportArchive` refuses outright, and
+// signing it by hand ships an entitlement the system rejects at runtime. It was removed on
+// 2026-08-23 for exactly that reason — see docs/architecture/releasing.md, "Sign in with Apple
+// cannot be shipped by Developer ID". Hosted sign-in on a *distributed* Mac build needs the
+// Services ID web flow instead; the native request still works in a development build, which
+// is what host enrollment is tested against.
+//
+// This assertion used to demand the opposite. Do not restore it without reading that record.
+const restrictedEntitlement = /<key>com\.apple\.developer\./u;
+if (restrictedEntitlement.test(debugEntitlements)) {
   failures.push("macOS Debug builds must remain launchable with ad-hoc signing");
 }
-if (!appleSignInEntitlement.test(releaseEntitlements)) {
-  failures.push("macOS Release builds must retain the Sign in with Apple entitlement");
+if (restrictedEntitlement.test(releaseEntitlements)) {
+  failures.push("macOS Release builds must carry no restricted entitlement; Developer ID cannot authorise one");
 }
 
 const expectedRateLimits = new Map([
