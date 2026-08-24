@@ -13,6 +13,31 @@ Managed here:
 - the zone entry-point report rate-limit ruleset;
 - an optional account billing-usage alert.
 
+## OpenTofu, and the two account-specific files
+
+`.terraform.lock.hcl` was produced by `tofu init`, so OpenTofu is what this module has been
+exercised with. `scripts/infra.mjs` and `scripts/deploy-production.mjs` both default their CLI to
+`terraform`; export `THREADING_INFRA_CLI=tofu` unless Terraform itself is installed. The deploy
+wrapper reads `d1_database_id` through that same CLI, so getting it wrong fails the deploy rather
+than silently using the checked-in placeholder.
+
+Two files here are deliberately untracked and must exist before any command works:
+
+- `terraform.tfvars` — the account and zone IDs.
+- `backend.hcl` — the state bucket, key and account-specific R2 endpoint, passed as
+  `tofu init -backend-config=backend.hcl`. The `backend "s3" {}` block in `versions.tf` is partial
+  on purpose so no account-specific value is committed. Credentials come from
+  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in the environment, which for R2 means an S3
+  access key created under R2 → Manage API Tokens, *not* the Cloudflare API token.
+
+## The rate-limit rule is capped by the zone plan
+
+A Free zone accepts only a 10-second window and a 10-second mitigation timeout; asking for
+anything else fails the apply with an entitlement error. `report_rate_limit_period_seconds`
+carries that fact, and both the window's request count and the mitigation timeout derive from it,
+so a paid zone reproduces the originally intended rule by setting it to 60. See
+`docs/operations/cloudflare-release-setup.md` for what the Free-plan values cost in practice.
+
 Not stored here: API tokens, Worker secrets, Apple `.p8` material, TURN credentials, report pickup
 credentials, webhook credentials, Terraform state, or customer reports. Use a protected remote
 state backend and the team secret manager. A local state file is sensitive operational data even

@@ -1,5 +1,20 @@
 locals {
   report_prefix = "reports/v1/"
+
+  # Cloudflare meters the rate-limit *window* by zone plan: a Free zone is entitled only to a
+  # 10-second period, and asking for 60 fails the apply outright with "not entitled to use the
+  # period 60, can only use a period among [10]". The operator-facing input stays a per-minute
+  # rate, because that is the number worth reasoning about and it does not change when the plan
+  # does; the window and its request count are derived from it. On a paid zone, raising
+  # report_rate_limit_period_seconds to 60 reproduces the original rule exactly.
+  rate_limit_period   = var.report_rate_limit_period_seconds
+  rate_limit_requests = max(1, ceil(var.report_requests_per_minute_per_source * local.rate_limit_period / 60))
+
+  # The same entitlement caps how long a flooding source stays blocked: a Free zone rejects any
+  # mitigation timeout other than 10 ("not entitled to use a mitigation timeout different from
+  # 10"). Derived from the window rather than given its own variable, because both facts encode
+  # one thing — whether this zone is on a paid plan — and two knobs could disagree.
+  rate_limit_mitigation = local.rate_limit_period == 10 ? 10 : 600
   billing_alert_enabled = (
     var.billing_alert_email != "" &&
     length(var.billing_alert_products) > 0 &&
@@ -23,6 +38,14 @@ resource "cloudflare_d1_database" "control_plane" {
 resource "cloudflare_r2_bucket" "issue_reports" {
   account_id = var.cloudflare_account_id
   name       = var.issue_report_bucket_name
+
+  # A placement *hint*, not a jurisdiction. It records where this bucket is meant to live
+  # instead of leaving it to whatever Cloudflare picks, and it is the location this account
+  # already selects on its own. Deliberately not `jurisdiction = "eu"`: that puts the bucket in
+  # a separate namespace behind a different S3 endpoint, so the Worker's r2_buckets binding
+  # would silently bind a *different* bucket of the same name unless it carried the same key.
+  # Revisit only as a legal decision about report contents, and change both sides together.
+  location = "eeur"
 
   lifecycle {
     prevent_destroy = true
@@ -93,9 +116,9 @@ resource "cloudflare_ruleset" "report_rate_limit" {
     action      = "block"
     ratelimit = {
       characteristics     = ["cf.colo.id", "ip.src"]
-      period              = 60
-      requests_per_period = var.report_requests_per_minute_per_source
-      mitigation_timeout  = 600
+      period              = local.rate_limit_period
+      requests_per_period = local.rate_limit_requests
+      mitigation_timeout  = local.rate_limit_mitigation
     }
   }]
 }

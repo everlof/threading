@@ -11,14 +11,52 @@ secrets, custom domain, cron triggers and the Queue consumer are deployed throug
   name an account owner and on-call owner, and record account/zone IDs in the deployment system.
 - [ ] Create a least-privilege CI API token for D1, R2, Queues, Notifications and Zone WAF writes.
   Store it only in CI/team secret management and exercise rotation.
-- [ ] Configure a protected remote Terraform/OpenTofu state backend with locking, versioning,
+- [x] Configure a protected remote Terraform/OpenTofu state backend with locking, versioning,
   recovery access and an owner. Never commit local state, plans, tfvars or API tokens.
-- [ ] If the zone already has an `http_ratelimit` entry-point ruleset, import it and merge every
+  *(2026-08-24: state is in R2 at `threading-tofu-state/control-plane/terraform.tfstate`, using
+  OpenTofu's native S3 locking — `use_lockfile`, no DynamoDB. The backend is declared partial in
+  `versions.tf`; its account-specific values live in an untracked `infra/backend.hcl` the same way
+  `terraform.tfvars` carries the account and zone IDs.)*
+  **R2 has no object versioning**, so "versioning" above cannot be satisfied as written: the
+  provider offers `cloudflare_r2_bucket_{cors,lifecycle,lock,event_notification,sippy}` and no
+  versioning resource, because R2 does not implement it. Durability and locking are covered;
+  point-in-time recovery from a bad write is not. The apply step therefore copies the state object
+  to a dated `snapshots/` key afterwards, which is the substitute. HCP Terraform's free tier is
+  the alternative if real state history is ever wanted, at the cost of a third party holding it.
+- [x] If the zone already has an `http_ratelimit` entry-point ruleset, import it and merge every
   existing rule into `cloudflare_ruleset.report_rate_limit` before applying. One system owns the
-  complete phase; do not split it between the dashboard and Terraform.
-- [ ] Run `npm run infra:plan`, review the saved `.threading.tfplan`, then use `npm run infra:apply`
+  complete phase; do not split it between the dashboard and Terraform. *(2026-08-24: the zone had
+  zero entry-point rulesets in that phase, so nothing needed importing.)*
+- [x] Run `npm run infra:plan`, review the saved `.threading.tfplan`, then use `npm run infra:apply`
   to apply that exact plan. Confirm the resulting D1, private R2 bucket, 30-day lifecycle, report
   Queue, 14-day dead-letter Queue, R2 event notification and report rate-limit rule in production.
+  *(2026-08-24: all seven applied and read back from the API. The lifecycle reports
+  `maxAge=2592000s` on prefix `reports/v1/`, and the notification reports `PutObject` on
+  `reports/v1/` + `.json` into `threading-issue-report-events`.)*
+
+### The zone plan caps the edge rate limit, and the shipped values assumed a paid one
+
+`main.tf` originally asked for a 60-second window and a 600-second mitigation timeout. **Neither
+is available on a Free zone**, and the config could not apply there at all. Both failures are
+entitlement errors from the rulesets API rather than anything wrong with the rule:
+
+```
+not entitled to use the period 60, can only use a period among [10]
+not entitled to use a mitigation timeout different from 10
+```
+
+The module now derives both from one input. `report_rate_limit_period_seconds` defaults to 10 and
+accepts 60; `report_requests_per_minute_per_source` stays the operator-facing rate and is
+converted to the window's request count, so raising the period to 60 on a paid zone reproduces
+the original rule exactly.
+
+**What a Free zone actually buys is weaker than the design assumed, and it is the mitigation
+timeout rather than the rate that matters.** The effective rate is unchanged: 12/minute becomes
+2 per 10 seconds. But a flooding source is released after 10 seconds instead of 10 minutes, so
+the edge sheds a sustained flood 60 times less effectively. The Worker's own limiters are
+untouched and remain the real gate — `REPORT_RATE_LIMITER` at 6/minute per source and
+`REPORT_GLOBAL_RATE_LIMITER` at 60/minute — so this degrades a backstop rather than the control.
+Upgrading the zone plan and setting the period to 60 is the whole fix; no code changes.
 - [ ] Configure `billing_alert_email`, `billing_alert_products`, and `billing_alert_limit` from
   the account's current `billing_usage_alert` schema and send a test notification. If Cloudflare
   does not offer that alert for the account, record the separately owned budget alarm here.

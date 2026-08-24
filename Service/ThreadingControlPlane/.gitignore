@@ -10,3 +10,4 @@ infra/*.tfstate.*
 infra/*.tfplan
 infra/.threading.tfplan
 infra/terraform.tfvars
+infra/backend.hcl

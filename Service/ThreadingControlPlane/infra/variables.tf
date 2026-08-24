@@ -66,6 +66,17 @@ variable "report_requests_per_minute_per_source" {
   }
 }
 
+variable "report_rate_limit_period_seconds" {
+  description = "Rate-limit window. A Free zone is entitled to 10 only; paid zones also allow 60."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = contains([10, 60], var.report_rate_limit_period_seconds)
+    error_message = "Cloudflare accepts a 10-second window on any plan and 60 only on a paid zone."
+  }
+}
+
 variable "billing_alert_email" {
   description = "Optional Cloudflare account email for usage alerts. Empty disables this resource."
   type        = string
