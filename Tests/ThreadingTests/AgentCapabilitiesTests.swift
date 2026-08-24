@@ -50,7 +50,8 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("transcriptReplay", .transcriptReplay),
             ("terminalUI", .terminalUI),
             ("transcriptInterruptedMessageRecord", .transcriptInterruptedMessageRecord),
-            ("escapeInterruptsTerminalTurn", .escapeInterruptsTerminalTurn)
+            ("escapeInterruptsTerminalTurn", .escapeInterruptsTerminalTurn),
+            ("inlineTerminalViewport", .inlineTerminalViewport)
         ]
 
         var seen: [Int: String] = [:]
@@ -73,6 +74,35 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
     func testEveryRuntimeCanResume() {
         for kind in AgentKind.allCases {
             XCTAssertTrue(kind.supports(.resume), "\(kind) must resume")
+        }
+    }
+
+    /// Only Codex is deliberately launched with a compact inline viewport.
+    /// Other terminal clients own the complete screen, so trimming their live
+    /// grid would move cursor-addressed content out of the viewport.
+    func testInlineTerminalViewportMatchesTheCodexLaunchContract() {
+        for kind in AgentKind.allCases {
+            XCTAssertEqual(
+                kind.supports(.inlineTerminalViewport),
+                kind == .codex,
+                "\(kind) inline terminal viewport contract drifted"
+            )
+        }
+    }
+
+    /// The session host consumes the capability when it creates the terminal;
+    /// declaring the matrix row without applying it would leave the empty tail
+    /// in the shipping pane while every lower-level scroll test still passed.
+    @MainActor
+    func testAgentTerminalAppliesTheDeclaredScrollbackEnd() {
+        for kind in AgentKind.allCases {
+            let controller = AgentSessionViewController(
+                agentSession: AgentSession(kind: kind, title: "scroll end")
+            )
+            XCTAssertEqual(
+                controller.session.terminalView.scrollbackEnd,
+                kind.supports(.inlineTerminalViewport) ? .lastPopulatedRow : .screen
+            )
         }
     }
 

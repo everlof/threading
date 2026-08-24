@@ -462,9 +462,10 @@ final class TerminalRenderOwner: Sendable {
             let resizedTo = applyPendingSize(
                 request.pendingSize, terminal: terminal,
                 selection: session.selection, search: session.search)
+            let followedScrollEnd = terminal.followConfiguredScrollbackEndIfNeeded()
             let capturedScrollPosition = Self.scrollPosition(terminal)
 #if os(macOS)
-            let scrollerState = request.updateScroller
+            let scrollerState = request.updateScroller || followedScrollEnd
                 ? Self.scrollerState(terminal)
                 : nil
 #endif
@@ -632,7 +633,10 @@ final class TerminalRenderOwner: Sendable {
         if terminal.isDisplayBufferAlternate || buffer.yDisp <= 0 {
             return 0
         }
-        let maximum = buffer.lines.count - buffer.rows
+        let maximum = terminal.maximumViewYDisp()
+        if maximum <= 0 {
+            return 0
+        }
         if buffer.yDisp >= maximum {
             return 1
         }
@@ -644,15 +648,19 @@ final class TerminalRenderOwner: Sendable {
         -> TerminalView.ScrollerState
     {
         let buffer = terminal.displayBuffer
+        let maximum = terminal.maximumViewYDisp()
         let canScroll = !terminal.isDisplayBufferAlternate &&
-            buffer.hasScrollback && buffer.lines.count > buffer.rows
+            buffer.hasScrollback && maximum > 0
         let thumb: CGFloat
         if terminal.isDisplayBufferAlternate {
             thumb = 0
-        } else if buffer.lines.isEmpty {
+        } else if maximum <= 0 {
             thumb = 1
         } else {
-            thumb = max(CGFloat(buffer.rows) / CGFloat(buffer.lines.count), 0.01)
+            thumb = max(
+                CGFloat(buffer.rows) / CGFloat(maximum + buffer.rows),
+                0.01
+            )
         }
         return TerminalView.ScrollerState(
             isEnabled: canScroll,

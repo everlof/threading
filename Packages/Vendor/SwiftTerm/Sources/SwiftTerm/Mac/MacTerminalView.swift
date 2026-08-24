@@ -3934,6 +3934,30 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         didSet { scrollSensitivity = max(0.05, scrollSensitivity) }
     }
 
+    /// Defines the live end of local scrollback for the normal buffer.
+    ///
+    /// Leave this at ``TerminalScrollbackEnd/screen`` for ordinary terminals
+    /// and full-screen programs. A host that deliberately launches an inline
+    /// transcript may choose ``TerminalScrollbackEnd/lastPopulatedRow`` so the
+    /// unused rows beneath that transcript are not scrollable empty space.
+    public var scrollbackEnd: TerminalScrollbackEnd {
+        get {
+            withTerminal { $0.scrollbackEnd }
+        }
+        set {
+            let changed = withTerminal { terminal in
+                guard terminal.scrollbackEnd != newValue else { return false }
+                terminal.scrollbackEnd = newValue
+                terminal.followConfiguredScrollbackEndIfNeeded()
+                terminal.updateFullScreen()
+                return true
+            }
+            guard changed else { return }
+            updateScroller()
+            frameDriver.markDirty()
+        }
+    }
+
     open override func scrollWheel(with event: NSEvent) {
         // Preserves the previous `deltaY == 0` early exit, restated against the
         // delta this method now reads. Without it a zero delta would fall into

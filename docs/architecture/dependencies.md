@@ -156,6 +156,15 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     mouse reporting and receive ordinary wheel input themselves; Option-wheel is the explicit
     local-scrollback escape hatch. Holding history above the live edge sets
     `Terminal.userScrolling`, so output repaints do not pull the viewport back to the bottom.
+  - **An inline transcript has a content-shaped live end.** The normal terminal answer keeps the
+    complete live grid at the bottom of scrollback, including every unused row below the cursor.
+    That is required for shells and cursor-addressed/full-screen programs, but Codex's supported
+    `--no-alt-screen` viewport uses only a compact run of rows and left a trackpad flick resting on
+    a mostly empty page. `TerminalView.scrollbackEnd = .lastPopulatedRow` clamps only that host-
+    declared inline viewport to its last populated-or-cursor row, scans only the visible grid,
+    follows growth while the user is at the live edge, and leaves every other terminal on
+    `.screen`. Threading grants the mode through the provider capability that also documents the
+    inline launch contract; see [`sessions.md`](sessions.md).
   - **Wheel reports are rate-limited, and dropped rather than queued.** A pty carries no message
     boundaries and its input queue fills a byte at a time, so a client that is mid-render when
     reports arrive resumes reading *inside* one; a stdin parser that does not carry a partial

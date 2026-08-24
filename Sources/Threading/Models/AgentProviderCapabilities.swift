@@ -270,6 +270,17 @@ struct AgentCapabilities: OptionSet {
   /// here as owed rather than assumed, which is the standard every other row on this matrix was
   /// granted by.
   static let escapeInterruptsTerminalTurn = Self(rawValue: 1 << 30)
+
+  /// The runtime is launched in a supported inline terminal mode whose live
+  /// viewport occupies only its populated rows while the terminal owns the
+  /// retained transcript above it.
+  ///
+  /// Codex only: Threading supplies `--no-alt-screen`. Leaving SwiftTerm's
+  /// ordinary full-screen scroll end in force makes every unused grid row
+  /// beneath Codex's compact composer part of the scrollable tail, so a flick
+  /// can settle on a mostly empty page. The terminal host may compact that end
+  /// without changing shells or alternate/full-screen clients.
+  static let inlineTerminalViewport = Self(rawValue: 1 << 31)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -337,7 +348,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .resume, .accounts, .nativeUI, .terminalUI, .permissionModes, .threadingBridge,
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
-        .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn
+        .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
+        .inlineTerminalViewport
       ]
     case .grok:
       return [

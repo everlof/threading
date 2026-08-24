@@ -346,6 +346,27 @@
       }
     },
     {
+      "id": "codex-inline-terminal-scrollback",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Codex inline terminal scroll end",
+      "description": "The real Codex session controller after a compact inline repaint, proving retained transcript fills the pane and the final live status row reaches the bottom instead of leaving a scrollable empty tail.",
+      "states": ["Retained transcript", "Compact live composer", "Scrolled to live end"],
+      "matrix": {
+        "providers": ["Codex"],
+        "appearances": ["Dark"],
+        "sizes": ["760×560-point terminal pane"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AgentTerminalScrollbackRenderTests.swift",
+        "test": "ThreadingTests/AgentTerminalScrollbackRenderTests/testRendersCodexInlineViewportWithoutAnEmptyTail"
+      },
+      "capture": {
+        "glob": "codex-inline-scrollback-end-*.png"
+      }
+    },
+    {
       "id": "limit-recovery-ribbon",
       "kind": "surface",
       "status": "implemented",

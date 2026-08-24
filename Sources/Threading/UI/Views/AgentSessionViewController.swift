@@ -116,6 +116,9 @@ final class AgentSessionViewController: NSViewController {
         )
         super.init(nibName: nil, bundle: nil)
         session.delegate = self
+        session.terminalView.scrollbackEnd = agentSession.kind.supports(.inlineTerminalViewport)
+            ? .lastPopulatedRow
+            : .screen
 
         // Names the tracker's log lines. A window holds dozens of these and every one of them
         // reports the same six states, so a trail that cannot say *which* session moved is a

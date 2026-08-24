@@ -645,6 +645,7 @@ open class Terminal {
     var scrollInvariantRefreshStart = Int.max
     var scrollInvariantRefreshEnd = -1
     var userScrolling = false
+    var scrollbackEnd: TerminalScrollbackEnd = .screen
     var lineFeedMode = false
     
     // We do not implement smooth scrolling here, dubious value, but
@@ -7236,6 +7237,72 @@ open class Terminal {
     func setViewYDisp (_ newValue: Int)
     {
         buffer.yDisp = newValue
+    }
+
+    /// The greatest normal-buffer row the viewport may use as its top edge.
+    ///
+    /// The standard terminal answer is `lines.count - rows`, which preserves
+    /// the complete live screen. Inline transcript programs occupy only a few
+    /// rows of that screen, though, and the rest are visually empty. Their
+    /// host may compact the live end to the last populated row while retaining
+    /// the cursor even when it sits in an otherwise-empty cell.
+    ///
+    /// Work is bounded by the visible grid. It never scans scrollback.
+    func maximumViewYDisp () -> Int
+    {
+        terminalLock.preconditionLocked()
+        let displayBuffer = displayBuffer
+        let screenEnd = max(0, displayBuffer.lines.count - displayBuffer.rows)
+        guard scrollbackEnd == .lastPopulatedRow,
+              !isDisplayBufferAlternate,
+              screenEnd > 0,
+              displayBuffer.rows > 0,
+              !displayBuffer.lines.isEmpty else {
+            return screenEnd
+        }
+
+        let liveStart = max(0, min(displayBuffer.yBase, displayBuffer.lines.count - 1))
+        let liveEnd = max(
+            liveStart,
+            min(liveStart + displayBuffer.rows - 1, displayBuffer.lines.count - 1)
+        )
+        let cursorRow = max(
+            liveStart,
+            min(displayBuffer.yBase + displayBuffer.y, liveEnd)
+        )
+
+        var lastRelevantRow = liveEnd
+        while lastRelevantRow > cursorRow,
+              !displayBuffer.lines[lastRelevantRow].hasAnyContent() {
+            lastRelevantRow -= 1
+        }
+        lastRelevantRow = max(lastRelevantRow, cursorRow)
+
+        return max(
+            0,
+            min(lastRelevantRow - displayBuffer.rows + 1, screenEnd)
+        )
+    }
+
+    /// Keeps an unheld viewport on the configured live end as an inline
+    /// program grows or repaints its compact viewport.
+    @discardableResult
+    func followConfiguredScrollbackEndIfNeeded () -> Bool
+    {
+        terminalLock.preconditionLocked()
+        guard !isDisplayBufferAlternate else { return false }
+        let target = maximumViewYDisp()
+        if buffer.yDisp > target {
+            buffer.yDisp = target
+            userScrolling = false
+            updateFullScreen()
+            return true
+        }
+        guard !userScrolling else { return false }
+        guard buffer.yDisp != target else { return false }
+        buffer.yDisp = target
+        updateFullScreen()
+        return true
     }
 
     /**

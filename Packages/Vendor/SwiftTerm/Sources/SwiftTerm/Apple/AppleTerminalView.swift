@@ -2135,8 +2135,10 @@ extension TerminalView {
         if source.isDisplayBufferAlternate || displayBuffer.yDisp <= 0 {
             position = 0
         } else {
-            let maxScrollback = displayBuffer.lines.count - displayBuffer.rows
-            position = displayBuffer.yDisp >= maxScrollback
+            let maxScrollback = source.maximumViewYDisp()
+            position = maxScrollback <= 0
+                ? 0
+                : displayBuffer.yDisp >= maxScrollback
                 ? 1
                 : Double(displayBuffer.yDisp) / Double(maxScrollback)
         }
@@ -4027,7 +4029,12 @@ extension TerminalView {
             return 0
         }
 
-        return max (CGFloat (displayBuffer.rows) / CGFloat (displayBuffer.lines.count), 0.01)
+        let maximum = terminal.maximumViewYDisp()
+        guard maximum > 0 else { return 1 }
+        return max(
+            CGFloat(displayBuffer.rows) / CGFloat(maximum + displayBuffer.rows),
+            0.01
+        )
     }
     
     /**
@@ -4048,7 +4055,10 @@ extension TerminalView {
             return 0
         }
 
-        let maxScrollback = displayBuffer.lines.count - displayBuffer.rows
+        let maxScrollback = terminal.maximumViewYDisp()
+        if maxScrollback <= 0 {
+            return 0
+        }
         if displayBuffer.yDisp >= maxScrollback {
             return 1
         }
@@ -4072,7 +4082,7 @@ extension TerminalView {
         let displayBuffer = terminal.displayBuffer
         return !terminal.isDisplayBufferAlternate &&
             displayBuffer.hasScrollback &&
-            displayBuffer.lines.count > displayBuffer.rows
+            terminal.maximumViewYDisp() > 0
     }
     
     public func scroll (toPosition: Double)
@@ -4080,7 +4090,7 @@ extension TerminalView {
         let scroll = withTerminal { terminal -> (position: Int, changed: Bool) in
             let displayBuffer = terminal.displayBuffer
             let oldPosition = displayBuffer.yDisp
-            let maxScrollback = max(0, displayBuffer.lines.count - displayBuffer.rows)
+            let maxScrollback = terminal.maximumViewYDisp()
             let position = max(0, min(Int(Double(maxScrollback) * toPosition), maxScrollback))
             return (position, position != oldPosition)
         }
@@ -4095,7 +4105,7 @@ extension TerminalView {
 
     private func updateUserScrollingStateLocked(for row: Int, in displayBuffer: Buffer) {
         terminal.terminalLock.preconditionLocked()
-        let maxScrollback = max(0, displayBuffer.lines.count - displayBuffer.rows)
+        let maxScrollback = terminal.maximumViewYDisp()
         let isUserScrolling = row < maxScrollback
         userScrolling = isUserScrolling
         terminal.userScrolling = isUserScrolling
@@ -4108,7 +4118,7 @@ extension TerminalView {
 #endif
         let didScroll = withTerminal { terminal in
             let displayBuffer = terminal.displayBuffer
-            let maxScrollback = max(0, displayBuffer.lines.count - displayBuffer.rows)
+            let maxScrollback = terminal.maximumViewYDisp()
             let targetRow = max(0, min(row, maxScrollback))
             updateUserScrollingStateLocked(for: targetRow, in: displayBuffer)
             if targetRow == displayBuffer.yDisp {
@@ -4177,7 +4187,10 @@ extension TerminalView {
     {
         let newPosition = withTerminal { terminal in
             let displayBuffer = terminal.displayBuffer
-            return max (0, min (displayBuffer.yDisp + lines, displayBuffer.lines.count - displayBuffer.rows))
+            return max(
+                0,
+                min(displayBuffer.yDisp + lines, terminal.maximumViewYDisp())
+            )
         }
         scrollTo (row: newPosition)
     }

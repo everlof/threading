@@ -703,9 +703,13 @@ conversation transcript. On iPhone the visible frame therefore moved away to emp
 buffer rows while the older conversation existed only in Codex's retained model. The CLI's
 supported inline mode puts the rendered transcript in Threading's terminal-owned scrollback,
 which is the same bounded record the Mac view and remote terminal protocol already mirror. The
-flag belongs only to interactive terminal launches; native app-server and headless pipe transports
-have no terminal buffer to configure. An already-running Codex process must be relaunched before
-the launch contract can affect it.
+live Codex viewport occupies only its populated rows, so the Mac terminal also compacts the local
+scroll end to its final populated-or-cursor row; otherwise the unused remainder of the terminal
+grid becomes a page of scrollable empty space beneath the composer. That presentation is granted
+through `.inlineTerminalViewport`, keeping ordinary shells and full-screen clients on the complete
+terminal screen. The flag belongs only to interactive terminal launches; native app-server and
+headless pipe transports have no terminal buffer to configure. An already-running Codex process
+must be relaunched before the launch contract can affect it.
 
 **An identifier is not a conversation, so the resume branch asks the filesystem — and the
 encoding it asks with is load-bearing.** Claude's id is minted before anything is written, so
