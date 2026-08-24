@@ -327,8 +327,8 @@ final class UsageLimitStopTests: XCTestCase {
         wait(for: [secondRead], timeout: 5)
     }
 
-    /// The regression from session 4ce20d8d: moving the refused transcript to Daniel copied the
-    /// old account's 429 to a new path, whose empty cache announced it as a fresh Daniel refusal
+    /// The regression from session 4ce20d8d: moving the refused transcript to Nova copied the
+    /// old account's 429 to a new path, whose empty cache announced it as a fresh Nova refusal
     /// and immediately offered Viktor. A migration carries the copied byte boundary, but not the
     /// account-scoped stop, and still notices genuinely appended output afterwards.
     @MainActor
@@ -370,12 +370,12 @@ final class UsageLimitStopTests: XCTestCase {
 
         let handle = try FileHandle(forWritingTo: destination)
         try handle.seekToEnd()
-        try handle.write(contentsOf: Data((refusal(text: "Daniel reached a new limit") + "\n").utf8))
+        try handle.write(contentsOf: Data((refusal(text: "Nova reached a new limit") + "\n").utf8))
         try handle.close()
 
         let destinationRefusal = expectation(description: "destination refusal read")
         ClaudeTranscriptUsageLimit.revalidate(at: destination) { stop in
-            XCTAssertEqual(stop?.message, "Daniel reached a new limit")
+            XCTAssertEqual(stop?.message, "Nova reached a new limit")
             destinationRefusal.fulfill()
         }
         wait(for: [destinationRefusal], timeout: 5)

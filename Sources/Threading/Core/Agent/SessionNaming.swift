@@ -51,7 +51,7 @@ enum SessionNaming {
     // MARK: - Placeholder and Noise Detection
 
     /// Whether a stored creation title says nothing about the conversation: empty, the old
-    /// agent-or-account naming scheme ("Claude Code 2", "claudedb 3"), or a generic label.
+    /// agent-or-account naming scheme ("Claude Code 2", "claudenh 3"), or a generic label.
     /// Such a title may be replaced by one derived from the first prompt.
     static func isPlaceholderTitle(
         _ title: String,

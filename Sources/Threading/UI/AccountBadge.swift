@@ -14,7 +14,7 @@ import AppKit
 /// this platform.
 ///
 /// The initial comes from the **email** rather than the alias, because aliases are named
-/// after the agent and collide on it — `claude-dblock` and `claude-vlundborg` are both `c`,
+/// after the agent and collide on it — `claude-nhartley` and `claude-ikeller` are both `c`,
 /// which identifies nothing — while the address names the person (`D`, `L`). The fill hashes
 /// the whole address, so two accounts sharing an initial still differ by colour, exactly as
 /// `GeneratedProjectIcon` separates two same-initial projects.

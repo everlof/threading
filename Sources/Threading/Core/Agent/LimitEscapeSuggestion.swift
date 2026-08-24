@@ -265,7 +265,7 @@ struct LimitEscapeSuggestion: Equatable, Sendable {
     /// second would act on the same refusal — but only the one pressed says it is working.
     ///
     /// Named rather than a Boolean because the two answers do very different things: a strip
-    /// that reported "Continuing as Daniel Block…" because somebody pressed *Continue at Reset*
+    /// that reported "Continuing as Nova Hartley…" because somebody pressed *Continue at Reset*
     /// would be claiming a login change nobody asked for, over a conversation that had not moved.
     var busy: LimitEscapeAction?
 
@@ -573,7 +573,7 @@ final class LimitEscapeSuggestionStore {
     ///
     /// `resumeVia(_:)` names a login the user pinned, which is not necessarily the one the ranking
     /// would have offered — and the busy state is drawn from this record, so without this the strip
-    /// would say "Continuing as Daniel Block…" over a conversation being moved to somebody else.
+    /// would say "Continuing as Nova Hartley…" over a conversation being moved to somebody else.
     /// That is the same misstatement `busy` is named rather than counted to avoid.
     ///
     /// The deciding window is dropped rather than carried over: it described the *other* login's

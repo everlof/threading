@@ -721,8 +721,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
 
     /// The same move, for a caller whose own control already named the whole action.
     ///
-    /// The confirmation exists because a menu item reading "Daniel Block" says nothing about
-    /// stopping the agent; the usage-limit escape's button says *Continue as Daniel Block* on
+    /// The confirmation exists because a menu item reading "Nova Hartley" says nothing about
+    /// stopping the agent; the usage-limit escape's button says *Continue as Nova Hartley* on
     /// its face and is pressed by somebody looking at a session that has already stopped, so a
     /// second dialog would only ask them to agree with what they just pressed.
     ///

@@ -427,7 +427,7 @@ final class TerminalPaneCurfewStripTests: HostedStoreTestCase {
         LimitEscapeSuggestionStore.shared.record(
             LimitEscapeSuggestion(
                 sessionID: sessionID,
-                accountName: "Daniel Block",
+                accountName: "Nova Hartley",
                 reading: "5h 12% · 7d 40%",
                 resetHint: "9:40pm (Europe/Rome)",
                 model: nil

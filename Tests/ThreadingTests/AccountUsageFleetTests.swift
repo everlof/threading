@@ -243,8 +243,8 @@ final class AccountUsageFleetTests: XCTestCase {
         defer { AppThemePalette.set(previousTheme) }
         let items = [
             item("Default", fraction: 0.75, isCurrent: true),
-            item("dblock", fraction: 0.02, resetsIn: 14_100),
-            item("vlundborg", fraction: 0.26, resetsIn: 6 * 86_400),
+            item("nhartley", fraction: 0.02, resetsIn: 14_100),
+            item("ikeller", fraction: 0.26, resetsIn: 6 * 86_400),
             item("Work", provider: .codex, fraction: 0.41),
             item("Personal", provider: .codex, fraction: 0.94)
         ]

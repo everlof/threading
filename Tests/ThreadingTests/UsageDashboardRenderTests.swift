@@ -349,8 +349,8 @@ final class UsageDashboardRenderTests: XCTestCase {
     private func fleetFixture() -> [AccountUsageFleetItem] {
         let values: [(AgentKind, String, String, [Double?], Bool)] = [
             (.claude, "default", "Default", [0.75, 0.38], true),
-            (.claude, "dblock", "dblock", [0.02, 0.20], false),
-            (.claude, "vlundborg", "vlundborg", [0.26, 0.03], false),
+            (.claude, "nhartley", "nhartley", [0.02, 0.20], false),
+            (.claude, "ikeller", "ikeller", [0.26, 0.03], false),
             (.codex, "work", "Work", [0.41, nil], false),
             (.codex, "personal", "Personal", [0.94, 0.67], false)
         ]

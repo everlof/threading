@@ -3523,7 +3523,7 @@ extension ProjectSidebarViewController {
     /// nil-means-follow writer one scope out.
     ///
     /// **It names no login, and cannot.** A login belongs to exactly one runtime while a checkout
-    /// hosts chats of several, so "continue as Daniel Block" is only a well-formed answer one scope
+    /// hosts chats of several, so "continue as Nova Hartley" is only a well-formed answer one scope
     /// in, on a chat that runs Claude. What a checkout can say is the runtime-neutral version —
     /// continue on whichever of *that chat's* logins has room — which is why this list is
     /// `LimitRecoveryPolicy.runtimeNeutralChoices` rather than the session menu's.

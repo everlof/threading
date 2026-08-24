@@ -569,21 +569,21 @@ final class ProjectIconTests: XCTestCase {
     // MARK: - Account Badges
 
     /// The reason the badge reads the email at all: aliases are named after the *agent*, so
-    /// `claude-dblock` and `claude-vlundborg` both reduce to `C` and identify nothing, while
-    /// their addresses reduce to `D` and `L`.
+    /// `claude-nhartley` and `claude-ikeller` both reduce to `C` and identify nothing, while
+    /// their addresses reduce to `N` and `K`.
     @MainActor
     func testBadgeInitialPrefersEmailOverAlias() throws {
-        let dblock = try claudeAccount(
-            handle: .named("claude-dblock"),
-            email: "daniel.block3@example.com"
+        let nhartley = try claudeAccount(
+            handle: .named("claude-nhartley"),
+            email: "nova.hartley3@example.com"
         )
-        let vlundborg = try claudeAccount(
-            handle: .named("claude-vlundborg"),
-            email: "lundborg.viktor@example.com"
+        let ikeller = try claudeAccount(
+            handle: .named("claude-ikeller"),
+            email: "keller.ines@example.com"
         )
 
-        XCTAssertEqual(AccountBadge.initial(for: dblock), "D")
-        XCTAssertEqual(AccountBadge.initial(for: vlundborg), "L")
+        XCTAssertEqual(AccountBadge.initial(for: nhartley), "N")
+        XCTAssertEqual(AccountBadge.initial(for: ikeller), "K")
     }
 
     /// An account whose config carries no address still has to render something, and its

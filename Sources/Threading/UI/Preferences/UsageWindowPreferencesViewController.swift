@@ -364,7 +364,7 @@ final class UsageWindowPreferencesViewController: NSViewController {
     /// `docs/architecture/limit-recovery.md`.
     private func limitRecoverySection() -> NSView {
         // The runtime-neutral answers only. Settings speaks for every chat in the app and a login
-        // belongs to exactly one runtime, so "continue as Daniel Block" is a sentence only a chat
+        // belongs to exactly one runtime, so "continue as Nova Hartley" is a sentence only a chat
         // can say — it is offered in the chat's own menu. See `LimitRecoveryPolicy.resumeVia`.
         let choices = LimitRecoveryPolicy.runtimeNeutralChoices
         let popUp = SettingsUI.popUp(target: self, action: #selector(limitRecoveryChanged))

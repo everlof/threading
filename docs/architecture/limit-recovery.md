@@ -310,7 +310,7 @@ to differ while behaving identically is worse than no mark. It is materialized o
 
 The same choice, offered as a strip over the refused session's composer and pressed by hand:
 
-> ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Daniel Block · 5h 12% · 7d 40%**  ·  ✕
+> ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Nova Hartley · 5h 12% · 7d 40%**  ·  ✕
 
 **It needs no settings opt-in, and that is not an oversight.** The reason the automatic policies
 are opted into is stated above: they type into the user's session and spend their quota *with
@@ -333,7 +333,7 @@ who is told when it fails (`LimitRecoveryCoordinator.noteAutomaticResumeFailed`,
 is Core's fact and the move is not) — plus one thing a named login forces: `retarget` points the
 standing record at the login the policy chose before the busy line is drawn from it, since
 `resumeVia`'s login need not be the one the ranking offered and a strip reading "Continuing as
-Daniel Block…" over a conversation going somewhere else is the misstatement `busy` is named rather
+Nova Hartley…" over a conversation going somewhere else is the misstatement `busy` is named rather
 than counted to avoid.
 
 ### The ranking is pure, and it is the automatic policy's
@@ -382,7 +382,7 @@ answers. Three things follow, and the third is a capability the old shape could 
 
 `busy` names *which* answer is running (`LimitEscapeAction`) rather than counting a Boolean. Both
 controls dim while either runs — the second would act on the same refusal — but only the pressed
-one says so: a strip reporting "Continuing as Daniel Block…" because somebody pressed the button
+one says so: a strip reporting "Continuing as Nova Hartley…" because somebody pressed the button
 beside it would be naming a login change that is not happening.
 
 **The button and the standing option are worded differently on purpose**, and were not at first.

@@ -3,14 +3,14 @@ import XCTest
 
 /// Naming a login after the person rather than after the shell alias.
 ///
-/// Aliases are named after the *agent* — `claude-dblock`, `claude-vlundborg` — so a menu of
+/// Aliases are named after the *agent* — `claude-nhartley`, `claude-ikeller` — so a menu of
 /// them asks the user to tell two logins apart by four characters in the middle of a word. The
 /// address the CLI already records names the person instead.
 final class AccountNameTests: XCTestCase {
 
     func testALocalPartBecomesAName() {
-        XCTAssertEqual(AccountName.derived(fromEmail: "daniel.block3@example.com"), "Daniel Block")
-        XCTAssertEqual(AccountName.derived(fromEmail: "victor.lundborg@example.com"), "Victor Lundborg")
+        XCTAssertEqual(AccountName.derived(fromEmail: "nova.hartley3@example.com"), "Nova Hartley")
+        XCTAssertEqual(AccountName.derived(fromEmail: "ines.keller@example.com"), "Ines Keller")
     }
 
     /// Underscores, hyphens and plus-addressing are all separators people actually use.
@@ -22,8 +22,8 @@ final class AccountNameTests: XCTestCase {
 
     /// Digits on the end of a name are almost always "that address was taken", not a name.
     func testTrailingDigitsAreDropped() {
-        XCTAssertEqual(AccountName.derived(fromEmail: "block99@x.io"), "Block")
-        XCTAssertEqual(AccountName.derived(fromEmail: "2daniel@x.io"), "Daniel")
+        XCTAssertEqual(AccountName.derived(fromEmail: "hartley99@x.io"), "Hartley")
+        XCTAssertEqual(AccountName.derived(fromEmail: "2nova@x.io"), "Nova")
     }
 
     func testASingleWordStillReadsAsAName() {
@@ -39,7 +39,7 @@ final class AccountNameTests: XCTestCase {
     }
 
     func testCaseIsNormalised() {
-        XCTAssertEqual(AccountName.derived(fromEmail: "DANIEL.BLOCK@x.io"), "Daniel Block")
+        XCTAssertEqual(AccountName.derived(fromEmail: "NOVA.HARTLEY@x.io"), "Nova Hartley")
         XCTAssertEqual(AccountName.derived(fromEmail: "mcDONALD@x.io"), "Mcdonald")
     }
 }

@@ -1649,7 +1649,7 @@ the conversation stays in the pane, and what it did is written to the diagnostic
 When a session stops at its limit and you have another login for the same agent with room left,
 a strip appears at the bottom of that session's pane:
 
-> ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Daniel Block · 5h 12% · 7d 40%**  ·  **Wait for Reset**  ·  ✕
+> ⚠ Limit reached · resets 9:40pm (Europe/Rome)  ·  **Continue as Nova Hartley · 5h 12% · 7d 40%**  ·  **Wait for Reset**  ·  ✕
 
 Pressing the first button moves the conversation to that login and sends it a **continue**, so the
 work carries on where it stopped. It is the same move as **Move to Account** above with the
@@ -1709,8 +1709,8 @@ one, **New … Session** becomes a submenu listing the accounts.
 
 Where you *pick* an account — the composer's chip and its menu, and **Move to Account** — each
 login is named after the person, derived from the address the CLI is signed in as:
-`daniel.block3@example.com` shows as **Daniel Block**. Aliases are named after the agent
-(`claude-dblock`, `claude-vlundborg`), which makes two logins differ by a few letters in the
+`nova.hartley3@example.com` shows as **Nova Hartley**. Aliases are named after the agent
+(`claude-nhartley`, `claude-ikeller`), which makes two logins differ by a few letters in the
 middle of a word; the address is what actually tells them apart. Two logins belonging to the
 same person fall back to showing the addresses, since that is the one thing guaranteed to
 differ.
@@ -1727,10 +1727,10 @@ compared at a glance instead of by reading six numbers.
 If you have a shell alias pointing at an account, Threading uses your name for it. Given:
 
 ```bash
-alias claudedb='CLAUDE_CONFIG_DIR="$HOME/.claude-dblock" claude'
+alias claudenh='CLAUDE_CONFIG_DIR="$HOME/.claude-nhartley" claude'
 ```
 
-the account appears as **claudedb** rather than `claude-dblock`. Accounts are found by
+the account appears as **claudenh** rather than `claude-nhartley`. Accounts are found by
 scanning for config directories, so they appear whether or not you have an alias; aliases only
 supply the label.
 
@@ -1750,8 +1750,8 @@ account's discovered avatar, else its initial on a colour of its own. Sessions o
 default login carry no chip, since the mark already says everything there is to say.
 
 The initial comes from the account's **login email**, not its alias, because aliases are
-named after the agent and collide: `claude-dblock` and `claude-vlundborg` are both `c`, while
-`daniel.block3@…` and `lundborg.viktor@…` are `D` and `L`. The colour is derived from the
+named after the agent and collide: `claude-nhartley` and `claude-ikeller` are both `c`, while
+`nova.hartley3@…` and `keller.ines@…` are `N` and `K`. The colour is derived from the
 whole address, so two accounts sharing an initial still differ. Hover a session for the
 account's full name.
 
@@ -1796,7 +1796,7 @@ Two things are deliberately *not* treated as accounts:
 
 ### Why the account sticks
 Conversations are stored per account, so a session resumes under the account it started on.
-Resuming a `claudedb` conversation under the default account would not find it.
+Resuming a `claudenh` conversation under the default account would not find it.
 
 The default account launches with `env -u CLAUDE_CONFIG_DIR` rather than a bare command, so an
 override exported by your shell cannot silently route it to the wrong account.

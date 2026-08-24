@@ -2,10 +2,10 @@ import Foundation
 
 /// The name to show for an agent login where the *person* is what matters.
 ///
-/// An account's `displayName` is the user's own shell alias — `claudedb`, `claudevl` — which is
+/// An account's `displayName` is the user's own shell alias — `claudenh`, `claudeik` — which is
 /// how they invoke it and a fine name for a session. It is a poor name for *choosing between
 /// logins*, where the question is whose account this is, and aliases are named after the agent
-/// rather than the person: `claude-dblock` and `claude-vlundborg` differ by four characters in
+/// rather than the person: `claude-nhartley` and `claude-ikeller` differ by four characters in
 /// the middle of a word.
 ///
 /// So this derives a name from the login email the CLIs already record. The alias stays where
@@ -15,7 +15,7 @@ enum AccountName {
     /// Splits a local part on the separators people actually use.
     private static let separators = CharacterSet(charactersIn: "._-+")
 
-    /// `daniel.block3@example.com` → `Daniel Block`.
+    /// `nova.hartley3@example.com` → `Nova Hartley`.
     ///
     /// Trailing digits are dropped from each word, since they are almost always disambiguation
     /// for a taken address rather than part of a name. Nil when nothing readable comes out,
@@ -41,7 +41,7 @@ enum AccountName {
     /// Names for a set of accounts, resolved together.
     ///
     /// Together, because the failure this prevents is only visible across the list: two logins
-    /// belonging to the same person derive the same name, and a menu offering "Daniel Block"
+    /// belonging to the same person derive the same name, and a menu offering "Nova Hartley"
     /// twice is worse than one offering two aliases. A collision falls back to the address,
     /// which is the one thing guaranteed to differ.
     @MainActor

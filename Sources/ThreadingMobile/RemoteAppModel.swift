@@ -3198,7 +3198,7 @@ final class RemoteAppModel: ObservableObject {
                     // one falling back to its initial on a hashed disc are drawn differently, and
                     // the evidence capture is where that difference is reviewed.
                     account: .init(
-                        name: "Vera Lundborg",
+                        name: "Vera Keller",
                         glyph: "V",
                         isEmoji: false,
                         hue: 0.72

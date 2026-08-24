@@ -78,7 +78,7 @@ final class MobileAgentIdentityTests: XCTestCase {
             hue: nil
         )
         let initial = RemoteSessionAccountDTO(
-            name: "Vera Lundborg",
+            name: "Vera Keller",
             glyph: "V",
             isEmoji: false,
             hue: 0.72

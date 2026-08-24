@@ -12,7 +12,7 @@ final class RemoteAccountBridgeTests: XCTestCase {
     private func account(
         handle: AccountHandle,
         emoji: String? = nil,
-        displayName: String = "claude-vlundborg"
+        displayName: String = "claude-ikeller"
     ) -> AgentAccount {
         AgentAccount(
             provider: .claude,
@@ -38,7 +38,7 @@ final class RemoteAccountBridgeTests: XCTestCase {
     /// The initial and the disc's hue are `AccountBadge`'s own, not a second implementation. Two
     /// hash functions agreeing today is exactly the kind of thing that stops agreeing after an edit.
     func testAnInitialChipCarriesTheSameGlyphAndHueTheSidebarDraws() throws {
-        let login = account(handle: AccountHandle(storedName: "claude-vlundborg"))
+        let login = account(handle: AccountHandle(storedName: "claude-ikeller"))
         let identity = RemoteAccountBridge.identity(for: login)
 
         XCTAssertFalse(identity.isEmoji)
@@ -51,7 +51,7 @@ final class RemoteAccountBridgeTests: XCTestCase {
     }
 
     func testTheHueIsAFractionOfTheWheelAndStableForOneLogin() throws {
-        let login = account(handle: AccountHandle(storedName: "claude-dblock"))
+        let login = account(handle: AccountHandle(storedName: "claude-nhartley"))
         let hue = try XCTUnwrap(RemoteAccountBridge.identity(for: login).hue)
 
         XCTAssertGreaterThanOrEqual(hue, 0)
@@ -62,7 +62,7 @@ final class RemoteAccountBridgeTests: XCTestCase {
     /// Two logins that share an initial still differ by colour — the reason the disc is hashed at
     /// all. Without this a sidebar of `D`s says nothing more than a sidebar of blanks.
     func testTwoLoginsSharingAnInitialStillDifferByColour() throws {
-        let first = account(handle: AccountHandle(storedName: "claude-dblock"))
+        let first = account(handle: AccountHandle(storedName: "claude-nhartley"))
         let second = account(handle: AccountHandle(storedName: "claude-dahlberg"))
 
         XCTAssertNotEqual(

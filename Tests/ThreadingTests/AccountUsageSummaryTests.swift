@@ -499,7 +499,7 @@ final class AccountUsageSummaryTests: XCTestCase {
             window(id: "7d", fraction: 0.37, resetsIn: 54_000)
         ])
 
-        var item = ThemedMenuItem(title: "Lundborg Viktor")
+        var item = ThemedMenuItem(title: "Keller Ines")
         AccountUsageMenu.apply(usage, to: &item, at: now)
 
         let expired = try XCTUnwrap(item.metrics.first)

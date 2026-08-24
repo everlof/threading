@@ -3172,7 +3172,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     @MainActor
     func testTheColumnsTakeTheirWidthFromTheNameNotThePanel() {
         AppThemePalette.set(.system)
-        let name = String(repeating: "Lundborg Viktor ", count: 6)
+        let name = String(repeating: "Keller Ines ", count: 6)
         var bare = ThemedMenuItem(title: name)
         bare.metrics = []
         var measured = ThemedMenuItem(title: name)
@@ -3238,7 +3238,7 @@ final class ThemedControlTests: HostedStoreTestCase {
         let mixedRun: [ThemedMenuEntry] = [
             .header("Claude Code"),
             .item(withLine),
-            .item(ThemedMenuItem(title: "Daniel Block"))
+            .item(ThemedMenuItem(title: "Nova Hartley"))
         ]
         XCTAssertEqual(
             ThemedMenuMetrics.heights(for: mixedRun),
@@ -6024,8 +6024,8 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// `NSTextField(string:)` imports a class factory method, which is free to hand back a plain
     /// `NSTextField` — the subclass would then be one only by the annotation at the call site.
     func testTheStringInitializerReallyBuildsAThemedField() {
-        let field = ThemedTextField(string: "claudedb")
-        XCTAssertEqual(field.stringValue, "claudedb")
+        let field = ThemedTextField(string: "claudenh")
+        XCTAssertEqual(field.stringValue, "claudenh")
         XCTAssertFalse(field.isBezeled, "init(string:) bypassed the themed setup")
     }
 
@@ -6036,7 +6036,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// with about three points of air, and the text read as wedged against the border. Pinned
     /// with the air stated, so the next change to the scale has to mean it.
     func testAFieldLeavesRealAirAroundItsText() {
-        let field = ThemedTextField(string: "claudedb")
+        let field = ThemedTextField(string: "claudenh")
         let line = ceil((field.font ?? Design.Typography.body()).boundingRectForFont.height)
 
         XCTAssertEqual(field.intrinsicContentSize.height, Design.Size.fieldHeight)

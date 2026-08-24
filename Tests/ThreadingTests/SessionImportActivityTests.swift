@@ -93,8 +93,8 @@ final class SessionImportActivityTests: XCTestCase {
     // MARK: - Duplicates
 
     func testAConversationHeldByTwoAccountsIsOfferedOnce() {
-        let older = session(id: shared, account: "dblock", activeAt: 3_000)
-        let newer = session(id: shared, account: "vlundborg", activeAt: 9_000)
+        let older = session(id: shared, account: "nhartley", activeAt: 3_000)
+        let newer = session(id: shared, account: "ikeller", activeAt: 9_000)
         let other = session(id: toolbarID, account: nil, activeAt: 5_000)
 
         let offered = SessionImporter.deduplicated(

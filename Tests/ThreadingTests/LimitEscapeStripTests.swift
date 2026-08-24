@@ -23,7 +23,7 @@ final class LimitEscapeStripTests: XCTestCase {
         static let narrowWidth: CGFloat = 260
         static let height: CGFloat = 120
 
-        static let accountName = "Daniel Block"
+        static let accountName = "Nova Hartley"
         static let reading = "5h 12% · 7d 40%"
         static let resetHint = "9:40pm (Europe/Rome)"
 
@@ -249,7 +249,7 @@ final class LimitEscapeStripTests: XCTestCase {
     }
 
     /// **Only the pressed answer reports itself working.** Both dim, but a strip saying
-    /// "Continuing as Daniel Block…" because somebody pressed *Continue at Reset* would name a
+    /// "Continuing as Nova Hartley…" because somebody pressed *Continue at Reset* would name a
     /// login change that is not happening, to a conversation that has not moved — which is why
     /// the record names the action instead of counting a Boolean.
     func testOnlyThePressedAnswerSaysItIsWorking() {
@@ -387,13 +387,13 @@ final class LimitEscapeStripTests: XCTestCase {
             accountName: Fixture.accountName,
             reading: "5h 96% · 7d 40%",
             resetHint: Fixture.resetHint,
-            problem: "Daniel Block is close to its own limit now."
+            problem: "Nova Hartley is close to its own limit now."
         ))
         host(strip)
 
         XCTAssertEqual(
             try sentence(in: strip).stringValue,
-            "Daniel Block is close to its own limit now."
+            "Nova Hartley is close to its own limit now."
         )
         XCTAssertFalse(strip.continueControl.isEnabled)
         XCTAssertTrue(

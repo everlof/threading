@@ -872,7 +872,7 @@ authoritative source where a conversation is being replayed — see
 **The model has a third source, and it is the transcript.** The two configuration sources both
 describe what was *chosen*: `session.model` is what the user pinned in the composer, and
 `AgentModels.defaultModel` reads `"model"` from the account's `settings.json`. A login that
-leaves the choice to the CLI sets neither — `~/.claude-vlundborg/settings.json` here carries
+leaves the choice to the CLI sets neither — `~/.claude-ikeller/settings.json` here carries
 `effortLevel` and no `model` — and Claude then resolves its own default from a layer this app
 does not read, so the card sat beside a session visibly running Opus 5 and could say only "Extra
 High". `ClaudeTranscriptModel` reads the newest `message.model` back out of the session's own

@@ -113,7 +113,7 @@ final class RemoteSessionSurfaceTests: XCTestCase {
             state: .idle,
             projectName: "Project",
             account: RemoteSessionAccountDTO(
-                name: "Vera Lundborg",
+                name: "Vera Keller",
                 glyph: "V",
                 isEmoji: false,
                 hue: 0.72
@@ -124,7 +124,7 @@ final class RemoteSessionSurfaceTests: XCTestCase {
             RemoteSessionSummaryDTO.self,
             from: JSONEncoder().encode(summary)
         )
-        XCTAssertEqual(roundTrip.account?.name, "Vera Lundborg")
+        XCTAssertEqual(roundTrip.account?.name, "Vera Keller")
         XCTAssertEqual(roundTrip.account?.glyph, "V")
         XCTAssertEqual(roundTrip.account?.isEmoji, false)
         XCTAssertEqual(roundTrip.account?.hue, 0.72)

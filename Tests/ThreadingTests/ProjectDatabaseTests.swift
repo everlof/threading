@@ -933,7 +933,7 @@ final class ProjectDatabaseTests: XCTestCase {
         // The payload is the model's own encoding precisely so fields added to `AgentSession`
         // need no schema change; this is the assertion that keeps that claim honest.
         let database = try makeDatabase()
-        var session = AgentSession(kind: .claude, title: "Chat", accountHandle: .named("claudedb"), model: "opus")
+        var session = AgentSession(kind: .claude, title: "Chat", accountHandle: .named("claudenh"), model: "opus")
         session.customTitle = "Renamed"
         session.agentTitle = "working"
         session.branch = "feature/x"

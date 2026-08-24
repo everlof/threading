@@ -67,7 +67,7 @@ final class LimitEscapeSuggestionTests: XCTestCase {
             LimitEscapeSuggestion(
                 sessionID: sessionID,
                 accountID: account(name),
-                accountName: "Daniel Block",
+                accountName: "Nova Hartley",
                 reading: reading,
                 resetHint: "9:40pm (Europe/Rome)",
                 model: "claude-opus-5",
@@ -459,7 +459,7 @@ final class LimitEscapeSuggestionTests: XCTestCase {
 
         let upgraded = try XCTUnwrap(store.offer(for: sessionID))
         XCTAssertTrue(upgraded.offersAccountEscape)
-        XCTAssertEqual(upgraded.accountName, "Daniel Block")
+        XCTAssertEqual(upgraded.accountName, "Nova Hartley")
     }
 
     /// And the upgrade is still the *same* refusal, so a dismissal survives it. Waving away one

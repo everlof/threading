@@ -1646,7 +1646,7 @@ final class ComponentGalleryViewController: NSViewController {
         // different login nobody chose.
         let limitEscapeOffers: [LimitEscapeStripView.Offer] = [
             LimitEscapeStripView.Offer(
-                accountName: "Daniel Block",
+                accountName: "Nova Hartley",
                 reading: "5h 12% · 7d 40%",
                 offersWaitForReset: true,
                 resetHint: "9:40pm (Europe/Rome)"
@@ -1656,18 +1656,18 @@ final class ComponentGalleryViewController: NSViewController {
                 resetHint: "9:40pm (Europe/Rome)"
             ),
             LimitEscapeStripView.Offer(
-                accountName: "Daniel Block",
+                accountName: "Nova Hartley",
                 reading: "5h 12% · 7d 40%",
                 offersWaitForReset: true,
                 resetHint: "9:40pm (Europe/Rome)",
                 busy: .moveAccount
             ),
             LimitEscapeStripView.Offer(
-                accountName: "Daniel Block",
+                accountName: "Nova Hartley",
                 reading: "5h 94% · 7d 40%",
                 offersWaitForReset: true,
                 resetHint: "9:40pm (Europe/Rome)",
-                problem: "Daniel Block is close to its own limit now."
+                problem: "Nova Hartley is close to its own limit now."
             ),
             // The user's own line, which wears the conduct mark rather than the triangle and
             // carries a Lift instead of a ✕. Three of them, because the ledger is the point: the

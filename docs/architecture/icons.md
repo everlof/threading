@@ -39,8 +39,8 @@ rows with and without one still align, and it hangs `cornerOverhang` past the sl
 flush inside it covered the middle of a 13pt mark.
 
 The initial comes from the **login email**, not the alias: aliases are named after the agent
-and collide on it (`claude-dblock` and `claude-vlundborg` are both `c`), while the addresses
-give `D` and `L`. Its disc hashes the whole address through `GeneratedProjectIcon.stableHash`,
+and collide on it (`claude-nhartley` and `claude-ikeller` are both `c`), while the addresses
+give `N` and `K`. Its disc hashes the whole address through `GeneratedProjectIcon.stableHash`,
 so two accounts sharing an initial still differ by colour, on a brighter ramp than the project
 tiles — a 9pt disc has far less area to carry a hue than a 16pt tile. The **default account
 gets no chip**: its agent's mark already says everything the row knows.

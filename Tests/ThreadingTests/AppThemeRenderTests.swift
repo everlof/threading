@@ -197,11 +197,11 @@ final class AppThemeRenderTests: XCTestCase {
                 [window("5h", 0.22, resetsIn: 16_440), window("7d", 0.15, resetsIn: 345_600)],
                 scoped: [scoped("Fable", 0.4, resetsIn: -60)]
             )),
-            row("Daniel Block", .claude, usage(
+            row("Nova Hartley", .claude, usage(
                 [window("5h", 0.01, resetsIn: 16_440), window("7d", 0.37, resetsIn: 356_000)],
                 scoped: [scoped("Fable", 0.38, resetsIn: 356_000)]
             ), selected: true),
-            row("Lundborg Viktor", .claude, usage(
+            row("Keller Ines", .claude, usage(
                 [window("5h", nil, resetsIn: 3_600), window("7d", 0.79, resetsIn: 62_640)],
                 scoped: [scoped("Fable", 0, resetsIn: 62_640)]
             )),

@@ -57,7 +57,7 @@ final class SessionNamingTests: XCTestCase {
         }
 
         XCTAssertTrue(SessionNaming.isPlaceholderTitle(
-            "claudedb 3", kind: .claude, accountDisplayName: "claudedb"
+            "claudenh 3", kind: .claude, accountDisplayName: "claudenh"
         ))
         XCTAssertTrue(SessionNaming.isPlaceholderTitle(
             "Codex", kind: .codex, accountDisplayName: nil
@@ -80,7 +80,7 @@ final class SessionNamingTests: XCTestCase {
             "Claude Code 2", kind: .claude, accountDisplayName: nil
         ))
         XCTAssertTrue(SessionNaming.isAgentDerivedTitle(
-            "claudedb 3", kind: .claude, accountDisplayName: "claudedb"
+            "claudenh 3", kind: .claude, accountDisplayName: "claudenh"
         ))
 
         for title in ["", "New Session", "Side Chat", "Fix the tests"] {
@@ -118,7 +118,7 @@ final class SessionNamingTests: XCTestCase {
         XCTAssertFalse(SessionNaming.isNoiseTitle(
             "Add favicon discovery for projects",
             kind: .claude,
-            accountDisplayName: "claudedb",
+            accountDisplayName: "claudenh",
             projectName: "sonda",
             folderBasename: "sonda"
         ))

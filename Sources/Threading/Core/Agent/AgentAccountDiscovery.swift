@@ -328,7 +328,7 @@ enum AgentAccountDiscovery {
         )
     }
 
-    /// The directory name minus its leading dot, e.g. `.claude-dblock` becomes `claude-dblock`.
+    /// The directory name minus its leading dot, e.g. `.claude-nhartley` becomes `claude-nhartley`.
     private static func handle(for directory: URL) -> AccountHandle {
         .named(String(directory.lastPathComponent.dropFirst()))
     }
