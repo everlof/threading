@@ -237,6 +237,28 @@ fi
 # do not read the project's ARCHS, so without this every package compiles an x86_64 slice the
 # link then discards — 139 compiles per archive when it was measured.
 
+# MARK: - Issue-report intake
+#
+# There is deliberately no compiled-in fallback: a build that names no endpoint writes its record
+# and posts nothing, so this is the only thing standing between a user's bug report and the
+# developer. It is injected here rather than committed because it is a *release* property; an
+# ordinary Debug build must not post to production, and MacIssueReportSubmitter only honours the
+# environment override under DEBUG.
+#
+# The host is verified before the archive rather than after. `issue-reporting-setup.md` records
+# why in blood: the iOS app once shipped naming this host before it served anything, and the
+# 2026-08-21 support report is 250 deliveries that could only ever fail against a parked domain's
+# TLS. A registrar parking record answers a ClientHello with handshake_failure and no certificate,
+# which reaches the app as URLError(-1200) and is indistinguishable from a real network fault.
+REPORT_INTAKE_HOST="remote.threading.codes"
+REPORT_INTAKE_URL="https://${REPORT_INTAKE_HOST}/v1/reports"
+
+say "Checking the report intake host presents a certificate"
+if ! openssl s_client -connect "${REPORT_INTAKE_HOST}:443" -servername "$REPORT_INTAKE_HOST" \
+        </dev/null 2>/dev/null | grep -q "BEGIN CERTIFICATE"; then
+    fail "${REPORT_INTAKE_HOST} presented no certificate; refusing to ship a build that names it"
+fi
+
 say "Archiving $SCHEME ($CHANNEL)"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -251,6 +273,7 @@ run_xcodebuild "archive" "$BUILD_DIR/archive.log" archive \
     MARKETING_VERSION="$VERSION" \
     CURRENT_PROJECT_VERSION="$VERSION" \
     THREADING_CHANNEL="$CHANNEL" \
+    THREADING_REPORT_INTAKE_URL="$REPORT_INTAKE_URL" \
     -archivePath "$ARCHIVE"
 
 [[ -d "$ARCHIVE" ]] || fail "the archive was not produced"

@@ -6,24 +6,24 @@ production Cloudflare account has been inspected.
 
 ## Storage and service
 
-- [ ] Apply `Service/ThreadingControlPlane/infra/` and verify it created
+- [x] Apply `Service/ThreadingControlPlane/infra/` and verify it created
   `threading-private-issue-reports`, the report Queue, dead-letter Queue and R2 event notification.
 - [ ] Keep R2 public access, `r2.dev`, custom domains, public credentials, and CORS disabled.
 - [ ] Verify Terraform's mandatory 30-day lifecycle for `reports/v1/` by deleting an aged
   staging object.
-- [ ] Verify Terraform created production D1; run the guarded deploy and confirm migration
+- [x] Verify Terraform created production D1; run the guarded deploy and confirm migration
   `0007_issue_report_quota.sql`. The deploy renders D1's output into a temporary config; do not
   replace the checked-in placeholder.
 - [ ] Allocate distinct production namespaces for every checked-in rate-limit binding.
-- [ ] Generate an independent random `REPORT_PICKUP_TOKEN` of at least 32 bytes, install it with
+- [x] Generate an independent random `REPORT_PICKUP_TOKEN` of at least 32 bytes, install it with
   `wrangler secret put`, and store the operator copy in the team secret manager—not an app,
   script argument, shell history, or repository file.
-- [ ] Install `REPORT_ALERT_WEBHOOK_URL` and an independent 32-byte-or-longer
+- [x] Install `REPORT_ALERT_WEBHOOK_URL` and an independent 32-byte-or-longer
   `REPORT_ALERT_WEBHOOK_TOKEN`; confirm the URL has HTTPS, no embedded credential/query/fragment,
   and is owned by the team.
-- [ ] Deploy through `npm run deploy`; verify `/ready` and confirm Worker logs contain metadata
+- [x] Deploy through `npm run deploy`; verify `/ready` and confirm Worker logs contain metadata
   only.
-- [ ] Set `ThreadingReportIntakeURL` in the shipping app's Info.plist to the deployed intake URL,
+- [x] Set `ThreadingReportIntakeURL` in the shipping app's Info.plist to the deployed intake URL,
   and confirm a release build reports a receipt rather than **saved**. There is deliberately no
   compiled-in fallback: a build that states no endpoint writes its record and posts nothing, so
   omitting this key ships an app whose reports never leave the user's Mac.
@@ -31,11 +31,29 @@ production Cloudflare account has been inspected.
   rule and has no fallback either. It used to have one, aimed at `remote.threading.codes` before
   that host was serving anything, and the 2026-08-21 support report is 250 deliveries that could
   only ever fail against a parked domain's TLS.
-- [ ] Confirm the intake host actually resolves to the Worker before shipping a build that names
+- [x] Confirm the intake host actually resolves to the Worker before shipping a build that names
   it: `openssl s_client -connect <host>:443 -servername <host>` must present a certificate.
   A registrar parking record answers a ClientHello with `handshake_failure` and no certificate,
   which reaches the app as `URLError(-1200)` and is indistinguishable in a report from a genuine
   TLS problem on the user's network.
+
+### Deployed 2026-08-24
+
+Applied and inspected in production. D1 `threading-control-plane`
+(`983bf573-45ab-4198-803f-983fbb887076`) carries all seven migrations; the private R2 bucket
+reports `maxAge=2592000s` on prefix `reports/v1/`; the event notification fires `PutObject` on
+`reports/v1/` + `.json` into `threading-issue-report-events`. A real report was posted to
+`https://remote.threading.codes/v1/reports`, stored at `reports/v1/<id>.json`, listed through
+authenticated developer pickup, and produced a phone notification through the alert receiver.
+
+`ThreadingReportIntakeURL` is injected by `scripts/release.sh` rather than committed, because an
+ordinary Debug build must not post to production. That script now refuses to archive unless the
+intake host presents a certificate, which is the check this file already demanded and nothing
+enforced.
+
+**The macOS half is done. The iOS half is not**: `Sources/ThreadingMobile-Info.plist` still names
+no intake, and there is deliberately no fallback, so an iOS build today writes its record and
+posts nothing.
 
 ## Abuse and availability
 
@@ -54,7 +72,7 @@ production Cloudflare account has been inspected.
 
 ## Developer pickup and triage
 
-- [ ] Verify unauthenticated and incorrect-token calls to `GET /v1/developer/reports` fail, while
+- [x] Verify unauthenticated and incorrect-token calls to `GET /v1/developer/reports` fail, while
   the correct developer token can list metadata and retrieve one exact UUID.
 - [ ] Put the pickup credential in a protected operator/triage client and rotate it on staff or
   device changes. Never distribute it with Threading.
