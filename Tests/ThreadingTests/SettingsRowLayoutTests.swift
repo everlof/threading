@@ -1138,9 +1138,15 @@ final class SettingsRowLayoutTests: XCTestCase {
             SettingsSidebar.Defaults.maximumResultRows,
             "the capped search built more rows than it promised"
         )
+        // Built through L10n rather than interpolated, because the overflow line is too.
+        // `L10n.format` passes `locale: .current` to `String(format:)`, which groups `%lld` --
+        // 2000 reaches the label as "2,000", or "2 000" under a Swedish locale. Searching the
+        // rendered text for the raw digits therefore fails on a line that is perfectly correct,
+        // and fails differently depending on whose Mac runs it.
+        let cutPageCount = resultCount - SettingsSidebar.Defaults.maximumResultRows
         XCTAssertTrue(
             labels(in: sidebar).contains {
-                $0.contains("\(resultCount - SettingsSidebar.Defaults.maximumResultRows)")
+                $0 == L10n.format("%lld more pages match", cutPageCount)
             },
             "a capped list has to say how much it cut"
         )
