@@ -696,6 +696,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         startupPerformance.splitToolbarNanoseconds = DispatchTime.now().uptimeNanoseconds
             - toolbarStarted
+        (window as? TitlebarActionWindow)?.refreshScreenshotDropDestination()
 
         let headerStarted = DispatchTime.now().uptimeNanoseconds
         // The pane's own header, built here because the window controller owns what these
@@ -820,9 +821,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         updateHeaderInset()
         updateSidebarMinimumThickness()
+        (window as? TitlebarActionWindow)?.refreshScreenshotDropDestination()
         DispatchQueue.main.async { [weak self] in
             self?.updateHeaderInset()
             self?.updateSidebarMinimumThickness()
+            (self?.window as? TitlebarActionWindow)?.refreshScreenshotDropDestination()
         }
     }
 
@@ -4717,6 +4720,7 @@ extension MainWindowController: NSWindowDelegate {
     /// (`WindowChromeCoordinator.applyCurrentTheme`); this is where the parked change runs.
     func windowDidExitFullScreen(_ notification: Notification) {
         chromeCoordinator?.windowDidExitFullScreen()
+        (window as? TitlebarActionWindow)?.refreshScreenshotDropDestination()
     }
 }
 

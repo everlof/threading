@@ -112,6 +112,10 @@ final class BrandInteractionRenderTests: XCTestCase {
             AppThemeRefresh.repaint(root)
             root.layoutSubtreeIfNeeded()
             if state == .screenshotDrop {
+                // Configure the shipping route before presenting its accepted state. The
+                // structural drop destination owns the design-system indicator in production;
+                // without a listener there is deliberately no destination to render.
+                window.onScreenshotDropped = { _ in }
                 window.setScreenshotDropIndicatorPresentation(true)
             }
             root.layoutSubtreeIfNeeded()

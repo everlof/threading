@@ -4,6 +4,17 @@ import SwiftTerm
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
+/// Launch Services calls the application delegate before the Dock's drag-completion transaction
+/// has unwound. Application or window mutations therefore cross one main-queue turn first.
+@MainActor
+enum AppIconDropDelivery {
+    static func afterDragCompletion(_ operation: @escaping @MainActor () -> Void) {
+        DispatchQueue.main.async {
+            operation()
+        }
+    }
+}
+
 /// Opt-in phase clock for the noninteractive cold-launch capture.
 ///
 /// Kept outside `PerformanceRecorder`: the first timestamp is taken before `NSApplication`
@@ -1147,6 +1158,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // that does not own the state does not adopt folders into it either.
         guard ownsSingleInstanceLock else { return }
 
+        // Launch Services delivers a Dock-icon drop from inside CoreDrag's completion callback.
+        // Activating the app or presenting a sheet before that callback unwinds re-enters the
+        // process drag manager; on macOS 26 one such re-entry leaves later drags reporting a
+        // completed transaction and no usable drag reference. Cross the run-loop boundary once
+        // so CoreDrag can finish before any dropped URL mutates application or window state.
+        AppIconDropDelivery.afterDragCompletion { [weak self] in
+            guard let self, self.ownsSingleInstanceLock else { return }
+            self.openDroppedURLs(urls)
+        }
+    }
+
+    private func openDroppedURLs(_ urls: [URL]) {
         for url in urls {
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {

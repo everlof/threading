@@ -27,6 +27,8 @@ final class TitlebarActionWindow: NSWindow {
     /// This design-system view is mounted only when a drag proves it is carrying one reportable
     /// image, then paints the accepted target without taking titlebar hit-testing from AppKit.
     private let screenshotDropIndicator = ScreenshotReportDropTargetView()
+    private let screenshotDropDestination = ScreenshotReportDropDestinationView()
+    private var screenshotDropDestinationConstraints: [NSLayoutConstraint] = []
 
     /// What a double-click performs, as a closure so a test can state the answer rather than
     /// inherit whichever setting the machine running it happens to carry — the gesture is only
@@ -91,24 +93,31 @@ final class TitlebarActionWindow: NSWindow {
     var onScreenshotDropped: ((URL) -> Void)? {
         didSet {
             if onScreenshotDropped == nil {
-                unregisterDraggedTypes()
-                setScreenshotDropIndicatorPresented(false, animated: false)
+                removeScreenshotDropDestination()
             } else {
-                registerForDraggedTypes([.fileURL])
+                refreshScreenshotDropDestination()
             }
         }
     }
 
+    /// Test seam for the destination methods below. The window deliberately is not registered
+    /// for any drag type: registering `NSWindow` makes the whole window a candidate and prevents
+    /// a child destination such as the terminal from owning the same file URL. In production
+    /// AppKit calls these methods on `screenshotDropDestination`, whose bounds are the strip.
     func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        screenshotDragOperation(for: sender, animated: true)
+        guard isInTitlebarStrip(sender.draggingLocation) else {
+            setScreenshotDropIndicatorPresented(false, animated: false)
+            return []
+        }
+        return screenshotDropDestination.draggingEntered(sender)
     }
 
     func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        screenshotDragOperation(for: sender, animated: true)
+        draggingEntered(sender)
     }
 
     func draggingExited(_ sender: (any NSDraggingInfo)?) {
-        setScreenshotDropIndicatorPresented(false, animated: false)
+        screenshotDropDestination.draggingExited(sender)
     }
 
     func draggingEnded(_ sender: any NSDraggingInfo) {
@@ -116,17 +125,15 @@ final class TitlebarActionWindow: NSWindow {
     }
 
     func concludeDragOperation(_ sender: (any NSDraggingInfo)?) {
-        setScreenshotDropIndicatorPresented(false, animated: false)
+        screenshotDropDestination.concludeDragOperation(sender)
     }
 
     func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        guard let url = droppableScreenshot(in: sender) else {
+        guard isInTitlebarStrip(sender.draggingLocation) else {
             setScreenshotDropIndicatorPresented(false, animated: false)
             return false
         }
-        setScreenshotDropIndicatorPresented(false, animated: false)
-        onScreenshotDropped?(url)
-        return true
+        return screenshotDropDestination.performDragOperation(sender)
     }
 
     /// A render-test seam for the transient state. Production reaches the same method through
@@ -140,55 +147,84 @@ final class TitlebarActionWindow: NSWindow {
         screenshotDropIndicator.isPresented
     }
 
-    /// One image, dropped on the strip. Deliberately narrow on both counts: the strip is a target
-    /// a person cannot see, so it may only claim a drag it is certain about, and everything it
-    /// refuses falls through to whatever the window's content does with it.
-    private func droppableScreenshot(in sender: any NSDraggingInfo) -> URL? {
-        guard onScreenshotDropped != nil,
-              isInTitlebarStrip(sender.draggingLocation),
-              let urls = sender.draggingPasteboard.readObjects(
-                forClasses: [NSURL.self],
-                options: [.urlReadingFileURLsOnly: true]
-              ) as? [URL],
-              urls.count == 1,
-              let url = urls.first,
-              DroppedScreenshotReport.isReportable(url) else { return nil }
-        return url
+    /// Re-homes and remeasures the destination after the content root, toolbar, fullscreen state,
+    /// or app-drawn frame changes. Its bounds, rather than a conditional answer from the whole
+    /// window, are what let AppKit choose the terminal everywhere below the native strip.
+    func refreshScreenshotDropDestination() {
+        guard let onScreenshotDropped,
+              let contentView else {
+            removeScreenshotDropDestination()
+            return
+        }
+
+        let stripHeight = titlebarStripHeight
+        guard stripHeight > 0 else {
+            removeScreenshotDropDestination()
+            return
+        }
+
+        screenshotDropDestination.onDrop = onScreenshotDropped
+        screenshotDropDestination.onPresentationChange = { [weak self] presented, animated in
+            self?.setScreenshotDropIndicatorPresented(presented, animated: animated)
+        }
+
+        if screenshotDropDestination.superview !== contentView {
+            NSLayoutConstraint.deactivate(screenshotDropDestinationConstraints)
+            screenshotDropDestination.removeFromSuperview()
+            screenshotDropDestination.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(screenshotDropDestination, positioned: .above, relativeTo: nil)
+            screenshotDropDestinationConstraints = [
+                screenshotDropDestination.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+                screenshotDropDestination.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+                screenshotDropDestination.topAnchor.constraint(equalTo: contentView.topAnchor),
+            ]
+            NSLayoutConstraint.activate(screenshotDropDestinationConstraints)
+        }
+
+        if screenshotDropIndicator.superview !== screenshotDropDestination {
+            screenshotDropIndicator.removeFromSuperview()
+            screenshotDropIndicator.translatesAutoresizingMaskIntoConstraints = false
+            screenshotDropDestination.addSubview(screenshotDropIndicator)
+            NSLayoutConstraint.activate([
+                screenshotDropIndicator.leadingAnchor.constraint(
+                    equalTo: screenshotDropDestination.leadingAnchor
+                ),
+                screenshotDropIndicator.trailingAnchor.constraint(
+                    equalTo: screenshotDropDestination.trailingAnchor
+                ),
+                screenshotDropIndicator.topAnchor.constraint(
+                    equalTo: screenshotDropDestination.topAnchor
+                ),
+                screenshotDropIndicator.bottomAnchor.constraint(
+                    equalTo: screenshotDropDestination.bottomAnchor
+                ),
+            ])
+        }
+
+        screenshotDropDestination.setHeight(stripHeight)
     }
 
-    private func screenshotDragOperation(
-        for sender: any NSDraggingInfo,
-        animated: Bool
-    ) -> NSDragOperation {
-        let acceptsScreenshot = droppableScreenshot(in: sender) != nil
-        setScreenshotDropIndicatorPresented(acceptsScreenshot, animated: animated)
-        return acceptsScreenshot ? .copy : []
+    var screenshotDropDestinationRegisteredTypes: [NSPasteboard.PasteboardType] {
+        screenshotDropDestination.registeredDraggedTypes
+    }
+
+    var screenshotDropDestinationFrame: NSRect? {
+        guard screenshotDropDestination.superview === contentView else { return nil }
+        contentView?.layoutSubtreeIfNeeded()
+        return screenshotDropDestination.frame
+    }
+
+    private func removeScreenshotDropDestination() {
+        setScreenshotDropIndicatorPresented(false, animated: false)
+        screenshotDropDestination.onDrop = nil
+        screenshotDropDestination.onPresentationChange = nil
+        NSLayoutConstraint.deactivate(screenshotDropDestinationConstraints)
+        screenshotDropDestinationConstraints = []
+        screenshotDropDestination.removeFromSuperview()
     }
 
     private func setScreenshotDropIndicatorPresented(_ presented: Bool, animated: Bool) {
-        guard presented else {
-            screenshotDropIndicator.setPresented(false, animated: false)
-            return
-        }
-        guard let contentView else { return }
-
-        let stripHeight = titlebarStripHeight
-        guard stripHeight > 0 else { return }
-
-        if screenshotDropIndicator.superview !== contentView {
-            screenshotDropIndicator.removeFromSuperview()
-            contentView.addSubview(screenshotDropIndicator, positioned: .above, relativeTo: nil)
-        }
-        // The full-size root reaches under the native titlebar, so its visible top edge is the
-        // stable placement reference. AppKit may restate `contentLayoutRect.origin` after this
-        // feedback view is mounted; neither this frame nor later drag updates depend on it.
-        screenshotDropIndicator.frame = NSRect(
-            x: contentView.bounds.minX,
-            y: contentView.bounds.maxY - stripHeight,
-            width: contentView.bounds.width,
-            height: stripHeight
-        )
-        screenshotDropIndicator.setPresented(true, animated: animated)
+        screenshotDropIndicator.setPresented(presented, animated: presented && animated)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -228,6 +264,96 @@ final class TitlebarActionWindow: NSWindow {
         case .doNothing:
             break
         }
+    }
+}
+
+/// The report target's drag ownership without any appearance of its own.
+///
+/// A destination receives drag callbacks for its bounds. That geometric fact is load-bearing:
+/// `NSWindow.registerForDraggedTypes` made every file drag in the window a screenshot candidate,
+/// including the same file URL the terminal had registered for. Returning `[]` from the window
+/// outside the strip does not restart destination selection at the child beneath it. This view is
+/// instead exactly as tall as the native strip, never participates in click hit-testing, and
+/// hosts the design-system indicator only after it has accepted a reportable image.
+@MainActor
+private final class ScreenshotReportDropDestinationView: NSView {
+    var onDrop: ((URL) -> Void)?
+    var onPresentationChange: ((Bool, Bool) -> Void)?
+
+    private var heightConstraint: NSLayoutConstraint?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func setHeight(_ height: CGFloat) {
+        if let heightConstraint {
+            heightConstraint.constant = height
+        } else {
+            let constraint = heightAnchor.constraint(equalToConstant: height)
+            constraint.isActive = true
+            heightConstraint = constraint
+        }
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        dragOperation(for: sender, animated: true)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        dragOperation(for: sender, animated: true)
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        onPresentationChange?(false, false)
+    }
+
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        droppableScreenshot(in: sender) != nil
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let url = droppableScreenshot(in: sender) else {
+            onPresentationChange?(false, false)
+            return false
+        }
+        onPresentationChange?(false, false)
+        onDrop?(url)
+        return true
+    }
+
+    override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) {
+        onPresentationChange?(false, false)
+    }
+
+    private func dragOperation(
+        for sender: any NSDraggingInfo,
+        animated: Bool
+    ) -> NSDragOperation {
+        let acceptsScreenshot = droppableScreenshot(in: sender) != nil
+        onPresentationChange?(acceptsScreenshot, animated)
+        return acceptsScreenshot ? .copy : []
+    }
+
+    /// One image and nothing else. Refusing at the pasteboard boundary keeps this invisible
+    /// destination from promising a report that cannot be opened.
+    private func droppableScreenshot(in sender: any NSDraggingInfo) -> URL? {
+        guard onDrop != nil,
+              let urls = sender.draggingPasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+              ) as? [URL],
+              urls.count == 1,
+              let url = urls.first,
+              DroppedScreenshotReport.isReportable(url) else { return nil }
+        return url
     }
 }
 

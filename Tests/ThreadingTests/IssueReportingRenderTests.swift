@@ -808,6 +808,22 @@ final class IssueReportingRenderTests: XCTestCase {
         var dropped: [URL] = []
         window.onScreenshotDropped = { dropped.append($0) }
 
+        XCTAssertEqual(
+            window.screenshotDropDestinationRegisteredTypes,
+            [.fileURL],
+            "the titlebar's bounded view, not the window, must own screenshot drags"
+        )
+        let destinationFrame = try XCTUnwrap(window.screenshotDropDestinationFrame)
+        XCTAssertEqual(destinationFrame.minX, window.contentView?.bounds.minX)
+        XCTAssertEqual(destinationFrame.maxX, window.contentView?.bounds.maxX)
+        XCTAssertEqual(destinationFrame.maxY, window.contentView?.bounds.maxY)
+        XCTAssertEqual(
+            destinationFrame.height,
+            window.frame.height - window.contentLayoutRect.height,
+            accuracy: 0.5,
+            "the screenshot destination leaked below the titlebar and can preempt terminal drops"
+        )
+
         XCTAssertEqual(drag(png, to: strip, on: window), .copy)
         XCTAssertTrue(
             window.isScreenshotDropIndicatorPresented,

@@ -88,6 +88,23 @@ final class AppDelegateTests: XCTestCase {
         )
     }
 
+    /// Launch Services invokes `application(_:open:)` from the Dock's CoreDrag completion. The
+    /// report sheet and activation must not re-enter that transaction; they start on the next
+    /// main-queue turn, after the drag manager has returned to idle.
+    func testDockDropDeliveryWaitsForDragCompletionToUnwind() async {
+        var delivered = false
+        let delivery = expectation(description: "drop delivery")
+
+        AppIconDropDelivery.afterDragCompletion {
+            delivered = true
+            delivery.fulfill()
+        }
+
+        XCTAssertFalse(delivered, "the Dock callback mutated application state synchronously")
+        await fulfillment(of: [delivery], timeout: 1)
+        XCTAssertTrue(delivered)
+    }
+
     func testClosingTheLastTestWindowDoesNotTerminateTheHostedRunner() {
         XCTAssertFalse(
             AppDelegate().applicationShouldTerminateAfterLastWindowClosed(NSApp)

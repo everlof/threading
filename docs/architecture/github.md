@@ -218,6 +218,19 @@ screenshot to report** beside the traffic lights. The view never hit-tests, appe
 accepted state, and clears on exit, refusal, cancellation and drop; Reduce Motion skips its short
 arrival but keeps the complete feedback.
 
+The **destination** is a separate structural view whose bounds are exactly that strip. The window
+itself is never registered for file URLs: registering `NSWindow` makes the whole window a drag
+candidate, and returning no operation below the strip does not restart AppKit's destination search
+at the terminal or composer underneath. That version made the screenshot feature silently take
+the same file URL those inputs had registered to receive. The bounded destination owns no pixels
+and never hit-tests; it hosts the design-system feedback only while the drag is accepted.
+
+The Dock door also crosses a lifecycle boundary. Launch Services delivers `application(_:open:)`
+while CoreDrag is completing the icon drop, so app activation, project adoption and report-sheet
+presentation are deferred by one main-queue turn. Performing them synchronously re-entered the
+drag manager on macOS 26; the process then kept answering later drags with a completed transaction
+and no usable drag reference until Threading restarted.
+
 What such a report loses is the geometry the inspector knows by construction. What it keeps is the
 picture and the marks put on it, which is what the sheet was worth opening for.
 
