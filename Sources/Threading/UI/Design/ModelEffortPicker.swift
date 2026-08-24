@@ -42,17 +42,29 @@ final class ModelEffortPickerViewController: NSViewController {
         static let inset = Design.Spacing.medium
         static let titleHeight: CGFloat = 22
         static let titleGap = Design.Spacing.small
+        static let footerGap = Design.Spacing.small
         static let maximumWidth: CGFloat = 680
         static let maximumMatrixHeight: CGFloat = 336
     }
 
     let matrixView: ModelEffortMatrixControl
+    private let hiddenModelCount: Int
+    private let onShowHiddenModels: (() -> Void)?
 
     init(
         presentation: ModelEffortPickerPresentation,
+        hiddenModelCount: Int = 0,
+        onHideModel: ((_ modelID: String) -> Void)? = nil,
+        onShowHiddenModels: (() -> Void)? = nil,
         onChoose: @escaping (_ model: String?, _ effort: String?) -> Void
     ) {
-        matrixView = ModelEffortMatrixControl(presentation: presentation, onChoose: onChoose)
+        self.hiddenModelCount = hiddenModelCount
+        self.onShowHiddenModels = onShowHiddenModels
+        matrixView = ModelEffortMatrixControl(
+            presentation: presentation,
+            onHideModel: onHideModel,
+            onChoose: onChoose
+        )
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -83,10 +95,26 @@ final class ModelEffortPickerViewController: NSViewController {
             height: min(Layout.maximumMatrixHeight, natural.height)
         )
 
-        for child in [title, scroll] { child.translatesAutoresizingMaskIntoConstraints = false }
+        let showHidden: ThemedButton? = if hiddenModelCount > 0, onShowHiddenModels != nil {
+            ThemedButton(
+                title: L10n.format("Show hidden models (%d)", hiddenModelCount),
+                target: self,
+                action: #selector(showHiddenModelsClicked)
+            )
+        } else {
+            nil
+        }
+        showHidden?.emphasis = .tertiary
+        showHidden?.contentAlignment = .leading
+        showHidden?.setAccessibilityIdentifier("model-effort.show-hidden-models")
+
+        for child in [title, scroll] + (showHidden.map { [$0] } ?? []) {
+            child.translatesAutoresizingMaskIntoConstraints = false
+        }
         root.addSubview(title)
         root.addSubview(scroll)
-        NSLayoutConstraint.activate([
+        if let showHidden { root.addSubview(showHidden) }
+        var constraints = [
             title.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Layout.inset),
             title.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -Layout.inset),
             title.topAnchor.constraint(equalTo: root.topAnchor, constant: Layout.inset),
@@ -94,14 +122,26 @@ final class ModelEffortPickerViewController: NSViewController {
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Layout.inset),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Layout.inset),
             scroll.topAnchor.constraint(equalTo: title.bottomAnchor, constant: Layout.titleGap),
-            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Layout.inset),
             scroll.widthAnchor.constraint(equalToConstant: viewport.width),
             scroll.heightAnchor.constraint(equalToConstant: viewport.height)
-        ])
+        ]
+        if let showHidden {
+            constraints += [
+                showHidden.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Layout.inset),
+                showHidden.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: Layout.footerGap),
+                showHidden.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Layout.inset)
+            ]
+        } else {
+            constraints.append(
+                scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Layout.inset)
+            )
+        }
+        NSLayoutConstraint.activate(constraints)
 
         let contentSize = NSSize(
             width: viewport.width + Layout.inset * 2,
             height: Layout.inset * 2 + Layout.titleHeight + Layout.titleGap + viewport.height
+                + (showHidden.map { Layout.footerGap + $0.intrinsicContentSize.height } ?? 0)
         )
         // Give AppKit a non-zero owner before the popover installs the controller. Otherwise
         // the root's temporary autoresizing-mask height of zero fights the complete vertical
@@ -111,6 +151,10 @@ final class ModelEffortPickerViewController: NSViewController {
         root.frame = NSRect(origin: .zero, size: contentSize)
         preferredContentSize = contentSize
         view = root
+    }
+
+    @objc private func showHiddenModelsClicked() {
+        onShowHiddenModels?()
     }
 }
 
@@ -135,11 +179,18 @@ final class ModelEffortMatrixControl: ThemedControl {
     }
 
     private let presentation: ModelEffortPickerPresentation
+    private let onHideModel: ((_ modelID: String) -> Void)?
     private let onChoose: (_ model: String?, _ effort: String?) -> Void
     private var hoveredCell: Cell? {
         didSet {
             guard hoveredCell != oldValue else { return }
             updateUltraAnimation()
+            needsDisplay = true
+        }
+    }
+    private var hoveredModelRow: Int? {
+        didSet {
+            guard hoveredModelRow != oldValue else { return }
             needsDisplay = true
         }
     }
@@ -156,9 +207,11 @@ final class ModelEffortMatrixControl: ThemedControl {
 
     init(
         presentation: ModelEffortPickerPresentation,
+        onHideModel: ((_ modelID: String) -> Void)? = nil,
         onChoose: @escaping (_ model: String?, _ effort: String?) -> Void
     ) {
         self.presentation = presentation
+        self.onHideModel = onHideModel
         self.onChoose = onChoose
         super.init(frame: .zero)
         setAccessibilityElement(true)
@@ -232,20 +285,27 @@ final class ModelEffortMatrixControl: ThemedControl {
     override func mouseMoved(with event: NSEvent) {
         guard let point = uncoveredPointerLocation(in: event) else {
             hoveredCell = nil
+            hoveredModelRow = nil
             return
         }
         hoveredCell = availableCell(at: point)
+        hoveredModelRow = modelRow(at: point)
     }
 
     override func mouseExited(with event: NSEvent) {
         hoveredCell = nil
+        hoveredModelRow = nil
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard isEnabled,
-              let cell = availableCell(at: convert(event.locationInWindow, from: nil)) else {
+        guard isEnabled else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if let row = modelRow(at: point), canHideModel(at: row), hideRect(for: row).contains(point) {
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+            onHideModel?(presentation.models[row].id)
             return
         }
+        guard let cell = availableCell(at: point) else { return }
         window?.makeFirstResponder(self)
         focusedCell = cell
         choose(cell)
@@ -321,24 +381,29 @@ final class ModelEffortMatrixControl: ThemedControl {
 
     private func drawModel(_ row: Int, in rect: NSRect) {
         let selected = presentation.models[row].id == presentation.selectedModelID
+        let showsHide = hoveredModelRow == row && canHideModel(at: row)
         drawText(
             presentation.models[row].name,
             in: NSRect(
                 x: Design.Spacing.small,
                 y: rect.minY,
-                width: Layout.modelWidth - Design.Spacing.medium,
+                width: Layout.modelWidth - Design.Spacing.medium - (showsHide ? 26 : 0),
                 height: rect.height
             ),
             font: selected ? Design.Typography.control() : Design.Typography.controlRegular(),
             color: selected ? Design.Text.label : Design.Text.secondary,
             alignment: .left
         )
+        if showsHide { drawHideModelButton(row: row) }
     }
 
     private func drawCell(_ cell: Cell, in rect: NSRect) {
         let available = isAvailable(cell)
         let selected = isSelected(cell)
         let hovered = hoveredCell == cell
+        let onHoveredAxis = hoveredCell.map {
+            $0 != cell && ($0.row == cell.row || $0.column == cell.column)
+        } ?? false
         let focused = focusedCell == cell && window?.firstResponder === self
         let effort = presentation.efforts[cell.column]
 
@@ -354,6 +419,13 @@ final class ModelEffortMatrixControl: ThemedControl {
                 rect,
                 fill: Design.Surface.controlHover,
                 border: focused ? Design.Surface.accent : Design.Surface.border,
+                radius: Design.Radius.control
+            )
+        } else if onHoveredAxis && available {
+            ThemedSurface.draw(
+                rect,
+                fill: Design.Surface.controlHover.withAlphaComponent(0.46),
+                border: effort.isUltra ? Design.Surface.accentMuted : nil,
                 radius: Design.Radius.control
             )
         } else if available {
@@ -385,10 +457,16 @@ final class ModelEffortMatrixControl: ThemedControl {
             ink = Design.Text.tertiary
         }
         ink.setFill()
-        NSBezierPath(ovalIn: beacon).fill()
+        if effort.isUltra {
+            diamond(in: beacon).fill()
+        } else {
+            NSBezierPath(ovalIn: beacon).fill()
+        }
         if selected {
             Design.Ink.selection.label.withAlphaComponent(0.42).setStroke()
-            let ring = NSBezierPath(ovalIn: beacon.insetBy(dx: -4, dy: -4))
+            let ring = effort.isUltra
+                ? diamond(in: beacon.insetBy(dx: -4, dy: -4))
+                : NSBezierPath(ovalIn: beacon.insetBy(dx: -4, dy: -4))
             ring.lineWidth = 1
             ring.stroke()
         }
@@ -398,11 +476,24 @@ final class ModelEffortMatrixControl: ThemedControl {
     /// to the active theme: accent for the orbit, accent-muted for its field, no fixed violet.
     private func drawUltraOrbit(in rect: NSRect, selected: Bool, active: Bool) {
         let strength: CGFloat = selected ? 0.82 : (active ? 0.62 : 0.28)
+        let halo = rect.insetBy(dx: 3, dy: 2)
+        NSGradient(
+            starting: Design.Surface.accent.withAlphaComponent(strength * 0.32),
+            ending: Design.Surface.accentMuted.withAlphaComponent(0)
+        )?.draw(in: NSBezierPath(ovalIn: halo), relativeCenterPosition: .zero)
+
         Design.Surface.accent.withAlphaComponent(strength).setStroke()
         let orbitRect = rect.insetBy(dx: 8, dy: 7)
-        let orbit = NSBezierPath(ovalIn: orbitRect)
-        orbit.lineWidth = selected ? 1.5 : 1
-        orbit.stroke()
+        for rotation: CGFloat in [-18, 18] {
+            let orbit = NSBezierPath(ovalIn: orbitRect)
+            var transform = AffineTransform()
+            transform.translate(x: orbitRect.midX, y: orbitRect.midY)
+            transform.rotate(byDegrees: rotation)
+            transform.translate(x: -orbitRect.midX, y: -orbitRect.midY)
+            orbit.transform(using: transform)
+            orbit.lineWidth = selected ? 1.35 : 0.8
+            orbit.stroke()
+        }
 
         guard selected || active else { return }
         for index in 0..<3 {
@@ -422,6 +513,42 @@ final class ModelEffortMatrixControl: ThemedControl {
                 height: size
             )).fill()
         }
+    }
+
+    private func drawHideModelButton(row: Int) {
+        let rect = hideRect(for: row)
+        if rect.contains(convert(window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)) {
+            ThemedSurface.draw(
+                rect,
+                fill: Design.Surface.controlHover,
+                border: Design.Surface.border,
+                radius: Design.Radius.control
+            )
+        }
+        guard let image = NSImage(
+            systemSymbolName: "eye.slash",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+                .applying(.init(paletteColors: [Design.Text.secondary]))
+        ) else { return }
+        let size = image.size
+        image.draw(in: NSRect(
+            x: rect.midX - size.width / 2,
+            y: rect.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        ))
+    }
+
+    private func diamond(in rect: NSRect) -> NSBezierPath {
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: rect.midX, y: rect.minY))
+        path.line(to: NSPoint(x: rect.maxX, y: rect.midY))
+        path.line(to: NSPoint(x: rect.midX, y: rect.maxY))
+        path.line(to: NSPoint(x: rect.minX, y: rect.midY))
+        path.close()
+        return path
     }
 
     private func drawText(
@@ -468,6 +595,31 @@ final class ModelEffortMatrixControl: ThemedControl {
               presentation.efforts.indices.contains(column),
               isAvailable(cell) else { return nil }
         return cell
+    }
+
+    private func modelRow(at point: NSPoint) -> Int? {
+        guard point.x >= 0,
+              point.x < Layout.modelWidth,
+              point.y >= Layout.headerHeight else { return nil }
+        let row = Int((point.y - Layout.headerHeight) / Layout.rowHeight)
+        return presentation.models.indices.contains(row) ? row : nil
+    }
+
+    private func canHideModel(at row: Int) -> Bool {
+        guard onHideModel != nil, presentation.models.indices.contains(row) else { return false }
+        let model = presentation.models[row]
+        return model.representedValue != nil
+            && model.id != presentation.selectedModelID
+            && presentation.models.count > 1
+    }
+
+    private func hideRect(for row: Int) -> NSRect {
+        NSRect(
+            x: Layout.modelWidth - 30,
+            y: Layout.headerHeight + CGFloat(row) * Layout.rowHeight + 9,
+            width: 24,
+            height: 30
+        )
     }
 
     private func isAvailable(_ cell: Cell) -> Bool {
@@ -529,7 +681,22 @@ final class ModelEffortMatrixControl: ThemedControl {
         let model = presentation.models[cell.row]
         let effort = presentation.efforts[cell.column]
         onChoose(model.representedValue, effort.representedValue)
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         NSAccessibility.post(element: self, notification: .valueChanged)
+    }
+
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard let row = (focusedCell ?? selectedCell())?.row,
+              canHideModel(at: row) else { return nil }
+        let model = presentation.models[row]
+        return [
+            NSAccessibilityCustomAction(name: L10n.format("Hide %@", model.name)) {
+                [weak self] in
+                guard let self else { return false }
+                self.onHideModel?(model.id)
+                return true
+            }
+        ]
     }
 
     private func updateAccessibilityValue() {
@@ -570,4 +737,11 @@ final class ModelEffortMatrixControl: ThemedControl {
         ultraTimer?.invalidate()
         ultraTimer = nil
     }
+
+    #if DEBUG
+    /// Freezes the otherwise pointer-only affordance into deterministic rendered evidence.
+    func hoverModelForTesting(at row: Int?) {
+        hoveredModelRow = row.flatMap { presentation.models.indices.contains($0) ? $0 : nil }
+    }
+    #endif
 }

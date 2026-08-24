@@ -2,6 +2,7 @@ import SwiftUI
 import ThreadingRemoteKit
 
 #if os(iOS)
+import UIKit
 
 /// The phone rendering of the same model-by-effort decision as the Mac composer.
 ///
@@ -76,8 +77,8 @@ struct MobileModelEffortPicker: View {
     @State private var modelPage: Int
     @State private var effortPage: Int
     @State private var scrubbedCell: MatrixCell?
-    @State private var scrubFeedbackStep = 0
-    @State private var commitFeedbackStep = 0
+    @State private var scrubFeedback = UISelectionFeedbackGenerator()
+    @State private var commitFeedback = UIImpactFeedbackGenerator(style: .medium)
 
     private let rows: [ModelRow]
     private let effortCatalog: [EffortColumn]
@@ -160,6 +161,10 @@ struct MobileModelEffortPicker: View {
         selectedEffortID.isEmpty ? Metrics.automaticEffortID : selectedEffortID
     }
 
+    private var freezesForEvidence: Bool {
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_RUN"] != nil
+    }
+
     private var modelPageCount: Int {
         max(1, Int(ceil(Double(rows.count) / Double(Metrics.modelsPerPage))))
     }
@@ -219,12 +224,12 @@ struct MobileModelEffortPicker: View {
                 matrixContent(modelWidth: modelWidth, effortWidth: effortWidth)
                     .contentShape(Rectangle())
                     .gesture(scrubGesture(modelWidth: modelWidth, effortWidth: effortWidth))
-                    .sensoryFeedback(.selection, trigger: scrubFeedbackStep)
-                    .sensoryFeedback(.impact(weight: .light), trigger: commitFeedbackStep)
             }
             .frame(height: matrixHeight)
-            .background(theme.panel)
-            .clipShape(RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous))
+            .background {
+                RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
+                    .fill(theme.panel)
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
                     .stroke(theme.border, lineWidth: theme.borderWidth)
@@ -233,6 +238,10 @@ struct MobileModelEffortPicker: View {
             if modelPageCount > 1 || effortPageCount > 1 {
                 pageControls
             }
+        }
+        .onAppear {
+            scrubFeedback.prepare()
+            commitFeedback.prepare()
         }
     }
 
@@ -327,11 +336,18 @@ struct MobileModelEffortPicker: View {
             && effectiveSelectedEffortID == effort.id
         let selected = scrubbedCell.map { $0 == cell } ?? committed
         let isScrubTarget = scrubbedCell == cell
+        let onScrubbedAxis = scrubbedCell.map {
+            $0 != cell && ($0.row == cell.row || $0.column == cell.column)
+        } ?? false
 
         if available {
             ZStack {
                 RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
-                    .fill(selected ? theme.accent : theme.controlResting)
+                    .fill(
+                        selected
+                            ? theme.accent
+                            : (onScrubbedAxis ? theme.controlHover.opacity(0.58) : theme.controlResting)
+                    )
                     .overlay {
                         RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
                             .stroke(
@@ -343,33 +359,39 @@ struct MobileModelEffortPicker: View {
                     }
 
                 if effort.isUltra {
+                    RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    theme.accent.opacity(selected ? 0.62 : 0.20),
+                                    theme.accentMuted.opacity(selected ? 0.54 : 0.16),
+                                    .clear,
+                                ],
+                                center: .center,
+                                startRadius: 1,
+                                endRadius: max(18, width * 0.62)
+                            )
+                        )
                     MobileUltraOrbit(
                         active: selected,
                         reduceMotion: reduceMotion,
+                        freezesForEvidence: freezesForEvidence,
                         width: min(36, max(20, width - Metrics.cellGap * 2))
                     )
                 }
 
-                Circle()
-                    .fill(selected ? theme.accentForeground : (
-                        effort.isUltra ? theme.accent : theme.tertiaryLabel
-                    ))
-                    .frame(
-                        width: selected ? Metrics.selectedBeacon : Metrics.beacon,
-                        height: selected ? Metrics.selectedBeacon : Metrics.beacon
-                    )
-                    .overlay {
-                        if selected {
-                            Circle()
-                                .stroke(theme.accentForeground.opacity(0.44), lineWidth: 1)
-                                .padding(-4)
-                        }
-                    }
+                beacon(isUltra: effort.isUltra, selected: selected)
             }
             .frame(width: max(1, width - Metrics.cellGap), height: Metrics.rowHeight - 8)
             .scaleEffect(isScrubTarget && !reduceMotion ? 1.07 : 1)
             .zIndex(isScrubTarget ? 1 : 0)
             .remoteThemeGlow(selected && effort.isUltra ? theme : RemoteThemePalette(nil))
+            .mobileUltraBeam(
+                active: selected && effort.isUltra,
+                radius: theme.controlRadius,
+                reducesMotion: reduceMotion,
+                freezesForEvidence: freezesForEvidence
+            )
             .animation(
                 reduceMotion ? nil : .snappy(
                     duration: MobileDesign.Motion.controlResponse,
@@ -382,6 +404,8 @@ struct MobileModelEffortPicker: View {
             .accessibilityAddTraits(.isButton)
             .accessibilityAddTraits(selected ? [.isSelected] : [])
             .accessibilityAction {
+                commitFeedback.impactOccurred(intensity: effort.isUltra ? 1 : 0.68)
+                commitFeedback.prepare()
                 choose(cell)
             }
         } else {
@@ -402,7 +426,8 @@ struct MobileModelEffortPicker: View {
                     effortWidth: effortWidth
                 ), cell != scrubbedCell else { return }
                 scrubbedCell = cell
-                scrubFeedbackStep &+= 1
+                scrubFeedback.selectionChanged()
+                scrubFeedback.prepare()
             }
             .onEnded { value in
                 let releaseCell = availableCell(
@@ -412,9 +437,44 @@ struct MobileModelEffortPicker: View {
                 ) ?? scrubbedCell
                 scrubbedCell = nil
                 guard let releaseCell else { return }
-                commitFeedbackStep &+= 1
+                let isUltra = visibleEfforts[releaseCell.column].isUltra
+                commitFeedback.impactOccurred(intensity: isUltra ? 1 : 0.68)
+                commitFeedback.prepare()
                 choose(releaseCell)
             }
+    }
+
+    @ViewBuilder
+    private func beacon(isUltra: Bool, selected: Bool) -> some View {
+        let diameter = selected ? Metrics.selectedBeacon : Metrics.beacon
+        let ink = selected
+            ? theme.accentForeground
+            : (isUltra ? theme.accent : theme.tertiaryLabel)
+        if isUltra {
+            RoundedRectangle(cornerRadius: selected ? 2 : 1, style: .continuous)
+                .fill(ink)
+                .frame(width: diameter, height: diameter)
+                .rotationEffect(.degrees(45))
+                .overlay {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .stroke(theme.accentForeground.opacity(0.54), lineWidth: 1)
+                            .padding(-4)
+                            .rotationEffect(.degrees(45))
+                    }
+                }
+        } else {
+            Circle()
+                .fill(ink)
+                .frame(width: diameter, height: diameter)
+                .overlay {
+                    if selected {
+                        Circle()
+                            .stroke(theme.accentForeground.opacity(0.44), lineWidth: 1)
+                            .padding(-4)
+                    }
+                }
+        }
     }
 
     private func availableCell(
@@ -488,12 +548,17 @@ struct MobileModelEffortPicker: View {
         move: @escaping (Int) -> Void
     ) -> some View {
         HStack(spacing: MobileDesign.Spacing.tight) {
-            Button { move(-1) } label: {
+            Button {
+                scrubFeedback.selectionChanged()
+                scrubFeedback.prepare()
+                move(-1)
+            } label: {
                 Image(systemName: "chevron.left")
                     .frame(
-                        width: MobileDesign.Size.compactControl,
-                        height: MobileDesign.Size.compactControl
+                        width: MobileDesign.Size.minimumTapTarget,
+                        height: MobileDesign.Size.minimumTapTarget
                     )
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(page == 0)
@@ -503,12 +568,17 @@ struct MobileModelEffortPicker: View {
                 .monospacedDigit()
                 .contentTransition(.numericText())
 
-            Button { move(1) } label: {
+            Button {
+                scrubFeedback.selectionChanged()
+                scrubFeedback.prepare()
+                move(1)
+            } label: {
                 Image(systemName: "chevron.right")
                     .frame(
-                        width: MobileDesign.Size.compactControl,
-                        height: MobileDesign.Size.compactControl
+                        width: MobileDesign.Size.minimumTapTarget,
+                        height: MobileDesign.Size.minimumTapTarget
                     )
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(page == count - 1)
@@ -526,14 +596,8 @@ private struct MobileUltraOrbit: View {
     @Environment(\.remoteTheme) private var theme
     let active: Bool
     let reduceMotion: Bool
+    let freezesForEvidence: Bool
     let width: CGFloat
-
-    /// Evidence compares complete app-owned frames until they are byte-stable. Freeze at the
-    /// same intentional pose as Reduce Motion while that harness is present; ordinary DEBUG and
-    /// release launches still animate.
-    private var freezesForEvidence: Bool {
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_RUN"] != nil
-    }
 
     var body: some View {
         TimelineView(.animation(
@@ -545,14 +609,42 @@ private struct MobileUltraOrbit: View {
                 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3)
                     / 3 * 360
             ZStack {
-                Capsule()
-                    .stroke(theme.accent.opacity(active ? 0.82 : 0.30), lineWidth: active ? 1.5 : 1)
+                Circle()
+                    .fill(theme.accent.opacity(active ? 0.18 : 0.06))
+                    .frame(width: width * (active ? 1.04 : 0.82))
+                    .scaleEffect(active ? 0.94 + 0.08 * sin(phase * .pi / 180) : 1)
+
+                ForEach([-18.0, 18.0], id: \.self) { tilt in
+                    Capsule()
+                        .stroke(
+                            AngularGradient(
+                                colors: [theme.accentMuted, theme.accent, theme.accentMuted],
+                                center: .center,
+                                angle: .degrees(phase)
+                            ),
+                            lineWidth: active ? 1.45 : 0.8
+                        )
+                        .rotationEffect(.degrees(tilt))
+                }
                     .frame(width: width, height: min(22, width * 0.62))
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.clear, theme.accent.opacity(active ? 0.72 : 0.20), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: width * 0.88, height: 1)
+                    .rotationEffect(.degrees(phase))
+
                 ForEach(0..<3, id: \.self) { index in
                     Circle()
-                        .fill(theme.accent.opacity(active ? 0.90 : 0.40))
-                        .frame(width: index == 0 ? 4 : 3, height: index == 0 ? 4 : 3)
-                        .offset(x: width / 2)
+                        .fill(index == 0 ? theme.accent : theme.accentMuted)
+                        .frame(width: index == 0 ? 5 : 3, height: index == 0 ? 5 : 3)
+                        .shadow(color: theme.accent.opacity(active ? 0.72 : 0), radius: 3)
+                        .offset(x: width * 0.46)
                         .rotationEffect(.degrees(phase + Double(index * 120)))
                 }
             }

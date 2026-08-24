@@ -68,7 +68,8 @@ final class ModelEffortPickerRenderTests: XCTestCase {
     }
 
     private var renderDirectory: URL {
-        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !override.isEmpty {
             return URL(fileURLWithPath: override)
         }
         return FileManager.default.temporaryDirectory
@@ -103,8 +104,12 @@ final class ModelEffortPickerRenderTests: XCTestCase {
 
         let controller = ModelEffortPickerViewController(
             presentation: presentation(),
+            hiddenModelCount: 2,
+            onHideModel: { _ in },
+            onShowHiddenModels: {},
             onChoose: { _, _ in }
         )
+        controller.matrixView.hoverModelForTesting(at: 1)
         let popover = HostPopoverFactory.make(.composerModelEffortPicker)
         popover.animates = false
         popover.contentViewController = controller

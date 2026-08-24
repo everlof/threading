@@ -1,3 +1,4 @@
+import BorderBeamKit
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
@@ -526,6 +527,40 @@ extension View {
         } else {
             self
         }
+    }
+
+    /// Gives an active Ultra choice the same tuned, breathing beam as the package's web demo.
+    ///
+    /// The model matrix is bounded to one active cell, so only one Metal timeline is mounted.
+    /// Palette, appearance, radius and the ordinary material shadow still come from the remote
+    /// theme; the multicolour beam is Ultra's semantic emphasis rather than replacement chrome.
+    func mobileUltraBeam(
+        active: Bool,
+        radius: CGFloat,
+        reducesMotion: Bool,
+        freezesForEvidence: Bool
+    ) -> some View {
+        borderBeam(
+            .pulseOutside,
+            colorVariant: .colorful,
+            theme: .auto,
+            staticColors: reducesMotion || freezesForEvidence,
+            duration: 3,
+            active: active,
+            borderRadius: Double(radius),
+            brightness: 1.12,
+            saturation: 1.18,
+            strength: 1,
+            tuning: BeamTuning(
+                glowBoost: 1.05,
+                strokeOpacity: 1.71,
+                innerOpacity: 1.71,
+                bloomOpacity: 1.71,
+                glowBrightness: 1.3 * 1.71,
+                glowSaturate: 1.2 * 1.71
+            ),
+            rendersStatically: freezesForEvidence
+        )
     }
 }
 

@@ -498,6 +498,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     package regression samples the centre after a parent-view cache, and application screenshot
     code reaches the contract only through `AgentActivityBeamView` so the package type remains
     contained at the design-system boundary.
+  - **The iOS seam is also theme-owned.** `RemoteTheme.mobileUltraBeam` is the only mobile
+    importer and applies the package's tuned pulse to the active Ultra cell; the picker states
+    only whether that semantic state is active. `BorderBeam.rendersStatically` exposes the same
+    frozen full-opacity frame as the AppKit host so deterministic iOS evidence never samples a
+    moving Metal timeline. The live effect still honors Reduce Motion inside the package.
   - **The platform floor is ours.** The Shader APIs need macOS 14 but Threading deploys to
     13, so the package declares `.macOS(.v13)` and every SwiftUI view carries
     `@available(macOS 14.0, *)`. `AgentActivityBeamView` (in `UI/Design/`) is the theme

@@ -43,6 +43,7 @@
 		A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		A20000010000000000000018 /* ThinkingOrbs in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000003 /* ThinkingOrbs */; };
 		A20000010000000000000019 /* LabelMorph in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000005 /* LabelMorph */; };
+		A20000010000000000000020 /* BorderBeamKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000011 /* BorderBeamKit */; };
 		A39A300DF9F7CA8D21A7B7C3 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
 		A61100010000000000000001 /* RemoteUsageDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61100010000000000000002 /* RemoteUsageDashboardTests.swift */; };
 		A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61200010000000000000002 /* RemoteConversationStoreTests.swift */; };
@@ -400,6 +401,7 @@
 				A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */,
 				A20000010000000000000018 /* ThinkingOrbs in Frameworks */,
 				A20000010000000000000019 /* LabelMorph in Frameworks */,
+				A20000010000000000000020 /* BorderBeamKit in Frameworks */,
 				D1FF00010000000000000013 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000014 /* NativeDiffUIKit in Frameworks */,
 			);
@@ -750,6 +752,7 @@
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 				F4000001000000000000003 /* ThinkingOrbs */,
 				F4000001000000000000005 /* LabelMorph */,
+				F4000001000000000000011 /* BorderBeamKit */,
 				D1FF00010000000000000003 /* NativeDiffCore */,
 				D1FF00010000000000000004 /* NativeDiffUIKit */,
 			);

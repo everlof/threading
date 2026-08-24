@@ -200,8 +200,71 @@ private struct SessionDraftComposerScreen: View {
     }
 
     private var models: [RemoteModelChoiceDTO] {
-        selectedAccount?.models ?? selectedAgent?.models ?? []
+        let resolved = selectedAccount?.models ?? selectedAgent?.models ?? []
+#if DEBUG
+        // The picker evidence state carries one bounded overflow page so the real shipping
+        // popover proves both its no-scroll geometry and the pager's full-size touch targets.
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            == "new-session-model-effort-picker" {
+            return resolved + Self.pickerEvidenceOverflowModels
+        }
+#endif
+        return resolved
     }
+
+#if DEBUG
+    private static let pickerEvidenceOverflowModels: [RemoteModelChoiceDTO] = [
+        .init(
+            id: "evidence-gpt-5.5",
+            name: "GPT-5.5",
+            reasoning: [
+                .init(id: "low", name: "Light"),
+                .init(id: "medium", name: "Medium"),
+                .init(id: "high", name: "High"),
+                .init(id: "xhigh", name: "Extra High"),
+                .init(id: "max", name: "Max"),
+                .init(id: "ultra", name: "Ultra"),
+            ],
+            defaultReasoningID: "high",
+            supportsFastMode: true
+        ),
+        .init(
+            id: "evidence-gpt-5.4",
+            name: "GPT-5.4",
+            reasoning: [
+                .init(id: "low", name: "Light"),
+                .init(id: "medium", name: "Medium"),
+                .init(id: "high", name: "High"),
+                .init(id: "xhigh", name: "Extra High"),
+                .init(id: "max", name: "Max"),
+            ],
+            defaultReasoningID: "medium",
+            supportsFastMode: true
+        ),
+        .init(
+            id: "evidence-gpt-5.3",
+            name: "GPT-5.3",
+            reasoning: [
+                .init(id: "low", name: "Light"),
+                .init(id: "medium", name: "Medium"),
+                .init(id: "high", name: "High"),
+            ],
+            defaultReasoningID: "medium",
+            supportsFastMode: false
+        ),
+        .init(
+            id: "evidence-gpt-5.2",
+            name: "GPT-5.2",
+            reasoning: [
+                .init(id: "low", name: "Light"),
+                .init(id: "medium", name: "Medium"),
+                .init(id: "high", name: "High"),
+            ],
+            defaultReasoningID: "medium",
+            supportsFastMode: false
+        ),
+    ]
+#endif
 
     private var defaultModelID: String? {
         selectedAccount?.defaultModelID ?? selectedAgent?.defaultModelID
@@ -661,7 +724,7 @@ private struct SessionDraftComposerScreen: View {
                 )
             }
         } label: {
-            DraftMenuLabel(symbol: "bolt", title: selectedSpeedName)
+            DraftMenuLabel(symbol: selectedSpeedSymbol, title: selectedSpeedName)
         }
         .id("speed-\(speedID)")
         .disabled(isSubmitting)
@@ -674,6 +737,16 @@ private struct SessionDraftComposerScreen: View {
         case "fast": return MobileL10n.string("Fast")
         case "standard": return MobileL10n.string("Standard")
         default: return MobileL10n.string("Inherit")
+        }
+    }
+
+    /// The bolt is the meaning of Fast, not of the speed control itself. Keep the trigger's
+    /// glyph aligned with the value so an inherited or standard run never looks accelerated.
+    private var selectedSpeedSymbol: String {
+        switch speedID {
+        case "fast": return "bolt.fill"
+        case "standard": return "gauge.with.dots.needle.50percent"
+        default: return "arrow.triangle.branch"
         }
     }
 
