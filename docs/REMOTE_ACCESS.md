@@ -1495,9 +1495,11 @@ feature lock.
 - Authentication failures are rate-limited globally and per device, and slow WebSocket consumers
   are dropped instead of being allowed to back-pressure an agent's terminal.
 - Native REST mutations carry a request id. The Mac coalesces concurrent duplicates and keeps the
-  bounded result for five minutes, while rejecting the same id with a different path or body.
-  The iPhone can therefore retry a lost response, including over another advertised endpoint,
-  without starting two sessions or applying an action twice. Native prompts and atomic terminal
+  bounded result for five minutes, while rejecting the same id with a different path or semantic
+  JSON body. JSON key order and whitespace are normalized before fingerprinting, and iOS emits
+  sorted keys as compatibility with installed hosts that fingerprinted bytes. The iPhone can
+  therefore retry a lost response, including over another advertised endpoint, without starting
+  two sessions or applying an action twice. Native prompts and atomic terminal
   lines use the same five-minute principle on their WebSocket: the draft stays visible until an
   authoritative result arrives, and reconnect retries the same id only inside a shorter client
   window. The cache retains a fingerprint and status, never prompt text. Live terminal and

@@ -1187,12 +1187,21 @@ struct RemoteClient {
     ) async throws -> Response {
         var request = request(url: url)
         request.httpMethod = "POST"
-        request.httpBody = try JSONEncoder().encode(body)
+        request.httpBody = try Self.encodeMutationBody(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(requestID, forHTTPHeaderField: "X-Threading-Request-ID")
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
         _ = try validate(data: data, response: response, accepted: 200...299)
         return try JSONDecoder().decode(Response.self, from: data)
+    }
+
+    /// A route walk rebuilds its URL request for each address while preserving one mutation id.
+    /// Stable JSON bytes keep that replay compatible with installed hosts whose exactly-once
+    /// cache predates semantic JSON fingerprints.
+    static func encodeMutationBody<Body: Encodable>(_ body: Body) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(body)
     }
 
     /// A lost response is ambiguous: the Mac may already have applied the mutation. Retrying

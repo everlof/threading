@@ -682,8 +682,29 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             input.append(contentsOf: (request.header(header) ?? "").utf8)
             input.append(0)
         }
-        input.append(request.body)
+        input.append(mutationFingerprintBody(for: request))
         return Data(SHA256.hash(data: input))
+    }
+
+    /// JSON object order and whitespace are serialization details, not mutation identity. Native
+    /// clients rebuild a request when they fail over to another address, so hashing raw bytes can
+    /// reject the same operation precisely when its first response was lost. Invalid or non-JSON
+    /// bodies retain byte-for-byte identity and continue through their route's normal validation.
+    private static func mutationFingerprintBody(for request: HTTPRequest) -> Data {
+        guard request.header("content-type")?
+            .split(separator: ";", maxSplits: 1)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() == "application/json",
+              let object = try? JSONSerialization.jsonObject(with: request.body),
+              JSONSerialization.isValidJSONObject(object),
+              let canonical = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+              ) else {
+            return request.body
+        }
+        return canonical
     }
 
     func handleMessage(_ message: RemoteWebSocket.Message, from connection: RemoteConnection) {

@@ -2443,6 +2443,43 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(replay.headers["X-Threading-Request-ID"] as? String, "request-1")
     }
 
+    func testMutationRequestIDReplaysEquivalentJSONSerialization() throws {
+        let redeemer = InvitationPersistenceSpy()
+        server.invitationRedeemer = redeemer
+        let headers = [
+            "X-Threading-Client": "Threading-iOS",
+            "X-Threading-Request-ID": "request-1",
+        ]
+        let firstBody = Data(
+            #"{"displayName":"Test iPhone","futureField":true}"#.utf8
+        )
+        let fallbackBody = Data(
+            #"{ "futureField" : true, "displayName" : "Test iPhone" }"#.utf8
+        )
+
+        let first = try XCTUnwrap(post(
+            RemoteRouter.invitationAcceptancePath,
+            bearer: "ios-bootstrap",
+            body: firstBody,
+            headers: headers
+        ))
+        let replay = try XCTUnwrap(post(
+            RemoteRouter.invitationAcceptancePath,
+            bearer: "ios-bootstrap",
+            body: fallbackBody,
+            headers: headers
+        ))
+
+        XCTAssertEqual(first.status, 201)
+        XCTAssertEqual(replay.status, 201)
+        XCTAssertEqual(replay.body, first.body)
+        XCTAssertEqual(
+            redeemer.persistenceRequests,
+            [true],
+            "one semantic mutation must not run again when route failover re-encodes its JSON"
+        )
+    }
+
     func testMutationRequestIDRejectsADifferentBody() throws {
         let redeemer = InvitationPersistenceSpy()
         server.invitationRedeemer = redeemer

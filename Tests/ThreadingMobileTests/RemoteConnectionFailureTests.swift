@@ -112,11 +112,30 @@ final class SilentTCPServer: @unchecked Sendable {
 @MainActor
 final class RemoteConnectionFailureTests: XCTestCase {
 
+    private struct MutationBody: Encodable {
+        let zebra: Int
+        let alpha: Int
+        let middle: Int
+    }
+
     private static let bearer = String(repeating: "a", count: 43)
     private let injectedDeadline: Duration = .milliseconds(400)
     /// Generous next to the injected deadline, so a failure here means "never terminal", not
     /// "slower than expected on a loaded simulator".
     private let terminalAllowance: TimeInterval = 6
+
+    func testMutationJSONUsesStableKeyOrderAcrossRouteRequests() throws {
+        let body = MutationBody(zebra: 3, alpha: 1, middle: 2)
+
+        let first = try RemoteClient.encodeMutationBody(body)
+        let fallback = try RemoteClient.encodeMutationBody(body)
+
+        XCTAssertEqual(first, fallback)
+        XCTAssertEqual(
+            String(decoding: first, as: UTF8.self),
+            #"{"alpha":1,"middle":2,"zebra":3}"#
+        )
+    }
 
     // MARK: - The phone must fail instead of hanging
 
