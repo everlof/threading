@@ -682,12 +682,25 @@ struct SessionDashboard: View {
 
     var body: some View {
         dashboardAlerts
+            // Keep visibility automatic. On iOS 26, forcing this background visible makes its
+            // scroll-edge plate retain the pull-to-refresh height and cover the session rows.
             .toolbarBackground(theme.surface, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
             .background(theme.ground)
     }
 
+    @ViewBuilder
     private var dashboardContent: some View {
+        if #available(iOS 26.0, *) {
+            dashboardScrollView
+                // The automatic top-edge effect can retain the released pull distance after the
+                // refresh finishes. The navigation bar already owns this edge's themed surface.
+                .scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            dashboardScrollView
+        }
+    }
+
+    private var dashboardScrollView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
                 let visibleFailure = visibleConnectionFailure
