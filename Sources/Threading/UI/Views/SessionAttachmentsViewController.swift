@@ -38,8 +38,16 @@ private final class AttachmentHeaderRow: NSView {
 
         count.translatesAutoresizingMaskIntoConstraints = false
         filter.translatesAutoresizingMaskIntoConstraints = false
-        count.setContentHuggingPriority(.required, for: .horizontal)
+        // Low horizontally, because the label is what absorbs this row's slack — the same
+        // bargain the NSStackView made, and the reason the filter sits on the trailing edge.
+        // Required here instead pins the row to count + spacing + filter, and the row is pinned
+        // to both of the pane's edges, so the *pane* stops being resizable: the split view
+        // places the divider, Auto Layout puts it straight back, and the fold's corner drag
+        // does nothing. No constraint breaks and nothing is logged.
+        count.setContentHuggingPriority(.defaultLow, for: .horizontal)
         count.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // Vertical stays required: that is what keeps this one line one line, rather than
+        // letting a tall pane's slack settle here and leave the caption adrift mid-pane.
         count.setContentHuggingPriority(.required, for: .vertical)
         addSubview(count)
         addSubview(filter)
