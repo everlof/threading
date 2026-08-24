@@ -67,6 +67,18 @@ final class MediaTransportView: NSView, ThemedComponent {
         }
     }
 
+    /// Whether Play/Pause belongs in this row.
+    ///
+    /// Time-varying documents keep it here. A movie puts the same host-owned action over the
+    /// picture and leaves this row to be the timeline beneath it; hiding the duplicate also gives
+    /// a narrow attachment preview more useful scrub travel.
+    var showsPlayControl: Bool = true {
+        didSet {
+            guard showsPlayControl != oldValue else { return }
+            playButton.isHidden = !showsPlayControl
+        }
+    }
+
     /// Whether this document can make a sound at all.
     ///
     /// Off by default, because every format the registry carried before movies is silent and a
@@ -157,6 +169,7 @@ final class MediaTransportView: NSView, ThemedComponent {
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = Design.Spacing.small
+        stack.detachesHiddenViews = true
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 

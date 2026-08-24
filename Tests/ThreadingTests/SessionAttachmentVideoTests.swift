@@ -289,13 +289,14 @@ final class SessionAttachmentVideoTests: XCTestCase {
             loader: { _ in .failure(.unresolvedSource) },
             fileLoader: { _ in .success(url) }
         )
-        player.update(document: ExtensionMediaDocument(
+        let document = ExtensionMediaDocument(
             id: "movie",
             source: .sessionAttachment("movie"),
             format: .video,
             playback: ExtensionMediaPlayback(isPlaying: false, loop: .once),
             accessibilityLabel: "capture.mov"
-        ))
+        )
+        player.update(document: document)
 
         waitUntil("the movie opens") {
             player.transportForTesting.documentDuration > 0 || player.phase == .failed
@@ -309,9 +310,91 @@ final class SessionAttachmentVideoTests: XCTestCase {
         XCTAssertFalse(player.transportForTesting.isPlaying)
         XCTAssertFalse(player.isClockRunningForTesting, "a paused movie is running a clock")
         XCTAssertTrue(
+            player.transportForTesting.playButtonForTesting.isHidden,
+            "the timeline duplicated the movie's centred Play control"
+        )
+        XCTAssertFalse(player.playbackOverlayForTesting.isHidden)
+        XCTAssertTrue(player.playbackOverlayForTesting.isControlVisibleForTesting)
+        XCTAssertEqual(player.playbackOverlayForTesting.accessibilityTitle(), L10n.string("Play"))
+        XCTAssertTrue(
             player.transportForTesting.muteButtonForTesting.isHidden,
             "a movie with no audio track offered a mute control"
         )
+
+        player.update(document: document)
+        XCTAssertTrue(
+            player.transportForTesting.isEnabled,
+            "re-selecting the loaded movie disabled its timeline"
+        )
+        XCTAssertTrue(
+            player.playbackOverlayForTesting.isEnabled,
+            "re-selecting the loaded movie disabled its centred action"
+        )
+
+        XCTAssertTrue(player.playbackOverlayForTesting.performPrimaryAction())
+        XCTAssertEqual(player.phase, .playing)
+        XCTAssertTrue(player.playbackOverlayForTesting.isPlaying)
+        XCTAssertEqual(player.playbackOverlayForTesting.accessibilityTitle(), L10n.string("Pause"))
+
+        XCTAssertTrue(player.playbackOverlayForTesting.performPrimaryAction())
+        XCTAssertEqual(player.phase, .paused)
+    }
+
+    /// The fold owns the preview rectangle. A movie aspect-fits inside it; it cannot impose the
+    /// old 120-point canvas floor and make a downward drag stop early. At the smallest useful
+    /// preview the centred control remains while the timeline yields, returning on expansion.
+    func testTheMovieFollowsTheAttachmentFoldThroughTheCompactHeight() throws {
+        AttachmentsListHeight.reset()
+        defer { AttachmentsListHeight.reset() }
+
+        let movie = try writeMovie(named: "capture.mov")
+        var attachments = [movie]
+        for index in 0..<19 {
+            attachments.append(try writePNG(named: "shot-\(index).png"))
+        }
+        let pane = try laidOutPane(
+            showing: attachments,
+            size: NSSize(width: 353, height: 420)
+        )
+        pane.showAttachment(at: movie)
+        pane.view.layoutSubtreeIfNeeded()
+
+        let player = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? MediaDocumentPlayerView }.first
+        )
+        let preview = try XCTUnwrap(
+            descendants(of: pane.view).first {
+                $0.accessibilityIdentifier() == "attachments.preview-host"
+            }
+        )
+        waitUntil("the pane's movie opens") { player.phase == .ready || player.phase == .failed }
+        XCTAssertEqual(player.phase, .ready, player.messageTextForTesting)
+
+        pane.foldDragged(by: 1_000)
+        pane.view.layoutSubtreeIfNeeded()
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertLessThan(
+            preview.frame.height,
+            MediaDocumentPlayerView.Layout.minimumCanvasHeight,
+            "the movie's former minimum height stopped the fold"
+        )
+        XCTAssertEqual(player.minimumCanvasPriorityForTesting, .fittingSizeCompression)
+        assertFills(player, preview)
+        XCTAssertTrue(player.transportForTesting.isHidden, "a crushed timeline stayed operable")
+        XCTAssertFalse(
+            player.playbackOverlayForTesting.isHidden,
+            "the compact preview lost its remaining playback action"
+        )
+
+        let compactHeight = preview.frame.height
+        pane.foldDragged(by: -1_000)
+        pane.view.layoutSubtreeIfNeeded()
+        pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertGreaterThan(preview.frame.height, compactHeight)
+        assertFills(player, preview)
+        XCTAssertFalse(player.transportForTesting.isHidden, "the timeline did not return")
     }
 
     /// A surface with no file for its sources cannot play a movie, and says so instead of
@@ -326,6 +409,120 @@ final class SessionAttachmentVideoTests: XCTestCase {
         ))
         waitUntil("the player refuses") { player.phase == .failed }
         XCTAssertFalse(player.messageTextForTesting.isEmpty)
+    }
+
+    // MARK: - Rendered evidence
+
+    /// The shipping attachment pane, not an isolated control: the ordinary paused posture, the
+    /// hover-only Pause action while running, and the compact fold where the timeline yields.
+    func testRendersAttachmentVideoPlayback() throws {
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .map(URL.init(fileURLWithPath:))
+            ?? FileManager.default.temporaryDirectory
+                .appendingPathComponent("ThreadingRenders", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        AttachmentsListHeight.reset()
+        defer {
+            AttachmentsListHeight.reset()
+            AppThemePalette.set(.system)
+        }
+
+        let movie = try writeMovie(named: "capture.mov")
+        var attachments = [movie]
+        for index in 0..<11 {
+            attachments.append(try writePNG(named: "evidence-shot-\(index).png"))
+        }
+        let pane = try laidOutPane(
+            showing: attachments,
+            size: NSSize(width: 420, height: 560)
+        )
+        pane.showAttachment(at: movie)
+
+        let host = ThemedSurfaceView()
+        // This is the render root, not an arranged child. Keep its explicit product-shell size
+        // out of the descendant Auto Layout system's fitting-size calculation.
+        host.translatesAutoresizingMaskIntoConstraints = true
+        host.frame = NSRect(x: 0, y: 0, width: 420, height: 560)
+        host.applySurface(fill: Design.Surface.panel, radius: .fixed(0))
+        pane.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(pane.view)
+        NSLayoutConstraint.activate([
+            pane.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            pane.view.topAnchor.constraint(equalTo: host.topAnchor),
+            pane.view.widthAnchor.constraint(equalToConstant: 420),
+            pane.view.heightAnchor.constraint(equalToConstant: 560)
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let player = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? MediaDocumentPlayerView }.first
+        )
+        player.windowVisibility = { _ in true }
+        player.refreshWindowVisibility()
+        waitUntil("the evidence movie opens") {
+            player.transportForTesting.documentDuration > 0 || player.phase == .failed
+        }
+        XCTAssertEqual(player.phase, .ready, player.messageTextForTesting)
+        XCTAssertEqual(host.bounds.size, NSSize(width: 420, height: 560))
+        XCTAssertEqual(pane.view.bounds.size, host.bounds.size)
+
+        let themes: [(String, AppTheme)] = [
+            ("system", .system),
+            ("neo-brutalism", AppThemeStyles.neoBrutalism),
+            ("cyberpunk", AppThemeStyles.cyberpunk)
+        ]
+        let appearances: [(String, NSAppearance.Name)] = [
+            ("light", .aqua),
+            ("dark", .darkAqua)
+        ]
+        var written = 0
+
+        for (themeName, theme) in themes {
+            AppThemePalette.set(theme)
+            for (appearanceName, appearance) in appearances {
+                pane.foldDidReset()
+                if player.playbackOverlayForTesting.isPlaying {
+                    _ = player.playbackOverlayForTesting.performPrimaryAction()
+                }
+                player.playbackOverlayForTesting.mouseExited(
+                    with: VideoPointerEventStub(type: .mouseExited)
+                )
+                layout(host, appearance: appearance)
+                try writeRender(
+                    host,
+                    to: directory,
+                    named: "attachment-video-paused-\(themeName)-\(appearanceName)"
+                )
+
+                _ = player.playbackOverlayForTesting.performPrimaryAction()
+                player.playbackOverlayForTesting.mouseEntered(
+                    with: VideoPointerEventStub(type: .mouseEntered)
+                )
+                layout(host, appearance: appearance)
+                try writeRender(
+                    host,
+                    to: directory,
+                    named: "attachment-video-playing-hover-\(themeName)-\(appearanceName)"
+                )
+
+                _ = player.playbackOverlayForTesting.performPrimaryAction()
+                player.playbackOverlayForTesting.mouseExited(
+                    with: VideoPointerEventStub(type: .mouseExited)
+                )
+                pane.foldDragged(by: 1_000)
+                layout(host, appearance: appearance)
+                try writeRender(
+                    host,
+                    to: directory,
+                    named: "attachment-video-compact-\(themeName)-\(appearanceName)"
+                )
+                written += 3
+            }
+        }
+
+        XCTAssertEqual(written, themes.count * appearances.count * 3)
+        print("Rendered attachment video playback to \(directory.path)")
     }
 
     // MARK: - Fixtures
@@ -467,7 +664,10 @@ final class SessionAttachmentVideoTests: XCTestCase {
         )
     }
 
-    private func laidOutPane(showing urls: [URL]) throws -> SessionAttachmentsViewController {
+    private func laidOutPane(
+        showing urls: [URL],
+        size: NSSize = NSSize(width: 353, height: 700)
+    ) throws -> SessionAttachmentsViewController {
         let sessionID = SessionID()
         let recorded = SessionAttachmentStore.shared.record(
             urls: urls,
@@ -477,11 +677,48 @@ final class SessionAttachmentVideoTests: XCTestCase {
         XCTAssertEqual(recorded.count, urls.count, "a fixture attachment was refused")
 
         let controller = SessionAttachmentsViewController(sessionID: sessionID)
-        controller.view.frame = NSRect(x: 0, y: 0, width: 353, height: 700)
+        controller.view.frame = NSRect(origin: .zero, size: size)
         controller.view.autoresizingMask = []
         controller.view.layoutSubtreeIfNeeded()
         controller.view.layoutSubtreeIfNeeded()
         return controller
+    }
+
+    private func assertFills(
+        _ player: MediaDocumentPlayerView,
+        _ preview: NSView,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(player.frame.minX, preview.bounds.minX, accuracy: 0.5, file: file, line: line)
+        XCTAssertEqual(player.frame.minY, preview.bounds.minY, accuracy: 0.5, file: file, line: line)
+        XCTAssertEqual(player.frame.width, preview.bounds.width, accuracy: 0.5, file: file, line: line)
+        XCTAssertEqual(player.frame.height, preview.bounds.height, accuracy: 0.5, file: file, line: line)
+    }
+
+    private func layout(_ root: NSView, appearance: NSAppearance.Name) {
+        let render: @MainActor () -> Void = {
+            root.appearance = NSAppearance(named: appearance)
+            AppThemeRefresh.repaint(root)
+            root.layoutSubtreeIfNeeded()
+            root.layoutSubtreeIfNeeded()
+        }
+        if let resolved = NSAppearance(named: appearance) {
+            resolved.performAsCurrentDrawingAppearance {
+                MainActor.assumeIsolated(render)
+            }
+        }
+    }
+
+    private func writeRender(_ view: NSView, to directory: URL, named name: String) throws {
+        var png: Data?
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            png = rep.representation(using: .png, properties: [:])
+        }
+        let resolved = try XCTUnwrap(png)
+        try resolved.write(to: directory.appendingPathComponent("\(name).png"))
     }
 
     private func messages(in pane: SessionAttachmentsViewController) -> [String] {
@@ -510,4 +747,20 @@ final class SessionAttachmentVideoTests: XCTestCase {
         }
         XCTAssertTrue(condition(), "timed out waiting for \(what)")
     }
+}
+
+private final class VideoPointerEventStub: NSEvent {
+    private let stubType: NSEvent.EventType
+
+    init(type: NSEvent.EventType) {
+        stubType = type
+        super.init()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var type: NSEvent.EventType { stubType }
 }

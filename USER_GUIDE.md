@@ -3093,9 +3093,12 @@ another tab, a collapsed pane, a window behind another one, or the Dock. Under *
 it opens paused; press Play and it plays.
 
 **Movies play here too** — a screen recording, a simulator capture, a clip an agent produced.
-Selecting the row shows the first frame with the same transport under it, plus a speaker button
-when the movie has sound. It opens **paused**: a row you arrived at with an arrow key is not a
-request to make a noise. Press Play and it plays with sound, once through; the same movie plays
+Selecting the row shows the first frame with a timeline under it, plus a speaker button when the
+movie has sound. It opens **paused**, with Play in the middle of the picture: a row you arrived at
+with an arrow key is not a request to make a noise. Press Play and it plays with sound, once
+through; while it is playing the control clears from the picture and hovering the movie brings
+Pause back. Dragging the fold above the preview resizes the whole player; at the tightest height
+the timeline steps out until there is useful room for it again. The same movie plays
 in the lightbox on Space or a double-click, on the rail beside the session's images and PDFs.
 Selecting another row stops it, as does looking away. Movie rows show a frame from the movie with
 a small play mark on it, so a recording is not mistaken for a screenshot, and the size limit that

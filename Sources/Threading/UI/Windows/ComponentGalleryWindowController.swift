@@ -120,6 +120,7 @@ final class ComponentGalleryViewController: NSViewController {
         "MediaDocumentCanvasView",
         "MediaDocumentPlayerView",
         "MediaInspectorView",
+        "MediaPlaybackOverlayView",
         "MediaTransportView",
         "ModelEffortMatrixControl",
         "ModelEffortPickerViewController",
@@ -307,6 +308,7 @@ final class ComponentGalleryViewController: NSViewController {
     /// the distinction the component exists for.
     private let galleryScrubber = ThemedScrubber(frame: .zero)
     private let galleryTransport = MediaTransportView(frame: .zero)
+    private let galleryPlaybackOverlay = MediaPlaybackOverlayView(frame: .zero)
     /// The player's story runs a real document through the real registry — a synthesized
     /// animated GIF, so the story exercises the decoder, the clock and the transport together
     /// rather than a canvas holding a still.
@@ -2063,6 +2065,12 @@ final class ComponentGalleryViewController: NSViewController {
                     row(makeMediaCanvasSamples())
                 ),
                 story(
+                    "MediaPlaybackOverlayView",
+                    "The movie's centred Play action. Start it and the control clears from the "
+                        + "frame; hover the movie to bring Pause back.",
+                    makePlaybackOverlaySample()
+                ),
+                story(
                     "MediaTransportView",
                     "The transport a host-owned media player wears: play/pause, the scrubber "
                         + "and a monospaced-digit reading. It owns no clock — it states what it "
@@ -3462,6 +3470,35 @@ final class ComponentGalleryViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
         return stack
+    }
+
+    private func makePlaybackOverlaySample() -> NSView {
+        let canvas = ThemedSurfaceView()
+        canvas.translatesAutoresizingMaskIntoConstraints = false
+        canvas.applySurface(
+            fill: Design.Surface.ground,
+            radius: .panel,
+            border: Design.Surface.border
+        )
+        canvas.addSubview(galleryPlaybackOverlay)
+        NSLayoutConstraint.activate([
+            canvas.widthAnchor.constraint(equalToConstant: 320),
+            canvas.heightAnchor.constraint(equalToConstant: 180),
+            galleryPlaybackOverlay.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
+            galleryPlaybackOverlay.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
+            galleryPlaybackOverlay.topAnchor.constraint(equalTo: canvas.topAnchor),
+            galleryPlaybackOverlay.bottomAnchor.constraint(equalTo: canvas.bottomAnchor)
+        ])
+        galleryPlaybackOverlay.onToggle = { [weak self] in
+            guard let self else { return }
+            self.galleryPlaybackOverlay.isPlaying.toggle()
+            self.showReceipt(
+                self.galleryPlaybackOverlay.isPlaying
+                    ? L10n.string("MediaPlaybackOverlayView asked to play.")
+                    : L10n.string("MediaPlaybackOverlayView asked to pause.")
+            )
+        }
+        return canvas
     }
 
     private func makeMediaPlayerSample() -> NSView {

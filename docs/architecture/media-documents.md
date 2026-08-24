@@ -146,7 +146,10 @@ Three consequences, each deliberate:
 `AVPlayerLayer` installed in the canvas's `contentLayer`, so the session is **self-clocked** and
 the player above it stops asking for positions and starts mirroring them — a `Double` read per tick
 instead of a decode. AVKit is not used at any point: `AVPlayerView` brings its own chrome, and the
-transport here is `MediaTransportView` like every other format's.
+timeline here is the same `MediaTransportView` every other format uses. A movie hides that row's
+duplicate Play button and puts the same host-owned action in `MediaPlaybackOverlayView`, centred
+over the picture: Play stays visible while paused; while playing, Pause returns on hover or
+keyboard focus and otherwise clears out of the frame.
 
 - **Nothing decodes into this process**, so the ceilings that bound a parsed document — bytes,
   frames, duration — do not apply to a movie. They bound an allocation this path never makes. The
@@ -158,6 +161,11 @@ transport here is `MediaTransportView` like every other format's.
   confirmed when the document is opened. A file that is not a movie is refused with a sentence.
 - **The presented size, not the stored one.** A portrait recording stores a landscape frame plus a
   rotation; a canvas given `naturalSize` alone draws it into a letterbox turned the wrong way.
+- **The pane owns the rectangle; the movie owns the pixels inside it.** The attachment player fills
+  the flexible preview host and `AVPlayerLayer.resizeAspect` aspect-fits the frame. Its document
+  ratio and the standalone player's 120-point canvas floor are low-priority hints in this host,
+  not competing minimums that stop the fold. If the fold leaves less room than a useful canvas and
+  timeline together, the timeline detaches and returns on expansion; centred Play remains.
 - **Sound is the new question**, and it is answered in three places. `MediaPlaybackState.isMuted`
   is host-side and deliberately absent from `ExtensionMediaPlayback` — an extension that could
   unmute a document could make a noise in a window nobody was looking at. `MediaTransportView`
@@ -444,6 +452,12 @@ Three decisions hold it together.
   be much shorter than the one it was chosen in. A double-click on the fold hands the position back
   to the pane, and `WindowLayoutReset` clears it with the window's other geometry.
 
+The preview is the flexible half all the way through its renderer. In particular, a movie player
+is pinned to all four preview edges and its canvas minimum compresses below the fold's constraints;
+the movie's aspect belongs to the `AVPlayerLayer` inside that rectangle. Making the player state a
+required document-shaped height recreates a second divider owner and makes a legal drag appear to
+stop before the pane's own limit.
+
 The fold runs edge to edge, so its leading end lands on the window's split seam — and holding the
 point where two seams cross while moving only one of them is the gesture arriving at half its
 meaning. A press within `PaneFoldDivider.Layout.cornerReach` of that end therefore takes the seam
@@ -529,11 +543,16 @@ pushing. The general fix is recorded and deliberately not built:
   because one key press *is* a complete scrub. Committing on every intermediate value is how a seek
   turns into a queue of seeks. Assigning `value` raises neither: a control that echoed its own
   assignment would make a player's state report a feedback loop.
-- **`MediaTransportView`** — play/pause, the scrubber, and a monospaced-digit reading. The digits
+- **`MediaTransportView`** — play/pause, the scrubber, and a monospaced-digit reading. A movie can
+  detach Play and use the row as the timeline below its picture. The digits
   are not decoration: a proportional readout re-lays out on almost every tick (`0:09` → `0:10`
   changes width), which moves the scrubber under the pointer dragging it. Its length property is
   `documentDuration` rather than `duration` because the boundary lint reserves `.duration`
   assignments for `Design.Motion` — content length is not motion the app chose.
+- **`MediaPlaybackOverlayView`** — the movie's 48-point centred Play/Pause target. It spans the
+  canvas for one hover area but answers hit testing only inside the drawn target, so the canvas
+  keeps its context menu everywhere else. Pointer, Space/Return and VoiceOver all raise the same
+  host-owned toggle; setting `isPlaying` never raises it.
 - **`MediaDocumentCanvasView`** — the bounded surface, with the checkerboard drawn from theme roles
   rather than the conventional two greys, since a system-grey checkerboard is the one thing a fully
   themed page cannot have.

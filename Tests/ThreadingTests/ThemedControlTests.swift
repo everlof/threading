@@ -7767,6 +7767,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "MediaDocumentCanvasView",
                 "MediaDocumentPlayerView",
                 "MediaInspectorView",
+                "MediaPlaybackOverlayView",
                 "MediaTransportView",
                 "ModelEffortMatrixControl",
                 "ModelEffortPickerViewController",

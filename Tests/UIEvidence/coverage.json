@@ -714,6 +714,27 @@
       }
     },
     {
+      "id": "attachment-video-playback",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Attachment video playback",
+      "description": "The real attachment pane with a native movie selected, covering its centred playback action, timeline below the picture, hover-only Pause posture, and the fold's compact limit.",
+      "states": ["Paused play overlay", "Playing hover pause overlay", "Timeline below video", "Compressed fold"],
+      "matrix": {
+        "themes": ["System", "Neo Brutalism", "Cyberpunk"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["420×560-point attachment pane", "Compact fold"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SessionAttachmentVideoTests.swift",
+        "test": "ThreadingTests/SessionAttachmentVideoTests/testRendersAttachmentVideoPlayback"
+      },
+      "capture": {
+        "glob": "attachment-video-*.png"
+      }
+    },
+    {
       "id": "image-annotations",
       "kind": "surface",
       "status": "implemented",

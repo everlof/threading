@@ -1509,10 +1509,11 @@ final class SessionAttachmentsViewController: NSViewController {
                     }
                     return .success(attachment.url)
                 }
-            }
+            },
+            canvasSizing: .fillAvailableSpace
         )
         player.isHidden = true
-        installPreviewSurface(player, fillsVertically: false)
+        installPreviewSurface(player)
         videoPlayer = player
         return player
     }
@@ -1575,23 +1576,17 @@ final class SessionAttachmentsViewController: NSViewController {
         return scroll
     }
 
-    /// - Parameter fillsVertically: whether the surface is asked to be exactly as tall as the
-    ///   pane. A surface that states its own height — a player, whose canvas keeps the document's
-    ///   aspect ratio above a transport — is pinned no further than the bottom, because a required
-    ///   equality there is a constraint that can only be satisfied by breaking the aspect the
-    ///   picture is in.
-    private func installPreviewSurface(_ surface: NSView, fillsVertically: Bool = true) {
+    /// Installs the selected body into the preview's flexible rectangle. Media renderers preserve
+    /// their document inside that rectangle; they do not turn the document's aspect into a second
+    /// owner of the attachment fold.
+    private func installPreviewSurface(_ surface: NSView) {
         surface.translatesAutoresizingMaskIntoConstraints = false
         previewHost.addSubview(surface, positioned: .below, relativeTo: previewMessage)
         NSLayoutConstraint.activate([
             surface.topAnchor.constraint(equalTo: previewHost.topAnchor),
             surface.leadingAnchor.constraint(equalTo: previewHost.leadingAnchor),
             surface.trailingAnchor.constraint(equalTo: previewHost.trailingAnchor),
-            fillsVertically
-                ? surface.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor)
-                : surface.bottomAnchor.constraint(
-                    lessThanOrEqualTo: previewHost.bottomAnchor
-                ),
+            surface.bottomAnchor.constraint(equalTo: previewHost.bottomAnchor)
         ])
     }
 

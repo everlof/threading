@@ -19,6 +19,14 @@ import ThreadingExtensionKit
 @MainActor
 final class MediaDocumentPlayerView: NSView, ThemedComponent {
 
+    /// Whether this player chooses a document-shaped height or takes the height its product
+    /// surface gives it. The canvas preserves the document inside either rectangle; the second
+    /// form is for a resizable pane whose fold, not the movie, owns the available height.
+    enum CanvasSizing {
+        case documentAspect
+        case fillAvailableSpace
+    }
+
     /// Resolves a source to bytes. Host-side by construction: the extension supplies a handle and
     /// never learns a path, and the bytes never travel back across the boundary.
     typealias DocumentLoader = (ExtensionMediaSource) async -> Result<Data, MediaDocumentFailure>
@@ -40,6 +48,11 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         static let defaultAspectRatio: CGFloat = 1
         /// The transport's own height plus the gap above it.
         static let transportSpacing = Design.Spacing.small
+        /// Below this, preserving a useful movie canvas matters more than squeezing a scrubber
+        /// into a strip too short to operate. The transport returns as soon as both fit again.
+        static let compactTransportThreshold = MediaPlaybackOverlayView.Layout.target
+            + transportSpacing
+            + MediaTransportView.Layout.height
     }
 
     // MARK: - Contract
@@ -54,15 +67,18 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
 
     private let canvas = MediaDocumentCanvasView()
     private let transport = MediaTransportView(frame: .zero)
+    private let playbackOverlay = MediaPlaybackOverlayView(frame: .zero)
     private let message = NSTextField(wrappingLabelWithString: "")
     private var themeRedraw: ThemeRedraw?
     private var aspectConstraint: NSLayoutConstraint?
+    private var minimumCanvasConstraint: NSLayoutConstraint?
 
     // MARK: - Playback
 
     private let loader: DocumentLoader
     private let fileLoader: FileLoader?
     private let limits: MediaDocumentLimits
+    private let canvasSizing: CanvasSizing
     private var session: (any MediaDocumentPlaybackSession)?
     private var state = MediaPlaybackState()
     private var loadGeneration = 0
@@ -78,6 +94,7 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
     /// Set by the surface hosting the player — a tab going away, a pane collapsing.
     private var isPresentationActive = true
     private var isWindowVisible = true
+    private var transportRequestedVisible = true
 
     /// Whether the window holding this player can actually be seen.
     ///
@@ -107,6 +124,10 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
 
     var canvasForTesting: MediaDocumentCanvasView { canvas }
     var transportForTesting: MediaTransportView { transport }
+    var playbackOverlayForTesting: MediaPlaybackOverlayView { playbackOverlay }
+    var minimumCanvasPriorityForTesting: NSLayoutConstraint.Priority {
+        minimumCanvasConstraint?.priority ?? .required
+    }
     var isClockRunningForTesting: Bool { clock != nil || fallbackTimer != nil }
     var progressForTesting: Double { state.progress }
     var messageTextForTesting: String { message.isHidden ? "" : message.stringValue }
@@ -116,11 +137,13 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
     init(
         loader: @escaping DocumentLoader,
         fileLoader: FileLoader? = nil,
-        limits: MediaDocumentLimits = .default
+        limits: MediaDocumentLimits = .default,
+        canvasSizing: CanvasSizing = .documentAspect
     ) {
         self.loader = loader
         self.fileLoader = fileLoader
         self.limits = limits
+        self.canvasSizing = canvasSizing
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityIdentifier("media.player")
@@ -138,8 +161,18 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Layout.transportSpacing
+        stack.detachesHiddenViews = true
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        addSubview(playbackOverlay)
+
+        let minimumCanvas = canvas.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: Layout.minimumCanvasHeight
+        )
+        minimumCanvas.priority = canvasSizing == .documentAspect
+            ? .required
+            : .fittingSizeCompression
+        minimumCanvasConstraint = minimumCanvas
 
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: topAnchor),
@@ -148,7 +181,11 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             canvas.widthAnchor.constraint(equalTo: stack.widthAnchor),
             transport.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            canvas.heightAnchor.constraint(greaterThanOrEqualToConstant: Layout.minimumCanvasHeight)
+            minimumCanvas,
+            playbackOverlay.topAnchor.constraint(equalTo: canvas.topAnchor),
+            playbackOverlay.bottomAnchor.constraint(equalTo: canvas.bottomAnchor),
+            playbackOverlay.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
+            playbackOverlay.trailingAnchor.constraint(equalTo: canvas.trailingAnchor)
         ])
         applyAspectRatio(Layout.defaultAspectRatio)
 
@@ -156,6 +193,11 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         transport.onScrub = { [weak self] value in self?.scrub(to: value) }
         transport.onScrubEnd = { [weak self] value in self?.finishScrub(at: value) }
         transport.onToggleMute = { [weak self] in self?.toggleMute() }
+        playbackOverlay.onToggle = { [weak self] in self?.togglePlayback() }
+        playbackOverlay.onShowContextMenu = { [weak self] anchor in
+            self?.canvas.presentContextMenu(at: anchor) ?? false
+        }
+        playbackOverlay.isHidden = true
 
         events.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in
             self?.needsDisplay = true
@@ -171,6 +213,11 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         NotificationCenter.default.removeObserver(self)
     }
 
+    override func layout() {
+        super.layout()
+        updateTransportVisibility()
+    }
+
     // MARK: - Document
 
     /// Applies a document, keeping playback when only the intent around it changed.
@@ -184,7 +231,10 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         canvas.background = newDocument.background
         canvas.setAccessibilityLabel(newDocument.accessibilityLabel)
         setAccessibilityLabel(newDocument.accessibilityLabel)
-        transport.isHidden = newDocument.transport == .hidden
+        transportRequestedVisible = newDocument.transport != .hidden
+        transport.showsPlayControl = newDocument.format != .video
+        playbackOverlay.isHidden = newDocument.format != .video || !transportRequestedVisible
+        updateTransportVisibility()
         canvas.allowsFrameCopy = newDocument.allowsFrameCopy
         canvas.onCopyFrame = { [weak self] in self?.copyCurrentFrame() }
 
@@ -196,10 +246,14 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
             && previous?.source == newDocument.source
             && previous?.format == newDocument.format
         if isSameDocument, session != nil {
+            transport.isEnabled = true
+            playbackOverlay.isEnabled = true
             applyPlaybackIntent(newDocument.playback, preservingPosition: true)
             return
         }
 
+        transport.isEnabled = false
+        playbackOverlay.isEnabled = false
         loadGeneration += 1
         stopClock()
         session?.invalidate()
@@ -208,7 +262,7 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         state = resolvedState(from: newDocument.playback, currentProgress: 0)
         isPingPongReversing = false
         phase = .ready
-        transport.isPlaying = false
+        setPlaybackPresentation(isPlaying: false)
         transport.progress = 0
         transport.documentDuration = 0
         // Whether the *next* document can make a sound is not known until it is open, and a
@@ -308,6 +362,8 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         transport.progress = state.progress
         transport.showsAudioControl = opened.hasAudio
         transport.isMuted = isMuted
+        transport.isEnabled = true
+        playbackOverlay.isEnabled = true
         opened.apply(state)
         opened.present(atProgress: state.progress)
 
@@ -316,7 +372,7 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         if state.isPlaying {
             startPlaying()
         } else {
-            transport.isPlaying = false
+            setPlaybackPresentation(isPlaying: false)
         }
     }
 
@@ -327,7 +383,8 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         canvas.clear()
         phase = .failed
         transport.isEnabled = false
-        transport.isPlaying = false
+        playbackOverlay.isEnabled = false
+        setPlaybackPresentation(isPlaying: false)
         let extensionFailure = failure.extensionFailure
         showMessage(extensionFailure.message)
         report(failure: extensionFailure)
@@ -366,7 +423,7 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         if !state.isPlaying {
             stopClock()
             session?.present(atProgress: state.progress)
-            transport.isPlaying = false
+            setPlaybackPresentation(isPlaying: false)
             transport.progress = state.progress
             if wasPlaying {
                 phase = .paused
@@ -385,7 +442,7 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
             state.isPlaying = false
             stopClock()
             phase = .paused
-            transport.isPlaying = false
+            setPlaybackPresentation(isPlaying: false)
             session?.apply(state)
             report()
         } else {
@@ -412,7 +469,7 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
 
     private func startPlaying() {
         phase = .playing
-        transport.isPlaying = true
+        setPlaybackPresentation(isPlaying: true)
         startClock()
         report()
     }
@@ -539,7 +596,7 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
         state.isPlaying = false
         stopClock()
         phase = .completed
-        transport.isPlaying = false
+        setPlaybackPresentation(isPlaying: false)
         session?.apply(state)
         report()
     }
@@ -656,15 +713,34 @@ final class MediaDocumentPlayerView: NSView, ThemedComponent {
 
     // MARK: - Presentation
 
+    private func setPlaybackPresentation(isPlaying: Bool) {
+        transport.isPlaying = isPlaying
+        playbackOverlay.isPlaying = isPlaying
+    }
+
+    /// A resizable attachment fold may leave less room than a usable timeline costs. The canvas
+    /// yields first, and then the transport gets out of the way instead of becoming a required
+    /// minimum that stops the fold. The centred play control remains the compact route.
+    private func updateTransportVisibility() {
+        let isCompressed = canvasSizing == .fillAvailableSpace
+            && bounds.height < Layout.compactTransportThreshold
+        let shouldHide = !transportRequestedVisible || isCompressed
+        guard transport.isHidden != shouldHide else { return }
+        transport.isHidden = shouldHide
+    }
+
     private func applyAspectRatio(_ ratio: CGFloat) {
         aspectConstraint?.isActive = false
         let constraint = canvas.heightAnchor.constraint(
             equalTo: canvas.widthAnchor,
             multiplier: 1 / max(ratio, 0.01)
         )
-        // Below required, so the minimum height and the pane's own width can both hold when a
-        // very wide document would otherwise force a canvas one pixel tall.
-        constraint.priority = .defaultHigh
+        // A document-shaped standalone player prefers the aspect strongly. A player filling a
+        // resizable pane takes that pane's rectangle instead; its render layer aspect-fits the
+        // pixels inside it without making the movie's ratio a pane-size constraint.
+        constraint.priority = canvasSizing == .documentAspect
+            ? .defaultHigh
+            : .fittingSizeCompression
         constraint.isActive = true
         aspectConstraint = constraint
     }

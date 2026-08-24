@@ -290,6 +290,17 @@ final class MediaTransportTests: XCTestCase {
         XCTAssertEqual(presses, 1, "stating the phase raised the action")
     }
 
+    /// Movies put the primary action over the picture. The row below is then a timeline, not two
+    /// copies of Play competing for attention and scrub travel.
+    func testTheTransportCanBecomeATimelineWithoutItsPlayControl() {
+        let transport = makeHostedTransport()
+
+        transport.showsPlayControl = false
+
+        XCTAssertTrue(transport.playButtonForTesting.isHidden)
+        XCTAssertFalse(transport.scrubberForTesting.isHidden)
+    }
+
     func testDisablingTheTransportDisablesItsControls() {
         let transport = makeHostedTransport()
         transport.isEnabled = false
@@ -328,6 +339,52 @@ final class MediaTransportTests: XCTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: window), [])
     }
 
+    // MARK: - Movie overlay
+
+    /// Play remains discoverable while a movie is paused, but only the drawn target claims a
+    /// click. The rest of the overlay is deliberately transparent to the canvas underneath it.
+    func testThePausedMovieOverlayShowsPlayAndOnlyHitsItsCentre() {
+        let overlay = makeHostedPlaybackOverlay()
+
+        XCTAssertTrue(overlay.isControlVisibleForTesting)
+        XCTAssertEqual(overlay.accessibilityRole(), .button)
+        XCTAssertEqual(overlay.accessibilityTitle(), L10n.string("Play"))
+        XCTAssertTrue(overlay.hitTest(NSPoint(x: 100, y: 60)) === overlay)
+        XCTAssertNil(overlay.hitTest(NSPoint(x: 4, y: 4)))
+    }
+
+    /// Once playback is under way the picture clears. Entering anywhere over the canvas reveals
+    /// Pause — the action the centre control will take — and leaving clears it again.
+    func testThePlayingMovieOverlayShowsPauseOnlyWhileHovered() {
+        let overlay = makeHostedPlaybackOverlay()
+        overlay.isPlaying = true
+
+        XCTAssertFalse(overlay.isControlVisibleForTesting)
+        XCTAssertEqual(overlay.accessibilityTitle(), L10n.string("Pause"))
+
+        overlay.mouseEntered(with: PointerEventStub(location: .zero, type: .mouseEntered))
+        XCTAssertTrue(overlay.isControlVisibleForTesting)
+
+        overlay.mouseExited(with: PointerEventStub(location: .zero, type: .mouseExited))
+        XCTAssertFalse(overlay.isControlVisibleForTesting)
+    }
+
+    /// Pointer, keyboard and VoiceOver all raise the same host-owned intent. Stating a new phase
+    /// remains presentation only, so a player can mirror its session without recursively acting.
+    func testTheMovieOverlayRaisesItsActionWithoutTogglingItself() {
+        let overlay = makeHostedPlaybackOverlay()
+        var toggles = 0
+        overlay.onToggle = { toggles += 1 }
+
+        XCTAssertTrue(overlay.performPrimaryAction())
+        XCTAssertTrue(overlay.accessibilityPerformPress())
+        XCTAssertEqual(toggles, 2)
+        XCTAssertFalse(overlay.isPlaying)
+
+        overlay.isPlaying = true
+        XCTAssertEqual(toggles, 2)
+    }
+
     // MARK: - Fixtures
 
     private func makeHostedScrubber() -> ThemedScrubber {
@@ -349,6 +406,18 @@ final class MediaTransportTests: XCTestCase {
         ])
         host.layoutSubtreeIfNeeded()
         return transport
+    }
+
+    private func makeHostedPlaybackOverlay() -> MediaPlaybackOverlayView {
+        // A real movie canvas is offset above its transport row. Keeping that offset in the
+        // fixture catches a hit-test implementation that converts an already-local point twice.
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 220))
+        let overlay = MediaPlaybackOverlayView(
+            frame: NSRect(x: 50, y: 50, width: 200, height: 120)
+        )
+        host.addSubview(overlay)
+        host.layoutSubtreeIfNeeded()
+        return overlay
     }
 
     /// A pointer event located by fraction of the control's width, so a fixture that changes size
