@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +37,22 @@ try {
     "wrangler", "d1", "migrations", "apply", "threading-control-plane",
     "--remote", "--config", generatedPath,
   ], environment);
-  await run("npx", ["wrangler", "deploy", "--config", generatedPath], environment);
+  // `wrangler secret put` cannot address a Worker that does not exist yet, so the very first
+  // deploy has to carry its secrets with it. THREADING_DEPLOY_SECRETS_FILE names a KEY=value
+  // file for exactly that case; every later deploy leaves it unset and the already-installed
+  // secrets are untouched. The file is the caller's to create and delete — this script never
+  // writes one, so no secret is left behind by a failed run.
+  const secretsFile = process.env.THREADING_DEPLOY_SECRETS_FILE;
+  if (secretsFile !== undefined) {
+    if (!existsSync(secretsFile)) {
+      throw new Error(`THREADING_DEPLOY_SECRETS_FILE does not exist: ${secretsFile}`);
+    }
+    process.stderr.write("deploy: bootstrapping a new Worker with its secrets\n");
+  }
+  await run("npx", [
+    "wrangler", "deploy", "--config", generatedPath,
+    ...(secretsFile === undefined ? [] : ["--secrets-file", secretsFile]),
+  ], environment);
   await run(process.execPath, ["scripts/verify-production.mjs"], environment);
 } finally {
   await rm(generatedURL, { force: true });

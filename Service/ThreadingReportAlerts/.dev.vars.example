@@ -1,0 +1,4 @@
+# Copy to .dev.vars. Never commit real values.
+REPORT_ALERT_WEBHOOK_TOKEN=local-development-token-at-least-32-bytes-long
+PUSHOVER_APP_TOKEN=replace_with_the_30_char_app_token
+PUSHOVER_USER_KEY=replace_with_the_30_char_user_key

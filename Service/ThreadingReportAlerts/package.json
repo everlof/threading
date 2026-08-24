@@ -1,0 +1,15 @@
+{
+  "name": "threading-report-alerts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260811.1",
+    "typescript": "7.0.2",
+    "wrangler": "4.121.0"
+  }
+}

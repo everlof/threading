@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "threading-report-alerts",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-11",
+
+  // No workers.dev. The only caller is the control plane, which is configured with an exact
+  // URL; an extra public hostname on a *.workers.dev subdomain would be a second way in that
+  // nothing needs and nobody is watching.
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "alerts.threading.codes", "custom_domain": true }
+  ],
+
+  "observability": { "enabled": true },
+
+  // Secrets, installed with `wrangler secret put`, never in this file:
+  //   REPORT_ALERT_WEBHOOK_TOKEN  the same value the control plane sends as its bearer
+  //   PUSHOVER_APP_TOKEN          identifies this application to Pushover
+  //   PUSHOVER_USER_KEY           identifies the account that receives the notification
+  "secrets": {
+    "required": ["REPORT_ALERT_WEBHOOK_TOKEN", "PUSHOVER_APP_TOKEN", "PUSHOVER_USER_KEY"]
+  }
+}
