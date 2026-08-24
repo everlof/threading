@@ -367,6 +367,27 @@
       }
     },
     {
+      "id": "remote-terminal-macos-grid-restoration",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Mac terminal grid after an iPhone leaves",
+      "description": "The real agent terminal after a phone-sized viewport is released, proving the desktop grid and its final visible row return immediately.",
+      "states": ["Phone-owned compact grid", "Explicit mobile leave", "Desktop grid restored"],
+      "matrix": {
+        "providers": ["Codex"],
+        "appearances": ["Dark"],
+        "sizes": ["760×560-point terminal pane"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AgentTerminalScrollbackRenderTests.swift",
+        "test": "ThreadingTests/AgentTerminalScrollbackRenderTests/testRendersMacGridAfterMobileViewportLeaves"
+      },
+      "capture": {
+        "glob": "remote-terminal-macos-grid-restored-*.png"
+      }
+    },
+    {
       "id": "limit-recovery-ribbon",
       "kind": "surface",
       "status": "implemented",

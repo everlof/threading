@@ -186,6 +186,16 @@ final class RemoteSessionMirrorRegistry {
         case terminal(TerminalID)
     }
 
+    /// Why one live viewport stopped owning the shared PTY grid.
+    ///
+    /// A transport loss may be a momentary background/foreground round trip, so it keeps the
+    /// reconnect grace. An explicit release or parked chat is the renderer saying it has left;
+    /// keeping that grid would make the Mac remain at phone size after the phone is gone.
+    private enum ViewportLeaseRelease {
+        case reconnectGrace
+        case immediate
+    }
+
     private struct ProjectTerminalMirror {
         var ring: RemoteRingBuffer
         var subscribers: [ObjectIdentifier: RemoteConnection] = [:]
@@ -1140,6 +1150,13 @@ final class RemoteSessionMirrorRegistry {
     }
 
     func detach(_ connection: RemoteConnection) {
+        detach(connection, viewportRelease: .reconnectGrace)
+    }
+
+    private func detach(
+        _ connection: RemoteConnection,
+        viewportRelease: ViewportLeaseRelease
+    ) {
         let key = ObjectIdentifier(connection)
         if let startupSessionID = startupSessionByConnection.removeValue(forKey: key),
            var starting = startingSessions[startupSessionID] {
@@ -1149,7 +1166,11 @@ final class RemoteSessionMirrorRegistry {
         cancelTerminalHydration(for: key)
         themeEventSubscribers.removeValue(forKey: key)
         if let terminalID = terminalByConnection.removeValue(forKey: key) {
-            releaseViewport(for: connection, target: .terminal(terminalID))
+            releaseViewport(
+                for: connection,
+                target: .terminal(terminalID),
+                release: viewportRelease
+            )
             terminalMirrors[terminalID]?.subscribers.removeValue(forKey: key)
             if terminalMirrors[terminalID]?.subscribers.isEmpty == true,
                !AppSettings.shared.remoteAccessEnabled {
@@ -1166,7 +1187,11 @@ final class RemoteSessionMirrorRegistry {
         let departingParticipantID = connection.authenticatedPeer?.authorization
             .collaborationParticipantID
         broadcastPresence(.left, from: connection, sessionID: sessionID)
-        releaseViewport(for: connection, target: .session(sessionID))
+        releaseViewport(
+            for: connection,
+            target: .session(sessionID),
+            release: viewportRelease
+        )
         mirrors[sessionID]?.subscribers.removeValue(forKey: key)
         presenceIDs[key] = nil
         if mirrors[sessionID]?.subscribers.isEmpty ?? true {
@@ -1212,7 +1237,7 @@ final class RemoteSessionMirrorRegistry {
     func park(_ connection: RemoteConnection, sessionID: SessionID) -> Bool {
         let key = ObjectIdentifier(connection)
         guard sessionByConnection[key] == sessionID else { return false }
-        detach(connection)
+        detach(connection, viewportRelease: .immediate)
         connection.sendText(encode(RemoteSessionParkedDTO()))
         return true
     }
@@ -1433,7 +1458,11 @@ final class RemoteSessionMirrorRegistry {
     }
 
     func releaseViewport(from connection: RemoteConnection, sessionID: SessionID) {
-        releaseViewport(for: connection, target: .session(sessionID))
+        releaseViewport(
+            for: connection,
+            target: .session(sessionID),
+            release: .immediate
+        )
     }
 
     func requestViewport(
@@ -1457,7 +1486,11 @@ final class RemoteSessionMirrorRegistry {
     }
 
     func releaseViewport(from connection: RemoteConnection, terminalID: TerminalID) {
-        releaseViewport(for: connection, target: .terminal(terminalID))
+        releaseViewport(
+            for: connection,
+            target: .terminal(terminalID),
+            release: .immediate
+        )
     }
 
     /// - Parameter attachmentPaths: staged uploads the server already claimed for this exact
@@ -2675,13 +2708,14 @@ final class RemoteSessionMirrorRegistry {
 
     // MARK: - Viewport leases
 
-    /// Ends one connection's lease, holding its grid for a grace period when the device can be
-    /// recognised on its return.
+    /// Ends one connection's lease. Only an unannounced transport loss holds its grid for a
+    /// grace period when the device can be recognised on its return; an explicit release or
+    /// parked chat restores the remaining controller or Mac grid immediately.
     ///
     /// A lease change is a real `SIGWINCH` and a full TUI repaint, and the joining client waits
-    /// for that repaint. Backgrounding the iOS app drops the socket exactly as a deliberate
-    /// close does, so a glance at a notification and a return used to reflow a working agent
-    /// twice — the most frequent cost this mirror imposes on the program it is watching.
+    /// for that repaint. Backgrounding the iOS app can drop the socket without an explicit
+    /// release, so a glance at a notification and a return used to reflow a working agent twice
+    /// — the most frequent cost this mirror imposes on the program it is watching.
     ///
     /// **The grace holds a grid, and only a grid.** The socket is already unsubscribed, the peer
     /// is permitted nothing, and `followers(of:)` reads subscribers rather than leases, so a
@@ -2689,17 +2723,29 @@ final class RemoteSessionMirrorRegistry {
     /// master switch and a loss of write permission all end it immediately rather than at
     /// expiry; nothing here is a place where an authorization outlives its check.
     ///
-    /// Two releases stay immediate: a connection that authenticated without a device id, which
-    /// could never be matched when it came back, and every release while the grace is configured
-    /// to zero — the kill switch that restores the behaviour this replaced.
-    private func releaseViewport(for connection: RemoteConnection, target: ViewportLeaseTarget) {
-        guard var leases = viewportLeases(for: target),
-              let request = leases.active.removeValue(forKey: ObjectIdentifier(connection))
-        else { return }
+    /// An explicit release also removes a held lease for the same device. Socket teardown and a
+    /// final `viewportRelease` frame cross queues, so teardown can otherwise turn the active
+    /// request into a held one just before the already-sent explicit release is handled.
+    private func releaseViewport(
+        for connection: RemoteConnection,
+        target: ViewportLeaseTarget,
+        release: ViewportLeaseRelease
+    ) {
+        guard var leases = viewportLeases(for: target) else { return }
+        let request = leases.active.removeValue(forKey: ObjectIdentifier(connection))
+        var removedHeldLease = false
+        if release == .immediate,
+           let deviceID = connection.authenticatedPeer?.deviceID,
+           let held = leases.held.removeValue(forKey: deviceID) {
+            held.expiry.cancel()
+            removedHeldLease = true
+        }
+        guard request != nil || removedHeldLease else { return }
         defer {
             setViewportLeases(leases, for: target)
             applyViewport(for: target)
         }
+        guard release == .reconnectGrace, let request else { return }
         let grace = viewportLeaseGrace()
         guard grace > .zero,
               let peer = connection.authenticatedPeer,

@@ -6,12 +6,13 @@ import XCTest
 /// The grace period on a released viewport lease.
 ///
 /// A lease change is a real `SIGWINCH` and a full TUI repaint, and backgrounding the iOS app
-/// drops the socket exactly as a deliberate close does — so a glance at a notification and a
-/// return used to reflow a working agent twice. Every assertion here is on the **applied grid**,
-/// the calls the host actually made on the terminal, rather than on how many requests the
-/// registry was holding: a lease that is counted but never reaches the PTY costs nothing, and a
-/// lease that is dropped and re-applied at the same size costs a repaint the request count
-/// cannot see.
+/// drops the socket without saying whether it will return — so a glance at a notification and a
+/// return used to reflow a working agent twice. A deliberate Back, park, or `viewportRelease` is
+/// different: the renderer has said it is gone, and the Mac grid must return immediately. Every
+/// assertion here is on the **applied grid**, the calls the host actually made on the terminal,
+/// rather than on how many requests the registry was holding: a lease that is counted but never
+/// reaches the PTY costs nothing, and a lease that is dropped and re-applied at the same size
+/// costs a repaint the request count cannot see.
 @MainActor
 final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
 
@@ -263,6 +264,91 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
             .init(identity: .agentSession(fixture.sessionID), grid: .init(cols: 64, rows: 22)),
             .init(identity: .agentSession(fixture.sessionID), grid: nil),
         ])
+    }
+
+    /// Leaving the terminal view is an explicit renderer decision, not a transport failure.
+    /// Applying reconnect grace here is what left the desktop at phone size after Back.
+    func testExplicitReleaseRestoresTheMacGridWithoutReconnectGrace() throws {
+        let fixture = try makeFixture(grace: .seconds(30))
+        try attachedWatcher(to: fixture)
+
+        let phone = authenticated(deviceID: "phone-release", authorization: Self.ownerInteract)
+        XCTAssertTrue(fixture.registry.attach(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract
+        ))
+        fixture.registry.requestViewport(
+            from: phone,
+            sessionID: fixture.sessionID,
+            cols: 62,
+            rows: 21
+        )
+
+        fixture.registry.releaseViewport(from: phone, sessionID: fixture.sessionID)
+
+        XCTAssertEqual(fixture.capability.viewportCalls, [
+            .init(identity: .agentSession(fixture.sessionID), grid: .init(cols: 62, rows: 21)),
+            .init(identity: .agentSession(fixture.sessionID), grid: nil),
+        ])
+    }
+
+    /// A warm parked socket deliberately leaves host fan-out. It must keep the transport, not
+    /// the renderer's geometry.
+    func testParkingAChatRestoresTheMacGridWithoutReconnectGrace() throws {
+        let fixture = try makeFixture(grace: .seconds(30))
+        try attachedWatcher(to: fixture)
+
+        let phone = authenticated(deviceID: "phone-park", authorization: Self.ownerInteract)
+        XCTAssertTrue(fixture.registry.attach(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract
+        ))
+        fixture.registry.requestViewport(
+            from: phone,
+            sessionID: fixture.sessionID,
+            cols: 58,
+            rows: 19
+        )
+
+        XCTAssertTrue(fixture.registry.park(phone, sessionID: fixture.sessionID))
+
+        XCTAssertFalse(fixture.registry.isAttached(phone, to: fixture.sessionID))
+        XCTAssertEqual(fixture.capability.viewportCalls, [
+            .init(identity: .agentSession(fixture.sessionID), grid: .init(cols: 58, rows: 19)),
+            .init(identity: .agentSession(fixture.sessionID), grid: nil),
+        ])
+    }
+
+    /// The release frame and socket close are dispatched independently. If close wins, it has
+    /// already converted the active request into a held lease; the explicit release must still
+    /// find that device-keyed hold and return the desktop grid.
+    func testExplicitReleaseDropsAHeldLeaseCreatedByEarlierSocketTeardown() throws {
+        let fixture = try makeFixture(grace: .seconds(30))
+        try attachedWatcher(to: fixture)
+
+        let phone = authenticated(deviceID: "phone-release-race", authorization: Self.ownerInteract)
+        XCTAssertTrue(fixture.registry.attach(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract
+        ))
+        fixture.registry.requestViewport(
+            from: phone,
+            sessionID: fixture.sessionID,
+            cols: 54,
+            rows: 18
+        )
+        fixture.registry.detach(phone)
+        XCTAssertEqual(fixture.capability.viewportCalls.count, 1)
+
+        fixture.registry.releaseViewport(from: phone, sessionID: fixture.sessionID)
+
+        XCTAssertEqual(fixture.capability.viewportCalls.last, .init(
+            identity: .agentSession(fixture.sessionID),
+            grid: nil
+        ))
     }
 
     // MARK: - What a held lease is not

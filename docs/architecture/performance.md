@@ -358,6 +358,16 @@ local half: a navigation-width storm leaves SwiftTerm on one grid, a coordinator
 commits only its last width, and keyboard height still follows its container without changing
 columns.
 
+A disconnect and a deliberate leave do not have the same lease lifetime. An unannounced socket
+loss keeps the device-keyed grid for the configurable reconnect grace, avoiding two expensive
+reflows when iOS briefly backgrounds. Explicit `viewportRelease` and `sessionPark` messages end
+the lease immediately: Back means the renderer is gone, so keeping its grid made the desktop stay
+at phone size for the default 120-second grace whenever another watcher or the enabled remote
+mirror kept the session alive. The immediate path also removes a held lease for the same device,
+because socket teardown and the already-sent release frame can reach the main actor in either
+order. `RemoteViewportLeaseGraceTests` pins transient disconnect, deliberate release, parking and
+that close/release race separately.
+
 The Mac's authoritative desktop grid is renderer input during attach, never a phone viewport
 lease. It may legitimately exceed the phone protocol's 240-column ceiling. SwiftTerm's
 `shouldReportSizeChange` hook must therefore guard the delegate notification inside its explicit

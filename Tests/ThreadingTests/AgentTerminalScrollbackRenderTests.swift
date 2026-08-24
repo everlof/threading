@@ -112,6 +112,89 @@ final class AgentTerminalScrollbackRenderTests: XCTestCase {
         )
     }
 
+    /// Exercises the real terminal surface's second half of the lease handoff. Registry tests
+    /// prove that an explicit mobile leave now sends `nil`; this render proves that mutation
+    /// returns SwiftTerm to the desktop-sized grid and exposes the Mac's final row again.
+    func testRendersMacGridAfterMobileViewportLeaves() throws {
+        let controller = AgentSessionViewController(
+            agentSession: AgentSession(kind: .codex, title: "Desktop grid restoration")
+        )
+        _ = controller.view
+        var profile = TerminalProfile.default
+        profile.theme = .systemDark
+        controller.session.updateProfile(profile)
+
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Fixture.size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: true
+        )
+        self.window = window
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = controller.paneBackgroundColor
+        window.contentViewController = controller
+        window.setContentSize(Fixture.size)
+        controller.view.frame = NSRect(origin: .zero, size: Fixture.size)
+        controller.view.layoutSubtreeIfNeeded()
+
+        let terminal = controller.session.terminalView
+        terminal.suspendsRenderingWhenNotVisible = false
+        terminal.cursorStyle = .steadyBlock
+        settle(terminal)
+        let macGrid = terminal.terminalDimensions
+        XCTAssertGreaterThan(macGrid.cols, 40)
+        XCTAssertGreaterThan(macGrid.rows, 16)
+
+        controller.session.setRemoteViewport(
+            cols: max(20, macGrid.cols - 24),
+            rows: max(4, macGrid.rows - 10)
+        )
+        XCTAssertNotEqual(terminal.terminalDimensions.cols, macGrid.cols)
+        XCTAssertNotEqual(terminal.terminalDimensions.rows, macGrid.rows)
+
+        controller.session.clearRemoteViewport()
+        settle(terminal)
+        XCTAssertEqual(terminal.terminalDimensions.cols, macGrid.cols)
+        XCTAssertEqual(terminal.terminalDimensions.rows, macGrid.rows)
+        XCTAssertNil(controller.session.remoteViewport)
+
+        terminal.feed(text: "\(Fixture.escape)[2J\(Fixture.escape)[H")
+        for row in 1...macGrid.rows {
+            let label = row == macGrid.rows
+                ? "macOS owns the full \(macGrid.cols)×\(macGrid.rows) grid again"
+                : "Desktop row \(row): restored after the iPhone left the chat"
+            terminal.feed(text: "\(Fixture.escape)[\(row);1H\(label)")
+        }
+        settle(terminal)
+
+        let visible = terminal.terminalStateSnapshot().visibleRows.map {
+            $0.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        XCTAssertEqual(
+            visible.last,
+            "macOS owns the full \(macGrid.cols)×\(macGrid.rows) grid again"
+        )
+
+        let representation = try XCTUnwrap(
+            terminal.bitmapImageRepForCachingDisplay(in: terminal.bounds)
+        )
+        terminal.cacheDisplay(in: terminal.bounds, to: representation)
+        terminal.cacheDisplay(in: terminal.bounds, to: representation)
+        let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(png.count, 10_000, "the restored Mac terminal evidence rendered blank")
+
+        try FileManager.default.createDirectory(
+            at: Fixture.outputDirectory,
+            withIntermediateDirectories: true
+        )
+        try png.write(
+            to: Fixture.outputDirectory
+                .appendingPathComponent("remote-terminal-macos-grid-restored-dark.png"),
+            options: .atomic
+        )
+    }
+
     private func settle(_ terminal: EmojiFixedTerminalView) {
         terminal.frameTick()
         controllerLayout(terminal)
