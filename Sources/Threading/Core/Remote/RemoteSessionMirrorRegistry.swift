@@ -89,6 +89,12 @@ final class RemoteSessionMirrorRegistry {
             self?.closeUnavailableSessions()
             self?.broadcastSessionsChanged(change)
         }
+        // Account presentation and availability already live in `/api/me`; model visibility now
+        // does too. Treat a preference edit as a catalogue invalidation so a connected phone
+        // refetches immediately instead of keeping a model the Mac just withdrew until reconnect.
+        appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
+            self?.broadcastSessionsChanged(ProjectsDidChange())
+        }
         // Activity is live row state, not a project mutation. Depending on a coincident title or
         // branch write left a completed chat's phone badge stale indefinitely.
         appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
@@ -492,8 +498,8 @@ final class RemoteSessionMirrorRegistry {
             let discoveredAccounts = AgentAccountDiscovery.accounts(for: kind)
             let accountNames = AccountName.names(for: discoveredAccounts)
 
-            func models(for account: AgentAccount?) -> [RemoteModelChoiceDTO] {
-                AgentModels.options(for: kind, account: account).map { option in
+            @MainActor func models(for account: AgentAccount?) -> [RemoteModelChoiceDTO] {
+                AgentModels.visibleOptions(for: kind, account: account).map { option in
                     RemoteModelChoiceDTO(
                         id: option.identifier,
                         name: option.displayName,

@@ -18543,6 +18543,16 @@
         }
       }
     },
+    "Show hidden models (%d)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa dolda modeller (%d)"
+          }
+        }
+      }
+    },
     "Show Device Toolbar": {
       "localizations": {
         "sv": {

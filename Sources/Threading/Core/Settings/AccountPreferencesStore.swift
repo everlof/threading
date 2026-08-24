@@ -35,12 +35,21 @@ struct AccountPreference: Codable, Equatable {
     /// account whose owner cleared its rules would silently pick the app default back up.
     var customLimits: [CustomLimit]?
 
+    /// Catalogue models the owner withdrew from new-session pickers for this login.
+    ///
+    /// Optional for backwards compatibility and storage hygiene: an account nobody has
+    /// customised carries no key, while an explicitly restored account collapses back to the
+    /// same empty preference. The account qualifier matters because providers may reuse model
+    /// identifiers and two logins can receive different catalogues.
+    var hiddenModelIDs: Set<String>?
+
     var isEmpty: Bool {
         emoji == nil
             && displayNameOverride == nil
             && isDisabled == nil
             && lastReportedModel == nil
             && customLimits == nil
+            && hiddenModelIDs == nil
     }
 }
 
@@ -131,6 +140,39 @@ final class AccountPreferencesStore {
         update(accountID) { $0.lastReportedModel = normalisedModel }
     }
 
+    // MARK: - Model Visibility
+
+    /// Models hidden from new-session choice surfaces for this provider-qualified login.
+    func hiddenModelIDs(for accountID: AccountID) -> Set<String> {
+        preferences[accountID.rawValue]?.hiddenModelIDs ?? []
+    }
+
+    /// Adds or removes one catalogue identifier from the hidden set.
+    ///
+    /// The UI only calls this with an identifier from the bounded provider catalogue. Keep a
+    /// second persistence bound here anyway: a malformed defaults blob or a future caller must
+    /// not turn a compact-metadata preference into an allocation proportional to provider input.
+    func setModel(_ modelID: String, hidden: Bool, for accountID: AccountID) {
+        guard let modelID = normalized(modelID),
+              modelID.utf8.count <= ModelVisibility.maximumIdentifierBytes else { return }
+        update(accountID) { preference in
+            var hiddenIDs = preference.hiddenModelIDs ?? []
+            if hidden {
+                guard hiddenIDs.contains(modelID)
+                    || hiddenIDs.count < ModelVisibility.maximumHiddenModels else { return }
+                hiddenIDs.insert(modelID)
+            } else {
+                hiddenIDs.remove(modelID)
+            }
+            preference.hiddenModelIDs = hiddenIDs.isEmpty ? nil : hiddenIDs
+        }
+    }
+
+    /// Restores every model for one login, including identifiers no longer in today's catalogue.
+    func showAllModels(for accountID: AccountID) {
+        update(accountID) { $0.hiddenModelIDs = nil }
+    }
+
     // MARK: - Custom Limits
 
     /// The limits stored *on this account*, or nil when it has never answered and inherits the
@@ -181,6 +223,7 @@ final class AccountPreferencesStore {
 
         // Drop empty entries rather than persisting placeholders.
         candidate[accountID.rawValue] = preference.isEmpty ? nil : preference
+        guard candidate != preferences else { return }
         if persistence.save(candidate) {
             preferences = candidate
             NotificationCenter.default.post(AccountPreferencesDidChange())
@@ -198,5 +241,10 @@ final class AccountPreferencesStore {
 
     private enum Keys {
         static let accountPreferences = "accountPreferences"
+    }
+
+    private enum ModelVisibility {
+        static let maximumHiddenModels = 256
+        static let maximumIdentifierBytes = 512
     }
 }

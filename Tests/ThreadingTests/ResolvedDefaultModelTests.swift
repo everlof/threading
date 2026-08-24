@@ -294,6 +294,25 @@ final class ClaudeAccountModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(identifiers, ["fable", "opus", "sonnet", "haiku"])
     }
 
+    func testHiddenCatalogRowsAreRemovedWithoutReorderingPreservedRows() {
+        let options = ["sol", "terra", "luna"].map {
+            AgentModelOption(
+                identifier: $0,
+                displayName: $0.capitalized,
+                fastServiceTier: nil,
+                defaultServiceTier: nil
+            )
+        }
+
+        let visible = AgentModels.applyingVisibility(
+            to: options,
+            hidden: ["sol", "terra"],
+            preserving: ["sol"]
+        )
+
+        XCTAssertEqual(visible.map(\.identifier), ["sol", "luna"])
+    }
+
     /// Inside a tier the alias leads the variants it stands for: `Fable` is the ordinary choice
     /// and `Fable 5 · 1M` the deliberate one, whatever order the CLI cached them in.
     func testAnAliasLeadsItsOwnTier() throws {
@@ -310,6 +329,21 @@ final class ClaudeAccountModelDiscoveryTests: XCTestCase {
             identifiers,
             ["fable", "claude-fable-5[1m]", "opus", "claude-opus-4-8", "sonnet", "haiku"]
         )
+    }
+
+    /// A configured default still belongs on the capability ladder. It used to be synthesized
+    /// above the already-sorted catalogue by the composer, which put Opus · 1M above Fable and
+    /// made the first row falsely read as the strongest model on offer.
+    @MainActor
+    func testAConfiguredDefaultMissingFromTheCatalogueJoinsItsOwnTier() throws {
+        try write(#"{"model": "opus[1m]"}"#, to: AgentDefaults.claudeSettingsFile)
+
+        let identifiers = AgentModels.visibleOptions(
+            for: .claude,
+            account: account()
+        ).map(\.identifier)
+
+        XCTAssertEqual(identifiers, ["fable", "opus", "opus[1m]", "sonnet", "haiku"])
     }
 
     /// Two openings of the same menu list the same models in the same order. Sorting on an

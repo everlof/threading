@@ -29,10 +29,10 @@ not `auth.json`. Failed, cancelled, timed-out or unverified attempts are never a
 or delete anything on disk.
 
 **Where a login is *chosen*, it is named after the person** (`AccountName`), not after the
-alias. An alias is named after the agent — `claude-dblock`, `claude-vlundborg` — so a menu of
+alias. An alias is named after the agent — `claude-nhartley`, `claude-ikeller` — so a menu of
 them asks the user to tell two logins apart by four characters in the middle of a word, and
 `AccountBadge`'s initial has the same collision (both are `c`). The name is derived from the
-login address instead: `daniel.block3@example.com` → `Daniel Block`, dropping trailing digits
+login address instead: `nova.hartley3@example.com` → `Nova Hartley`, dropping trailing digits
 because they are almost always "that address was taken". Names are resolved for the whole
 *list* at once, since the failure being avoided is only visible across it — two logins
 belonging to one person derive the same name, and a menu offering it twice is worse than one
@@ -66,6 +66,15 @@ The presentation action on that row is deliberately **Restore Name & Icon**, not
 clears only the display-name and emoji overrides and leaves enablement, credentials, sessions,
 and every usage reading untouched. “Reset” beside the Usage destinations made the last of those
 easy to misread; the button now names the complete scope of its action on its face.
+
+**Model visibility is also scoped to the provider-qualified login.** The macOS launch popover
+owns the edit affordance: hovering an unselected, non-default model reveals an eye-slash action,
+and the same popover restores every hidden row. `AccountPreference.hiddenModelIDs` persists that
+bounded set. Both the Mac composer and `/api/me` project the provider catalogue through the same
+filter; an account-preference event invalidates the remote catalogue so a connected iPhone
+refetches immediately. The inherited default and any explicit in-progress choice are preserved,
+so changing visibility cannot strand the launch state. iOS deliberately consumes the result but
+does not grow a second management surface.
 
 The composer starts on the standard handle, so a disabled *default* is the case that bites —
 without `preferredAccount`, the login the user just switched off is still what a fresh session

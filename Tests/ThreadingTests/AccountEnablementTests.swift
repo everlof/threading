@@ -85,15 +85,40 @@ final class AccountEnablementTests: XCTestCase {
         )
     }
 
+    func testHiddenModelsPersistAndStayScopedToOneLogin() {
+        let work = AccountID(provider: .codex, handle: .named("codex-work"))
+        let personal = AccountID(provider: .codex, handle: .standard)
+
+        store.setModel("gpt-5.6-terra", hidden: true, for: work)
+
+        let reloaded = AccountPreferencesStore(defaults: defaults)
+        XCTAssertEqual(reloaded.hiddenModelIDs(for: work), ["gpt-5.6-terra"])
+        XCTAssertTrue(reloaded.hiddenModelIDs(for: personal).isEmpty)
+    }
+
+    func testShowingAllModelsLeavesOtherAccountChoicesAlone() {
+        let id = AccountID(provider: .codex, handle: .named("codex-work"))
+        store.setEmoji("🌀", for: id)
+        store.setEnabled(false, for: id)
+        store.setModel("gpt-5.6-terra", hidden: true, for: id)
+
+        store.showAllModels(for: id)
+
+        XCTAssertTrue(store.hiddenModelIDs(for: id).isEmpty)
+        XCTAssertEqual(store.emoji(for: id), "🌀")
+        XCTAssertFalse(store.isEnabled(id))
+    }
+
     /// Preferences stored before the switch existed carry no such key, and a decoder that
     /// treated the absence as a failure would drop every icon and name the user had set.
     func testPreferencesWrittenBeforeTheSwitchStillDecodeAsOn() throws {
-        let legacy = Data(#"{"emoji":"✳️","displayNameOverride":"Daniel"}"#.utf8)
+        let legacy = Data(#"{"emoji":"✳️","displayNameOverride":"Nova"}"#.utf8)
         let decoded = try JSONDecoder().decode(AccountPreference.self, from: legacy)
 
         XCTAssertEqual(decoded.emoji, "✳️")
-        XCTAssertEqual(decoded.displayNameOverride, "Daniel")
+        XCTAssertEqual(decoded.displayNameOverride, "Nova")
         XCTAssertNil(decoded.isDisabled)
+        XCTAssertNil(decoded.hiddenModelIDs)
         XCTAssertFalse(decoded.isEmpty)
     }
 

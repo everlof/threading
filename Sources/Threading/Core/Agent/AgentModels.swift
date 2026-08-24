@@ -167,6 +167,53 @@ enum AgentModels {
         }
     }
 
+    /// The catalogue rows offered by a new-session picker after the owner has hidden models.
+    ///
+    /// Visibility is per provider-qualified login. The account's inherited default always stays
+    /// offered: hiding it would leave an "Auto" launch resolving to a model absent from the very
+    /// picker that explains Auto. A caller may additionally preserve an explicit in-progress
+    /// choice so changing visibility elsewhere never strands the current composer state.
+    @MainActor
+    static func visibleOptions(
+        for kind: AgentKind,
+        account: AgentAccount?,
+        preserving modelIDs: Set<String> = []
+    ) -> [AgentModelOption] {
+        let inherited = defaultModel(for: kind, account: account)
+        // A configured default may be a dated or long-context variant the provider's ordinary
+        // picker catalogue omits. Include it through the same capability sorter as every other
+        // row: prepending it in the presentation made the inherited model look like the most
+        // capable choice even when a higher tier was available.
+        let options = options(for: kind, account: account, including: inherited)
+        let accountID = AccountID(
+            provider: kind,
+            handle: account?.handle ?? .standard
+        )
+        let hidden = AccountPreferencesStore.shared.hiddenModelIDs(for: accountID)
+        guard !hidden.isEmpty else { return options }
+
+        var preserved = modelIDs
+        if let inherited {
+            preserved.insert(inherited)
+        }
+        return applyingVisibility(to: options, hidden: hidden, preserving: preserved)
+    }
+
+    /// Pure projection shared by host and remote catalogue tests. Keeping the filter independent
+    /// of discovery and defaults storage makes the important rule explicit: hidden rows leave in
+    /// catalogue order, while inherited or in-progress rows survive even if their saved id says
+    /// otherwise.
+    static func applyingVisibility(
+        to options: [AgentModelOption],
+        hidden: Set<String>,
+        preserving modelIDs: Set<String>
+    ) -> [AgentModelOption] {
+        guard !hidden.isEmpty else { return options }
+        return options.filter {
+            !hidden.contains($0.identifier) || modelIDs.contains($0.identifier)
+        }
+    }
+
     /// The catalog, with `identifier` in it whether or not the catalog knew about it.
     ///
     /// For the menu of a conversation that is *already pinned* to something: a session started

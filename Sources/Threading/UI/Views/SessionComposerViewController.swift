@@ -2023,8 +2023,22 @@ final class SessionComposerViewController: NSViewController {
         guard let presentation = modelEffortPickerPresentation() else { return nil }
 
         let popover = HostPopoverFactory.make(.composerModelEffortPicker)
+        let visibility = modelVisibilityContext()
         let controller = ModelEffortPickerViewController(
-            presentation: presentation
+            presentation: presentation,
+            hiddenModelCount: visibility.hiddenCount,
+            onHideModel: { [weak popover] modelID in
+                AccountPreferencesStore.shared.setModel(
+                    modelID,
+                    hidden: true,
+                    for: visibility.accountID
+                )
+                popover?.close()
+            },
+            onShowHiddenModels: visibility.hiddenCount > 0 ? { [weak popover] in
+                AccountPreferencesStore.shared.showAllModels(for: visibility.accountID)
+                popover?.close()
+            } : nil
         ) { [weak self, weak popover] model, effort in
             guard let self else { return }
             self.selectedModel = model
@@ -2058,7 +2072,12 @@ final class SessionComposerViewController: NSViewController {
             ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
             : nil
         let resolved = resolvedDefaultModel(for: account)
-        let options = AgentModels.options(for: selectedAgent, account: account)
+        let preserved = Set([selectedModel, resolved.identifier].compactMap { $0 })
+        let options = AgentModels.visibleOptions(
+            for: selectedAgent,
+            account: account,
+            preserving: preserved
+        )
         guard !options.isEmpty else { return nil }
 
         let markedInList = resolved.identifier.map { identifier in
@@ -2120,6 +2139,27 @@ final class SessionComposerViewController: NSViewController {
             selectedEffortID: selectedReasoningEffort
                 ?? ModelEffortPickerPresentation.automaticEffortID
         )
+    }
+
+    /// Visibility is stored per provider-qualified login, including the standard account for a
+    /// runtime that has no discovered account row. Count only rows in today's catalogue: stale
+    /// identifiers remain recoverable through the store, but should not add a mysterious footer
+    /// count to this picker.
+    private func modelVisibilityContext() -> (accountID: AccountID, hiddenCount: Int) {
+        let account = selectedAgent.supportsAccounts
+            ? AgentAccountDiscovery.account(for: selectedAgent, handle: selectedAccountHandle)
+            : nil
+        let accountID = AccountID(
+            provider: selectedAgent,
+            handle: account?.handle ?? .standard
+        )
+        let hidden = AccountPreferencesStore.shared.hiddenModelIDs(for: accountID)
+        let inherited = resolvedDefaultModel(for: account).identifier
+        let hiddenCount = AgentModels.options(for: selectedAgent, account: account).reduce(0) {
+            count, option in
+            count + (hidden.contains(option.identifier) && option.identifier != inherited ? 1 : 0)
+        }
+        return (accountID, hiddenCount)
     }
 
     private func roleItems() -> [ThemedMenuEntry] {
