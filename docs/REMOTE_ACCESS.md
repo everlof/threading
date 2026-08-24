@@ -183,14 +183,17 @@ produced twenty attempts before any other route was tried once, and the phone re
 address that was working at attempt 22 of 23, ninety seconds in.
 
 **The read-only walk has a ceiling.** `RemoteRouteWalkBudget` gives a route's own address four
-seconds, a guessed port two, and the whole walk twelve — after which the caller is answered with
-the ordinary named transport failure while the walk keeps its remaining candidates. A success that
-lands after the ceiling is adopted exactly as a timely one would have been, which is what makes
-twelve seconds safe to set: nothing is abandoned, only stopped being waited on. A walk of exactly
-one candidate has no ceiling and keeps the ordinary request timeout, because there is no other
-route to get on with. Mutations keep their sequential failover and their longer per-attempt
-timeout; they gain the wave ordering but no ceiling, since abandoning an operation with side
-effects is not the same trade as abandoning a read.
+seconds, a guessed port two, and the whole walk twelve. The per-address choice is based on the
+complete race, not the size of one lane: splitting one Tailscale door into a lane of its own must
+not silently restore the ordinary twenty-second request timeout while other routes are racing.
+At twelve seconds the race is cancelled before the caller receives the ordinary named transport
+failure. Recovery may then start a fresh generation with one owner. The former behavior let the
+old race continue beside recovery; the new generation necessarily discarded an otherwise valid
+late success, which is the 2026-08-24 defect. A race of exactly one candidate has no short ceiling
+and keeps the ordinary request timeout, because there is no other route to get on with. Mutations
+keep their sequential failover and their longer per-attempt timeout; they gain the wave ordering
+but no ceiling, since abandoning an operation with side effects is not the same trade as
+abandoning a read.
 
 Owner responses carry the addresses each way in is currently answering on, tailnet included, plus an
 explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still

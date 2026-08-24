@@ -1189,8 +1189,9 @@ final class RemoteNotificationManager: ObservableObject {
         let requestID = UUID().uuidString.lowercased()
         let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
         var lastError: Error = RemoteClientError.invalidResponse
-        let candidates = host.candidateLinks
-        for (index, link) in candidates.enumerated() {
+        let candidates = host.candidates
+        for (index, candidate) in candidates.enumerated() {
+            let link = candidate.link
             let timeout = candidates.count > 1 && index < candidates.count - 1
                 ? 8
                 : RemoteClient.defaultRequestTimeout
@@ -1198,7 +1199,7 @@ final class RemoteNotificationManager: ObservableObject {
             let fields: [RemoteDiagnosticField: String] = [
                 .trace: requestID,
                 .peer: peer,
-                .transport: PairedRemoteHost.endpointKind(for: link.baseURL).rawValue,
+                .transport: candidate.kind.rawValue,
                 .origin: MobileDiagnostics.originDigest(link.baseURL),
                 .phase: "notificationRegistration.request",
                 .timeoutMS: MobileDiagnostics.milliseconds(timeout),
@@ -1212,7 +1213,8 @@ final class RemoteNotificationManager: ObservableObject {
             do {
                 let response = try await RemoteClient(
                     link: link,
-                    requestTimeout: timeout
+                    requestTimeout: timeout,
+                    endpointKind: candidate.kind
                 ).registerNotifications(registration, requestID: requestID)
                 MobileDiagnostics.recordConnectivity(
                     .hostRouteEnded,

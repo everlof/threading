@@ -482,7 +482,11 @@ final class RemoteAppModel: ObservableObject {
 
     var client: RemoteClient? {
         activeHost.map { host in
-            RemoteClient(link: activeHostedHostID == host.id ? activeHostedLink ?? host.link : host.link)
+            let usesHostedRoute = activeHostedHostID == host.id
+            return RemoteClient(
+                link: usesHostedRoute ? activeHostedLink ?? host.link : host.link,
+                endpointKind: usesHostedRoute ? .hosted : host.activeEndpointKind
+            )
         }
     }
 
@@ -922,9 +926,9 @@ final class RemoteAppModel: ObservableObject {
             preferring: discoveredAddresses[host.id]
         ).count
         do {
-            // The walk has a ceiling, and a walk that reaches it stops being something to make a
-            // person wait for rather than being abandoned. If a slower route answers afterwards
-            // it is adopted exactly as a timely one would have been.
+            // The ceiling owns the whole race. Once it answers, every request from that generation
+            // is cancelled before recovery may start a fresh one; two refreshes never compete to
+            // become the host's authoritative route.
             let connection = try await RemoteRouteWalkDeadline.run(
                 ceiling: RemoteRouteWalkBudget.ceiling(
                     forCandidateCount: plannedCandidateCount
@@ -935,18 +939,6 @@ final class RemoteAppModel: ObservableObject {
                         from: host,
                         reportsProgress: !wasOnline,
                         trace: refreshTrace
-                    )
-                },
-                lateSuccess: { [weak self] late in
-                    await self?.applyRefreshSuccess(
-                        late,
-                        host: host,
-                        hostID: hostID,
-                        generation: generation,
-                        wasOnline: wasOnline,
-                        trace: refreshTrace,
-                        baseFields: refreshBaseFields,
-                        startedAt: refreshStartedAt
                     )
                 },
                 exceeded: {
@@ -1012,11 +1004,7 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
-    /// Adopts a successful walk, whether it answered inside the walk budget or after it.
-    ///
-    /// Extracted so a late success takes exactly the path a timely one takes. A second copy of
-    /// this would be the place a late connection quietly stopped persisting its pins or starting
-    /// its event socket.
+    /// Adopts the successful race through the one path that persists pins and starts its socket.
     private func applyRefreshSuccess(
         _ connection: SuccessfulConnection,
         host: PairedRemoteHost,
@@ -1742,6 +1730,7 @@ final class RemoteAppModel: ObservableObject {
         let hasHostedRoute = host.isOwnerDevice
             && host.hostedServiceURL != nil
             && host.hostedCredential != nil
+        let isOnlyCandidateInRace = localCandidates.count + (hasHostedRoute ? 1 : 0) == 1
 
         if reportsProgress, let firstKind = localCandidates.first?.kind
             ?? (hasHostedRoute ? RemoteHostEndpointKind.hosted : nil) {
@@ -1760,7 +1749,11 @@ final class RemoteAppModel: ObservableObject {
                 failurePriority: index
             ) { @MainActor [weak self] in
                 guard let self else { throw CancellationError() }
-                return try await self.fetchMeSequentially(candidates: lane, trace: trace)
+                return try await self.fetchMeSequentially(
+                    candidates: lane,
+                    isOnlyCandidateInRace: isOnlyCandidateInRace,
+                    trace: trace
+                )
             })
         }
         if hasHostedRoute {
@@ -1849,12 +1842,13 @@ final class RemoteAppModel: ObservableObject {
     /// lane and stops as soon as its door has answered or proved unreachable.
     private func fetchMeSequentially(
         candidates: [ConnectionCandidate],
+        isOnlyCandidateInRace: Bool,
         trace: String
     ) async throws -> SuccessfulConnection {
         try await Self.walk(candidates, trace: trace, phase: "request") { index, candidate in
             let timeout = RemoteRouteWalkBudget.timeout(
                 for: candidate.wave,
-                isOnlyCandidate: candidates.count == 1
+                isOnlyCandidateInRace: isOnlyCandidateInRace
             )
             return try await self.fetchMe(
                 candidate: candidate,
@@ -2062,11 +2056,18 @@ final class RemoteAppModel: ObservableObject {
             .hostRouteStarted,
             fields: baseFields.merging([.result: "started"]) { current, _ in current }
         )
+        let metrics = RemoteRequestMetricsCollector()
         do {
-            let response = try await RemoteClient(link: candidate.link).fetchMe(timeout: timeout)
+            let response = try await RemoteClient(
+                link: candidate.link,
+                endpointKind: candidate.kind
+            ).fetchMe(
+                timeout: timeout,
+                metrics: metrics
+            )
             MobileDiagnostics.recordConnectivity(
                 .hostRouteEnded,
-                fields: baseFields.merging([
+                fields: baseFields.merging(metrics.fields) { current, _ in current }.merging([
                     .result: "succeeded",
                     .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
                 ]) { current, _ in current }
@@ -2085,6 +2086,7 @@ final class RemoteAppModel: ObservableObject {
                 .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
                 .code: cancelled ? "swift.cancelled" : MobileDiagnostics.errorCode(error),
             ]) { current, _ in current }
+            fields.merge(metrics.fields) { current, _ in current }
             if let remote = error as? RemoteClientError,
                case .server(let status) = remote {
                 fields[.status] = String(status)
@@ -2139,7 +2141,7 @@ final class RemoteAppModel: ObservableObject {
             if let doorID = candidate.doorID, closedDoors.contains(doorID) { continue }
             let timeout = RemoteRouteWalkBudget.mutationTimeout(
                 for: candidate.wave,
-                isOnlyCandidate: prepared.candidates.count == 1
+                isOnlyCandidateInWalk: prepared.candidates.count == 1
             )
             let startedAt = MobileDiagnostics.monotonicNow()
             var routeFields: [RemoteDiagnosticField: String] = [
@@ -2158,7 +2160,11 @@ final class RemoteAppModel: ObservableObject {
             MobileDiagnostics.recordConnectivity(.hostRouteStarted, fields: routeFields)
             do {
                 let response = try await operation(
-                    RemoteClient(link: candidate.link, requestTimeout: timeout),
+                    RemoteClient(
+                        link: candidate.link,
+                        requestTimeout: timeout,
+                        endpointKind: candidate.kind
+                    ),
                     requestID
                 )
                 guard activeHostID == hostID else { throw CancellationError() }
@@ -2469,13 +2475,16 @@ final class RemoteAppModel: ObservableObject {
         clearThemeEventSocket()
 
         let link = activeHostedHostID == host.id ? activeHostedLink ?? host.link : host.link
-        let client = RemoteClient(link: link)
+        let endpointKind = activeHostedHostID == host.id
+            ? RemoteHostEndpointKind.hosted
+            : host.activeEndpointKind ?? PairedRemoteHost.endpointKind(for: link.baseURL)
+        let client = RemoteClient(link: link, endpointKind: endpointKind)
         let trace = MobileDiagnostics.connectivityTrace()
         themeEventsStartedAt = MobileDiagnostics.monotonicNow()
         themeEventsDiagnosticFields = [
             .trace: trace,
             .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
-            .transport: PairedRemoteHost.endpointKind(for: link.baseURL).rawValue,
+            .transport: client.endpointKind.rawValue,
             .origin: MobileDiagnostics.originDigest(link.baseURL),
             .surface: "events",
         ]

@@ -132,6 +132,18 @@ public enum RemoteDiagnosticField: String, CaseIterable, Sendable {
     case durationMS
     case timeoutMS
     case delayMS
+    /// Coarse URL-loading phases for one bounded request. Missing durations are meaningful: a
+    /// request that reached `tcp` but has no `tcpMS` was still inside that phase when it ended.
+    case networkStage
+    case dnsMS
+    case tcpMS
+    case tlsMS
+    case serverWaitMS
+    case responseMS
+    /// Fixed URLSession tokens only; never an address, interface name, or request URL.
+    case networkProtocol
+    case networkPath
+    case connectionReused
     /// One-based position in a bounded attempt set, and that set's fixed upper bound.
     case attempt
     case total
@@ -348,7 +360,8 @@ public enum RemoteDiagnosticUploadPolicy {
 
         switch RemoteDiagnosticField(rawValue: key) {
         case .enabledKindCount, .recordCount, .protocolVersion, .minimumProtocolVersion,
-             .durationMS, .timeoutMS, .delayMS, .attempt, .total:
+             .durationMS, .timeoutMS, .delayMS, .dnsMS, .tcpMS, .tlsMS, .serverWaitMS,
+             .responseMS, .attempt, .total:
             return value.allSatisfy(\.isNumber)
         case .peer:
             return isPseudonym(value, prefixes: ["peer-", "device-"])

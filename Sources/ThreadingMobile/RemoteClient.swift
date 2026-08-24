@@ -389,15 +389,187 @@ struct RemoteConnectionAttempt: LocalizedError {
     }
 }
 
+/// Share-safe URL loading evidence for one request.
+///
+/// The stage is useful even when a duration is absent: `tls` with no `tlsMS` means the task was
+/// still negotiating TLS when it failed or was cancelled. URLSession does not expose addresses
+/// here, and the protocol/path values are reduced to fixed tokens before entering diagnostics.
+struct RemoteRequestMetrics: Equatable, Sendable {
+    let stage: String
+    let dnsMS: Int?
+    let tcpMS: Int?
+    let tlsMS: Int?
+    let serverWaitMS: Int?
+    let responseMS: Int?
+    let networkProtocol: String?
+    let networkPath: String
+    let connectionReused: Bool
+
+    init(
+        domainLookupStart: Date?,
+        domainLookupEnd: Date?,
+        connectStart: Date?,
+        connectEnd: Date?,
+        secureConnectionStart: Date?,
+        secureConnectionEnd: Date?,
+        requestStart: Date?,
+        requestEnd: Date?,
+        responseStart: Date?,
+        responseEnd: Date?,
+        networkProtocolName: String?,
+        isCellular: Bool,
+        isExpensive: Bool,
+        isConstrained: Bool,
+        isMultipath: Bool,
+        isReusedConnection: Bool
+    ) {
+        if responseStart != nil {
+            stage = "response"
+        } else if requestEnd != nil {
+            stage = "server"
+        } else if requestStart != nil {
+            stage = "request"
+        } else if secureConnectionStart != nil {
+            stage = "tls"
+        } else if connectStart != nil {
+            stage = "tcp"
+        } else if domainLookupStart != nil {
+            stage = "dns"
+        } else {
+            stage = "queued"
+        }
+        dnsMS = Self.milliseconds(from: domainLookupStart, to: domainLookupEnd)
+        tcpMS = Self.milliseconds(
+            from: connectStart,
+            to: secureConnectionStart ?? connectEnd
+        )
+        tlsMS = Self.milliseconds(from: secureConnectionStart, to: secureConnectionEnd)
+        serverWaitMS = Self.milliseconds(from: requestEnd, to: responseStart)
+        responseMS = Self.milliseconds(from: responseStart, to: responseEnd)
+        networkProtocol = Self.protocolToken(networkProtocolName)
+        var path = [isCellular ? "cellular" : "noncellular"]
+        if isExpensive { path.append("expensive") }
+        if isConstrained { path.append("constrained") }
+        if isMultipath { path.append("multipath") }
+        if path.count == 1 { path.append("ordinary") }
+        networkPath = path.joined(separator: ".")
+        connectionReused = isReusedConnection
+    }
+
+    init(_ metrics: URLSessionTaskMetrics) {
+        guard let transaction = metrics.transactionMetrics.last else {
+            self.init(
+                domainLookupStart: nil,
+                domainLookupEnd: nil,
+                connectStart: nil,
+                connectEnd: nil,
+                secureConnectionStart: nil,
+                secureConnectionEnd: nil,
+                requestStart: nil,
+                requestEnd: nil,
+                responseStart: nil,
+                responseEnd: nil,
+                networkProtocolName: nil,
+                isCellular: false,
+                isExpensive: false,
+                isConstrained: false,
+                isMultipath: false,
+                isReusedConnection: false
+            )
+            return
+        }
+        self.init(
+            domainLookupStart: transaction.domainLookupStartDate,
+            domainLookupEnd: transaction.domainLookupEndDate,
+            connectStart: transaction.connectStartDate,
+            connectEnd: transaction.connectEndDate,
+            secureConnectionStart: transaction.secureConnectionStartDate,
+            secureConnectionEnd: transaction.secureConnectionEndDate,
+            requestStart: transaction.requestStartDate,
+            requestEnd: transaction.requestEndDate,
+            responseStart: transaction.responseStartDate,
+            responseEnd: transaction.responseEndDate,
+            networkProtocolName: transaction.networkProtocolName,
+            isCellular: transaction.isCellular,
+            isExpensive: transaction.isExpensive,
+            isConstrained: transaction.isConstrained,
+            isMultipath: transaction.isMultipath,
+            isReusedConnection: transaction.isReusedConnection
+        )
+    }
+
+    var diagnosticFields: [RemoteDiagnosticField: String] {
+        var fields: [RemoteDiagnosticField: String] = [
+            .networkStage: stage,
+            .networkPath: networkPath,
+            .connectionReused: connectionReused ? "true" : "false",
+        ]
+        if let dnsMS { fields[.dnsMS] = String(dnsMS) }
+        if let tcpMS { fields[.tcpMS] = String(tcpMS) }
+        if let tlsMS { fields[.tlsMS] = String(tlsMS) }
+        if let serverWaitMS { fields[.serverWaitMS] = String(serverWaitMS) }
+        if let responseMS { fields[.responseMS] = String(responseMS) }
+        if let networkProtocol { fields[.networkProtocol] = networkProtocol }
+        return fields
+    }
+
+    private static func milliseconds(from start: Date?, to end: Date?) -> Int? {
+        guard let start, let end else { return nil }
+        return max(Int((end.timeIntervalSince(start) * 1_000).rounded()), 0)
+    }
+
+    private static func protocolToken(_ value: String?) -> String? {
+        switch value?.lowercased() {
+        case "h2": return "h2"
+        case "h3": return "h3"
+        case "http/1.0": return "http1.0"
+        case "http/1.1": return "http1.1"
+        case .some: return "other"
+        case .none: return nil
+        }
+    }
+}
+
+/// One request owns one collector. URLSession calls the delegate before completing the async
+/// request, and the lock makes the snapshot safe across its delegate queue and the caller task.
+final class RemoteRequestMetricsCollector: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: RemoteRequestMetrics?
+
+    var fields: [RemoteDiagnosticField: String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored?.diagnosticFields ?? [:]
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didFinishCollecting metrics: URLSessionTaskMetrics
+    ) {
+        lock.lock()
+        stored = RemoteRequestMetrics(metrics)
+        lock.unlock()
+    }
+}
+
 struct RemoteClient {
     static let defaultRequestTimeout = RemoteClientDefaults.requestTimeoutSeconds
 
     let link: RemoteConnectionLink
     let requestTimeout: TimeInterval?
+    /// The route the Mac advertised for this link. An address is only a fallback guess: a
+    /// Tailscale IP and a VPN IP do not carry their transport kind in their spelling.
+    let endpointKind: RemoteHostEndpointKind
 
-    init(link: RemoteConnectionLink, requestTimeout: TimeInterval? = nil) {
+    init(
+        link: RemoteConnectionLink,
+        requestTimeout: TimeInterval? = nil,
+        endpointKind: RemoteHostEndpointKind? = nil
+    ) {
         self.link = link
         self.requestTimeout = requestTimeout
+        self.endpointKind = endpointKind ?? PairedRemoteHost.endpointKind(for: link.baseURL)
     }
 
     /// The one pinning delegate, shared by every session this client opens.
@@ -483,10 +655,18 @@ struct RemoteClient {
         try await reportSession.data(for: request)
     }
 
-    func fetchMe(timeout: TimeInterval? = nil) async throws -> RemoteMeDTO {
+    func fetchMe(
+        timeout: TimeInterval? = nil,
+        metrics: RemoteRequestMetricsCollector? = nil
+    ) async throws -> RemoteMeDTO {
         var request = request(url: link.meURL)
         if let timeout { request.timeoutInterval = timeout }
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response): (Data, URLResponse)
+        if let metrics {
+            (data, response) = try await Self.session.data(for: request, delegate: metrics)
+        } else {
+            (data, response) = try await Self.session.data(for: request)
+        }
         return try decodeMe(data: data, response: response)
     }
 

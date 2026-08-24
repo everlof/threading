@@ -115,14 +115,17 @@ enum RemoteRouteWalkBudget {
     static let walkCeiling: TimeInterval = 12
 
     /// The timeout for one read-only attempt.
-    static func timeout(for wave: RemoteRouteWave?, isOnlyCandidate: Bool) -> TimeInterval {
-        guard !isOnlyCandidate else { return RemoteClientDefaults.requestTimeoutSeconds }
+    static func timeout(for wave: RemoteRouteWave?, isOnlyCandidateInRace: Bool) -> TimeInterval {
+        guard !isOnlyCandidateInRace else { return RemoteClientDefaults.requestTimeoutSeconds }
         return wave == .port ? portAttemptTimeout : routeAttemptTimeout
     }
 
     /// The timeout for one attempt at an operation that changes something on the Mac.
-    static func mutationTimeout(for wave: RemoteRouteWave?, isOnlyCandidate: Bool) -> TimeInterval {
-        guard !isOnlyCandidate else { return RemoteClientDefaults.requestTimeoutSeconds }
+    static func mutationTimeout(
+        for wave: RemoteRouteWave?,
+        isOnlyCandidateInWalk: Bool
+    ) -> TimeInterval {
+        guard !isOnlyCandidateInWalk else { return RemoteClientDefaults.requestTimeoutSeconds }
         return wave == .port ? routeAttemptTimeout : mutationAttemptTimeout
     }
 
@@ -132,13 +135,13 @@ enum RemoteRouteWalkBudget {
     }
 }
 
-/// Answers the caller with whichever comes first, the walk or the budget, and lets the walk go on.
+/// Gives one route race a real ownership boundary.
 ///
-/// A walk that has run out of budget has not been proved wrong; it has only stopped being
-/// something to make a person wait for. So the caller is handed the ordinary named transport
-/// failure at the ceiling while the walk keeps its remaining candidates, and a success that lands
-/// afterwards is delivered to `lateSuccess` rather than thrown away. That is what makes the
-/// ceiling safe to set at twelve seconds: nothing is abandoned, only stopped being waited on.
+/// A previous version answered the caller at the ceiling but left the walk alive. The caller then
+/// scheduled recovery, which started a second refresh generation while the first generation still
+/// owned live requests. A late success from the first race was consequently discarded by design.
+/// The ceiling now cancels the old walk before it reports the timeout, so every retry is a fresh,
+/// single owner rather than a competitor to work that can no longer be adopted.
 @MainActor
 enum RemoteRouteWalkDeadline {
 
@@ -147,7 +150,7 @@ enum RemoteRouteWalkDeadline {
     /// isolation on the type — rather than relying on all current callers happening to arrive
     /// from main-actor tasks — makes the exactly-once handoff a compiler-checked invariant.
     @MainActor
-    private final class Arbiter<Value> {
+    private final class Arbiter<Value: Sendable> {
         private enum State {
             case waiting
             case answeredBeforeAnyoneWaited(Result<Value, Error>?)
@@ -192,7 +195,6 @@ enum RemoteRouteWalkDeadline {
     static func run<Value: Sendable>(
         ceiling: TimeInterval,
         walk: @escaping @MainActor () async throws -> Value,
-        lateSuccess: @escaping @MainActor (Value) async -> Void,
         exceeded: @escaping @Sendable () -> Error
     ) async throws -> Value {
         let arbiter = Arbiter<Value>()
@@ -200,19 +202,17 @@ enum RemoteRouteWalkDeadline {
         let budgetTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(ceiling))
             guard !Task.isCancelled else { return }
+            walkTask.cancel()
             arbiter.settle(nil)
         }
         Task { @MainActor in
             let outcome = await walkTask.result
-            let wasAwaited = arbiter.settle(outcome)
+            arbiter.settle(outcome)
             budgetTask.cancel()
-            guard !wasAwaited, case .success(let value) = outcome else { return }
-            await lateSuccess(value)
         }
 
-        // Cancellation still means cancellation. The walk outliving its *budget* is the point;
-        // outliving a refresh that was replaced, or a Mac the user switched away from, would be a
-        // route walk nothing owns.
+        // Cancellation still means cancellation. A refresh that was replaced, or a Mac the user
+        // switched away from, must not leave a route walk behind it.
         let answer = await withTaskCancellationHandler {
             await arbiter.firstAnswer()
         } onCancel: {

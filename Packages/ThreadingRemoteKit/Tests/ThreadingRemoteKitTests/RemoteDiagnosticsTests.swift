@@ -78,6 +78,15 @@ final class RemoteDiagnosticsTests: XCTestCase {
                 .result: "failed",
                 .durationMS: "15017",
                 .timeoutMS: "15000",
+                .networkStage: "tls",
+                .dnsMS: "18",
+                .tcpMS: "41",
+                .tlsMS: "14958",
+                .serverWaitMS: "0",
+                .responseMS: "0",
+                .networkProtocol: "h2",
+                .networkPath: "cellular.expensive",
+                .connectionReused: "false",
                 .attempt: "1",
                 .total: "2",
             ]
@@ -85,6 +94,10 @@ final class RemoteDiagnosticsTests: XCTestCase {
         XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(
             event: .hostRouteEnded,
             fields: [.durationMS: "fifteen-seconds"]
+        )))
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(
+            event: .hostRouteEnded,
+            fields: [.tcpMS: "forty-one"]
         )))
     }
 

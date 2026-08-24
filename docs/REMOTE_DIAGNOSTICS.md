@@ -66,6 +66,15 @@ ended (`door.answered` or `door.unreachable`), the failure code behind it, and i
 attempts it stood in for — one record per door, never one per skipped port, so an early stop reads
 as a decision rather than as a gap in the attempt numbers. Only a response or a definitive
 DNS/routing failure ends a door; a generic request timeout remains scoped to its attempted port.
+Each catalogue request's terminal record also carries URLSession's last completed transaction as
+bounded phase evidence: the furthest `networkStage`, completed DNS/TCP/TLS/server-wait/response
+durations, fixed protocol and cellular/expense/constraint flags, and whether the connection was
+reused. An absent duration is evidence too — `networkStage: tls` without `tlsMS` means the request
+ended during that phase — so the next long handoff can distinguish tunnel/network establishment,
+TLS, and a Mac that accepted a request but delayed its first byte. These fields contain no host,
+address, interface name, URL, or payload. The transport kind travels from the Mac's advertised
+candidate into downstream socket diagnostics; it is not re-guessed from an IP address that could
+equally be LAN, VPN, or Tailscale.
 A live session similarly carries one local trace through `socketConnecting`, `socketConnected` or
 `socketFailed`/`socketEnded`, and `socketReconnectScheduled` records the next attempt and bounded
 backoff delay. The dashboard event socket follows the same contract and has its own 15-second
@@ -121,8 +130,9 @@ iOS also mirrors connectivity lifecycle events to the local unified-log category
 `codes.threading.mobile/diagnostics`, alongside its fallback for ordinary screen and persistence
 failures that may occur before a share-safe remote event exists. Connectivity lines contain only
 event, trace, pseudonymous peer, hashed origin, phase, transport, surface, result, structural
-code/status, duration, configured timeout, reconnect delay and bounded attempt position; fallback
-records contain a fixed surface enum plus a fixed failure code or numeric error domain/code.
+code/status, duration, configured timeout, reconnect delay, bounded network-phase metrics and
+attempt position; fallback records contain a fixed surface enum plus a fixed failure code or
+numeric error domain/code.
 Localized descriptions, hosts, URLs, paths, titles, attachment names and credentials cannot be
 represented by either API.
 

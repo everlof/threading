@@ -1591,7 +1591,7 @@ final class RemoteSessionConnection: ObservableObject {
     private var destinationFields: [RemoteDiagnosticField: String] {
         [
             .session: MobileDiagnostics.pseudonym(session.id, prefix: "session"),
-            .transport: PairedRemoteHost.endpointKind(for: client.link.baseURL).rawValue,
+            .transport: client.endpointKind.rawValue,
             .origin: MobileDiagnostics.originDigest(client.link.baseURL),
         ]
     }

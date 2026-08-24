@@ -15,6 +15,14 @@ final class RemoteHostCandidateTests: XCTestCase {
 
     private static let bearer = String(repeating: "a", count: 43)
 
+    private actor CancellationFlag {
+        private(set) var wasCancelled = false
+
+        func markCancelled() {
+            wasCancelled = true
+        }
+    }
+
     // MARK: - Which doors
 
     /// `lan` and `vpn` are addresses of the Mac on a network the user is already on, so
@@ -266,15 +274,15 @@ final class RemoteHostCandidateTests: XCTestCase {
     /// answers nor refuses is behind the same silence as the address itself.
     func testAGuessedPortIsGivenLessThanARoutesOwnAddress() {
         XCTAssertEqual(
-            RemoteRouteWalkBudget.timeout(for: .route, isOnlyCandidate: false),
+            RemoteRouteWalkBudget.timeout(for: .route, isOnlyCandidateInRace: false),
             RemoteRouteWalkBudget.routeAttemptTimeout
         )
         XCTAssertEqual(
-            RemoteRouteWalkBudget.timeout(for: .address, isOnlyCandidate: false),
+            RemoteRouteWalkBudget.timeout(for: .address, isOnlyCandidateInRace: false),
             RemoteRouteWalkBudget.routeAttemptTimeout
         )
         XCTAssertEqual(
-            RemoteRouteWalkBudget.timeout(for: .port, isOnlyCandidate: false),
+            RemoteRouteWalkBudget.timeout(for: .port, isOnlyCandidateInRace: false),
             RemoteRouteWalkBudget.portAttemptTimeout
         )
         XCTAssertLessThan(
@@ -287,7 +295,7 @@ final class RemoteHostCandidateTests: XCTestCase {
     /// would only turn a slow success into a failure.
     func testASingleCandidateKeepsTheOrdinaryRequestTimeoutAndNoCeiling() {
         XCTAssertEqual(
-            RemoteRouteWalkBudget.timeout(for: .route, isOnlyCandidate: true),
+            RemoteRouteWalkBudget.timeout(for: .route, isOnlyCandidateInRace: true),
             RemoteClient.defaultRequestTimeout
         )
         XCTAssertEqual(
@@ -305,24 +313,23 @@ final class RemoteHostCandidateTests: XCTestCase {
         )
     }
 
-    /// The ceiling answers the caller; it does not abandon the walk. A route that comes back after
-    /// it is adopted exactly as a timely one would have been, which is what makes twelve seconds
-    /// safe to set.
+    /// The ceiling is an ownership boundary. Recovery may start as soon as it answers, so the old
+    /// walk must already have been cancelled and cannot later compete with that new generation.
     @MainActor
-    func testTheCeilingAnswersTheCallerAndALateSuccessStillLands() async {
-        let adopted = expectation(description: "the late success is delivered")
-        var late: String?
+    func testTheCeilingCancelsTheWalkBeforeRecoveryCanReplaceIt() async {
+        let cancellation = CancellationFlag()
 
         do {
             _ = try await RemoteRouteWalkDeadline.run(
                 ceiling: 0.05,
                 walk: {
-                    try await Task.sleep(for: .milliseconds(200))
-                    return "tailnet"
-                },
-                lateSuccess: { value in
-                    late = value
-                    adopted.fulfill()
+                    do {
+                        try await Task.sleep(for: .seconds(30))
+                        return "never"
+                    } catch {
+                        await cancellation.markCancelled()
+                        throw error
+                    }
                 },
                 exceeded: { URLError(.timedOut) }
             )
@@ -331,25 +338,27 @@ final class RemoteHostCandidateTests: XCTestCase {
             XCTAssertEqual((error as? URLError)?.code, .timedOut)
         }
 
-        await fulfillment(of: [adopted], timeout: 2)
-        XCTAssertEqual(late, "tailnet", "nothing was abandoned, only stopped being waited on")
+        for _ in 0..<20 {
+            if await cancellation.wasCancelled { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let wasCancelled = await cancellation.wasCancelled
+        XCTAssertTrue(
+            wasCancelled,
+            "the timed-out generation cannot leave a request alive behind recovery"
+        )
     }
 
-    /// The ordinary case is unchanged: a walk that answers inside its ceiling is the caller's
-    /// answer, and nothing is reported late.
+    /// The ordinary case is unchanged: a walk that answers inside its ceiling is the answer.
     @MainActor
     func testAWalkInsideTheCeilingIsTheCallersAnswer() async throws {
-        var lateCount = 0
-
         let value = try await RemoteRouteWalkDeadline.run(
             ceiling: 5,
             walk: { "lan" },
-            lateSuccess: { _ in lateCount += 1 },
             exceeded: { URLError(.timedOut) }
         )
 
         XCTAssertEqual(value, "lan")
-        XCTAssertEqual(lateCount, 0)
     }
 
     /// The failure the caller sees at the ceiling is the walk's ordinary named transport failure,
@@ -363,7 +372,6 @@ final class RemoteHostCandidateTests: XCTestCase {
                     try await Task.sleep(for: .seconds(30))
                     return "never"
                 },
-                lateSuccess: { _ in },
                 exceeded: {
                     RemoteConnectionAttempt(
                         underlying: URLError(.timedOut),
@@ -443,7 +451,7 @@ final class RemoteHostCandidateTests: XCTestCase {
         let after = await replay(
             connectionCandidates(host),
             timeout: {
-                RemoteRouteWalkBudget.timeout(for: $0.wave, isOnlyCandidate: false)
+                RemoteRouteWalkBudget.timeout(for: $0.wave, isOnlyCandidateInRace: false)
             }
         )
 
@@ -481,7 +489,10 @@ final class RemoteHostCandidateTests: XCTestCase {
                     )
                 },
                 timeout: {
-                    RemoteRouteWalkBudget.timeout(for: $0.wave, isOnlyCandidate: lane.count == 1)
+                    RemoteRouteWalkBudget.timeout(
+                        for: $0.wave,
+                        isOnlyCandidateInRace: host.candidates.count == 1
+                    )
                 }
             )
             guard outcome.winner != nil else { continue }
@@ -582,6 +593,11 @@ final class RemoteHostCandidateTests: XCTestCase {
             PairedRemoteHost.endpointKind(for: vpnLink.baseURL),
             RemoteHostEndpointKind.lan,
             "the address alone cannot tell a VPN tunnel from the Wi-Fi it looks like"
+        )
+        XCTAssertEqual(
+            RemoteClient(link: vpnLink, endpointKind: .vpn).endpointKind,
+            .vpn,
+            "downstream socket diagnostics keep the advertised route instead of guessing again"
         )
     }
 

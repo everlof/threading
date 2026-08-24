@@ -178,6 +178,68 @@ final class MobileConnectionDiagnosticsTests: XCTestCase {
         XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(request))
     }
 
+    // MARK: - Request phase evidence
+
+    func testARequestThatStopsDuringTLSNamesTheUnfinishedPhase() {
+        let base = Date(timeIntervalSince1970: 1_000)
+        let metrics = RemoteRequestMetrics(
+            domainLookupStart: nil,
+            domainLookupEnd: nil,
+            connectStart: base,
+            connectEnd: nil,
+            secureConnectionStart: base.addingTimeInterval(0.120),
+            secureConnectionEnd: nil,
+            requestStart: nil,
+            requestEnd: nil,
+            responseStart: nil,
+            responseEnd: nil,
+            networkProtocolName: nil,
+            isCellular: true,
+            isExpensive: true,
+            isConstrained: false,
+            isMultipath: false,
+            isReusedConnection: false
+        )
+
+        XCTAssertEqual(metrics.stage, "tls")
+        XCTAssertEqual(metrics.tcpMS, 120)
+        XCTAssertNil(metrics.tlsMS, "no completed duration is invented for an unfinished phase")
+        XCTAssertEqual(metrics.networkPath, "cellular.expensive")
+        XCTAssertEqual(metrics.diagnosticFields[.connectionReused], "false")
+    }
+
+    func testACompletedRequestSeparatesDNSConnectTLSAndTheMacsWait() {
+        let base = Date(timeIntervalSince1970: 1_000)
+        let metrics = RemoteRequestMetrics(
+            domainLookupStart: base,
+            domainLookupEnd: base.addingTimeInterval(0.020),
+            connectStart: base.addingTimeInterval(0.020),
+            connectEnd: base.addingTimeInterval(0.100),
+            secureConnectionStart: base.addingTimeInterval(0.040),
+            secureConnectionEnd: base.addingTimeInterval(0.100),
+            requestStart: base.addingTimeInterval(0.100),
+            requestEnd: base.addingTimeInterval(0.110),
+            responseStart: base.addingTimeInterval(0.310),
+            responseEnd: base.addingTimeInterval(0.360),
+            networkProtocolName: "h2",
+            isCellular: false,
+            isExpensive: false,
+            isConstrained: false,
+            isMultipath: false,
+            isReusedConnection: true
+        )
+
+        XCTAssertEqual(metrics.stage, "response")
+        XCTAssertEqual(metrics.dnsMS, 20)
+        XCTAssertEqual(metrics.tcpMS, 20)
+        XCTAssertEqual(metrics.tlsMS, 60)
+        XCTAssertEqual(metrics.serverWaitMS, 200)
+        XCTAssertEqual(metrics.responseMS, 50)
+        XCTAssertEqual(metrics.networkProtocol, "h2")
+        XCTAssertEqual(metrics.networkPath, "noncellular.ordinary")
+        XCTAssertEqual(metrics.diagnosticFields[.connectionReused], "true")
+    }
+
     // MARK: - First-success route racing
 
     func testTheFirstSuccessfulRouteWinsAndCancelsTheLoser() async throws {
