@@ -855,7 +855,7 @@ final class SessionAttachmentComparisonTests: XCTestCase {
             try writePNG(named: "timeline.png", color: .systemTeal),
             try writePNG(named: "shots/contact.png", color: .systemOrange),
             try writePNG(named: "screenshot.png", color: .systemPurple)
-        ])
+        ], origins: [.agent, .user, .agent], width: 548)
         let table = try table(of: pane)
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
 
@@ -888,6 +888,82 @@ final class SessionAttachmentComparisonTests: XCTestCase {
         print("Rendered the attachments chronology to \(directory.path)")
     }
 
+    /// The count and origin filter are one sentence. Centring their frames does not align their
+    /// text because caption and control fonts have different line metrics; they share a baseline.
+    func testTheAttachmentCountSharesTheFiltersTextBaseline() throws {
+        let pane = try laidOutPane(
+            showing: [
+                try writePNG(named: "agent.png"),
+                try writePNG(named: "user.png")
+            ],
+            origins: [.agent, .user]
+        )
+        let filter = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ThemedSegmentedControl }.first
+        )
+        let count = try XCTUnwrap(
+            descendants(of: pane.view)
+                .compactMap { $0 as? NSTextField }
+                .first { $0.stringValue.hasPrefix("ATTACHMENTS") }
+        )
+
+        XCTAssertFalse(filter.isHidden, "the mixed-origin fixture did not show the filter")
+        XCTAssertEqual(
+            count.frame.maxY - count.firstBaselineOffsetFromTop,
+            filter.frame.maxY - filter.firstBaselineOffsetFromTop,
+            accuracy: 0.5,
+            "count=\(count.frame) filter=\(filter.frame) rowFlipped=\(count.superview?.isFlipped == true)"
+        )
+    }
+
+    /// A one-origin session offers no filter. Removing it also removes its taller control line;
+    /// the caption becomes the header's whole height instead of leaving an empty control band.
+    func testTheCountOwnsTheHeaderHeightWhenTheFilterIsHidden() throws {
+        let pane = try laidOutPane(showing: [try writePNG(named: "agent.png")])
+        let filter = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ThemedSegmentedControl }.first
+        )
+        let count = try XCTUnwrap(
+            descendants(of: pane.view)
+                .compactMap { $0 as? NSTextField }
+                .first { $0.stringValue.hasPrefix("ATTACHMENTS") }
+        )
+        let row = try XCTUnwrap(count.superview)
+
+        XCTAssertTrue(filter.isHidden)
+        XCTAssertEqual(row.bounds.height, count.intrinsicContentSize.height, accuracy: 0.5)
+        XCTAssertEqual(count.frame.height, row.bounds.height, accuracy: 0.5)
+    }
+
+    /// At the width of the supplied product pane all three filter choices fit in full. The run
+    /// may truncate in a deliberately narrow pane, but a retained compressed first pass must not
+    /// survive after the header grows to its shipping width.
+    func testTheFilterTitlesFitAtProductPaneWidth() throws {
+        let pane = try laidOutPane(
+            showing: [try writePNG(named: "agent.png"), try writePNG(named: "user.png")],
+            origins: [.agent, .user],
+            width: 548
+        )
+        let filter = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ThemedSegmentedControl }.first
+        )
+        let titles = descendants(of: filter)
+            .compactMap { $0 as? NSTextField }
+            .filter { ["All", "Agent", "You"].contains($0.stringValue) }
+
+        XCTAssertEqual(titles.count, 3)
+        for title in titles {
+            let visibleWidth = title.frame.intersection(title.superview?.bounds ?? .zero).width
+            XCTAssertGreaterThanOrEqual(
+                visibleWidth,
+                title.intrinsicContentSize.width,
+                "\(title.stringValue) visible=\(visibleWidth) frame=\(title.frame) "
+                    + "intrinsic=\(title.intrinsicContentSize) "
+                    + "segment=\(title.superview?.superview?.frame ?? .zero) filter=\(filter.frame)"
+            )
+        }
+    }
+
     private var renderDirectory: URL {
         if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
             return URL(fileURLWithPath: override)
@@ -902,10 +978,26 @@ final class SessionAttachmentComparisonTests: XCTestCase {
     /// with one `referencedAt` — the tie the ordering rule has to survive.
     private func laidOutPane(
         showing urls: [URL],
-        asOneBatch: Bool = false
+        asOneBatch: Bool = false,
+        origins: [SessionAttachment.Origin]? = nil,
+        width: CGFloat = 360
     ) throws -> SessionAttachmentsViewController {
         let sessionID = SessionID()
-        if asOneBatch {
+        if let origins {
+            XCTAssertFalse(asOneBatch, "a fixture cannot be one scanned batch and declared")
+            XCTAssertEqual(origins.count, urls.count, "every fixture attachment needs an origin")
+            for (url, origin) in zip(urls, origins) {
+                XCTAssertNotNil(
+                    SessionAttachmentStore.shared.record(
+                        declared: url,
+                        sessionID: sessionID,
+                        projectRoot: root,
+                        origin: origin
+                    ),
+                    "a fixture attachment was refused: \(url.lastPathComponent)"
+                )
+            }
+        } else if asOneBatch {
             XCTAssertEqual(
                 SessionAttachmentStore.shared.record(
                     urls: urls, sessionID: sessionID, projectRoot: root
@@ -929,7 +1021,7 @@ final class SessionAttachmentComparisonTests: XCTestCase {
         // would write a row into the developer's own sidebar, since this bundle is hosted in the
         // app and `ProjectStore` has no scratch mode.
         controller.projectRootProvider = { [root] in root }
-        controller.view.frame = NSRect(x: 0, y: 0, width: 360, height: 700)
+        controller.view.frame = NSRect(x: 0, y: 0, width: width, height: 700)
         controller.view.autoresizingMask = []
         controller.view.layoutSubtreeIfNeeded()
         controller.view.layoutSubtreeIfNeeded()

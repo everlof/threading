@@ -18,6 +18,75 @@ struct SessionAttachmentPreviewTiming {
     var totalNanoseconds: UInt64 = 0
 }
 
+/// The attachment count and its filter are one text line with two font sizes.
+///
+/// `NSStackView` owns hidden-view detachment well, but on macOS it stretches a native label and a
+/// custom baseline-bearing arranged view to the same cross-axis frame even when asked for first-
+/// baseline alignment. That puts the caption's words above the segment titles. This structural
+/// row keeps horizontal stack semantics while constraining the two views from their published
+/// text baselines, and collapses to the caption's own height when the filter has no choice to offer.
+private final class AttachmentHeaderRow: NSView {
+    private let count: NSTextField
+    private let filter: ThemedSegmentedControl
+    private var filterShownConstraints: [NSLayoutConstraint] = []
+    private var filterHiddenConstraints: [NSLayoutConstraint] = []
+
+    init(count: NSTextField, filter: ThemedSegmentedControl, spacing: CGFloat) {
+        self.count = count
+        self.filter = filter
+        super.init(frame: .zero)
+
+        count.translatesAutoresizingMaskIntoConstraints = false
+        filter.translatesAutoresizingMaskIntoConstraints = false
+        count.setContentHuggingPriority(.required, for: .horizontal)
+        count.setContentCompressionResistancePriority(.required, for: .horizontal)
+        count.setContentHuggingPriority(.required, for: .vertical)
+        addSubview(count)
+        addSubview(filter)
+        setContentHuggingPriority(.required, for: .vertical)
+
+        count.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
+        filterShownConstraints = [
+            count.trailingAnchor.constraint(equalTo: filter.leadingAnchor, constant: -spacing),
+            filter.trailingAnchor.constraint(equalTo: trailingAnchor),
+            filter.topAnchor.constraint(equalTo: topAnchor),
+            filter.bottomAnchor.constraint(equalTo: bottomAnchor),
+            count.firstBaselineAnchor.constraint(equalTo: filter.firstBaselineAnchor),
+            count.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+            count.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
+        ]
+        filterHiddenConstraints = [
+            count.trailingAnchor.constraint(equalTo: trailingAnchor),
+            count.topAnchor.constraint(equalTo: topAnchor),
+            count.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ]
+        NSLayoutConstraint.activate(filterShownConstraints)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(
+            width: NSView.noIntrinsicMetric,
+            height: filter.isHidden
+                ? count.intrinsicContentSize.height
+                : filter.intrinsicContentSize.height
+        )
+    }
+
+    func setFilterHidden(_ hidden: Bool) {
+        guard filter.isHidden != hidden else { return }
+        NSLayoutConstraint.deactivate(hidden ? filterShownConstraints : filterHiddenConstraints)
+        filter.isHidden = hidden
+        NSLayoutConstraint.activate(hidden ? filterHiddenConstraints : filterShownConstraints)
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+    }
+}
+
 /// A session's inspectable deliverables: two panes, the chronology above its preview, and a
 /// footer naming the selected file with the one action the user last took beside it.
 ///
@@ -138,22 +207,14 @@ final class SessionAttachmentsViewController: NSViewController {
         control.translatesAutoresizingMaskIntoConstraints = false
         return control
     }()
-    /// The count and the filter as one line: two halves of the same sentence, and a stack so a
-    /// hidden filter takes its height with it rather than leaving a band of nothing behind.
-    private lazy var headerRow: NSStackView = {
-        let row = NSStackView(views: [countLabel, filterControl])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.distribution = .fill
-        row.spacing = Design.Spacing.small
-        // The label absorbs the slack, which is what puts the filter on the trailing edge.
-        countLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        // One line *means* one line. The row is pinned above (the pane's top) and below (the
-        // list), and a stack left free to grow was where a tall pane's slack silently went:
-        // the layout was ambiguous, the solver gave this band hundreds of points, and the
-        // centred count label floated mid-pane with the list a screen below it — no constraint
-        // broken, nothing logged, just a caption adrift.
-        row.setHuggingPriority(.required, for: .vertical)
+    /// The count and the filter as one line. A dedicated structural row owns the baseline because
+    /// these two font sizes cannot be aligned by centring or by `NSStackView`'s custom-view path.
+    private lazy var headerRow: AttachmentHeaderRow = {
+        let row = AttachmentHeaderRow(
+            count: countLabel,
+            filter: filterControl,
+            spacing: Design.Spacing.small
+        )
         row.translatesAutoresizingMaskIntoConstraints = false
         return row
     }()
@@ -841,7 +902,7 @@ final class SessionAttachmentsViewController: NSViewController {
     /// files in one direction only.
     private func updateFilterControl() {
         let origins = Set(allAttachments.map(\.origin))
-        filterControl.isHidden = origins.count < 2
+        headerRow.setFilterHidden(origins.count < 2)
         if filterControl.isHidden, filter != .all {
             filter = .all
             attachments = allAttachments

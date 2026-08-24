@@ -20,7 +20,7 @@ import AppKit
 /// An unselected segment under the pointer answers in *ink* instead of taking a third fill step,
 /// because the design system has two control fills and inventing a third here is how a scale
 /// stops being a scale.
-final class ThemedSegmentedControl: NSView {
+final class ThemedSegmentedControl: NSView, TextBaselineProviding {
 
     // MARK: - Properties
 
@@ -98,6 +98,20 @@ final class ThemedSegmentedControl: NSView {
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: controlHeight)
+    }
+
+    /// Where the segment titles' shared baseline sits. The run's children centre one control-
+    /// font line in the track, so its public baseline has to state that same geometry; `NSView`'s
+    /// default answer is the frame edge and makes any correctly baseline-aligned sibling wrong.
+    override var firstBaselineOffsetFromTop: CGFloat {
+        let font = Design.Typography.control()
+        return (intrinsicContentSize.height - Design.Typography.lineHeight(of: font)) / 2
+            + NSLayoutManager().defaultBaselineOffset(for: font)
+    }
+
+    /// Every segment has one title line, so its last baseline is the same line from the far edge.
+    override var lastBaselineOffsetFromBottom: CGFloat {
+        intrinsicContentSize.height - firstBaselineOffsetFromTop
     }
 
     // MARK: - Initialization
@@ -257,6 +271,7 @@ private final class SegmentView: ThemedControl {
     private let titleLabel = NSTextField(labelWithString: "")
     private let markLabel = NSTextField(labelWithString: "")
     private var focusOrigin = KeyboardFocusOrigin()
+    private var titleWidthFloor: NSLayoutConstraint?
 
     /// A pointer press keeps this segment as first responder so the next arrow key can continue
     /// the choice, but the accent ring is keyboard guidance rather than a second selection mark.
@@ -275,8 +290,19 @@ private final class SegmentView: ThemedControl {
         // The segment is the accessibility element; its labels would otherwise be announced as
         // second, unrelated objects inside it.
         titleLabel.setAccessibilityElement(false)
-        // A title yields to the segment it stands in rather than pushing its own run wider.
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // A title yields to the segment's required margins when the run is genuinely narrow, but
+        // not to a fitting pass rounding a fractional intrinsic width down by half a point — that
+        // made "Agent" ellipsize inside a 140-point segment. Required-minus-one preserves both.
+        titleLabel.setContentCompressionResistancePriority(.required - 1, for: .horizontal)
+        // `NSTextField` can report a half-point intrinsic width that `NSStackView` rounds down
+        // before clipping the field's alignment overhang. Keep the visible slot on the next
+        // whole point; priority 999 still yields to the segment's required margins when narrow.
+        let titleWidthFloor = titleLabel.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: ceil(titleLabel.intrinsicContentSize.width)
+        )
+        titleWidthFloor.priority = .required - 1
+        titleWidthFloor.isActive = true
+        self.titleWidthFloor = titleWidthFloor
         markLabel.applyFont(.control)
         markLabel.alignment = .center
         markLabel.setAccessibilityElement(false)
@@ -327,6 +353,14 @@ private final class SegmentView: ThemedControl {
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: Design.Size.chipHeight)
+    }
+
+    override func layout() {
+        let ceiledWidth = ceil(titleLabel.intrinsicContentSize.width)
+        if titleWidthFloor?.constant != ceiledWidth {
+            titleWidthFloor?.constant = ceiledWidth
+        }
+        super.layout()
     }
 
     // MARK: - Drawing

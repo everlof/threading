@@ -310,6 +310,25 @@ final class ThemedControlTests: HostedStoreTestCase {
         return (control, [])
     }
 
+    /// A segmented run can sit beside loose text, so its public baseline has to be the title's
+    /// real baseline rather than `NSView`'s default frame edge. Otherwise a host can baseline-
+    /// constrain the two perfectly and still draw the caption several points above the choices.
+    func testTheRunExposesItsTitlesBaseline() throws {
+        let (control, _) = makeSegmentedControl()
+        let title = try XCTUnwrap(
+            descendants(in: control)
+                .compactMap { $0 as? NSTextField }
+                .first { $0.stringValue == "All" }
+        )
+        let titleFrame = control.convert(title.bounds, from: title)
+
+        XCTAssertEqual(
+            control.bounds.maxY - control.firstBaselineOffsetFromTop,
+            titleFrame.maxY - title.firstBaselineOffsetFromTop,
+            accuracy: 0.5
+        )
+    }
+
     func testASegmentSelectsOnClickAndReportsItOnce() throws {
         let (control, _) = makeSegmentedControl()
         var reported: [Int] = []
