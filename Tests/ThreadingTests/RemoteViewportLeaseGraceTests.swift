@@ -351,6 +351,89 @@ final class RemoteViewportLeaseGraceTests: HostedStoreTestCase {
         ))
     }
 
+    /// A selected Mac terminal is an active renderer, not an unattended fallback. If it was
+    /// already looking when the phone vanished, retaining the phone grid serves nobody.
+    func testDisconnectDoesNotHoldGraceWhileTheMacIsAlreadyViewingTheChat() throws {
+        let fixture = try makeFixture(grace: .seconds(30))
+        try attachedWatcher(to: fixture)
+        fixture.registry.localSessionVisibilityChanged(fixture.sessionID)
+
+        let phone = authenticated(deviceID: "phone-mac-visible", authorization: Self.ownerInteract)
+        XCTAssertTrue(fixture.registry.attach(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract
+        ))
+        fixture.registry.requestViewport(
+            from: phone,
+            sessionID: fixture.sessionID,
+            cols: 56,
+            rows: 18
+        )
+
+        fixture.registry.detach(phone)
+
+        XCTAssertEqual(fixture.capability.viewportCalls, [
+            .init(identity: .agentSession(fixture.sessionID), grid: .init(cols: 56, rows: 18)),
+            .init(identity: .agentSession(fixture.sessionID), grid: nil),
+        ])
+    }
+
+    /// The opposite ordering matters too: the phone can vanish while another chat is selected,
+    /// then the Mac opens this one before the reconnect window ends.
+    func testOpeningTheChatOnMacEndsAnAlreadyHeldReconnectGrace() throws {
+        let fixture = try makeFixture(grace: .seconds(30))
+        try attachedWatcher(to: fixture)
+
+        let phone = authenticated(deviceID: "phone-before-mac", authorization: Self.ownerInteract)
+        XCTAssertTrue(fixture.registry.attach(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract
+        ))
+        fixture.registry.requestViewport(
+            from: phone,
+            sessionID: fixture.sessionID,
+            cols: 52,
+            rows: 17
+        )
+        fixture.registry.detach(phone)
+        XCTAssertEqual(fixture.capability.viewportCalls.count, 1)
+
+        fixture.registry.localSessionVisibilityChanged(fixture.sessionID)
+
+        XCTAssertEqual(fixture.capability.viewportCalls.last, .init(
+            identity: .agentSession(fixture.sessionID),
+            grid: nil
+        ))
+    }
+
+    /// Mac selection cancels only the 120-second reconnect hold. A phone that is still on the
+    /// terminal screen remains a real participant in the shared-grid intersection.
+    func testOpeningTheChatOnMacDoesNotEvictAnActivePhoneRenderer() throws {
+        let fixture = try makeFixture(grace: .seconds(30))
+        try attachedWatcher(to: fixture)
+
+        let phone = authenticated(deviceID: "phone-still-active", authorization: Self.ownerInteract)
+        XCTAssertTrue(fixture.registry.attach(
+            phone,
+            to: fixture.sessionID,
+            authorization: Self.ownerInteract
+        ))
+        fixture.registry.requestViewport(
+            from: phone,
+            sessionID: fixture.sessionID,
+            cols: 60,
+            rows: 20
+        )
+
+        fixture.registry.localSessionVisibilityChanged(fixture.sessionID)
+
+        XCTAssertEqual(fixture.capability.viewportCalls, [
+            .init(identity: .agentSession(fixture.sessionID), grid: .init(cols: 60, rows: 20)),
+        ])
+    }
+
     // MARK: - What a held lease is not
 
     /// Discard and archival are authorization changes. The timer is not a place where one of

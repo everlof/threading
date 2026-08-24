@@ -366,7 +366,10 @@ at phone size for the default 120-second grace whenever another watcher or the e
 mirror kept the session alive. The immediate path also removes a held lease for the same device,
 because socket teardown and the already-sent release frame can reach the main actor in either
 order. `RemoteViewportLeaseGraceTests` pins transient disconnect, deliberate release, parking and
-that close/release race separately.
+that close/release race separately. The grace also exists only while no local Mac renderer is
+looking at that chat: a disconnect while the chat is selected restores immediately, and selecting
+it after a hold began cancels the held grids. A phone that is still actively rendering remains in
+the intersection; Mac visibility cancels the reconnect hold, not a live viewer.
 
 The Mac's authoritative desktop grid is renderer input during attach, never a phone viewport
 lease. It may legitimately exceed the phone protocol's 240-column ceiling. SwiftTerm's

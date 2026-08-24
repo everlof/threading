@@ -48,6 +48,9 @@ final class RemoteSessionMirrorRegistry {
     /// relaunch and a test can hand this registry milliseconds — or zero, which is the
     /// release-immediately behaviour the grace replaced.
     private let viewportLeaseGrace: @MainActor () -> Duration
+    /// The Mac terminal selected in the local pane. It does not displace a phone that is still
+    /// actively rendering, but it makes a departed phone's reconnect hold ineligible.
+    private var locallyVisibleSessionID: SessionID?
 
     init(
         terminalApplication: (any RemoteTerminalApplicationCapability)? = nil,
@@ -1493,6 +1496,23 @@ final class RemoteSessionMirrorRegistry {
         )
     }
 
+    /// Reconciles the viewport grace with the local renderer's ownership transition.
+    ///
+    /// The reconnect window exists for a phone whose transport disappeared while nobody local
+    /// is looking at the chat. Selecting that chat on the Mac is an explicit demand for the
+    /// desktop grid, so any departed devices stop constraining it immediately. Active phone
+    /// leases remain: they still represent renderers on screen and continue to use the shared
+    /// intersection rule.
+    func localSessionVisibilityChanged(_ sessionID: SessionID?) {
+        locallyVisibleSessionID = sessionID
+        guard let sessionID,
+              var leases = mirrors[sessionID]?.viewportLeases,
+              !leases.held.isEmpty else { return }
+        leases.dropHeld()
+        mirrors[sessionID]?.viewportLeases = leases
+        applyViewport(for: sessionID)
+    }
+
     /// - Parameter attachmentPaths: staged uploads the server already claimed for this exact
     ///   session and device. They are paths into the host's own staging directory, never
     ///   anything a client named: the claim happened before this call and cannot be repeated.
@@ -2746,6 +2766,12 @@ final class RemoteSessionMirrorRegistry {
             applyViewport(for: target)
         }
         guard release == .reconnectGrace, let request else { return }
+        if case .session(let sessionID) = target,
+           locallyVisibleSessionID == sessionID {
+            // The local renderer is already looking at this chat. There is no unattended
+            // interval for a reconnect grace to protect, so its desktop grid wins now.
+            return
+        }
         let grace = viewportLeaseGrace()
         guard grace > .zero,
               let peer = connection.authenticatedPeer,

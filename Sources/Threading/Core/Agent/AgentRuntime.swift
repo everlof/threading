@@ -136,6 +136,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     private let readReceipts: SessionReadReceiptStore
     private let remotelyViewingParticipantIDs: @MainActor (SessionID) -> Set<String>
     private let ownerAlertWasAcknowledged: @MainActor (SessionID) -> Void
+    private let localSessionVisibilityChanged: @MainActor (SessionID?) -> Void
 
     init(
         currentSessionProjection: CurrentSessionProjection,
@@ -145,12 +146,16 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         },
         ownerAlertWasAcknowledged: @escaping @MainActor (SessionID) -> Void = {
             AttentionAlertCenter.shared.sessionWasViewed($0)
+        },
+        localSessionVisibilityChanged: @escaping @MainActor (SessionID?) -> Void = {
+            RemoteSessionMirrorRegistry.shared.localSessionVisibilityChanged($0)
         }
     ) {
         self.currentSessionProjection = currentSessionProjection
         self.readReceipts = readReceipts
         self.remotelyViewingParticipantIDs = remotelyViewingParticipantIDs
         self.ownerAlertWasAcknowledged = ownerAlertWasAcknowledged
+        self.localSessionVisibilityChanged = localSessionVisibilityChanged
     }
 
     // MARK: - Properties
@@ -703,6 +708,10 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// Marks which session is on screen, so only the others flag finished work.
     func setVisibleSession(_ sessionID: SessionID?) {
         visibleSessionID = sessionID
+        // Selection is a viewport owner as well as attention state. A disconnected phone may
+        // keep its grid only while no local renderer is looking at this session; publishing the
+        // transition here also catches a Mac opening a chat after the phone's grace began.
+        localSessionVisibilityChanged(sessionID)
         for (id, controller) in controllers {
             controller.isVisible = (id == sessionID)
         }

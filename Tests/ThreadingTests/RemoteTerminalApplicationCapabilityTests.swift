@@ -350,6 +350,22 @@ final class RemoteTerminalApplicationCapabilityTests: XCTestCase {
 
 @MainActor
 final class AgentTerminalRuntimeCapabilityTests: XCTestCase {
+    func testRuntimePublishesTheLocalViewportOwnerWhenMacSelectionChanges() {
+        let sessionID = SessionID()
+        var changes: [SessionID?] = []
+        let runtime = AgentRuntime(
+            currentSessionProjection: CurrentSessionProjection { _ in nil },
+            localSessionVisibilityChanged: { changes.append($0) }
+        )
+
+        runtime.setVisibleSession(sessionID)
+        runtime.setVisibleSession(nil)
+
+        XCTAssertEqual(changes.count, 2)
+        XCTAssertEqual(changes[0], sessionID)
+        XCTAssertNil(changes[1])
+    }
+
     func testRuntimeProjectsNarrowCapabilitiesAndRefusesStoppedInput() throws {
         let liveID = SessionID()
         let stoppedID = SessionID()

@@ -440,6 +440,10 @@ Three properties make it safe:
 - **A mirror that is being torn down cannot hold a grid**, because nothing would be left to
   expire it. The last subscriber leaving a mirror that does not survive puts the terminal back
   to its Mac frame before the mirror goes.
+- **A Mac renderer looking at the chat cancels held grids.** A disconnect while that chat is
+  selected restores the desktop grid immediately, and selecting it after a grace began ends the
+  hold then. This affects departed devices only; an iPhone that is still actively rendering
+  remains a participant in the shared-grid intersection.
 
 Agent sessions and standalone project terminals share one implementation of all of this.
 `Remote viewport lease held` and `Remote viewport lease expired` are written to the event log
