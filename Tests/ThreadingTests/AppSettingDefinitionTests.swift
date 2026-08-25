@@ -191,6 +191,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "ptyHostEnabled",
                 valueType: .boolean
             ),
+            .prependsCommandLineToolsToPATH: .init(
+                key: "prependsCommandLineToolsToPATH",
+                valueType: .boolean
+            ),
             .workspaceNavigatorSelection: .init(
                 key: "workspaceNavigatorSelection",
                 valueType: .data
@@ -403,7 +407,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 79)
+        XCTAssertEqual(authoredRows.count, 81)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -475,13 +479,15 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Files & Folders", "Notifications", "Accessibility", "Screen Recording",
             "Live usage from your Claude login"
         ])
-        // The background host's two rows are last on the page and are ordered after Start Over
+        // The background host's rows are last on the page and are ordered after Start Over
         // deliberately: the page reads as "where things are, how to start over, and what is still
-        // running when Threading is not".
+        // running when Threading is not". The two command-line-tool rows close it out, because
+        // reaching the daemon from a terminal is the last thing in that sentence.
         XCTAssertEqual(actual["advanced"], [
             "Allow paired-iPhone checkups", "Settings", "Projects, sessions and caches",
             "First-launch walkthrough", "Run at next launch", "Reset settings",
-            "Reset everything", "Background host", "Turn off the background host"
+            "Reset everything", "Background host", "Turn off the background host",
+            "Command line tool", "Tools in Threading's terminals"
         ])
     }
 

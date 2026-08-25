@@ -648,6 +648,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // is attempted and never required: every failure leaves sessions on the in-process PTY.
         PTYHostRegistrationCoordinator.shared.start(settings: environment.settings)
 
+        // The shim directory that makes `~/.local/bin/threading-ptyd` survive a bundle move.
+        // Every launch, because the bundle is exactly what moves: the autoinstall hook replaces
+        // `/Applications/Threading.app` wholesale and a Debug build runs from DerivedData, so a
+        // link written yesterday names a path that may no longer hold a helper. Beside the
+        // registration above because it publishes the same daemon, and below the recovery guard
+        // for the same reason: a launch that came up because the last one did not should change
+        // as little as possible about the machine. Off-main and idempotent — an unchanged
+        // directory is one `readlink` per tool and no writes.
+        Task.detached(priority: .utility) {
+            ThreadingCommandLineTools.refreshAtLaunch()
+        }
+
         // One sweep of the runtime inventory, at most once a day and re-checked while the app
         // keeps running. Process and network work stay off-main; a found result waits for a
         // visible, active main window before its toast clock starts.

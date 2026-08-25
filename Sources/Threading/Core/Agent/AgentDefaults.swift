@@ -257,6 +257,42 @@ enum AgentEnvironment {
             environment.removeValue(forKey: key)
         }
 
+        return applyingCommandLineTools(to: environment)
+    }
+
+    /// Puts Threading's command-line tools on `PATH`, when the user has asked for it.
+    ///
+    /// **One place, both paths.** `TerminalSession.buildEnvironment()` composes a PTY child's
+    /// environment and this composes a headless one; they differ in the terminal variables and
+    /// agree about everything else, so a rule that belongs to *what Threading launches* rather
+    /// than to how it is drawn lives here and is called from both. Two copies would be two
+    /// places for the opt-in to be half-applied.
+    ///
+    /// **Prepended, never substituted.** The entry goes in front of whatever `PATH` already
+    /// says and nothing is removed, so `threading-ptyd` resolves to Threading's shim while every
+    /// other command the user has resolves exactly as before. A login shell's `path_helper` and
+    /// the user's own profile may *reorder* what they inherit — `/etc/paths` entries are
+    /// commonly moved to the front — but neither drops an entry, so the directory stays
+    /// reachable even when it stops being first.
+    ///
+    /// Refused when `PATH` is absent or empty rather than invented: a child that inherits no
+    /// `PATH` gets `execvp`'s own default, and replacing that with a directory holding two
+    /// symlinks would break every command in the session.
+    static func applyingCommandLineTools(
+        to environment: [String: String],
+        directory: String = ThreadingCommandLineTools.directory.path,
+        isEnabled: Bool = AppSettings.prependsCommandLineToolsToPATH
+    ) -> [String: String] {
+        guard isEnabled, !directory.isEmpty else { return environment }
+        guard let existing = environment[EnvironmentKeys.path], !existing.isEmpty else {
+            return environment
+        }
+        // Already leading: a second pass over the same value must not grow it.
+        guard existing != directory, !existing.hasPrefix("\(directory):") else {
+            return environment
+        }
+        var environment = environment
+        environment[EnvironmentKeys.path] = "\(directory):\(existing)"
         return environment
     }
 }

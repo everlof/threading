@@ -892,6 +892,30 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Command Line Tools
+
+    /// Whether every shell and agent Threading launches gets its command-line tools on `PATH`.
+    ///
+    /// Off by default: this changes the `PATH` of every child the app starts, which is not
+    /// something to do to somebody's terminal unasked. On, the shim directory is *prepended* to
+    /// whatever `PATH` already says, so `threading-ptyd` resolves inside Threading's own
+    /// terminals and the shell drawer without a profile edit, and nothing else moves. The
+    /// composition lives in `AgentEnvironment.applyingCommandLineTools`, which both the PTY and
+    /// the headless launch paths go through.
+    var prependsCommandLineToolsToPATH: Bool {
+        get { Self.prependsCommandLineToolsToPATH }
+        set {
+            AppSettingDefinitions.prependsCommandLineToolsToPATH.write(newValue, to: defaults)
+        }
+    }
+
+    /// Read where a child's environment is composed, which is not always the main actor —
+    /// `AgentEnvironment.launchEnvironment()` runs wherever a headless probe runs.
+    nonisolated static var prependsCommandLineToolsToPATH: Bool {
+        _ = registerStandardDefaults
+        return AppSettingDefinitions.prependsCommandLineToolsToPATH.read(from: .standard) ?? false
+    }
+
     // MARK: - Agent Hooks
 
     /// Whether Claude sessions report turn boundaries and subagent lifecycle back to Threading.

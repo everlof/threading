@@ -4710,6 +4710,45 @@ General ▸ Login Items**, which is the one case with a button that takes you th
 If it is still holding sessions it stays registered and they keep running, because removing it
 would end them; the next launch that finds it idle removes it.
 
+#### Running the tools from a terminal
+
+Threading ships `threading-ptyd`, the background host, as a command you can run yourself.
+
+`threading-ptyd status` says whether the helper is listening, which build answered, how many
+sessions it holds and whether macOS has been told to start it, and it prints the path of the
+helper's own log. `threading-ptyd sessions` prints one line per held session: a short id, whether
+it is a terminal or a conversation, its process id, how long it has been running, its window size,
+whether anything is watching it, and what it is running. Add `--json` to read the same answer from
+a script. `threading-ptyd journal` prints the last 50 lines of the log, or however many you ask
+for. `threading-ptyd stop <id>` ends one session, named by the first few characters of its id, and
+refuses rather than guessing when those characters reach more than one. `threading-ptyd help`
+lists all of it.
+
+It answers 0 when the helper replied, 1 when nothing did, and 64 when the command line was wrong.
+There is no follow mode: the log is an ordinary file, and `status` prints its path so you can
+`tail -f` it. It cannot start a session, because a session belongs to a conversation Threading
+owns and one started from a shell would be one no window could ever show. It never stands the
+helper down either; that is Threading's own upgrade step, and doing it by hand would interrupt
+agents that are still working.
+
+**Install Command Line Tool** on the **Command line tool** row adds `~/.local/bin/threading-ptyd`.
+No password is asked for and nothing is written outside your home directory. The row says where
+the link is and whether it is there; once it is, the button becomes **Remove**. If
+`~/.local/bin` is not on your `PATH` the row says so and gives you the line to add to your shell
+profile. Threading never edits that file for you.
+
+The link points at a copy Threading keeps under `~/Library/Application Support/Threading/bin/`
+and repoints at every launch, so the command keeps working after Threading updates itself or you
+move the app. If something of yours is already using that name, Threading says so and leaves it
+alone rather than replacing it.
+
+**Tools in Threading's terminals** is the other way in, and needs no link at all. With it on,
+every terminal, shell drawer and agent Threading starts gets those tools on its `PATH`, so
+`threading-ptyd` works inside the app without you changing a shell profile. It is added in front
+of your own `PATH` and nothing is removed, so every other command resolves exactly as before. It
+applies to terminals started after you switch it on; ones already open keep the `PATH` they
+started with. It is off unless you turn it on.
+
 The first launch after a quit says what it found. A band across the pane reads "3 sessions kept
 running while Threading was closed", with **Reattach** if any of them are not back yet. If the
 helper itself was restarted its agents went with it, and the band says so and offers **Resume**,

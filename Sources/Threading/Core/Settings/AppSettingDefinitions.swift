@@ -46,6 +46,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case usesContainedExtensionLauncher
     case usesMCPStdioBridge
     case ptyHostEnabled
+    case prependsCommandLineToolsToPATH
     case workspaceNavigatorSelection
     case reportsClaudeLifecycleEvents
     case installsCodexHooks
@@ -985,6 +986,27 @@ enum AppSettingDefinitions {
             ["PTY", "daemon", "background", "durable", "keep running", "threading-ptyd"]
         )]
     )
+    /// Whether every shell and agent Threading launches gets its command-line tools on `PATH`.
+    ///
+    /// Off by default, because it changes the `PATH` of every child the app starts and that is
+    /// not something to do to somebody's terminal without being asked. On, it prepends the shim
+    /// directory — never replaces `PATH` — so `threading-ptyd` works inside Threading's own
+    /// terminals and the shell drawer with no profile edit, while every other command resolves
+    /// exactly as it did. The composition itself is `AgentEnvironment.applyingCommandLineTools`.
+    ///
+    /// **Presented, and `.catalogueOnly` by construction.** Omitting `remotePolicy` is
+    /// deliberate for the reason the switch above it gives: `list_settings` may describe the row,
+    /// and neither the phone nor an agent can read or move the value. Changing what is on the
+    /// `PATH` of every process this Mac's agents run is not a remote `PATCH`.
+    static let prependsCommandLineToolsToPATH = AppSettingDescriptor<Bool>(
+        identity: .prependsCommandLineToolsToPATH,
+        persistenceKey: "prependsCommandLineToolsToPATH",
+        absence: .falseValue,
+        presentations: [row(
+            "advanced", 10, "Background Sessions", "Tools in Threading's terminals",
+            ["PATH", "command line", "CLI", "terminal", "threading-ptyd", "shell"]
+        )]
+    )
     static let workspaceNavigatorSelection = AppSettingDescriptor<Data>(
         identity: .workspaceNavigatorSelection,
         persistenceKey: "workspaceNavigatorSelection",
@@ -1300,6 +1322,7 @@ enum AppSettingDefinitions {
         .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
         .init(usesMCPStdioBridge), .init(ptyHostEnabled),
+        .init(prependsCommandLineToolsToPATH),
         .init(workspaceNavigatorSelection), .init(reportsClaudeLifecycleEvents),
         .init(installsCodexHooks), .init(readsClaudeLoginFromKeychain),
         .init(suppressesClaudeStatusLine), .init(bypassesCodexHookTrust),
@@ -1398,7 +1421,10 @@ enum AppSettingDefinitions {
                   "erase", "corrupt", "start over"),
         surfaced("advanced.turnOffBackgroundHost", pageID: "advanced", order: 8,
                   section: "Background Sessions", title: "Turn off the background host",
-                  "login items", "launch agent", "daemon", "threading-ptyd")
+                  "login items", "launch agent", "daemon", "threading-ptyd"),
+        surfaced("advanced.commandLineTool", pageID: "advanced", order: 9,
+                  section: "Background Sessions", title: "Command line tool",
+                  "install", "symlink", "PATH", "terminal", "threading-ptyd", ".local/bin")
     ]
 
     static let all: [AppSettingDefinition] =

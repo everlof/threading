@@ -739,6 +739,20 @@ Nothing new goes on disk for any of this. The registration's state is launchd's:
 Task Management record and the Login Items row, both keyed by the label, and neither of them
 Threading's to write.
 
+### Reaching the daemon from a terminal
+
+The helper is a `product-type.tool` inside the bundle, so the shell that would run it cannot find
+it and the path it would need changes under every autoinstall. Both ways in go through one
+per-user directory, `~/Library/Application Support/Threading/bin/`, holding a symlink per public
+tool that the app repoints at the running bundle on every launch: Settings ▸ Advanced ▸ **Command
+line tool** installs `~/.local/bin/threading-ptyd` pointing at that shim, and
+**Tools in Threading's terminals** prepends the shim directory to the `PATH` of everything
+Threading launches. Neither writes outside the user's home, neither asks for `sudo`, and neither
+edits a shell profile. The directory, the refresh and what it refuses to touch are in
+[`persistence.md`](persistence.md#2026-07-30--where-it-all-is-and-starting-over); the environment
+half is in [`sessions.md`](sessions.md#launch-and-resume). `ThreadingCommandLineTools.publicTools`
+is the list, so publishing a second tool is one name.
+
 ### What registration does not cover
 
 The controls that drive it. The Advanced page's switch, the Background Sessions list and the quit
@@ -762,7 +776,7 @@ exactly that — so the inherited path is inert rather than wrong, and only four
 |---|---|---|
 | `EmojiFixedTerminalView.send(source:data:)` | `super.send` → `process.send` | `hostTransport.sendInput` — an `input` frame |
 | output | `setProcessOutputBytesHandler` → main hop → `onOutput`, `onOutputBytes` | `feedFromHost(_:answersQueries:)` → `feed(byteArray:)`, then **the same two callbacks in the same order on main** |
-| `sendWindowSize(_:)` | `process.updateWindowSize` | a `resize` frame carrying the whole `winsize` |
+| `sendWindowSize(_:)` | `process.updateWindowSize` — a synchronous local ioctl | the link's reconciled grid: recorded, then a `resize` frame the daemon answers with `resized`. See [The durable grid](#the-durable-grid) |
 | `TerminalSession.terminate()` | `terminalView.terminate()` | a `kill` frame; the view's process is never touched |
 
 The third is the one SwiftTerm fork change this whole design needs, and it is recorded in

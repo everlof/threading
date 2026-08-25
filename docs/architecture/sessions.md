@@ -688,6 +688,30 @@ The MCP routing variables are the deliberate exception to stripping an inherited
 identity: `AgentLauncher` creates them for the new child after filtering. They are per-process
 routing, not inherited state from the parent.
 
+**The one thing composition *adds* to `PATH` is opt-in, and it is a directory rather than the
+bundle.** `AgentEnvironment.applyingCommandLineTools` prepends
+`~/Library/Application Support/Threading/bin` when `prependsCommandLineToolsToPATH` is on, and
+both launch paths go through it: `TerminalSession.buildEnvironment()` for a PTY child and
+`AgentEnvironment.launchEnvironment()` for a headless one. It lives here rather than in either,
+because it is a rule about what the app launches and not about how a terminal is drawn, and two
+copies would be two places for one opt-in to be half applied.
+
+The directory is deliberately *not* `Contents/Helpers`. A path inside the bundle is a path that
+moves: the post-commit hook replaces `/Applications/Threading.app` wholesale and a Debug build
+runs from DerivedData, so a `PATH` entry naming either would be stale the moment the app was
+updated, and stale invisibly — the shell still resolves nothing there rather than reporting a
+broken link. The shim directory is rewritten at every launch to name the bundle that is running,
+so one stable `PATH` entry survives every bundle move. See
+[`persistence.md`](persistence.md) for the directory and
+[`pty-host.md`](pty-host.md#reaching-the-daemon-from-a-terminal) for the tool it publishes.
+
+It is *prepended*, never substituted, and nothing is removed: the entry goes in front and every
+command the user has resolves exactly as before. A login shell's `path_helper` and the user's own
+profile may reorder what they inherit, which is fine — neither drops an entry, so the directory
+stays reachable even when it stops being first. And an absent or empty `PATH` is left absent
+rather than invented: a child with no `PATH` gets `execvp`'s default, and replacing that with a
+directory holding two symlinks would break every command in the session.
+
 Claude and Grok accept `--session-id <uuid>`, so the id is minted up front. Grok does not persist
 that id while its first-login browser authentication screen is open, so `GrokSessionDiscovery`
 polls the supported `grok sessions list` command and marks it resumable only after it appears.

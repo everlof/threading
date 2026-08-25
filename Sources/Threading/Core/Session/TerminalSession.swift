@@ -891,7 +891,11 @@ final class TerminalSession: NSObject {
         let historyPath = HistoryManager.historyFilePath(for: identity)
         env["HISTFILE"] = historyPath.path
 
-        return env.map { "\($0.key)=\($0.value)" }
+        // The opt-in `PATH` entry for Threading's own command-line tools. Applied through
+        // `AgentEnvironment` rather than here, because it is a rule about what the app launches
+        // rather than about how a terminal is drawn, and the headless path needs the same one.
+        return AgentEnvironment.applyingCommandLineTools(to: env)
+            .map { "\($0.key)=\($0.value)" }
     }
 
     // MARK: - Profile Management

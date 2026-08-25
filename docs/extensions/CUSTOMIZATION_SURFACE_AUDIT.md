@@ -41,6 +41,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
 | All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, bounded scrolling and popover lifecycle | Host-only |
+| Usage analytics section switch | — | host-only | selected native analysis, retained chart state, keyboard and accessibility navigation | Host-only |
 | Curfew surfaces (draft moon button and chip, chat chip, sidebar Curfew fold, strip source, Settings section) | — | host-only | the deadline and its instance identity, hold admission, the wind-down record, interrupt/stop decisions and their receipts, the watched-turn rule, Lift | Host-only |
 | Account setup and reconnect | — | host-only | provider identity, isolated-home routing, child-process lifecycle, login verification, credential non-capture, native failure and installation fallback | Host-only |
 | Custom-limit authoring | — | host-only | account/window identity, numeric validation, rule semantics, persistence, bounded history work, keyboard and accessibility contract | Host-only |
@@ -58,6 +59,8 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
 | Background sessions (quit choice, launch band, Advanced list) | — | host-only | which children the daemon holds and their identities, the quit answer and what it stops, registration and its removal rule, the stop's attach-then-kill, bounded survey and viewport | Host-only |
+| Command-line tool installation (Advanced row) | — | host-only | which tools are public, the shim directory and its refresh, what in a user's `~/.local/bin` may be written or removed, the login-shell `PATH` reading, the refusal to edit a shell profile | Host-only |
+| Command-line tools on launched `PATH` (Advanced switch) | — | host-only | the environment composed for every shell and agent, prepend-never-substitute, the absent-`PATH` refusal | Host-only |
 
 The background-sessions surfaces remain host-only because each of the three is a **decision about
 somebody's running work**, not a presentation of it. The quit choice ends processes or does not;
@@ -68,6 +71,14 @@ are already published where an extension can reach them honestly — a session's
 runtime — and what is missing for an extension that wants to *act* is a typed background-session
 entity with the daemon's identity in it, not the box the rows are in. The launch band is a
 `PaneNoticeView`, which is host chrome for the same reason every other band is.
+
+The two command-line-tool surfaces remain host-only for the same reason as the rows above them,
+one step sharper: both write outside anything Threading owns. One creates and deletes a symlink in
+the user's own `~/.local/bin` and reads what their login shell exports; the other changes the
+`PATH` of every process this Mac's agents will run. A replaceable presentation of either is a
+surface that can misname the path it is about to write, or say a switch is off while it is on. The
+facts behind them are already published where an extension can reach them honestly — the settings
+catalogue describes both rows, and neither is remotely mutable by construction.
 
 The launch failure surface remains host-only because its content *is* the evidence. The whole
 surface exists because an agent's account of why it would not start was being destroyed, and a
@@ -162,6 +173,12 @@ provider refresh pacing, which login is current, the bounded virtual viewport, a
 `SessionMigration` eligibility and move action for the conversation under the toolbar. Publishing
 its presentation requires a typed, bounded multi-account usage contract; the existing
 `toolbar.account-usage-popover@1` remains the customization point for one account's reading.
+
+The Usage analytics section switch remains host-only navigation over Threading's prepared
+Consumption and Limit-history truth. Threading owns which retained native column is visible, its
+keyboard and accessibility state, and the promise that switching does not rebuild or reset either
+chart. Extension-contributed Usage settings remain additive sections outside this switch; a
+replacement switch must not gain authority to hide or relabel their content.
 
 Session Overview is host-only because its two sections expose host-owned operational truth rather
 than a presentation-only document: exact versus observed work attribution, transcript-accounted
