@@ -435,6 +435,9 @@
     "Current Mac": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Aktuell Mac" } } }
     },
+    "Jump to bottom": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hoppa längst ned" } } }
+    },
     "Jump to latest message": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hoppa till senaste meddelandet" } } }
     },

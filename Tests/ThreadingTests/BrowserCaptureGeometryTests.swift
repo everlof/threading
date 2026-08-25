@@ -52,6 +52,53 @@ final class BrowserCaptureGeometryTests: XCTestCase {
 
     // MARK: - Origin
 
+    /// The responsive-test viewport remains part of the real browser surface rather than
+    /// floating midway down it.
+    ///
+    /// The pure geometry tests make the placement rule cheap to exercise in the fast lane. This
+    /// on-screen WebKit test proves the shipping controller applies that rule, and leaves a real
+    /// browser render behind for the appearance-review lap.
+    func testResponsiveViewportStaysAttachedToBrowserChrome() async throws {
+        window.setContentSize(NSSize(width: 760, height: 1_000))
+        browser.view.layoutSubtreeIfNeeded()
+
+        let resized = await browser.agentSetResponsiveViewport(width: 760, height: 656)
+        XCTAssertTrue(resized.ok, resized.message)
+        _ = try await browser.evaluate(
+            """
+            document.documentElement.style.margin = '0';
+            document.body.style.margin = '0';
+            document.body.style.minHeight = '656px';
+            document.body.style.background = 'rgb(246, 241, 232)';
+            document.body.innerHTML =
+              "<main style='box-sizing:border-box;padding:56px;font:24px -apple-system;color:#14213d'>" +
+              "<h1 style='margin:0 0 18px;font-size:42px'>Responsive page</h1>" +
+              "<p style='margin:0;max-width:560px;line-height:1.45'>The document starts directly " +
+              "below the browser chrome. Spare test canvas belongs after the page.</p></main>";
+            """
+        )
+        try await settle()
+
+        XCTAssertEqual(browser.webView.frame.minY, 0, accuracy: 0.5)
+        XCTAssertEqual(browser.webView.frame.height, 656, accuracy: 0.5)
+
+        let representation = try XCTUnwrap(
+            browser.view.bitmapImageRepForCachingDisplay(in: browser.view.bounds)
+        )
+        browser.view.cacheDisplay(in: browser.view.bounds, to: representation)
+        browser.view.cacheDisplay(in: browser.view.bounds, to: representation)
+        let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
+        if let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            let directory = URL(fileURLWithPath: output, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try png.write(
+                to: directory.appendingPathComponent(
+                    "browser-responsive-viewport-top-aligned.png"
+                )
+            )
+        }
+    }
+
     /// A full-page capture starts at the document origin, whatever the page is scrolled to.
     ///
     /// It did not, until this test asked. `WKSnapshotConfiguration.rect` is in the *view's*

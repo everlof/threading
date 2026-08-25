@@ -977,11 +977,12 @@ struct TerminalRemoteView: View {
         TerminalViewRepresentable(
             connection: connection,
             theme: connection.terminalTheme,
+            chromeTheme: theme,
             allowsDirectInput: allowsDirectInput,
             keyBridge: keyBridge,
             fontSize: terminalFontSize,
             onFontSizeChange: { terminalFontSize = $0 },
-            initialScrollProgress: terminalContinuity?.terminalViewportProgress,
+            initialScrollProgress: initialTerminalScrollProgress,
             onScrollProgress: saveTerminalViewport,
             quoteSelection: inputMode == .none ? nil : addSelectionQuote
         )
@@ -1005,6 +1006,19 @@ struct TerminalRemoteView: View {
     private var terminalContinuity: MobileSessionContinuityStore.SessionState? {
         guard let hostID = model.activeHostID else { return nil }
         return continuity.state(hostID: hostID, sessionID: connection.session.id)
+    }
+
+    private var initialTerminalScrollProgress: Double? {
+        if let persisted = terminalContinuity?.terminalViewportProgress { return persisted }
+#if DEBUG
+        // The scrollback evidence uses the shipping continuity path to hold the real SwiftTerm
+        // viewport above its live edge. No snapshot-only overlay manufactures the button.
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?
+            .hasPrefix("terminal-scrollback-") == true {
+            return 0.32
+        }
+#endif
+        return nil
     }
 
     private func saveTerminalViewport(_ progress: Double) {

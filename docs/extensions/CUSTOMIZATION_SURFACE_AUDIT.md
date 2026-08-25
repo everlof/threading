@@ -34,6 +34,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
 | Command palette | — | host-only | command identity and availability, focus/dismissal, bounded search, shortcut ownership/conflicts, explicit target collection and last-moment invocation checks | Host-only |
 | Mobile terminal key bar | — | host-only | PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
+| Mobile terminal return-to-end control | — | host-only | emulator scroll-end truth, TUI/local ownership, follow-mode transition, motion and accessibility | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
 | Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
 | Local iOS diagnostics settings | — | host-only | independent consent, pairing and authorization, request nonces, evidence allowlist, screenshot policy and bounded custody | Host-only |
@@ -104,6 +105,13 @@ accessibility feedback, attachment upload/custody and path insertion, and the de
 archive's validated fallback. Letting an extension replace that shell could show a key, file or
 pressed state that the host did not send. Threading owns those behaviors and the complete
 interactive cap; the built-in keyboard editor remains the one presentation customization seam.
+
+The mobile terminal return-to-end control is host-only because its presence is an emulator claim,
+not decoration. Threading retains the exact reachable scroll end, whether one finger belongs to
+the TUI or local history, the action that cancels the current UIKit gesture velocity before it
+clears manual scrollback and resumes follow mode, and the control's accessibility and Reduce
+Motion behavior. An extension cannot replace the arrow or its visibility without risking a
+control that claims local content is below while the program actually owns that gesture.
 
 The mobile terminal selection quote tray is host-only for the same reasons. A chip stands for
 text the person selected in the terminal and chose to send; the host owns that snapshot, decides

@@ -2092,6 +2092,31 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
     }
 
+    /// Whether the UIKit scroll view is resting at the terminal's live scrollback end.
+    ///
+    /// This answers from the same reachable maximum and half-cell tolerance used to re-engage
+    /// follow mode in `syncYDispFromContentOffset`. Embedders can therefore present a return-to-
+    /// end affordance without guessing around partial terminal rows or adjusted content insets.
+    public var isAtScrollbackEnd: Bool {
+        guard terminal != nil else { return true }
+        let maximum = maxContentOffsetY()
+        let offsetY = min(max(contentOffset.y, 0), maximum)
+        let threshold = max(contentOffsetTolerance, cellDimension.height / 2)
+        return offsetY >= maximum - threshold
+    }
+
+    /// Whether one finger currently scrolls the program rather than this view's local history.
+    ///
+    /// A mouse-tracking program consumes wheel reports, while an alternate buffer consumes the
+    /// cursor-key form of xterm alternate scrolling. Both are program-owned scrolling from the
+    /// embedder's perspective. A host that declines mouse reporting gets local scrolling back.
+    public var programOwnsPrimaryScrollGesture: Bool {
+        guard terminal != nil, allowMouseReporting else { return false }
+        return withTerminal { terminal in
+            terminal.mouseMode != .off || terminal.isDisplayBufferAlternate
+        }
+    }
+
     private func setContentOffsetFromTerminal(_ newContentOffset: CGPoint) {
         if abs(contentOffset.x - newContentOffset.x) <= contentOffsetTolerance &&
             abs(contentOffset.y - newContentOffset.y) <= contentOffsetTolerance {
@@ -3665,8 +3690,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// buffer whose wheel contract is cursor keys. Without the second branch a Codex-style TUI
     /// let UIScrollView drag its intentionally history-free alternate buffer into blank space.
     private func refreshProgramScrollGesture(mouseMode: Terminal.MouseMode? = nil) {
-        let capturesProgramScroll = allowMouseReporting && withTerminal { terminal in
-            (mouseMode ?? terminal.mouseMode) != .off || terminal.isDisplayBufferAlternate
+        let capturesProgramScroll: Bool
+        if let mouseMode {
+            capturesProgramScroll = allowMouseReporting && withTerminal { terminal in
+                mouseMode != .off || terminal.isDisplayBufferAlternate
+            }
+        } else {
+            capturesProgramScroll = programOwnsPrimaryScrollGesture
         }
         if capturesProgramScroll {
             enableMousePanGesture()

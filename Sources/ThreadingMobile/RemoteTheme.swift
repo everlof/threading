@@ -28,6 +28,11 @@ enum MobileDesign {
 
     enum Size {
         static let minimumTapTarget: CGFloat = 44
+        /// The floating return-to-end control stays visually compact while retaining the full
+        /// iPhone tap target. Its arrow is deliberately quieter than toolbar glyphs because it
+        /// sits over content rather than in a chrome row.
+        static let floatingScrollTarget: CGFloat = minimumTapTarget
+        static let floatingScrollGlyph: CGFloat = 14
         /// The icon-only chrome control: the dashboard's toolbar circles and the plus that
         /// starts a chat in a project. One size keeps them reading as the same kind of thing.
         static let compactControl: CGFloat = 34
@@ -110,6 +115,8 @@ enum MobileDesign {
 
     enum Offset {
         static let workspaceActivityDot: CGFloat = 3
+        /// The short rise traversed as a return-to-end control enters or leaves the surface.
+        static let floatingScrollLift: CGFloat = 12
         /// How far the account chip hangs past the mark's corner. Flush inside the tile it covered
         /// the middle of the mark; hanging it out keeps the mark recognisable underneath.
         static let accountChipOverhang: CGFloat = 3
@@ -149,6 +156,12 @@ enum MobileDesign {
 
     enum Motion {
         static let controlResponse: Double = 0.18
+        /// Floating return-to-end controls arrive a little more deliberately than an ordinary
+        /// tap response, rising and growing into place. Departure is shorter so the control gets
+        /// out of the content's way as soon as the live end is reached.
+        static let floatingScrollArrival: TimeInterval = 0.24
+        static let floatingScrollDeparture: TimeInterval = 0.16
+        static let floatingScrollStartScale: CGFloat = 0.88
         /// The attachment ledger bringing the current cell into view, and a page changing under
         /// a tapped cell: one chrome response, so the two read as one move.
         static let ledgerScroll: TimeInterval = 0.25

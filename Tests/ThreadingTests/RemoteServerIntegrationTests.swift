@@ -1659,6 +1659,63 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
     }
 
+    /// Exercises the native iOS mutation shape against the shipping Mac settings mutator.
+    /// Recording the requested id alone is not enough: that fake would pass without proving that
+    /// the host actually installed or returned a phone's second selection.
+    @MainActor
+    func testIOSCanApplyTwoSuccessiveAppThemesToTheMac() throws {
+        let previousTheme = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previousTheme) }
+        AppThemeLibrary.apply(.system)
+        settingsMutator.appliesAppThemesToHost = true
+
+        let firstTheme = AppThemeStyles.threading
+        let secondTheme = AppTheme.system
+        let clientHeaders = [
+            "X-Threading-Client": "Threading-iOS",
+            "X-Threading-Protocol": String(RemoteProtocol.current),
+            "X-Threading-Protocol-Min": String(RemoteProtocol.minimumSupported),
+        ]
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+
+        func select(_ theme: AppTheme, requestID: String) throws -> RemoteMeDTO {
+            var headers = clientHeaders
+            headers["X-Threading-Request-ID"] = requestID
+            let response = try XCTUnwrap(post(
+                "/api/theme",
+                bearer: "goodtoken",
+                body: try encoder.encode(
+                    RemoteSetAppThemeRequestDTO(themeID: theme.id.rawValue)
+                ),
+                headers: headers
+            ))
+            XCTAssertEqual(response.status, 200)
+            XCTAssertEqual(
+                response.headers["X-Threading-Request-ID"] as? String,
+                requestID
+            )
+            return try JSONDecoder().decode(RemoteMeDTO.self, from: response.body)
+        }
+
+        let first = try select(firstTheme, requestID: "ios-theme-request-1")
+        XCTAssertEqual(AppThemeLibrary.current.id, firstTheme.id)
+        XCTAssertEqual(first.theme?.id, firstTheme.id.rawValue)
+
+        let second = try select(secondTheme, requestID: "ios-theme-request-2")
+        XCTAssertEqual(AppThemeLibrary.current.id, secondTheme.id)
+        XCTAssertEqual(second.theme?.id, secondTheme.id.rawValue)
+        XCTAssertEqual(
+            settingsMutator.appThemeIDs,
+            [firstTheme.id, secondTheme.id],
+            "a new iOS request id must perform the second selection, not replay the first"
+        )
+        XCTAssertEqual(
+            eventRecorder.messages.filter { $0 == "App theme changed remotely" }.count,
+            2
+        )
+    }
+
     func testAppSettingMutationProjectsDescriptorPolicyAndFailsClosed() throws {
         let focused = Data(#"{"value":"focusedOwner"}"#.utf8)
         authority.set(
@@ -3722,6 +3779,7 @@ private final class RecordingRemoteSettingsMutator: RemoteSettingsMutating {
     private let appSettings: AppSettings
     private(set) var appThemeIDs: [AppThemeID] = []
     private(set) var appSettingMutations: [AppSettingMutation] = []
+    var appliesAppThemesToHost = false
 
     init(appSettings: AppSettings) {
         self.appSettings = appSettings
@@ -3737,7 +3795,11 @@ private final class RecordingRemoteSettingsMutator: RemoteSettingsMutating {
 
     func applyAppTheme(id: AppThemeID) -> RemoteAppThemeMutationResult {
         appThemeIDs.append(id)
-        return AppThemeLibrary.theme(withID: id) == nil ? .unknownTheme : .applied(id)
+        if appliesAppThemesToHost {
+            return LiveRemoteSettingsMutator(appSettings: appSettings).applyAppTheme(id: id)
+        }
+        guard let theme = AppThemeLibrary.theme(withID: id) else { return .unknownTheme }
+        return .applied(theme.id)
     }
 
     func setSessionTheme(

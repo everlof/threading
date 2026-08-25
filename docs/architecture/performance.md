@@ -358,6 +358,15 @@ local half: a navigation-width storm leaves SwiftTerm on one grid, a coordinator
 commits only its last width, and keyboard height still follows its container without changing
 columns.
 
+The return-to-live-end control shares that frequency boundary. Every accepted UIKit offset can
+re-evaluate it, so the check reads only `contentOffset`, the cached cell size/reachable maximum,
+and the emulator's current mouse/alternate-buffer mode: O(1), one retained button, no buffer-row
+walk, view rebuild, PTY write or viewport lease. A long scroll or continuous output changes only
+that button's small presence state; `RemoteTerminalScrollTests` drives both local-scrollback and
+program-owned cases through the real SwiftTerm view. Activating it performs one constant-time
+UIKit momentum cancellation before the exact tail jump, so a completed reset cannot be displaced
+later by the flick velocity that preceded it.
+
 A disconnect and a deliberate leave do not have the same lease lifetime. An unannounced socket
 loss keeps the device-keyed grid for the configurable reconnect grace, avoiding two expensive
 reflows when iOS briefly backgrounds. Explicit `viewportRelease` and `sessionPark` messages end

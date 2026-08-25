@@ -249,6 +249,18 @@ from the host's geometry rather than written down, because a layer-backed view u
 pane inherits flipped layer geometry and a bare `-rise` would invert the whole arrival the day a
 pane becomes flipped.
 
+The iPhone counterpart is `MobileFloatingScrollToEndButton`, shared by the native conversation
+and terminal-local scrollback. It keeps the same interaction grammar in UIKit: one 44pt circular
+target over the theme's opaque `floating_surface`, a quiet down arrow, fade plus a 12pt rise from
+0.88 scale over 240ms, and a shorter 160ms departure. It begins a reversal from the presentation
+layer, remains clickable until departure finishes, and applies endpoints immediately under Reduce
+Motion. Hosts supply only the semantic question and action: the conversation answers from its
+virtualized timeline, while the terminal answers from SwiftTerm's local/program scroll ownership
+and exact live-end seam. Both actions pass through `MobileScrollMotion`, which cancels an active
+finger or deceleration before the host installs its destination; a jump is not allowed to inherit
+the gesture velocity that made the control appear. Neither feature constructs a second button or
+owns motion numbers.
+
 **Two components say "every" for a reason, and it is the design system's sharpest lesson so
 far.** Each of them was two or three implementations, and each had already been "unified" by
 sharing constants — one radius, one type scale, one height, read from a common enum. It did not

@@ -61,7 +61,12 @@ final class RemoteTerminalScrollTests: XCTestCase {
             initialScrollProgress: nil,
             onScrollProgress: { _ in }
         )
-        coordinator.attach(to: view)
+        let layout = RemoteTerminalLayoutView(
+            frame: view.frame,
+            terminalView: view,
+            contentInset: 0
+        )
+        coordinator.attach(to: view, in: layout)
         let recorder = RecordingTerminalDelegate()
         view.terminalDelegate = recorder
 
@@ -102,6 +107,120 @@ final class RemoteTerminalScrollTests: XCTestCase {
         XCTAssertTrue(view.canScroll, "300 lines into a 420pt view has to leave something above")
         XCTAssertGreaterThan(view.contentOffset.y, 0)
         XCTAssertEqual(view.scrollPosition, 1, accuracy: 0.001)
+        XCTAssertTrue(view.isAtScrollbackEnd)
+    }
+
+    func testScrollbackEndTruthUsesTheSameBoundaryAsFollowMode() {
+        let view = makeView(feeding: Fixture.lines)
+
+        view.scroll(toPosition: 0.4)
+        settleTerminalCallbacks(for: view)
+        XCTAssertFalse(view.isAtScrollbackEnd)
+
+        view.scroll(toPosition: 1)
+        settleTerminalCallbacks(for: view)
+        XCTAssertTrue(view.isAtScrollbackEnd)
+    }
+
+    func testProgramScrollOwnershipTracksMouseAndHostReportingPolicy() {
+        let view = makeView(feeding: Fixture.shortRun)
+        XCTAssertFalse(view.programOwnsPrimaryScrollGesture)
+
+        view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
+        XCTAssertTrue(view.programOwnsPrimaryScrollGesture)
+
+        view.allowMouseReporting = false
+        XCTAssertFalse(
+            view.programOwnsPrimaryScrollGesture,
+            "A host that cannot deliver reports must keep local scrolling and its affordance."
+        )
+    }
+
+    func testFloatingEndControlAppearsOnlyForLocalScrollbackAndJumpsToTheTail() {
+        let view = makeView(feeding: Fixture.lines)
+        let layout = RemoteTerminalLayoutView(
+            frame: Fixture.frame,
+            terminalView: view,
+            contentInset: MobileDesign.Spacing.small
+        )
+        let coordinator = TerminalViewRepresentable.Coordinator(
+            connection: .demoTerminal(),
+            allowsInput: true,
+            keyBridge: TerminalKeyBridge(),
+            initialScrollProgress: nil,
+            onScrollProgress: { _ in }
+        )
+        view.terminalDelegate = coordinator
+        coordinator.attach(to: view, in: layout)
+
+        view.scroll(toPosition: 0.35)
+        settleTerminalCallbacks(for: view)
+        coordinator.refreshScrollToEndPresence(animated: false)
+
+        XCTAssertTrue(layout.scrollToEndButton.isPresented)
+        XCTAssertFalse(layout.scrollToEndButton.isHidden)
+        XCTAssertEqual(
+            layout.scrollToEndButton.accessibilityLabel,
+            MobileL10n.string("Jump to bottom")
+        )
+
+        layout.scrollToEndButton.sendActions(for: .touchUpInside)
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertTrue(view.isAtScrollbackEnd)
+        XCTAssertFalse(layout.scrollToEndButton.isPresented)
+        XCTAssertEqual(layout.scrollToEndButton.layer.opacity, 0)
+    }
+
+    func testScrollResetCancelsUIKitMomentumBeforeJumpingToTheTail() {
+        let view = makeScrollPhaseView(feeding: Fixture.lines)
+        view.scroll(toPosition: 0.35)
+        settleTerminalCallbacks(for: view)
+        XCTAssertFalse(view.isAtScrollbackEnd)
+
+        view.simulatesDeceleration = true
+        view.unanimatedContentOffsetWrites = 0
+        MobileScrollMotion.cancel(in: view)
+        view.scroll(toPosition: 1)
+        settleTerminalCallbacks(for: view)
+
+        XCTAssertEqual(
+            view.unanimatedContentOffsetWrites,
+            1,
+            "The reset must arrest UIKit's current velocity before installing the tail offset."
+        )
+        XCTAssertFalse(view.isDecelerating)
+        XCTAssertTrue(view.isAtScrollbackEnd)
+    }
+
+    func testFloatingEndControlWithdrawsWhenTheTUIOwnsScrolling() {
+        let view = makeView(feeding: Fixture.lines)
+        let layout = RemoteTerminalLayoutView(
+            frame: Fixture.frame,
+            terminalView: view,
+            contentInset: MobileDesign.Spacing.small
+        )
+        let coordinator = TerminalViewRepresentable.Coordinator(
+            connection: .demoTerminal(),
+            allowsInput: true,
+            keyBridge: TerminalKeyBridge(),
+            initialScrollProgress: nil,
+            onScrollProgress: { _ in }
+        )
+        view.terminalDelegate = coordinator
+        coordinator.attach(to: view, in: layout)
+        view.scroll(toPosition: 0.35)
+        coordinator.refreshScrollToEndPresence(animated: false)
+        XCTAssertTrue(layout.scrollToEndButton.isPresented)
+
+        view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
+        coordinator.refreshScrollToEndPresence(animated: false)
+
+        XCTAssertTrue(view.programOwnsPrimaryScrollGesture)
+        XCTAssertFalse(layout.scrollToEndButton.isPresented)
+        XCTAssertEqual(layout.scrollToEndButton.layer.opacity, 0)
     }
 
     func testAViewportHeldAboveTheTailIsNotPulledBackByOutput() {
@@ -548,6 +667,7 @@ final class RemoteTerminalScrollTests: XCTestCase {
 private final class ScrollPhaseTerminalView: TerminalView {
     var simulatesTracking = false
     var simulatesDeceleration = false
+    var unanimatedContentOffsetWrites = 0
 
     override var isTracking: Bool {
         simulatesTracking || super.isTracking
@@ -555,6 +675,15 @@ private final class ScrollPhaseTerminalView: TerminalView {
 
     override var isDecelerating: Bool {
         simulatesDeceleration || super.isDecelerating
+    }
+
+    override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {
+        if !animated {
+            unanimatedContentOffsetWrites += 1
+            // UIKit's nonanimated setter is the production primitive that arrests deceleration.
+            simulatesDeceleration = false
+        }
+        super.setContentOffset(contentOffset, animated: animated)
     }
 }
 

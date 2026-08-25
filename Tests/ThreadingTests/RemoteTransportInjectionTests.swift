@@ -29,6 +29,15 @@ final class RecordingTailnetTransport: RemoteTailnetTransport {
     }
 }
 
+@MainActor
+private final class RecordingRemoteAccessProcessActivity: RemoteAccessProcessActivityManaging {
+    private(set) var beginCount = 0
+    private(set) var endCount = 0
+
+    func begin() { beginCount += 1 }
+    func end() { endCount += 1 }
+}
+
 /// The seam that keeps a test run from publishing the developer's Mac.
 ///
 /// `RemoteAccessCoordinator` used to build its transports itself, with the shipping executable
@@ -210,6 +219,33 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
         XCTAssertGreaterThan(tailnet.stopCount, 0, "switching Serve off left it running")
     }
 
+    func testRemoteAccessPreventsAppNapOnlyWhileItsListenerIsAvailable() throws {
+        let activity = RecordingRemoteAccessProcessActivity()
+        let settings = isolatedAppSettings()
+        settings.remoteAccessListenerPort = try XCTUnwrap(FreeLocalPort.quiet())
+        settings.remoteAccessDoors = []
+        settings.remoteAccessTailscaleEnabled = false
+        let coordinator = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: settings,
+            guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
+            tailnetTransport: RecordingTailnetTransport(),
+            processActivity: activity
+        )
+        coordinators.append(coordinator)
+
+        coordinator.setEnabled(true)
+        waitForListening(coordinator)
+        XCTAssertEqual(activity.beginCount, 1)
+        XCTAssertEqual(activity.endCount, 0)
+
+        coordinator.setEnabled(true)
+        XCTAssertEqual(activity.beginCount, 1, "an already-live listener duplicated its activity")
+
+        coordinator.stop()
+        XCTAssertEqual(activity.endCount, 1)
+    }
+
     /// The sub-option and the door are independent in both directions, which is the whole claim
     /// behind "the Threading app does not need this": Serve is a browser convenience, so it
     /// neither follows the door nor takes a route away when it stops.
@@ -327,5 +363,37 @@ final class RemoteAccessDoorTransportTests: HostedStoreTestCase {
         let defaults = UserDefaults(suiteName: name)!
         defaults.register(defaults: AppSettingDefinitions.registeredDefaults)
         return AppSettings(defaults: defaults)
+    }
+}
+
+@MainActor
+final class RemoteAccessProcessActivityTests: XCTestCase {
+    func testShippingActivityPreventsAppNapButAllowsIdleSystemSleep() {
+        XCTAssertEqual(
+            RemoteAccessProcessActivity.options,
+            .userInitiatedAllowingIdleSystemSleep
+        )
+    }
+
+    func testActivityIsIdempotentAndEndsItsTokenOnDeinit() {
+        var beginCount = 0
+        var endedTokens: [NSObject] = []
+        var activity: RemoteAccessProcessActivity? = RemoteAccessProcessActivity(
+            beginActivity: {
+                beginCount += 1
+                return NSObject()
+            },
+            endActivity: { token in
+                endedTokens.append(token as! NSObject)
+            }
+        )
+
+        activity?.begin()
+        activity?.begin()
+        XCTAssertEqual(beginCount, 1)
+        XCTAssertEqual(endedTokens.count, 0)
+
+        activity = nil
+        XCTAssertEqual(endedTokens.count, 1)
     }
 }

@@ -301,6 +301,7 @@
 				ThreadingMobile/Localizable.xcstrings,
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileDiagnosticsBridge.swift,
+				ThreadingMobile/MobileFloatingScrollToEndButton.swift,
 				ThreadingMobile/MobileIssueReportArchive.swift,
 				ThreadingMobile/MobileIssueReporting.swift,
 				ThreadingMobile/MobileLoadingPlaceholder.swift,

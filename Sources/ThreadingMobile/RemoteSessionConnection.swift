@@ -1717,6 +1717,7 @@ final class RemoteSessionConnection: ObservableObject {
         let isCodexFixture = demoMode == "terminal-ansi"
             || demoMode == "terminal-attachments"
             || demoMode == "terminal-codex-tui"
+            || demoMode == "terminal-scrollback"
         let agentName = isCodexFixture ? "Codex" : "Claude Code"
         let session = RemoteSessionSummaryDTO(
             id: "f50c77da-5716-470b-933c-d68310644b4f",
@@ -1826,7 +1827,7 @@ final class RemoteSessionConnection: ObservableObject {
             // color; substituting a safer bullet here would stop the evidence from testing that.
             let completedTool = "\u{23FA}"
             lines = [
-                "\u{1b}[2J\u{1b}[H\u{1b}[1;35mClaude Code\u{1b}[0m",
+                "\u{1b}[2J\u{1b}[H\u{1b}[?1000h\u{1b}[?1006h\u{1b}[1;35mClaude Code\u{1b}[0m",
                 "\u{1b}[2mSonnet · plan mode · AnotherTerminal\u{1b}[0m",
                 "",
                 "❯ Review the mobile Git pane at 20k files.",
@@ -1848,11 +1849,19 @@ final class RemoteSessionConnection: ObservableObject {
                 "❯ ",
             ]
         case "terminal-scrollback":
+            let compileLines = (1...72).map { index in
+                let source = [
+                    "RemoteConversationViewController.swift",
+                    "RemoteNotifications.swift",
+                    "TerminalViewRepresentable.swift",
+                    "RemoteSessionConnection.swift",
+                ][index % 4]
+                return "Compile [\(index)/72] \(source)"
+            }
             lines = [
-                "\u{1b}[2J\u{1b}[H\u{1b}[1;36mClaude Code\u{1b}[0m  Test run",
+                "\u{1b}[2J\u{1b}[H\u{1b}[1;36mCodex\u{1b}[0m  Test run",
                 "$ xcodebuild -scheme ThreadingMobile test",
-                "Compile RemoteConversationViewController.swift",
-                "Compile RemoteNotifications.swift",
+            ] + compileLines + [
                 "Link ThreadingMobileTests.xctest",
                 "Test Suite 'KeyboardLifecycleTests' started",
                 "  ✓ testConversationRestoresComposerGeometry (0.42s)",

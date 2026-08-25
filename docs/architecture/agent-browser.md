@@ -214,7 +214,10 @@ phone viewport presets. It folds its label and preset picker into the browser ov
 shrinks. Closing the toolbar resets the page to the panel, omitting both tool dimensions does the
 same, and navigation and pop-ups inherit the active size. Presets describe CSS viewport dimensions
 only: they do not imply touch, device scale, mobile identity, or a different browser engine. The
-override is deliberately runtime-only testing state.
+override is deliberately runtime-only testing state. A viewport narrower than its host is centred
+across the spare width like a device preview, but its document origin stays against the top edge;
+spare height follows below it. Centring a short viewport vertically detached the page from the
+address bar and made the ordinary page look like two failed black render bands.
 
 The native address field is content before it is an input. At rest the URL draws directly on the
 browser strip with no permanent field silhouette; pointer hover raises a `controlHover` plate over

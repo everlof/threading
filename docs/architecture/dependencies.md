@@ -204,8 +204,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     this device's option-wheel. Xterm Alternate Scroll Mode remains cursor-key translation, not a
     promise that every TUI uses those keys for history; Codex uses them for composer history and
     is therefore launched in its supported inline mode so the terminal owns its transcript
-    scrollback. `RemoteTerminalScrollTests` covers the emulator rules; `AgentLaunchQuotingTests`
-    holds the Codex launch boundary.
+    scrollback. `isAtScrollbackEnd` exposes the same partial-row/inset boundary that re-engages
+    follow mode, and `programOwnsPrimaryScrollGesture` exposes the same mouse/alternate-buffer
+    decision that assigns one finger. These are constant-time embedding facts for Threading's
+    floating return-to-end control; the host does not infer emulator state from UIKit geometry.
+    `RemoteTerminalScrollTests` covers the emulator and affordance rules;
+    `AgentLaunchQuotingTests` holds the Codex launch boundary.
   - **`pasteText` is ours.** Upstream reaches bracketed paste only through `paste(_:)`, which
     reads `NSPasteboard.general` — so text that never came from the clipboard could only be sent
     as typing, or by writing over the user's clipboard first. A drop is a paste, and the markers

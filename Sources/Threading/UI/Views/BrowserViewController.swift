@@ -984,22 +984,15 @@ final class BrowserViewController: NSViewController {
     /// inside a narrow panel without the app window being resized under them.
     private func layoutWebViews(resetScrollPosition: Bool = false) {
         let visible = viewportScrollView.contentView.bounds.size
-        let viewport = agentViewportSize ?? visible
-        guard viewport.width > 0, viewport.height > 0 else { return }
+        guard let layout = BrowserViewportLayout.resolve(
+            visibleSize: visible,
+            requestedViewport: agentViewportSize
+        ) else { return }
 
-        let canvasSize = CGSize(
-            width: max(visible.width, viewport.width),
-            height: max(visible.height, viewport.height)
-        )
-        webViewHost.frame = CGRect(origin: .zero, size: canvasSize)
-        let webOrigin = CGPoint(
-            x: max(0, floor((canvasSize.width - viewport.width) / 2)),
-            y: max(0, floor((canvasSize.height - viewport.height) / 2))
-        )
-        let frame = CGRect(origin: webOrigin, size: viewport)
-        webViewStack.forEach { $0.frame = frame }
-        annotationOverlay.frame = frame
-        baselineOverlay.frame = frame
+        webViewHost.frame = CGRect(origin: .zero, size: layout.canvasSize)
+        webViewStack.forEach { $0.frame = layout.viewportFrame }
+        annotationOverlay.frame = layout.viewportFrame
+        baselineOverlay.frame = layout.viewportFrame
         updateAnnotationOverlay()
 
         if resetScrollPosition {
@@ -3933,6 +3926,37 @@ enum BrowserDefaults {
 /// browser page starts when the outer scroll view first presents it.
 private final class BrowserViewportCanvasView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// The one geometry shared by the live page and its native overlays.
+///
+/// A responsive viewport narrower than its host is centred like a device preview. Its document
+/// origin always stays at the host's top edge: vertically centring a short viewport detached the
+/// page from the address bar and made the unused canvas look like two rendering failures.
+struct BrowserViewportLayout: Equatable {
+    let canvasSize: CGSize
+    let viewportFrame: CGRect
+
+    static func resolve(
+        visibleSize: CGSize,
+        requestedViewport: CGSize?
+    ) -> BrowserViewportLayout? {
+        let viewport = requestedViewport ?? visibleSize
+        guard viewport.width > 0, viewport.height > 0 else { return nil }
+
+        let canvasSize = CGSize(
+            width: max(visibleSize.width, viewport.width),
+            height: max(visibleSize.height, viewport.height)
+        )
+        let origin = CGPoint(
+            x: max(0, floor((canvasSize.width - viewport.width) / 2)),
+            y: 0
+        )
+        return BrowserViewportLayout(
+            canvasSize: canvasSize,
+            viewportFrame: CGRect(origin: origin, size: viewport)
+        )
+    }
 }
 
 // MARK: - Console bridge

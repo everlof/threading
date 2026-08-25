@@ -148,6 +148,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private let authority = RemoteAuthorityStore()
     private let ownerDevices: RemoteOwnerDeviceRegistry
     private let guestShareStore: RemoteGuestSharePersisting
+    /// Remote Access is useful with no visible window, so keep its process schedulable while its
+    /// listener is starting or live. The concrete activity deliberately permits idle sleep.
+    private let processActivity: any RemoteAccessProcessActivityManaging
     private(set) var guestSharePersistenceError: String?
     private var pairingBootstrapToken: String?
     private static let hostedPairingDeviceID = "hosted-pairing"
@@ -173,7 +176,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         serverServices: RemoteAccessServerServices? = nil,
         tailnetTransport: (any RemoteTailnetTransport)? = nil,
         identityStore: RemoteAccessIdentityStore? = nil,
-        tailscaleDoor: RemoteTailscaleDoorImplementation = .current
+        tailscaleDoor: RemoteTailscaleDoorImplementation = .current,
+        processActivity: (any RemoteAccessProcessActivityManaging)? = nil
     ) {
         self.appSettings = appSettings
         self.tailscaleDoor = tailscaleDoor
@@ -186,6 +190,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
         self.hostedService = hostedService ?? RemoteHostedServiceController()
+        self.processActivity = processActivity ?? RemoteAccessProcessActivity()
         let hostedPushService = self.hostedService
         services.notifications.configureHostedPushSender(
             isAvailable: { [weak hostedPushService] in
@@ -1743,6 +1748,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         pairingBootstrapToken = nil
         pairingRedemptions.removeAll()
         status = .disabled
+        processActivity.end()
     }
 
     // MARK: - Start
@@ -1761,6 +1767,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             return
         }
 
+        processActivity.begin()
+
         // The photographed value is a bootstrap, never the durable capability. It is consumed
         // and rotated when a device exchanges it for its own 256-bit bearer.
         guard let token = Self.pairingToken() else {
@@ -1768,6 +1776,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 "Remote credential generation failed stage=listener_start"
             )
             status = .failed(reason: L10n.string("A secure remote access token could not be created."))
+            processActivity.end()
             return
         }
         lifecycleGeneration += 1
@@ -1824,6 +1833,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 self.pairingRedemptions.removeAll()
                 self.listenerStatus = .idle
                 self.status = .failed(reason: failure.statement)
+                self.processActivity.end()
                 EventLog.shared.record(
                     .remote,
                     "Remote access failed to start",

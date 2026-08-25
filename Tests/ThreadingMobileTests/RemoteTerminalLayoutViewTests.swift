@@ -1,3 +1,4 @@
+import QuartzCore
 import SwiftTerm
 import UIKit
 import XCTest
@@ -5,6 +6,58 @@ import XCTest
 
 @MainActor
 final class RemoteTerminalLayoutViewTests: XCTestCase {
+    func testFloatingControlArrivalFadesRisesAndScalesToItsSettledState() throws {
+        let button = makeFloatingButton()
+
+        button.setPresented(true, animated: true, reducesMotion: false)
+
+        XCTAssertTrue(button.isPresented)
+        XCTAssertFalse(button.isHidden)
+        XCTAssertEqual(button.layer.opacity, 1)
+        XCTAssertTrue(CATransform3DIsIdentity(button.layer.transform))
+        let animation = try XCTUnwrap(
+            button.layer.animation(
+                forKey: "threading.mobile-floating-scroll-to-end.presence"
+            ) as? CAAnimationGroup
+        )
+        XCTAssertEqual(animation.duration, MobileDesign.Motion.floatingScrollArrival)
+        XCTAssertEqual(animation.animations?.count, 2)
+        let transform = try XCTUnwrap(
+            animation.animations?.compactMap { $0 as? CABasicAnimation }
+                .first(where: { $0.keyPath == "transform" })
+        )
+        let start = try XCTUnwrap(transform.fromValue as? NSValue).caTransform3DValue
+        XCTAssertEqual(start.m11, MobileDesign.Motion.floatingScrollStartScale, accuracy: 0.001)
+        XCTAssertEqual(start.m22, MobileDesign.Motion.floatingScrollStartScale, accuracy: 0.001)
+        XCTAssertEqual(start.m42, MobileDesign.Offset.floatingScrollLift, accuracy: 0.001)
+    }
+
+    func testFloatingControlHonorsReduceMotionAtBothEndpoints() {
+        let button = makeFloatingButton()
+
+        button.setPresented(true, animated: true, reducesMotion: true)
+        XCTAssertFalse(button.isHidden)
+        XCTAssertNil(button.layer.animationKeys())
+
+        button.setPresented(false, animated: true, reducesMotion: true)
+        XCTAssertTrue(button.isHidden)
+        XCTAssertEqual(button.layer.opacity, 0)
+        XCTAssertFalse(CATransform3DIsIdentity(button.layer.transform))
+    }
+
+    func testFloatingControlCanReverseAnInterruptedDeparture() {
+        let button = makeFloatingButton()
+        button.setPresented(true, animated: false, reducesMotion: false)
+
+        button.setPresented(false, animated: true, reducesMotion: false)
+        button.setPresented(true, animated: true, reducesMotion: false)
+
+        XCTAssertTrue(button.isPresented)
+        XCTAssertFalse(button.isHidden)
+        XCTAssertEqual(button.layer.opacity, 1)
+        XCTAssertTrue(CATransform3DIsIdentity(button.layer.transform))
+    }
+
     func testNavigationWidthsClipOneSettledTerminalGrid() {
         let fixture = makeFixture()
         let originalWidth = fixture.terminal.bounds.width
@@ -138,6 +191,13 @@ final class RemoteTerminalLayoutViewTests: XCTestCase {
         )
         host.updateTerminalFrame(for: host.bounds.size, holdsWidth: false)
         return (host, terminal)
+    }
+
+    private func makeFloatingButton() -> MobileFloatingScrollToEndButton {
+        MobileFloatingScrollToEndButton(
+            accessibilityLabel: "Jump to bottom",
+            accessibilityIdentifier: "scroll-test"
+        )
     }
 
     private enum Fixture {

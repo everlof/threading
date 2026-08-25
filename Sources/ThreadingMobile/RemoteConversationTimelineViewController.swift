@@ -487,7 +487,10 @@ final class RemoteConversationTimelineViewController: UIViewController {
     private let onViewportChange: (Double, Bool) -> Void
     private var theme: RemoteThemePalette
     private var collectionView: UICollectionView!
-    private let latestButton = UIButton(type: .system)
+    private let latestButton = MobileFloatingScrollToEndButton(
+        accessibilityLabel: MobileL10n.string("Jump to latest message"),
+        accessibilityIdentifier: "conversation-scroll-to-latest"
+    )
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
     private var storeObserver: UUID?
     private var parsedDocuments: [String: RemoteMarkdownDocument] = [:]
@@ -631,13 +634,8 @@ final class RemoteConversationTimelineViewController: UIViewController {
             forCellWithReuseIdentifier: RemoteConversationHistoryCell.reuseIdentifier
         )
         view.addSubview(collectionView)
-        latestButton.translatesAutoresizingMaskIntoConstraints = false
-        latestButton.setImage(UIImage(systemName: "arrow.down"), for: .normal)
-        latestButton.accessibilityLabel = MobileL10n.string("Jump to latest message")
-        latestButton.alpha = 0
-        latestButton.isHidden = true
         latestButton.addAction(UIAction { [weak self] _ in
-            self?.scrollToBottom(animated: true)
+            self?.scrollToBottom(animated: true, cancellingUserMotion: true)
         }, for: .touchUpInside)
         view.addSubview(latestButton)
         NSLayoutConstraint.activate([
@@ -654,10 +652,10 @@ final class RemoteConversationTimelineViewController: UIViewController {
                 constant: -MobileDesign.Spacing.inset
             ),
             latestButton.widthAnchor.constraint(
-                equalToConstant: MobileDesign.Size.minimumTapTarget
+                equalToConstant: MobileDesign.Size.floatingScrollTarget
             ),
             latestButton.heightAnchor.constraint(
-                equalToConstant: MobileDesign.Size.minimumTapTarget
+                equalToConstant: MobileDesign.Size.floatingScrollTarget
             ),
         ])
         view.backgroundColor = theme.uiGround
@@ -1074,33 +1072,25 @@ final class RemoteConversationTimelineViewController: UIViewController {
         return remaining < MobileDesign.Size.conversationBottomTolerance
     }
 
-    private func scrollToBottom(animated: Bool = false) {
+    private func scrollToBottom(
+        animated: Bool = false,
+        cancellingUserMotion: Bool = false
+    ) {
         guard let item = dataSource.snapshot().itemIdentifiers.last,
               let indexPath = dataSource.indexPath(for: item) else { return }
+        if cancellingUserMotion {
+            MobileScrollMotion.cancel(in: collectionView)
+        }
         collectionView.scrollToItem(at: indexPath, at: .bottom, animated: animated)
         setLatestButtonVisible(false)
     }
 
     private func applyLatestButtonTheme() {
-        latestButton.applyRemoteSurface(
-            fill: theme.uiSurface,
-            radius: MobileDesign.Size.minimumTapTarget / 2,
-            border: theme.uiBorder,
-            borderWidth: max(theme.borderWidth, 1)
-        )
-        latestButton.tintColor = theme.uiAccent
+        latestButton.applyTheme(theme)
     }
 
     private func setLatestButtonVisible(_ visible: Bool) {
-        guard latestButton.isHidden == visible else { return }
-        if visible { latestButton.isHidden = false }
-        UIView.animate(
-            withDuration: UIAccessibility.isReduceMotionEnabled
-                ? 0
-                : MobileDesign.Motion.controlResponse,
-            animations: { self.latestButton.alpha = visible ? 1 : 0 },
-            completion: { _ in self.latestButton.isHidden = !visible }
-        )
+        latestButton.setPresented(visible)
     }
 
     private func positionInitialBottomAfterLayout() {

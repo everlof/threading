@@ -8,6 +8,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 
     @ObservedObject var connection: RemoteSessionConnection
     let theme: RemoteTerminalThemeDTO?
+    let chromeTheme: RemoteThemePalette
     let allowsDirectInput: Bool
     let keyBridge: TerminalKeyBridge
     let fontSize: Double
@@ -41,7 +42,8 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         let container = RemoteTerminalLayoutView(
             frame: containerFrame,
             terminalView: view,
-            contentInset: contentInset
+            contentInset: contentInset,
+            theme: chromeTheme
         )
         view.terminalDelegate = context.coordinator
         view.dropBuiltInKeyboardAccessory()
@@ -56,7 +58,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         view.allowMouseReporting = allowsDirectInput
         view.configureFontSizing(onChange: onFontSizeChange)
         view.configureSelectionMenu(quoteSelection: quoteSelection, canPaste: allowsDirectInput)
-        context.coordinator.attach(to: view)
+        context.coordinator.attach(to: view, in: container)
         Self.apply(theme, to: view)
         view.accessibilityLabel = MobileL10n.string("Remote terminal")
 #if DEBUG
@@ -93,6 +95,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         // input mode flips on a live view.
         keyBridge.refreshKeyboardAvailability()
         terminalView.allowMouseReporting = allowsDirectInput
+        uiView.updateTheme(chromeTheme)
         terminalView.configureFontSizing(onChange: onFontSizeChange)
         terminalView.configureSelectionMenu(
             quoteSelection: quoteSelection,
@@ -108,6 +111,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             )
         }
         Self.apply(theme, to: terminalView)
+        context.coordinator.refreshScrollToEndPresence(animated: false)
     }
 
     static func dismantleUIView(_ uiView: RemoteTerminalLayoutView, coordinator: Coordinator) {
@@ -190,6 +194,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         var initialScrollProgress: Double?
         var onScrollProgress: @MainActor (Double) -> Void
         private weak var terminalView: RemoteTerminalView?
+        private weak var layoutView: RemoteTerminalLayoutView?
         private var contentOffsetObservation: NSKeyValueObservation?
         private var hasRestoredViewport = false
 
@@ -233,6 +238,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
                     view.feed(byteArray: Array(data)[...])
 #endif
                     self.restoreViewportIfPossible()
+                    self.refreshScrollToEndPresence()
                 },
                 gridChange: { [weak view] cols, rows in
                     guard view?.usesLocalViewport == false else { return }
@@ -246,14 +252,19 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         }
 
         @MainActor
-        func attach(to view: RemoteTerminalView) {
+        func attach(to view: RemoteTerminalView, in layoutView: RemoteTerminalLayoutView) {
             terminalView = view
+            self.layoutView = layoutView
             keyBridge.terminalView = view
+            view.scrollOwnershipDidChange = { [weak self] in
+                self?.refreshScrollToEndPresence()
+            }
             contentOffsetObservation = view.observe(\.contentOffset, options: [.new]) {
                 [weak self, weak view] _, _ in
                 Task { @MainActor in
-                    guard let self, let view,
-                          view.isDragging || view.isDecelerating || view.isTracking else { return }
+                    guard let self, let view else { return }
+                    self.refreshScrollToEndPresence()
+                    guard view.isDragging || view.isDecelerating || view.isTracking else { return }
 #if DEBUG
                     MobileTerminalWirePerformanceProbe.localScrollChanged(self.connection.session)
 #endif
@@ -266,10 +277,12 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         func detach() {
             contentOffsetObservation?.invalidate()
             contentOffsetObservation = nil
+            terminalView?.scrollOwnershipDidChange = nil
             if keyBridge.terminalView === terminalView {
                 keyBridge.terminalView = nil
             }
             terminalView = nil
+            layoutView = nil
         }
 
         func restoreViewportIfPossible() {
@@ -284,7 +297,16 @@ struct TerminalViewRepresentable: UIViewRepresentable {
                     animated: false
                 )
                 self.hasRestoredViewport = true
+                self.refreshScrollToEndPresence(animated: false)
             }
+        }
+
+        func refreshScrollToEndPresence(animated: Bool = true) {
+            guard let view = terminalView else { return }
+            let shouldPresent = view.canScroll
+                && !view.programOwnsPrimaryScrollGesture
+                && !view.isAtScrollbackEnd
+            layoutView?.setScrollToEndPresented(shouldPresent, animated: animated)
         }
 
         func captureViewport() {
@@ -361,6 +383,10 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 final class RemoteTerminalLayoutView: UIView {
     let terminalView: RemoteTerminalView
     let contentInset: CGFloat
+    let scrollToEndButton = MobileFloatingScrollToEndButton(
+        accessibilityLabel: MobileL10n.string("Jump to bottom"),
+        accessibilityIdentifier: "terminal-scroll-to-end"
+    )
 
     private(set) var settledTerminalWidth: CGFloat
     private(set) var pendingTerminalWidth: CGFloat?
@@ -373,7 +399,8 @@ final class RemoteTerminalLayoutView: UIView {
     init(
         frame: CGRect,
         terminalView: RemoteTerminalView,
-        contentInset: CGFloat
+        contentInset: CGFloat,
+        theme: RemoteThemePalette = RemoteThemePalette(nil)
     ) {
         self.terminalView = terminalView
         self.contentInset = contentInset
@@ -381,6 +408,30 @@ final class RemoteTerminalLayoutView: UIView {
         super.init(frame: frame)
         clipsToBounds = true
         addSubview(terminalView)
+        scrollToEndButton.applyTheme(theme)
+        scrollToEndButton.addAction(UIAction { [weak terminalView, weak self] _ in
+            guard let terminalView else { return }
+            MobileScrollMotion.cancel(in: terminalView)
+            terminalView.scroll(toPosition: 1)
+            self?.setScrollToEndPresented(false)
+        }, for: .touchUpInside)
+        addSubview(scrollToEndButton)
+        NSLayoutConstraint.activate([
+            scrollToEndButton.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -(contentInset + MobileDesign.Spacing.inset)
+            ),
+            scrollToEndButton.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -(contentInset + MobileDesign.Spacing.inset)
+            ),
+            scrollToEndButton.widthAnchor.constraint(
+                equalToConstant: MobileDesign.Size.floatingScrollTarget
+            ),
+            scrollToEndButton.heightAnchor.constraint(
+                equalToConstant: MobileDesign.Size.floatingScrollTarget
+            ),
+        ])
     }
 
     @available(*, unavailable)
@@ -391,6 +442,15 @@ final class RemoteTerminalLayoutView: UIView {
         let coordinator = enclosingTransitionCoordinator
         updateTerminalFrame(for: bounds.size, holdsWidth: coordinator != nil)
         observeCompletion(of: coordinator)
+        bringSubviewToFront(scrollToEndButton)
+    }
+
+    func updateTheme(_ theme: RemoteThemePalette) {
+        scrollToEndButton.applyTheme(theme)
+    }
+
+    func setScrollToEndPresented(_ presented: Bool, animated: Bool = true) {
+        scrollToEndButton.setPresented(presented, animated: animated)
     }
 
     /// Internal so the high-frequency contract can be exercised without manufacturing a UIKit
@@ -526,6 +586,14 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
     private var fontSizeAtPinchStart = MobileTerminalFontSize.defaultValue
     private let fontSizeFeedbackGenerator = UISelectionFeedbackGenerator()
     private var onFontSizeChange: (@MainActor (Double) -> Void)?
+    var scrollOwnershipDidChange: (@MainActor () -> Void)?
+
+    nonisolated override func mouseModeChanged(source: Terminal) {
+        super.mouseModeChanged(source: source)
+        Task { @MainActor [weak self] in
+            self?.scrollOwnershipDidChange?()
+        }
+    }
 
     override var canBecomeFirstResponder: Bool {
         allowsKeyboardInput && super.canBecomeFirstResponder

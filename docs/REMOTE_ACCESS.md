@@ -629,6 +629,15 @@ scrolls the program when it is tracking the mouse and the mirror's own scrollbac
 two fingers always scroll the mirror. Knowing *whether* it is tracking is the next paragraph:
 until the modes were stated at attach, a phone that joined a running agent believed nothing was.
 
+When the terminal owns that local scrollback and the viewport is above its live end, the iPhone
+shows one floating down-arrow over the lower trailing corner. It returns SwiftTerm to the live end
+and resumes following. A tap first cancels UIKit's active pan or deceleration, because returning to
+the live end is a semantic reset rather than a new destination for the old gesture's velocity. The
+arrow is deliberately absent while the TUI owns one-finger scrolling
+(mouse tracking or an alternate buffer), because in that state Threading cannot truthfully say
+that the TUI has more content below. Its presence reads SwiftTerm's exact reachable end and input
+mode in constant time; it does not inspect scrollback or send a PTY message.
+
 **The sticky modes are stated at attach; the ring cannot be trusted to carry them.** A joining
 client is seeded with a repaint of the *visible screen* (`RemoteScreenSeed`), which carries no DEC
 private modes, and in front of that seed is a 512 KB window over raw output. A TUI arms its modes
@@ -1739,7 +1748,11 @@ Remote access cannot wake a Mac that is offline, and cannot wake a sleeping one 
 same network, where the sleep proxy path above can: both "Wake for network access" and a proxy on
 the network are required, and Threading claims it only when it has observed both. A remotely
 resumed session starts in the background and does not activate or bring Threading's Mac window to
-the front.
+the front. While Remote Access is starting or listening, Threading holds a
+`userInitiatedAllowingIdleSystemSleep` process activity. This prevents App Nap from suspending the
+main-actor work behind an otherwise healthy listener when the app has no visible window, while
+deliberately preserving normal system sleep. The activity ends when Remote Access stops or its
+listener fails.
 
 Remote session creation intentionally exposes only checkouts the Mac already knows. Git Review,
 the read-only repository browser, detected image/PDF previews, and browser follow snapshots have

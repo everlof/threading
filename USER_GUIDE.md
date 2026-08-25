@@ -2648,7 +2648,10 @@ Claude Code track the mouse and scroll their own transcript, so **one finger** m
 view the way a wheel does on the Mac. A program that is not tracking the mouse leaves the finger to
 the terminal's own scrollback instead. **Two fingers** always scroll the local scrollback, which is
 the phone's equivalent of holding Option while scrolling on the Mac. Output no longer pulls the
-view back to the bottom while you are reading above it; typing returns you to the live end.
+view back to the bottom while you are reading above it; typing returns you to the live end. When
+the terminal owns the scrollback and you are above that end, a small floating **↓** appears at the
+lower right; tap it to stop the current scroll, jump back, and resume following. It stays out of
+the way for a TUI such as Claude Code that is scrolling its own transcript.
 
 **Pinch with two fingers** to make the terminal text larger or smaller. The iPhone remembers that
 size across terminal sessions on this device. A hardware keyboard can use **Cmd++** and **Cmd+-**;
