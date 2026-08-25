@@ -287,6 +287,44 @@ final class PrivacyPreferencesViewController: NSViewController {
         return button
     }
 
+    /// Privacy copy for a feature this build does not offer would describe a page the reader
+    /// cannot open. Withheld with the feature rather than reworded, because the honest version of
+    /// these sentences in a build without Remote Access is silence: nothing binds a network
+    /// address, and no notification reaches Apple. See `BuildChannel.offersRemoteAccess`.
+    /// Privacy copy for a feature this build does not offer would describe a page the reader
+    /// cannot open. Withheld with the feature rather than reworded, because the honest version of
+    /// these sentences in a build without Remote Access is silence: nothing binds a network
+    /// address, and no notification reaches Apple. Two properties rather than one because the
+    /// rows belong to different cards, and a row is only honest where it sits.
+    /// See `BuildChannel.offersRemoteAccess`.
+    private var remoteAccessAttributionRows: [NSView] {
+        guard AppInfo.buildChannel.offersRemoteAccess else { return [] }
+        return [
+            SettingsUI.detailRow(
+                symbol: "network",
+                title: "Remote Access binds only the ways in you turn on",
+                detail: "The listener always binds 127.0.0.1, and binds a network address only "
+                    + "for a way in you switched on. Each of those presents this Mac’s own "
+                    + "certificate, which your paired phone pins; nothing else terminates the "
+                    + "traffic."
+            ),
+        ]
+    }
+
+    private var remoteAccessEgressRows: [NSView] {
+        guard AppInfo.buildChannel.offersRemoteAccess else { return [] }
+        return [
+            SettingsUI.detailRow(
+                symbol: "bell.badge",
+                title: "Notification titles reach Apple",
+                detail: "To arrive on your iPhone, a notification travels through Apple's push "
+                    + "service, and its title is the chat's name — usually the one the agent "
+                    + "chose. Tool arguments, paths and diffs are deliberately left out. This "
+                    + "happens only while Remote Access is on."
+            ),
+        ]
+    }
+
     private func attributionCard() -> SettingsCard {
         SettingsCard(rows: [
             SettingsUI.detailRow(
@@ -304,15 +342,7 @@ final class PrivacyPreferencesViewController: NSViewController {
                     + "executable must declare each capability it wants, and Threading requests "
                     + "only the grants that its reviewed capabilities cover."
             ),
-            SettingsUI.detailRow(
-                symbol: "network",
-                title: "Remote Access binds only the ways in you turn on",
-                detail: "The listener always binds 127.0.0.1, and binds a network address only "
-                    + "for a way in you switched on. Each of those presents this Mac’s own "
-                    + "certificate, which your paired phone pins; nothing else terminates the "
-                    + "traffic."
-            )
-        ])
+        ] + remoteAccessAttributionRows)
     }
 
     private func credentialsCard() -> SettingsCard {
@@ -474,14 +504,6 @@ final class PrivacyPreferencesViewController: NSViewController {
                     + "GitLab uses glab. Turning off the card stops these lookups."
             ),
             SettingsUI.detailRow(
-                symbol: "bell.badge",
-                title: "Notification titles reach Apple",
-                detail: "To arrive on your iPhone, a notification travels through Apple's push "
-                    + "service, and its title is the chat's name — usually the one the agent "
-                    + "chose. Tool arguments, paths and diffs are deliberately left out. This "
-                    + "happens only while Remote Access is on."
-            ),
-            SettingsUI.detailRow(
                 symbol: "arrow.down.circle",
                 title: "Update checks reach release sources",
                 detail: "Once a day, Threading asks GitHub about the app, npm about installed "
@@ -499,7 +521,7 @@ final class PrivacyPreferencesViewController: NSViewController {
                     + "counts and grant states — no names, paths or prompts — and reveals it in "
                     + "the Finder. Threading never uploads it; sending it is your decision."
             )
-        ])
+        ] + remoteAccessEgressRows)
     }
 
     private func symbol(_ name: String) -> NSImage {

@@ -78,6 +78,30 @@ enum BuildChannel: String, CaseIterable {
         self = (infoValue as? String).flatMap(BuildChannel.init(rawValue:)) ?? .dev
     }
 
+    /// Whether a build on this channel offers Remote Access at all.
+    ///
+    /// The feature works and is tested, but it is not something the first distributed builds
+    /// support, so they do not show the door. Hidden rather than deleted: every runtime path
+    /// already guards on `AppSettings.remoteAccessEnabled`, which is `absence: .falseValue`, so
+    /// withholding the one surface that can turn it on is enough to withhold the feature. Nothing
+    /// is stripped, nothing has to be put back, and a development build keeps it.
+    ///
+    /// A distributed build could not offer the whole feature anyway. Hosted Direct needs
+    /// `com.apple.developer.applesignin` to enroll the Mac as a host, and that entitlement never
+    /// reaches a Developer ID provisioning profile — see `releasing.md`, "Sign in with Apple
+    /// cannot be shipped by Developer ID". So a notarized build's Remote Access page could only
+    /// ever advertise the local and Tailscale doors while the pairing story it is named for
+    /// silently did not work. Showing that is worse than showing nothing.
+    ///
+    /// `.dev` is the channel every uninjected build lands on, so working on Remote Access needs
+    /// no flag: build it the ordinary way and it is there.
+    var offersRemoteAccess: Bool {
+        switch self {
+        case .dev: true
+        case .nightly, .beta, .release: false
+        }
+    }
+
     /// What a channel mark means, spelled out — the honest sentence behind an abbreviation the
     /// sidebar shouts in three letters. `nil` for the release build, which wears no mark at all.
     var spokenName: String? {
