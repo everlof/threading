@@ -265,6 +265,9 @@ final class DisplayPaneController: NSViewController {
   private let customizationLookup: ComponentCustomizationHost.Lookup
   private let browserFactory: @MainActor (BrowserContextKind) -> BrowserViewController
   private let simulatorControl: any SimulatorControlling
+  private let simulatorLeaseManager: any SimulatorLeaseManaging
+  private let simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating
+  private let simulatorInputAuthorizer: any SimulatorInputAuthorizing
 
   /// Test and embedding seam for extension actions. Production routes through the shared
   /// provider slot when no explicit receiver is installed.
@@ -335,12 +338,21 @@ final class DisplayPaneController: NSViewController {
     browserFactory: @escaping @MainActor (BrowserContextKind) -> BrowserViewController = {
       BrowserViewController(contextKind: $0)
     },
-    simulatorControl: any SimulatorControlling = SimctlSimulatorControl()
+    simulatorControl: any SimulatorControlling = SimctlSimulatorControl(),
+    simulatorStreamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
+    simulatorInputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared
   ) {
     self.extensionPanels = extensionPanels ?? ExtensionManager.shared
     self.customizationLookup = customizationLookup
     self.browserFactory = browserFactory
     self.simulatorControl = simulatorControl
+    if simulatorControl is SimctlSimulatorControl {
+      self.simulatorLeaseManager = SimulatorLeaseManager.shared
+    } else {
+      self.simulatorLeaseManager = SimulatorLeaseManager(control: simulatorControl)
+    }
+    self.simulatorStreamCoordinator = simulatorStreamCoordinator
+    self.simulatorInputAuthorizer = simulatorInputAuthorizer
     super.init(nibName: nil, bundle: nil)
 
     appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
@@ -1344,7 +1356,10 @@ final class DisplayPaneController: NSViewController {
   ) -> SimulatorPaneViewController {
     let controller = SimulatorPaneViewController(
       preferredDeviceID: preferredDeviceID,
-      control: simulatorControl
+      control: simulatorControl,
+      leaseManager: simulatorLeaseManager,
+      streamCoordinator: simulatorStreamCoordinator,
+      inputAuthorizer: simulatorInputAuthorizer
     )
     addChild(controller)
     controller.onSelectedDeviceChange = { [weak self] _ in

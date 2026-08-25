@@ -71,6 +71,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "shareChatLink",
             "approveSystemPermissionPrompt",
             "conferManagerRole",
+            "controlSimulatorDevice",
             "installUpdate",
             "installUpdateAndRelaunch"
         ])

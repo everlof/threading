@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingSimulatorKit
 
 enum SimulatorPaneAgentResult<Value: Sendable>: Sendable {
     case success(Value)
@@ -12,9 +13,9 @@ struct SimulatorPaneScreenshot: Sendable {
 
 /// A session's adopted CoreSimulator device inside the right display pane.
 ///
-/// The first renderer deliberately uses bounded `simctl` screenshots. It is the public fallback
-/// behind the same controller the direct framebuffer helper will feed: replacing the frame source
-/// must not create another tab kind, device lease or agent-visible identity.
+/// The signed helper is the default live renderer; bounded `simctl` screenshots remain its public
+/// view-only fallback. Both feed this controller so a backend change cannot create another tab
+/// kind, device lease or agent-visible identity.
 @MainActor
 final class SimulatorPaneViewController: NSViewController {
 
@@ -33,6 +34,9 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private let control: any SimulatorControlling
+    private let leaseManager: any SimulatorLeaseManaging
+    private let streamCoordinator: any SimulatorLiveStreamCoordinating
+    private let inputAuthorizer: any SimulatorInputAuthorizing
     private var preferredDeviceID: SimulatorDeviceID?
     private var devices: [SimulatorDevice] = []
     private var lease: SimulatorDeviceLease?
@@ -41,8 +45,14 @@ final class SimulatorPaneViewController: NSViewController {
     private var preparationCompletions: [
         @MainActor @Sendable (SimulatorPaneAgentResult<SimulatorDeviceLease>) -> Void
     ] = []
-    private var frameTask: Task<Void, Never>?
-    private var frameGeneration = 0
+    private var streamTask: Task<Void, Never>?
+    private var streamSession: (any SimulatorLiveStreamSession)?
+    private var streamGeneration = 0
+    private var fallbackTask: Task<Void, Never>?
+    private var fallbackGeneration = 0
+    private var liveBackend: SimulatorLiveBackend?
+    private var liveCapabilities: SimulatorBridgeCapabilities?
+    private var lastStreamFailure: String?
     private var agentCommandTasks: [UUID: Task<Void, Never>] = [:]
     private var isPresented = false
 
@@ -53,6 +63,8 @@ final class SimulatorPaneViewController: NSViewController {
     var selectedDeviceID: SimulatorDeviceID? {
         lease?.device.id ?? preferredDeviceID
     }
+
+    var adoptedDevice: SimulatorDevice? { lease?.device }
 
     var onSelectedDeviceChange: ((SimulatorDeviceID) -> Void)?
 
@@ -87,11 +99,23 @@ final class SimulatorPaneViewController: NSViewController {
         trailing: [retryButton]
     )
 
-    private lazy var screenView: ThemedImagePreview = {
-        let preview = ThemedImagePreview()
-        preview.allowsUpscaling = true
+    private lazy var screenView: SimulatorScreenView = {
+        let preview = SimulatorScreenView()
         preview.setAccessibilityLabel(L10n.string("Simulator screen"))
         preview.setAccessibilityIdentifier("simulator.screen")
+        preview.onTap = { [weak self] point in
+            self?.submitInput(.tap(x: Double(point.x), y: Double(point.y)))
+        }
+        preview.onDrag = { [weak self] from, to, duration in
+            self?.submitInput(.drag(
+                fromX: Double(from.x),
+                fromY: Double(from.y),
+                toX: Double(to.x),
+                toY: Double(to.y),
+                durationMilliseconds: duration
+            ))
+        }
+        preview.onText = { [weak self] text in self?.submitInput(.text(text)) }
         return preview
     }()
 
@@ -109,10 +133,16 @@ final class SimulatorPaneViewController: NSViewController {
 
     init(
         preferredDeviceID: SimulatorDeviceID? = nil,
-        control: any SimulatorControlling
+        control: any SimulatorControlling,
+        leaseManager: (any SimulatorLeaseManaging)? = nil,
+        streamCoordinator: any SimulatorLiveStreamCoordinating = SimulatorLiveStreamCoordinator.shared,
+        inputAuthorizer: any SimulatorInputAuthorizing = SimulatorInputConsentController.shared
     ) {
         self.preferredDeviceID = preferredDeviceID
         self.control = control
+        self.leaseManager = leaseManager ?? SimulatorLeaseManager(control: control)
+        self.streamCoordinator = streamCoordinator
+        self.inputAuthorizer = inputAuthorizer
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -211,12 +241,11 @@ final class SimulatorPaneViewController: NSViewController {
         finishPreparation(.failure("The Simulator pane was closed."))
         agentCommandTasks.values.forEach { $0.cancel() }
         agentCommandTasks.removeAll()
-        stopFrameLoop()
+        stopTransport()
         let releasedLease = lease
         lease = nil
         guard let releasedLease else { return }
-        let control = control
-        Task { try? await control.release(releasedLease) }
+        Task { await leaseManager.release(releasedLease) }
     }
 
     func selectDevice(_ id: SimulatorDeviceID) {
@@ -317,6 +346,7 @@ final class SimulatorPaneViewController: NSViewController {
 
     private func retry() {
         if let lease {
+            stopTransport()
             presentationState = .ready(lease.device)
             startFrameLoop()
         } else {
@@ -329,9 +359,9 @@ final class SimulatorPaneViewController: NSViewController {
         releasingCurrentLease: Bool = false
     ) {
         preparationTask?.cancel()
-        stopFrameLoop()
+        stopTransport()
         presentationState = .discovering
-        let control = control
+        let leaseManager = leaseManager
         let currentLease = releasingCurrentLease ? lease : nil
         if releasingCurrentLease { lease = nil }
         preparationGeneration += 1
@@ -344,9 +374,9 @@ final class SimulatorPaneViewController: NSViewController {
                 }
             }
             do {
-                if let currentLease { try await control.release(currentLease) }
+                if let currentLease { await leaseManager.release(currentLease) }
                 try Task.checkCancellation()
-                let devices = try await control.availableDevices()
+                let devices = try await leaseManager.availableDevices()
                 try Task.checkCancellation()
                 guard self != nil else { return }
                 self?.devices = devices
@@ -359,9 +389,9 @@ final class SimulatorPaneViewController: NSViewController {
                 self?.preferredDeviceID = targetID
                 self?.presentationState = .preparing(targetID)
 
-                let preparedLease = try await control.prepare(deviceID: targetID)
+                let preparedLease = try await leaseManager.acquire(deviceID: targetID)
                 guard !Task.isCancelled, let self else {
-                    try? await control.release(preparedLease)
+                    await leaseManager.release(preparedLease)
                     return
                 }
                 self.lease = preparedLease
@@ -401,14 +431,101 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func startFrameLoop() {
-        guard isPresented, let deviceID = lease?.device.id, frameTask == nil else { return }
+        guard isPresented, let deviceID = lease?.device.id else { return }
+        if let streamSession {
+            streamSession.setVisible(true)
+            return
+        }
+        guard streamTask == nil, fallbackTask == nil else { return }
+
+        liveBackend = nil
+        liveCapabilities = nil
+        lastStreamFailure = nil
+        streamGeneration += 1
+        let generation = streamGeneration
+        let coordinator = streamCoordinator
+        streamTask = Task { [weak self] in
+            do {
+                let session = try await coordinator.openStream(for: deviceID)
+                guard !Task.isCancelled else {
+                    session.stop()
+                    return
+                }
+                guard let self,
+                      self.streamGeneration == generation,
+                      self.isPresented,
+                      self.lease?.device.id == deviceID else {
+                    session.stop()
+                    return
+                }
+                self.streamSession = session
+                session.setVisible(true)
+
+                var terminalFailure: String?
+                for await event in session.events {
+                    guard !Task.isCancelled else { break }
+                    guard self.streamGeneration == generation,
+                          self.lease?.device.id == deviceID else { break }
+                    switch event {
+                    case .ready(let backend, let capabilities, _, _):
+                        self.liveBackend = backend
+                        self.liveCapabilities = capabilities
+                        self.screenView.allowsInteraction = capabilities.supportsTouch
+                            || capabilities.supportsKeyboard
+                        if let device = self.lease?.device {
+                            self.presentationState = .ready(device)
+                        }
+                    case .frame(let frame):
+                        self.screenView.image = NSImage(cgImage: frame.image, size: .zero)
+                    case .statistics:
+                        break
+                    case .failed(let message):
+                        terminalFailure = message
+                        break
+                    case .ended:
+                        terminalFailure = SimulatorLiveStreamError.disconnected.localizedDescription
+                    }
+                    if terminalFailure != nil { break }
+                }
+
+                session.stop()
+                guard !Task.isCancelled,
+                      self.streamGeneration == generation,
+                      self.lease?.device.id == deviceID else { return }
+                self.streamSession = nil
+                self.streamTask = nil
+                self.beginFallback(reason: terminalFailure ?? L10n.string(
+                    "The direct Simulator stream ended."
+                ))
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      !Task.isCancelled,
+                      self.streamGeneration == generation,
+                      self.lease?.device.id == deviceID else { return }
+                self.streamTask = nil
+                self.beginFallback(reason: error.localizedDescription)
+            }
+        }
+    }
+
+    private func beginFallback(reason: String) {
+        guard isPresented, let deviceID = lease?.device.id, fallbackTask == nil else { return }
+        liveBackend = .screenshotFallback(reason: reason)
+        SimulatorStreamDiagnostics.shared.recordedFallback()
+        liveCapabilities = nil
+        lastStreamFailure = reason
+        screenView.allowsInteraction = false
+        if let device = lease?.device { presentationState = .ready(device) }
+
         let control = control
-        frameGeneration += 1
-        let generation = frameGeneration
-        frameTask = Task { [weak self] in
+        fallbackGeneration += 1
+        let generation = fallbackGeneration
+        fallbackTask = Task { [weak self] in
             defer {
-                if self?.frameGeneration == generation {
-                    self?.frameTask = nil
+                if self?.fallbackGeneration == generation {
+                    self?.fallbackTask = nil
                 }
             }
             while !Task.isCancelled {
@@ -418,10 +535,9 @@ final class SimulatorPaneViewController: NSViewController {
                     guard let image = NSImage(data: data) else {
                         throw SimulatorControlError.invalidScreenshot
                     }
-                    self?.screenView.image = image
-                    if let device = self?.lease?.device {
-                        self?.presentationState = .ready(device)
-                    }
+                    guard let self, self.lease?.device.id == deviceID else { return }
+                    self.screenView.image = image
+                    if let device = self.lease?.device { self.presentationState = .ready(device) }
                     try await Task.sleep(nanoseconds: Timing.fallbackFrameInterval)
                 } catch is CancellationError {
                     return
@@ -437,9 +553,114 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func stopFrameLoop() {
-        frameTask?.cancel()
-        frameTask = nil
-        frameGeneration += 1
+        streamSession?.setVisible(false)
+        fallbackTask?.cancel()
+        fallbackTask = nil
+        fallbackGeneration += 1
+        if streamSession == nil {
+            streamTask?.cancel()
+            streamTask = nil
+            streamGeneration += 1
+        }
+    }
+
+    private func stopTransport() {
+        fallbackTask?.cancel()
+        fallbackTask = nil
+        fallbackGeneration += 1
+        streamTask?.cancel()
+        streamTask = nil
+        streamGeneration += 1
+        streamSession?.stop()
+        streamSession = nil
+        liveBackend = nil
+        liveCapabilities = nil
+        lastStreamFailure = nil
+        screenView.allowsInteraction = false
+    }
+
+    private func submitInput(_ input: SimulatorBridgeInput) {
+        sendInput(input) { [weak self] result in
+            if case .failure(let message) = result {
+                self?.statusLabel.stringValue = message
+                self?.statusLabel.textColor = Design.Status.negative
+                self?.statusLabel.toolTip = message
+            }
+        }
+    }
+
+    func sendInputForAgent(
+        _ input: SimulatorBridgeInput,
+        completion: @escaping @MainActor @Sendable (SimulatorPaneAgentResult<Void>) -> Void
+    ) {
+        sendInput(input, completion: completion)
+    }
+
+    private func sendInput(
+        _ input: SimulatorBridgeInput,
+        completion: @escaping @MainActor @Sendable (SimulatorPaneAgentResult<Void>) -> Void
+    ) {
+        guard let device = lease?.device else {
+            completion(.failure("Call simulator_prepare before controlling the Simulator."))
+            return
+        }
+        runAgentCommand { [weak self] in
+            guard let self else { return }
+            do {
+                let session = try await self.awaitInputSession(for: device.id)
+                let approved = await self.inputAuthorization(for: device)
+                guard approved else {
+                    completion(.failure("Simulator control was not allowed for \(device.name)."))
+                    return
+                }
+                guard self.lease?.device.id == device.id,
+                      self.streamSession === session else {
+                    completion(.failure("The selected Simulator changed before input was sent."))
+                    return
+                }
+                try await session.sendInput(input)
+                try Task.checkCancellation()
+                guard self.lease?.device.id == device.id,
+                      self.streamSession === session else {
+                    completion(.failure("The selected Simulator changed while input was sent."))
+                    return
+                }
+                completion(.success(()))
+            } catch is CancellationError {
+                completion(.failure("The Simulator input was cancelled."))
+            } catch {
+                completion(.failure(error.localizedDescription))
+            }
+        }
+    }
+
+    private func awaitInputSession(
+        for deviceID: SimulatorDeviceID
+    ) async throws -> any SimulatorLiveStreamSession {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(4))
+        while clock.now < deadline {
+            try Task.checkCancellation()
+            guard lease?.device.id == deviceID else {
+                throw SimulatorLiveStreamError.disconnected
+            }
+            if let streamSession, liveCapabilities != nil { return streamSession }
+            if case .screenshotFallback = liveBackend {
+                throw SimulatorLiveStreamError.helperUnavailable(
+                    "Direct Simulator control is unavailable while the pane uses screenshot fallback."
+                )
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        throw SimulatorLiveStreamError.handshakeTimedOut
+    }
+
+    private func inputAuthorization(for device: SimulatorDevice) async -> Bool {
+        await withCheckedContinuation { continuation in
+            inputAuthorizer.authorize(device: device, in: view.window) {
+                continuation.resume(returning: $0)
+            }
+        }
     }
 
     private func renderState() {
@@ -462,12 +683,24 @@ final class SimulatorPaneViewController: NSViewController {
             retryButton.isEnabled = false
         case .ready(let device):
             deviceChip.configure(symbolName: "iphone", title: device.name)
+            let backend: String
+            switch liveBackend {
+            case .direct(.h264): backend = L10n.string("Live H.264")
+            case .direct(.jpeg): backend = L10n.string("Live JPEG")
+            case .screenshotFallback: backend = L10n.string("Preview fallback")
+            case nil: backend = L10n.string("Connecting live preview…")
+            }
             statusLabel.stringValue = L10n.format(
-                "%@ · %@ · Preview",
+                "%@ · %@ · %@",
                 device.name,
-                device.runtimeName
+                device.runtimeName,
+                backend
             )
-            statusLabel.textColor = Design.Status.positive
+            if case .screenshotFallback = liveBackend {
+                statusLabel.textColor = Design.Status.warning
+            } else {
+                statusLabel.textColor = Design.Status.positive
+            }
             retryButton.isEnabled = true
         case .failed(let message):
             statusLabel.stringValue = message
@@ -478,7 +711,7 @@ final class SimulatorPaneViewController: NSViewController {
         // Keeping the chip enabled also lets the user inspect that one-item choice instead of
         // washing the device name out as though Simulator itself were unavailable.
         deviceChip.isEnabled = !devices.isEmpty
-        statusLabel.toolTip = statusLabel.stringValue
+        statusLabel.toolTip = lastStreamFailure ?? statusLabel.stringValue
     }
 
     private func deviceEntries() -> [ThemedMenuEntry] {
@@ -493,5 +726,6 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     var frameImageForTesting: NSImage? { screenView.image }
+    var liveBackendForTesting: SimulatorLiveBackend? { liveBackend }
     var isPresentedForTesting: Bool { isPresented }
 }

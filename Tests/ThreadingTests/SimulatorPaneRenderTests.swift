@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingSimulatorKit
 import XCTest
 @testable import Threading
 
@@ -92,6 +93,11 @@ final class SimulatorPaneRenderTests: XCTestCase {
             device: device,
             frame: deviceFrame
         )
+        let image = try XCTUnwrap(NSImage(data: deviceFrame))
+        var imageRect = NSRect(origin: .zero, size: image.size)
+        let liveFrame = try XCTUnwrap(
+            image.cgImage(forProposedRect: &imageRect, context: nil, hints: nil)
+        )
         let project = Project(
             name: "Threading",
             folderURL: FileManager.default.temporaryDirectory
@@ -108,7 +114,10 @@ final class SimulatorPaneRenderTests: XCTestCase {
         )
         applyConversationFixture(to: conversation)
 
-        let panel = DisplayPaneController(simulatorControl: control)
+        let panel = DisplayPaneController(
+            simulatorControl: control,
+            simulatorStreamCoordinator: SimulatorPaneRenderStreamCoordinator(frame: liveFrame)
+        )
         let split = SidebarSplitViewController()
         let conversationItem = NSSplitViewItem(viewController: conversation)
         conversationItem.minimumThickness = 560
@@ -391,4 +400,61 @@ private actor SimulatorPaneRenderControl: SimulatorControlling {
     func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data { frame }
 
     func release(_ lease: SimulatorDeviceLease) async throws {}
+}
+
+/// The evidence fixture replaces only the CoreSimulator transport boundary. Its frame still
+/// travels through the production live-stream event path, decoder-independent view model and
+/// interactive screen view, so the capture proves the shipped adopted surface rather than the
+/// slower screenshot fallback.
+private final class SimulatorPaneRenderStreamCoordinator:
+    SimulatorLiveStreamCoordinating,
+    @unchecked Sendable
+{
+    private let session: SimulatorPaneRenderStreamSession
+
+    init(frame: CGImage) {
+        session = SimulatorPaneRenderStreamSession(frame: frame)
+    }
+
+    func openStream(
+        for deviceID: SimulatorDeviceID
+    ) async throws -> any SimulatorLiveStreamSession {
+        session
+    }
+}
+
+private final class SimulatorPaneRenderStreamSession:
+    SimulatorLiveStreamSession,
+    @unchecked Sendable
+{
+    let events: AsyncStream<SimulatorLiveStreamEvent>
+
+    init(frame: CGImage) {
+        let pair = AsyncStream<SimulatorLiveStreamEvent>.makeStream(
+            bufferingPolicy: .bufferingNewest(2)
+        )
+        events = pair.stream
+        pair.continuation.yield(.ready(
+            backend: .direct(codec: .h264),
+            capabilities: SimulatorBridgeCapabilities(
+                codecs: [.h264, .jpeg],
+                supportsTouch: true,
+                supportsKeyboard: true,
+                supportsButtons: true,
+                maximumFramesPerSecond: 30
+            ),
+            coreSimulatorVersion: "evidence",
+            simulatorKitVersion: "evidence"
+        ))
+        pair.continuation.yield(.frame(SimulatorLiveFrame(
+            sequence: 1,
+            image: frame,
+            codec: .h264,
+            presentationTimeNanoseconds: 0
+        )))
+    }
+
+    func setVisible(_ visible: Bool) {}
+    func sendInput(_ input: SimulatorBridgeInput) async throws {}
+    func stop() {}
 }

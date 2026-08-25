@@ -121,6 +121,18 @@ extension AgentCommand {
   static func simulatorScreenshot(_ value: SimulatorScreenshotArguments) -> Self {
     builtIn(.simulatorScreenshot, value)
   }
+  static func simulatorTap(_ value: SimulatorTapArguments) -> Self {
+    builtIn(.simulatorTap, value)
+  }
+  static func simulatorSwipe(_ value: SimulatorSwipeArguments) -> Self {
+    builtIn(.simulatorSwipe, value)
+  }
+  static func simulatorTypeText(_ value: SimulatorTypeTextArguments) -> Self {
+    builtIn(.simulatorTypeText, value)
+  }
+  static func simulatorPressButton(_ value: SimulatorPressButtonArguments) -> Self {
+    builtIn(.simulatorPressButton, value)
+  }
   static func panelListTabs(_ value: EmptyToolArguments) -> Self { builtIn(.panelListTabs, value) }
   static func panelActivateTab(_ value: PanelActivateTabArguments) -> Self {
     builtIn(.panelActivateTab, value)

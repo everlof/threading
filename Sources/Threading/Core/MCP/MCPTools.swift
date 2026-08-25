@@ -1556,6 +1556,35 @@ struct SimulatorScreenshotArguments: Codable, Sendable {
   }
 }
 
+struct SimulatorTapArguments: Codable, Sendable {
+  let x: Double?
+  let y: Double?
+}
+
+struct SimulatorSwipeArguments: Codable, Sendable {
+  let fromX: Double?
+  let fromY: Double?
+  let toX: Double?
+  let toY: Double?
+  let durationMilliseconds: Int?
+
+  private enum CodingKeys: String, CodingKey {
+    case fromX = "from_x"
+    case fromY = "from_y"
+    case toX = "to_x"
+    case toY = "to_y"
+    case durationMilliseconds = "duration_ms"
+  }
+}
+
+struct SimulatorTypeTextArguments: Codable, Sendable {
+  let text: String?
+}
+
+struct SimulatorPressButtonArguments: Codable, Sendable {
+  let button: String?
+}
+
 struct EmptyToolArguments: Codable, Sendable {}
 
 /// What an agent says when it files its own session away.
@@ -2471,6 +2500,10 @@ enum MCPTools {
   static let simulatorPrepare = MCPBuiltInTool.simulatorPrepare.rawValue
   static let simulatorInstallLaunch = MCPBuiltInTool.simulatorInstallLaunch.rawValue
   static let simulatorScreenshot = MCPBuiltInTool.simulatorScreenshot.rawValue
+  static let simulatorTap = MCPBuiltInTool.simulatorTap.rawValue
+  static let simulatorSwipe = MCPBuiltInTool.simulatorSwipe.rawValue
+  static let simulatorTypeText = MCPBuiltInTool.simulatorTypeText.rawValue
+  static let simulatorPressButton = MCPBuiltInTool.simulatorPressButton.rawValue
 
   static let panelListTabs = MCPBuiltInTool.panelListTabs.rawValue
   static let panelActivateTab = MCPBuiltInTool.panelActivateTab.rawValue
@@ -5581,6 +5614,159 @@ enum MCPTools {
           )
         ],
         required: []
+      )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorTap,
+      name: "simulator_tap",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Tap Simulator",
+      detail: "Tap a normalized point on the adopted panel device.",
+      symbol: "hand.tap",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SimulatorTapArguments.self, forKey: .arguments)
+          ?? SimulatorTapArguments(x: nil, y: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorTap(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Tap the exact Simulator shown live in Threading's right panel. Coordinates are normalized \
+        over the visible device screen: (0,0) is top-left and (1,1) is bottom-right. The user is \
+        asked once before this device accepts input. Call simulator_prepare first and use \
+        simulator_screenshot when you need pixels for choosing a point.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "x": MCPPropertySchema(type: .number, description: "Horizontal position from 0 to 1."),
+          "y": MCPPropertySchema(type: .number, description: "Vertical position from 0 to 1."),
+        ],
+        required: ["x", "y"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorSwipe,
+      name: "simulator_swipe",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Swipe Simulator",
+      detail: "Swipe between normalized points on the adopted panel device.",
+      symbol: "hand.draw",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SimulatorSwipeArguments.self, forKey: .arguments)
+          ?? SimulatorSwipeArguments(
+            fromX: nil, fromY: nil, toX: nil, toY: nil, durationMilliseconds: nil
+          )
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorSwipe(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Swipe on the exact Simulator shown live in Threading's right panel. Coordinates are \
+        normalized from the screen's top-left (0,0) to bottom-right (1,1). duration_ms defaults \
+        to 300 and is bounded to 100–2000. The user is asked once before this device accepts input.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "from_x": MCPPropertySchema(type: .number, description: "Starting x from 0 to 1."),
+          "from_y": MCPPropertySchema(type: .number, description: "Starting y from 0 to 1."),
+          "to_x": MCPPropertySchema(type: .number, description: "Ending x from 0 to 1."),
+          "to_y": MCPPropertySchema(type: .number, description: "Ending y from 0 to 1."),
+          "duration_ms": MCPPropertySchema(
+            type: .number,
+            description: "Duration from 100 to 2000 milliseconds. Defaults to 300."
+          ),
+        ],
+        required: ["from_x", "from_y", "to_x", "to_y"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorTypeText,
+      name: "simulator_type_text",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Type in Simulator",
+      detail: "Type bounded US-keyboard text into the adopted panel device.",
+      symbol: "keyboard",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SimulatorTypeTextArguments.self, forKey: .arguments)
+          ?? SimulatorTypeTextArguments(text: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorTypeText(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Type up to 1,024 printable US-keyboard characters, tabs, newlines, or backspaces into the \
+        focused control on the exact Simulator shown live in Threading's right panel. Tap the \
+        target field first. The user is asked once before this device accepts input; Threading \
+        never forwards arbitrary keyboard events to a helper.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "text": MCPPropertySchema(
+            type: .string,
+            description: "Bounded printable US-keyboard text, tab, newline, or backspace."
+          )
+        ],
+        required: ["text"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .simulatorPressButton,
+      name: "simulator_press_button",
+      groupID: "simulator",
+      family: .simulator,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Press Simulator button",
+      detail: "Press Home, Lock, or Side on the adopted panel device.",
+      symbol: "iphone.gen3",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SimulatorPressButtonArguments.self, forKey: .arguments)
+          ?? SimulatorPressButtonArguments(button: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.simulatorPressButton(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Press Home, Lock, or Side on the exact Simulator shown live in Threading's right panel. \
+        The user is asked once before this device accepts input. Call simulator_prepare first.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "button": MCPPropertySchema(
+            type: .string,
+            description: "One of: home, lock, side."
+          )
+        ],
+        required: ["button"]
       )
     ),
     MCPToolDefinition(

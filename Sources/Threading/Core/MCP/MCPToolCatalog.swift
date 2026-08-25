@@ -363,13 +363,15 @@ enum MCPToolCatalog {
       adopts one device, and returns its exact UDID. Use that UDID for xcodebuild with \
       -destination id=<device_id>, then call simulator_install_launch with the built .app and \
       bundle identifier. Use simulator_screenshot when you need the current pixels in your \
-      own context; the user continues seeing the same device in the panel.
+      own context; the user continues seeing the same device in the panel. Prefer simulator_tap, \
+      simulator_swipe, simulator_type_text, and simulator_press_button for interaction so the \
+      user watches the same live surface. Coordinates are normalized over the returned screen.
 
-      Do not run open -a Simulator merely to present the app. The public fallback is currently \
-      a bounded view-only preview; commands that address the returned UDID directly may still \
-      be used when these tools do not yet expose an interaction, without opening a separate \
-      Simulator window. Keep build output in the session's project or DerivedData and never \
-      guess a device identifier.
+      Do not run open -a Simulator merely to present or interact with the app. Threading asks the \
+      user once before direct input reaches each exact adopted device. If the pane reports that \
+      it is using screenshot fallback, interaction tools fail closed instead of opening another \
+      window. Keep build output in the session's project or DerivedData and never guess a device \
+      identifier.
       """
   )
 
