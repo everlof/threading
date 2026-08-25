@@ -1198,6 +1198,120 @@ is `.catalogueOnly` by construction — omitting `remotePolicy` is deliberate, s
 describe the row while neither the phone nor an agent can read or move the value. Starting a
 background daemon on somebody's Mac from a phone is not a thing this switch is going to do.
 
+## The command-line client
+
+`threading-ptyd status`, `sessions`, `journal` and `stop`, run from any shell against the daemon
+that is already listening. It is the **same binary**: the client has to speak the framing, the
+frames and the version gate exactly as the daemon does, and a second executable would be a second
+place for all three to drift, plus one more thing to sign, embed and keep in the bundle. The
+verbs live in `PTYHostCLI.swift`, `PTYHostCLIClient.swift` and `PTYHostCLIFormatting.swift`, all
+inside the same import fence as the daemon, so the client links Foundation, Darwin, Dispatch and
+`ThreadingPTYHostKit` and nothing else.
+
+**The two command lines cannot collide.** `PTYHostCLI.parse` declines anything whose first
+argument begins with `-`, and declines an empty command line, so `--socket <path> --state <dir>`
+and `--default-locations` reach the daemon's own parser exactly as they did before this existed.
+Only a bare word reaches the verb table, which is what makes adding a verb later unable to shadow
+a flag. `PTYHostCLITests/testTheDaemonCommandLineIsUnchanged` is that claim as a test.
+
+| Verb | What it answers | Exit |
+|---|---|---|
+| `status` | whether a socket file is there, whether a daemon answers (`hello`: build, pid, protocol pair), how many sessions it holds split into attached / detached / exited, a `lost` set if the daemon reported one, whether the bundle carries the launch-agent plist, what launchd says about the label, and the path of today's journal file | 0 if a daemon answered and the gate admitted it, else 1 |
+| `sessions` | one row per held session: short id, channel, pid, elapsed uptime, grid, state, exit status, executable basename. `--json` prints the same set with stable keys | 0 if the daemon answered, else 1 |
+| `journal [N]` | the last N journal lines (default 50) through `journalTail`, bounded again by the daemon's own `maximumJournalTailBytes` | 0 if the daemon answered, else 1 |
+| `stop <id-prefix>` | attach with the floor replay budget, then `kill(escalate: true)`, then wait for `exited` | 0 when the ending arrived, else 1 |
+| `help`, `--help` | the usage, on standard output | 0 |
+| a bad verb, an option on the wrong verb, a missing value | the usage, on standard error | 64 (`EX_USAGE`) |
+
+Output is plain aligned text on standard output, one line per row, no colour and no progress; a
+refusal is one sentence on standard error and nothing on standard output. Every wait is bounded by
+a constant in `PTYHostCLIDefaults`, which is separate from `PTYHostDefaults` because the daemon's
+numbers are load-bearing for a process holding somebody's agents and these bound a tool that
+connects, asks once and exits.
+
+**What it refuses to do, and why.**
+
+- **Never `retire`.** Retiring unlinks the socket and drains, and it is the *app's* upgrade
+  policy — decided by `PTYHostUpgradePolicy` from the build, the gate and the held count. A shell
+  command that retired would be a way to interrupt working agents by hand, and on a mismatched
+  daemon it would be worse: `selfTooOld` exists precisely so a newer daemon is never taken down to
+  install an older host. An incompatible daemon is therefore reported and left alone, and `status`
+  exits 1 because something is listening that nothing here can ask anything of.
+- **Never `spawn`.** A session belongs to a conversation the app owns; a child started from a
+  shell would be one no surface could ever show, and the daemon's own `sessions.jsonl` would carry
+  a record the app can only classify as an orphan. Putting a session *in* the daemon is what
+  `PTYHostCLITests`' own wire fixture does, because the tool must not grow a verb for it.
+- **No follow mode.** `journal -f` is refused with the reason rather than silently accepted: the
+  daemon's journal is an ordinary append-only file under the state directory, `status` prints its
+  path, and `tail -f` on that file is better than a socket held open for the same bytes.
+
+`stop` is the one verb that changes anything, and it is `PTYHostSessionStop`'s semantics rather
+than a second dialect: attach first, because `kill` names a session and a connection may only name
+the one it is *bound* to, so a watcher that wants to end a child it is not watching has to become
+its watcher for as long as it takes to say so. The replay is bound to
+`PTYHostReplayDefaults.minimumBudgetBytes` — something about to end a child has no use for its
+history, and the daemon clamps anything smaller up to that anyway. An ambiguous prefix is
+**refused rather than resolved**: the two sessions a prefix reaches are two different people's
+turns. `PTYHostCLIDefaults.stopTimeout` is ten seconds rather than the page's three, because the
+daemon's own arithmetic is `SIGTERM`, a two-second escalation grace, `SIGKILL` and up to half a
+second of output drain, and a run of this measured 2.13 s between `killRequested` and `exited` for
+a `sleep` that did not die on the first signal.
+
+### The registration line, and the one thing the daemon cannot link
+
+`status` reports whether `Contents/Library/LaunchAgents/codes.threading.ptyd.plist` is registered,
+and it cannot ask `SMAppService`: the boundary lint holds this target to Foundation, Darwin,
+Dispatch and the wire package, which is the rule that keeps "it owns the child, the ring, the grid
+and the exit status, and parses nothing" true. `PTYHostRegistration` is the app's, and the app is
+what the daemon must not link.
+
+So it asks the way a person at a prompt would — `launchctl print gui/<uid>/codes.threading.ptyd` —
+and `PTYHostCLIRegistration.parse` reads the answer. Three findings, kept apart because they send
+somebody looking in different places: `registered` with launchd's own `state` word and the pid when
+there is one, `notRegistered` when the text carries "Could not find service", and `unreadable`
+carrying the first line when `launchctl` said something else. Two things in the parser are
+deliberate:
+
+- **The text decides, not the exit status.** `launchctl` exits non-zero for "no such service" and
+  for a malformed domain alike, and those are not the same finding. It has also moved its refusal
+  between standard output and standard error across releases, so both descriptors are read as one
+  string.
+- **A key is matched on the whole line.** `launchctl` prints `spawn type`, `program identifier` and
+  a dozen other keys ending in the words being looked for, so a substring search for `state` or
+  `pid` would answer with whichever came first.
+
+The line names the label, because the answer is about `codes.threading.ptyd` rather than about
+whichever socket the invocation was pointed at — and somebody who named a socket with `--socket` is
+usually asking why the ordinary one is silent.
+
+`PTYHostCLIDefaults.launchctlEnvironmentKey` (`THREADING_PTY_HOST_LAUNCHCTL`) names the program to
+run, and is a test seam in `PTYHostDefaults.ringBudgetEnvironmentKey`'s sense: never a user
+setting. The reason is sharper here than there. There is one registered label on a machine and it
+belongs to the developer's own Threading, so a test that ran the real `launchctl print` would be
+asserting about their login items rather than about this code — and the answer would change when
+they toggled the setting. Every invocation in `PTYHostCLITests` therefore points the key at a
+script replaying a captured `launchctl print`, which is how the parser is exercised over the text
+it actually has to read.
+
+### Tested as the process it is
+
+`PTYHostCLITests` runs the shipping helper twice: once as a daemon on a scratch rendezvous, once as
+a client pointed at it with `--socket`/`--state`. Nothing is stubbed on either side, because a
+client tested against a fake daemon is a client that agrees with a fake. The assertions are what a
+person reads and what the shell gets back — the text, the sentence on standard error, the exit code
+— plus the one thing text cannot prove: after `stop`, the child's **pid** is gone, since a tool
+that sent the right frames and left the child running would pass every text check above it.
+
+Sessions are put into the daemon by a small wire fixture in that file rather than by the tool, and
+the ambiguity case uses two hand-written UUIDs sharing a prefix rather than drawing random ones
+until two collide.
+
+One harness note worth keeping: a coverage build's instrumentation writes `LLVM Profile Error:
+Failed to write file "default.profraw"` to the child's standard error when it cannot place the
+file, and the test host's working directory is `/`. The fixture gives every child a writable
+working directory, and the "help says nothing on standard error" assertion checks that the *tool*
+wrote nothing there rather than that the stream is empty.
+
 ## What is not decided here
 
 Re-adopting a **live** native conversation, rather than ending it and resuming from its transcript
