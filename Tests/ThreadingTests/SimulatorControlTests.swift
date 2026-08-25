@@ -94,17 +94,54 @@ final class SimulatorControlTests: XCTestCase {
         ])
     }
 
-    func testScreenshotAcceptsOnlyABoundedPNG() async throws {
+    func testScreenshotUsesAPrivateBoundedFileAndRemovesIt() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
         let png = SimulatorControlDefaults.pngSignature + Data([0x00, 0x01])
+        let runner = RecordingSimulatorCommandRunner(
+            outputs: [Data()],
+            screenshotPayloads: [png]
+        )
         let control = SimctlSimulatorControl(
-            runner: RecordingSimulatorCommandRunner(outputs: [png])
+            runner: runner,
+            screenshotTemporaryDirectory: temporaryDirectory,
+            maximumScreenshotBytes: png.count
         )
 
         let captured = try await control.screenshot(of: Self.workPhoneID)
-        XCTAssertEqual(captured, png)
 
+        XCTAssertEqual(captured, png)
+        let command = try XCTUnwrap(runner.recordedArguments.first)
+        XCTAssertEqual(Array(command.dropLast()), [
+            "io", Self.workPhoneID.rawValue, "screenshot", "--type=png"
+        ])
+        let outputPath = try XCTUnwrap(command.last)
+        XCTAssertNotEqual(outputPath, "-")
+        XCTAssertTrue(outputPath.hasPrefix(temporaryDirectory.path + "/"))
+        XCTAssertEqual(URL(fileURLWithPath: outputPath).pathExtension, "png")
+        XCTAssertEqual(runner.recordedCaptures, [.combined])
+        XCTAssertEqual(
+            runner.recordedMaximumOutputBytes,
+            [SimulatorControlDefaults.maximumCommandOutputBytes]
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outputPath))
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory.path),
+            []
+        )
+    }
+
+    func testScreenshotRejectsInvalidPNGAndRemovesItsCapture() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let runner = RecordingSimulatorCommandRunner(
+            outputs: [Data()],
+            screenshotPayloads: [Data("not png".utf8)]
+        )
         let invalid = SimctlSimulatorControl(
-            runner: RecordingSimulatorCommandRunner(outputs: [Data("not png".utf8)])
+            runner: runner,
+            screenshotTemporaryDirectory: temporaryDirectory
         )
         do {
             _ = try await invalid.screenshot(of: Self.workPhoneID)
@@ -112,6 +149,68 @@ final class SimulatorControlTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? SimulatorControlError, .invalidScreenshot)
         }
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory.path),
+            []
+        )
+    }
+
+    func testScreenshotRejectsAnOversizedFileAndRemovesItsCapture() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let oversized = SimulatorControlDefaults.pngSignature + Data([0x00])
+        let control = SimctlSimulatorControl(
+            runner: RecordingSimulatorCommandRunner(
+                outputs: [Data()],
+                screenshotPayloads: [oversized]
+            ),
+            screenshotTemporaryDirectory: temporaryDirectory,
+            maximumScreenshotBytes: SimulatorControlDefaults.pngSignature.count
+        )
+
+        do {
+            _ = try await control.screenshot(of: Self.workPhoneID)
+            XCTFail("An oversized framebuffer capture should be refused.")
+        } catch {
+            XCTAssertEqual(
+                error as? SimulatorControlError,
+                .outputTooLarge(operation: "screenshot")
+            )
+        }
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory.path),
+            []
+        )
+    }
+
+    func testScreenshotPreservesSimctlFailureDetailAndRemovesPartialCapture() async throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let detail = "CoreSimulator capture failed"
+        let runner = RecordingSimulatorCommandRunner(
+            outputs: [Data(detail.utf8)],
+            screenshotPayloads: [SimulatorControlDefaults.pngSignature],
+            exitStatuses: [72]
+        )
+        let control = SimctlSimulatorControl(
+            runner: runner,
+            screenshotTemporaryDirectory: temporaryDirectory
+        )
+
+        do {
+            _ = try await control.screenshot(of: Self.workPhoneID)
+            XCTFail("A failed simctl capture should be reported.")
+        } catch {
+            XCTAssertEqual(
+                error as? SimulatorControlError,
+                .commandFailed(operation: "screenshot", detail: detail)
+            )
+        }
+        XCTAssertEqual(runner.recordedCaptures, [.combined])
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory.path),
+            []
+        )
     }
 
     func testRunnerCancellationTerminatesTheOwnedProcessGroup() async throws {
@@ -145,6 +244,18 @@ final class SimulatorControlTests: XCTestCase {
     private static let recentPhoneID = SimulatorDeviceID(
         "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
     )!
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SimulatorControlTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false
+        )
+        return directory
+    }
 
     private static let deviceFixture = #"""
     {
@@ -199,16 +310,38 @@ final class SimulatorControlTests: XCTestCase {
 private final class RecordingSimulatorCommandRunner: SimulatorCommandRunning, @unchecked Sendable {
     private let lock = NSLock()
     private var outputs: [Data]
+    private var screenshotPayloads: [Data]
+    private var exitStatuses: [Int32]
     private var arguments: [[String]] = []
+    private var captures: [SimulatorCommandCapture] = []
+    private var maximumOutputBytes: [Int] = []
 
-    init(outputs: [Data]) {
+    init(
+        outputs: [Data],
+        screenshotPayloads: [Data] = [],
+        exitStatuses: [Int32] = []
+    ) {
         self.outputs = outputs
+        self.screenshotPayloads = screenshotPayloads
+        self.exitStatuses = exitStatuses
     }
 
     var recordedArguments: [[String]] {
         lock.lock()
         defer { lock.unlock() }
         return arguments
+    }
+
+    var recordedCaptures: [SimulatorCommandCapture] {
+        lock.lock()
+        defer { lock.unlock() }
+        return captures
+    }
+
+    var recordedMaximumOutputBytes: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return maximumOutputBytes
     }
 
     func run(
@@ -221,6 +354,8 @@ private final class RecordingSimulatorCommandRunner: SimulatorCommandRunning, @u
         lock.lock()
         defer { lock.unlock() }
         self.arguments.append(arguments)
+        captures.append(capture)
+        self.maximumOutputBytes.append(maximumOutputBytes)
         guard !outputs.isEmpty else {
             return SimulatorCommandResult(
                 output: Data("No fixture response".utf8),
@@ -228,10 +363,18 @@ private final class RecordingSimulatorCommandRunner: SimulatorCommandRunning, @u
                 termination: .exited(1)
             )
         }
+        if arguments.dropFirst(2).starts(with: ["screenshot", "--type=png"]),
+           let outputPath = arguments.last,
+           !screenshotPayloads.isEmpty {
+            try screenshotPayloads.removeFirst().write(
+                to: URL(fileURLWithPath: outputPath),
+                options: .atomic
+            )
+        }
         return SimulatorCommandResult(
             output: outputs.removeFirst(),
             outputWasTruncated: false,
-            termination: .exited(0)
+            termination: .exited(exitStatuses.isEmpty ? 0 : exitStatuses.removeFirst())
         )
     }
 }

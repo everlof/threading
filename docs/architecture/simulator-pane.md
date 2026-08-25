@@ -36,7 +36,10 @@ surface for:
 Every command runs outside main on one named serial queue, in its own process group, under a
 deadline and caller cancellation. Output and device counts have named ceilings. Values crossing
 the queue are `Sendable`, and an invalid CoreSimulator response is a typed failure rather than an
-empty inventory.
+empty inventory. Screenshot fallback uses an explicit, unique file inside a private temporary
+directory because current `simctl io screenshot` help documents `-` as stdout, but the command
+treats it as a literal filename. Threading bounded-reads the PNG and removes the whole capture
+directory on every success or failure path.
 
 The public path is the fallback and lifecycle plane, not the intended live renderer. The planned
 direct backend is a first-party signed helper using the CoreSimulator framebuffer and device HID

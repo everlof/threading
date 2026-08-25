@@ -83,16 +83,23 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
 final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
     private let runner: any SimulatorCommandRunning
     private let commandQueue: SimulatorCommandQueue
+    private let screenshotTemporaryDirectory: URL
+    private let maximumScreenshotBytes: Int
 
     init(
         runner: any SimulatorCommandRunning = XcrunSimulatorCommandRunner(),
         queue: DispatchQueue = DispatchQueue(
             label: SimulatorControlDefaults.commandQueueLabel,
             qos: .userInitiated
-        )
+        ),
+        screenshotTemporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        maximumScreenshotBytes: Int = SimulatorControlDefaults.maximumScreenshotBytes
     ) {
+        precondition(maximumScreenshotBytes >= SimulatorControlDefaults.pngSignature.count)
         self.runner = runner
         self.commandQueue = SimulatorCommandQueue(queue: queue)
+        self.screenshotTemporaryDirectory = screenshotTemporaryDirectory
+        self.maximumScreenshotBytes = maximumScreenshotBytes
     }
 
     func availableDevices() async throws -> [SimulatorDevice] {
@@ -179,16 +186,44 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
     }
 
     func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data {
-        try await perform { runner, cancellation in
-            let data = try Self.run(
-                ["io", deviceID.rawValue, "screenshot", "--type=png", "-"],
+        let screenshotTemporaryDirectory = screenshotTemporaryDirectory
+        let maximumScreenshotBytes = maximumScreenshotBytes
+        return try await perform { runner, cancellation in
+            let capture = try Self.makeScreenshotCapture(
+                in: screenshotTemporaryDirectory
+            )
+            defer { try? FileManager.default.removeItem(at: capture.directoryURL) }
+
+            _ = try Self.run(
+                [
+                    "io", deviceID.rawValue, "screenshot", "--type=png",
+                    capture.outputURL.path
+                ],
                 operation: "screenshot",
                 timeout: SimulatorControlDefaults.screenshotTimeout,
-                maximumOutputBytes: SimulatorControlDefaults.maximumScreenshotBytes,
-                capture: .standardOutput,
+                maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
+                capture: .combined,
                 using: runner,
                 cancellation: cancellation
             )
+            let data: Data
+            do {
+                data = try BoundedFileReader.read(
+                    capture.outputURL,
+                    maximumBytes: maximumScreenshotBytes
+                )
+            } catch let error as BoundedFileReadError {
+                switch error {
+                case .exceedsLimit:
+                    throw SimulatorControlError.outputTooLarge(operation: "screenshot")
+                case .notRegularFile:
+                    throw SimulatorControlError.invalidScreenshot
+                }
+            } catch {
+                throw SimulatorControlError.invalidResponse(
+                    "Threading could not read the Simulator screenshot: \(error.localizedDescription)"
+                )
+            }
             guard data.starts(with: SimulatorControlDefaults.pngSignature) else {
                 throw SimulatorControlError.invalidScreenshot
             }
@@ -242,6 +277,36 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
             cancellation: cancellation
         )
         return try SimulatorDeviceCatalog.decodeAvailableIOSDevices(from: output)
+    }
+
+    private static func makeScreenshotCapture(
+        in temporaryDirectory: URL
+    ) throws -> (directoryURL: URL, outputURL: URL) {
+        guard temporaryDirectory.isFileURL else {
+            throw SimulatorControlError.invalidResponse(
+                "Threading's Simulator screenshot location is not a local directory."
+            )
+        }
+        let directoryURL = temporaryDirectory.appendingPathComponent(
+            "codes.threading.simulator-capture-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        do {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+        } catch {
+            throw SimulatorControlError.invalidResponse(
+                "Threading could not prepare a private Simulator screenshot location: "
+                    + error.localizedDescription
+            )
+        }
+        return (
+            directoryURL: directoryURL,
+            outputURL: directoryURL.appendingPathComponent("frame.png", isDirectory: false)
+        )
     }
 
     private static func run(
