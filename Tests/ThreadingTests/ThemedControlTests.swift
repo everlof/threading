@@ -3172,7 +3172,12 @@ final class ThemedControlTests: HostedStoreTestCase {
     @MainActor
     func testTheColumnsTakeTheirWidthFromTheNameNotThePanel() {
         AppThemePalette.set(.system)
-        let name = String(repeating: "Keller Ines ", count: 6)
+        // The repeat count exists to clear `ThemedMenuLayout.maximumWidth`, not for its own sake:
+        // both assertions below are about what happens to a panel *already at its cap*, so a name
+        // that stops short of it tests nothing. Renaming the fixture changes the character count
+        // and can silently undo that — this was 6 × "Lundborg Viktor " until the account fixtures
+        // were renamed, and 6 × the shorter name measured 413 against a 440 cap.
+        let name = String(repeating: "Keller Ines ", count: 8)
         var bare = ThemedMenuItem(title: name)
         bare.metrics = []
         var measured = ThemedMenuItem(title: name)
