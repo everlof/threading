@@ -38,6 +38,9 @@ enum ThreadingLogger {
     /// Embedded browser tabs, baseline persistence, and Playwright automation.
     static let browser = Logger(subsystem: subsystem, category: "browser")
 
+    /// Adopted CoreSimulator lifecycle, live-helper sessions, codecs, and aggregate frame health.
+    static let simulator = Logger(subsystem: subsystem, category: "simulator")
+
     /// Session management (lifecycle, state)
     static let session = Logger(subsystem: subsystem, category: "session")
 

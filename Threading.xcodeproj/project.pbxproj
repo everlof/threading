@@ -33,6 +33,14 @@
 		7C000005000000000000A008 /* PTYHostState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000005000000000000B008 /* PTYHostState.swift */; };
 		7C000005000000000000A009 /* threading-ptyd in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000005000000000000B011 /* threading-ptyd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C000005000000000000A010 /* ThreadingPTYHostKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000005000000000000C010 /* ThreadingPTYHostKit */; };
+		7C000007000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B001 /* main.swift */; };
+		7C000007000000000000A002 /* SimulatorHelperServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B002 /* SimulatorHelperServer.swift */; };
+		7C000007000000000000A003 /* SimulatorFrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B003 /* SimulatorFrameEncoder.swift */; };
+		7C000007000000000000A004 /* SimulatorInputSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B004 /* SimulatorInputSender.swift */; };
+		7C000007000000000000A005 /* SimulatorPrivateBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B005 /* SimulatorPrivateBridge.m */; };
+		7C000007000000000000A009 /* threading-simulator-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B011 /* threading-simulator-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		7C000007000000000000A010 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C010 /* ThreadingSimulatorKit */; };
+		7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C011 /* ThreadingSimulatorKit */; };
 		7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C000006000000000000B001 /* codes.threading.ptyd.plist */; };
 		89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		953EC13AE9B26A038EF6BA1C /* ExtensionRunnerRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B615390888E592FA931EAC /* ExtensionRunnerRequest.swift */; };
@@ -139,6 +147,13 @@
 			remoteGlobalIDString = 7C000005000000000000C003;
 			remoteInfo = ThreadingPTYHost;
 		};
+		7C000007000000000000C004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8000001000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7C000007000000000000C003;
+			remoteInfo = ThreadingSimulatorHelper;
+		};
 		95814D89024CC2AED2A443AC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F8000001000000000000001 /* Project object */;
@@ -182,6 +197,7 @@
 				7A0000010000000000000003 /* threading-wasm-extension-runner in Embed Extension Helpers */,
 				7C000003000000000000A009 /* threading-mcp-bridge in Embed Extension Helpers */,
 				7C000005000000000000A009 /* threading-ptyd in Embed Extension Helpers */,
+				7C000007000000000000A009 /* threading-simulator-helper in Embed Extension Helpers */,
 			);
 			name = "Embed Extension Helpers";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -237,6 +253,16 @@
 		7C000005000000000000B010 /* threading-ptyd.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-ptyd.entitlements"; sourceTree = "<group>"; };
 		7C000006000000000000B001 /* codes.threading.ptyd.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = codes.threading.ptyd.plist; sourceTree = "<group>"; };
 		7C000005000000000000B011 /* threading-ptyd */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-ptyd"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C000007000000000000B001 /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		7C000007000000000000B002 /* SimulatorHelperServer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimulatorHelperServer.swift; sourceTree = "<group>"; };
+		7C000007000000000000B003 /* SimulatorFrameEncoder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimulatorFrameEncoder.swift; sourceTree = "<group>"; };
+		7C000007000000000000B004 /* SimulatorInputSender.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SimulatorInputSender.swift; sourceTree = "<group>"; };
+		7C000007000000000000B005 /* SimulatorPrivateBridge.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = SimulatorPrivateBridge.m; sourceTree = "<group>"; };
+		7C000007000000000000B006 /* SimulatorPrivateBridge.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = SimulatorPrivateBridge.h; sourceTree = "<group>"; };
+		7C000007000000000000B007 /* ThreadingSimulatorHelper-Bridging-Header.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = "ThreadingSimulatorHelper-Bridging-Header.h"; sourceTree = "<group>"; };
+		7C000007000000000000B008 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		7C000007000000000000B009 /* threading-simulator-helper.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = "threading-simulator-helper.entitlements"; sourceTree = "<group>"; };
+		7C000007000000000000B011 /* threading-simulator-helper */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "compiled.mach-o.executable"; path = "threading-simulator-helper"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000010000000000000002 /* ThreadingMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThreadingMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000010000000000000015 /* Sources/Threading/AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Sources/Threading/AppIcon.icon; sourceTree = "<group>"; };
 		A61100010000000000000002 /* RemoteUsageDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteUsageDashboardTests.swift; sourceTree = "<group>"; };
@@ -392,6 +418,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7C000007000000000000C009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7C000007000000000000A010 /* ThreadingSimulatorKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A20000010000000000000003 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -444,6 +478,7 @@
 				F1000001000000000000041 /* ThreadingRemoteKit in Frameworks */,
 				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
 				7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */,
+				7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */,
 				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
 				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
@@ -516,6 +551,23 @@
 			);
 			name = "PTY Host";
 			path = Targets/PTYHost;
+			sourceTree = "<group>";
+		};
+		7C000007000000000000C001 /* Simulator Helper */ = {
+			isa = PBXGroup;
+			children = (
+				7C000007000000000000B001 /* main.swift */,
+				7C000007000000000000B002 /* SimulatorHelperServer.swift */,
+				7C000007000000000000B003 /* SimulatorFrameEncoder.swift */,
+				7C000007000000000000B004 /* SimulatorInputSender.swift */,
+				7C000007000000000000B005 /* SimulatorPrivateBridge.m */,
+				7C000007000000000000B006 /* SimulatorPrivateBridge.h */,
+				7C000007000000000000B007 /* ThreadingSimulatorHelper-Bridging-Header.h */,
+				7C000007000000000000B008 /* Info.plist */,
+				7C000007000000000000B009 /* threading-simulator-helper.entitlements */,
+			);
+			name = "Simulator Helper";
+			path = Targets/SimulatorHelper;
 			sourceTree = "<group>";
 		};
 		B2000001000000000000000F /* Mobile Tests */ = {
@@ -609,6 +661,7 @@
 				7A0000010000000000000041 /* Wasm Runner */,
 				7C000003000000000000C001 /* MCP Bridge */,
 				7C000005000000000000C001 /* PTY Host */,
+				7C000007000000000000C001 /* Simulator Helper */,
 			);
 			sourceTree = "<group>";
 		};
@@ -630,6 +683,7 @@
 				7A0000010000000000000014 /* threading-wasm-extension-runner */,
 				7C000003000000000000B011 /* threading-mcp-bridge */,
 				7C000005000000000000B011 /* threading-ptyd */,
+				7C000007000000000000B011 /* threading-simulator-helper */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -727,6 +781,25 @@
 			);
 			productName = ThreadingPTYHost;
 			productReference = 7C000005000000000000B011 /* threading-ptyd */;
+			productType = "com.apple.product-type.tool";
+		};
+		7C000007000000000000C003 /* ThreadingSimulatorHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7C000007000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingSimulatorHelper" */;
+			buildPhases = (
+				7C000007000000000000C002 /* Sources */,
+				7C000007000000000000C009 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ThreadingSimulatorHelper;
+			packageProductDependencies = (
+				7C000007000000000000C010 /* ThreadingSimulatorKit */,
+			);
+			productName = ThreadingSimulatorHelper;
+			productReference = 7C000007000000000000B011 /* threading-simulator-helper */;
 			productType = "com.apple.product-type.tool";
 		};
 		A20000010000000000000001 /* ThreadingMobile */ = {
@@ -863,6 +936,7 @@
 				7A0000010000000000000022 /* PBXTargetDependency */,
 				7C000003000000000000C005 /* PBXTargetDependency */,
 				7C000005000000000000C005 /* PBXTargetDependency */,
+				7C000007000000000000C005 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				63D8F4952EE47C9A007F49BD /* Sources */,
@@ -877,6 +951,7 @@
 				F4000001000000000000009 /* ThreadingRemoteKit */,
 				D0A100010000000000000003 /* ThreadingDomain */,
 				7C000004000000000000000C /* ThreadingPTYHostKit */,
+				7C000007000000000000C011 /* ThreadingSimulatorKit */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
 				D1FF00010000000000000001 /* NativeDiffCore */,
 				D1FF00010000000000000002 /* NativeDiffAppKit */,
@@ -939,6 +1014,7 @@
 				F4000001000000000000010 /* XCLocalSwiftPackageReference "Packages/ThreadingRemoteKit" */,
 				D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */,
 				7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */,
+				7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */,
 				D3EE00010000000000000003 /* XCLocalSwiftPackageReference "Packages/ThreadingPeerTransport" */,
 				D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */,
 				5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
@@ -959,6 +1035,7 @@
 				7A0000010000000000000051 /* ThreadingWasmExtensionRunner */,
 				7C000003000000000000C003 /* ThreadingMCPBridge */,
 				7C000005000000000000C003 /* ThreadingPTYHost */,
+				7C000007000000000000C003 /* ThreadingSimulatorHelper */,
 			);
 		};
 /* End PBXProject section */
@@ -1183,6 +1260,18 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7C000007000000000000C002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7C000007000000000000A001 /* main.swift in Sources */,
+				7C000007000000000000A002 /* SimulatorHelperServer.swift in Sources */,
+				7C000007000000000000A003 /* SimulatorFrameEncoder.swift in Sources */,
+				7C000007000000000000A004 /* SimulatorInputSender.swift in Sources */,
+				7C000007000000000000A005 /* SimulatorPrivateBridge.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A20000010000000000000005 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1295,6 +1384,12 @@
 			name = ThreadingPTYHost;
 			target = 7C000005000000000000C003 /* ThreadingPTYHost */;
 			targetProxy = 7C000005000000000000C004 /* PBXContainerItemProxy */;
+		};
+		7C000007000000000000C005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = ThreadingSimulatorHelper;
+			target = 7C000007000000000000C003 /* ThreadingSimulatorHelper */;
+			targetProxy = 7C000007000000000000C004 /* PBXContainerItemProxy */;
 		};
 		A2F10D84B314A37BF2F55C73 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -1528,6 +1623,60 @@
 				PRODUCT_NAME = "threading-ptyd";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		7C000007000000000000C006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_ARC = NO;
+				CODE_SIGN_ENTITLEMENTS = "Targets/SimulatorHelper/threading-simulator-helper.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Targets/SimulatorHelper/Info.plist",
+					"-framework",
+					Security,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.simulator-helper";
+				PRODUCT_NAME = "threading-simulator-helper";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Targets/SimulatorHelper/ThreadingSimulatorHelper-Bridging-Header.h";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7C000007000000000000C007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_ARC = NO;
+				CODE_SIGN_ENTITLEMENTS = "Targets/SimulatorHelper/threading-simulator-helper.entitlements";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__info_plist,
+					"$(SRCROOT)/Targets/SimulatorHelper/Info.plist",
+					"-framework",
+					Security,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.simulator-helper";
+				PRODUCT_NAME = "threading-simulator-helper";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Targets/SimulatorHelper/ThreadingSimulatorHelper-Bridging-Header.h";
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 5.0;
 			};
@@ -2067,6 +2216,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		7C000007000000000000C008 /* Build configuration list for PBXNativeTarget "ThreadingSimulatorHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7C000007000000000000C007 /* Release */,
+				7C000007000000000000C006 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A20000010000000000000006 /* Build configuration list for PBXNativeTarget "ThreadingMobile" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -2135,6 +2293,10 @@
 		7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingPTYHostKit;
+		};
+		7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingSimulatorKit;
 		};
 		D3EE00010000000000000003 /* XCLocalSwiftPackageReference "Packages/ThreadingPeerTransport" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -2214,6 +2376,14 @@
 		7C000005000000000000C010 /* ThreadingPTYHostKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingPTYHostKit;
+		};
+		7C000007000000000000C010 /* ThreadingSimulatorKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingSimulatorKit;
+		};
+		7C000007000000000000C011 /* ThreadingSimulatorKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingSimulatorKit;
 		};
 		D1FF00010000000000000001 /* NativeDiffCore */ = {
 			isa = XCSwiftPackageProductDependency;

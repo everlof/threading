@@ -71,4 +71,43 @@ final class SimulatorBridgeKitTests: XCTestCase {
         )
         XCTAssertEqual(decoder.bufferedBytes, 0)
     }
+
+    func testSixtyFPSStressKeepsOnlyOutstandingAndLatestPendingFrame() {
+        var window = SimulatorLatestFrameWindow<Int>()
+        var lastSent = 0
+        var replaced = 0
+        var maximumPending = 0
+
+        for sequence in 1...3_600 {
+            switch window.offer(sequence, sequence: UInt64(sequence)) {
+            case .send(let frame):
+                lastSent = frame
+            case .held(let didReplace):
+                if didReplace { replaced += 1 }
+            }
+            XCTAssertLessThanOrEqual(window.pendingFrameCount, 1)
+            maximumPending = max(maximumPending, window.pendingFrameCount)
+
+            if sequence.isMultiple(of: 12),
+               let next = window.acknowledge(sequence: UInt64(lastSent)) {
+                lastSent = next
+            }
+        }
+
+        XCTAssertTrue(window.hasOutstandingFrame)
+        XCTAssertEqual(maximumPending, 1)
+        XCTAssertEqual(window.pendingFrameCount, 0)
+        XCTAssertGreaterThan(replaced, 3_000)
+    }
+
+    func testKeyboardVocabularyMatchesBoundedUSKeyboardTransport() {
+        XCTAssertTrue(SimulatorBridgeText.isSupported(
+            "AZaz09 !@#$%^&*()_+-=[]{}\\|;:'\",.<>/?`~\t\n\u{8}"
+        ))
+        XCTAssertFalse(SimulatorBridgeText.isSupported("nul\u{0}"))
+        XCTAssertFalse(SimulatorBridgeText.isSupported("Hej 👋"))
+        XCTAssertFalse(SimulatorBridgeText.isSupported(
+            String(repeating: "a", count: SimulatorBridgeText.maximumCharacterCount + 1)
+        ))
+    }
 }
