@@ -400,7 +400,7 @@ final class PTYHostServer: @unchecked Sendable {
                 )))
                 return
             }
-            resize(session, to: request.grid)
+            resize(session, to: request.grid, from: connection)
         case .detach(let request):
             guard let session = boundSession(named: request.id, on: connection) else { return }
             // A pipes session stores nothing: it has no emulator anywhere, so its seeds are
@@ -433,7 +433,7 @@ final class PTYHostServer: @unchecked Sendable {
             connection.send(.journal(PTYHostJournal(
                 lines: journal.tail(maxBytes: request.maxBytes)
             )))
-        case .helloRefused, .sessions, .spawned, .spawnRefused, .attached,
+        case .helloRefused, .sessions, .spawned, .spawnRefused, .attached, .resized,
              .exited, .foreground, .lost, .journal, .error:
             // Every one of these is the daemon's to send. Receiving one means the peer is
             // speaking the protocol backwards, which is not a state to keep serving.
@@ -708,14 +708,38 @@ final class PTYHostServer: @unchecked Sendable {
         startForegroundTimer(for: session)
     }
 
-    private func resize(_ session: PTYSession, to grid: PTYHostGrid) {
-        session.grid = grid
-        PTYSpawn.applyWindowSize(grid, to: session.master)
+    /// Sets the durable grid, applies it to the terminal, and answers the connection that asked.
+    ///
+    /// The answer is the whole of what `resized` adds, and it carries the grid that reached
+    /// `TIOCSWINSZ` rather than the one that was requested: those differ where the request is out
+    /// of a `winsize`'s range, and an acknowledgement of a number the terminal does not hold
+    /// would let the app believe a divergence had been closed.
+    ///
+    /// A terminal that would not take the size is **not** acknowledged and does not become the
+    /// durable grid: a session with no master left is the only way this happens, and telling a
+    /// later watcher it inherits a grid nothing was ever set to is worse than saying nothing. The
+    /// app's own reconciliation retries at its next convergence point.
+    private func resize(
+        _ session: PTYSession,
+        to grid: PTYHostGrid,
+        from connection: PTYHostConnection
+    ) {
+        guard let applied = PTYSpawn.applyWindowSize(grid, to: session.master) else {
+            journal.record(.resizeFailed, [
+                Field.session: session.id.description,
+                Field.connection: String(connection.number),
+                Field.cols: String(grid.cols),
+                Field.rows: String(grid.rows)
+            ])
+            return
+        }
+        session.grid = applied
         journal.record(.resized, [
             Field.session: session.id.description,
-            Field.cols: String(grid.cols),
-            Field.rows: String(grid.rows)
+            Field.cols: String(applied.cols),
+            Field.rows: String(applied.rows)
         ])
+        connection.send(.resized(PTYHostResized(id: session.id, grid: applied)))
     }
 
     /// Closes a pipes child's standard input, which is how every native transport says goodbye.

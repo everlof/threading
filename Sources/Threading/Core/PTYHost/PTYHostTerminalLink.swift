@@ -182,6 +182,43 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     /// down in `pty-host.md` rather than guessed at here.
     private var ringOffset: UInt64 = 0
 
+    /// The emulator's window size and the daemon's, reconciled.
+    ///
+    /// The whole of the grid contract lives in this one value, because the two numbers it holds
+    /// are only meaningful next to each other. See `converge()`.
+    private struct GridReconciliation {
+
+        /// The last full `winsize` the view asked to deliver, whether or not it has left yet.
+        ///
+        /// Recorded **before** delivery is attempted, always: a send that could not happen is a
+        /// grid this terminal still wants, and dropping it is what left the child on an old one.
+        var wanted: PTYHostGrid?
+
+        /// The grid the daemon has confirmed it is holding — the spawn's own grid, an
+        /// `attached` frame's, or a `resized` acknowledgement's.
+        var acknowledged: PTYHostGrid?
+
+        /// The last grid successfully handed to the transport, and the guard against a storm: a
+        /// grid that was written and not acknowledged is not written again, so a daemon that
+        /// clamps one, or an older one that answers nothing at all, costs one frame and not a
+        /// loop.
+        var delivered: PTYHostGrid?
+
+        /// True once a delivery threw. The retry is what the convergence points are for, and
+        /// this is also what makes the journal line the rare event rather than a per-resize one.
+        var didFail = false
+
+        /// True once the daemon has confirmed the session exists — `spawned` or `attached`.
+        /// Before that there is nothing on the other end to resize, and the app does not yet
+        /// know the grid it would be reconciling against.
+        var isConfirmed = false
+
+        /// One line per link, not one per reconciliation.
+        var hasJournalledReconciliation = false
+    }
+
+    private var grids = GridReconciliation()
+
     /// True while the bytes arriving are a `.cut` replay, which the emulator must not answer.
     ///
     /// Cleared by the first flush, which is the only boundary the wire gives: the daemon queues
@@ -239,10 +276,15 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     }
 
     /// Adopts the transport this link speaks over. Called once, before the spawn.
+    ///
+    /// The first of the three convergence points: a transport becoming current is the moment a
+    /// grid that had nowhere to go acquires somewhere to go. It sends nothing on an ordinary
+    /// launch, where nothing has been asked for yet and no session exists to resize.
     func adopt(_ transport: any PTYHostSessionTransport) {
         lock.lock()
         transportStorage = transport
         lock.unlock()
+        converge()
     }
 
     /// Starts the child. Throwing means nothing was sent, so the caller may still run in-process.
@@ -254,6 +296,14 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         guard let transport = currentTransport() else { throw PTYHostClientError.notReady }
         lock.lock()
         ringOffset = 0
+        // The spawn's own grid is the grid the child's terminal is forked with — the daemon
+        // takes it verbatim and cannot substitute one — so it is this session's first
+        // acknowledged grid, and the view's first `sizeChanged` is measured against it rather
+        // than against nothing.
+        if case .pty(let grid) = request.channel {
+            grids.wanted = grid
+            grids.acknowledged = grid
+        }
         lock.unlock()
         try transport.spawn(request)
     }
@@ -321,26 +371,113 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         }
     }
 
-    /// The whole `winsize`. Answers whether it was handed over, which is what the view's resize
-    /// seam reports back to SwiftTerm.
+    /// The whole `winsize`, recorded as this terminal's wanted grid and delivered when it can be.
+    ///
+    /// **Answers whether the link will get this grid to the child**, which is what
+    /// `LocalProcessTerminalView.sizeChanged` needs in order to decide whether the resize
+    /// happened: false only when there is no link left — no transport, or an ending already
+    /// reported — because then nothing will ever converge. A grid that is recorded but not yet
+    /// on the wire answers true, because the link guarantees it arrives: it is sent at the next
+    /// convergence point, and the daemon's `resized` is what says it landed.
+    ///
+    /// That is the seam's whole difference from the in-process path, where the same call is a
+    /// synchronous `ioctl` on a descriptor this process holds and cannot fail after the emulator
+    /// has already resized. Here it is a write on a socket, and a write that did not happen must
+    /// not become a grid nobody remembers — a child left on an old grid while the emulator moved
+    /// on wraps the agent's own lines mid-word.
     @discardableResult
     func sendWindowSize(_ size: winsize) -> Bool {
-        guard let transport = currentTransport() else { return false }
-        do {
-            try transport.resize(PTYHostResize(
-                id: identity,
-                grid: PTYHostGrid(
-                    cols: Int(size.ws_col),
-                    rows: Int(size.ws_row),
-                    xpixel: Int(size.ws_xpixel),
-                    ypixel: Int(size.ws_ypixel)
-                )
-            ))
-            return true
-        } catch {
-            fail(with: error)
+        lock.lock()
+        guard !hasEnded, transportStorage != nil else {
+            lock.unlock()
             return false
         }
+        grids.wanted = Self.grid(of: size)
+        lock.unlock()
+
+        converge()
+        return true
+    }
+
+    /// Sends one `resize` for the wanted grid when the daemon is not already holding it.
+    ///
+    /// The three convergence points are `adopt(_:)`, `spawned`/`attached`, and an
+    /// acknowledgement that reports a grid other than the wanted one; a burst of output or any
+    /// other frame converges too when a previous send failed, because bytes arriving are the
+    /// only evidence this side has that the transport is current again.
+    ///
+    /// Both guards are load-bearing. `wanted != acknowledged` is what makes a reattach at the
+    /// daemon's own grid send nothing — adopting a grid is not a window having changed, and
+    /// telling the daemon the size it has just told us would raise `SIGWINCH` on an agent that
+    /// has been working at that size all along. `wanted != delivered` is what keeps a grid the
+    /// daemon answers differently — one it clamped, or one an older daemon never answers at all
+    /// — to a single frame instead of a loop.
+    private func converge() {
+        lock.lock()
+        guard !hasEnded,
+              let transport = transportStorage,
+              grids.isConfirmed,
+              let wanted = grids.wanted,
+              wanted != grids.acknowledged,
+              wanted != grids.delivered
+        else {
+            lock.unlock()
+            return
+        }
+        // Claimed before the write, not after it: the lock is never held across a call out of
+        // this type, and two convergence points can run at once — the view's own resize on main
+        // and a frame on the transport's queue. The claim is what makes one grid one frame.
+        let previous = grids.delivered
+        grids.delivered = wanted
+        let shouldJournal = grids.didFail && !grids.hasJournalledReconciliation
+        if shouldJournal { grids.hasJournalledReconciliation = true }
+        lock.unlock()
+
+        do {
+            try transport.resize(PTYHostResize(id: identity, grid: wanted))
+        } catch {
+            lock.lock()
+            grids.delivered = previous
+            grids.didFail = true
+            if shouldJournal { grids.hasJournalledReconciliation = false }
+            lock.unlock()
+            let cause = (error as? PTYHostClientError)?.token ?? "unknown"
+            // Not an ending. A resize is fire-and-forget by design, and the two errors this can
+            // be — a queue past its bound, a transport no longer ready — both close the
+            // connection themselves, so the ending arrives through `linkClosed` if there is one
+            // to report. Treating a dropped window size as a dead terminal would end a session
+            // over a frame the next convergence point can send again.
+            ThreadingLogger.ptyHost.error(
+                "PTY host resize could not be sent: \(cause, privacy: .public)"
+            )
+            return
+        }
+
+        lock.lock()
+        grids.didFail = false
+        lock.unlock()
+
+        guard shouldJournal else { return }
+        // Once per link, and only after a send that failed: the ordinary resize is not an event,
+        // and a line per resize would be a terminal's whole layout history in the journal.
+        EventLog.shared.record(
+            .session,
+            "PTY host window size reconciled after a failed send",
+            [
+                "session": identity.identity.historyFileStem,
+                "cols": String(wanted.cols),
+                "rows": String(wanted.rows)
+            ]
+        )
+    }
+
+    private static func grid(of size: winsize) -> PTYHostGrid {
+        PTYHostGrid(
+            cols: Int(size.ws_col),
+            rows: Int(size.ws_row),
+            xpixel: Int(size.ws_xpixel),
+            ypixel: Int(size.ws_ypixel)
+        )
     }
 
     /// Ends the child. The link stays open afterwards so the daemon's `exited` still arrives —
@@ -363,9 +500,25 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     }
 
     private func received(_ frame: PTYHostFrame) {
+        // A frame arriving is the same evidence a burst of output is: the transport is current,
+        // so a window size a previous send could not deliver can be delivered now. Read first
+        // and acted on before the switch, so a `resized` that follows a failed retry is still
+        // the acknowledgement of the frame this sends.
+        lock.lock()
+        let shouldConverge = grids.didFail
+        lock.unlock()
+        if shouldConverge { converge() }
+
         switch frame {
         case .spawned(let spawned) where spawned.id == identity:
-            let delivery = self.delivery
+            lock.lock()
+            grids.isConfirmed = true
+            let delivery = deliveryStorage
+            lock.unlock()
+            // The session exists now, so a window size the view produced while the spawn was
+            // still in flight has somewhere to go. The view lays out during a launch, which
+            // makes this the ordinary case rather than a corner one.
+            converge()
             DispatchQueue.main.async { delivery.spawned(spawned) }
 
         case .attached(let attached) where attached.id == identity:
@@ -374,9 +527,23 @@ final class PTYHostTerminalLink: @unchecked Sendable {
             // `.exact` carries bytes no emulator has ever seen and must be answered; `.cut` is
             // history and must not be. See `isReplayingHistory`.
             if case .cut = attached.replay { isReplayingHistory = true }
+            // The daemon's own grid, which this watcher adopts rather than replaces. The
+            // comparison in `converge()` is what replaces the view's old "suppress the first
+            // resize after an attach" rule: equal is silence, different is one frame.
+            grids.acknowledged = attached.grid
+            grids.isConfirmed = true
             let delivery = deliveryStorage
             lock.unlock()
+            converge()
             DispatchQueue.main.async { delivery.attached(attached) }
+
+        case .resized(let resized) where resized.id == identity:
+            lock.lock()
+            grids.acknowledged = resized.grid
+            lock.unlock()
+            // Ordinarily the end of the exchange: the daemon is holding what was asked for.
+            // A grid that is not the wanted one is the third convergence point.
+            converge()
 
         case .spawnRefused(let refusal) where refusal.id == identity:
             refused(refusal.reason)
@@ -413,7 +580,12 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         lock.lock()
         ringOffset &+= UInt64(bytes.count)
         let answers = !isReplayingHistory
+        // One comparison per burst, and only after a send that failed. Bytes arriving are this
+        // side's only evidence that a transport which refused a write is current again — there
+        // is no frame for "ready", and a timer would be a guess.
+        let shouldConverge = grids.didFail
         lock.unlock()
+        if shouldConverge { converge() }
         deliver(PTYHostFeedSegment(bytes: [UInt8](bytes), answersQueries: answers))
     }
 

@@ -636,10 +636,11 @@ final class TerminalSession: NSObject {
         isRunning = true
 
         // After the transport, and still ahead of every replayed byte: the daemon's answer is
-        // delivered on a later main-queue turn and this call is on the current one. The view
-        // remembers the grid it was handed and refuses to send it back, because SwiftTerm reports
-        // this resize one turn later — by which time the link would carry it to a daemon that
-        // told us the number in the first place.
+        // delivered on a later main-queue turn and this call is on the current one. Adopting the
+        // grid makes SwiftTerm report a resize straight back, and nothing of it reaches the
+        // daemon: the link compares the wanted grid with the one the daemon has acknowledged and
+        // sends only a difference, so the size the daemon told us in the first place is silence
+        // and a window that genuinely moved is one frame.
         terminalView.adoptHostGrid(cols: grid.cols, rows: grid.rows)
         return true
     }

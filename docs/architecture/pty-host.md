@@ -48,6 +48,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `output` | ← | 1 | raw bytes, no envelope |
 | `input` | → | 2 | raw bytes, no envelope |
 | `resize` | → | 0 | `id`, `grid` (cols, rows, xpixel, ypixel) |
+| `resized` | ← | 0 | `id`, `grid` — the grid `TIOCSWINSZ` took, to the connection that asked |
 | `detach` | → | 0 | `id`, `screenSeed`, `modeSeed`, `ringOffset` |
 | `closeInput` | → | 0 | `id` |
 | `kill` | → | 0 | `id`, `escalate` |
@@ -88,7 +89,10 @@ stays out of these slices.
 
 ### Two rules the frames encode
 
-**A `resize` sets the durable grid; an `attach` does not.** A new watcher inherits the grid, it
+**A `resize` sets the durable grid, and is answered; an `attach` does not.** The answer is
+`resized`, carrying the grid `TIOCSWINSZ` actually took — which is also what the session stores —
+to the connection that asked, and it is what lets the app tell "the child is on this grid" from
+"we sent a frame saying so". A new watcher inherits the grid, it
 does not impose one. That is what makes "reattaching a Threading that has just restarted must not
 reflow an agent that kept working the whole time" true by construction rather than by care. A
 session with no watcher keeps its last grid indefinitely — there is no Mac frame to restore to.
@@ -389,8 +393,14 @@ replay, and then `exited`. It is owed the ending *after* the history rather than
 ### The last window size
 
 `resize` sets the grid, applies `TIOCSWINSZ` and raises `SIGWINCH` on the foreground group; the
-grid is then the session's durable window size, kept indefinitely while nobody is attached. **An
-attach never resizes** — the watcher is told the grid and adopts it. `PTYHostDaemonTests` asserts
+grid is then the session's durable window size, kept indefinitely while nobody is attached, and
+the asking connection is answered `resized` with the grid the terminal took. The answer is the
+applied grid rather than a `Bool`, because the four numbers are clamped into a `winsize` on the
+way in and the app reconciles against them: an acknowledgement of a number the terminal does not
+hold would close a divergence on paper only. A terminal that would not take the size — a session
+whose master has gone — is journalled, is **not** acknowledged, and does not become the durable
+grid either, because a later watcher inheriting a grid nothing was ever set to is a worse answer
+than silence. **An attach never resizes** — the watcher is told the grid and adopts it. `PTYHostDaemonTests` asserts
 both halves by asking the child what `stty size` says, which is the only assertion that can tell a
 daemon that resized the terminal from one that sent the right frames. The app's half of that rule —
 adopting a grid rather than imposing one, and not sending it straight back — is
@@ -972,23 +982,79 @@ Titles and the working directory come back on their own: the pid arrives in `att
 
 ## The durable grid
 
+The grid is **reconciled state on the link**, not a frame that is sent and forgotten.
+`PTYHostTerminalLink` holds two grids beside each other, and a third that is only bookkeeping:
+
+- **wanted** — the last full `winsize` the view asked to deliver, recorded *before* delivery is
+  attempted, always. A send that could not happen is still a grid this terminal wants.
+- **acknowledged** — the grid the daemon has confirmed it is holding: the `spawn`'s own grid
+  (the daemon forks the pty with it verbatim and cannot substitute one), an `attached` frame's,
+  or a `resized` acknowledgement's.
+
+The third is **delivered**, the last grid successfully handed to the transport, and it is the
+loop guard rather than part of the contract.
+
+The link sends one `resize` when the two differ, at three convergence points: when the transport
+becomes current (`adopt`), after every `spawned` and `attached`, and when an acknowledgement
+reports a grid other than the wanted one. A burst of output or any other frame converges too when
+a previous send *failed*, because bytes arriving are the only evidence this side has that a
+transport which refused a write is current again — there is no frame for "ready", and a timer
+would be a guess. Comparing against *delivered* as well is what keeps a daemon that clamps a
+size, or an older one that answers nothing at all, to one frame rather than a loop.
+
+**Why only this path ever needed it.** In-process, `sizeChanged` resizes the emulator and then
+calls `LocalProcess.updateWindowSize` — a synchronous `ioctl` on a descriptor this process holds,
+which cannot fail once the emulator has already resized. Host-backed, the same seam is a wire
+`resize`: a write that can be refused when the transport is not current, on a session the daemon
+may not have created yet, and `resize` had no answering frame. So one dropped or refused frame
+left the two sides disagreeing until the grid happened to change again — and nothing reconciled
+them, because `getWindowSize()` was read in exactly one place, at spawn.
+
+**The measured symptom.** Reading `TIOCGWINSZ` off every pty at once on a live machine: the one
+host-backed session sat at **111×81** under a pane about 210 columns wide, while every in-process
+session matched its pane. Claude never wraps mid-word, so the mid-word wraps and eaten first
+characters on that screen were the emulator's own autowrap — the child was writing lines wider
+than the buffer they were being rendered into, because the child's terminal and the emulator were
+on different grids.
+
+`sendWindowSize` therefore answers **"this grid will reach the child"**, not "the bytes have
+left": true whenever the link is live, including for a grid it has recorded and undertaken to
+converge on, and false only when there is no link left to converge — no transport, or an ending
+already reported. That is the answer `LocalProcessTerminalView.sizeChanged` needs, since it uses
+it to decide whether the resize is worth reporting to `processDelegate` at all. The contract is
+written at the seam in `MacLocalTerminalView.sendWindowSize(_:)`, because that is where the
+in-process default states the other half of it.
+
+A grid that had to be reconciled after a failed send is one `EventLog` line, once per link. The
+ordinary resize is not an event, and a line per resize would be a terminal's whole layout history
+in the journal.
+
+### What that makes true of an attach
+
 **An attach never resizes**, and the app's half of that rule is to *adopt* rather than impose.
 `TerminalSession.attachToHost(grid:)` puts the emulator on the daemon's grid **before** a byte of
 the replay lands, so a screen written at 100×40 is rendered at 100×40; imposing this window's grid
 first and reflowing afterwards would be a screen nobody ever saw.
 
-Adopting a grid is itself an emulator resize, and SwiftTerm reports one through `onMain` — a
-main-queue turn later, by which time the link is installed. Telling the daemon the size it has just
-told us would raise `SIGWINCH` on an agent that has been working at that size all along, which is
-precisely the reflow reattaching must not cause. So `EmojiFixedTerminalView` remembers the adopted
-grid and refuses to send it back; a window size that differs — the user resized Threading while it
-was closed — is a real change, is sent once, and ends the comparison. It is a comparison rather than
-a timer because a timer is a guess about how long AppKit takes to lay out.
+Adopting a grid is itself an emulator resize, which SwiftTerm reports straight back through
+`sizeChanged` — so the size the daemon has just given us is offered back to it. Telling the daemon
+that size would raise `SIGWINCH` on an agent that has been working at it all along, which is
+precisely the reflow reattaching must not cause, and it is the wanted-versus-acknowledged
+comparison that stops it: equal is silence, and a window the user resized while Threading was
+closed is a real change and one frame. This replaced a narrower rule in `EmojiFixedTerminalView` —
+"suppress the first post-attach resize when it equals the adopted grid" — deliberately: it was a
+special case of the general one, and two copies of a rule drift.
 
 `PTYHostReattachDaemonTests` asserts both halves the only way they can be asserted: the child
-installs a `SIGWINCH` handler that appends `stty size` to a file, and the file is still empty after
-a whole detach-and-reattach cycle and has exactly one line after the window genuinely moves. The
-screen cannot be the witness here, because a replay puts an earlier size line back on it.
+polls `stty size` and appends a line only when the answer changes, and the file still has one line
+after a whole detach-and-reattach cycle and exactly two after the window genuinely moves. The
+screen cannot be the witness here, because a replay puts an earlier size line back on it. The same
+suite kills a live session's transport and reattaches into a third window size, which is what a
+crash or a socket that went away looks like from here: the child ends on the grid the window
+actually has. `PTYHostSessionDaemonTests` reproduces the original symptom against the real daemon
+— a transport that refuses exactly one `resize`, a child that goes on reporting the old grid while
+nothing is flowing, and the same child landing on the new grid as soon as any output proves the
+link current.
 
 ## Pipes
 

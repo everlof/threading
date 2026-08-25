@@ -107,7 +107,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `EmojiFixedTerminalView` carries. The whole `winsize` is passed, `ws_xpixel`/`ws_ypixel`
     included, because a program that asks for pixel dimensions is told zero if they are dropped
     in transit. Both grid gates above still run first, so a phone holding the grid keeps holding
-    it whichever process owns the pty. See [`pty-host.md`](pty-host.md).
+    it whichever process owns the pty. The answer means **"this grid will reach the child"**
+    rather than "the bytes have left": the default is a synchronous local ioctl where those are
+    the same thing, and an out-of-process host records the wanted grid and converges on it, so a
+    write it could not make now is still a resize that happens and only a link that is gone
+    answers false. See [`pty-host.md`](pty-host.md).
   - **iOS selection survives output, and the edit menu has a host seam.** The iOS view's
     `scrolled`/`linefeed` pair follows the Mac's: a selection is dropped only when scrollback
     recycles its rows or the alternate buffer scrolls in place, never on a line feed that merely

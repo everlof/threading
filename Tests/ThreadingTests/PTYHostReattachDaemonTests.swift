@@ -26,6 +26,8 @@ final class PTYHostReattachDaemonTests: XCTestCase {
         static let frame = NSRect(x: 0, y: 0, width: 640, height: 400)
         /// A genuinely different window, for the one resize a moved window is allowed.
         static let widerFrame = NSRect(x: 0, y: 0, width: 900, height: 620)
+        /// A third size, unlike either of the others: the window a relaunch comes back into.
+        static let smallerFrame = NSRect(x: 0, y: 0, width: 460, height: 300)
         static let listenTimeout: TimeInterval = 10
         static let childTimeout: TimeInterval = 20
         /// Longer than the child's own pause, so the bytes it wrote while nobody watched are in
@@ -259,6 +261,78 @@ final class PTYHostReattachDaemonTests: XCTestCase {
         XCTAssertEqual(sizeLines(in: log), 2, "one window change is one change of the child's size")
     }
 
+    /// A link that was lost takes its unsent window size with it, and the child still ends on
+    /// the grid the window has when somebody is watching it again.
+    ///
+    /// The transport is killed under a live session, which is what a crash, a daemon that stopped
+    /// reading, or a socket that went away all look like from here: the child keeps working at
+    /// the last grid it was told, and this app has no way to tell it anything. What closes the
+    /// gap is the reattach — the daemon's grid arrives in `attached` and is compared with the one
+    /// this window actually has, so exactly one resize follows a window that is genuinely
+    /// different and none follows one that is not.
+    func testAChildEndsOnTheGridTheWindowHasAfterItsLinkWasLost() throws {
+        let socketPath = try startDaemon()
+        let log = directory.appendingPathComponent("winsize.log", isDirectory: false)
+
+        let box = ClientBox()
+        let first = try makeSession()
+        first.hostTransportFactory = factory(socketPath: socketPath, box: box)
+        first.start(plan: plan(
+            "last=; while :; do now=$(stty size); "
+                + "if [ \"$now\" != \"$last\" ]; then printf '%s\\n' \"$now\" >> \(log.path); "
+                + "last=$now; fi; sleep 0.2; done"
+        ))
+        XCTAssertTrue(
+            pump(until: { self.sizeLines(in: log) >= 1 }),
+            "the child never reported the size it was spawned at"
+        )
+
+        first.terminalView.frame = Fixture.widerFrame
+        first.terminalView.layoutSubtreeIfNeeded()
+        XCTAssertTrue(
+            pump(until: { self.sizeLines(in: log) >= 2 }),
+            "an ordinary window change has to reach the child"
+        )
+        let wide = first.terminalView.terminalDimensions
+
+        // The link goes away under a working child.
+        try XCTUnwrap(box.client).close()
+        XCTAssertTrue(
+            pump(until: { !first.isRunning }),
+            "a link that dropped is still the end of this terminal"
+        )
+
+        let holdings = try holdings(socketPath: socketPath)
+        let summary = try XCTUnwrap(holdings.sessions.first)
+        XCTAssertNil(summary.exit, "the child is supposed to have kept working")
+        XCTAssertEqual(
+            summary.grid.cols,
+            wide.cols,
+            "the daemon keeps the last grid it was told, indefinitely"
+        )
+
+        // The relaunch, into a window that is a different size again.
+        let second = try makeSession(identity: first.identity)
+        second.hostTransportFactory = factory(socketPath: socketPath, box: ClientBox())
+        XCTAssertTrue(second.attachToHost(grid: summary.grid))
+        XCTAssertTrue(pump(until: { second.shellPid > 0 }), "the daemon never handed it back")
+
+        second.terminalView.frame = Fixture.smallerFrame
+        second.terminalView.layoutSubtreeIfNeeded()
+        XCTAssertTrue(
+            pump(until: { self.sizeLines(in: log) >= 3 }),
+            "the window this session came back into never reached the child"
+        )
+        let now = second.terminalView.terminalDimensions
+        XCTAssertEqual(
+            lastSizeLine(in: log),
+            "\(now.rows) \(now.cols)",
+            "the child has to end on the grid the window actually has"
+        )
+        _ = pump(until: { false }, timeout: Fixture.quietWindow)
+        XCTAssertEqual(sizeLines(in: log), 3, "one window change is one change of the child's size")
+    }
+
     // MARK: - Measurement
 
     /// D14's measurement: taking eight sessions back against starting eight.
@@ -385,6 +459,16 @@ final class PTYHostReattachDaemonTests: XCTestCase {
         PTYHostPolicy.attachingTransportFactory(socketPath: socketPath)
     }
 
+    /// The same shipping factory, keeping the client so a test can take the link away.
+    private func factory(socketPath: String, box: ClientBox) -> PTYHostTransportFactory {
+        { events in
+            let client = PTYHostClient(socketPath: socketPath, build: "test", events: events)
+            try client.connect()
+            box.adopt(client)
+            return client
+        }
+    }
+
     /// The shipping survey against the scratch daemon.
     ///
     /// Blocking, which production forbids on the main actor and a test may do: the client answers
@@ -405,14 +489,23 @@ final class PTYHostReattachDaemonTests: XCTestCase {
 
     /// How many size lines the child has written. `stty size` prints "rows cols".
     private func sizeLines(in log: URL) -> Int {
-        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return 0 }
+        writtenSizes(in: log).count
+    }
+
+    /// The last size the child observed, which is the one that says where it ended up.
+    private func lastSizeLine(in log: URL) -> String? {
+        writtenSizes(in: log).last
+    }
+
+    private func writtenSizes(in log: URL) -> [String] {
+        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return [] }
         return text
             .split(separator: "\n")
+            .map(String.init)
             .filter { line in
                 let parts = line.split(separator: " ")
                 return parts.count == 2 && parts.allSatisfy { $0.allSatisfy(\.isNumber) }
             }
-            .count
     }
 
     /// Where the shipping daemon is, whichever way this suite was started.
@@ -492,6 +585,26 @@ final class PTYHostReattachDaemonTests: XCTestCase {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
         }
         return condition()
+    }
+}
+
+// MARK: - The link a test can take away
+
+/// Holds the client the factory built, across the `@Sendable` boundary the factory is.
+private final class ClientBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: PTYHostClient?
+
+    var client: PTYHostClient? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func adopt(_ client: PTYHostClient) {
+        lock.lock()
+        storage = client
+        lock.unlock()
     }
 }
 

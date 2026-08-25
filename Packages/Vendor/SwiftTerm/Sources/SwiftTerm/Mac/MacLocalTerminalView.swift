@@ -272,6 +272,16 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     /// `sizeChanged` is a protocol requirement and therefore cannot be overridden.
     /// `winsize` is passed whole rather than as columns and rows: a program that
     /// asks for pixel dimensions gets zeroes if they are dropped in transit.
+    ///
+    /// **The contract is "this grid will reach the child", not "the bytes have
+    /// left".** The default is a synchronous `ioctl` on a descriptor this process
+    /// holds, where the two are the same thing and neither can fail once the
+    /// emulator has already resized. An out-of-process host answers over a socket,
+    /// where a write can be refused and a session may not exist yet, so it returns
+    /// true for a grid it has recorded and undertaken to converge on, and false only
+    /// when there is no host left to converge — which is the answer `sizeChanged`
+    /// needs, since it uses it to decide whether the resize is worth reporting to
+    /// `processDelegate` at all.
     open func sendWindowSize(_ size: inout winsize) -> Bool {
         process.updateWindowSize(&size)
     }

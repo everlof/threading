@@ -86,6 +86,22 @@ public enum PTYHostFrame: Codable, Equatable, Sendable {
     /// imposing one (D8).
     case resize(PTYHostResize)
 
+    /// Daemon → app: the grid it applied, to the connection that asked for it.
+    ///
+    /// The answering frame `resize` did without in version 1, and the reason it needs one is
+    /// that `resize` is the only app-to-daemon frame whose delivery the app cannot verify for
+    /// itself. In-process the same seam is a synchronous `ioctl` that cannot fail once the
+    /// emulator has resized; across a socket it is a write that may be refused, and one refused
+    /// write used to leave the emulator and the child's terminal disagreeing until the grid
+    /// happened to change again — measured as a 111×81 pty under a 210-column pane, with the
+    /// emulator wrapping the child's lines mid-word.
+    ///
+    /// It carries the grid the daemon **actually applied**, which is also what it stored as the
+    /// session's durable window size, so the app compares its own wanted grid against a fact
+    /// rather than against what it hoped. Sent only to the connection that asked: another
+    /// watcher's resize is not this watcher's acknowledgement.
+    case resized(PTYHostResized)
+
     /// App → daemon: I am leaving, and here is what the screen looked like when I did.
     case detach(PTYHostDetach)
 
@@ -447,6 +463,22 @@ public struct PTYHostResize: Codable, Equatable, Sendable {
     }
 }
 
+/// The grid a `resize` actually put on a session's pseudo-terminal.
+///
+/// Four numbers rather than "it worked", because the acknowledgement is only worth having if the
+/// app can compare it with what it asked for: a grid the daemon clamped, or a stale one it is
+/// still holding, has to be told apart from the one that was wanted, and a boolean cannot.
+public struct PTYHostResized: Codable, Equatable, Sendable {
+    public let id: PTYHostSessionIdentity
+    /// What `TIOCSWINSZ` was given, and what the session now keeps as its durable window size.
+    public let grid: PTYHostGrid
+
+    public init(id: PTYHostSessionIdentity, grid: PTYHostGrid) {
+        self.id = id
+        self.grid = grid
+    }
+}
+
 /// The last watcher is leaving, and hands over what only it could compute.
 ///
 /// The daemon cannot synthesise a screen — a repaint is derived from a live emulator, and the
@@ -589,6 +621,7 @@ extension PTYHostFrame {
         case attach
         case attached
         case resize
+        case resized
         case detach
         case closeInput
         case kill
@@ -623,6 +656,7 @@ extension PTYHostFrame {
         case .attach: self = .attach(try Self.body(container, raw))
         case .attached: self = .attached(try Self.body(container, raw))
         case .resize: self = .resize(try Self.body(container, raw))
+        case .resized: self = .resized(try Self.body(container, raw))
         case .detach: self = .detach(try Self.body(container, raw))
         case .closeInput: self = .closeInput(try Self.body(container, raw))
         case .kill: self = .kill(try Self.body(container, raw))
@@ -667,6 +701,9 @@ extension PTYHostFrame {
             try container.encode(value, forKey: .body)
         case .resize(let value):
             try container.encode(FrameType.resize, forKey: .type)
+            try container.encode(value, forKey: .body)
+        case .resized(let value):
+            try container.encode(FrameType.resized, forKey: .type)
             try container.encode(value, forKey: .body)
         case .detach(let value):
             try container.encode(FrameType.detach, forKey: .type)
