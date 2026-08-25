@@ -343,7 +343,7 @@ final class MacSupportReportDetailsTests: XCTestCase {
         // them by accident.
         let structured: Set<RemoteDiagnosticExtraField> = [
             .agentAccountSummary, .metricKitDiagnostics, .metricKitWindow, .metricKitLastCrash,
-            .mainThreadStalls
+            .mainThreadStalls, .simulatorStreaming
         ]
 
         for (field, value) in fields {
