@@ -170,6 +170,11 @@ bundle in a pre-workspace, activation-prohibited probe that verifies the embedde
 and first decoded frame using that Xcode's private frameworks. The probe is read-only; it cannot
 prepare, boot, install into or control a device.
 
+The dogfood and iOS UI-evidence runners take the same host-wide advisory CoreSimulator lane before
+reading the catalogue. A second Threading worktree therefore refuses immediately instead of
+cloning or rebooting the adopted device midway through compatibility evidence. The lock is held
+through cleanup and released by the kernel when the owning script exits.
+
 The runner records a versioned JSON matrix and requires Simulator/Device Hub to be absent before
 and after the lane, so activating an existing GUI cannot masquerade as headless behavior. It also
 requires the user-owned device to remain booted with the same `lastBootedAt`, catching both a final

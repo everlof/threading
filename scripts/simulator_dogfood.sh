@@ -19,6 +19,7 @@
 set -euo pipefail
 
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/coresimulator_lane_lock.sh"
 requested_udid=""
 app_path=""
 output_root=""
@@ -66,6 +67,8 @@ if [[ -n "$app_path" ]]; then
     [[ "$app_path" = /* ]] || fail "--app must be an absolute path"
     [[ -d "$app_path" ]] || fail "no app bundle exists at $app_path"
 fi
+
+threading_acquire_coresimulator_lane "Simulator dogfood compatibility matrix" || exit $?
 
 if [[ -z "$output_root" ]]; then
     timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
