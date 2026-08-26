@@ -8,6 +8,14 @@ version this file does not describe.
 
 Format: `## [x.y.z]` per release, newest first, matching the git tag `vx.y.z`.
 
+A beta has a section of its own, under the version it ships as rather than the one it is a beta
+of. Its tag is `beta-vx.y.z`, and its version sits strictly below the stable it precedes — a
+beta of the upcoming 0.2.0 goes out as 0.1.90 — because Sparkle compares one dotted number and
+equal is not newer, so a beta sharing 0.2.0's version would never be offered 0.2.0 itself. Write
+it for the tester: what to try, and what is known to be rough. When the stable release lands, its
+own section describes the whole change, not the difference since the last beta; nobody on stable
+saw the betas.
+
 ## [Unreleased]
 
 ## [0.1.0]
@@ -17,6 +25,11 @@ Format: `## [x.y.z]` per release, newest first, matching the git tag `vx.y.z`.
 - First release of Threading: projects and agent sessions in one window, with Claude Code,
   Codex, Grok, and OpenCode running in real terminals — or, experimentally, rendered as
   native conversations.
+- Report a Problem, from the Help menu or the inspector. A report carries your description
+  and a bounded set of content-free diagnostics, and nothing else: no terminal output, no
+  prompts, no file paths, no credentials. A screenshot is included only if you opt in, and
+  only as the small preview shown to you. Reports are kept privately for 30 days and then
+  deleted.
 - Signed in-app software updates powered by Sparkle. Threading checks its GitHub release
   feed at most daily, only with your consent, and shows updates in its own interface:
   release notes rendered natively, download and preparation progress, and an explicit

@@ -308,6 +308,10 @@ enum SettingsPages {
             // dynamic.
         ) { UsageWindowPreferencesViewController() },
         // MARK: Access
+        //
+        // Remote Access is offered only where the build channel offers it. Withholding the page
+        // withholds the feature: it is the one surface that can set `remoteAccessEnabled`, and
+        // every runtime path guards on that. See `BuildChannel.offersRemoteAccess`.
         Page(
             id: remoteAccessID,
             hostPage: nil,
@@ -388,8 +392,23 @@ enum SettingsPages {
         ) { ExtensionsPreferencesViewController() }
     ]
 
+    /// Whether this build offers the page at all.
+    ///
+    /// Filtered here rather than removed from `builtIn` so that every reader agrees: `all`,
+    /// `page(id:)`, both `index(of:)` accessors and the search index are all derived from this
+    /// one list, and a page the build does not offer must be missing from every one of them. A
+    /// page that is merely hidden from the sidebar but still reachable by id or by search is
+    /// worse than no gate, because it looks deliberate.
+    /// Takes the channel rather than reading it, so a test can ask what a *shipping* build shows
+    /// without the host bundle being one. A hosted test bundle carries no channel, so it is a
+    /// `.dev` build by definition and would otherwise only ever exercise the offered case.
+    static func isOffered(_ page: Page, on channel: BuildChannel) -> Bool {
+        page.id != remoteAccessID || channel.offersRemoteAccess
+    }
+
     static var all: [Page] {
-        builtIn + ExtensionSettingsRegistry.shared.pages.map { registered in
+        builtIn.filter { isOffered($0, on: AppInfo.buildChannel) }
+            + ExtensionSettingsRegistry.shared.pages.map { registered in
             Page(
                 id: registered.id,
                 hostPage: nil,

@@ -1712,7 +1712,6 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
-				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -1752,7 +1751,6 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
-				INFOPLIST_KEY_ThreadingReportIntakeURL = "$(THREADING_REPORT_INTAKE_URL)";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

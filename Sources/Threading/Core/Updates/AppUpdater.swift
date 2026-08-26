@@ -118,4 +118,14 @@ private final class FeedDelegate: NSObject, SPUUpdaterDelegate {
     func feedURLString(for updater: SPUUpdater) -> String? {
         UpdateFeedPolicy.feedOverride(for: AppInfo.buildChannel)
     }
+
+    /// Which tagged items this updater is willing to see.
+    ///
+    /// Sparkle's own default is the empty set, so *not* implementing this would already keep
+    /// everyone on stable. It is implemented because the opposite must also be possible: a person
+    /// who asked for betas, or who is running one, has to be shown them. Returning the empty set
+    /// is not "no updates" — it means untagged items only, which is exactly what stable is.
+    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        AppSettings.shared.updateChannelSubscription.allowedChannelNames
+    }
 }

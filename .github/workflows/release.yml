@@ -4,8 +4,16 @@
 # credentials, and Sparkle's private key. Maintaining the steps here instead would be the
 # second list scripts/ci.sh exists to avoid.
 #
-# Trigger: push an annotated tag `vX.Y.Z` (by hand — pushes from the release machine recurse
-# into the submodule forks, so scripts never push; see CLAUDE.md).
+# Trigger: push an annotated tag by hand — pushes from the release machine recurse into the
+# submodule forks, so scripts never push; see CLAUDE.md.
+#
+#   vX.Y.Z        a stable release, published as the repository's Latest
+#   beta-vX.Y.Z   a beta, published as a prerelease and visible only to people who chose betas
+#                 in Settings ▸ General ▸ Software Updates
+#
+# The version in a beta tag sits strictly below the stable it precedes (0.1.9x before 0.2.0),
+# because Sparkle compares one dotted number and equal is not newer. publish_release.sh refuses
+# a tag that breaks that; scripts/release_tag_policy.sh explains why.
 #
 # Required repository secrets:
 #   APPLE_CERTIFICATE_P12       base64 of a .p12 export of the Developer ID Application
@@ -30,6 +38,7 @@ on:
   push:
     tags:
       - "v*"
+      - "beta-v*"
 
 permissions:
   contents: write

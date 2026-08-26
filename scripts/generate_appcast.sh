@@ -22,9 +22,27 @@
 #   from stdin (the shape `generate_keys -x` exports). The plist guard cannot run in that mode,
 #   so the secret must be the export of the same key the plist names.
 #
+# Seeding, and why the feed is not built from scratch each time:
+#   By default this describes exactly the one build in build/release, which is right for the
+#   nightly feed — a rolling release clobbers its assets, so an item for last Tuesday would
+#   point at a URL that now serves a different zip.
+#
+#   A channelled *release* feed cannot work that way. Publish stable 0.2.1, then beta 0.3.0, and
+#   a one-item feed holds only the beta: someone still on 0.1.0 and subscribed to stable is
+#   offered nothing until the next stable. So `--seed <url>` downloads the currently published
+#   appcast first and generate_appcast extends it, keeping earlier items with their channels and
+#   their signatures even though their archives are long gone. No archive retention, no growing
+#   download; the enclosure URLs already point at each release's own tag.
+#
+#   The seed goes to the *output* path, not into the archives directory. Sparkle's help says the
+#   archives directory, and that is true only when it is also the output: with -o it reads the
+#   existing feed from the output path and leaves a copy in the archives directory untouched.
+#   Verified against Sparkle 2 before this was written.
+#
 # Usage:
 #   scripts/generate_appcast.sh                # version from the tag on HEAD or THREADING_VERSION
 #   scripts/generate_appcast.sh --channel beta # stamp the item into the beta channel
+#   scripts/generate_appcast.sh --seed <url>   # extend the feed published at <url>
 #
 # Environment:
 #   THREADING_VERSION                          the version when HEAD carries no tag
@@ -32,6 +50,7 @@
 #   THREADING_SPARKLE_ACCOUNT                  keychain account (default mjukis-threading)
 #   THREADING_SPARKLE_PRIVATE_KEY_FILE         private-key file for CI; '-' reads stdin
 #   THREADING_SPARKLE_PHASED_ROLLOUT_INTERVAL  seconds between rollout phases (default 86400; 0 disables)
+#   THREADING_SPARKLE_MAXIMUM_VERSIONS         items kept per channel branch (default 1)
 #   THREADING_DOWNLOAD_URL_PREFIX              enclosure URL prefix (nightly feeds override this)
 #   THREADING_RELEASE_TAG                      tag the full-notes link points at (default v<version>)
 #   THREADING_RELEASE_NOTES_FILE               Markdown notes to embed instead of the CHANGELOG
@@ -48,12 +67,18 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 
 CHANNEL=""
+SEED_URL=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --channel)
             shift
             CHANNEL="${1:-}"
             [[ -n "$CHANNEL" ]] || fail "--channel requires a value"
+            ;;
+        --seed)
+            shift
+            SEED_URL="${1:-}"
+            [[ -n "$SEED_URL" ]] || fail "--seed requires a URL"
             ;;
         *) fail "unknown argument '$1'" ;;
     esac
@@ -153,7 +178,29 @@ if [[ -n "$CHANNEL" ]]; then
     channel_args+=(--channel "$CHANNEL")
 fi
 
+# Always removed first: a stale appcast left by an earlier run of this script is a local file
+# nobody published, and extending it would put an item in the feed that no release serves. The
+# only thing worth extending is the feed the world can already read, fetched below.
 rm -f "$APPCAST"
+if [[ -n "$SEED_URL" ]]; then
+    say "Seeding from the published feed"
+    seed_status="$(curl -fsSL --max-time 60 -w '%{http_code}' -o "$APPCAST.seed" "$SEED_URL" || true)"
+    if [[ -s "$APPCAST.seed" ]]; then
+        # A feed that is not a feed would be silently replaced by a one-item one, which is the
+        # failure this whole mechanism exists to prevent, so it has to be loud.
+        grep -q '<rss' "$APPCAST.seed" \
+            || fail "$SEED_URL did not return an appcast (got ${seed_status:-no status})"
+        mv "$APPCAST.seed" "$APPCAST"
+        echo "  extending $(grep -c '<item>' "$APPCAST") published item(s)"
+    else
+        rm -f "$APPCAST.seed"
+        # The first publish has no feed to extend, and neither does a repository whose releases
+        # were wiped. Both are legitimately "start from this one build".
+        echo "  no published feed at $SEED_URL yet; starting a new one"
+    fi
+fi
+
+readonly MAXIMUM_VERSIONS="${THREADING_SPARKLE_MAXIMUM_VERSIONS:-1}"
 "$SPARKLE_BIN/generate_appcast" \
     "${key_args[@]}" \
     "${phase_args[@]}" \
@@ -162,7 +209,7 @@ rm -f "$APPCAST"
     --full-release-notes-url "https://github.com/$REPO/releases/tag/$RELEASE_TAG" \
     --link "https://github.com/$REPO" \
     --embed-release-notes \
-    --maximum-versions 1 \
+    --maximum-versions "$MAXIMUM_VERSIONS" \
     --maximum-deltas 0 \
     -o "$APPCAST" \
     "$WORK"
@@ -174,17 +221,36 @@ rm -f "$APPCAST"
 # format the in-app sheet would show as raw text.
 
 say "Verifying the appcast"
-grep -q 'sparkle:edSignature=' "$APPCAST" \
-    || fail "the feed's enclosure is not signed"
+
+# This version's *own* item, not just some item in the file.
+#
+# A whole-file grep for a signature was enough while the feed described one build. It is not
+# enough now that earlier items are carried over: their signatures satisfy the grep while this
+# release's enclosure goes out unsigned. And unsigned is exactly what Sparkle produces when the
+# signing key's public half does not match the app's SUPublicEDKey — it prints a warning, omits
+# the signature and exits 0 (generate_appcast/Appcast.swift), so nothing else would say so.
+item_for_this_version="$(awk '
+    /<item>/ { block = "" ; inside = 1 }
+    inside { block = block $0 "\n" }
+    /<\/item>/ { if (inside && index(block, wanted) > 0) printf "%s", block; inside = 0 }
+' wanted="<sparkle:version>$VERSION</sparkle:version>" "$APPCAST")"
+
+# generate_appcast reads the version off the bundle *inside* the zip, so no item for this
+# version means the zip in build/release is stale or hand-made — release.sh's read-back
+# guarantees a fresh one agrees.
+[[ -n "$item_for_this_version" ]] \
+    || fail "the feed has no item for $VERSION — the zip in build/release is not this release's"
+grep -q 'sparkle:edSignature=' <<< "$item_for_this_version" \
+    || fail "$VERSION's enclosure is not signed — the signing key's public half almost certainly does not match the app's SUPublicEDKey, which Sparkle only warns about"
+if [[ -n "$CHANNEL" ]]; then
+    grep -q "<sparkle:channel>$CHANNEL</sparkle:channel>" <<< "$item_for_this_version" \
+        || fail "$VERSION's item is not tagged into the $CHANNEL channel, so every subscriber would see it as a stable release"
+fi
 grep -q '<!-- sparkle-signatures:' "$APPCAST" && grep -q '^edSignature: ' "$APPCAST" \
     || fail "the feed itself is not signed"
-grep -q "Threading-$VERSION.zip" "$APPCAST" \
-    || fail "the feed does not reference Threading-$VERSION.zip"
-# generate_appcast reads the version off the bundle *inside* the zip, so a mismatch here
-# means the zip is stale or hand-made — release.sh's read-back guarantees a fresh one agrees.
-grep -q "<sparkle:version>$VERSION</sparkle:version>" "$APPCAST" \
-    || fail "the feed's item version is not $VERSION — the zip in build/release is not this release's"
-grep -q 'sparkle:format="markdown"' "$APPCAST" \
+grep -q "Threading-$VERSION.zip" <<< "$item_for_this_version" \
+    || fail "$VERSION's item does not reference Threading-$VERSION.zip"
+grep -q 'sparkle:format="markdown"' <<< "$item_for_this_version" \
     || fail "the embedded release notes are not markdown — the in-app sheet renders exactly that (see releasing.md)"
 "$SPARKLE_BIN/sign_update" --verify "${key_args[@]}" "$APPCAST"
 

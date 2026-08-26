@@ -29,6 +29,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let restoreLimitPopUp = ThemedPopUp()
     private let attentionNotificationToggle = ThemedToggle()
     private let automaticUpdateToggle = ThemedToggle()
+    private let updateChannelPopUp = ThemedPopUp()
     private let preventIdleSleepToggle = ThemedToggle()
 
     /// One toggle per suppressible prompt, built from the register rather than declared one by
@@ -195,6 +196,7 @@ final class GeneralPreferencesViewController: NSViewController {
         configure(automaticUpdateToggle,
                   isOn: AppSettings.shared.automaticUpdateChecksEnabled,
                   action: #selector(automaticUpdateChecksChanged))
+        configureUpdateChannelPopUp()
         configure(
             preventIdleSleepToggle,
             isOn: AppSettings.shared.preventsIdleSystemSleepWhileAgentsWork,
@@ -309,6 +311,30 @@ final class GeneralPreferencesViewController: NSViewController {
         popUp.setAccessibilityIdentifier(accessibilityIdentifier)
         popUp.translatesAutoresizingMaskIntoConstraints = false
         popUp.widthAnchor
+            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+    }
+
+    /// Which builds this person is willing to receive.
+    ///
+    /// The selection resolves through `AppSettings`, which falls back to the running build's own
+    /// channel rather than to a constant: a beta handed to a friend must default to the beta
+    /// subscription or every beta item is filtered away and their build never updates again.
+    private func configureUpdateChannelPopUp() {
+        for subscription in UpdateChannelSubscription.allCases {
+            updateChannelPopUp.addItem(
+                ThemedMenuItem(title: subscription.settingsTitle, representedValue: subscription)
+            )
+        }
+        updateChannelPopUp.selectItem(
+            at: UpdateChannelSubscription.allCases.firstIndex(
+                of: AppSettings.shared.updateChannelSubscription
+            ) ?? 0
+        )
+        updateChannelPopUp.target = self
+        updateChannelPopUp.action = #selector(updateChannelChanged)
+        updateChannelPopUp.setAccessibilityIdentifier("settings.general.update-channel")
+        updateChannelPopUp.translatesAutoresizingMaskIntoConstraints = false
+        updateChannelPopUp.widthAnchor
             .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
     }
 
@@ -1125,6 +1151,15 @@ final class GeneralPreferencesViewController: NSViewController {
     private func updatesCard() -> SettingsCard {
         SettingsCard(rows: [
             SettingsUI.row(
+                title: "Updates you receive",
+                subtitle: "Stable is the finished release and needs no action. Betas arrive "
+                    + "earlier and may be rough; switching back here returns you to stable at "
+                    + "the next release. Nightly is a separate feed you join by installing a "
+                    + "nightly build, and leave by downloading a stable build yourself, because "
+                    + "a nightly's date version is higher than any release.",
+                control: updateChannelPopUp
+            ),
+            SettingsUI.row(
                 title: "Check for updates automatically",
                 subtitle: "Once a day, Threading checks GitHub for the app and each installed "
                     + "agent's official release source. App updates use Sparkle after you "
@@ -1289,6 +1324,14 @@ final class GeneralPreferencesViewController: NSViewController {
         // The setter posts the settings notification both update coordinators observe. That is
         // what stops their scheduled checks; this view reaches into neither implementation.
         AppSettings.shared.automaticUpdateChecksEnabled = automaticUpdateToggle.state == .on
+    }
+
+    @objc private func updateChannelChanged() {
+        guard let subscription = updateChannelPopUp.selectedItem?.representedValue
+            as? UpdateChannelSubscription else { return }
+        // Writing it is the whole effect. Sparkle asks the delegate for `allowedChannels` on each
+        // check rather than caching them, so the next check honours this with nothing to restart.
+        AppSettings.shared.updateChannelSubscription = subscription
     }
 
     @objc private func preventIdleSleepChanged() {

@@ -274,7 +274,10 @@ final class AppSettingDefinitionTests: XCTestCase {
             .chatNameMorphStyle: .init(key: "chatNameMorphStyle", valueType: .string),
             .chromeFontFamily: .init(key: "chromeFontFamily", valueType: .string),
             .conversationFontFamily: .init(key: "conversationFontFamily", valueType: .string),
-            .appTextSize: .init(key: "appTextSize", valueType: .string)
+            .appTextSize: .init(key: "appTextSize", valueType: .string),
+            .updateChannelSubscription: .init(
+                key: "updateChannelSubscription", valueType: .string
+            )
         ]
 
         XCTAssertEqual(Set(expected.keys), Set(AppSettingIdentity.allCases))
@@ -407,7 +410,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 81)
+        XCTAssertEqual(authoredRows.count, 82)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -445,7 +448,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             "New sessions start in", "Remote Control for new Claude sessions",
             "Report Claude turn and subagent activity",
             "Hide Claude's status line in Threading terminals", "Report Codex turn boundaries",
-            "Skip Codex hook review", "Check for updates automatically",
+            "Skip Codex hook review", "Updates you receive",
+            "Check for updates automatically",
             "Keep this Mac awake while agents work"
         ])
         XCTAssertEqual(actual["keyboard"], [

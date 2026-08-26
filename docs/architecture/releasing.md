@@ -266,7 +266,7 @@ Four, of which the release pipeline can stamp three:
 | Channel | Made by | Version | Badge |
 |---|---|---|---|
 | `release` | `scripts/release.sh` on a tag | the tag's semver | none |
-| `beta` | `scripts/release.sh --channel beta` | *(pipeline not built yet — see below)* | BETA |
+| `beta` | a `beta-vX.Y.Z` tag, through the same `release.sh --channel beta` | strictly below the stable it precedes, e.g. `0.1.90` before `0.2.0` | BETA |
 | `nightly` | `scripts/release.sh --channel nightly` with `THREADING_VERSION` | the date as dotted digits, e.g. `2026.8.2` | NIGHTLY |
 | `dev` | every build made any other way | `0.0.0` | DEV |
 
@@ -326,11 +326,96 @@ single source of truth for everyone else. A dev build (`0.0.0`) additionally nev
 schedule — it is outranked by every release forever, so the daily check would nag daily
 forever; Help ▸ Check for Updates… still works there.
 
-**Beta is a feed feature, not a third pipeline.** Sparkle 2 items can carry
-`<sparkle:channel>beta</sparkle:channel>` in the stable appcast, invisible to updaters unless
-the delegate opts in — so "include beta updates" becomes a Settings toggle when wanted, with
-no separate feed and no separate versioning scheme. The `--channel beta` stamp exists so
-those builds wear their badge the day that arrives; until then nothing publishes it.
+**Nightly is not a subscription level, for the same reason it has its own feed.** Choosing it in
+the picker would work; choosing Stable again would point at a feed whose newest item is *lower*
+than the running build, so Sparkle offers nothing and the user is stranded until they download a
+stable build by hand. A control that can strand its user is not a control. The Software Updates
+row therefore names nightly in its subtitle — what it is, that installing one is how you join,
+and that leaving means downloading a stable build yourself — and offers Stable and Beta only.
+
+**Beta is a feed feature, not a third pipeline.** Sparkle 2 items carry
+`<sparkle:channel>beta</sparkle:channel>` in the stable appcast, invisible to any updater that
+does not name that channel — so opting in is a Settings pop-up (General ▸ Software Updates),
+with no separate feed and no separate `SUFeedURL`. `.github/workflows/release.yml` triggers on
+`beta-v*` as well as `v*`, and `scripts/publish_release.sh` derives the channel from the tag.
+
+What a user *subscribes* to is not what their build *is*, and the two are separate types:
+`BuildChannel` describes an artefact, `UpdateChannelSubscription` an appetite. The subscription
+resolves an unexpressed choice from the running build's channel, because the common way onto a
+beta is a direct download and a beta build defaulting to the stable subscription would filter
+away every beta item and never update again. Nightly is deliberately not a subscription level;
+see below.
+
+### A prerelease version sits strictly below the stable it precedes
+
+`release.sh` gives `CFBundleVersion` the same dotted string as the marketing version, and the
+version has to stay dotted digits because `SUStandardVersionComparator` orders it. So a beta
+published as `0.2.0` is *equal* to the stable `0.2.0`, and equal is not newer: Sparkle would
+never offer that tester the release that supersedes their own build. A beta of the upcoming
+0.2.0 therefore ships as `0.1.90`.
+
+Only half of that is checkable when a beta is published, because the stable it precedes does not
+exist yet. `scripts/release_tag_policy.sh` checks each half at the moment it can:
+
+| publishing | must be strictly above | or else |
+|---|---|---|
+| a beta | the newest published stable | nobody running stable is offered it |
+| a stable | every published beta | its testers sit on a build that outranks its own successor |
+
+Read from what is *published* rather than from local tags, because a tag nobody pushed strands
+nobody. `scripts/tests/test_release_tag_policy.py` runs both directions.
+
+### The feed is seeded, not rebuilt
+
+`generate_appcast.sh` used to delete the appcast and keep one version. That is right for the
+nightly feed — a rolling release clobbers its assets, so an item for last Tuesday would point at
+a URL now serving a different zip — and wrong for a channelled one: publish stable 0.2.1, then
+beta 0.3.0, and a one-item feed holds only the beta, so someone still on 0.1.0 is offered nothing
+until the next stable.
+
+`--seed <url>` downloads the currently published feed first, and `generate_appcast` extends it,
+keeping earlier items with their channels and their EdDSA signatures even though their archives
+are long gone. No archive retention, no growing download; each item's enclosure already points at
+its own release's tag. **The seed goes to the output path, not the archives directory** — Sparkle's
+help says the archives directory, which is true only when that is also the output; with `-o` it
+reads the existing feed from the output path. Verified against Sparkle 2, not inferred.
+
+`--maximum-versions` is 5 rather than the old 1, and that is 5 *per channel* rather than 5 in
+total: the channel is part of Sparkle's `UpdateBranch`, alongside the minimum OS and hardware
+requirements. Stable and beta are pruned independently, so a run of betas can never push the
+stable release a lagging user needs out of the feed. Sparkle also trims a channel branch back to
+one item once the default branch has overtaken it, so a settled beta line tidies itself up.
+
+Seeding made the old signature check unsound, which is worth stating because the failure is
+silent: when the signing key's public half does not match the app's `SUPublicEDKey`, Sparkle
+prints a warning, **omits the enclosure signature and exits 0**. A whole-file grep for a signature
+is then satisfied by a carried-over item while this release goes out unsigned. The verification
+now reads this version's own item.
+
+### Running a beta while subscribed to stable
+
+The one state the picker can leave somebody in, and it needs no new copy. Sparkle filters the
+beta items, so the newest item that updater can see is the last stable — older than the build
+they are running — and `SPUBasicUpdateDriver` answers "You're up to date!" with
+`SPUNoUpdateFoundReasonOnNewerThanLatestVersion`.
+
+That is honest, and it is where it ends: the next stable release outranks that beta by
+construction, so it arrives on its own. Note that Sparkle **cannot** report channel gating as a
+reason — it says so in as many words ("There could be update items on channels the updater is
+not subscribed to for example. But we can't tell the user about them.") and reports being on the
+latest version. So there is nothing to render differently, and inferring it from an error code
+would mean claiming to know what Sparkle just said it could not determine.
+
+### Where each artefact goes
+
+The zip goes on the release for its own tag, and a beta's release is marked prerelease. The
+appcast goes on whatever GitHub resolves `latest` to — asked of GitHub rather than worked out,
+because that is by definition the release serving `SUFeedURL`. Every shipped copy resolves
+`releases/latest/download/appcast.xml`, that URL cannot move without stranding every installed
+app, and a prerelease never becomes `latest`; a dedicated "feed" release would have to *be*
+latest, pointing the repository's human-facing Latest at an XML file. Clobbering a stable
+release's appcast asset is already how a second stable release works, and the feed is signed, so
+a tampered one is rejected rather than installed.
 
 ## Apple silicon only
 

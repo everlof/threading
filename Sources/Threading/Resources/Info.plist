@@ -44,6 +44,15 @@
 	     the negotiated peer path and does not transit this origin. -->
 	<key>ThreadingControlPlaneURL</key>
 	<string>https://remote.threading.codes</string>
+	<!-- Where Report a Problem posts. Declared here, not as INFOPLIST_KEY_… in the project:
+	     that build setting is only consulted when Xcode *generates* the Info.plist, and this
+	     target ships an explicit one, so it was silently inert. Empty for every build that does
+	     not inject it, which is deliberate — MacIssueReportSubmitter treats an empty value as no
+	     endpoint, writes the report locally and posts nothing, so only a release archive can
+	     reach production. scripts/release.sh supplies it and refuses to archive unless the host
+	     presents a certificate. -->
+	<key>ThreadingReportIntakeURL</key>
+	<string>$(THREADING_REPORT_INTAKE_URL)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSMainNibFile</key>

@@ -1247,6 +1247,24 @@ final class AppSettings {
         }
     }
 
+    /// Which builds this person receives, which is not what their build *is*. See
+    /// `UpdateChannelSubscription`.
+    ///
+    /// An unset value is resolved against the running build rather than against a constant: a
+    /// beta someone downloaded directly would otherwise default to the stable subscription,
+    /// filtering away every beta item and never updating again. The stored string therefore only
+    /// ever records a choice somebody actually made.
+    var updateChannelSubscription: UpdateChannelSubscription {
+        get {
+            let stored = AppSettingDefinitions.updateChannelSubscription.read(from: defaults) ?? ""
+            return UpdateChannelSubscription(rawValue: stored)
+                ?? UpdateChannelSubscription.standard(for: AppInfo.buildChannel)
+        }
+        set {
+            AppSettingDefinitions.updateChannelSubscription.write(newValue.rawValue, to: defaults)
+        }
+    }
+
     /// Whether Threading may ask its own and installed agent tools' official release sources
     /// whether newer versions exist.
     ///

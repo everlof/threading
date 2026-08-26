@@ -70,6 +70,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteInputControlDefault
     case phoneReportWorkspace
     case automaticUpdateChecksEnabled
+    case updateChannelSubscription
     case preventsIdleSystemSleepWhileAgentsWork
     case workingOrbStyle
     case chatNameMorphStyle
@@ -1237,11 +1238,28 @@ enum AppSettingDefinitions {
         remotePolicy: .ownerMutable
     )
 
+    /// Which builds this person is willing to receive. See `UpdateChannelSubscription`.
+    ///
+    /// Deliberately has no fixed default. A beta build must default to the beta subscription or a
+    /// friend handed a beta zip is filtered away from every beta item and never updates again —
+    /// the common way onto a beta, not an exotic one. The resolved default therefore depends on
+    /// `AppInfo.buildChannel`, which the accessor applies; the stored value only ever records a
+    /// choice somebody actually made.
+    static let updateChannelSubscription = AppSettingDescriptor<String>(
+        identity: .updateChannelSubscription,
+        persistenceKey: "updateChannelSubscription",
+        absence: .emptyString,
+        validation: .allowedStrings(
+            Set(UpdateChannelSubscription.allCases.map(\.rawValue)).union([""])
+        ),
+        presentations: [row("general", 30, "Software Updates", "Updates you receive",
+                            ["beta", "channel", "prerelease", "nightly", "updates"])]
+    )
     static let automaticUpdateChecksEnabled = AppSettingDescriptor<Bool>(
         identity: .automaticUpdateChecksEnabled,
         persistenceKey: "automaticUpdateChecksEnabled",
         absence: .registered(true),
-        presentations: [row("general", 30, "Software Updates",
+        presentations: [row("general", 31, "Software Updates",
                             "Check for updates automatically", [
                                 "updates", "Sparkle", "agent", "CLI", "Claude", "Codex",
                                 "Grok", "OpenCode", "Cursor"
@@ -1252,7 +1270,7 @@ enum AppSettingDefinitions {
         persistenceKey: "preventsIdleSystemSleepWhileAgentsWork",
         absence: .registered(false),
         presentations: [row(
-            "general", 31, "Power", "Keep this Mac awake while agents work",
+            "general", 32, "Power", "Keep this Mac awake while agents work",
             ["sleep", "awake", "lid", "battery", "energy", "active turn"]
         )]
     )
@@ -1341,6 +1359,7 @@ enum AppSettingDefinitions {
         .init(remoteAccessDiscoveryEnabled),
         .init(remoteInputControlDefault),
         .init(phoneReportWorkspace),
+        .init(updateChannelSubscription),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
         .init(workingOrbStyle),
         .init(chatNameMorphStyle), .init(chromeFontFamily), .init(conversationFontFamily),
