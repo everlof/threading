@@ -23,6 +23,14 @@
         "value" : "$(THREADING_SIMULATOR_INTEGRATION_UDID)"
       },
       {
+        "key" : "THREADING_SIMULATOR_DOGFOOD_APP_PATH",
+        "value" : "$(THREADING_SIMULATOR_DOGFOOD_APP_PATH)"
+      },
+      {
+        "key" : "THREADING_SIMULATOR_DOGFOOD_BUNDLE_ID",
+        "value" : "$(THREADING_SIMULATOR_DOGFOOD_BUNDLE_ID)"
+      },
+      {
         "key" : "THREADING_EXTENSION_PACKAGE_UNDER_TEST",
         "value" : "$(THREADING_EXTENSION_PACKAGE_UNDER_TEST)"
       },

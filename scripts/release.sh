@@ -17,6 +17,10 @@
 #   scripts/release.sh --install       # also install the result over /Applications/Threading.app
 #                                      # (scripts/install-app.sh does the work, and can be run on
 #                                      # its own against any bundle — see its header)
+#   scripts/release.sh --simulator-matrix
+#                                      # dogfood the exported host/helper against every Xcode in
+#                                      # THREADING_SIMULATOR_MATRIX_XCODES (colon-separated), or
+#                                      # the active Xcode when unset; uses an already-booted device
 #   scripts/release.sh --channel nightly
 #                                      # stamp a channel other than release into the bundle;
 #                                      # the app shows it as the sidebar badge (BuildChannelBadge)
@@ -64,11 +68,13 @@ fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 
 NOTARIZE=0
 INSTALL=0
+SIMULATOR_MATRIX=0
 CHANNEL="release"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --notarize) NOTARIZE=1 ;;
         --install) INSTALL=1 ;;
+        --simulator-matrix) SIMULATOR_MATRIX=1 ;;
         --channel)
             shift
             CHANNEL="${1:-}"
@@ -406,9 +412,32 @@ install_if_asked() {
     "$ROOT/scripts/install-app.sh" --app "$APP"
 }
 
+simulator_matrix_if_asked() {
+    [[ $SIMULATOR_MATRIX -eq 1 ]] || return 0
+    say "Dogfooding the adopted Simulator against the release bundle"
+    local arguments=(
+        --app "$APP"
+        --output "$BUILD_DIR/simulator-compatibility"
+    )
+    if [[ -n "${THREADING_SIMULATOR_MATRIX_UDID:-}" ]]; then
+        arguments+=(--udid "$THREADING_SIMULATOR_MATRIX_UDID")
+    fi
+    if [[ -n "${THREADING_SIMULATOR_MATRIX_XCODES:-}" ]]; then
+        local matrix_xcodes=()
+        IFS=':' read -r -a matrix_xcodes <<< "$THREADING_SIMULATOR_MATRIX_XCODES"
+        local matrix_xcode
+        for matrix_xcode in "${matrix_xcodes[@]}"; do
+            [[ -n "$matrix_xcode" ]] && arguments+=(--xcode "$matrix_xcode")
+        done
+    fi
+    [[ $NOTARIZE -eq 0 ]] || arguments+=(--require-notarized)
+    "$ROOT/scripts/simulator_dogfood.sh" "${arguments[@]}"
+}
+
 # MARK: - Notarize
 
 if [[ $NOTARIZE -eq 0 ]]; then
+    simulator_matrix_if_asked
     say "Done (not notarized)"
     echo "The bundle is signed and verified but Gatekeeper will still warn until it is"
     echo "notarized. Re-run with --notarize to submit it."
@@ -430,6 +459,8 @@ ditto -c -k --keepParent --sequesterRsrc "$APP" "$zip"
 
 say "Gatekeeper assessment"
 spctl -a -vvv -t install "$APP"
+
+simulator_matrix_if_asked
 
 say "Ready: $SCHEME $version ($build, $channel)"
 echo "  app: $APP"

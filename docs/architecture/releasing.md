@@ -440,6 +440,21 @@ xcrun notarytool store-credentials threading-notary \
 After stapling, the zip is rebuilt from the stapled app — the ticket lives inside the bundle, so
 serving the pre-staple zip would ship an unstapled app that Gatekeeper still questions offline.
 
+### The signed Simulator helper is tested as a bundle
+
+The adopted Simulator renderer crosses two boundaries an ordinary unit suite cannot reproduce:
+the exact host/helper code-signing relationship inside the export, and the private CoreSimulator
+surface supplied by the selected Xcode. `scripts/release.sh --simulator-matrix` therefore hands the
+exported `Threading.app` to `scripts/simulator_dogfood.sh`. With `--notarize`, this happens after
+stapling and Gatekeeper assessment and the matrix requires the same acceptance.
+
+The lane uses one already-booted iOS device and never opens Simulator.app. It drives the real
+agent-facing right-panel workflow, then starts the exported app in a hidden one-shot mode that
+performs the normal signed-helper handshake and waits for one decoded frame before any workspace,
+window or single-instance state is loaded. Repeat `--xcode` on the dogfood script, or set the
+colon-separated `THREADING_SIMULATOR_MATRIX_XCODES` for `release.sh`, to exercise each supported
+Xcode/runtime pair. Evidence is written to `build/release/simulator-compatibility/matrix.json`.
+
 ## Sparkle
 
 Sparkle 2.9.4 (July 2026). `2.x` requires macOS 12+, and this app targets 13+, so the current

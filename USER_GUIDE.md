@@ -2828,6 +2828,26 @@ order is the same one the agent sees, and it survives a relaunch. **⌘⇧[** an
 **⌘1**–**⌘9** jump to a tab by its place in it. The same gestures and menu, with the same
 commands, work on the shell drawer's tabs.
 
+### iOS Simulator in the panel
+
+When an agent builds an iPhone app, it can adopt an already-installed Simulator device as an
+**iOS Simulator** tab in this panel. The live screen, screenshots, taps, swipes, typing and button
+presses all address that one tab and one exact device. Apple Simulator does not need to open as a
+separate window: Threading reads the device framebuffer directly through its signed helper and
+uses a slower screenshot preview if that live connection is unavailable.
+
+Agents are told to prefer this route. They choose the device in the panel, build for the exact
+destination Threading returns, install and launch the resulting app there, and inspect it in the
+same place. Input asks for permission once per exact device for this Threading launch. Hiding the
+tab pauses live capture; closing it releases Threading's lease. A device that was already running
+is left running. If Threading itself started the device, it may stop it when the final lease is
+deliberately released.
+
+The device chip switches between available iPhones without creating another kind of window. A
+helper or Xcode compatibility failure stays in the tab, with a reason and retry; Threading never
+silently responds by launching Apple Simulator. The public screenshot fallback is view-only, so
+control waits until the direct connection has recovered.
+
 **More tabs than fit scroll rather than shrink**, and the strip only answers what is meant for
 it. Swipe sideways over the tabs to move along them; a mouse wheel does the same, since sideways
 is the only direction the strip has. Swipe *down* over the tabs and the pane behind them scrolls,
