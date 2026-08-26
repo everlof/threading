@@ -28,7 +28,13 @@ concurrency:
 
 jobs:
   nightly:
-    runs-on: macos-15-intel
+    # Apple silicon, and not negotiable: Threading builds arm64 only
+    # (ARCHS[sdk=macosx*] = arm64) and ThirdParty/scc/scc is deliberately a single arm64 slice.
+    # An Intel runner cannot execute either -- Rosetta translates x86 on Apple silicon, not the
+    # reverse -- so check_bundled_scc.sh dies with exit 126 before a single test runs, and the
+    # arm64 test bundle could not have run after it. This was macos-15-intel from a25c3afb until
+    # 2026-08-26, which is why every run since failed identically.
+    runs-on: macos-15
     timeout-minutes: 120
 
     steps:

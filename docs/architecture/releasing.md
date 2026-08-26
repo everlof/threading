@@ -334,6 +334,17 @@ those builds wear their badge the day that arrives; until then nothing publishes
 
 ## Apple silicon only
 
+**The CI runner has to be Apple silicon too, and this cost the project every green build it never
+had.** From `a25c3afb` (2026-08-09) until 2026-08-26 all three workflows ran `macos-15-intel`,
+swapped in without comment alongside unrelated hardening. An Intel host cannot execute an `arm64`
+binary at all — Rosetta translates x86 on Apple silicon, never the reverse — so
+`scripts/check_bundled_scc.sh` exited 126 the moment it ran the single-slice `scc` below, and the
+`arm64` test bundle behind it could not have run either. `scripts/ci.sh` calls that check;
+`scripts/release.sh` calls `ci.sh`; `release.yml` calls `publish_release.sh`, which calls
+`release.sh`. So the release workflow was never one secret away from working: it would have died
+on the same line, and every one of the eleven CI runs on record failed. The runners are
+`macos-15` and each workflow carries a comment saying why.
+
 Threading builds and ships for `arm64` alone. The decision is about what a person sees when they
 look at `Threading.app` in the Finder, not about CPUs: measured on master at `0fbd79f9` (Xcode
 26.5, `xcodebuild archive -configuration Release`, stripped, unsigned), the universal bundle was
