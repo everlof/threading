@@ -1,39 +1,34 @@
 # Findings reviewed once and pinned by fingerprint, so the same shape appearing anywhere new
 # still fails the gate. A fingerprint is commit:path:rule:line — it does not generalise.
 #
-# Every entry below was inspected by hand on 2026-08-23 and is one of:
+# **A history rewrite invalidates every line in this file.** The fingerprint names a commit, so
+# rewriting one (git-filter-repo, a rebase, git-moonlighter moving author dates) gives it a new
+# sha and every pin here stops matching. The gate then refuses a push with findings that were
+# reviewed months ago. That is the gate working, not a false alarm: re-review, regenerate, commit.
+# This file was last regenerated after exactly that, on 2026-08-26.
 #
-#   * a Sparkle *public* EdDSA key, in an older revision of the file before it moved into
-#     .gitleaks.toml's value allowlist (publishing it is what it is for — releasing.md, "Keys");
+# Every entry below was inspected by hand and is one of:
+#
+#   * a Sparkle *public* EdDSA key, which is published on purpose (releasing.md, "Keys");
+#   * a fixture in a test — a fake credential-helper response, a generated invitation token, a
+#     key minted inside the test that uses it;
 #   * a Swift type annotation on a key-shaped property name, which the generic rule reads as an
-#     assignment even though the line binds a type rather than a value;
-#   * a bearer/session token generated inside a test, or an obviously fake literal in one.
+#     assignment even though the line binds a type rather than a value.
 #
 # None is a credential. Nothing here grants access to anything.
 #
 # Regenerate after review with:
 #   gitleaks git --report-format json --report-path leaks.json --exit-code 0
 
-0d28f279044b382dd22801d737dd5b75968f678e:Tests/ThreadingTests/AppUpdaterTests.swift:generic-api-key:54
-16fa716282db3e46aafe1fc1d67a4cab736e2b85:Service/ThreadingControlPlane/test/service.test.ts:generic-api-key:55
-287adaf247777ffb1da2a3d52b15c0ec19c7b798:Tests/ThreadingTests/AppUpdaterTests.swift:generic-api-key:54
-33f6bc0cebd0d9c4ab89c06b3cf2e01d7e1c7afe:docs/architecture/releasing.md:generic-api-key:206
-45e10945c11824fa21967a24054ae2695bc40fd7:Tests/ThreadingTests/GitHubCredentialsTests.swift:generic-api-key:146
-45e10945c11824fa21967a24054ae2695bc40fd7:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:743
-45e10945c11824fa21967a24054ae2695bc40fd7:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:764
-4d01c48683898c516c7845d57cd32a58e89f8de4:Service/ThreadingControlPlane/test/service.test.ts:generic-api-key:55
-6bd8c008dd19ea6f8eb0ca46281922cdbd397e3a:Tests/ThreadingTests/GitHubCredentialsTests.swift:generic-api-key:146
-6bd8c008dd19ea6f8eb0ca46281922cdbd397e3a:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:743
-6bd8c008dd19ea6f8eb0ca46281922cdbd397e3a:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:764
-7ab2018a4c565ceff2f92e3bbec5b27891c1de9a:Tests/ThreadingTests/GitHubCredentialsTests.swift:generic-api-key:146
-7ab2018a4c565ceff2f92e3bbec5b27891c1de9a:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:743
-7ab2018a4c565ceff2f92e3bbec5b27891c1de9a:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:764
-98613e150ae7775d25f69edd6a0d9ebf336cee98:Service/ThreadingControlPlane/test/service.test.ts:generic-api-key:55
-9b9824d8976a2e7dc3d61e39d65bf5f2dd3f24c4:Tests/ThreadingTests/RemoteGuestInvitationTests.swift:generic-api-key:14
-ac704cf05f8173e8c97946bef0afa1e6208cfbc2:docs/architecture/releasing.md:generic-api-key:206
-bc9d38bb6a911b211afb77231a7a4d8783eb4f71:docs/architecture/releasing.md:generic-api-key:206
-d08d6249e9cedc91649e3d20216122510104652a:Tests/ThreadingTests/AppUpdaterTests.swift:generic-api-key:54
-d55b93df1678bef028b06fe2456a485d8eb3e375:Tests/ThreadingTests/RemoteGuestInvitationTests.swift:generic-api-key:14
+# Two fingerprint shapes appear below, and both are needed. A scan that walks history from a
+# ref records commit:path:rule:line; one that reaches a blob through a path whose file no
+# longer exists records path:rule:line with no commit. The Skalman-era entries are the second
+# kind: that tree was renamed to Threading, so those paths exist only in history.
+
+1cb700c416f813c25b9b91baedfeff174a6a01c2:Tests/ThreadingTests/AppUpdaterTests.swift:generic-api-key:54
+511fed1c50ff8a1879eda0968a45cceff6ae486a:docs/architecture/releasing.md:generic-api-key:206
+594e357c331a7b79ed23f2372675cd6d24a5f285:Service/ThreadingControlPlane/test/service.test.ts:generic-api-key:55
+6f153b24d18810a9774b80e6bac9481484d1a0c0:Tests/ThreadingTests/RemoteGuestInvitationTests.swift:generic-api-key:14
 Sources/Skalman/Core/Remote/RemoteNotificationService.swift:generic-api-key:427
 Tests/SkalmanTests/RemoteServerIntegrationTests.swift:generic-api-key:511
 Tests/SkalmanTests/RemoteServerIntegrationTests.swift:generic-api-key:523
@@ -41,3 +36,6 @@ Tests/SkalmanTests/RemoteServerIntegrationTests.swift:generic-api-key:536
 Tests/SkalmanTests/RemoteServerIntegrationTests.swift:generic-api-key:571
 Tests/SkalmanTests/RemoteWebSocketTests.swift:generic-api-key:24
 Tests/SkalmanTests/RemoteWebSocketTests.swift:generic-api-key:50
+cc509f204580817f1640fc0b0600e7141cd73a3d:Tests/ThreadingTests/GitHubCredentialsTests.swift:generic-api-key:146
+cc509f204580817f1640fc0b0600e7141cd73a3d:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:743
+cc509f204580817f1640fc0b0600e7141cd73a3d:ThreadingRemoteKit/Tests/ThreadingRemoteKitTests/RemoteProtocolTests.swift:generic-api-key:764
