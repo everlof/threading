@@ -62,6 +62,11 @@ fi
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31merror: %s\033[0m\n' "$1" >&2; exit 1; }
 
+# The release tag grammar, shared with publish_release.sh so the two cannot disagree about what
+# a tag means. See scripts/tests/test_release_tag_policy.py.
+# shellcheck source=scripts/release_tag_policy.sh
+source "$ROOT/scripts/release_tag_policy.sh"
+
 NOTARIZE=0
 INSTALL=0
 CHANNEL="release"
@@ -208,7 +213,13 @@ say "Resolving the version"
 VERSION="${THREADING_VERSION:-}"
 if [[ -z "$VERSION" ]]; then
     tag="$(git -C "$ROOT" describe --tags --exact-match HEAD 2>/dev/null || true)"
-    VERSION="${tag#v}"
+    if [[ -n "$tag" ]] && description="$(release_tag_describe "$tag" 2>/dev/null)"; then
+        read -r tag_channel VERSION <<< "$description"
+        # The tag is the only thing saying what this build is here, so a --channel that
+        # contradicts it would silently stamp the wrong badge and the wrong feed behaviour.
+        [[ "$tag_channel" == "$CHANNEL" ]] \
+            || fail "$tag is a $tag_channel tag but --channel says $CHANNEL — pass --channel $tag_channel, or set THREADING_VERSION to build something the tag does not name"
+    fi
 fi
 
 if [[ -z "$VERSION" ]]; then

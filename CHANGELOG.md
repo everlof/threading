@@ -8,6 +8,14 @@ version this file does not describe.
 
 Format: `## [x.y.z]` per release, newest first, matching the git tag `vx.y.z`.
 
+A beta has a section of its own, under the version it ships as rather than the one it is a beta
+of. Its tag is `beta-vx.y.z`, and its version sits strictly below the stable it precedes — a
+beta of the upcoming 0.2.0 goes out as 0.1.90 — because Sparkle compares one dotted number and
+equal is not newer, so a beta sharing 0.2.0's version would never be offered 0.2.0 itself. Write
+it for the tester: what to try, and what is known to be rough. When the stable release lands, its
+own section describes the whole change, not the difference since the last beta; nobody on stable
+saw the betas.
+
 ## [Unreleased]
 
 ## [0.1.0]

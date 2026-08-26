@@ -59,6 +59,9 @@ python3 -m unittest "${repository_directory}/scripts/tests/test_ui_evidence_tool
 say "Testing agent feedback audit"
 python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"
 
+say "Testing release tag policy"
+python3 -m unittest "${repository_directory}/scripts/tests/test_release_tag_policy.py"
+
 say "Testing Threading (off-screen plan, complete concurrency checking)"
 "${script_directory}/test.sh" fast \
     SWIFT_STRICT_CONCURRENCY=complete \
