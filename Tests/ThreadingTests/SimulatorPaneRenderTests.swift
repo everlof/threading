@@ -13,7 +13,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
         static let panelWidth: CGFloat = 420
 
         static var directory: URL {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override, isDirectory: true)
             }
             return FileManager.default.temporaryDirectory
@@ -26,7 +27,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
         ]
     }
 
-    func testRendersAdoptedSimulatorInRightPanel() async throws {
+    func testRendersAdoptedSimulatorInRightPanel() throws {
         try FileManager.default.createDirectory(
             at: Render.directory,
             withIntermediateDirectories: true
@@ -43,7 +44,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
             )
             defer { fixture.tearDown() }
 
-            try await eventually {
+            eventually {
                 fixture.simulator.frameImageForTesting != nil
             }
             settle(fixture.window)
@@ -343,14 +344,14 @@ final class SimulatorPaneRenderTests: XCTestCase {
     private func eventually(
         timeout: TimeInterval = 3,
         _ condition: @MainActor () -> Bool
-    ) async throws {
+    ) {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             if Date() >= deadline {
                 XCTFail("Timed out waiting for the adopted Simulator frame.")
                 return
             }
-            try await Task.sleep(nanoseconds: 20_000_000)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
     }
 }
@@ -428,13 +429,15 @@ private final class SimulatorPaneRenderStreamSession:
     @unchecked Sendable
 {
     let events: AsyncStream<SimulatorLiveStreamEvent>
+    private let continuation: AsyncStream<SimulatorLiveStreamEvent>.Continuation
 
     init(frame: CGImage) {
         let pair = AsyncStream<SimulatorLiveStreamEvent>.makeStream(
             bufferingPolicy: .bufferingNewest(2)
         )
         events = pair.stream
-        pair.continuation.yield(.ready(
+        continuation = pair.continuation
+        continuation.yield(.ready(
             backend: .direct(codec: .h264),
             capabilities: SimulatorBridgeCapabilities(
                 codecs: [.h264, .jpeg],
@@ -446,7 +449,7 @@ private final class SimulatorPaneRenderStreamSession:
             coreSimulatorVersion: "evidence",
             simulatorKitVersion: "evidence"
         ))
-        pair.continuation.yield(.frame(SimulatorLiveFrame(
+        continuation.yield(.frame(SimulatorLiveFrame(
             sequence: 1,
             image: frame,
             codec: .h264,
@@ -456,5 +459,5 @@ private final class SimulatorPaneRenderStreamSession:
 
     func setVisible(_ visible: Bool) {}
     func sendInput(_ input: SimulatorBridgeInput) async throws {}
-    func stop() {}
+    func stop() { continuation.finish() }
 }

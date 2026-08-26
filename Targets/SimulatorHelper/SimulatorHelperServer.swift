@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import IOSurface
 import ThreadingSimulatorKit
@@ -22,8 +23,8 @@ final class SimulatorHelperServer: @unchecked Sendable {
         static let framebufferUnavailable = 26
     }
 
-    private let input = FileHandle.standardInput
-    private let output = FileHandle.standardOutput
+    private let inputDescriptor = STDIN_FILENO
+    private let outputDescriptor = STDOUT_FILENO
     private let stateQueue = DispatchQueue(label: "codes.threading.simulator-helper.state")
     private let outputQueue = DispatchQueue(label: "codes.threading.simulator-helper.output")
     private let inputQueue = DispatchQueue(label: "codes.threading.simulator-helper.input")
@@ -60,7 +61,17 @@ final class SimulatorHelperServer: @unchecked Sendable {
         }
 
         do {
-            while !isStopped, let bytes = try input.read(upToCount: Limits.readBytes), !bytes.isEmpty {
+            var buffer = [UInt8](repeating: 0, count: Limits.readBytes)
+            while !isStopped {
+                let count = buffer.withUnsafeMutableBytes { storage in
+                    Darwin.read(inputDescriptor, storage.baseAddress, storage.count)
+                }
+                if count == 0 { break }
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                let bytes = Data(buffer.prefix(count))
                 switch decoder.accept(bytes) {
                 case .refused:
                     writeControl(.failure(.malformedMessage, detail: "The helper wire frame is malformed."))
@@ -306,8 +317,8 @@ final class SimulatorHelperServer: @unchecked Sendable {
             replacedFrames: statistics.replacedFrames,
             encodedBytes: statistics.encodedBytes + UInt64(frame.bytes.count)
         )
-        outputQueue.async { [output] in
-            do { try output.write(contentsOf: framed) }
+        outputQueue.async { [outputDescriptor] in
+            do { try Self.writeAll(framed, to: outputDescriptor) }
             catch { fputs("threading-simulator-helper: socket write failed\n", stderr) }
         }
         if statistics.sentFrames.isMultiple(of: UInt64(max(1, framesPerSecond * 5))) {
@@ -320,7 +331,9 @@ final class SimulatorHelperServer: @unchecked Sendable {
               let frame = try? SimulatorBridgeFraming.encode(kind: .control, payload: payload) else {
             return
         }
-        outputQueue.async { [output] in try? output.write(contentsOf: frame) }
+        outputQueue.async { [outputDescriptor] in
+            try? Self.writeAll(frame, to: outputDescriptor)
+        }
     }
 
     private func stop() {
@@ -331,5 +344,26 @@ final class SimulatorHelperServer: @unchecked Sendable {
         encoder?.finish()
         encoder = nil
         writeControl(.statistics(statistics))
+    }
+
+    private static func writeAll(_ data: Data, to descriptor: Int32) throws {
+        try data.withUnsafeBytes { storage in
+            guard let baseAddress = storage.baseAddress else { return }
+            var offset = 0
+            while offset < storage.count {
+                let count = Darwin.write(
+                    descriptor,
+                    baseAddress.advanced(by: offset),
+                    storage.count - offset
+                )
+                if count > 0 {
+                    offset += count
+                } else if count < 0, errno == EINTR {
+                    continue
+                } else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+            }
+        }
     }
 }

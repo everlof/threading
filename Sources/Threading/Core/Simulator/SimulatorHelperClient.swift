@@ -24,7 +24,8 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
     private let startedAt = DispatchTime.now().uptimeNanoseconds
 
     private var process: Process?
-    private var socket: FileHandle?
+    private var readDescriptor: Int32 = -1
+    private var writeDescriptor: Int32 = -1
     private var handshake: CheckedContinuation<Void, Error>?
     private var handshakeSpan: PerformanceSpan?
     private var pendingInput: [UUID: CheckedContinuation<Void, Error>] = [:]
@@ -135,7 +136,15 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         var noSignal: Int32 = 1
         setsockopt(sockets[0], SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal)))
         setsockopt(sockets[1], SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal)))
-        let parent = FileHandle(fileDescriptor: sockets[0], closeOnDealloc: true)
+        let parentReadDescriptor = sockets[0]
+        let parentWriteDescriptor = dup(parentReadDescriptor)
+        guard parentWriteDescriptor >= 0 else {
+            close(parentReadDescriptor)
+            close(sockets[1])
+            throw SimulatorLiveStreamError.helperUnavailable(
+                "Threading could not prepare the private Simulator helper socket."
+            )
+        }
         let child = FileHandle(fileDescriptor: sockets[1], closeOnDealloc: true)
 
         let process = Process()
@@ -157,7 +166,8 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         }
         do { try process.run() }
         catch {
-            parent.closeFile()
+            close(sockets[0])
+            close(parentWriteDescriptor)
             child.closeFile()
             throw SimulatorLiveStreamError.helperUnavailable(
                 "Threading could not launch its embedded Simulator helper."
@@ -165,14 +175,21 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         }
         child.closeFile()
         self.process = process
-        socket = parent
-        readQueue.async { [weak self] in self?.readFrames(from: parent) }
+        readDescriptor = parentReadDescriptor
+        writeDescriptor = parentWriteDescriptor
+        readQueue.async { [weak self] in self?.readFrames(from: parentReadDescriptor) }
     }
 
-    private func readFrames(from socket: FileHandle) {
+    private func readFrames(from descriptor: Int32) {
         var wireDecoder = SimulatorBridgeFrameDecoder()
         do {
-            while let bytes = try socket.read(upToCount: 64 * 1024), !bytes.isEmpty {
+            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+            while true {
+                guard let bytes = try SimulatorSocketIO.read(
+                    upToCount: buffer.count,
+                    from: descriptor,
+                    reusing: &buffer
+                ) else { break }
                 switch wireDecoder.accept(bytes) {
                 case .refused:
                     throw SimulatorLiveStreamError.invalidFrame
@@ -296,14 +313,15 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
     }
 
     private func send(_ message: SimulatorBridgeClientMessage) {
-        guard !didStop, let socket,
+        guard !didStop, writeDescriptor >= 0,
               let payload = try? JSONEncoder().encode(message),
               let frame = try? SimulatorBridgeFraming.encode(
                 kind: .control,
                 payload: payload
               ) else { return }
-        writeQueue.async { [weak self, socket] in
-            do { try socket.write(contentsOf: frame) }
+        let descriptor = writeDescriptor
+        writeQueue.async { [weak self] in
+            do { try SimulatorSocketIO.writeAll(frame, to: descriptor) }
             catch {
                 guard let client = self else { return }
                 client.stateQueue.async { [client] in client.stopLocked() }
@@ -329,8 +347,11 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
             continuation.resume(throwing: SimulatorLiveStreamError.disconnected)
         }
         pendingInput.removeAll()
-        socket?.closeFile()
-        socket = nil
+        writeQueue.sync {}
+        if readDescriptor >= 0 { close(readDescriptor) }
+        readDescriptor = -1
+        if writeDescriptor >= 0 { close(writeDescriptor) }
+        writeDescriptor = -1
         if terminateProcess, let process, process.isRunning { process.terminate() }
         process = nil
         if didStartDiagnostics {
@@ -363,6 +384,45 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         case .malformedMessage: return "The Simulator helper connection returned malformed data."
         case .inputUnavailable: return "This Xcode does not expose compatible Simulator input."
         case .internalFailure: return "The direct Simulator helper failed."
+        }
+    }
+}
+
+enum SimulatorSocketIO {
+    static func read(
+        upToCount count: Int,
+        from descriptor: Int32,
+        reusing buffer: inout [UInt8]
+    ) throws -> Data? {
+        precondition(count > 0 && buffer.count >= count)
+        while true {
+            let bytesRead = buffer.withUnsafeMutableBytes { storage in
+                Darwin.read(descriptor, storage.baseAddress, count)
+            }
+            if bytesRead > 0 { return Data(buffer.prefix(bytesRead)) }
+            if bytesRead == 0 { return nil }
+            if errno != EINTR { throw SimulatorLiveStreamError.disconnected }
+        }
+    }
+
+    static func writeAll(_ data: Data, to descriptor: Int32) throws {
+        try data.withUnsafeBytes { storage in
+            guard let baseAddress = storage.baseAddress else { return }
+            var offset = 0
+            while offset < storage.count {
+                let count = Darwin.write(
+                    descriptor,
+                    baseAddress.advanced(by: offset),
+                    storage.count - offset
+                )
+                if count > 0 {
+                    offset += count
+                } else if count < 0, errno == EINTR {
+                    continue
+                } else {
+                    throw SimulatorLiveStreamError.disconnected
+                }
+            }
         }
     }
 }
