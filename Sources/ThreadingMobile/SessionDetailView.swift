@@ -819,7 +819,6 @@ struct TerminalRemoteView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
-    @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var inheritedTheme
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
@@ -840,9 +839,12 @@ struct TerminalRemoteView: View {
     @State private var clipboardOffersContent = false
     @State private var pendingDirectAttachmentInsertionID: String?
     @State private var selectionQuotes: [RemoteTerminalSelectionQuote] = []
+    @State private var selectedInputPreference: MobileTerminalInputPreference?
     @StateObject private var keyBridge = TerminalKeyBridge()
     @AppStorage(MobileTerminalFontSize.preferenceKey)
     private var terminalFontSize = MobileTerminalFontSize.defaultValue
+    @AppStorage(MobileTerminalInputPreference.defaultPreferenceKey)
+    private var defaultInputPreference = MobileTerminalInputPreference.direct
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
@@ -856,15 +858,38 @@ struct TerminalRemoteView: View {
         return Color(color)
     }
 
+    private var inputPreference: MobileTerminalInputPreference {
+#if DEBUG
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "terminal-compose" {
+            return .compose
+        }
+#endif
+        return selectedInputPreference
+            ?? terminalContinuity?.terminalInputPreference
+            ?? defaultInputPreference
+    }
+
     private var inputMode: MobileTerminalInputMode {
-        connection.terminalInputMode(
-            settingEnabled: notifications.independentTerminalDraftsEnabled
-        )
+        connection.terminalInputMode(preference: inputPreference)
     }
 
     private var usesIndependentComposer: Bool { inputMode == .independentComposer }
 
     private var allowsDirectInput: Bool { inputMode == .direct }
+
+    /// A participant roster may temporarily force the atomic composer. The stored preference is
+    /// still kept, but changing it while the visible mode is host-required would look like a
+    /// broken button and could re-enable raw typing at the wrong moment.
+    private var canChooseInputPreference: Bool {
+        guard connection.capability == .interact,
+              connection.supportsAtomicTerminalSubmission,
+              connection.supportsFocusedInputControl,
+              connection.inputControl?.canWrite != false,
+              let state = connection.inputControl,
+              !MobileCollaborationPresentation.hasOtherParticipant(state),
+              !connection.isPromptSubmissionPending else { return false }
+        return true
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -897,6 +922,10 @@ struct TerminalRemoteView: View {
                 bridge: keyBridge,
                 agentKind: connection.session.agentKind,
                 customize: { showsKeyboardEditor = true },
+                inputPreference: inputPreference,
+                effectiveInputMode: inputMode,
+                canChooseInputPreference: canChooseInputPreference,
+                toggleInputPreference: toggleInputPreference,
                 showsAttachmentKey: allowsDirectInput
                     && connection.supportsTerminalAttachmentInsertion,
                 canAttach: directAttachmentTray?.canAcceptMore == true,
@@ -922,6 +951,7 @@ struct TerminalRemoteView: View {
                 .environmentObject(keyboards)
                 .mobileTheme(theme)
         }
+        .onAppear(perform: restoreInputPreference)
         .onAppear(perform: configureDirectAttachments)
         .onAppear(perform: seedSelectionQuotesForEvidence)
         .onChange(of: model.client != nil) { _, _ in
@@ -1025,6 +1055,42 @@ struct TerminalRemoteView: View {
         guard let hostID = model.activeHostID else { return }
         continuity.setTerminalViewport(
             progress: progress,
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
+    }
+
+    private func restoreInputPreference() {
+        guard selectedInputPreference == nil else { return }
+#if DEBUG
+        // Evidence fixtures share one demo session inside a single cloned simulator. The Compose
+        // fixture forces presentation only; persisting it would turn every later Direct fixture
+        // into Compose and make the keyboard-open evidence test the wrong surface.
+        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "terminal-compose" {
+            return
+        }
+#endif
+        if let restored = terminalContinuity?.terminalInputPreference {
+            selectedInputPreference = restored
+        } else {
+            // The computed value already uses this default. Materialize it for future launches
+            // without rewriting identical SwiftUI state and remounting a newly focused terminal.
+            saveInputPreference(defaultInputPreference)
+        }
+    }
+
+    private func toggleInputPreference() {
+        guard canChooseInputPreference else { return }
+        keyBridge.dismissKeyboard()
+        let next: MobileTerminalInputPreference = inputPreference == .direct ? .compose : .direct
+        selectedInputPreference = next
+        saveInputPreference(next)
+    }
+
+    private func saveInputPreference(_ preference: MobileTerminalInputPreference) {
+        guard let hostID = model.activeHostID else { return }
+        continuity.setTerminalInputPreference(
+            preference,
             hostID: hostID,
             sessionID: connection.session.id
         )

@@ -58,7 +58,7 @@ struct MobileSettingsView: View {
                         SettingsNavigationRow(
                             symbol: "person.2",
                             title: "Collaboration",
-                            detail: "Presence, typing and drafts"
+                            detail: "Presence and typing"
                         ) {
                             CollaborationSettingsView()
                         }
@@ -374,20 +374,12 @@ struct CollaborationSettingsView: View {
                     Toggle("Typing indicators", isOn: $notifications.typingIndicatorsEnabled)
                         .padding(.horizontal, MobileDesign.Spacing.inset)
                         .padding(.vertical, MobileDesign.Spacing.small)
-                    ThemedRowDivider()
-                    Toggle(
-                        "Independent terminal drafts",
-                        isOn: $notifications.independentTerminalDraftsEnabled
-                    )
-                    .padding(.horizontal, MobileDesign.Spacing.inset)
-                    .padding(.vertical, MobileDesign.Spacing.small)
                 }
 
                 Text(MobileL10n.string(
                     """
-                    Presence stays inside the live session. Independent drafts keep people from \
-                    mixing keystrokes once someone else joins; owner-only terminals always type \
-                    directly in the TUI.
+                    Presence stays inside the live session. A shared terminal uses its device \
+                    composer so two people cannot mix keystrokes in one TUI line.
                     """
                 ))
                 .font(.footnote)

@@ -360,6 +360,7 @@ struct RootView: View {
 #if DEBUG
     private static let terminalDemoModes: Set<String> = [
         "terminal-collaboration",
+        "terminal-compose",
         "terminal-ansi",
         "terminal-scrollback",
         "terminal-attachments",

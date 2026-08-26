@@ -135,7 +135,12 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             canShowKeyboard: true,
             dismissKeyboard: {},
             showKeyboard: {},
-            customize: {}
+            customize: {},
+            showsInputModeControl: false,
+            inputPreference: .direct,
+            effectiveInputMode: .direct,
+            canChooseInputPreference: true,
+            toggleInputPreference: {}
         )
         let bitmap = try renderedAlpha(
             of: controls,

@@ -223,8 +223,17 @@ enum TerminalKeyBarSymbols {
     static let showKeyboard = "keyboard"
     static let hideKeyboard = "keyboard.chevron.compact.down"
     static let customizeKeys = "keyboard.badge.ellipsis"
+    static let directInput = "terminal"
+    static let composeInput = "square.and.pencil"
 
-    static let all = [attachments, showKeyboard, hideKeyboard, customizeKeys]
+    static let all = [
+        attachments,
+        showKeyboard,
+        hideKeyboard,
+        customizeKeys,
+        directInput,
+        composeInput,
+    ]
 }
 
 private enum TerminalKeyBarMetrics {
@@ -273,6 +282,11 @@ struct TerminalKeyBarTrailingControls: View {
     let dismissKeyboard: () -> Void
     let showKeyboard: () -> Void
     let customize: () -> Void
+    let showsInputModeControl: Bool
+    let inputPreference: MobileTerminalInputPreference
+    let effectiveInputMode: MobileTerminalInputMode
+    let canChooseInputPreference: Bool
+    let toggleInputPreference: () -> Void
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
@@ -298,7 +312,35 @@ struct TerminalKeyBarTrailingControls: View {
                 trailingIcon(TerminalKeyBarSymbols.customizeKeys)
             }
             .accessibilityLabel(MobileL10n.string("Customize keys"))
+
+            if showsInputModeControl {
+                Button(action: toggleInputPreference) {
+                    trailingIcon(
+                        effectiveInputMode == .independentComposer
+                            ? TerminalKeyBarSymbols.composeInput
+                            : TerminalKeyBarSymbols.directInput
+                    )
+                }
+                .disabled(!canChooseInputPreference)
+                .accessibilityLabel(inputModeAccessibilityLabel)
+                .accessibilityValue(inputModeAccessibilityValue)
+            }
         }
+    }
+
+    private var inputModeAccessibilityLabel: String {
+        guard canChooseInputPreference else {
+            return MobileL10n.string("Compose terminal input is required")
+        }
+        return inputPreference == .direct
+            ? MobileL10n.string("Compose terminal input")
+            : MobileL10n.string("Use direct terminal input")
+    }
+
+    private var inputModeAccessibilityValue: String {
+        effectiveInputMode == .independentComposer
+            ? MobileL10n.string("Compose")
+            : MobileL10n.string("Direct")
     }
 
     /// The key caps are hit-testable across their whole cap because each carries a filled
@@ -325,6 +367,10 @@ struct TerminalKeyBar: View {
     @ObservedObject var bridge: TerminalKeyBridge
     let agentKind: String
     let customize: () -> Void
+    let inputPreference: MobileTerminalInputPreference
+    let effectiveInputMode: MobileTerminalInputMode
+    let canChooseInputPreference: Bool
+    let toggleInputPreference: () -> Void
     let showsAttachmentKey: Bool
     let canAttach: Bool
     /// Asks the owner to open the source chooser: it reads the clipboard once, there, and then
@@ -368,7 +414,13 @@ struct TerminalKeyBar: View {
                 canShowKeyboard: bridge.canShowKeyboard,
                 dismissKeyboard: bridge.dismissKeyboard,
                 showKeyboard: bridge.showKeyboard,
-                customize: customize
+                customize: customize,
+                showsInputModeControl: connection.supportsAtomicTerminalSubmission
+                    && effectiveInputMode != .none,
+                inputPreference: inputPreference,
+                effectiveInputMode: effectiveInputMode,
+                canChooseInputPreference: canChooseInputPreference,
+                toggleInputPreference: toggleInputPreference
             )
         }
         .background(theme.surface)

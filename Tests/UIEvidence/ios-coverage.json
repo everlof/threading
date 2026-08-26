@@ -69,6 +69,7 @@
     {"id": "attention-request-keyboard-open-custom-dark", "entryID": "ios-attention-request", "demo": "attention-request", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
     {"id": "attention-request-keyboard-dismissed-custom-dark", "entryID": "ios-attention-request", "demo": "attention-request", "appearance": "dark", "theme": "custom", "keyboardState": "dismissed-after-open", "captureMode": "app", "assertions": ["keyboardShownOnce", "keyboardHidden", "noFirstResponder", "safeAreaRestored", "editorFrameRestored"]},
     {"id": "terminal-collaboration-custom-dark", "entryID": "ios-terminal", "demo": "terminal-collaboration", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "terminal-compose-custom-dark", "entryID": "ios-terminal", "demo": "terminal-compose", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "terminal-ansi-custom-dark", "entryID": "ios-terminal", "demo": "terminal-ansi", "appearance": "dark", "theme": "custom"},
     {"id": "terminal-attachments-custom-dark", "entryID": "ios-terminal", "demo": "terminal-attachments", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "terminal-selection-quote-custom-dark", "entryID": "ios-terminal", "demo": "terminal-selection", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
@@ -293,7 +294,7 @@
       "priority": "critical",
       "title": "Remote terminal",
       "description": "The relayed SwiftTerm surface with mobile keyboard controls, viewport ownership and collaboration state.",
-      "states": ["Connected terminal", "Focused collaboration", "ANSI palette", "Unicode and wrapping", "Codex TUI", "Large terminal font", "Claude Code TUI", "Local scrollback away from live end", "Mobile key bar", "Keyboard open", "Keyboard dismissed and geometry restored"],
+      "states": ["Connected terminal", "Direct input", "Compose input", "Focused collaboration", "ANSI palette", "Unicode and wrapping", "Codex TUI", "Large terminal font", "Claude Code TUI", "Local scrollback away from live end", "Mobile key bar", "Keyboard open", "Keyboard dismissed and geometry restored"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/terminal-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied terminal"]}
@@ -376,8 +377,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Mobile settings",
-      "description": "General mobile preferences plus app icon, Mac appearance, collaboration, connection reuse, local diagnostics, terminal-key, notification and support-diagnostics destinations.",
-      "states": ["General", "App icon", "Mac appearance", "Collaboration", "Connection reuse and metrics", "Local diagnostics", "Terminal key agents", "Terminal key editor", "Notifications", "Support diagnostics"],
+      "description": "General mobile preferences plus app icon, Mac appearance, collaboration, connection reuse, local diagnostics, terminal-input/key, notification and support-diagnostics destinations.",
+      "states": ["General", "App icon", "Mac appearance", "Collaboration", "Connection reuse and metrics", "Local diagnostics", "Terminal input default and key agents", "Terminal key editor", "Notifications", "Support diagnostics"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/settings-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}

@@ -33,7 +33,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
 | Command palette | — | host-only | command identity and availability, focus/dismissal, bounded search, shortcut ownership/conflicts, explicit target collection and last-moment invocation checks | Host-only |
-| Mobile terminal key bar | — | host-only | PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
+| Mobile terminal key bar | — | host-only | Direct/Compose resolution, collaboration override, PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
 | Mobile terminal return-to-end control | — | host-only | emulator scroll-end truth, TUI/local ownership, follow-mode transition, motion and accessibility | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
 | Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
@@ -109,13 +109,15 @@ invoker. An extension may customize its command's published title, detail, icon,
 shortcut through the command contract; it may not replace the shell and visually claim a disabled
 command, stolen shortcut or stale target is executable.
 
-The mobile terminal key bar is host-only even though its key layout is deliberately customizable
-by the person using that phone. Its presentation is inseparable from permission-gated PTY writes,
-DECCKM/xterm encoding, latching and live two-finger modifier state, touch cancellation, haptic and
-accessibility feedback, attachment upload/custody and path insertion, and the device-local
-archive's validated fallback. Letting an extension replace that shell could show a key, file or
-pressed state that the host did not send. Threading owns those behaviors and the complete
-interactive cap; the built-in keyboard editor remains the one presentation customization seam.
+The mobile terminal key bar is host-only even though its key layout and solo Direct/Compose choice
+are deliberately customizable by the person using that phone. Its presentation is inseparable
+from the collaboration rule that temporarily requires atomic Compose, permission-gated PTY
+writes, DECCKM/xterm encoding, latching and live two-finger modifier state, touch cancellation,
+haptic and accessibility feedback, attachment upload/custody and path insertion, and the
+device-local archive's validated fallback. Letting an extension replace that shell could show a
+key, file, input mode or pressed state that the host did not authorize. Threading owns those
+behaviors and the complete interactive cap; the built-in keyboard editor remains the one
+presentation customization seam.
 
 The mobile terminal return-to-end control is host-only because its presence is an emulator claim,
 not decoration. Threading retains the exact reachable scroll end, whether one finger belongs to

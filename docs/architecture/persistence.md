@@ -670,16 +670,18 @@ file follows `RecoverableFileStore` quarantine rather than being replaced silent
 The companion clients use the same contract with a wider key. iOS stores a versioned archive in
 its own `UserDefaults`; the dependency-free browser stores one in same-origin `localStorage`.
 Both length-prefix the paired host identity before the session id so ids cannot collide, persist
-the last host/session route, and keep Native and terminal drafts distinct. The route's own URL is
-deliberately absent from that key: every advertised address is a route to one paired host. Records containing an
-unsent draft are never pruned automatically; position-only records are bounded to the 250 most
-recent. The iOS archive is also capped at 1 MiB and validates state count, identity, viewport and
-aggregate draft bytes before decode is accepted and before encode is attempted. Every mutation is
-made against a candidate archive, and that candidate becomes visible only after the `UserDefaults`
-replacement reads back identically; a persistence refusal cannot leave the running composer ahead
-of its durable draft. The device-local terminal-keyboard archive follows the same candidate-first,
-bounded rule. No continuity archive is synchronized across clients, because merging partial human
-input or moving another person's viewport would turn safety state into collaboration state.
+the last host/session route, keep Native and terminal drafts distinct, and remember the iPhone's
+Direct/Compose preference for each terminal. The route's own URL is deliberately absent from that
+key: every advertised address is a route to one paired host. Records containing an unsent draft or
+an explicit terminal input choice are never pruned automatically; position-only records are
+bounded to the 250 most recent. The iOS archive is also capped at 1 MiB and validates state count,
+identity, viewport and aggregate draft bytes before decode is accepted and before encode is
+attempted. Every mutation is made against a candidate archive, and that candidate becomes visible
+only after the `UserDefaults` replacement reads back identically; a persistence refusal cannot
+leave the running composer ahead of its durable draft. The device-local terminal-keyboard archive
+follows the same candidate-first, bounded rule. No continuity archive is synchronized across
+clients, because merging partial human input, moving another person's viewport or inheriting their
+input preference would turn private continuity into collaboration state.
 
 The crash itself was in the SwiftTerm fork: `LocalProcess.processTerminated()` reaps the
 child with `waitpid`, which destroys the kernel event its `DispatchSourceProcess` is

@@ -3,7 +3,7 @@ import XCTest
 @testable import ThreadingMobile
 
 final class MobileCollaborationPresentationTests: XCTestCase {
-    func testOwnerOnlyStateHidesControlAndUsesDirectTerminalInput() {
+    func testOwnerOnlyStateHidesControlAndUsesTheDirectPreference() {
         let state = inputControlState(participants: [owner])
 
         XCTAssertFalse(MobileCollaborationPresentation.showsInputControl(
@@ -13,7 +13,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
         ))
         XCTAssertEqual(
             MobileCollaborationPresentation.terminalInputMode(
-                settingEnabled: true,
+                preference: .direct,
                 supportsAtomicSubmission: true,
                 capability: .interact,
                 inputControlFeatureSupported: true,
@@ -21,6 +21,20 @@ final class MobileCollaborationPresentationTests: XCTestCase {
                 state: state
             ),
             .direct
+        )
+    }
+
+    func testSoloTerminalCanForceTheComposer() {
+        XCTAssertEqual(
+            MobileCollaborationPresentation.terminalInputMode(
+                preference: .compose,
+                supportsAtomicSubmission: true,
+                capability: .interact,
+                inputControlFeatureSupported: true,
+                canWrite: true,
+                state: inputControlState(participants: [owner])
+            ),
+            .independentComposer
         )
     }
 
@@ -37,7 +51,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
         ))
         XCTAssertEqual(
             MobileCollaborationPresentation.terminalInputMode(
-                settingEnabled: true,
+                preference: .direct,
                 supportsAtomicSubmission: true,
                 capability: .interact,
                 inputControlFeatureSupported: true,
@@ -72,7 +86,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
     func testLegacyHostWithNoRosterKeepsTheAtomicComposer() {
         XCTAssertEqual(
             MobileCollaborationPresentation.terminalInputMode(
-                settingEnabled: true,
+                preference: .direct,
                 supportsAtomicSubmission: true,
                 capability: .interact,
                 inputControlFeatureSupported: false,
@@ -91,7 +105,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
     func testARosterThatHasNotArrivedYetOffersNothingRatherThanFlashingAComposer() {
         XCTAssertEqual(
             MobileCollaborationPresentation.terminalInputMode(
-                settingEnabled: true,
+                preference: .compose,
                 supportsAtomicSubmission: true,
                 capability: .interact,
                 inputControlFeatureSupported: true,
@@ -102,19 +116,17 @@ final class MobileCollaborationPresentationTests: XCTestCase {
         )
     }
 
-    /// The same window with the setting off: no composer was ever coming, so direct input is
-    /// not being withheld for a roster it does not depend on.
-    func testIndependentDraftsOffKeepsDirectInputWhileTheRosterIsUnknown() {
+    func testTheDirectPreferenceStillWaitsForTheCurrentHostRoster() {
         XCTAssertEqual(
             MobileCollaborationPresentation.terminalInputMode(
-                settingEnabled: false,
+                preference: .direct,
                 supportsAtomicSubmission: true,
                 capability: .interact,
                 inputControlFeatureSupported: true,
                 canWrite: true,
                 state: nil
             ),
-            .direct
+            .none
         )
     }
 
@@ -122,7 +134,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
     func testAWithheldTurnOffersNoInputEvenSolo() {
         XCTAssertEqual(
             MobileCollaborationPresentation.terminalInputMode(
-                settingEnabled: true,
+                preference: .compose,
                 supportsAtomicSubmission: true,
                 capability: .interact,
                 inputControlFeatureSupported: true,
@@ -143,7 +155,7 @@ final class MobileCollaborationPresentationTests: XCTestCase {
         ))
         XCTAssertEqual(
             MobileCollaborationPresentation.terminalInputMode(
-                settingEnabled: true,
+                preference: .direct,
                 supportsAtomicSubmission: true,
                 capability: .view,
                 inputControlFeatureSupported: true,
@@ -151,6 +163,50 @@ final class MobileCollaborationPresentationTests: XCTestCase {
                 state: state
             ),
             MobileTerminalInputMode.none
+        )
+    }
+
+    func testHostWithoutAtomicSubmissionFallsBackToDirectInput() {
+        XCTAssertEqual(
+            MobileCollaborationPresentation.terminalInputMode(
+                preference: .compose,
+                supportsAtomicSubmission: false,
+                capability: .interact,
+                inputControlFeatureSupported: false,
+                canWrite: true,
+                state: nil
+            ),
+            .direct
+        )
+    }
+
+    @MainActor
+    func testTerminalInputPreferenceIsRememberedPerSessionOnThisDevice() {
+        let suiteName = "MobileCollaborationPresentationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = MobileSessionContinuityStore(defaults: defaults)
+        store.setTerminalInputPreference(.compose, hostID: "mac-a", sessionID: "terminal-a")
+
+        XCTAssertEqual(
+            MobileSessionContinuityStore(defaults: defaults)
+                .state(hostID: "mac-a", sessionID: "terminal-a")
+                .terminalInputPreference,
+            .compose
+        )
+        XCTAssertNil(
+            MobileSessionContinuityStore(defaults: defaults)
+                .state(hostID: "mac-a", sessionID: "terminal-b")
+                .terminalInputPreference
+        )
+
+        store.setTerminalInputPreference(.direct, hostID: "mac-a", sessionID: "terminal-a")
+        XCTAssertEqual(
+            MobileSessionContinuityStore(defaults: defaults)
+                .state(hostID: "mac-a", sessionID: "terminal-a")
+                .terminalInputPreference,
+            .direct
         )
     }
 

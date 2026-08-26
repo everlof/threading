@@ -2595,22 +2595,26 @@ its own draft; sending waits for the Mac's acknowledgement before clearing the e
 text. If another composer wins the current turn, the session changes, or reconnect cannot safely
 retry, your draft stays in place with an explanation.
 
-Unsent Native drafts are saved as you type on macOS, iPhone, and the browser. Independent iPhone
-terminal drafts are saved the same way. iPhone and browser also reopen the last session and restore
-the reading position for Native conversations and agent-UI terminals; the Mac restores each Native
-conversation's draft and reading position. This state is device-local rather than collaborative:
-another person or one of your other devices does not inherit half-written text or pull your view
-away from where you left it. Drafts are retained until sent or cleared; older position-only records
-may be pruned.
+Unsent Native drafts are saved as you type on macOS, iPhone, and the browser. iPhone terminal
+Compose drafts and each terminal's Direct/Compose choice are saved the same way. iPhone and browser
+also reopen the last session and restore the reading position for Native conversations and
+agent-UI terminals; the Mac restores each Native conversation's draft and reading position. This
+state is device-local rather than collaborative: another person or one of your other devices does
+not inherit half-written text, your terminal input choice, or pull your view away from where you
+left it. Drafts are retained until sent or cleared; older position-only records may be pruned.
 
-Agent-UI terminals with another reply-capable participant use **Independent terminal drafts** on
-iPhone by default. Type in the composer below the terminal and send when the line is ready; the
+On iPhone, a solo agent-UI terminal starts in **Direct** input: each key goes straight to the real
+TUI. Use the Direct/Compose control at the trailing edge of the terminal key bar when you prefer
+to write in the iOS text area and send the finished line at once. The choice is remembered for
+that terminal on this device. **Settings → On this iPhone → Terminal keys** can make Compose the
+default for terminal sessions this phone has not seen before, without changing existing choices.
+
+When another reply-capable participant joins, the terminal temporarily uses **Compose**. The
 entire line and Return reach Claude Code or Codex as one PTY write, so another person cannot mix
-their keystrokes into yours. An owner-only terminal instead types directly into the target TUI,
-and an unused invitation does not change that. The key bar's controls remain immediate. In the
-iPhone notification settings, **In-app collaboration** lets you independently hide people
-presence, hide typing indicators, or turn off independent drafts for shared terminals. These
-in-app indicators never create a push notification.
+their keystrokes into yours. The key bar's controls remain immediate, and the terminal returns to
+its saved input choice when it becomes solo again. In iPhone notification settings, **In-app
+collaboration** only controls people presence and typing indicators; these indicators never create
+a push notification.
 
 To select terminal text on iPhone, long-press a word: it is selected at once, with handles to
 drag, and the edit menu appears when you lift — slide before lifting to extend from that word.

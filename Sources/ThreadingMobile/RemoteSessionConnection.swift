@@ -66,7 +66,7 @@ enum MobileCollaborationPresentation {
     /// because "no composer" and "keystrokes go straight to the PTY" are not the same thing and
     /// a caller that reads only one of them will eventually offer both or neither.
     static func terminalInputMode(
-        settingEnabled: Bool,
+        preference: MobileTerminalInputPreference,
         supportsAtomicSubmission: Bool,
         capability: RemoteCapability,
         inputControlFeatureSupported: Bool,
@@ -74,7 +74,7 @@ enum MobileCollaborationPresentation {
         state: RemoteInputControlStateDTO?
     ) -> MobileTerminalInputMode {
         guard capability == .interact else { return .none }
-        guard settingEnabled, supportsAtomicSubmission else {
+        guard supportsAtomicSubmission else {
             return canWrite ? .direct : .none
         }
         // An older host cannot state whether another participant has joined, and never will, so
@@ -89,8 +89,19 @@ enum MobileCollaborationPresentation {
         // know whether somebody else holds the session.
         guard let state else { return .none }
         if hasOtherParticipant(state) { return .independentComposer }
-        return canWrite ? .direct : .none
+        guard canWrite else { return .none }
+        return preference == .compose ? .independentComposer : .direct
     }
+}
+
+/// How this iPhone prefers to type into one real terminal UI while no collaboration policy has
+/// to override it. It is device-local presentation state: changing it neither mutates nor
+/// restarts the Mac session.
+enum MobileTerminalInputPreference: String, Codable, Equatable, Sendable {
+    case direct
+    case compose
+
+    static let defaultPreferenceKey = "threading.mobile.terminal-input.default"
 }
 
 /// What a terminal session offers this phone for typing.
@@ -357,9 +368,11 @@ final class RemoteSessionConnection: ObservableObject {
         return true
     }
 
-    func terminalInputMode(settingEnabled: Bool) -> MobileTerminalInputMode {
+    func terminalInputMode(
+        preference: MobileTerminalInputPreference
+    ) -> MobileTerminalInputMode {
         MobileCollaborationPresentation.terminalInputMode(
-            settingEnabled: settingEnabled,
+            preference: preference,
             supportsAtomicSubmission: supportsAtomicTerminalSubmission,
             capability: capability,
             inputControlFeatureSupported: supportsFocusedInputControl,

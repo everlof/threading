@@ -3,8 +3,8 @@ import Foundation
 /// Private working state for remote sessions on this phone or tablet.
 ///
 /// The Mac owns the transcript and session lifecycle. This store owns only what is meaningful
-/// on one client: drafts, viewport positions, and the last route. Host identity is part of every
-/// key because two Macs may use the same provider session identifier.
+/// on one client: drafts, viewport positions, terminal input preference, and the last route. Host
+/// identity is part of every key because two Macs may use the same provider session identifier.
 @MainActor
 final class MobileSessionContinuityStore: ObservableObject {
     @Published private(set) var recoveryMessage: String?
@@ -24,14 +24,17 @@ final class MobileSessionContinuityStore: ObservableObject {
         var conversationViewportProgress: Double?
         var conversationFollowsBottom = true
         var terminalViewportProgress: Double?
+        var terminalInputPreference: MobileTerminalInputPreference?
         var updatedAt = Date()
 
         var hasDraft: Bool { !conversationDraft.isEmpty || !terminalDraft.isEmpty }
+        var hasUserChoice: Bool { hasDraft || terminalInputPreference != nil }
         var isEmpty: Bool {
             !hasDraft
                 && conversationViewportProgress == nil
                 && conversationFollowsBottom
                 && terminalViewportProgress == nil
+                && terminalInputPreference == nil
         }
     }
 
@@ -145,6 +148,16 @@ final class MobileSessionContinuityStore: ObservableObject {
         }
     }
 
+    func setTerminalInputPreference(
+        _ preference: MobileTerminalInputPreference,
+        hostID: String,
+        sessionID: String
+    ) {
+        update(hostID: hostID, sessionID: sessionID) { state in
+            state.terminalInputPreference = preference
+        }
+    }
+
     func setActiveHostID(_ hostID: String?) {
         guard archive.activeHostID != hostID else { return }
         var candidate = archive
@@ -188,9 +201,10 @@ final class MobileSessionContinuityStore: ObservableObject {
         save(candidate)
     }
 
-    /// Position-only records are disposable history; records containing unsent words are not.
+    /// Position-only records are disposable history; records containing unsent words or an
+    /// explicit input choice are not.
     private func prunePositions(in candidate: inout Archive) {
-        let positionOnly = candidate.states.filter { !$0.value.hasDraft }
+        let positionOnly = candidate.states.filter { !$0.value.hasUserChoice }
             .sorted { $0.value.updatedAt > $1.value.updatedAt }
         guard positionOnly.count > Defaults.retainedPositionCount else { return }
         for entry in positionOnly.dropFirst(Defaults.retainedPositionCount) {

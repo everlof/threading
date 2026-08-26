@@ -761,7 +761,7 @@ live ones. A grid that already fits is restored to full size, which is also what
 interactive page to 13px once its lease is honoured.
 
 The first-run iPhone screen exposes **Settings** before any connection exists. App icon,
-notification preferences, in-app presence/typing, independent terminal drafts and local
+notification preferences, in-app presence/typing, the default terminal input style and local
 diagnostics are useful without a Mac and stay available from the dashboard's `…` menu after
 pairing. The stock icon picker is manual because iOS confirms every icon change; when a connected
 Mac uses a built-in style, the picker names that style as the matching choice.
@@ -1028,19 +1028,25 @@ Focused input control makes it false for everyone else. Neither is the agent wor
 answer no rather than spinning an orb about someone else's keyboard. Our own prompt still being
 acknowledged answers yes, because that turn has begun on this side before the Mac has said so.
 
-**A terminal session decides how it takes typing, once.** `MobileTerminalInputMode` is one answer
-rather than two booleans: `direct` sends keystrokes to the PTY, `independentComposer` composes a
-whole line here and submits it atomically, and `none` offers nothing. A caller reading only one of
-two booleans eventually offers both surfaces or neither.
+**A terminal session resolves one typing surface at a time.** `MobileTerminalInputMode` is one
+answer rather than two booleans: `direct` sends keystrokes to the PTY,
+`independentComposer` writes in an iOS text area and submits the whole line atomically, and
+`none` offers nothing. A caller reading only one of two booleans eventually offers both surfaces
+or neither. While solo, the key bar switches between Direct and Compose without changing or
+restarting the Mac session. That device-local choice is remembered for the host/session pair;
+**Settings → On this iPhone → Terminal keys** supplies Direct-by-default or Compose-by-default
+only for terminal sessions this phone has not seen before.
 
 The mode also waits for the roster. `hello` and the first `inputControl` frame are two messages
 with a render between them, and treating that gap as "roster unknown, keep the safe atomic path"
 put the line composer on screen for a frame and then removed it — a flash of the non-TUI text area
 on the way into every solo terminal session, since the default for independent drafts is on. A
 host that supports the roster is now given that one frame to send it, and only a host too old to
-send one at all — which never will — keeps the atomic composer as its settled answer. The wait
-costs nothing else: raw keystrokes should not start before we know whether somebody else holds the
-session either.
+send one at all — which never will — keeps the atomic composer as its settled answer. A real
+second participant also requires Compose regardless of the stored solo preference, so two people
+cannot interleave characters; when the terminal becomes solo again, its saved Direct/Compose
+choice returns. The wait costs nothing else: raw keystrokes should not start before we know
+whether somebody else holds the session either.
 
 ## Sending a file from the phone
 
@@ -1262,12 +1268,12 @@ other phones show the device-aware participant label and otherwise show who is v
 is advisory, expires with the connection, and never locks a composer or grants authority. The
 iPhone lets people-presence and typing indicators be hidden separately.
 
-Each remote Native composer owns its draft. The iPhone's terminal also uses an independent local
-composer by default and sends the completed text plus Return as one PTY write. This does not make
-the terminal multi-user: it creates a safe atomic boundary at submission so concurrent devices
-cannot interleave individual characters. The key bar's controls remain immediate terminal
-controls. **Independent terminal drafts** can be disabled in the iPhone's collaboration settings
-when raw direct terminal typing is required.
+Each remote Native composer owns its draft. A shared iPhone terminal uses an independent local
+composer and sends the completed text plus Return as one PTY write. This does not make the
+terminal multi-user: it creates a safe atomic boundary at submission so concurrent devices cannot
+interleave individual characters. The key bar's controls remain immediate terminal controls.
+When the terminal is solo, the same bar can switch between that Compose surface and Direct TUI
+input; collaboration temporarily requires Compose and does not overwrite the saved solo choice.
 
 The key bar itself is a customizable, Termius-style keyboard, and deliberately exceeds Termius's
 model where agent TUIs need it: a key can be a *chord* (⇧⇥ — Claude Code's permission-mode

@@ -902,11 +902,6 @@ final class RemoteNotificationManager: ObservableObject {
     @Published var typingIndicatorsEnabled: Bool {
         didSet { defaults.set(typingIndicatorsEnabled, forKey: Keys.typingIndicators) }
     }
-    @Published var independentTerminalDraftsEnabled: Bool {
-        didSet {
-            defaults.set(independentTerminalDraftsEnabled, forKey: Keys.independentTerminalDrafts)
-        }
-    }
     @Published var notificationSoundsEnabled: Bool {
         didSet { defaults.set(notificationSoundsEnabled, forKey: Keys.notificationSounds) }
     }
@@ -941,7 +936,6 @@ final class RemoteNotificationManager: ObservableObject {
         static let attentionRequests = "remoteNotificationsAttentionRequests"
         static let peoplePresence = "remoteCollaborationPeoplePresence"
         static let typingIndicators = "remoteCollaborationTypingIndicators"
-        static let independentTerminalDrafts = "remoteCollaborationIndependentTerminalDrafts"
         static let notificationSounds = "remoteNotificationSounds"
         static let permissionSounds = "remoteNotificationPermissionSounds"
         static let questionSounds = "remoteNotificationQuestionSounds"
@@ -959,7 +953,6 @@ final class RemoteNotificationManager: ObservableObject {
             Keys.attentionRequests: true,
             Keys.peoplePresence: true,
             Keys.typingIndicators: true,
-            Keys.independentTerminalDrafts: true,
             Keys.notificationSounds: true,
             Keys.permissionSounds: true,
             Keys.questionSounds: true,
@@ -974,7 +967,6 @@ final class RemoteNotificationManager: ObservableObject {
         attentionRequestsEnabled = defaults.bool(forKey: Keys.attentionRequests)
         peoplePresenceEnabled = defaults.bool(forKey: Keys.peoplePresence)
         typingIndicatorsEnabled = defaults.bool(forKey: Keys.typingIndicators)
-        independentTerminalDraftsEnabled = defaults.bool(forKey: Keys.independentTerminalDrafts)
         notificationSoundsEnabled = defaults.bool(forKey: Keys.notificationSounds)
         permissionSoundsEnabled = defaults.bool(forKey: Keys.permissionSounds)
         questionSoundsEnabled = defaults.bool(forKey: Keys.questionSounds)
@@ -1500,18 +1492,13 @@ struct NotificationSettingsView: View {
                         "Typing indicators",
                         isOn: $notifications.typingIndicatorsEnabled
                     )
-                    Toggle(
-                        "Independent terminal drafts",
-                        isOn: $notifications.independentTerminalDraftsEnabled
-                    )
                 } header: {
                     Text("In-app collaboration")
                 } footer: {
                     Text(
                         "Presence stays inside the live session and never creates push "
-                            + "notifications. Independent drafts keep people from mixing "
-                            + "keystrokes once someone else joins; owner-only terminals always "
-                            + "type directly in the TUI."
+                            + "notifications. A shared terminal uses its device composer so "
+                            + "two people cannot mix keystrokes in one TUI line."
                     )
                 }
 

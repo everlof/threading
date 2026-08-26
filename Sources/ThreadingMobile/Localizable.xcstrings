@@ -767,8 +767,8 @@
     "Open Threading → Settings → Remote Access to show its pairing code.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Öppna Threading → Inställningar → Fjärråtkomst för att visa parkopplingskoden." } } }
     },
-    "Presence, typing and drafts": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro, skrivindikatorer och utkast" } } }
+    "Presence and typing": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro och skrivindikatorer" } } }
     },
     "Shared": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Delat" } } }
@@ -802,9 +802,6 @@
     },
     "Paste a pairing link, or a chat link someone shared with you.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Klistra in en parkopplingslänk eller en chattlänk som någon delat med dig." } } }
-    },
-    "Presence stays inside the live session. Independent drafts keep people from mixing keystrokes once someone else joins; owner-only terminals always type directly in the TUI.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro visas bara i livesessionen. Separata utkast hindrar personer från att blanda tangenttryckningar när någon annan har gått med; terminaler med bara ägaren skriver alltid direkt i TUI:n." } } }
     },
     "Scan the code on your Mac": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skanna koden på din Mac" } } }
@@ -992,6 +989,33 @@
     "Direct": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Direkt" } } }
     },
+    "Compose": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skrivfält" } } }
+    },
+    "Compose terminal input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd skrivfält för terminalinmatning" } } }
+    },
+    "Compose terminal input by default": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd skrivfält för terminalinmatning som standard" } } }
+    },
+    "Compose terminal input is required": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skrivfält krävs för terminalinmatning" } } }
+    },
+    "Direct sends each key to the TUI. Compose writes in an iOS text area and sends the finished line at once. Each terminal remembers its own choice.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Direkt skickar varje tangenttryckning till TUI:n. Skrivfält skriver i ett textområde i iOS och skickar hela raden på en gång. Varje terminal kommer ihåg sitt eget val." } } }
+    },
+    "Input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inmatning" } } }
+    },
+    "Presence stays inside the live session. A shared terminal uses its device composer so two people cannot mix keystrokes in one TUI line.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro stannar i den aktiva sessionen. En delad terminal använder enhetens skrivfält så att två personer inte blandar tangenttryckningar på samma TUI-rad." } } }
+    },
+    "Presence stays inside the live session and never creates push notifications. A shared terminal uses its device composer so two people cannot mix keystrokes in one TUI line.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro stannar i den aktiva sessionen och skapar aldrig pushnotiser. En delad terminal använder enhetens skrivfält så att två personer inte blandar tangenttryckningar på samma TUI-rad." } } }
+    },
+    "Use direct terminal input": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Använd direkt terminalinmatning" } } }
+    },
     "Relay": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Relä" } } }
     },
@@ -1025,9 +1049,6 @@
     "Compose on this device…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skriv på den här enheten…" } } }
     },
-    "Independent terminal drafts": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Oberoende terminalutkast" } } }
-    },
     "People in open chats": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Personer i öppna chattar" } } }
     },
@@ -1039,9 +1060,6 @@
     },
     "Send terminal line": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Skicka terminalrad" } } }
-    },
-    "Presence stays inside the live session and never creates push notifications. Independent drafts keep people from mixing keystrokes once someone else joins; owner-only terminals always type directly in the TUI.": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Närvaro stannar i den aktiva sessionen och skapar aldrig pushnotiser. Oberoende utkast hindrar personer från att blanda tangenttryckningar när någon annan har gått med; terminaler med bara ägaren skriver alltid direkt i TUI:n." } } }
     },
     "The Mac rejected this line. Your draft is still here.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade raden. Ditt utkast finns kvar." } } }
