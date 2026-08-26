@@ -4424,6 +4424,19 @@ own command there, with every prompt, result and exit code visible. When several
 Because Threading provides that notice, Codex chats launched inside Threading skip Codex's own
 startup update screen; this does not change Codex's setting when you launch it elsewhere.
 
+**Which builds you receive.** **Settings ▸ General ▸ Software Updates ▸ Updates you receive**
+chooses between **Stable releases** and **Betas and stable releases**. Stable is the default and
+needs no action. A beta arrives earlier and may be rough; it comes through the same update sheet
+as any other release, and switching back here puts you on the next stable release when it ships.
+A copy downloaded directly from a beta starts out receiving betas, so nothing you did not choose
+happens either way.
+
+Nightly builds are separate and are not in that pop-up. A nightly is built from every change as
+it lands and is versioned by its date, which is a higher number than any release will ever carry
+— so an installed nightly always looks newer than the newest stable release, and never offers to
+replace itself with one. You join nightly by installing a nightly build, and you leave it by
+downloading a stable build yourself and replacing the app.
+
 **Keeping the Mac awake.** **Settings ▸ General ▸ Power ▸ Keep this Mac awake while agents work**
 prevents automatic system sleep while at least one agent turn is working or waiting for your
 answer. It is off by default and does nothing merely because an agent is open at its prompt. The

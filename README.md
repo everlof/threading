@@ -14,11 +14,31 @@ or tailnet. Nothing goes through a third-party server.
 
 **macOS** — download the latest `Threading-x.y.z.zip` from
 [Releases](https://github.com/everlof/threading/releases). The app is Developer ID signed,
-notarized, and updates itself through Sparkle from the same releases feed.
+notarized, and updates itself through Sparkle.
 
 **iOS** — the companion is a paid app on the App Store. It is also fully buildable from this
 repository (see below): the price buys the convenience of a signed, updating build, not the
 code. Buying it is what funds this project.
+
+### Which builds you get
+
+Three kinds of build, and you are on the first one unless you went looking.
+
+| | What it is | How to get it | How to leave |
+|---|---|---|---|
+| **Stable** | The finished release. | Nothing to do; this is the default. | — |
+| **Beta** | The next release, earlier and rougher. | Settings ▸ General ▸ Software Updates ▸ *Updates you receive* ▸ **Betas and stable releases**. | The same pop-up, back to **Stable releases**. The next stable release replaces the beta you are running. |
+| **Nightly** | Built from every change as it lands. Expect breakage. | Install a nightly build from the rolling [`nightly`](https://github.com/everlof/threading/releases/tag/nightly) prerelease. | Download a stable build yourself and replace the app. |
+
+Betas are ordinary updates that arrive in the same sheet; nothing else changes, and switching
+back is one pop-up.
+
+Nightly is the one that does not switch back on its own, and it is worth knowing why before you
+install one. A nightly is versioned by its date (`2026.8.26`), which is a higher number than any
+release will ever carry, so an installed nightly always looks newer than the newest stable
+release and never offers to replace itself with one. That is also why nightly is not in the
+pop-up: choosing it would work, and choosing Stable again would leave you waiting for an update
+that cannot arrive.
 
 ## Build from source
 
