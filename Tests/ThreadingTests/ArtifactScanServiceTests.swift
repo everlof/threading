@@ -63,13 +63,22 @@ final class ArtifactScanServiceTests: XCTestCase {
     /// A service with every outside answer stated: the fixture root instead of the machine's
     /// temporary directories, no projects instead of the developer's own, and a busy answer
     /// instead of an agent.
+    /// `.utility` rather than production's `.background`, and that is the whole reason the QoS is
+    /// a seam.
+    ///
+    /// `.background` asks the system to defer the work for as long as it likes, which is right
+    /// for a disk chore nobody is waiting on and wrong for a test that waits ten seconds and then
+    /// calls it a failure. On a machine compiling something else these went red as a class, and
+    /// the walk they measure is a handful of fixture directories — the behaviour under test is
+    /// what the scan finds and publishes, which its priority does not change.
     private func makeService(busy: Bool = false) -> ArtifactScanService {
         ArtifactScanService(
             directory: directory,
             fileManager: .default,
             scratchRoots: [scratch],
             projects: { [] },
-            isAnySessionWorking: { busy }
+            isAnySessionWorking: { busy },
+            qualityOfService: .utility
         )
     }
 

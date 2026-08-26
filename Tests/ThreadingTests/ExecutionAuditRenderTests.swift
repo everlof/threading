@@ -12,7 +12,8 @@ final class ExecutionAuditRenderTests: XCTestCase {
         static let size = NSSize(width: 1_280, height: 760)
 
         static var directory: URL {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())

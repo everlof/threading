@@ -885,7 +885,8 @@ final class ChartTests: XCTestCase {
     /// in a picture and in no assertion anyone would have written.
     func testRendersTheChartStorybook() throws {
         let directory: URL = {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())

@@ -9,7 +9,8 @@ final class ImageCompareRenderTests: XCTestCase {
 
     private enum Render {
         static var directory: URL {
-            if let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !out.isEmpty {
                 return URL(fileURLWithPath: out, isDirectory: true)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)

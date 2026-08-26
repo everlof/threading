@@ -241,7 +241,9 @@ final class FileTreeViewTests: XCTestCase {
         defer { AppThemeLibrary.apply(previous) }
         let fixture = try makeVisualFixture()
         defer { try? FileManager.default.removeItem(at: fixture) }
-        let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+        let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            .map {
             URL(fileURLWithPath: $0, isDirectory: true)
         } ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("ThreadingRenders", isDirectory: true)
@@ -553,7 +555,9 @@ final class FileTreeViewTests: XCTestCase {
     }
 
     private func writeActivityRender(_ view: NSView) throws {
-        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            .map {
             URL(fileURLWithPath: $0, isDirectory: true)
         } ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("ThreadingRenders", isDirectory: true)

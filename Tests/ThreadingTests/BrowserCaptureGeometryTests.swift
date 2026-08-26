@@ -88,7 +88,8 @@ final class BrowserCaptureGeometryTests: XCTestCase {
         browser.view.cacheDisplay(in: browser.view.bounds, to: representation)
         browser.view.cacheDisplay(in: browser.view.bounds, to: representation)
         let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
-        if let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+        if let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !output.isEmpty {
             let directory = URL(fileURLWithPath: output, isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try png.write(

@@ -147,7 +147,12 @@ final class UIEvidenceRenderTests: XCTestCase {
     // MARK: - Component evidence
 
     func testCapturesEveryComponentGalleryStory() throws {
+        // Empty, not absent, is the case worth guarding: the test plan forwards this as
+        // `$(THREADING_UI_EVIDENCE_OUT)`, which expands to the empty string when nothing set it.
+        // A bare `if let` therefore never skips, and the empty path is the volume root — so this
+        // failed with a read-only write rather than the skip it was written to take.
         guard let outputPath = ProcessInfo.processInfo.environment[Contract.captureEnvironmentKey]
+            .flatMap({ $0.isEmpty ? nil : $0 })
         else {
             throw XCTSkip("Run scripts/ui-evidence.sh to capture the complete gallery")
         }

@@ -417,6 +417,7 @@ final class SessionAttachmentVideoTests: XCTestCase {
     /// hover-only Pause action while running, and the compact fold where the timeline yields.
     func testRendersAttachmentVideoPlayback() throws {
         let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
             .map(URL.init(fileURLWithPath:))
             ?? FileManager.default.temporaryDirectory
                 .appendingPathComponent("ThreadingRenders", isDirectory: true)

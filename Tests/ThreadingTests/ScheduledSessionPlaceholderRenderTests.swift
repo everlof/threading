@@ -14,7 +14,8 @@ final class ScheduledSessionPlaceholderRenderTests: XCTestCase {
     }
 
     private var outputDirectory: URL {
-        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
         return FileManager.default.temporaryDirectory.appendingPathComponent(

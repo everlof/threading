@@ -4749,7 +4749,8 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     let png = try XCTUnwrap(rendered.representation(using: .png, properties: [:]))
     XCTAssertFalse(png.isEmpty)
 
-    if let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+    if let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+       !output.isEmpty {
       let directory = URL(fileURLWithPath: output, isDirectory: true)
       try FileManager.default.createDirectory(
         at: directory,

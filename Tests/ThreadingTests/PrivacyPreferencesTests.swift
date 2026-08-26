@@ -474,7 +474,9 @@ final class PrivacyPreferencesTests: XCTestCase {
     /// Whether four permission rows read as a scannable list or as a wall of grey is not a claim
     /// any constraint assertion settles. `THREADING_RENDER_OUT` redirects the output.
     func testPrivacyPageRendersInBothAppearances() throws {
-        let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+        let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            .map {
             URL(fileURLWithPath: $0, isDirectory: true)
         }
         if let output {

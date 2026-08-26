@@ -427,7 +427,8 @@ final class AquaChromeTests: XCTestCase {
     }
 
     private var renderDirectory: URL {
-        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !override.isEmpty {
             return URL(fileURLWithPath: override)
         }
         return URL(fileURLWithPath: NSTemporaryDirectory())

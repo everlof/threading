@@ -34,7 +34,8 @@ final class ConversationRenderTests: XCTestCase {
 
         /// Where images land. Overridable so a review pass can drop them somewhere convenient.
         static var directory: URL {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())
@@ -3169,7 +3170,9 @@ final class SubagentSummaryViewTests: XCTestCase {
             "usage should annotate the existing child navigator, not build a second list"
         )
 
-        guard let outputPath = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] else {
+        guard let outputPath = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap({ $0.isEmpty ? nil : $0 })
+        else {
             return
         }
         let margin = Design.Spacing.large
@@ -3315,6 +3318,7 @@ final class SubagentSummaryViewTests: XCTestCase {
         host.cacheDisplay(in: host.bounds, to: rep)
         let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
         let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? FileManager.default.temporaryDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

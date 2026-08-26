@@ -4287,7 +4287,9 @@ final class ThemedControlTests: HostedStoreTestCase {
             AppSettings.shared.remoteAccessEnabled = previousEnabled
             AppSettings.shared.remoteAccessTailscaleEnabled = previousTailscale
         }
-        let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+        let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            .map {
             URL(fileURLWithPath: $0, isDirectory: true)
         }
         if let output {
@@ -8224,7 +8226,8 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
         attach(png, named: name)
 
-        if let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+        if let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !directory.isEmpty {
             let output = URL(fileURLWithPath: directory, isDirectory: true)
             try FileManager.default.createDirectory(
                 at: output,

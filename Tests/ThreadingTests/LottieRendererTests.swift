@@ -444,7 +444,8 @@ final class LottieRendererTests: XCTestCase {
             if !inked { blank.append(file.lastPathComponent) }
         }
 
-        if let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+        if let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !out.isEmpty {
             // A histogram says what was dropped; only a picture says whether what survived looks
             // like the animation. Written beside the ordinary storybooks so a corpus can be
             // eyeballed the same way every other visual in this repository is.

@@ -19,7 +19,8 @@ final class InspectorHierarchyRenderTests: XCTestCase {
         static let size = NSSize(width: 720, height: 460)
 
         static var directory: URL {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())

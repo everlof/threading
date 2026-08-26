@@ -24,7 +24,8 @@ final class AppIconRenderTests: XCTestCase {
         static let groundSample = CGPoint(x: 0.13, y: 0.5)
 
         static var directory: URL {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())

@@ -15,7 +15,8 @@ final class AccountSetupRenderTests: XCTestCase {
         static let settingsSize = NSSize(width: SettingsUIDefaults.pageWidth, height: 900)
 
         static var directory: URL {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override, isDirectory: true)
             }
             return FileManager.default.temporaryDirectory

@@ -236,7 +236,9 @@ final class ShareChatSheetTests: XCTestCase {
     /// thing an assertion cannot check is whether its three tiers still read there. Written out
     /// light and dark; `THREADING_RENDER_OUT` redirects the output.
     func testRendersTheGrantsLightAndDark() throws {
-        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            .map {
             URL(fileURLWithPath: $0)
         } ?? URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("ThreadingRenders", isDirectory: true)

@@ -1079,6 +1079,7 @@ final class ThemedPresentationTests: XCTestCase {
     /// somebody had configured by hand.
     private func writeRender(of rep: NSBitmapImageRep, named name: String) throws {
         let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
             ?? NSTemporaryDirectory() + "ThreadingRenders"
         let url = URL(fileURLWithPath: directory, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

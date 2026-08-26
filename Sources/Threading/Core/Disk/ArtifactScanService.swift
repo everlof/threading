@@ -81,7 +81,13 @@ final class ArtifactScanService {
 
     /// The chore's own queue. `.background` rather than `.utility`: the system throttles its
     /// I/O, which is exactly right for work nobody is waiting on.
-    private let queue = DispatchQueue(label: "codes.threading.artifact-scan", qos: .background)
+    ///
+    /// Which is also why the QoS is a seam. A test *is* waiting on it, with a timeout, and
+    /// `.background` is precisely the promise that the system may defer this work for as long as
+    /// it likes — so on a machine that is compiling something else the walk misses a ten-second
+    /// wait and the whole suite fails on scheduling rather than on behaviour. The walk's result
+    /// does not depend on its priority; only its punctuality does.
+    private let queue: DispatchQueue
 
     private var passiveTimer: Timer?
 
@@ -94,8 +100,13 @@ final class ArtifactScanService {
         fileManager: FileManager = .default,
         scratchRoots: [URL] = ScratchDefaults.roots,
         projects: (@MainActor () -> [Project])? = nil,
-        isAnySessionWorking: (@MainActor () -> Bool)? = nil
+        isAnySessionWorking: (@MainActor () -> Bool)? = nil,
+        qualityOfService: DispatchQoS = .background
     ) {
+        self.queue = DispatchQueue(
+            label: "codes.threading.artifact-scan",
+            qos: qualityOfService
+        )
         self.fileManager = fileManager
         self.scratchRoots = scratchRoots
         self.projectsProvider = projects ?? { ProjectStore.shared.projects }

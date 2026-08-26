@@ -77,7 +77,9 @@ final class AccountUsagePopoverVirtualizationTests: XCTestCase {
     /// The production controller at its shipping width, scrolled into a provider-sized model
     /// inventory. Both appearances exercise the fixed header/footer around the virtual viewport.
     func testRendersVirtualAccountUsagePopoverToImages() throws {
-        guard let directoryPath = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] else {
+        guard let directoryPath = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap({ $0.isEmpty ? nil : $0 })
+        else {
             throw XCTSkip("Set THREADING_RENDER_OUT to capture account usage popover evidence")
         }
         let directory = URL(fileURLWithPath: directoryPath, isDirectory: true)

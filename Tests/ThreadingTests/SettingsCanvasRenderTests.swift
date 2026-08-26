@@ -12,7 +12,8 @@ import XCTest
 final class SettingsCanvasRenderTests: HostedStoreTestCase {
     func testRendersTheSharedSettingsCanvasInTheMainWindow() throws {
         let directory: URL
-        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !override.isEmpty {
             directory = URL(fileURLWithPath: override, isDirectory: true)
         } else {
             directory = FileManager.default.temporaryDirectory

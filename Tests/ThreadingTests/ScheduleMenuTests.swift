@@ -153,7 +153,9 @@ final class ScheduleMenuTests: XCTestCase {
         )
         let entries = self.entries(usage: usage)
 
-        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
+        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            .map {
             URL(fileURLWithPath: $0)
         } ?? URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("ThreadingRenders", isDirectory: true)

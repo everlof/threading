@@ -143,6 +143,7 @@ final class ContextHandoffTests: XCTestCase {
 
         let directory = URL(
             fileURLWithPath: ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+                .flatMap { $0.isEmpty ? nil : $0 }
                 ?? NSTemporaryDirectory()
         ).appendingPathComponent("ThreadingRenders", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

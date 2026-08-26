@@ -608,6 +608,7 @@ final class SidebarWidthDensityTests: XCTestCase {
         let window = try XCTUnwrap(windows.last)
 
         let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
                 .appendingPathComponent("ThreadingRenders", isDirectory: true)

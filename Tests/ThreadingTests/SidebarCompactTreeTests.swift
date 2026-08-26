@@ -326,6 +326,7 @@ final class SidebarCompactTreeTests: XCTestCase {
         let view = try XCTUnwrap(window.contentView)
 
         let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? URL(
                 fileURLWithPath: NSTemporaryDirectory(),

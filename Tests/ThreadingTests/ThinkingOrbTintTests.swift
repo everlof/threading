@@ -113,7 +113,9 @@ final class ThinkingOrbTintTests: XCTestCase {
     /// Writes orb PNGs for eyeballing when `THREADING_RENDER_OUT` points somewhere,
     /// and is a no-op otherwise — the same opt-in the conversation renders use.
     func testWriteRenderSamples() throws {
-        guard let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] else {
+        guard let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap({ $0.isEmpty ? nil : $0 })
+        else {
             throw XCTSkip("set THREADING_RENDER_OUT to dump orb PNGs")
         }
         let dir = URL(fileURLWithPath: out)

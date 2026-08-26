@@ -490,7 +490,8 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// see this is draggable" can be true in an assertion and invisible on screen.
     func testRendersTheFoldAtRestAndUnderThePointer() throws {
         let directory: URL = {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1250,7 +1251,8 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// be true and invisible.
     func testRendersTheStatusMarkStorybook() throws {
         let directory: URL = {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1886,7 +1888,8 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// exactly the kind of difference an assertion can pass while the card reads as a wall.
     func testRendersTheIsolatedWorktreeCard() throws {
         let directory: URL = {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())
@@ -2366,7 +2369,8 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// the two marks and the counters line hold a column at the leading edge.
     func testRendersTheGitCardStorybook() throws {
         let directory: URL = {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())
@@ -2511,7 +2515,8 @@ final class ThemedIndicatorsTests: XCTestCase {
     /// row hover, section rules, and an extension-authored disclosure all share the real host.
     func testRendersStatusCardEnvironmentMenu() throws {
         let directory: URL = {
-            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+            if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+               !override.isEmpty {
                 return URL(fileURLWithPath: override)
             }
             return URL(fileURLWithPath: NSTemporaryDirectory())
