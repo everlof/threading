@@ -35,9 +35,16 @@ jobs:
 
       - name: Prepare policy tools
         run: |
-          # SwiftLint is part of the macOS 15 runner image; ripgrep is not guaranteed.
+          # Installed rather than asserted. The runner image shipped SwiftLint when these
+          # workflows were written and no longer does, which failed the first real release run
+          # at exit 127; gitleaks was never on it and was added to ci.sh without being added
+          # here, which failed the next one. An image dropping a tool should cost a slower job,
+          # not a broken release.
+          command -v swiftlint >/dev/null || brew install swiftlint
+          command -v rg >/dev/null || brew install ripgrep
+          command -v gitleaks >/dev/null || brew install gitleaks
           swiftlint version
-          brew install ripgrep
+          gitleaks version
 
       - name: Run the quality gate
         run: scripts/ci.sh

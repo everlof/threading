@@ -72,13 +72,16 @@ jobs:
 
       - name: Prepare policy tools
         run: |
-          # Neither is guaranteed. SwiftLint *was* on the macOS runner images and is not on
-          # this one any more, which failed the first real release run with exit 127 before a
-          # single gate had run. Installed rather than asserted, so the image dropping a tool
-          # is a slower job rather than a broken release.
+          # Installed rather than asserted. The runner image shipped SwiftLint when these
+          # workflows were written and no longer does, which failed the first real release run
+          # at exit 127; gitleaks was never on it and was added to ci.sh without being added
+          # here, which failed the next one. An image dropping a tool should cost a slower job,
+          # not a broken release.
           command -v swiftlint >/dev/null || brew install swiftlint
           command -v rg >/dev/null || brew install ripgrep
+          command -v gitleaks >/dev/null || brew install gitleaks
           swiftlint version
+          gitleaks version
 
       - name: Import the Developer ID certificate
         env:
