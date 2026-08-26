@@ -66,6 +66,33 @@ final class SimulatorPaneTests: XCTestCase {
         }
     }
 
+    func testLeaseRefreshPreservesBootOwnershipAndAcceptsOlderCapabilities() async throws {
+        let control = SimulatorLeaseRefreshControlFake()
+        let manager = SimulatorLeaseManager(
+            control: control,
+            releaseGraceNanoseconds: 1_000_000
+        )
+
+        let first = try await manager.acquire(deviceID: simulatorPaneTestDevice.id)
+        let second = try await manager.acquire(deviceID: simulatorPaneTestDevice.id)
+        let refreshed = try await manager.refresh(first)
+
+        XCTAssertEqual(first.bootOwnership, .threading)
+        XCTAssertEqual(refreshed.bootOwnership, .threading)
+        XCTAssertNotEqual(refreshed.capabilityID, first.capabilityID)
+        let prepareCount = await control.prepareCount
+        XCTAssertEqual(prepareCount, 2)
+
+        await manager.release(second)
+        await manager.release(refreshed)
+        try await eventually {
+            await control.releasedLease != nil
+        }
+        let releasedLease = await control.releasedLease
+        XCTAssertEqual(releasedLease?.capabilityID, refreshed.capabilityID)
+        XCTAssertEqual(releasedLease?.bootOwnership, .threading)
+    }
+
     func testLiveStreamBudgetCapsAndReleasesExactReservations() throws {
         var budget = SimulatorStreamBudget(maximum: 4)
         let reservations = try (0..<4).map { _ in try budget.reserve() }
@@ -217,6 +244,7 @@ private actor SimulatorPaneStreamCoordinatorFake: SimulatorLiveStreamCoordinatin
 private final class SimulatorPaneStreamSessionFake: SimulatorLiveStreamSession, @unchecked Sendable {
     let events: AsyncStream<SimulatorLiveStreamEvent>
 
+    private let continuation: AsyncStream<SimulatorLiveStreamEvent>.Continuation
     private let lock = NSLock()
     private var visibility: [Bool] = []
 
@@ -225,7 +253,8 @@ private final class SimulatorPaneStreamSessionFake: SimulatorLiveStreamSession, 
             bufferingPolicy: .bufferingNewest(2)
         )
         events = pair.stream
-        pair.continuation.yield(.ready(
+        continuation = pair.continuation
+        continuation.yield(.ready(
             backend: .direct(codec: .h264),
             capabilities: SimulatorBridgeCapabilities(
                 codecs: [.h264, .jpeg],
@@ -254,7 +283,45 @@ private final class SimulatorPaneStreamSessionFake: SimulatorLiveStreamSession, 
     }
 
     func sendInput(_ input: SimulatorBridgeInput) async throws {}
-    func stop() {}
+    func stop() { continuation.finish() }
+}
+
+private actor SimulatorLeaseRefreshControlFake: SimulatorControlling {
+    private(set) var prepareCount = 0
+    private(set) var releasedLease: SimulatorDeviceLease?
+
+    func availableDevices() async throws -> [SimulatorDevice] {
+        [simulatorPaneTestDevice]
+    }
+
+    func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
+        prepareCount += 1
+        return SimulatorDeviceLease(
+            device: simulatorPaneTestDevice,
+            bootOwnership: prepareCount == 1 ? .threading : .user
+        )
+    }
+
+    func installAndLaunch(
+        applicationURL: URL,
+        bundleIdentifier: String,
+        on deviceID: SimulatorDeviceID,
+        arguments: [String]
+    ) async throws -> SimulatorLaunchReceipt {
+        SimulatorLaunchReceipt(
+            deviceID: deviceID,
+            bundleIdentifier: bundleIdentifier,
+            processIdentifier: nil
+        )
+    }
+
+    func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data {
+        throw SimulatorControlError.invalidScreenshot
+    }
+
+    func release(_ lease: SimulatorDeviceLease) async throws {
+        releasedLease = lease
+    }
 }
 
 private let simulatorPaneTestDevice = SimulatorDevice(

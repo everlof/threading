@@ -25,6 +25,19 @@ enum SimulatorDeviceBootOwnership: String, Equatable, Codable, Sendable {
 struct SimulatorDeviceLease: Equatable, Sendable {
     let device: SimulatorDevice
     let bootOwnership: SimulatorDeviceBootOwnership
+    /// Opaque identity issued by the control plane. A refreshed lease can replace its device
+    /// snapshot without making releases from another pane's older snapshot unrecognisable.
+    let capabilityID: UUID
+
+    init(
+        device: SimulatorDevice,
+        bootOwnership: SimulatorDeviceBootOwnership,
+        capabilityID: UUID = UUID()
+    ) {
+        self.device = device
+        self.bootOwnership = bootOwnership
+        self.capabilityID = capabilityID
+    }
 }
 
 struct SimulatorLaunchReceipt: Equatable, Sendable {

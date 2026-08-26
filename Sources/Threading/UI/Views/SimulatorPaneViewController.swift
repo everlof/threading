@@ -53,6 +53,7 @@ final class SimulatorPaneViewController: NSViewController {
     private var liveBackend: SimulatorLiveBackend?
     private var liveCapabilities: SimulatorBridgeCapabilities?
     private var lastStreamFailure: String?
+    private var requiresLeaseRefresh = false
     private var agentCommandTasks: [UUID: Task<Void, Never>] = [:]
     private var isPresented = false
 
@@ -346,9 +347,16 @@ final class SimulatorPaneViewController: NSViewController {
 
     private func retry() {
         if let lease {
-            stopTransport()
-            presentationState = .ready(lease.device)
-            startFrameLoop()
+            if requiresLeaseRefresh {
+                prepare(
+                    lease.device.id,
+                    refreshingCurrentLease: true
+                )
+            } else {
+                stopTransport()
+                presentationState = .ready(lease.device)
+                startFrameLoop()
+            }
         } else {
             prepare(preferredDeviceID)
         }
@@ -356,14 +364,15 @@ final class SimulatorPaneViewController: NSViewController {
 
     private func prepare(
         _ requestedID: SimulatorDeviceID?,
-        releasingCurrentLease: Bool = false
+        releasingCurrentLease: Bool = false,
+        refreshingCurrentLease: Bool = false
     ) {
         preparationTask?.cancel()
         stopTransport()
         presentationState = .discovering
         let leaseManager = leaseManager
-        let currentLease = releasingCurrentLease ? lease : nil
-        if releasingCurrentLease { lease = nil }
+        let currentLease = (releasingCurrentLease || refreshingCurrentLease) ? lease : nil
+        if currentLease != nil { lease = nil }
         preparationGeneration += 1
         let generation = preparationGeneration
 
@@ -374,7 +383,9 @@ final class SimulatorPaneViewController: NSViewController {
                 }
             }
             do {
-                if let currentLease { await leaseManager.release(currentLease) }
+                if let currentLease, !refreshingCurrentLease {
+                    await leaseManager.release(currentLease)
+                }
                 try Task.checkCancellation()
                 let devices = try await leaseManager.availableDevices()
                 try Task.checkCancellation()
@@ -389,12 +400,18 @@ final class SimulatorPaneViewController: NSViewController {
                 self?.preferredDeviceID = targetID
                 self?.presentationState = .preparing(targetID)
 
-                let preparedLease = try await leaseManager.acquire(deviceID: targetID)
+                let preparedLease: SimulatorDeviceLease
+                if let currentLease, refreshingCurrentLease {
+                    preparedLease = try await leaseManager.refresh(currentLease)
+                } else {
+                    preparedLease = try await leaseManager.acquire(deviceID: targetID)
+                }
                 guard !Task.isCancelled, let self else {
                     await leaseManager.release(preparedLease)
                     return
                 }
                 self.lease = preparedLease
+                self.requiresLeaseRefresh = false
                 self.preferredDeviceID = preparedLease.device.id
                 self.presentationState = .ready(preparedLease.device)
                 self.onSelectedDeviceChange?(preparedLease.device.id)
@@ -406,6 +423,10 @@ final class SimulatorPaneViewController: NSViewController {
                 return
             } catch {
                 guard let self, !Task.isCancelled else { return }
+                if refreshingCurrentLease, let currentLease {
+                    self.lease = currentLease
+                    self.requiresLeaseRefresh = true
+                }
                 self.presentationState = .failed(error.localizedDescription)
                 self.finishPreparation(.failure(error.localizedDescription))
             }
@@ -545,6 +566,7 @@ final class SimulatorPaneViewController: NSViewController {
                     return
                 } catch {
                     guard let self, !Task.isCancelled else { return }
+                    self.requiresLeaseRefresh = true
                     self.presentationState = .failed(error.localizedDescription)
                     return
                 }
@@ -607,6 +629,7 @@ final class SimulatorPaneViewController: NSViewController {
         runAgentCommand { [weak self] in
             guard let self else { return }
             do {
+                self.reconnectTransportForInputIfNeeded(on: device.id)
                 let session = try await self.awaitInputSession(for: device.id)
                 let approved = await self.inputAuthorization(for: device)
                 guard approved else {
@@ -632,6 +655,19 @@ final class SimulatorPaneViewController: NSViewController {
                 completion(.failure(error.localizedDescription))
             }
         }
+    }
+
+    /// A device install or launch can invalidate an otherwise healthy private framebuffer
+    /// connection. The public fallback keeps the pane visible, but an explicit input request is
+    /// also a useful one-shot signal to reconnect the direct transport before failing closed.
+    /// Stale-device failures still require the stronger lease refresh path owned by Retry.
+    private func reconnectTransportForInputIfNeeded(on deviceID: SimulatorDeviceID) {
+        guard !requiresLeaseRefresh,
+              lease?.device.id == deviceID,
+              case .screenshotFallback = liveBackend else { return }
+        stopTransport()
+        if let device = lease?.device { presentationState = .ready(device) }
+        startFrameLoop()
     }
 
     private func awaitInputSession(
@@ -728,4 +764,5 @@ final class SimulatorPaneViewController: NSViewController {
     var frameImageForTesting: NSImage? { screenView.image }
     var liveBackendForTesting: SimulatorLiveBackend? { liveBackend }
     var isPresentedForTesting: Bool { isPresented }
+    func retryForTesting() { retry() }
 }
