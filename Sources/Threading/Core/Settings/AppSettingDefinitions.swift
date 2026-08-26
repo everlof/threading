@@ -69,6 +69,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case remoteInputControlDefault
     case phoneReportWorkspace
     case automaticUpdateChecksEnabled
+    case updateChannelSubscription
     case preventsIdleSystemSleepWhileAgentsWork
     case workingOrbStyle
     case chatNameMorphStyle
@@ -1215,6 +1216,23 @@ enum AppSettingDefinitions {
         remotePolicy: .ownerMutable
     )
 
+    /// Which builds this person is willing to receive. See `UpdateChannelSubscription`.
+    ///
+    /// Deliberately has no fixed default. A beta build must default to the beta subscription or a
+    /// friend handed a beta zip is filtered away from every beta item and never updates again —
+    /// the common way onto a beta, not an exotic one. The resolved default therefore depends on
+    /// `AppInfo.buildChannel`, which the accessor applies; the stored value only ever records a
+    /// choice somebody actually made.
+    static let updateChannelSubscription = AppSettingDescriptor<String>(
+        identity: .updateChannelSubscription,
+        persistenceKey: "updateChannelSubscription",
+        absence: .emptyString,
+        validation: .allowedStrings(
+            Set(UpdateChannelSubscription.allCases.map(\.rawValue)).union([""])
+        ),
+        presentations: [row("general", 1, "Software Updates", "Updates you receive",
+                            ["beta", "channel", "prerelease", "nightly", "updates"])]
+    )
     static let automaticUpdateChecksEnabled = AppSettingDescriptor<Bool>(
         identity: .automaticUpdateChecksEnabled,
         persistenceKey: "automaticUpdateChecksEnabled",

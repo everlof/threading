@@ -152,6 +152,54 @@ enum UpdateFeedPolicy {
     }
 }
 
+// MARK: - Which builds a person is willing to receive
+
+/// The risk level a *user* subscribes to, which is not the same thing as what their build *is*.
+///
+/// `BuildChannel` describes an artefact; this describes an appetite. They are separate because a
+/// person running a beta may want to go back to stable, and a person running stable may want to
+/// try a beta, without either of them reinstalling anything.
+///
+/// Sparkle carries it: an item in the appcast may be tagged `<sparkle:channel>beta</sparkle:channel>`
+/// and is invisible to any updater that does not name that channel. The default is the empty set,
+/// so a user who never touches this setting sees only untagged items — stable, by doing nothing.
+///
+/// **Nightly is deliberately not here.** Its version is the date (`2026.8.26`), which outranks
+/// every release Threading will ever ship, so joining is easy and leaving is impossible: Sparkle
+/// would find nothing newer on the stable feed and offer nothing, forever. It stays a separate
+/// feed reached by installing a nightly build. A control that can strand its user is not a
+/// control; see `feedOverride(for:)` above and `.github/workflows/nightly.yml`.
+enum UpdateChannelSubscription: String, CaseIterable, Sendable {
+    case stable
+    case beta
+
+    /// What a build with this channel should default to when the user has expressed no choice.
+    ///
+    /// The load-bearing case is a *direct download*: somebody handed a beta zip has, by default,
+    /// no beta subscription, so every beta item is filtered out and their build never updates
+    /// again. That is the common way to end up on a beta, not an exotic one, so the default
+    /// follows the build rather than stranding it. Choosing stable afterwards remains possible
+    /// and is then a decision rather than an accident.
+    static func standard(for channel: BuildChannel) -> UpdateChannelSubscription {
+        switch channel {
+        case .beta: .beta
+        case .dev, .nightly, .release: .stable
+        }
+    }
+
+    /// The Sparkle channel names this subscription accepts.
+    ///
+    /// Monotonic by construction: a subscription accepts its own channel and everything more
+    /// stable. Stable accepts nothing, which in Sparkle's vocabulary means "untagged items only"
+    /// rather than "no items".
+    var allowedChannelNames: Set<String> {
+        switch self {
+        case .stable: []
+        case .beta: ["beta"]
+        }
+    }
+}
+
 // MARK: - What the sheet offers
 
 /// The three answers Sparkle understands, minus its type.

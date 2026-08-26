@@ -1230,6 +1230,19 @@ final class AppSettings {
     /// which would ship the feature switched off for everyone who never opened Settings. The
     /// registered default is `true` and this reads through it, so "never touched" and
     /// "deliberately off" stay distinguishable in the stored domain.
+    /// Which builds this person receives. Resolved against the running build when unset, so a
+    /// direct beta download is not silently filtered away from its own updates.
+    var updateChannelSubscription: UpdateChannelSubscription {
+        get {
+            let stored = AppSettingDefinitions.updateChannelSubscription.read(from: defaults) ?? ""
+            return UpdateChannelSubscription(rawValue: stored)
+                ?? UpdateChannelSubscription.standard(for: AppInfo.buildChannel)
+        }
+        set {
+            AppSettingDefinitions.updateChannelSubscription.write(newValue.rawValue, to: defaults)
+        }
+    }
+
     var automaticUpdateChecksEnabled: Bool {
         get { AppSettingDefinitions.automaticUpdateChecksEnabled.read(from: defaults) ?? true }
         set {
