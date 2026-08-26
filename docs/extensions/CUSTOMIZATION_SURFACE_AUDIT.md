@@ -57,6 +57,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
 | Attachment preview body | `attachments.preview@1` | exclusive preview-body replacement, offered rather than owned | chronology, filter, selection, Open in, reveal, delete, pruning, the too-large refusal, editable annotation receipt/revisions and the inspector rail | Implemented |
 | Background sessions (quit choice, launch band, Advanced list) | — | host-only | which children the daemon holds and their identities, the quit answer and what it stops, registration and its removal rule, the stop's attach-then-kill, bounded survey and viewport | Host-only |
+| Update channel picker | — | host-only | which builds the updater accepts, the default a build resolves to, the feed override, the versions Sparkle compares | Host-only |
 
 The background-sessions surfaces remain host-only because each of the three is a **decision about
 somebody's running work**, not a presentation of it. The quit choice ends processes or does not;
@@ -67,6 +68,15 @@ are already published where an extension can reach them honestly — a session's
 runtime — and what is missing for an extension that wants to *act* is a typed background-session
 entity with the daemon's identity in it, not the box the rows are in. The launch band is a
 `PaneNoticeView`, which is host chrome for the same reason every other band is.
+
+The update channel picker remains host-only because it decides which software this Mac will
+install. Its two levels are exactly the subscriptions Sparkle can honour, its resolved default
+comes from the running build's own channel so a directly downloaded beta is not filtered into
+silence, and nightly is deliberately absent because a date version outranks every release and
+choosing stable again would strand the user. A replaceable presentation of that could offer a
+level the updater does not accept, show a level other than the one in force, or name nightly as a
+one-click option. An extension that wants to know what somebody receives should ask for a
+published typed subscription value, not for the control that sets it.
 
 The launch failure surface remains host-only because its content *is* the evidence. The whole
 surface exists because an agent's account of why it would not start was being destroyed, and a

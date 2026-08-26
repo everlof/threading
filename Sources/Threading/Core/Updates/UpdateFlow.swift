@@ -198,6 +198,15 @@ enum UpdateChannelSubscription: String, CaseIterable, Sendable {
         case .beta: ["beta"]
         }
     }
+
+    /// What the Software Updates pop-up calls each level. Names the appetite rather than the
+    /// mechanism, because the person choosing has no reason to know what a Sparkle channel is.
+    var settingsTitle: String {
+        switch self {
+        case .stable: L10n.string("Stable releases")
+        case .beta: L10n.string("Betas and stable releases")
+        }
+    }
 }
 
 // MARK: - What the sheet offers

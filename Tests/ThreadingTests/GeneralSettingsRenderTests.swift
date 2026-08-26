@@ -227,6 +227,44 @@ final class GeneralSettingsRenderTests: XCTestCase {
         XCTAssertTrue(labels.contains(L10n.string("Codex sessions start in")))
     }
 
+    /// The subscription picker is the only way back off a beta, so it has to offer both levels
+    /// and show the one currently in force.
+    ///
+    /// Read-only on purpose, for the reason the sound pickers are: the bundle is hosted in the
+    /// app, so writing a choice here would change which builds the developer's own copy accepts.
+    ///
+    /// The copy is asserted because it carries the part the control cannot. Nightly is
+    /// deliberately not an option — its date version outranks every release, so choosing stable
+    /// again would strand the user — and a channel a person can be on with no mention on the
+    /// page is a channel they cannot reason about. The row must name it and say how to leave.
+    @MainActor
+    func testUpdateChannelPickerOffersBothLevelsAndNamesNightly() throws {
+        let controller = GeneralPreferencesViewController()
+        laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
+
+        let popUp = try XCTUnwrap(
+            Self.view(in: controller.view, identifiedBy: "settings.general.update-channel")
+                as? ThemedPopUp,
+            "the Software Updates card has no reachable channel control"
+        )
+        XCTAssertEqual(
+            (0..<popUp.numberOfItems).compactMap { popUp.item(at: $0)?.title },
+            UpdateChannelSubscription.allCases.map(\.settingsTitle)
+        )
+        XCTAssertEqual(
+            popUp.selectedItem?.representedValue as? UpdateChannelSubscription,
+            AppSettings.shared.updateChannelSubscription,
+            "the picker shows a level other than the one the updater is actually using"
+        )
+
+        let labels = Self.labels(in: controller.view)
+        XCTAssertTrue(labels.contains(L10n.string("Updates you receive")))
+        XCTAssertTrue(
+            labels.contains { $0.contains("Nightly") && $0.contains("stable build yourself") },
+            "the row has to name nightly and say that leaving it is a manual download"
+        )
+    }
+
     /// Detection is stored and consumed per `AgentKind`; the page must be built from that same
     /// set or a new runtime can tell the user to change a switch that does not exist.
     @MainActor
