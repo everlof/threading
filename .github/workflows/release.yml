@@ -72,9 +72,13 @@ jobs:
 
       - name: Prepare policy tools
         run: |
-          # SwiftLint is part of the macOS 15 runner image; ripgrep is not guaranteed.
+          # Neither is guaranteed. SwiftLint *was* on the macOS runner images and is not on
+          # this one any more, which failed the first real release run with exit 127 before a
+          # single gate had run. Installed rather than asserted, so the image dropping a tool
+          # is a slower job rather than a broken release.
+          command -v swiftlint >/dev/null || brew install swiftlint
+          command -v rg >/dev/null || brew install ripgrep
           swiftlint version
-          brew install ripgrep
 
       - name: Import the Developer ID certificate
         env:
