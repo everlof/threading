@@ -15,8 +15,12 @@ struct TerminalHostTransport {
     /// Keystrokes, paste, and the emulator's own answers to a program's queries.
     let sendInput: (Data) -> Void
 
-    /// The whole `winsize`, pixels included. Answers whether it was delivered, which is what
-    /// `LocalProcessTerminalView.sizeChanged` uses to decide whether the resize happened.
+    /// The whole `winsize`, pixels included. Answers whether the host will get this grid to the
+    /// child — which is what `LocalProcessTerminalView.sizeChanged` uses to decide whether the
+    /// resize happened, and is deliberately not "the bytes have left": the background host
+    /// records the wanted grid before it tries to deliver it and converges on it afterwards, so
+    /// a size that could not be written now is still a size the child ends up on. False means
+    /// there is no host left to converge. See `PTYHostTerminalLink.sendWindowSize(_:)`.
     let sendWindowSize: (winsize) -> Bool
 
     /// End the child. `TerminalSession.terminate()`'s host-backed half.
@@ -128,18 +132,6 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// `feedFromHost(_:answersQueries:)` — so two replayed feeds in one turn can overlap.
     private var suppressedQueryReplyScopes = 0
 
-    /// The grid the background host is already holding, while this terminal has *adopted* one
-    /// rather than chosen it.
-    ///
-    /// A reattach adopts the daemon's grid, and adopting it is an emulator resize — which
-    /// SwiftTerm reports through `onMain`, one main-queue turn later, by which time the link is
-    /// installed. Telling the daemon the size it has just told us would raise `SIGWINCH` on an
-    /// agent that has been working at that size all along, which is exactly the reflow
-    /// reattaching must not cause. So a window size equal to the adopted grid is not sent, and a
-    /// different one — a window the user resized while Threading was closed — is a real change,
-    /// is sent once, and ends the comparison.
-    private var adoptedHostGrid: (cols: Int, rows: Int)?
-
     /// Whether this delivery is the emulator answering rather than a person typing.
     ///
     /// The two are told apart by the scopes the local paths already establish: every keystroke,
@@ -214,26 +206,26 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// holding it whichever process owns the pty.
     override func sendWindowSize(_ size: inout winsize) -> Bool {
         guard let hostTransport else { return super.sendWindowSize(&size) }
-        if let adopted = adoptedHostGrid {
-            guard Int(size.ws_col) != adopted.cols || Int(size.ws_row) != adopted.rows else {
-                // Delivered, in the only sense the caller cares about: the host holds this grid.
-                return true
-            }
-            adoptedHostGrid = nil
-        }
         return hostTransport.sendWindowSize(size)
     }
 
-    /// Puts the emulator on the grid the background host is holding, without telling the host.
+    /// Puts the emulator on the grid the background host is holding.
     ///
     /// The durable grid belongs to the session rather than to whichever window is looking at it,
     /// so a reattach inherits it and the replay is rendered at the size it was written at. A
     /// repeat of the grid already in force does nothing at all: SwiftTerm's resize path ends in
     /// `softReset()`, and re-applying an unchanged grid would clear a working agent's scrolling
     /// region for no reason — the same scar `applyRemoteGrid` records.
+    ///
+    /// Adopting a grid is itself an emulator resize, which SwiftTerm reports back through
+    /// `sizeChanged` — so the size the daemon has just given us is offered straight back to it.
+    /// Nothing here refuses that: `PTYHostTerminalLink` holds the daemon's acknowledged grid
+    /// beside the wanted one and sends only a difference, which is the same rule for the echo
+    /// after an adoption, for a window that moved while Threading was closed, and for a resize
+    /// that was dropped in transit. A view that suppressed the echo itself would be a second,
+    /// narrower copy of that rule, and the two would drift.
     func adoptHostGrid(cols: Int, rows: Int) {
         guard cols > 0, rows > 0 else { return }
-        adoptedHostGrid = (cols, rows)
         let current = terminalDimensions
         guard current.cols != cols || current.rows != rows else { return }
         resize(cols: cols, rows: rows)

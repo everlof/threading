@@ -163,22 +163,34 @@ enum PTYSpawn {
 
     // MARK: - The terminal
 
-    /// Applies a window size and raises `SIGWINCH` on the foreground group.
+    /// Applies a window size and raises `SIGWINCH` on the foreground group, answering the grid
+    /// the terminal actually took — or nil when it took none.
     ///
     /// Darwin's `TIOCSWINSZ` signals the foreground process group itself, and the explicit signal
     /// is the belt to that braces: a program that changed the foreground group between the two
     /// calls still learns. Both are cheap and neither is conditional on the other succeeding.
-    static func applyWindowSize(_ grid: PTYHostGrid, to master: Int32) {
-        guard master >= 0 else { return }
+    ///
+    /// The answer is the *applied* grid rather than a `Bool` because the four numbers are
+    /// clamped on the way into a `winsize`, and the app reconciles its own window size against
+    /// what the child's terminal holds. Telling it "yes" while the terminal holds something else
+    /// would be exactly the divergence the acknowledgement exists to close.
+    static func applyWindowSize(_ grid: PTYHostGrid, to master: Int32) -> PTYHostGrid? {
+        guard master >= 0 else { return nil }
         var size = winsize(
             ws_row: UInt16(clamping: grid.rows),
             ws_col: UInt16(clamping: grid.cols),
             ws_xpixel: UInt16(clamping: grid.xpixel),
             ws_ypixel: UInt16(clamping: grid.ypixel)
         )
-        _ = ioctl(master, TIOCSWINSZ, &size)
+        guard ioctl(master, TIOCSWINSZ, &size) == 0 else { return nil }
         let foreground = tcgetpgrp(master)
         if foreground > 0 { _ = Darwin.kill(-foreground, SIGWINCH) }
+        return PTYHostGrid(
+            cols: Int(size.ws_col),
+            rows: Int(size.ws_row),
+            xpixel: Int(size.ws_xpixel),
+            ypixel: Int(size.ws_ypixel)
+        )
     }
 
     /// Which process group owns the terminal, or nil when nothing does.

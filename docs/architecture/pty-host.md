@@ -48,6 +48,7 @@ are `PTYHostFrame.swift`; this table is the same set in prose.
 | `output` | ← | 1 | raw bytes, no envelope |
 | `input` | → | 2 | raw bytes, no envelope |
 | `resize` | → | 0 | `id`, `grid` (cols, rows, xpixel, ypixel) |
+| `resized` | ← | 0 | `id`, `grid` — the grid `TIOCSWINSZ` took, to the connection that asked |
 | `detach` | → | 0 | `id`, `screenSeed`, `modeSeed`, `ringOffset` |
 | `closeInput` | → | 0 | `id` |
 | `kill` | → | 0 | `id`, `escalate` |
@@ -88,7 +89,10 @@ stays out of these slices.
 
 ### Two rules the frames encode
 
-**A `resize` sets the durable grid; an `attach` does not.** A new watcher inherits the grid, it
+**A `resize` sets the durable grid, and is answered; an `attach` does not.** The answer is
+`resized`, carrying the grid `TIOCSWINSZ` actually took — which is also what the session stores —
+to the connection that asked, and it is what lets the app tell "the child is on this grid" from
+"we sent a frame saying so". A new watcher inherits the grid, it
 does not impose one. That is what makes "reattaching a Threading that has just restarted must not
 reflow an agent that kept working the whole time" true by construction rather than by care. A
 session with no watcher keeps its last grid indefinitely — there is no Mac frame to restore to.
@@ -389,8 +393,14 @@ replay, and then `exited`. It is owed the ending *after* the history rather than
 ### The last window size
 
 `resize` sets the grid, applies `TIOCSWINSZ` and raises `SIGWINCH` on the foreground group; the
-grid is then the session's durable window size, kept indefinitely while nobody is attached. **An
-attach never resizes** — the watcher is told the grid and adopts it. `PTYHostDaemonTests` asserts
+grid is then the session's durable window size, kept indefinitely while nobody is attached, and
+the asking connection is answered `resized` with the grid the terminal took. The answer is the
+applied grid rather than a `Bool`, because the four numbers are clamped into a `winsize` on the
+way in and the app reconciles against them: an acknowledgement of a number the terminal does not
+hold would close a divergence on paper only. A terminal that would not take the size — a session
+whose master has gone — is journalled, is **not** acknowledged, and does not become the durable
+grid either, because a later watcher inheriting a grid nothing was ever set to is a worse answer
+than silence. **An attach never resizes** — the watcher is told the grid and adopts it. `PTYHostDaemonTests` asserts
 both halves by asking the child what `stty size` says, which is the only assertion that can tell a
 daemon that resized the terminal from one that sent the right frames. The app's half of that rule —
 adopting a grid rather than imposing one, and not sending it straight back — is
@@ -739,6 +749,20 @@ Nothing new goes on disk for any of this. The registration's state is launchd's:
 Task Management record and the Login Items row, both keyed by the label, and neither of them
 Threading's to write.
 
+### Reaching the daemon from a terminal
+
+The helper is a `product-type.tool` inside the bundle, so the shell that would run it cannot find
+it and the path it would need changes under every autoinstall. Both ways in go through one
+per-user directory, `~/Library/Application Support/Threading/bin/`, holding a symlink per public
+tool that the app repoints at the running bundle on every launch: Settings ▸ Advanced ▸ **Command
+line tool** installs `~/.local/bin/threading-ptyd` pointing at that shim, and
+**Tools in Threading's terminals** prepends the shim directory to the `PATH` of everything
+Threading launches. Neither writes outside the user's home, neither asks for `sudo`, and neither
+edits a shell profile. The directory, the refresh and what it refuses to touch are in
+[`persistence.md`](persistence.md#2026-07-30--where-it-all-is-and-starting-over); the environment
+half is in [`sessions.md`](sessions.md#launch-and-resume). `ThreadingCommandLineTools.publicTools`
+is the list, so publishing a second tool is one name.
+
 ### What registration does not cover
 
 The controls that drive it. The Advanced page's switch, the Background Sessions list and the quit
@@ -762,7 +786,7 @@ exactly that — so the inherited path is inert rather than wrong, and only four
 |---|---|---|
 | `EmojiFixedTerminalView.send(source:data:)` | `super.send` → `process.send` | `hostTransport.sendInput` — an `input` frame |
 | output | `setProcessOutputBytesHandler` → main hop → `onOutput`, `onOutputBytes` | `feedFromHost(_:answersQueries:)` → `feed(byteArray:)`, then **the same two callbacks in the same order on main** |
-| `sendWindowSize(_:)` | `process.updateWindowSize` | a `resize` frame carrying the whole `winsize` |
+| `sendWindowSize(_:)` | `process.updateWindowSize` — a synchronous local ioctl | the link's reconciled grid: recorded, then a `resize` frame the daemon answers with `resized`. See [The durable grid](#the-durable-grid) |
 | `TerminalSession.terminate()` | `terminalView.terminate()` | a `kill` frame; the view's process is never touched |
 
 The third is the one SwiftTerm fork change this whole design needs, and it is recorded in
@@ -958,23 +982,79 @@ Titles and the working directory come back on their own: the pid arrives in `att
 
 ## The durable grid
 
+The grid is **reconciled state on the link**, not a frame that is sent and forgotten.
+`PTYHostTerminalLink` holds two grids beside each other, and a third that is only bookkeeping:
+
+- **wanted** — the last full `winsize` the view asked to deliver, recorded *before* delivery is
+  attempted, always. A send that could not happen is still a grid this terminal wants.
+- **acknowledged** — the grid the daemon has confirmed it is holding: the `spawn`'s own grid
+  (the daemon forks the pty with it verbatim and cannot substitute one), an `attached` frame's,
+  or a `resized` acknowledgement's.
+
+The third is **delivered**, the last grid successfully handed to the transport, and it is the
+loop guard rather than part of the contract.
+
+The link sends one `resize` when the two differ, at three convergence points: when the transport
+becomes current (`adopt`), after every `spawned` and `attached`, and when an acknowledgement
+reports a grid other than the wanted one. A burst of output or any other frame converges too when
+a previous send *failed*, because bytes arriving are the only evidence this side has that a
+transport which refused a write is current again — there is no frame for "ready", and a timer
+would be a guess. Comparing against *delivered* as well is what keeps a daemon that clamps a
+size, or an older one that answers nothing at all, to one frame rather than a loop.
+
+**Why only this path ever needed it.** In-process, `sizeChanged` resizes the emulator and then
+calls `LocalProcess.updateWindowSize` — a synchronous `ioctl` on a descriptor this process holds,
+which cannot fail once the emulator has already resized. Host-backed, the same seam is a wire
+`resize`: a write that can be refused when the transport is not current, on a session the daemon
+may not have created yet, and `resize` had no answering frame. So one dropped or refused frame
+left the two sides disagreeing until the grid happened to change again — and nothing reconciled
+them, because `getWindowSize()` was read in exactly one place, at spawn.
+
+**The measured symptom.** Reading `TIOCGWINSZ` off every pty at once on a live machine: the one
+host-backed session sat at **111×81** under a pane about 210 columns wide, while every in-process
+session matched its pane. Claude never wraps mid-word, so the mid-word wraps and eaten first
+characters on that screen were the emulator's own autowrap — the child was writing lines wider
+than the buffer they were being rendered into, because the child's terminal and the emulator were
+on different grids.
+
+`sendWindowSize` therefore answers **"this grid will reach the child"**, not "the bytes have
+left": true whenever the link is live, including for a grid it has recorded and undertaken to
+converge on, and false only when there is no link left to converge — no transport, or an ending
+already reported. That is the answer `LocalProcessTerminalView.sizeChanged` needs, since it uses
+it to decide whether the resize is worth reporting to `processDelegate` at all. The contract is
+written at the seam in `MacLocalTerminalView.sendWindowSize(_:)`, because that is where the
+in-process default states the other half of it.
+
+A grid that had to be reconciled after a failed send is one `EventLog` line, once per link. The
+ordinary resize is not an event, and a line per resize would be a terminal's whole layout history
+in the journal.
+
+### What that makes true of an attach
+
 **An attach never resizes**, and the app's half of that rule is to *adopt* rather than impose.
 `TerminalSession.attachToHost(grid:)` puts the emulator on the daemon's grid **before** a byte of
 the replay lands, so a screen written at 100×40 is rendered at 100×40; imposing this window's grid
 first and reflowing afterwards would be a screen nobody ever saw.
 
-Adopting a grid is itself an emulator resize, and SwiftTerm reports one through `onMain` — a
-main-queue turn later, by which time the link is installed. Telling the daemon the size it has just
-told us would raise `SIGWINCH` on an agent that has been working at that size all along, which is
-precisely the reflow reattaching must not cause. So `EmojiFixedTerminalView` remembers the adopted
-grid and refuses to send it back; a window size that differs — the user resized Threading while it
-was closed — is a real change, is sent once, and ends the comparison. It is a comparison rather than
-a timer because a timer is a guess about how long AppKit takes to lay out.
+Adopting a grid is itself an emulator resize, which SwiftTerm reports straight back through
+`sizeChanged` — so the size the daemon has just given us is offered back to it. Telling the daemon
+that size would raise `SIGWINCH` on an agent that has been working at it all along, which is
+precisely the reflow reattaching must not cause, and it is the wanted-versus-acknowledged
+comparison that stops it: equal is silence, and a window the user resized while Threading was
+closed is a real change and one frame. This replaced a narrower rule in `EmojiFixedTerminalView` —
+"suppress the first post-attach resize when it equals the adopted grid" — deliberately: it was a
+special case of the general one, and two copies of a rule drift.
 
 `PTYHostReattachDaemonTests` asserts both halves the only way they can be asserted: the child
-installs a `SIGWINCH` handler that appends `stty size` to a file, and the file is still empty after
-a whole detach-and-reattach cycle and has exactly one line after the window genuinely moves. The
-screen cannot be the witness here, because a replay puts an earlier size line back on it.
+polls `stty size` and appends a line only when the answer changes, and the file still has one line
+after a whole detach-and-reattach cycle and exactly two after the window genuinely moves. The
+screen cannot be the witness here, because a replay puts an earlier size line back on it. The same
+suite kills a live session's transport and reattaches into a third window size, which is what a
+crash or a socket that went away looks like from here: the child ends on the grid the window
+actually has. `PTYHostSessionDaemonTests` reproduces the original symptom against the real daemon
+— a transport that refuses exactly one `resize`, a child that goes on reporting the old grid while
+nothing is flowing, and the same child landing on the new grid as soon as any output proves the
+link current.
 
 ## Pipes
 
@@ -1197,6 +1277,120 @@ The switch itself stopped being a `defaults write` here. It is presented on the 
 is `.catalogueOnly` by construction — omitting `remotePolicy` is deliberate, so `list_settings` may
 describe the row while neither the phone nor an agent can read or move the value. Starting a
 background daemon on somebody's Mac from a phone is not a thing this switch is going to do.
+
+## The command-line client
+
+`threading-ptyd status`, `sessions`, `journal` and `stop`, run from any shell against the daemon
+that is already listening. It is the **same binary**: the client has to speak the framing, the
+frames and the version gate exactly as the daemon does, and a second executable would be a second
+place for all three to drift, plus one more thing to sign, embed and keep in the bundle. The
+verbs live in `PTYHostCLI.swift`, `PTYHostCLIClient.swift` and `PTYHostCLIFormatting.swift`, all
+inside the same import fence as the daemon, so the client links Foundation, Darwin, Dispatch and
+`ThreadingPTYHostKit` and nothing else.
+
+**The two command lines cannot collide.** `PTYHostCLI.parse` declines anything whose first
+argument begins with `-`, and declines an empty command line, so `--socket <path> --state <dir>`
+and `--default-locations` reach the daemon's own parser exactly as they did before this existed.
+Only a bare word reaches the verb table, which is what makes adding a verb later unable to shadow
+a flag. `PTYHostCLITests/testTheDaemonCommandLineIsUnchanged` is that claim as a test.
+
+| Verb | What it answers | Exit |
+|---|---|---|
+| `status` | whether a socket file is there, whether a daemon answers (`hello`: build, pid, protocol pair), how many sessions it holds split into attached / detached / exited, a `lost` set if the daemon reported one, whether the bundle carries the launch-agent plist, what launchd says about the label, and the path of today's journal file | 0 if a daemon answered and the gate admitted it, else 1 |
+| `sessions` | one row per held session: short id, channel, pid, elapsed uptime, grid, state, exit status, executable basename. `--json` prints the same set with stable keys | 0 if the daemon answered, else 1 |
+| `journal [N]` | the last N journal lines (default 50) through `journalTail`, bounded again by the daemon's own `maximumJournalTailBytes` | 0 if the daemon answered, else 1 |
+| `stop <id-prefix>` | attach with the floor replay budget, then `kill(escalate: true)`, then wait for `exited` | 0 when the ending arrived, else 1 |
+| `help`, `--help` | the usage, on standard output | 0 |
+| a bad verb, an option on the wrong verb, a missing value | the usage, on standard error | 64 (`EX_USAGE`) |
+
+Output is plain aligned text on standard output, one line per row, no colour and no progress; a
+refusal is one sentence on standard error and nothing on standard output. Every wait is bounded by
+a constant in `PTYHostCLIDefaults`, which is separate from `PTYHostDefaults` because the daemon's
+numbers are load-bearing for a process holding somebody's agents and these bound a tool that
+connects, asks once and exits.
+
+**What it refuses to do, and why.**
+
+- **Never `retire`.** Retiring unlinks the socket and drains, and it is the *app's* upgrade
+  policy — decided by `PTYHostUpgradePolicy` from the build, the gate and the held count. A shell
+  command that retired would be a way to interrupt working agents by hand, and on a mismatched
+  daemon it would be worse: `selfTooOld` exists precisely so a newer daemon is never taken down to
+  install an older host. An incompatible daemon is therefore reported and left alone, and `status`
+  exits 1 because something is listening that nothing here can ask anything of.
+- **Never `spawn`.** A session belongs to a conversation the app owns; a child started from a
+  shell would be one no surface could ever show, and the daemon's own `sessions.jsonl` would carry
+  a record the app can only classify as an orphan. Putting a session *in* the daemon is what
+  `PTYHostCLITests`' own wire fixture does, because the tool must not grow a verb for it.
+- **No follow mode.** `journal -f` is refused with the reason rather than silently accepted: the
+  daemon's journal is an ordinary append-only file under the state directory, `status` prints its
+  path, and `tail -f` on that file is better than a socket held open for the same bytes.
+
+`stop` is the one verb that changes anything, and it is `PTYHostSessionStop`'s semantics rather
+than a second dialect: attach first, because `kill` names a session and a connection may only name
+the one it is *bound* to, so a watcher that wants to end a child it is not watching has to become
+its watcher for as long as it takes to say so. The replay is bound to
+`PTYHostReplayDefaults.minimumBudgetBytes` — something about to end a child has no use for its
+history, and the daemon clamps anything smaller up to that anyway. An ambiguous prefix is
+**refused rather than resolved**: the two sessions a prefix reaches are two different people's
+turns. `PTYHostCLIDefaults.stopTimeout` is ten seconds rather than the page's three, because the
+daemon's own arithmetic is `SIGTERM`, a two-second escalation grace, `SIGKILL` and up to half a
+second of output drain, and a run of this measured 2.13 s between `killRequested` and `exited` for
+a `sleep` that did not die on the first signal.
+
+### The registration line, and the one thing the daemon cannot link
+
+`status` reports whether `Contents/Library/LaunchAgents/codes.threading.ptyd.plist` is registered,
+and it cannot ask `SMAppService`: the boundary lint holds this target to Foundation, Darwin,
+Dispatch and the wire package, which is the rule that keeps "it owns the child, the ring, the grid
+and the exit status, and parses nothing" true. `PTYHostRegistration` is the app's, and the app is
+what the daemon must not link.
+
+So it asks the way a person at a prompt would — `launchctl print gui/<uid>/codes.threading.ptyd` —
+and `PTYHostCLIRegistration.parse` reads the answer. Three findings, kept apart because they send
+somebody looking in different places: `registered` with launchd's own `state` word and the pid when
+there is one, `notRegistered` when the text carries "Could not find service", and `unreadable`
+carrying the first line when `launchctl` said something else. Two things in the parser are
+deliberate:
+
+- **The text decides, not the exit status.** `launchctl` exits non-zero for "no such service" and
+  for a malformed domain alike, and those are not the same finding. It has also moved its refusal
+  between standard output and standard error across releases, so both descriptors are read as one
+  string.
+- **A key is matched on the whole line.** `launchctl` prints `spawn type`, `program identifier` and
+  a dozen other keys ending in the words being looked for, so a substring search for `state` or
+  `pid` would answer with whichever came first.
+
+The line names the label, because the answer is about `codes.threading.ptyd` rather than about
+whichever socket the invocation was pointed at — and somebody who named a socket with `--socket` is
+usually asking why the ordinary one is silent.
+
+`PTYHostCLIDefaults.launchctlEnvironmentKey` (`THREADING_PTY_HOST_LAUNCHCTL`) names the program to
+run, and is a test seam in `PTYHostDefaults.ringBudgetEnvironmentKey`'s sense: never a user
+setting. The reason is sharper here than there. There is one registered label on a machine and it
+belongs to the developer's own Threading, so a test that ran the real `launchctl print` would be
+asserting about their login items rather than about this code — and the answer would change when
+they toggled the setting. Every invocation in `PTYHostCLITests` therefore points the key at a
+script replaying a captured `launchctl print`, which is how the parser is exercised over the text
+it actually has to read.
+
+### Tested as the process it is
+
+`PTYHostCLITests` runs the shipping helper twice: once as a daemon on a scratch rendezvous, once as
+a client pointed at it with `--socket`/`--state`. Nothing is stubbed on either side, because a
+client tested against a fake daemon is a client that agrees with a fake. The assertions are what a
+person reads and what the shell gets back — the text, the sentence on standard error, the exit code
+— plus the one thing text cannot prove: after `stop`, the child's **pid** is gone, since a tool
+that sent the right frames and left the child running would pass every text check above it.
+
+Sessions are put into the daemon by a small wire fixture in that file rather than by the tool, and
+the ambiguity case uses two hand-written UUIDs sharing a prefix rather than drawing random ones
+until two collide.
+
+One harness note worth keeping: a coverage build's instrumentation writes `LLVM Profile Error:
+Failed to write file "default.profraw"` to the child's standard error when it cannot place the
+file, and the test host's working directory is `/`. The fixture gives every child a writable
+working directory, and the "help says nothing on standard error" assertion checks that the *tool*
+wrote nothing there rather than that the stream is empty.
 
 ## What is not decided here
 

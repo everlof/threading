@@ -28,6 +28,7 @@ enum PTYHostJournalEvent: String {
     case attached
     case detached
     case resized
+    case resizeFailed
     case killRequested
     case killEscalated
     case exited

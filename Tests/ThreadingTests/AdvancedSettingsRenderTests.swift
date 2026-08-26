@@ -82,6 +82,126 @@ final class AdvancedSettingsRenderTests: XCTestCase {
         XCTAssertEqual(written, 4)
     }
 
+    /// The two command-line-tool rows, in the two states that read differently.
+    ///
+    /// Not installed is the first thing anyone sees. Installed-but-not-on-`PATH` is the state
+    /// worth a picture: the row has to carry a path, a sentence about `PATH` and a line to paste
+    /// into a profile, and whether that stays legible beside a button is not something an
+    /// assertion about its text can answer.
+    @MainActor
+    func testRendersTheCommandLineToolRows() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("AdvancedSettingsRender-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bundle = try makeBundle(in: root, shipping: PTYHostDefaults.helperName)
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let shims = root.appendingPathComponent("bin", isDirectory: true)
+
+        let previousTheme = AppThemeLibrary.current
+        AppThemeLibrary.apply(.system)
+        defer { AppThemeLibrary.apply(previousTheme) }
+
+        var written = 0
+        for state in ["absent", "installed-off-path"] {
+            if state == "installed-off-path" {
+                ThreadingCommandLineTools.refresh(bundleURL: bundle, directory: shims)
+                try CommandLineToolInstaller.install(
+                    tool: PTYHostDefaults.helperName,
+                    home: home,
+                    shimDirectory: shims
+                )
+            }
+            for (appearanceName, appearance) in [
+                ("light", NSAppearance.Name.aqua),
+                ("dark", NSAppearance.Name.darkAqua),
+            ] {
+                let resolvedAppearance = try XCTUnwrap(NSAppearance(named: appearance))
+                var rendered: Data?
+                var foundBothRows = false
+                var rowsAreOnThePicture = false
+                var hasThemeBoundaryViolations = false
+                resolvedAppearance.performAsCurrentDrawingAppearance {
+                    let controller = AdvancedPreferencesViewController(
+                        commandLineTools: CommandLineToolsSurface(
+                            home: home,
+                            shimDirectory: shims,
+                            bundleURL: bundle,
+                            // A `PATH` this directory is deliberately not on, so the row has to
+                            // say the line to add.
+                            loginShellPATH: "/usr/bin:/bin",
+                            asksLoginShell: false
+                        )
+                    )
+                    let host = self.laidOut(
+                        controller.view,
+                        width: Render.width,
+                        height: Render.height
+                    )
+                    host.appearance = resolvedAppearance
+                    controller.view.appearance = resolvedAppearance
+                    AppThemeRefresh.repaint(host)
+                    host.layoutSubtreeIfNeeded()
+                    let rows = [
+                        SettingsRowAnchor.find(
+                            title: L10n.string("Command line tool"),
+                            in: controller.view
+                        ),
+                        SettingsRowAnchor.find(
+                            title: L10n.string("Tools in Threading's terminals"),
+                            in: controller.view
+                        )
+                    ].compactMap { $0 }
+                    foundBothRows = rows.count == 2
+                    // These are the last rows of the longest page in Settings, so a picture of
+                    // the page's first 900 points is a picture of somebody else's rows. The
+                    // first render of this test wrote four files that were byte-identical to the
+                    // local-diagnostics ones, and every assertion in it passed.
+                    rows.last?.scrollToVisible(rows.last?.bounds ?? .zero)
+                    host.layoutSubtreeIfNeeded()
+                    rowsAreOnThePicture = rows.allSatisfy {
+                        host.bounds.contains($0.convert($0.bounds, to: host))
+                    }
+                    hasThemeBoundaryViolations = !ThemeBoundaryAudit.violations(
+                        in: controller.view
+                    ).isEmpty
+                    rendered = self.png(of: host)
+                }
+
+                XCTAssertTrue(foundBothRows, "the page did not build both command-line-tool rows")
+                XCTAssertTrue(rowsAreOnThePicture, "the rows are not inside the rendered frame")
+                XCTAssertFalse(hasThemeBoundaryViolations)
+
+                let url = directory.appendingPathComponent(
+                    "advanced-command-line-tool-\(state)-\(appearanceName).png"
+                )
+                try XCTUnwrap(rendered).write(to: url)
+                written += 1
+            }
+        }
+
+        print("Rendered \(written) Advanced command-line-tool pages to \(directory.path)")
+        XCTAssertEqual(written, 4)
+    }
+
+    private func makeBundle(in root: URL, shipping tool: String) throws -> URL {
+        let bundle = root.appendingPathComponent("Threading.app", isDirectory: true)
+        let helpers = bundle.appendingPathComponent(
+            ThreadingCommandLineToolDefaults.helpersDirectoryPath,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: helpers, withIntermediateDirectories: true)
+        let executable = helpers.appendingPathComponent(tool)
+        try "#!/bin/sh\n".write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path
+        )
+        return bundle
+    }
+
     @MainActor
     @discardableResult
     private func laidOut(_ view: NSView, width: CGFloat, height: CGFloat) -> NSView {

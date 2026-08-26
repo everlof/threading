@@ -33,10 +33,19 @@ final class AdvancedPreferencesViewController: NSViewController {
     /// explains an outcome nobody has caused yet is a row explaining nothing.
     private var backgroundHostRemoval: String?
 
+    /// Whether `~/.local/bin/threading-ptyd` is installed, and whether that directory is on the
+    /// user's `PATH`. Injectable for the inventory's reason: every part of the answer is
+    /// specific to a machine, and a hosted test must not be able to write into a real home.
+    private let commandLineTools: CommandLineToolsSurface
+
     // MARK: - Initialization
 
-    init(backgroundSessions: PTYHostBackgroundSessionsInventory = .init()) {
+    init(
+        backgroundSessions: PTYHostBackgroundSessionsInventory = .init(),
+        commandLineTools: CommandLineToolsSurface = CommandLineToolsSurface()
+    ) {
         self.backgroundSessions = backgroundSessions
+        self.commandLineTools = commandLineTools
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -66,6 +75,10 @@ final class AdvancedPreferencesViewController: NSViewController {
             backgroundSessionsList.show(backgroundSessions.state)
         }
         backgroundSessions.refresh()
+        // The link's own state is read synchronously above; what the login shell exports takes a
+        // login shell, so the row draws without it and gains the `PATH` sentence when it lands.
+        commandLineTools.onChange = { [weak self] in self?.rebuild() }
+        commandLineTools.readLoginShellPATH()
 #if DEBUG
         refreshOutboxRecordCount()
 #endif
@@ -194,6 +207,12 @@ final class AdvancedPreferencesViewController: NSViewController {
                 title: AdvancedStrings.backgroundHostOffTitle,
                 detail: backgroundHostRemoval ?? AdvancedStrings.backgroundHostOffDetail,
                 button: backgroundHostOffButton()
+            ),
+            commandLineToolRow(),
+            SettingsUI.row(
+                title: AdvancedStrings.commandLineToolsPATHTitle,
+                subtitle: AdvancedStrings.commandLineToolsPATHDetail,
+                control: commandLineToolsPATHToggle()
             )
         ])
 
@@ -215,6 +234,76 @@ final class AdvancedPreferencesViewController: NSViewController {
             action: #selector(backgroundHostChanged(_:))
         )
         toggle.setAccessibilityLabel(AdvancedStrings.backgroundHostTitle)
+        return toggle
+    }
+
+    /// One row for the whole of "can I run this from a terminal": where the link is, whether it
+    /// is there, whether the directory holding it is on `PATH`, and the one button that changes
+    /// the answer.
+    ///
+    /// The button toggles rather than repeating **Install** at somebody who has already
+    /// installed it: the row is a statement of the current state, so the control offers the
+    /// only move left. It is disabled, and the detail says why, in the three cases where there
+    /// is no move: the build ships no tool, and the two where the name is taken by something
+    /// Threading did not put there and will not overwrite.
+    private func commandLineToolRow() -> NSView {
+        let status = commandLineTools.status
+        let installed = status.isInstalled
+        let button = SettingsUI.button(
+            installed
+                ? AdvancedStrings.commandLineToolRemoveButton
+                : AdvancedStrings.commandLineToolInstallButton,
+            target: self,
+            action: #selector(toggleCommandLineTool)
+        )
+        switch status.placement {
+        case .installed:
+            button.isEnabled = true
+        case .absent:
+            button.isEnabled = commandLineTools.isShippedInBundle
+        case .foreignLink, .occupied:
+            button.isEnabled = false
+        }
+
+        return row(
+            title: AdvancedStrings.commandLineToolTitle,
+            detail: commandLineToolDetail(status),
+            button: button
+        )
+    }
+
+    private func commandLineToolDetail(_ status: CommandLineToolStatus) -> String {
+        let link = abbreviate(status.linkURL)
+        switch status.placement {
+        case .occupied:
+            return AdvancedStrings.commandLineToolOccupied(path: link)
+        case .foreignLink(let destination):
+            return AdvancedStrings.commandLineToolForeign(
+                path: link,
+                destination: (destination as NSString).abbreviatingWithTildeInPath
+            )
+        case .absent:
+            guard commandLineTools.isShippedInBundle else {
+                return AdvancedStrings.commandLineToolUnavailable
+            }
+            return AdvancedStrings.commandLineToolAbsent(path: link)
+        case .installed:
+            let installed = AdvancedStrings.commandLineToolInstalled(path: link)
+            guard status.directoryIsOnPATH == false else { return installed }
+            return installed + " " + AdvancedStrings.commandLineToolNotOnPATH(
+                directory: abbreviate(commandLineTools.binaryDirectory),
+                line: commandLineTools.profileLine
+            )
+        }
+    }
+
+    private func commandLineToolsPATHToggle() -> ThemedToggle {
+        let toggle = SettingsUI.toggle(
+            isOn: AppSettings.shared.prependsCommandLineToolsToPATH,
+            target: self,
+            action: #selector(commandLineToolsPATHChanged(_:))
+        )
+        toggle.setAccessibilityLabel(AdvancedStrings.commandLineToolsPATHTitle)
         return toggle
     }
 
@@ -399,6 +488,31 @@ final class AdvancedPreferencesViewController: NSViewController {
         }
         backgroundSessions.refresh()
         rebuild()
+    }
+
+    // MARK: - Command Line Tools
+
+    /// Installs the link, or removes it when it is already there.
+    ///
+    /// No confirmation either way. Installing writes one symlink into the user's own directory
+    /// and removing deletes the same one; neither ends anything, and the row it rebuilds into is
+    /// the acknowledgement. A refusal is a sheet, because the two refusals both mean "something
+    /// of yours is in the way" and that is not readable from the row alone.
+    @objc private func toggleCommandLineTool() {
+        do {
+            if commandLineTools.status.isInstalled {
+                try commandLineTools.remove()
+            } else {
+                try commandLineTools.install()
+            }
+        } catch {
+            presentFailure(error)
+        }
+        rebuild()
+    }
+
+    @objc private func commandLineToolsPATHChanged(_ sender: ThemedToggle) {
+        AppSettings.shared.prependsCommandLineToolsToPATH = sender.state == .on
     }
 
     private func stopBackgroundSession(_ session: PTYHostHeldSession) {
@@ -592,6 +706,49 @@ enum AdvancedStrings {
         L10n.string(
             "The agent ends and whatever it is working on right now is lost. The conversation is "
                 + "kept and can be resumed from the sidebar."
+        )
+    }
+
+    static var commandLineToolTitle: String { L10n.string("Command line tool") }
+    static func commandLineToolAbsent(path: String) -> String {
+        L10n.format(
+            "Install adds %@, so threading-ptyd runs in any terminal and keeps working after "
+                + "Threading is updated or moved.",
+            path
+        )
+    }
+    static func commandLineToolInstalled(path: String) -> String {
+        L10n.format("Installed at %@.", path)
+    }
+    static func commandLineToolNotOnPATH(directory: String, line: String) -> String {
+        L10n.format(
+            "%1$@ is not on your PATH. Add this line to your shell profile: %2$@",
+            directory,
+            line
+        )
+    }
+    static func commandLineToolForeign(path: String, destination: String) -> String {
+        L10n.format(
+            "%1$@ already points at %2$@, so Threading left it alone.",
+            path,
+            destination
+        )
+    }
+    static func commandLineToolOccupied(path: String) -> String {
+        L10n.format("Something else is already at %@, so Threading left it alone.", path)
+    }
+    static var commandLineToolUnavailable: String {
+        L10n.string("This build does not include the tool yet, so there is nothing to install.")
+    }
+    static var commandLineToolInstallButton: String { L10n.string("Install") }
+    static var commandLineToolRemoveButton: String { L10n.string("Remove") }
+
+    static var commandLineToolsPATHTitle: String { L10n.string("Tools in Threading's terminals") }
+    static var commandLineToolsPATHDetail: String {
+        L10n.string(
+            "Puts Threading's command line tools on the PATH of every terminal and agent it "
+                + "starts, so threading-ptyd works in them without changing your shell profile. "
+                + "Terminals already open keep the PATH they started with."
         )
     }
 

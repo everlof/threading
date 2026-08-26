@@ -182,6 +182,107 @@ final class PTYHostSessionTests: XCTestCase {
         XCTAssertGreaterThan(resize.grid.ypixel, 0)
     }
 
+    /// A window size the view produced while the spawn was still in flight is not lost: it is
+    /// held and sent the moment the daemon says the session exists.
+    ///
+    /// The view lays out during a launch, so this is the ordinary case rather than a corner one.
+    /// A `resize` before `spawned` names a session the daemon has not created yet, and the frame
+    /// is fire-and-forget — nothing would say it had been thrown away — so the grid is recorded
+    /// first and delivered at the convergence point.
+    func testAResizeDuringTheSpawnIsHeldAndSentWhenTheChildExists() throws {
+        let pending = try startHostBackedSession(confirmingSpawn: false)
+
+        pending.session.terminalView.frame = Fixture.resizedFrame
+        pending.session.terminalView.layoutSubtreeIfNeeded()
+        settle()
+        XCTAssertTrue(
+            pending.transport.resizes.isEmpty,
+            "there is no session on the other end to resize until the daemon says there is"
+        )
+
+        let wanted = pending.session.terminalView.terminalDimensions
+        pending.transport.send(.spawned(PTYHostSpawned(
+            id: pending.identity,
+            pid: Fixture.childPid,
+            startTime: PTYHostProcessStartTime(seconds: 1, microseconds: 2)
+        )))
+        settle()
+
+        XCTAssertEqual(
+            pending.transport.resizes.count,
+            1,
+            "the grid the view settled on has to reach the child, once"
+        )
+        XCTAssertEqual(pending.transport.resizes.first?.grid.cols, wanted.cols)
+        XCTAssertEqual(pending.transport.resizes.first?.grid.rows, wanted.rows)
+    }
+
+    /// A resize the transport refused is not an ending, and it is not forgotten either.
+    ///
+    /// This is the bug the reconciliation exists for, at the seam where it starts: `resize` has
+    /// an answering frame but no retry of its own, so a refused write used to leave the child on
+    /// one grid and the emulator on another until the window happened to move again — and the
+    /// agent's own lines came back wrapped mid-word. Bytes arriving are the evidence that the
+    /// transport is current again.
+    func testARefusedResizeIsNotAnEndingAndReachesTheChildAfterwards() throws {
+        let link = try startHostBackedSession()
+        link.transport.refuseResizes(true)
+
+        link.session.terminalView.frame = Fixture.resizedFrame
+        link.session.terminalView.layoutSubtreeIfNeeded()
+        settle()
+
+        let wanted = link.session.terminalView.terminalDimensions
+        XCTAssertEqual(link.transport.refusedResizes, 1, "the fixture has to have dropped one")
+        XCTAssertTrue(link.transport.resizes.isEmpty, "nothing can have reached the daemon")
+        XCTAssertTrue(
+            link.recorder.exitCodes.isEmpty,
+            "a window size that could not be written is not a terminal that died"
+        )
+        XCTAssertTrue(link.session.isHostBacked)
+
+        link.transport.refuseResizes(false)
+        link.transport.send(output: Array("working".utf8))
+        settle()
+
+        XCTAssertEqual(
+            link.transport.resizes.count,
+            1,
+            "the grid the view is on has to reach the child once the transport is current"
+        )
+        XCTAssertEqual(link.transport.resizes.first?.grid.cols, wanted.cols)
+        XCTAssertEqual(link.transport.resizes.first?.grid.rows, wanted.rows)
+
+        // And it is one frame, not a retry loop: the daemon's answer ends the exchange.
+        link.transport.send(.resized(PTYHostResized(
+            id: link.identity,
+            grid: try XCTUnwrap(link.transport.resizes.first?.grid)
+        )))
+        link.transport.send(output: Array("more".utf8))
+        settle()
+        XCTAssertEqual(link.transport.resizes.count, 1)
+    }
+
+    /// The daemon holding the grid already is the end of it: nothing is sent for a size it has
+    /// just reported, and nothing is sent twice for a size it has acknowledged.
+    func testAGridTheHostAlreadyHoldsIsNeverSentBack() throws {
+        let link = try startHostBackedSession()
+        let before = link.transport.resizes.count
+
+        guard case .pty(let inForce)? = link.transport.spawnRequest?.channel else {
+            return XCTFail("version 1 spawns a pseudo-terminal")
+        }
+        link.transport.send(.resized(PTYHostResized(id: link.identity, grid: inForce)))
+        link.transport.send(output: Array("idle".utf8))
+        settle()
+
+        XCTAssertEqual(
+            link.transport.resizes.count,
+            before,
+            "an acknowledgement of the grid in force is not a reason to send anything"
+        )
+    }
+
     // MARK: - The spawn
 
     /// The daemon is handed the app's own launch, verbatim, and the real grid.
@@ -558,7 +659,9 @@ final class PTYHostSessionTests: XCTestCase {
         return session
     }
 
-    private func startHostBackedSession() throws -> HostedSession {
+    private func startHostBackedSession(
+        confirmingSpawn: Bool = true
+    ) throws -> HostedSession {
         let session = makeSession()
         let recorder = Recorder()
         recorders.append(recorder)
@@ -574,11 +677,13 @@ final class PTYHostSessionTests: XCTestCase {
 
         let transport = try XCTUnwrap(box.transport, "the launch never reached the host")
         let identity = PTYHostSessionIdentity(session.identity)
-        transport.send(.spawned(PTYHostSpawned(
-            id: identity,
-            pid: Fixture.childPid,
-            startTime: PTYHostProcessStartTime(seconds: 1, microseconds: 2)
-        )))
+        if confirmingSpawn {
+            transport.send(.spawned(PTYHostSpawned(
+                id: identity,
+                pid: Fixture.childPid,
+                startTime: PTYHostProcessStartTime(seconds: 1, microseconds: 2)
+            )))
+        }
         settle()
 
         return HostedSession(
@@ -633,6 +738,8 @@ private final class FakeHostTransport: PTYHostSessionTransport, @unchecked Senda
     private var frames: [PTYHostFrame] = []
     private var inputStorage: [Data] = []
     private var closedStorage = false
+    private var refusesResizesStorage = false
+    private var refusedResizeCount = 0
 
     init(events: PTYHostClient.Events) {
         self.events = events
@@ -642,7 +749,17 @@ private final class FakeHostTransport: PTYHostSessionTransport, @unchecked Senda
 
     func spawn(_ request: PTYHostSpawnRequest) throws { record(.spawn(request)) }
     func attach(_ request: PTYHostAttach) throws { record(.attach(request)) }
-    func resize(_ request: PTYHostResize) throws { record(.resize(request)) }
+
+    /// Refuses while `refusesResizes` is set, exactly as a real client refuses a write on a
+    /// transport that is not ready — the one failure a window size has to survive.
+    func resize(_ request: PTYHostResize) throws {
+        lock.lock()
+        let refuses = refusesResizesStorage
+        if refuses { refusedResizeCount += 1 }
+        lock.unlock()
+        if refuses { throw PTYHostClientError.notReady }
+        record(.resize(request))
+    }
     func detach(_ request: PTYHostDetach) throws { record(.detach(request)) }
 
     /// Meaningless on a terminal, and never sent by one — recorded so the test can say so.
@@ -676,6 +793,19 @@ private final class FakeHostTransport: PTYHostSessionTransport, @unchecked Senda
         lock.lock()
         defer { lock.unlock() }
         return closedStorage
+    }
+
+    /// How many resizes were refused, so a test can say the drop it is about really happened.
+    var refusedResizes: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return refusedResizeCount
+    }
+
+    func refuseResizes(_ refuses: Bool) {
+        lock.lock()
+        refusesResizesStorage = refuses
+        lock.unlock()
     }
 
     var spawnRequest: PTYHostSpawnRequest? {

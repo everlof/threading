@@ -30,11 +30,6 @@ struct PTYHostArguments {
     let socketPath: String
     let stateDirectory: String
 
-    static let usage = """
-        usage: threading-ptyd --socket <path> --state <dir>
-               threading-ptyd \(PTYHostDefaultLocations.defaultLocationsArgument)
-        """
-
     private enum Flag {
         static let socket = "--socket"
         static let state = "--state"
@@ -112,8 +107,19 @@ enum ThreadingPTYHost {
         // being removed by somebody who saw only the other.
         signal(SIGPIPE, SIG_IGN)
 
-        guard let arguments = PTYHostArguments.parse(Array(CommandLine.arguments.dropFirst())) else {
-            FileHandle.standardError.write(Data((PTYHostArguments.usage + "\n").utf8))
+        let command = Array(CommandLine.arguments.dropFirst())
+
+        // A bare verb is somebody asking the *running* daemon a question, and it is answered by
+        // this same binary acting as a client — one place for the framing, the frames and the
+        // version gate rather than two that drift. `PTYHostCLI.parse` declines anything that
+        // starts with a flag, so every daemon command line below reaches the daemon's own parser
+        // exactly as it did before this existed.
+        if let parsed = PTYHostCLI.parse(command) {
+            exit(PTYHostCLI.run(parsed, build: buildString))
+        }
+
+        guard let arguments = PTYHostArguments.parse(command) else {
+            FileHandle.standardError.write(Data((PTYHostCLI.usage + "\n").utf8))
             exit(PTYHostDefaults.usageExitCode)
         }
 

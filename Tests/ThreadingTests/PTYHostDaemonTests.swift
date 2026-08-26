@@ -286,6 +286,47 @@ final class PTYHostDaemonTests: XCTestCase {
         try rejoined.waitForOutput(containing: "third 40 100", timeout: Fixture.childTimeout)
     }
 
+    /// A `resize` is answered with the grid the terminal actually took, on the connection that
+    /// asked for it.
+    ///
+    /// The frame `resize` did without in version 1, and the one thing the app cannot work out for
+    /// itself: a write across a socket may be refused, so "the child is on this grid" has to be
+    /// something the daemon says rather than something the app assumes. The acknowledgement is
+    /// asserted beside the child's own `stty size`, because a daemon that answered the frame and
+    /// did nothing to the terminal would pass either assertion alone.
+    func testAResizeIsAnsweredWithTheGridTheTerminalTook() throws {
+        let daemon = try startDaemon()
+        let client = try connect(to: daemon)
+        let id = Self.newIdentity()
+
+        _ = try spawn(
+            on: client,
+            id: id,
+            script: "while read -r line; do printf \"%s \" \"$line\"; stty size; done",
+            grid: PTYHostGrid(cols: 80, rows: 24)
+        )
+
+        let wanted = PTYHostGrid(cols: 100, rows: 40, xpixel: 800, ypixel: 640)
+        client.send(.resize(PTYHostResize(id: id, grid: wanted)))
+
+        let resized = try nextResized(on: client)
+        XCTAssertEqual(resized.id, id, "an acknowledgement names the session it is about")
+        XCTAssertEqual(
+            resized.grid,
+            wanted,
+            "the answer is the grid that reached TIOCSWINSZ, pixels included"
+        )
+
+        client.sendInput("after\n")
+        try client.waitForOutput(containing: "after 40 100", timeout: Fixture.childTimeout)
+
+        // And what was acknowledged is what a later watcher inherits: the acknowledgement and the
+        // durable grid are the same fact, not two that could drift.
+        client.send(.list)
+        let sessions = try nextSessions(on: client)
+        XCTAssertEqual(sessions.first?.grid, wanted)
+    }
+
     // MARK: - Endings
 
     func testReportsAnOrdinaryExitStatus() throws {
@@ -789,6 +830,16 @@ final class PTYHostDaemonTests: XCTestCase {
             return false
         }
         guard case .foreground(let body) = frame else { throw PTYHostTestFailure("\(frame)") }
+        return body
+    }
+
+    private func nextResized(on client: PTYHostTestClient) throws -> PTYHostResized {
+        let frame = try client.nextControl(timeout: Fixture.replyTimeout) {
+            if case .resized = $0 { return true }
+            if case .error = $0 { return true }
+            return false
+        }
+        guard case .resized(let body) = frame else { throw PTYHostTestFailure("\(frame)") }
         return body
     }
 

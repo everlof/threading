@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import Dispatch
 import Foundation
 import ThreadingDomain
 import ThreadingPTYHostKit
@@ -23,10 +24,14 @@ final class PTYHostSessionDaemonTests: XCTestCase {
     private enum Fixture {
         static let helperName = "threading-ptyd"
         static let frame = NSRect(x: 0, y: 0, width: 640, height: 400)
+        /// A genuinely different window, so the resize under test is a real change.
+        static let widerFrame = NSRect(x: 0, y: 0, width: 900, height: 620)
         /// Bounded: each covers a process launch plus a socket round trip.
         static let listenTimeout: TimeInterval = 10
         static let childTimeout: TimeInterval = 15
         static let exitTimeout: TimeInterval = 15
+        /// Long enough that "the child never learned" means it rather than "not yet".
+        static let quietWindow: TimeInterval = 2
     }
 
     // MARK: - Fixture state
@@ -114,7 +119,111 @@ final class PTYHostSessionDaemonTests: XCTestCase {
         XCTAssertFalse(session.isRunning)
     }
 
+    /// A window size the transport refused still reaches the child.
+    ///
+    /// This is the bug, reproduced end to end: `resize` is fire-and-forget and has no retry of
+    /// its own, so one refused write left the daemon's pty on an old grid while this process's
+    /// emulator moved to the new one — measured on a live machine as a 111×81 pty under a
+    /// 210-column pane, with the agent's own lines wrapped mid-word by the emulator's autowrap.
+    /// In-process the same seam is a synchronous `ioctl` that cannot fail after the emulator has
+    /// resized, which is why only the host-backed path could ever diverge.
+    ///
+    /// Both halves are asserted on what the **child** observed, through `stty size`: that it is
+    /// still on the old grid while nothing is flowing, and that it lands on the new one once
+    /// there is evidence the transport is current again. A frame count would say neither.
+    func testAWindowSizeTheTransportRefusedStillReachesTheChild() throws {
+        let socketPath = try startDaemon()
+        let log = directory.appendingPathComponent("winsize.log", isDirectory: false)
+        let refusals = ResizeRefusals()
+
+        let session = makeSession()
+        session.hostTransportFactory = { events in
+            let client = PTYHostClient(socketPath: socketPath, build: "test", events: events)
+            try client.connect()
+            return RefusingResizeTransport(client: client, refusals: refusals)
+        }
+        // Silent until it is spoken to: it writes every size change to a file and prints only
+        // what it is sent, so a quiet window is genuinely quiet and the output that converges
+        // the link arrives exactly when this test asks for it.
+        session.start(plan: AgentLaunchPlan(
+            executable: "/bin/sh",
+            arguments: ["-c", Self.sizeLoggingScript(log: log)],
+            resumeState: .unavailable
+        ))
+        XCTAssertTrue(session.isHostBacked, "the launch did not reach the daemon")
+        XCTAssertTrue(
+            pump(until: { self.sizeLines(in: log).count >= 1 }, timeout: Fixture.childTimeout),
+            "the child never reported the size it was spawned at"
+        )
+        let spawnedAt = try XCTUnwrap(sizeLines(in: log).last)
+
+        // The window moves, and the frame that would carry it is dropped on the floor.
+        session.terminalView.frame = Fixture.widerFrame
+        session.terminalView.layoutSubtreeIfNeeded()
+        XCTAssertTrue(
+            pump(until: { refusals.count >= 1 }, timeout: Fixture.childTimeout),
+            "the fixture has to have refused the resize this test is about"
+        )
+        refusals.stop()
+
+        let wanted = session.terminalView.terminalDimensions
+        _ = pump(until: { false }, timeout: Fixture.quietWindow)
+        XCTAssertEqual(
+            sizeLines(in: log),
+            [spawnedAt],
+            "a dropped resize is a child still on the old grid — the symptom this fixes"
+        )
+        XCTAssertNotEqual(
+            "\(wanted.rows) \(wanted.cols)",
+            spawnedAt,
+            "the emulator has to have moved, or there is no divergence to reconcile"
+        )
+        XCTAssertTrue(session.isRunning, "a window size that could not be written is not an end")
+
+        // Anything arriving proves the transport is current, and the grid nobody forgot is sent.
+        session.terminalView.sendUserText("probe\r")
+        XCTAssertTrue(
+            pump(until: { self.sizeLines(in: log).count >= 2 }, timeout: Fixture.childTimeout),
+            "the window size that was dropped never reached the child"
+        )
+        XCTAssertEqual(
+            sizeLines(in: log).last,
+            "\(wanted.rows) \(wanted.cols)",
+            "the child has to end on the grid the window actually has"
+        )
+
+        _ = pump(until: { false }, timeout: Fixture.quietWindow)
+        XCTAssertEqual(
+            sizeLines(in: log).count,
+            2,
+            "one window change is one change of the child's size, not a retry loop"
+        )
+    }
+
     // MARK: - Helpers
+
+    /// Polls its own window size into `log` and echoes whatever it is sent.
+    ///
+    /// The poll rather than a `SIGWINCH` trap because the size is the fact that matters, and it
+    /// depends on no shell's trap semantics; the `read` is what lets a test decide when output
+    /// flows, since a pty echoes and any output at all is evidence the link is current.
+    private static func sizeLoggingScript(log: URL) -> String {
+        "last=; while :; do now=$(stty size); "
+            + "if [ \"$now\" != \"$last\" ]; then printf '%s\\n' \"$now\" >> \(log.path); "
+            + "last=$now; fi; if read -t 1 line; then printf '[%s]' \"$line\"; fi; done"
+    }
+
+    /// The size lines the child has written. `stty size` prints "rows cols".
+    private func sizeLines(in log: URL) -> [String] {
+        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return [] }
+        return text
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { line in
+                let parts = line.split(separator: " ")
+                return parts.count == 2 && parts.allSatisfy { $0.allSatisfy(\.isNumber) }
+            }
+    }
 
     private func startDaemon() throws -> String {
         let helper = Bundle.main.bundleURL
@@ -172,6 +281,73 @@ final class PTYHostSessionDaemonTests: XCTestCase {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
         }
         return condition()
+    }
+}
+
+// MARK: - A transport that drops a resize
+
+/// How many resizes to refuse, and how many were.
+///
+/// A class because the factory that reads it is `@Sendable` and the test that asks is not: the
+/// same shape `TransportBox` uses next door for the same reason.
+private final class ResizeRefusals: @unchecked Sendable {
+    private let lock = NSLock()
+    private var refuses = true
+    private var refused = 0
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return refused
+    }
+
+    /// Stop refusing. What follows is an ordinary client on an ordinary connection.
+    func stop() {
+        lock.lock()
+        refuses = false
+        lock.unlock()
+    }
+
+    /// Answers whether this one is refused, counting it if it is.
+    func refusesNext() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if refuses { refused += 1 }
+        return refuses
+    }
+}
+
+/// The shipping client with one hole in it: `resize` throws while the fixture says so.
+///
+/// A decorator rather than a fake, because what is under test is the *daemon's* pty and the
+/// child's own `stty size` — everything except the one write has to be the real thing, over a
+/// real socket, or the reconciliation would be proven against a simulation of the failure it
+/// exists for. `PTYHostClientError.notReady` is what a real client throws for a transport that
+/// is not current, which is the failure the diagnosis measured.
+private final class RefusingResizeTransport: PTYHostSessionTransport, @unchecked Sendable {
+
+    private let client: PTYHostClient
+    private let refusals: ResizeRefusals
+
+    init(client: PTYHostClient, refusals: ResizeRefusals) {
+        self.client = client
+        self.refusals = refusals
+    }
+
+    var queue: DispatchQueue { client.queue }
+
+    func spawn(_ request: PTYHostSpawnRequest) throws { try client.spawn(request) }
+    func attach(_ request: PTYHostAttach) throws { try client.attach(request) }
+    func detach(_ request: PTYHostDetach) throws { try client.detach(request) }
+    func closeInput(_ request: PTYHostCloseInput) throws { try client.closeInput(request) }
+    func kill(_ request: PTYHostKill) throws { try client.kill(request) }
+    func sendInput(_ bytes: Data) throws { try client.sendInput(bytes) }
+    func drainWrites(until deadline: Date) -> Bool { client.drainWrites(until: deadline) }
+    func close() { client.close() }
+
+    func resize(_ request: PTYHostResize) throws {
+        guard !refusals.refusesNext() else { throw PTYHostClientError.notReady }
+        try client.resize(request)
     }
 }
 

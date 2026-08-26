@@ -757,6 +757,34 @@ that has already cost one day's journal 23 unparseable lines. The app reads a bo
 daemon's journal through a `journalTail` frame rather than sharing the file. See
 [`pty-host.md`](pty-host.md).
 
+**`Threading/bin/` is the third subdirectory, and the one that is deliberately not a boundary.**
+It holds one symlink per public command-line tool — today `threading-ptyd` — each pointing into
+the running bundle's `Contents/Helpers`. It is `0755` rather than `0700` on purpose: unlike
+`bridge/` and `pty/`, nothing here is a secret, every entry names a file inside a signed
+application bundle that anyone who can read `/Applications` can already read, and calling it a
+boundary would be claiming a protection it does not provide.
+
+**The indirection is the whole feature.** A user installs `~/.local/bin/threading-ptyd` pointing
+at the shim, never into the bundle, because the bundle moves: `scripts/autoinstall.sh` replaces
+`/Applications/Threading.app` wholesale on every commit to master and a Debug build runs from a
+DerivedData path that is different again. A link into `Contents/Helpers` would break the first
+time either happened, and would break *silently* — `command -v` still finds the name and the
+exec is what fails. `ThreadingCommandLineTools.refresh` rewrites this directory at every launch
+to name the bundle that is actually running, so the user-facing link is written once and never
+has to be written again.
+
+The refresh is idempotent and narrow. A link already pointing where it should is left untouched,
+so an ordinary launch is one `readlink` per tool and no writes, and only a launch that actually
+moved something journals a line. A wrong link is replaced with `symlink(2)` into a uniquely named
+neighbour followed by `rename(2)`, so the name never resolves to nothing in between. Nothing that
+is not ours is touched: a name a public tool claims that holds a regular file is reported and
+left, and an entry that is not one of the public tools is removed only when it is a symlink into
+some bundle's `Contents/Helpers` under its own name, which is the shape the refresh writes and
+nothing else does. Resolved through `StateManager`'s hosted-test redirect for the reason above
+one paragraph: a hosted test would otherwise repoint the developer's own shims at the test host.
+`~/.local/bin` itself is the user's, created if missing and never otherwise written to, and no
+shell profile is ever edited — the Advanced row shows the line to add and stops there.
+
 **The daemon's launchd registration adds nothing to this directory, and that is deliberate.** What
 records that the agent is registered is launchd's own Background Task Management store and the
 Login Items row, both keyed by the label `codes.threading.ptyd` and neither of them Threading's to
