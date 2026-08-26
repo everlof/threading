@@ -658,9 +658,10 @@ final class AgentWorkHydrationTests: XCTestCase {
             session: session,
             rootPath: repositoryRoot
         )
+        let reopened = try await eventually { second.presentation(for: target) }
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(
-            second.presentation(for: target)?.observedChangeCount, 1,
+            reopened.observedChangeCount, 1,
             "the checkpoint was folded in twice across a relaunch"
         )
     }
