@@ -22,9 +22,15 @@ enum SessionWorkspaceDrawer {
     /// A throw is read this far ahead, in seconds — the same read the row swipe uses, so a flick
     /// that stops short still lands where it was aimed.
     static let projection: CGFloat = MobileRowSwipe.projection
-    /// The settle after a release, and the spring that stops it ringing.
+    /// The settle after a release: the whole slide's time, the least a short remainder may
+    /// take, and the spring that stops it ringing.
     static let settleDuration: TimeInterval = 0.34
+    static let minimumSettleDuration: TimeInterval = 0.16
     static let settleDamping: CGFloat = 0.9
+    /// The most of a throw the settle's spring is handed, in remaining distances per second. A
+    /// flick released a few points short of home would otherwise arrive at hundreds, and a
+    /// spring started that hard overshoots: the panel past its edge, then back.
+    static let maximumSettleVelocity: CGFloat = 10
     /// A drag that starts this close to the panel's leading edge belongs to the navigation
     /// stack inside it when that stack has somewhere to pop to.
     static let navigationPopEdge: CGFloat = 24
@@ -67,12 +73,81 @@ enum SessionWorkspaceDrawer {
         velocity.x > 0 && velocity.x > abs(velocity.y)
     }
 
-    /// Whether a pan on the chat is the one that opens the drawer: it began at the right bezel
-    /// and is heading leftward, more sideways than down. Answered on velocity at the moment the
-    /// pan would begin, the way the row swipe is, so a scroll that happens to start near the
-    /// edge is declined before the list has waited for anything.
-    static func isOpeningEdgeTouch(location: CGPoint, velocity: CGPoint, width: CGFloat) -> Bool {
-        location.x >= width - openingEdge && velocity.x < 0 && -velocity.x > abs(velocity.y)
+    /// Whether a pan on the chat is the one that opens the drawer: it touched down at the right
+    /// bezel and has headed leftward since, more sideways than down.
+    ///
+    /// Asked at the moment the pan would begin, the way the row swipe is, so a scroll that
+    /// happens to start near the edge is declined before the list has waited for anything. By
+    /// then the finger has already travelled the recogniser's own hysteresis — ten points on a
+    /// quiet frame, and on a frame the terminal was busy drawing, however far it got before the
+    /// next touch arrived. So the edge is judged where the touch *began*, recovered as the
+    /// location less the translation, not where the finger is now: judged there, a quick swipe
+    /// from the bezel had left the edge zone before anyone asked, and opened nothing. The
+    /// direction is read off the same path rather than the velocity, because a whole path is
+    /// steadier than the last two samples; the velocity answers only for a pan that reports no
+    /// travel.
+    static func isOpeningEdgeTouch(
+        location: CGPoint,
+        translation: CGPoint,
+        velocity: CGPoint,
+        width: CGFloat
+    ) -> Bool {
+        guard location.x - translation.x >= width - openingEdge else { return false }
+        let heading = translation == .zero ? velocity : translation
+        return heading.x < 0 && -heading.x > abs(heading.y)
+    }
+
+    /// Which recognisers under the finger wait for the drawer's pans: the pans on scroll views,
+    /// which are the ones competing for the same drag — the list's own scroll, the terminal's
+    /// mouse and selection pans. Nothing else waits. A wait ends only when the drawer's pan
+    /// fails, and a pan does not fail while a finger rests on the glass, so a long press made to
+    /// wait for it fired at touch-up instead of after its own delay; the terminal's word
+    /// selection did exactly that.
+    static func isCompetingPan(_ other: UIGestureRecognizer) -> Bool {
+        other is UIPanGestureRecognizer && other.view is UIScrollView
+    }
+
+    /// How a release settles: which side, at what pace, and with how much of the throw.
+    struct Settle: Equatable {
+        let opens: Bool
+        /// A multiplier on the remaining slide's own time. One keeps `settleDuration`'s pace
+        /// over whatever is left; less slows a short remainder down to `minimumSettleDuration`,
+        /// so a release a few points from home does not snap.
+        let completionSpeed: CGFloat
+        /// The finger's speed toward where the panel is going, as a spring reads it: in
+        /// remaining distances per second, negative when the finger was heading the other way.
+        let initialVelocity: CGFloat
+    }
+
+    /// The settle for a release with the drawer `openness` open and the finger moving at
+    /// `velocity` points per second, negative toward the open side. The side is `settlesOpen`'s
+    /// answer; the spring is handed the throw, so a flick carries on at the finger's speed
+    /// rather than easing out from wherever it let go.
+    static func settle(openness: CGFloat, velocity: CGFloat, width: CGFloat) -> Settle {
+        settle(
+            opens: settlesOpen(openness: openness, velocity: velocity, width: width),
+            openness: openness,
+            velocity: velocity,
+            width: width
+        )
+    }
+
+    /// The settle to a side already decided — a gesture the system cancelled goes back where it
+    /// came from, whatever the position says.
+    static func settle(opens: Bool, openness: CGFloat, velocity: CGFloat, width: CGFloat) -> Settle {
+        let remaining = min(1, max(0, opens ? 1 - openness : openness))
+        let distance = remaining * width
+        let toward = opens ? -velocity : velocity
+        let initialVelocity = distance > 0
+            ? min(maximumSettleVelocity, max(-maximumSettleVelocity, toward / distance))
+            : 0
+        let remainingTime = Double(remaining) * settleDuration
+        let completionSpeed = remainingTime > 0 ? min(1, remainingTime / minimumSettleDuration) : 1
+        return Settle(
+            opens: opens,
+            completionSpeed: CGFloat(completionSpeed),
+            initialVelocity: initialVelocity
+        )
     }
 }
 
@@ -208,6 +283,8 @@ final class SessionWorkspaceDrawerCoordinator: NSObject, UIGestureRecognizerDele
     private var closeRecognizer: UIPanGestureRecognizer?
     /// The transition a finger is driving, while it is; nil for a tap's presentation.
     private var interaction: UIPercentDrivenInteractiveTransition?
+    /// A content refresh that arrived under the finger, owed once it lets go.
+    private var needsContentRefresh = false
 
     init(drawer: @escaping () -> AnyView) {
         self.drawer = drawer
@@ -249,6 +326,14 @@ final class SessionWorkspaceDrawerCoordinator: NSObject, UIGestureRecognizerDele
     }
 
     func refreshContent() {
+        // Not under a finger. The chat re-renders as its title and activity change, and each
+        // pass would hand the hosted tree a new root to diff on the frames the slide is
+        // competing for; the refresh is applied once the finger lets go.
+        guard interaction == nil else {
+            needsContentRefresh = true
+            return
+        }
+        needsContentRefresh = false
         hosting?.rootView = drawer()
     }
 
@@ -267,20 +352,28 @@ final class SessionWorkspaceDrawerCoordinator: NSObject, UIGestureRecognizerDele
     }
 
     private func present(interactive: Bool) {
-        guard let presenting else { return }
+        // Another presentation on this controller — a sheet, or the last drawer still on its
+        // way out — refuses a second, and UIKit says so only in the log. A finger that began
+        // then would drive an interaction nothing ever started, and its record would sit here
+        // holding every later dismissal off; so it is not begun.
+        guard let presenting, presenting.presentedViewController == nil else { return }
         let transition = SessionWorkspaceDrawerTransition()
         transition.reducesMotion = reducesMotion
         transition.onPresentationEnd = { [weak self] completed in
-            self?.interaction = nil
-            self?.onPresentationChange?(completed)
-            if !completed { self?.hosting = nil }
+            guard let self else { return }
+            self.interaction = nil
+            self.onPresentationChange?(completed)
+            if !completed { self.hosting = nil }
+            if self.needsContentRefresh { self.refreshContent() }
         }
         transition.onDismissalEnd = { [weak self] completed in
-            self?.interaction = nil
+            guard let self else { return }
+            self.interaction = nil
             if completed {
-                self?.hosting = nil
-                self?.onPresentationChange?(false)
+                self.hosting = nil
+                self.onPresentationChange?(false)
             }
+            if self.needsContentRefresh { self.refreshContent() }
         }
         transition.onScrimTapped = { [weak self] in self?.dismissIfNeeded() }
         let hosting = UIHostingController(rootView: drawer())
@@ -323,17 +416,40 @@ final class SessionWorkspaceDrawerCoordinator: NSObject, UIGestureRecognizerDele
                 translation: translation,
                 width: width
             )
-            if recognizer.state == .ended, SessionWorkspaceDrawer.settlesOpen(
-                openness: openness,
-                velocity: recognizer.velocity(in: view).x,
-                width: width
-            ) {
-                interaction.finish()
-            } else {
-                interaction.cancel()
-            }
+            let settle = recognizer.state == .ended
+                ? SessionWorkspaceDrawer.settle(
+                    openness: openness,
+                    velocity: recognizer.velocity(in: view).x,
+                    width: width
+                )
+                : SessionWorkspaceDrawer.settle(
+                    opens: false, openness: openness, velocity: 0, width: width
+                )
+            complete(interaction, finishing: settle.opens, settle: settle)
         default:
             break
+        }
+    }
+
+    /// Lets the transition go where the release decided, at the pace and with the throw the
+    /// arithmetic gave it. The timing curve stated here is the one the remainder runs on: a
+    /// percent-driven transition finishes an interruptible animator on its `completionCurve`
+    /// otherwise, which is a cubic that knows nothing of the finger — the spring on the animator
+    /// only ever ran for a tap's presentation.
+    private func complete(
+        _ interaction: UIPercentDrivenInteractiveTransition,
+        finishing: Bool,
+        settle: SessionWorkspaceDrawer.Settle
+    ) {
+        interaction.completionSpeed = settle.completionSpeed
+        interaction.timingCurve = UISpringTimingParameters(
+            dampingRatio: SessionWorkspaceDrawer.settleDamping,
+            initialVelocity: CGVector(dx: settle.initialVelocity, dy: 0)
+        )
+        if finishing {
+            interaction.finish()
+        } else {
+            interaction.cancel()
         }
     }
 
@@ -362,15 +478,16 @@ final class SessionWorkspaceDrawerCoordinator: NSObject, UIGestureRecognizerDele
                 translation: translation,
                 width: width
             )
-            if recognizer.state == .ended, !SessionWorkspaceDrawer.settlesOpen(
-                openness: openness,
-                velocity: recognizer.velocity(in: view).x,
-                width: width
-            ) {
-                interaction.finish()
-            } else {
-                interaction.cancel()
-            }
+            let settle = recognizer.state == .ended
+                ? SessionWorkspaceDrawer.settle(
+                    openness: openness,
+                    velocity: recognizer.velocity(in: view).x,
+                    width: width
+                )
+                : SessionWorkspaceDrawer.settle(
+                    opens: true, openness: openness, velocity: 0, width: width
+                )
+            complete(interaction, finishing: !settle.opens, settle: settle)
         default:
             break
         }
@@ -385,6 +502,7 @@ final class SessionWorkspaceDrawerCoordinator: NSObject, UIGestureRecognizerDele
         if recognizer === openRecognizer {
             return !isPresentedOrPresenting && SessionWorkspaceDrawer.isOpeningEdgeTouch(
                 location: pan.location(in: view),
+                translation: pan.translation(in: view),
                 velocity: pan.velocity(in: view),
                 width: view.bounds.width
             )
@@ -412,14 +530,15 @@ final class SessionWorkspaceDrawerCoordinator: NSObject, UIGestureRecognizerDele
         _ recognizer: UIGestureRecognizer,
         shouldBeRequiredToFailBy other: UIGestureRecognizer
     ) -> Bool {
-        // A scroll view under the finger waits for this recogniser's answer. For the edge pan
-        // the answer is immediate — a touch that did not begin at the bezel fails it at once —
-        // and without the wait the timeline's own pan took every edge touch first, which is why
-        // the edge never opened anything over a conversation. For the closing pan the answer
-        // comes on the first movement: sideways is the drawer's, anything else fails here and
-        // the list scrolls at once.
+        // A scroll view's pan under the finger waits for this recogniser's answer. For the edge
+        // pan the answer is immediate — a touch that did not begin at the bezel fails it at
+        // once — and without the wait the timeline's own pan took every edge touch first, which
+        // is why the edge never opened anything over a conversation. For the closing pan the
+        // answer comes on the first movement: sideways is the drawer's, anything else fails
+        // here and the list scrolls at once. Only the pans wait: see `isCompetingPan` for what
+        // making the terminal's long press wait did to it.
         (recognizer === openRecognizer || recognizer === closeRecognizer)
-            && other.view is UIScrollView
+            && SessionWorkspaceDrawer.isCompetingPan(other)
     }
 
     private func horizontalScroller(under point: CGPoint, in view: UIView) -> UIScrollView? {

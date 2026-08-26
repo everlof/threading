@@ -595,22 +595,133 @@ final class SessionWorkspaceDrawerTests: XCTestCase {
         XCTAssertFalse(SessionWorkspaceDrawer.settlesOpen(openness: 1, velocity: 0, width: 0))
     }
 
-    /// A touch is the drawer's when it begins at the right bezel heading left; the same drag
-    /// begun a thumb's width in is the list's, and a scroll that happens to start at the bezel
-    /// is the list's too.
+    /// A touch is the drawer's when it began at the right bezel and has headed left since; the
+    /// same drag begun a thumb's width in is the list's, and a scroll that happens to start at
+    /// the bezel is the list's too.
     func testOnlyALeftwardTouchFromTheRightBezelOpens() {
+        // Ten points in from a touch-down at 398: the recogniser's own hysteresis.
         XCTAssertTrue(SessionWorkspaceDrawer.isOpeningEdgeTouch(
-            location: CGPoint(x: 398, y: 450), velocity: CGPoint(x: -400, y: 30), width: 402
+            location: CGPoint(x: 388, y: 451), translation: CGPoint(x: -10, y: 1),
+            velocity: CGPoint(x: -400, y: 30), width: 402
         ))
         XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
-            location: CGPoint(x: 360, y: 450), velocity: CGPoint(x: -400, y: 30), width: 402
+            location: CGPoint(x: 350, y: 451), translation: CGPoint(x: -10, y: 1),
+            velocity: CGPoint(x: -400, y: 30), width: 402
+        ), "a thumb's width in is the list's")
+        XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 397, y: 440), translation: CGPoint(x: -1, y: -10),
+            velocity: CGPoint(x: -60, y: -900), width: 402
+        ), "a scroll begun at the bezel is the list's")
+        XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 402, y: 450), translation: CGPoint(x: 10, y: 0),
+            velocity: CGPoint(x: 300, y: 0), width: 402
+        ), "rightward is nobody's")
+    }
+
+    /// The edge is where the touch began, not where the finger is when the pan is asked. A
+    /// quick swipe has travelled well past the edge zone by then — further still on a frame the
+    /// terminal was busy drawing — and used to be declined for it.
+    func testTheEdgeIsJudgedAtTheTouchDownNotWhereTheFingerHasGot() {
+        XCTAssertTrue(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 340, y: 455), translation: CGPoint(x: -58, y: 5),
+            velocity: CGPoint(x: -2_400, y: 120), width: 402
+        ), "a swipe begun at 398 is the drawer's however far it got before it was asked")
+        XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 340, y: 455), translation: CGPoint(x: -30, y: 5),
+            velocity: CGPoint(x: -2_400, y: 120), width: 402
+        ), "the same finger, begun at 370, is the list's")
+    }
+
+    /// The direction is the path since touch-down, which is steadier than the last two
+    /// samples' velocity; a pan that reports no travel is judged on velocity.
+    func testTheDirectionIsThePathNotTheLastSample() {
+        XCTAssertTrue(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 386, y: 453), translation: CGPoint(x: -12, y: 3),
+            velocity: CGPoint(x: -60, y: -900), width: 402
+        ), "a leftward path with a vertical last sample still opens")
+        XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 395, y: 462), translation: CGPoint(x: -3, y: 12),
+            velocity: CGPoint(x: -900, y: 60), width: 402
+        ), "a downward path with a sideways last sample still scrolls")
+        XCTAssertTrue(SessionWorkspaceDrawer.isOpeningEdgeTouch(
+            location: CGPoint(x: 398, y: 450), translation: .zero,
+            velocity: CGPoint(x: -400, y: 30), width: 402
         ))
         XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
-            location: CGPoint(x: 398, y: 450), velocity: CGPoint(x: -60, y: -900), width: 402
+            location: CGPoint(x: 398, y: 450), translation: .zero,
+            velocity: CGPoint(x: -60, y: -900), width: 402
         ))
-        XCTAssertFalse(SessionWorkspaceDrawer.isOpeningEdgeTouch(
-            location: CGPoint(x: 398, y: 450), velocity: CGPoint(x: 300, y: 0), width: 402
-        ))
+    }
+
+    /// Only a scroll view's pan waits for the drawer's. The terminal's long press on the same
+    /// scroll view does not: a pan under a resting finger never fails, and a wait on it held
+    /// the press until touch-up.
+    func testOnlyAScrollViewsPanWaitsForTheDrawer() {
+        let scroller = UIScrollView()
+        let scrollerPan = UIPanGestureRecognizer()
+        scroller.addGestureRecognizer(scrollerPan)
+        let longPress = UILongPressGestureRecognizer()
+        scroller.addGestureRecognizer(longPress)
+        let pinch = UIPinchGestureRecognizer()
+        scroller.addGestureRecognizer(pinch)
+        let plain = UIView()
+        let plainPan = UIPanGestureRecognizer()
+        plain.addGestureRecognizer(plainPan)
+
+        XCTAssertTrue(SessionWorkspaceDrawer.isCompetingPan(scroller.panGestureRecognizer))
+        XCTAssertTrue(SessionWorkspaceDrawer.isCompetingPan(scrollerPan))
+        XCTAssertFalse(SessionWorkspaceDrawer.isCompetingPan(longPress))
+        XCTAssertFalse(SessionWorkspaceDrawer.isCompetingPan(pinch))
+        XCTAssertFalse(SessionWorkspaceDrawer.isCompetingPan(plainPan))
+    }
+
+    /// A release hands the spring the throw — the finger's speed toward where the panel is
+    /// going, in remaining distances per second, capped so a flick released short of home does
+    /// not overshoot — and a short remainder is slowed to the least settle rather than snapped.
+    func testTheSettleCarriesTheThrowAndNeverSnaps() {
+        // A quarter open, flicked inward at 1,000 pt/s: opens at full pace, carrying the throw
+        // over the three quarters left.
+        let flicked = SessionWorkspaceDrawer.settle(openness: 0.25, velocity: -1_000, width: 358)
+        XCTAssertTrue(flicked.opens)
+        XCTAssertEqual(flicked.completionSpeed, 1)
+        XCTAssertEqual(flicked.initialVelocity, 1_000 / (0.75 * 358), accuracy: 0.001)
+
+        // Nearly open and flicked hard: the throw is capped, and the last few points take the
+        // least settle instead of two frames.
+        let hard = SessionWorkspaceDrawer.settle(openness: 0.95, velocity: -3_000, width: 358)
+        XCTAssertTrue(hard.opens)
+        XCTAssertEqual(hard.initialVelocity, SessionWorkspaceDrawer.maximumSettleVelocity)
+        XCTAssertEqual(
+            0.05 * SessionWorkspaceDrawer.settleDuration / Double(hard.completionSpeed),
+            SessionWorkspaceDrawer.minimumSettleDuration,
+            accuracy: 0.001
+        )
+
+        // Pushed back from four tenths: closes, carrying the throw toward closed.
+        let pushed = SessionWorkspaceDrawer.settle(openness: 0.4, velocity: 200, width: 358)
+        XCTAssertFalse(pushed.opens)
+        XCTAssertEqual(pushed.initialVelocity, 200 / (0.4 * 358), accuracy: 0.001)
+
+        // Let go past half while drifting the other way: it opens, and the spring is told the
+        // finger was leaving.
+        let drifting = SessionWorkspaceDrawer.settle(openness: 0.6, velocity: 100, width: 358)
+        XCTAssertTrue(drifting.opens)
+        XCTAssertEqual(drifting.initialVelocity, -100 / (0.4 * 358), accuracy: 0.001)
+
+        // A gesture the system cancelled goes back where it came from, whatever the position
+        // says, at the slide's own pace.
+        let cancelled = SessionWorkspaceDrawer.settle(
+            opens: false, openness: 0.8, velocity: 0, width: 358
+        )
+        XCTAssertEqual(
+            cancelled,
+            SessionWorkspaceDrawer.Settle(opens: false, completionSpeed: 1, initialVelocity: 0)
+        )
+        XCTAssertEqual(
+            SessionWorkspaceDrawer.settle(openness: 1, velocity: -500, width: 0).initialVelocity,
+            0,
+            "a sliver has no throw"
+        )
     }
 
     func testOnlyARightwardSidewaysPanOnThePanelCloses() {

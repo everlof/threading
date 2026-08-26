@@ -370,12 +370,25 @@ thumbnail capability is carried in by value for the same reason. The opening rec
 plain `UIPanGestureRecognizer` whose `shouldBegin` states the edge rule
 (`SessionWorkspaceDrawer.isOpeningEdgeTouch`): `UIScreenEdgePanGestureRecognizer` on the hosting
 view received every bezel touch and never began, over the conversation's collection view and
-the terminal alike, while the system's own back swipe on the same touches did. Scroll views
-under either pan are made to wait for it (`shouldBeRequiredToFailBy`), which is what lets the
-edge win over the timeline's scroll; the closing pan declines a drag that is not rightward and
-sideways, one inside a horizontally scrollable view, and one at the panel's leading edge when
-the workspace's own navigation stack has something to pop. The rules are arithmetic in
-`SessionWorkspaceDrawer` and tested as such.
+the terminal alike, while the system's own back swipe on the same touches did. The edge is
+judged where the touch *began* — the location less the translation at the moment the pan would
+begin — because by then the finger has already travelled the recogniser's hysteresis, and on a
+frame the terminal was busy drawing however far it got before the next touch arrived; judged
+where the finger had got, a quick swipe from the bezel was declined more often than it opened.
+The direction is the path since touch-down for the same reason, with velocity answering only
+for a pan that reports no travel. The pans on scroll views under either drawer pan are made to
+wait for it (`shouldBeRequiredToFailBy`, `isCompetingPan`), which is what lets the edge win over
+the timeline's scroll and the terminal's mouse pan — only the pans, because a pan under a
+resting finger never fails, and a long press made to wait for one fires at touch-up, which is
+what the terminal's word selection did while every recogniser on its scroll view waited. The
+closing pan declines a drag that is not rightward and sideways, one inside a horizontally
+scrollable view, and one at the panel's leading edge when the workspace's own navigation stack
+has something to pop. A release settles on a spring handed the finger's throw
+(`SessionWorkspaceDrawer.settle`): a percent-driven transition otherwise finishes an
+interruptible animator on its cubic `completionCurve`, so a flick eased out from wherever it
+let go; the remainder now runs at the finger's speed, capped so a flick released short of home
+does not overshoot, and a release a few points from home is slowed to a least settle rather
+than snapped. The rules are arithmetic in `SessionWorkspaceDrawer` and tested as such.
 
 **An attachment opens in a gallery, with its neighbours a swipe away.** A row in **Attachments**
 used to push one preview; it now pushes `RemoteAttachmentGallery` at that row, a horizontal
