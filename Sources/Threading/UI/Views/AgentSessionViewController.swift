@@ -478,6 +478,17 @@ final class AgentSessionViewController: NSViewController {
     /// Claude's and Codex's transcript boundary readers as their own output callbacks re-arm
     /// them. Grok and OpenCode have no transcript boundary to read and stay on output inference,
     /// which is R7's accepted cost; no second reconciliation is invented here.
+    ///
+    /// **Output inference is the only thing that can say a reattached session is busy**, and it
+    /// has to survive the replay to do it. A turn that began before the relaunch raised its
+    /// `turnStarted` hook into a socket nobody was listening on, so no report is coming to say
+    /// the session is working and — before this — none was coming to end the launch grace either:
+    /// `noteUnattendedLaunch` made every burst inert, and a Codex session visibly painting
+    /// "Working" sat at idle in the sidebar until its *next* turn ended. So the grace is armed
+    /// for the replay and ended at the replay's own boundary, which the link reports. The two
+    /// transcript readers cannot stand in for it: `ClaudeTranscriptTurnRefusal` and
+    /// `CodexTranscriptInterruption` recover a turn that *ended*, and there is no reader here
+    /// that says one is open.
     @discardableResult
     func reattachToBackgroundHost(
         socketPath: String,
@@ -491,11 +502,22 @@ final class AgentSessionViewController: NSViewController {
             return false
         }
 
+        // A selected-session restore can have a launch queued for the next run-loop turn while
+        // the host survey is in flight. The daemon owns the child named by this attach attempt,
+        // so that local launch must stay cancelled even if attaching the surface fails.
+        pendingLaunchPlan = nil
+
         session.hostTransportFactory = PTYHostPolicy.attachingTransportFactory(
             socketPath: socketPath,
             bundle: bundle
         )
+        // Armed before the attach, because the link fires it from the first coalesced flush and
+        // that can be the very next main-queue turn.
+        session.onHostAttachReplayFinished = { [weak self] in
+            self?.activityTracker.endUnattendedLaunchGrace()
+        }
         guard session.attachToHost(grid: grid) else {
+            session.onHostAttachReplayFinished = nil
             session.hostTransportFactory = nil
             return false
         }
@@ -508,7 +530,8 @@ final class AgentSessionViewController: NSViewController {
         activityTracker.markRunning()
         // Nobody is looking, and the replay is a repaint: without this the reattach's first
         // burst reads as a finished turn and marks every recovered session unread. Same reason
-        // `launchInBackground` does it.
+        // `launchInBackground` does it — but here it is armed for the replay only, and
+        // `onHostAttachReplayFinished` above ends it as soon as the replay has been fed.
         activityTracker.noteUnattendedLaunch()
         if settings.remoteAccessEnabled {
             RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)

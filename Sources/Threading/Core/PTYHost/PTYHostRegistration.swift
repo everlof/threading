@@ -38,6 +38,16 @@ enum PTYHostRegistrationDefaults {
     /// stream of local-socket polls.
     static let upgradeRetryInterval: TimeInterval = 30
 
+    /// Where the doubling backstop settles.
+    ///
+    /// Thirty seconds is prompt for a daemon that might be seconds from idle; it is a poll once
+    /// that has been false a dozen times running. Measured on 2026-08-26: a compatible daemon of
+    /// another build held thirty agents for the whole life of the app, and the fixed interval
+    /// spent the day connecting twice a minute to be told the same thing. Five minutes is still
+    /// prompt against work that lasts hours, and the event-driven retry — a host-owned child
+    /// ending — is what actually catches the drain.
+    static let upgradeRetryMaximumInterval: TimeInterval = 300
+
     /// A read-only `launchctl print` is the fallback when an enabled stale registration has no
     /// socket. It distinguishes an absent helper (safe to re-register) from a retiring helper
     /// whose socket is intentionally gone while its sessions drain.

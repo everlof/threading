@@ -621,7 +621,7 @@ final class PTYHostSessionTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
         settings.ptyHostEnabled = true
         let admission = PTYHostNewSessionAdmission()
-        admission.setAllowed(false)
+        admission.resolve(.withheld)
 
         XCTAssertNil(PTYHostPolicy.transportFactory(
             for: .agentSession(SessionID()),

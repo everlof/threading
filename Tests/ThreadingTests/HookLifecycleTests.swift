@@ -1096,6 +1096,43 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertTrue(tracker.reportsOwnActivity, "the report still proves the hooks reached it")
     }
 
+    /// A reattach arms the grace for the **replay** and ends it at the replay's own boundary.
+    ///
+    /// Output inference is the only thing that can say a reattached session is busy: a turn that
+    /// began before the relaunch raised its `turnStarted` hook into a socket nobody was listening
+    /// on, so nothing is coming to say the session is working and — before
+    /// `endUnattendedLaunchGrace` existed — nothing was coming to end the grace either. A Codex
+    /// session painting "Working" sat at idle in the sidebar until its next turn ended.
+    @MainActor
+    func testEndingTheLaunchGraceLetsAReattachedSessionInferWorkFromItsOutput() {
+        let tracker = SessionActivityTracker()
+        tracker.markDormant()
+        tracker.markRunning()
+        tracker.noteUnattendedLaunch()
+
+        XCTAssertNotEqual(
+            tracker.activity,
+            .dormant,
+            "a successful attach is a running session, whatever the row said a moment ago"
+        )
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        XCTAssertEqual(
+            tracker.activity,
+            .idle,
+            "the replay is a repaint of a screen that was already there"
+        )
+
+        tracker.endUnattendedLaunchGrace()
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(
+            tracker.activity,
+            .working,
+            "everything after the replay is the child writing now"
+        )
+    }
+
     @MainActor
     func testABellDuringAnUnattendedBootRaisesNoFlag() {
         let tracker = SessionActivityTracker()

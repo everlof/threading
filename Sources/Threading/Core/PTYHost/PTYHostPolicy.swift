@@ -79,10 +79,17 @@ enum PTYHostPolicy {
         // daemon change rather than a protocol change.
         guard case .agentSession = identity else { return nil }
         guard let session, hostsSession(session, settings: settings) else { return nil }
-        guard newSessionAdmission.permitsHostedSpawn else {
+        // The gate's own token, not one fixed token for both of its refusals.
+        // `registrationRefreshing` means "a stale or ambiguous launchd association is being
+        // replaced safely", and it was being written for a daemon that was merely a different
+        // build holding somebody's agents — a state that lasts as long as the work does. A cause
+        // that names the wrong condition is worse than no cause, because it sends the next person
+        // to look at registration.
+        let admission = newSessionAdmission.current
+        guard admission == .allowed else {
             eventLog.record(.session, "Session runs its PTY in-process", [
                 "session": identity.historyFileStem,
-                "cause": PTYHostUnavailability.registrationRefreshing.token
+                "cause": admission.token
             ])
             return nil
         }

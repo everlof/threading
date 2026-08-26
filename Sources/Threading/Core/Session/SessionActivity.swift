@@ -881,6 +881,23 @@ final class SessionActivityTracker {
         launchedUnattended = true
     }
 
+    /// Ends the launch grace at a boundary the caller can prove, rather than at the first input.
+    ///
+    /// A **reattach** needs the grace for exactly as long as the replay: those bytes are a
+    /// repaint of a screen that was already there, and reading them as work would mark every
+    /// recovered session unread. Everything after the replay is the child working *now*, and it
+    /// is the only activity signal a reattached session has — a turn that began before the
+    /// relaunch raised its `turnStarted` hook into a socket nobody was listening on, so no
+    /// report is coming to say the session is busy and no report will clear the grace either.
+    /// Without this the row sat at idle while the TUI painted "Working" beside it.
+    ///
+    /// Deliberately narrower than `noteUnattendedLaunch`'s other two ends: it clears the launch
+    /// mark and nothing else, so the attention rules that mark spans stay exactly as they were
+    /// for a launch nobody has proved is over.
+    func endUnattendedLaunchGrace() {
+        launchedUnattended = false
+    }
+
     /// Marks the session as running again after being dormant.
     ///
     /// A new process has to earn the right to be believed all over again. The settings file

@@ -747,6 +747,36 @@ old work remains usable and can drain. This prevents a stream of new launches fr
 generation busy forever, and closes the launchd-restart race between a retiring process exiting
 and its registration being refreshed.
 
+**The gate has three states, not two, and a re-survey that changes nothing changes nothing.**
+`PTYHostNewSessionAdmission.State` is `unresolved` / `allowed` / `withheld`, and only the first
+means `registrationRefreshing` — "a stale or ambiguous launchd association is being replaced
+safely", which is a condition that lasts a moment. Measured on 2026-08-26: a compatible daemon of
+another build held thirty agents for the whole life of the app, the gate stayed shut for the whole
+of it, and **every** new conversation was journalled as running in-process because a registration
+was refreshing. Nothing was. So `withheld` has its own cause token, `upgradePending`, and
+`resolve(_:)` is idempotent — availability during a refresh is whatever the last survey settled on,
+and only the *first* survey of a launch may leave a launch degrading with nobody having asked yet.
+
+**The `holdsSessions` re-check is event-driven with a backing-off backstop, and the decision is
+journalled only when it changes.** A host-owned child ending posts `PTYHostMayHaveDrained` and
+re-runs the real `hello` + `list` decision at once, which is the retry that matters; the timer
+exists only for a detached child this launch could not adopt and therefore cannot observe ending.
+It was fixed at thirty seconds, which against a daemon holding somebody's day of work is 2,880
+connects and 5,760 journal lines saying `leave.holdsSessions`. It now doubles from
+`upgradeRetryInterval` towards `upgradeRetryMaximumInterval` (five minutes) and an ending puts it
+back to prompt, and `PTYHostUpgradeCheck.run` takes a `journalsDecision` predicate the monitor uses
+to record a decision once rather than once per tick.
+
+**One bundle, one generation string** — and that part was never the bug. The app reads its own
+`Info.plist` and the helper reads the processed one embedded in its `__TEXT,__info_plist`, both
+through `PTYHostGeneration.string(shortVersion:bundleVersion:sourceRevision:)`, so a pair built
+together always agrees;
+`PTYHostDaemonIntegrationTests/testARealDaemonAnswersHelloAndRunsAChildToCompletion` asserts
+exactly that against the real helper. A launch that sees `appBuild` carrying `@<sha>` beside a
+`daemonBuild` that does not is therefore reading a daemon from a *different bundle*, which is what
+the survey is for. On 2026-08-26 that is what it was: `lsof` put the running daemon's image in a
+DerivedData `Threading.app` while the app itself was `/Applications/Threading.app` at `d6f89fa1`.
+
 | `hello` generation | receipt | protocol gate | active sessions | Decision |
 |---|---|---|---|---|
 | same as the app's | current | compatible | any | leave — this is the ordinary answer |
@@ -977,12 +1007,28 @@ has. Five answers, because "the daemon has it" is not one fact:
 | the conversation is gone or archived | `attach` then `kill(escalate:)`, journalled. Nothing can ever show that child again |
 | in the daemon's `lost` set | journalled, and left to `relaunchSessionsFromLastQuit` to resume from its transcript. The daemon cannot hand it back, so holding it back from the relaunch would strand it |
 
-The first and third are what the relaunch must skip; the other three are not. `relaunchSessionsFromLastQuit`
-runs **after** this and plans only what the host does not hold — see
+The first and third are what every automatic launch path must skip; the other three are not.
+That ownership answer includes a running PTY even when this launch could not build or attach its
+local surface: a failed adoption does not stop the daemon's child, so treating the conversation as
+free would start a second CLI on it. The failed adoption is counted as pending and the launch band
+offers **Reattach** instead.
+
+`LaunchRestoration` uses this survey as a startup barrier. It consumes and plans the last-quit
+relaunch first, then passes the same held-id set to the selected-session restore; the selected row
+is shown only when a successful adoption has already made its cached controller running. An ended
+held row or a failed adoption stays dormant. The answer is cached for the launch, so a second
+restoration-gate call neither spends the record nor surveys and re-adopts the same terminals again.
+`relaunchSessionsFromLastQuit` therefore plans only what the host does not hold — see
 [`crash-recovery.md`](crash-recovery.md#what-a-recovery-launch-does-not-write) for what that does
 to the running-sessions record, and [`sessions.md`](sessions.md#the-sessions-that-come-back-on-their-own)
 for the launch set. With the hidden key off the whole step answers on the calling turn without
 opening anything, so a launch with the feature off is the launch it has always been.
+
+There is a defence at the surface boundary too. If an older or competing startup path already
+allocated the selected session's terminal and queued its launch for the next run-loop turn,
+reattach reuses that controller, clears the pending plan, and `startIfTerminalIsSized` refuses to
+spawn once the controller is running. Ownership ordering is the primary guarantee; this keeps a
+late answer from turning into the same duplicate race through another caller.
 
 Taking eight sessions back costs about what starting eight bare children costs — roughly 3 ms
 each, measured, with the numbers and the two things they deliberately leave out in
@@ -1029,6 +1075,40 @@ restart replays exactly, and a second consecutive restart re-derives from a tail
 would duplicate bytes into a live screen, so this is the direction to be wrong in, and it is a
 daemon-side field away from not being wrong at all.
 
+### What a reattach never sends the child
+
+**Being looked at is not input.** Selecting a reattached row makes its terminal first responder,
+lays it out at the pane's width and, when that width differs, resizes it. None of the three may put
+a byte on the child's standard input, and the reason is not politeness: an agent CLI reads control
+bytes as commands, and Claude Code ends its process on an end of file at an empty prompt or on a
+second interrupt. A volunteered byte there is somebody's turn gone.
+
+Three specific candidates are ruled out by construction rather than by care, and it is worth
+writing down which:
+
+- **Focus reports.** `Terminal.setTerminalFocus` sends `CSI I` / `CSI O` only when the program
+  armed `DECSET 1004`, and `RemoteTerminalModes` does not carry that mode — so a rejoined emulator
+  starts with focus reporting off and stays off unless a replayed byte re-arms it. Both directions
+  are wrong in the safe direction: silence rather than a report the child did not ask for.
+- **Query answers from the seeds.** `RemoteScreenSeed.repaint` is a repaint and contains no query;
+  `RemoteTerminalModeSeed` states private modes and the kitty flags, and SwiftTerm answers none of
+  them (`handleKittyKeyboardProtocol` replies only to `CSI ? u`, which the seed never writes). The
+  exact branch therefore answers only what the *child* wrote while nobody was attached, which is
+  the rule [The feed rule](#the-feed-rule-and-the-one-thing-the-wire-does-not-carry) already states.
+- **`closeInput` on a pty.** The daemon refuses it with `unsupportedChannel` and journals the
+  refusal; `PTYHostPipeLink` is its only caller. Closing a master is closing the terminal, and this
+  is the frame that would do it by accident.
+
+`PTYHostReattachInputDaemonTests` is that claim as a test, and it is asserted the only way it can
+be: the child records its own standard input, the app detaches with real seeds, reattaches into a
+fresh session, takes focus, gives it up, takes it again and resizes — and the recording has to be
+**empty**. Frame counts would prove nothing here; what matters is what a program received.
+
+The same file carries an opt-in second case, `THREADING_PTY_REAL_AGENT=1`, which does all of that
+against the developer's own agent CLI rather than a `printf` — it spends no provider turn, and it
+is gated because it writes a conversation record under their account. Run it when a report says a
+reattached CLI quit on its own: it prints every byte that went upstream and the screen at the end.
+
 ### What a reattach re-derives, and what it cannot
 
 The tracker is a **new** one, so there is nothing stale to correct — the staleness R7 names comes
@@ -1042,7 +1122,28 @@ reconciliation is invented for them.
 
 `noteUnattendedLaunch` is granted for the same reason a background relaunch grants it: nobody is
 looking, and a replay is a repaint — without it the rejoin's first burst reads as a finished turn
-and marks every recovered session unread.
+and marks every recovered session unread. **It is granted for the replay only.** The grace a
+relaunch wants lasts until somebody types or a turn is reported; the grace a *reattach* wants ends
+where the replay does, and the difference shipped as a bug — a Codex session painting
+"Working (5m 11s)" in the pane while its sidebar row showed nothing at all, for the whole of a turn
+that had begun before the relaunch.
+
+The reason is that a reattached session's **only** activity signal is the bytes its child is still
+writing. A turn that began before the relaunch raised its `turnStarted` hook into a socket nobody
+was listening on, so no report is coming to say the session is busy — and, before this, none was
+coming to end the grace either: `SessionActivityTracker.recordOutput` answers nil for every burst
+while `launchedUnattended` stands, and only `noteUserInput` and `noteTurnStarted` clear it. The row
+therefore sat at idle until the turn's *own* `Stop` arrived, however long that took. So
+`PTYHostTerminalLink.Delivery.attachReplayFinished` reports the end of the replay — the same
+boundary query suppression already uses, the first coalesced flush — and
+`AgentSessionViewController` turns it into `SessionActivityTracker.endUnattendedLaunchGrace()`.
+Everything after it is the child working now, and output inference reads it exactly as it reads a
+spawned session's.
+
+**No transcript seeding stands in for that**, and the readers that exist cannot:
+`ClaudeTranscriptTurnRefusal` and `CodexTranscriptInterruption` recover a turn that *ended*, and
+there is no reader here that says one is open. Grok and OpenCode have no boundary reader at all and
+are on output inference either way, which is the same accepted cost R7 already names.
 
 Titles and the working directory come back on their own: the pid arrives in `attached` and becomes
 `shellPid`, and OSC 0/2 and OSC 7 come through the emulator, which is here again.
@@ -1304,10 +1405,20 @@ again.
 
 Two sentences and two answers:
 
-- **"3 sessions kept running while Threading was closed."** Terminals taken back plus conversations
-  the daemon kept working. `Reattach` appears only when this launch did *not* take something
-  back — after a clean reattach they are ordinary running sessions and there is nothing left to
-  press.
+- **"3 sessions kept running while Threading was closed."** Terminals **taken back** plus
+  conversations the daemon kept working. `Reattach` appears only when this launch did *not* take
+  something back — after a clean reattach they are ordinary running sessions and there is nothing
+  left to press.
+
+  **The count is the outcome, not the inventory**, and it shipped the other way round once: on
+  2026-08-26 the daemon held 32 terminals, 31 came back, and the band read "32 sessions kept
+  running while Threading was closed." with `Reattach` beside it — a sentence overstating the
+  recovery next to a button whose subject the sentence never named. Both halves were one mistake:
+  `PTYHostLaunchNotice.forLaunch` was passed the plan's `adopt.count` rather than the count that
+  survived `apply`. It now names what came back and, when something did not, adds a second sentence
+  for it; a launch that recovered nothing says only that sentence, because "0 sessions kept
+  running" is the same overstatement pointed the other way. `Reattach` is the answer to the second
+  sentence and to nothing else.
 - **"2 sessions were lost while Threading was closed."** The daemon restarted and its children went
   with it (`KeepAlive` restores the service, not the work). `Resume` puts them back through the
   ordinary staggered relaunch, bypassing `sessionRestorePolicy` on purpose: the policy answers

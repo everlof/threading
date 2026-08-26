@@ -185,6 +185,14 @@ final class TerminalSession: NSObject {
     /// Whether this session's child is owned by `threading-ptyd` rather than by this process.
     var isHostBacked: Bool { hostLink != nil }
 
+    /// Called on the main actor once, after a reattach's replay has been fed and before any
+    /// live byte is reported as this session's own work.
+    ///
+    /// The owner needs the boundary because the two runs of bytes mean opposite things: the
+    /// replay is a repaint of a screen that already existed, and everything behind it is the
+    /// child working now. See `SessionActivityTracker.endUnattendedLaunchGrace()`.
+    var onHostAttachReplayFinished: (() -> Void)?
+
     /// The name of the profile used for this session.
     var profileName: String {
         profile.name
@@ -728,6 +736,12 @@ final class TerminalSession: NSObject {
                 MainActor.assumeIsolated {
                     guard let self, let link, self.hostLink === link else { return }
                     self.hostDidAttach(attached)
+                }
+            },
+            attachReplayFinished: { [weak self, weak link] in
+                MainActor.assumeIsolated {
+                    guard let self, let link, self.hostLink === link else { return }
+                    self.onHostAttachReplayFinished?()
                 }
             },
             foreground: { [weak self, weak link] group in

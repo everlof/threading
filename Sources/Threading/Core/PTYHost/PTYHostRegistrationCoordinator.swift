@@ -65,11 +65,8 @@ final class PTYHostRegistrationCoordinator {
         self.newSessionAdmission = newSessionAdmission
         self.upgradeMonitor = upgradeMonitor ?? PTYHostUpgradeMonitor(
             probe: .live(eventLog: eventLog),
-            scheduleRetry: { work in
-                queue.asyncAfter(
-                    deadline: .now() + PTYHostRegistrationDefaults.upgradeRetryInterval,
-                    execute: work
-                )
+            scheduleRetry: { delay, work in
+                queue.asyncAfter(deadline: .now() + delay, execute: work)
             },
             registeredProcessProbe: registeredProcessProbe,
             refreshRegistration: { request in
@@ -81,7 +78,7 @@ final class PTYHostRegistrationCoordinator {
                     return false
                 }
             },
-            setNewSessionAdmission: { newSessionAdmission.setAllowed($0) }
+            setNewSessionAdmission: { newSessionAdmission.resolve($0) }
         )
     }
 
@@ -126,9 +123,11 @@ final class PTYHostRegistrationCoordinator {
         let enabled = request.decision.isEnabled
         guard enabled != appliedEnablement else { return }
         appliedEnablement = enabled
-        // Synchronous with the setting edge: no new spawn can enter a daemon while the serial
-        // queue is still deciding whether its registration or generation has to be replaced.
-        newSessionAdmission.setAllowed(false)
+        // Synchronous with the setting edge, and *unresolved* rather than refused: no new spawn
+        // enters a daemon while the serial queue is still deciding whether its registration or
+        // generation has to be replaced, and a launch that lands in that window is told the
+        // honest reason — nobody has asked yet. See `PTYHostNewSessionAdmission.State`.
+        newSessionAdmission.resolve(.unresolved)
 
         let registration = self.registration
         let eventLog = self.eventLog

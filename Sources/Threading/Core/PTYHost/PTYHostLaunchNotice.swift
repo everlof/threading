@@ -15,11 +15,15 @@ import Foundation
 /// can hold without a window.
 enum PTYHostLaunchNotice: Equatable {
 
-    /// `threading-ptyd` kept `count` sessions running. `pending` is how many of them this launch
-    /// has **not** taken back — a terminal that could not be built, or a survey that came back
-    /// after the pane had gone. Zero is the ordinary case and the band then states a fact and
-    /// offers no action: after the reattach they are ordinary running sessions, and the only
-    /// thing left worth saying is that they never stopped.
+    /// `count` sessions the daemon kept running **and this launch got back**. `pending` is how
+    /// many it could **not** take back — a terminal that could not be built, or a survey that
+    /// came back after the pane had gone.
+    ///
+    /// The split is the whole point, and it is the bug this case shipped with: `count` used to be
+    /// everything the daemon held, so a launch that recovered 31 of 32 said "32 sessions kept
+    /// running" and put `Reattach` beside it — a sentence that overstated what came back next to
+    /// a button for the one that did not, five minutes after the 31 were plainly live on screen.
+    /// A band states what happened; only the part that did not happen earns an action.
     case keptRunning(count: Int, pending: Int)
 
     /// The daemon restarted and its children went with it (D12: `KeepAlive` restores the service,
@@ -36,12 +40,15 @@ enum PTYHostLaunchNotice: Equatable {
     /// back on its own. A launch that saw both says the second, and the journal has both counts.
     static func forLaunch(_ plan: PTYHostReattachPlan, pending: Int) -> PTYHostLaunchNotice? {
         if !plan.lost.isEmpty { return .lost(plan.lost) }
-        // A conversation the daemon kept working counts too. It is not being taken back — its
-        // transport cannot be rejoined mid-stream — but it *did* keep running, which is the
-        // sentence, and the work it did is in the transcript the resume reads.
-        let kept = plan.adopt.count + plan.resume.count
-        guard kept > 0 else { return nil }
-        return .keptRunning(count: kept, pending: pending)
+        // A conversation the daemon kept working counts as recovered too. It is not being taken
+        // back — its transport cannot be rejoined mid-stream — but it *did* keep running and this
+        // launch resumes it from the transcript it wrote, so there is nothing left to press for
+        // it. What `pending` names is the other set: terminals the daemon is still holding that
+        // this launch did not attach.
+        let held = max(0, pending)
+        let recovered = max(0, plan.adopt.count - held) + plan.resume.count
+        guard recovered > 0 || held > 0 else { return nil }
+        return .keptRunning(count: recovered, pending: held)
     }
 
     // MARK: - Reading
@@ -54,15 +61,25 @@ enum PTYHostLaunchNotice: Equatable {
     }
 
     /// The sentence the band carries.
+    ///
+    /// Two clauses rather than one when a launch both recovered work and left some behind,
+    /// because they are two different facts and only the second has anything to do.
     var message: String {
         switch self {
-        case .keptRunning(let count, _):
-            return count == 1
+        case .keptRunning(let count, let pending):
+            let recovered = count == 1
                 ? L10n.string("One session kept running while Threading was closed.")
                 : L10n.format(
                     "%lld sessions kept running while Threading was closed.",
                     Int64(count)
                 )
+            guard pending > 0 else { return recovered }
+            // A whole sentence rather than a clause, because a launch that recovered nothing
+            // shows this one on its own.
+            let held = pending == 1
+                ? L10n.string("One session could not be taken back.")
+                : L10n.format("%lld sessions could not be taken back.", Int64(pending))
+            return count > 0 ? "\(recovered) \(held)" : held
         case .lost(let sessionIDs):
             return sessionIDs.count == 1
                 ? L10n.string(

@@ -43,7 +43,9 @@ Five guards and one interaction boundary keep it honest:
   grace**: selecting the restored session or attaching a phone is presentation, and both provoke
   the very resize/repaint traffic the grace exists to reject. The grace ends at the first actual
   terminal input, or at the first reported turn — the remote mirror can type into an unattended
-  terminal, and from that interaction on the session flags like any other.
+  terminal, and from that interaction on the session flags like any other. There is a third end,
+  `endUnattendedLaunchGrace()`, and it exists for exactly one caller: see
+  [After a reattach](#after-a-reattach).
 - A **submitted-input boundary** (`noteUserInput`). Claude reports a permission prompt but no
   complementary "permission answered" event. A long, silent command can therefore be running
   while the last reported state still says `awaitingUser`. Enter is the provider-neutral fact
@@ -1215,6 +1217,37 @@ One bug worth keeping: every command reads stdin **before** its guard
 (`threading_payload=$(cat)`). A guard that returns without reading leaves Codex writing the event
 into a pipe nobody drains, and it is the *unrouted* runs — the user's own terminal sessions —
 that would pay for it. Found by a probe whose hook posted an empty body, and pinned by a test.
+
+## After a reattach
+
+A session `threading-ptyd` kept running while Threading was closed comes back to a **new** tracker
+(`markRunning`, then `noteUnattendedLaunch` for the replay — see
+[`pty-host.md`](pty-host.md#what-a-reattach-re-derives-and-what-it-cannot)), and that combination
+had one consequence nobody wanted: **output inference is the only signal such a session has, and
+the grace switched it off indefinitely.**
+
+The turn was already in flight when the app quit. Its `turnStarted` hook posted into a socket
+nobody was listening on, so `reportsOwnActivity` is false and no report is coming to say the
+session is busy. Meanwhile `recordOutput` answers nil for every burst while `launchedUnattended`
+stands, and the two ends that clear it — `noteUserInput` and `noteTurnStarted` — are exactly the
+two things a session nobody is typing into and whose turn began an hour ago will not produce. So
+the row sat at idle until the turn's own `Stop` arrived, however long that took: measured as a
+Codex pane reading "Working (5m 11s)" beside a sidebar row showing nothing at all.
+
+The grace a *relaunch* wants and the grace a *reattach* wants are different lengths, and the second
+has a boundary the first does not: the end of the replay. `endUnattendedLaunchGrace()` is that end.
+It clears the launch mark and nothing else — every attention rule the mark spans stays as it was —
+and its one caller is `AgentSessionViewController.reattachToBackgroundHost`, driven by
+`PTYHostTerminalLink`'s `attachReplayFinished`, which fires at the first coalesced flush: the same
+boundary the replay's query suppression already uses. Before it, the bytes are a repaint of a
+screen that was already there. After it, they are the child working now, and inference reads them
+exactly as it reads a spawned session's.
+
+**Seeding from the transcript was considered and is not what the readers do.**
+`ClaudeTranscriptTurnRefusal` and `CodexTranscriptInterruption` recover a turn that *ended*; there
+is no reader here that says one is open, and inventing one would be a second activity source for
+the two runtimes that already have the most. Grok and OpenCode have no boundary reader at all and
+stay on output inference either way, which is the accepted cost R7 already names.
 
 ## The account's own status line
 

@@ -770,7 +770,7 @@ final class PTYHostRegistrationTests: XCTestCase {
         let admission = PTYHostNewSessionAdmission()
         let monitor = PTYHostUpgradeMonitor(
             probe: recording.probe,
-            setNewSessionAdmission: { admission.setAllowed($0) }
+            setNewSessionAdmission: { admission.resolve($0) }
         )
 
         monitor.begin(PTYHostUpgradeRequest(socketPath: "/tmp/stale.sock", ownBuild: "new"))
@@ -781,6 +781,97 @@ final class PTYHostRegistrationTests: XCTestCase {
 
         monitor.hostMayHaveDrained()
         XCTAssertTrue(admission.permitsHostedSpawn)
+    }
+
+    /// "Nobody has asked yet" and "we asked and the answer was no" are different refusals, and
+    /// only the first is `registrationRefreshing`.
+    ///
+    /// Measured on 2026-08-26: a compatible daemon of another build held thirty agents all day,
+    /// and every new conversation was journalled as running in-process because a *registration*
+    /// was refreshing. Nothing was. A cause that names the wrong condition sends the next person
+    /// to look in the wrong subsystem.
+    func testTheAdmissionGateSaysWhichOfItsTwoRefusalsThisIs() {
+        let recording = RecordingUpgradeProbe(progress: [
+            .settled(.leave(.holdsSessions(1)))
+        ])
+        let admission = PTYHostNewSessionAdmission()
+        let monitor = PTYHostUpgradeMonitor(
+            probe: recording.probe,
+            setNewSessionAdmission: { admission.resolve($0) }
+        )
+
+        XCTAssertEqual(
+            PTYHostNewSessionAdmission.State.unresolved.token,
+            PTYHostUnavailability.registrationRefreshing.token
+        )
+        XCTAssertEqual(PTYHostNewSessionAdmission.State.withheld.token, "upgradePending")
+
+        monitor.begin(PTYHostUpgradeRequest(socketPath: "/tmp/stale.sock", ownBuild: "new"))
+
+        XCTAssertEqual(
+            admission.current,
+            .withheld,
+            "the survey answered; the refusal is an upgrade waiting for work to drain"
+        )
+    }
+
+    /// A survey that reaches the decision it reached last time is not news.
+    ///
+    /// The 30-second backstop wrote `PTY host connected` and `PTY host upgrade decision` every
+    /// tick for the whole life of an app whose daemon was never going to be free — 5,760 lines a
+    /// day saying `leave.holdsSessions`, which is how a journal stops being read.
+    func testARecheckThatChangesNothingIsNotJournalledAgain() {
+        let recording = RecordingUpgradeProbe(progress: [
+            .settled(.leave(.holdsSessions(2))),
+            .settled(.leave(.holdsSessions(2))),
+            .settled(.leave(.holdsSessions(1)))
+        ])
+        let monitor = PTYHostUpgradeMonitor(probe: recording.probe)
+
+        monitor.begin(PTYHostUpgradeRequest(socketPath: "/tmp/stale.sock", ownBuild: "new"))
+        monitor.hostMayHaveDrained()
+        monitor.hostMayHaveDrained()
+
+        XCTAssertEqual(
+            recording.journalledDecisions,
+            [.leave(.holdsSessions(2)), .leave(.holdsSessions(1))],
+            "the repeat says nothing new; the count moving does"
+        )
+    }
+
+    /// The backstop doubles towards a bound rather than polling at a fixed interval.
+    ///
+    /// It exists for a *detached* child this launch could not adopt and therefore cannot observe
+    /// ending. Thirty seconds is prompt when a drain might be seconds away and a poll once it has
+    /// plainly not been; an ending posts `PTYHostMayHaveDrained` and puts it back to prompt.
+    func testTheBackstopBacksOffAndAnEndingMakesItPromptAgain() {
+        let recording = RecordingUpgradeProbe(progress: Array(
+            repeating: .settled(.leave(.holdsSessions(1))),
+            count: 8
+        ))
+        let scheduler = RecordingUpgradeRetryScheduler()
+        let monitor = PTYHostUpgradeMonitor(
+            probe: recording.probe,
+            scheduleRetry: scheduler.schedule
+        )
+
+        monitor.begin(PTYHostUpgradeRequest(socketPath: "/tmp/stale.sock", ownBuild: "new"))
+        for _ in 0..<4 { scheduler.runNext() }
+
+        XCTAssertEqual(
+            scheduler.delays,
+            [30, 60, 120, 240, 300].map(TimeInterval.init),
+            "a busy daemon costs fewer connects the longer it stays busy"
+        )
+
+        monitor.hostMayHaveDrained()
+        scheduler.runNext()
+
+        XCTAssertEqual(
+            scheduler.delays.last,
+            PTYHostRegistrationDefaults.upgradeRetryInterval,
+            "an ending is evidence the count moved, so the next backstop is prompt again"
+        )
     }
 
     func testAStaleRegistrationWithNoProcessIsReclaimedAfterInitialSilence() {
@@ -946,7 +1037,7 @@ final class PTYHostRegistrationTests: XCTestCase {
             scheduleRetry: scheduler.schedule,
             registeredProcessProbe: PTYHostRegisteredProcessProbe { .notRunning },
             refreshRegistration: refresh.callback,
-            setNewSessionAdmission: { admission.setAllowed($0) }
+            setNewSessionAdmission: { admission.resolve($0) }
         )
 
         monitor.begin(PTYHostUpgradeRequest(
@@ -1164,6 +1255,7 @@ private final class RecordingUpgradeProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var progress: [PTYHostUpgradeProgress]
     private var requestStorage: [PTYHostUpgradeRequest] = []
+    private var journalled: [PTYHostUpgradeDecision] = []
 
     init(_ decisions: [PTYHostUpgradeDecision?]) {
         self.progress = decisions.map { decision in
@@ -1177,7 +1269,23 @@ private final class RecordingUpgradeProbe: @unchecked Sendable {
     }
 
     var probe: PTYHostUpgradeProbe {
-        PTYHostUpgradeProbe { [weak self] request in self?.answer(request) ?? .noAnswer }
+        PTYHostUpgradeProbe { [weak self] request, journalsDecision in
+            guard let self else { return .noAnswer }
+            let progress = self.answer(request)
+            if case .settled(let decision) = progress, journalsDecision(decision) {
+                self.lock.lock()
+                self.journalled.append(decision)
+                self.lock.unlock()
+            }
+            return progress
+        }
+    }
+
+    /// The decisions the monitor said were worth a journal line, in order.
+    var journalledDecisions: [PTYHostUpgradeDecision] {
+        lock.lock()
+        defer { lock.unlock() }
+        return journalled
     }
 
     var requests: [PTYHostUpgradeRequest] {
@@ -1263,14 +1371,24 @@ private final class RecordingRegistrationRefresh: @unchecked Sendable {
 private final class RecordingUpgradeRetryScheduler: @unchecked Sendable {
     private let lock = NSLock()
     private var work: [@Sendable () -> Void] = []
+    private var delayStorage: [TimeInterval] = []
 
-    var schedule: @Sendable (@escaping @Sendable () -> Void) -> Void {
-        { [weak self] work in
+    var schedule: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void {
+        { [weak self] delay, work in
             guard let self else { return }
             self.lock.lock()
             self.work.append(work)
+            self.delayStorage.append(delay)
             self.lock.unlock()
         }
+    }
+
+    /// Every delay the monitor asked for, in order. The backstop doubles, so a busy stale daemon
+    /// costs a launch fewer and fewer connects rather than two a minute forever.
+    var delays: [TimeInterval] {
+        lock.lock()
+        defer { lock.unlock() }
+        return delayStorage
     }
 
     var pendingCount: Int {

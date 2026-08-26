@@ -182,21 +182,61 @@ enum PTYHostRegisteredProcessState: Equatable, Sendable {
 /// reachable while a stale daemon drains. Only a new spawn is held back, closing the race where
 /// launchd restarts an old registered image between confirmed retirement and re-registration.
 final class PTYHostNewSessionAdmission: @unchecked Sendable {
+
+    /// Three states rather than a `Bool`, because "we have not asked yet" and "we asked and the
+    /// answer was no" are different facts and only the first is temporary.
+    ///
+    /// This mattered on a real machine. The withheld answer was re-asserted by every 30-second
+    /// re-survey, and the journal line every launch got for it said `registrationRefreshing` —
+    /// a token whose documented meaning is "a stale or ambiguous launchd association is being
+    /// replaced safely". Nothing was being replaced: a compatible daemon of another build was
+    /// holding thirty agents and would go on holding them for the rest of the day. Every new
+    /// conversation degraded to an in-process PTY with a reason that was not the reason.
+    enum State: Equatable, Sendable {
+        /// This launch has not had an answer from the daemon yet. The only state that means
+        /// "ask again in a moment", and the only one `registrationRefreshing` describes.
+        case unresolved
+        /// A survey answered, and new conversations may join the daemon.
+        case allowed
+        /// A survey answered, and a replacement this launch is waiting for is in the way.
+        case withheld
+
+        /// The structural cause a refused launch is journalled with.
+        var token: String {
+            switch self {
+            case .unresolved: return PTYHostUnavailability.registrationRefreshing.token
+            case .allowed: return "allowed"
+            case .withheld: return "upgradePending"
+            }
+        }
+    }
+
     static let shared = PTYHostNewSessionAdmission()
 
     private let lock = NSLock()
-    private var allowed = true
+    private var state: State = .allowed
 
-    var permitsHostedSpawn: Bool {
+    var permitsHostedSpawn: Bool { current == .allowed }
+
+    /// What the last survey settled on, or `.unresolved` before the first one answers.
+    var current: State {
         lock.lock()
         defer { lock.unlock() }
-        return allowed
+        return state
     }
 
-    func setAllowed(_ allowed: Bool) {
+    /// Moves the gate, and answers whether it moved.
+    ///
+    /// Idempotent on purpose: a re-survey that reaches the same conclusion is a survey that
+    /// changed nothing, and availability during a refresh has to be whatever it was last
+    /// resolved to. Callers use the answer to decide whether there is anything worth journalling.
+    @discardableResult
+    func resolve(_ next: State) -> Bool {
         lock.lock()
-        self.allowed = allowed
-        lock.unlock()
+        defer { lock.unlock() }
+        guard state != next else { return false }
+        state = next
+        return true
     }
 }
 
@@ -329,12 +369,17 @@ enum PTYHostUpgradeCheck {
     /// what happens when there was never a daemon at all.
     ///
     /// **Blocking.** Never call it from the main actor.
+    /// - Parameter journalsDecision: whether this answer is worth a journal line. The monitor
+    ///   says no to a decision it has already recorded, because a re-survey that reaches the same
+    ///   conclusion is not news — and a stale daemon holding somebody's agents is re-surveyed for
+    ///   as long as it holds them.
     @discardableResult
     static func run(
         request: PTYHostUpgradeRequest,
         eventLog: EventLog = .shared,
         timeout: TimeInterval = PTYHostRegistrationDefaults.surveyTimeout,
-        kernel: PTYHostKernelProcessProbe = .live
+        kernel: PTYHostKernelProcessProbe = .live,
+        journalsDecision: (PTYHostUpgradeDecision) -> Bool = { _ in true }
     ) -> PTYHostUpgradeProgress {
         switch connectAndCount(
             socketPath: request.socketPath,
@@ -361,7 +406,14 @@ enum PTYHostUpgradeCheck {
             )
             guard decision.retires else {
                 client.close()
-                journal(decision, survey: survey, ownBuild: request.ownBuild, eventLog: eventLog)
+                if journalsDecision(decision) {
+                    journal(
+                        decision,
+                        survey: survey,
+                        ownBuild: request.ownBuild,
+                        eventLog: eventLog
+                    )
+                }
                 return .settled(decision)
             }
 
@@ -377,7 +429,9 @@ enum PTYHostUpgradeCheck {
             }
             let didClose = closed.wait(timeout) != nil
             client.close()
-            journal(decision, survey: survey, ownBuild: request.ownBuild, eventLog: eventLog)
+            if journalsDecision(decision) {
+                journal(decision, survey: survey, ownBuild: request.ownBuild, eventLog: eventLog)
+            }
             if didClose { return .retirementConfirmed }
             if let identity, !kernel.matches(identity) { return .retirementConfirmed }
             return .retirementPending(identity)
@@ -575,19 +629,43 @@ struct PTYHostUpgradeRequest: Equatable, Sendable {
 
 /// The blocking survey seam used by `PTYHostUpgradeMonitor`.
 struct PTYHostUpgradeProbe: Sendable {
-    private let answer: @Sendable (PTYHostUpgradeRequest) -> PTYHostUpgradeProgress
+    private let answer: @Sendable (
+        PTYHostUpgradeRequest,
+        @escaping (PTYHostUpgradeDecision) -> Bool
+    ) -> PTYHostUpgradeProgress
 
-    init(_ answer: @escaping @Sendable (PTYHostUpgradeRequest) -> PTYHostUpgradeProgress) {
+    init(
+        _ answer: @escaping @Sendable (
+            PTYHostUpgradeRequest,
+            @escaping (PTYHostUpgradeDecision) -> Bool
+        ) -> PTYHostUpgradeProgress
+    ) {
         self.answer = answer
     }
 
-    func progress(for request: PTYHostUpgradeRequest) -> PTYHostUpgradeProgress {
-        answer(request)
+    /// Convenience for a fake that does not care whether the answer was journalled.
+    init(_ answer: @escaping @Sendable (PTYHostUpgradeRequest) -> PTYHostUpgradeProgress) {
+        self.answer = { request, journalsDecision in
+            let progress = answer(request)
+            if case .settled(let decision) = progress { _ = journalsDecision(decision) }
+            return progress
+        }
+    }
+
+    func progress(
+        for request: PTYHostUpgradeRequest,
+        journalsDecision: @escaping (PTYHostUpgradeDecision) -> Bool = { _ in true }
+    ) -> PTYHostUpgradeProgress {
+        answer(request, journalsDecision)
     }
 
     static func live(eventLog: EventLog = .shared) -> PTYHostUpgradeProbe {
-        PTYHostUpgradeProbe { request in
-            PTYHostUpgradeCheck.run(request: request, eventLog: eventLog)
+        PTYHostUpgradeProbe { request, journalsDecision in
+            PTYHostUpgradeCheck.run(
+                request: request,
+                eventLog: eventLog,
+                journalsDecision: journalsDecision
+            )
         }
     }
 }
@@ -600,22 +678,40 @@ struct PTYHostUpgradeProbe: Sendable {
 /// scheduled retry covers those unobservable endings without polling an ordinary current daemon.
 final class PTYHostUpgradeMonitor: @unchecked Sendable {
     private let probe: PTYHostUpgradeProbe
-    private let scheduleRetry: @Sendable (@escaping @Sendable () -> Void) -> Void
+    private let scheduleRetry: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
     private let registeredProcessProbe: PTYHostRegisteredProcessProbe
     private let kernelProcessProbe: PTYHostKernelProcessProbe
     private let refreshRegistration: @Sendable (PTYHostRegistrationRequest) -> Bool
-    private let setNewSessionAdmission: @Sendable (Bool) -> Void
+    private let setNewSessionAdmission: @Sendable (PTYHostNewSessionAdmission.State) -> Void
     private var pending: PTYHostUpgradeRequest?
     private var observedProcess: PTYHostProcessIdentity?
     private var hasScheduledRetry = false
 
+    /// The next fallback delay, doubling from `upgradeRetryInterval` towards
+    /// `upgradeRetryMaximumInterval`.
+    ///
+    /// **A backstop is not a poll.** The retry that matters is event-driven — a host-owned child
+    /// ending posts `PTYHostMayHaveDrained` and re-runs the real decision at once — and this
+    /// exists only for a *detached* child this launch could not adopt and therefore cannot
+    /// observe ending. A daemon holding somebody's thirty agents holds them for hours, and a
+    /// fixed 30-second timer against it is 2,880 connects and 5,760 journal lines a day saying
+    /// the same thing. So it retries promptly at first, when a drain really might be seconds
+    /// away, and settles into a long interval when it plainly is not.
+    private var nextRetryInterval = PTYHostRegistrationDefaults.upgradeRetryInterval
+
+    /// The decision the journal last recorded for the pending upgrade, so a re-survey that
+    /// reaches the same one records nothing.
+    private var journalledDecision: PTYHostUpgradeDecision?
+
     init(
         probe: PTYHostUpgradeProbe = .live(),
-        scheduleRetry: @escaping @Sendable (@escaping @Sendable () -> Void) -> Void = { _ in },
+        scheduleRetry: @escaping @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+            = { _, _ in },
         registeredProcessProbe: PTYHostRegisteredProcessProbe = .live(),
         kernelProcessProbe: PTYHostKernelProcessProbe = .live,
         refreshRegistration: @escaping @Sendable (PTYHostRegistrationRequest) -> Bool = { _ in true },
-        setNewSessionAdmission: @escaping @Sendable (Bool) -> Void = { _ in }
+        setNewSessionAdmission: @escaping @Sendable (PTYHostNewSessionAdmission.State) -> Void
+            = { _ in }
     ) {
         self.probe = probe
         self.scheduleRetry = scheduleRetry
@@ -629,25 +725,35 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
     /// Silence means there was no old process to replace; a daemon launched later comes from the
     /// bundle currently on disk.
     func begin(_ request: PTYHostUpgradeRequest) {
-        setNewSessionAdmission(false)
+        // Unresolved rather than withheld: this launch has not heard from the daemon yet, and a
+        // launch that lands in this window is degrading because nobody has asked, not because
+        // the answer was no.
+        setNewSessionAdmission(.unresolved)
         pending = request
         observedProcess = nil
+        journalledDecision = nil
+        nextRetryInterval = PTYHostRegistrationDefaults.upgradeRetryInterval
         evaluate(request, preservesPendingOnSilence: false)
         scheduleFallbackIfNeeded()
     }
 
     /// Rechecks after a host-owned child ended. A transient silence keeps the pending generation
     /// so another ending can retry; it never turns into permission to signal a process.
+    ///
+    /// An ending is real evidence that the count moved, so it also resets the backoff: the next
+    /// backstop is prompt again rather than an hour away because nothing had happened for an hour.
     func hostMayHaveDrained() {
         guard let pending else { return }
+        nextRetryInterval = PTYHostRegistrationDefaults.upgradeRetryInterval
         evaluate(pending, preservesPendingOnSilence: true)
     }
 
     /// Turning the host off cancels upgrade work as well as future hosted launches.
     func cancel() {
-        setNewSessionAdmission(false)
+        setNewSessionAdmission(.unresolved)
         pending = nil
         observedProcess = nil
+        journalledDecision = nil
     }
 
     /// Runs the scheduled backstop. Kept separate from session-ending retries so one timer stays
@@ -663,32 +769,48 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
         _ request: PTYHostUpgradeRequest,
         preservesPendingOnSilence: Bool
     ) {
-        switch probe.progress(for: request) {
+        switch progress(of: request) {
         case .settled(.leave(.holdsSessions)):
-            setNewSessionAdmission(false)
+            setNewSessionAdmission(.withheld)
             pending = request
             observedProcess = nil
         case .noAnswer where request.requiresRegistrationRefresh:
             evaluateUnansweredRefresh(request)
         case .noAnswer where preservesPendingOnSilence:
-            setNewSessionAdmission(false)
+            setNewSessionAdmission(.withheld)
             pending = request
         case .retirementPending(let identity) where request.requiresRegistrationRefresh:
-            setNewSessionAdmission(false)
+            setNewSessionAdmission(.withheld)
             pending = request
             observedProcess = identity ?? observedProcess
             if observedProcess == nil { observeRegisteredProcess(for: request) }
         case .retirementConfirmed where request.requiresRegistrationRefresh:
             completeRefresh(request)
         case .settled(.leave(.sameBuild)), .retirementConfirmed, .noAnswer:
-            setNewSessionAdmission(request.allowsNewSessionsWhenCurrent)
+            setNewSessionAdmission(request.allowsNewSessionsWhenCurrent ? .allowed : .withheld)
             pending = nil
             observedProcess = nil
         case .settled, .retirementPending:
-            setNewSessionAdmission(false)
+            setNewSessionAdmission(.withheld)
             pending = nil
             observedProcess = nil
         }
+    }
+
+    /// Runs the survey, telling it whether this answer is worth a journal line.
+    ///
+    /// The same decision reached again is not news. It was two lines every thirty seconds for the
+    /// whole life of an app whose daemon was never going to be free, which is how a journal stops
+    /// being read.
+    private func progress(of request: PTYHostUpgradeRequest) -> PTYHostUpgradeProgress {
+        let answer = probe.progress(for: request, journalsDecision: { [weak self] decision in
+            guard let self else { return true }
+            guard self.journalledDecision != decision else { return false }
+            self.journalledDecision = decision
+            return true
+        })
+        if case .noAnswer = answer { journalledDecision = nil }
+        return answer
     }
 
     private func evaluateUnansweredRefresh(_ request: PTYHostUpgradeRequest) {
@@ -709,13 +831,13 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
     private func observeRegisteredProcess(for request: PTYHostUpgradeRequest) {
         switch registeredProcessProbe.state() {
         case .running(let identity):
-            setNewSessionAdmission(false)
+            setNewSessionAdmission(.withheld)
             pending = request
             observedProcess = identity
         case .notRunning:
             completeRefresh(request)
         case .unknown:
-            setNewSessionAdmission(false)
+            setNewSessionAdmission(.withheld)
             // Uncertainty is never permission to call `unregister()`, because that call kills a
             // helper which may simply have unlinked its socket to drain.
             pending = request
@@ -729,11 +851,11 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
             return
         }
         if refreshRegistration(registrationRequest) {
-            setNewSessionAdmission(true)
+            setNewSessionAdmission(.allowed)
             pending = nil
             observedProcess = nil
         } else {
-            setNewSessionAdmission(false)
+            setNewSessionAdmission(.withheld)
             // `SMAppService` can fail transiently. With no old daemon left, the next backstop
             // retries only the bounded registration handoff; sessions meanwhile use in-process.
             pending = request
@@ -744,7 +866,12 @@ final class PTYHostUpgradeMonitor: @unchecked Sendable {
     private func scheduleFallbackIfNeeded() {
         guard pending != nil, !hasScheduledRetry else { return }
         hasScheduledRetry = true
-        scheduleRetry { [weak self] in self?.scheduledRetry() }
+        let delay = nextRetryInterval
+        nextRetryInterval = min(
+            delay * 2,
+            PTYHostRegistrationDefaults.upgradeRetryMaximumInterval
+        )
+        scheduleRetry(delay) { [weak self] in self?.scheduledRetry() }
     }
 }
 

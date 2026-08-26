@@ -148,6 +148,15 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         /// emulator can adopt the grid the bytes were written at.
         var attached: @Sendable (PTYHostAttached) -> Void = { _ in }
 
+        /// The replay this attach was owed has been fed, and everything after it is live output.
+        ///
+        /// The same boundary query suppression uses — the daemon queues the whole replay before
+        /// it binds the connection, so the replay is the head of what arrives and the first
+        /// coalesced flush is where it ends. It is delivered as an edge of its own because a
+        /// *reattached* session's only activity signal is the bytes its child keeps painting,
+        /// and those cannot be told from the repaint in front of them without this line.
+        var attachReplayFinished: @Sendable () -> Void = { }
+
         /// A different process group owns the terminal now.
         var foreground: @Sendable (Int32) -> Void = { _ in }
 
@@ -704,6 +713,10 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         attachParseBarrier = nil
         lock.unlock()
         barrier?.leave()
+
+        // After the handoff, and only once per link: every byte from here is the child writing
+        // now rather than the screen it was already showing.
+        backlogDelivery.attachReplayFinished()
     }
 
     // MARK: - Private Methods — Endings

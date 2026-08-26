@@ -167,6 +167,35 @@ final class PTYHostVisibilityTests: XCTestCase {
         XCTAssertEqual(notice.count, 3)
     }
 
+    /// The band names what **came back**, not what the daemon was holding.
+    ///
+    /// Measured on 2026-08-26: the daemon held 32 terminals, 31 were taken back, and the band read
+    /// "32 sessions kept running while Threading was closed." with `Reattach` beside it — a
+    /// sentence that overstated the recovery next to a button whose subject the sentence never
+    /// mentioned. Both halves are the same mistake: `count` was the total rather than the outcome.
+    func testTheBandNamesWhatCameBackRatherThanWhatTheDaemonHeld() throws {
+        let notice = try XCTUnwrap(PTYHostLaunchNotice.forLaunch(plan(adopt: 32), pending: 1))
+
+        XCTAssertEqual(notice, .keptRunning(count: 31, pending: 1))
+        XCTAssertEqual(
+            notice.message,
+            "31 sessions kept running while Threading was closed. "
+                + "One session could not be taken back."
+        )
+        XCTAssertEqual(notice.actionTitle, "Reattach")
+    }
+
+    /// A launch that recovered nothing says only the half that is true, and still offers the way
+    /// back: a sentence claiming zero sessions kept running would be the same overstatement in
+    /// the other direction.
+    func testABandWithNothingRecoveredNamesOnlyWhatIsOutstanding() throws {
+        let notice = try XCTUnwrap(PTYHostLaunchNotice.forLaunch(plan(adopt: 2), pending: 2))
+
+        XCTAssertEqual(notice, .keptRunning(count: 0, pending: 2))
+        XCTAssertEqual(notice.message, "2 sessions could not be taken back.")
+        XCTAssertEqual(notice.actionTitle, "Reattach")
+    }
+
     /// A conversation the daemon kept working counts as having kept running, even though it is
     /// not taken back: it did keep running, and what it wrote is in the transcript.
     func testAConversationTheHostKeptWorkingCountsOnTheBand() {
