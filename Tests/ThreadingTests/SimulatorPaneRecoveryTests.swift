@@ -126,6 +126,80 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
         XCTAssertEqual(openCount, 2)
     }
 
+    func testAgentInstallQuiescesDirectTransportAndReconnectsAfterMutation() async throws {
+        let firstSession = SimulatorRecoveryStreamSessionFake()
+        let recoveredSession = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([
+            .success(firstSession),
+            .success(recoveredSession),
+        ])
+        let control = SimulatorRecoveryControlFake(
+            transportStoppedProbe: { firstSession.didStop }
+        )
+        let controller = makeController(control: control, coordinator: coordinator)
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+
+        let result: SimulatorPaneAgentResult<SimulatorLaunchReceipt> =
+            await withCheckedContinuation { continuation in
+                controller.installAndLaunchForAgent(
+                    applicationURL: URL(fileURLWithPath: "/tmp/Dogfood.app"),
+                    bundleIdentifier: "codes.threading.dogfood",
+                    arguments: []
+                ) {
+                    continuation.resume(returning: $0)
+                }
+            }
+
+        guard case .success = result else {
+            return XCTFail("The mutation did not complete through the adopted pane.")
+        }
+        let installObservedTransportStopped = await control.installObservedTransportStopped
+        XCTAssertEqual(installObservedTransportStopped, true)
+        XCTAssertTrue(firstSession.didStop)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        let installOpenCount = await coordinator.openCount
+        XCTAssertEqual(installOpenCount, 2)
+    }
+
+    func testAgentScreenshotQuiescesDirectTransportAndReconnectsAfterCapture() async throws {
+        let firstSession = SimulatorRecoveryStreamSessionFake()
+        let recoveredSession = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([
+            .success(firstSession),
+            .success(recoveredSession),
+        ])
+        let control = SimulatorRecoveryControlFake(
+            transportStoppedProbe: { firstSession.didStop }
+        )
+        let controller = makeController(control: control, coordinator: coordinator)
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+
+        let result: SimulatorPaneAgentResult<SimulatorPaneScreenshot> =
+            await withCheckedContinuation { continuation in
+                controller.screenshotForAgent {
+                    continuation.resume(returning: $0)
+                }
+            }
+
+        guard case .success = result else {
+            return XCTFail("The capture did not complete through the adopted pane.")
+        }
+        let screenshotObservedTransportStopped = await control.screenshotObservedTransportStopped
+        XCTAssertEqual(screenshotObservedTransportStopped, true)
+        XCTAssertTrue(firstSession.didStop)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        let screenshotOpenCount = await coordinator.openCount
+        XCTAssertEqual(screenshotOpenCount, 2)
+    }
+
     func testStoppedDeviceFailureRefreshesLeaseBeforeRetryingTransport() async throws {
         let failedSession = SimulatorRecoveryStreamSessionFake()
         let recoveredSession = SimulatorRecoveryStreamSessionFake()
@@ -284,10 +358,17 @@ private final class SimulatorRecoveryInputAuthorizerFake: SimulatorInputAuthoriz
 private actor SimulatorRecoveryControlFake: SimulatorControlling {
     private(set) var prepareCount = 0
     private(set) var screenshotCount = 0
+    private(set) var installObservedTransportStopped: Bool?
+    private(set) var screenshotObservedTransportStopped: Bool?
     private var screenshotFailures: Int
+    private let transportStoppedProbe: @Sendable () -> Bool
 
-    init(screenshotFailures: Int = 0) {
+    init(
+        screenshotFailures: Int = 0,
+        transportStoppedProbe: @escaping @Sendable () -> Bool = { true }
+    ) {
         self.screenshotFailures = screenshotFailures
+        self.transportStoppedProbe = transportStoppedProbe
     }
 
     func availableDevices() async throws -> [SimulatorDevice] {
@@ -310,7 +391,8 @@ private actor SimulatorRecoveryControlFake: SimulatorControlling {
         on deviceID: SimulatorDeviceID,
         arguments: [String]
     ) async throws -> SimulatorLaunchReceipt {
-        SimulatorLaunchReceipt(
+        installObservedTransportStopped = transportStoppedProbe()
+        return SimulatorLaunchReceipt(
             deviceID: deviceID,
             bundleIdentifier: bundleIdentifier,
             processIdentifier: nil
@@ -319,6 +401,7 @@ private actor SimulatorRecoveryControlFake: SimulatorControlling {
 
     func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data {
         screenshotCount += 1
+        screenshotObservedTransportStopped = transportStoppedProbe()
         if screenshotFailures > 0 {
             screenshotFailures -= 1
             throw SimulatorControlError.deviceNotFound(deviceID)

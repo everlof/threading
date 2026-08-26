@@ -93,17 +93,17 @@ cleanup_mobile_fixture() {
         && -n "$active_developer_dir" ]]; then
         cleanup_status=1
         local attempt
-        for attempt in {1..12}; do
-            DEVELOPER_DIR="$active_developer_dir" xcrun simctl terminate \
-                "$active_cleanup_udid" "$active_cleanup_bundle" >/dev/null 2>&1 || true
-            DEVELOPER_DIR="$active_developer_dir" xcrun simctl uninstall \
-                "$active_cleanup_udid" "$active_cleanup_bundle" >/dev/null 2>&1 || true
+        for attempt in {1..3}; do
+            run_simctl_bounded "$active_developer_dir" 5 /dev/null terminate \
+                "$active_cleanup_udid" "$active_cleanup_bundle" || true
+            run_simctl_bounded "$active_developer_dir" 5 /dev/null uninstall \
+                "$active_cleanup_udid" "$active_cleanup_bundle" || true
             if wait_for_mobile_bundle_state "$active_developer_dir" \
                 "$active_cleanup_udid" "$active_cleanup_bundle" absent 1; then
                 cleanup_status=0
                 break
             fi
-            [[ $attempt -eq 12 ]] || sleep 1
+            [[ $attempt -eq 3 ]] || sleep 1
         done
     fi
     active_cleanup_udid=""
@@ -147,6 +147,41 @@ record_failure() {
     printf '  failed: %s\n' "$*" >&2
 }
 
+# CoreSimulator occasionally stops answering one public client while the device itself and the
+# adopted helper remain healthy. Evidence cleanup and catalogue reads must still have a finite
+# lane duration, including their child process tree, so a wedged simctl cannot hold the shared
+# CoreSimulator lock forever.
+run_simctl_bounded() {
+    local developer_dir="$1"
+    local timeout_seconds="$2"
+    local output_path="$3"
+    shift 3
+    DEVELOPER_DIR="$developer_dir" python3 - "$timeout_seconds" "$output_path" "$@" <<'PYTHON'
+import os
+import signal
+import subprocess
+import sys
+
+timeout = float(sys.argv[1])
+output_path = sys.argv[2]
+arguments = sys.argv[3:]
+with open(output_path, "wb") as output:
+    process = subprocess.Popen(
+        ["xcrun", "simctl", *arguments],
+        stdout=output,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        status = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        sys.exit(124)
+sys.exit(status)
+PYTHON
+}
+
 select_device() {
     local catalogue="$1"
     local wanted="$2"
@@ -186,8 +221,7 @@ mobile_bundle_presence() {
     local json_file
     plist_file="$(mktemp -t threading-simulator-listapps)"
     json_file="$(mktemp -t threading-simulator-listapps-json)"
-    if ! DEVELOPER_DIR="$developer_dir" xcrun simctl listapps "$udid" \
-        > "$plist_file" 2>/dev/null; then
+    if ! run_simctl_bounded "$developer_dir" 8 "$plist_file" listapps "$udid"; then
         rm -f "$plist_file" "$json_file"
         return 2
     fi
@@ -341,8 +375,8 @@ run_one_xcode() {
     DEVELOPER_DIR="$developer_dir" xcodebuild -version > "$run_directory/xcode-version.txt"
     say "$(head -1 "$run_directory/xcode-version.txt")"
 
-    if ! DEVELOPER_DIR="$developer_dir" xcrun simctl list devices available -j \
-        > "$run_directory/devices-before.json"; then
+    if ! run_simctl_bounded "$developer_dir" 15 \
+        "$run_directory/devices-before.json" list devices available -j; then
         record_failure "$run_directory" "could not read the CoreSimulator device catalogue"
         failed=1
     fi
@@ -546,8 +580,8 @@ PYTHON
 
     local final_device=""
     if [[ -n "$device_id" ]] \
-        && DEVELOPER_DIR="$developer_dir" xcrun simctl list devices available -j \
-            > "$run_directory/devices-after.json" \
+        && run_simctl_bounded "$developer_dir" 15 \
+            "$run_directory/devices-after.json" list devices available -j \
         && final_device="$(select_device "$run_directory/devices-after.json" "$device_id")"; then
         local final_id=""
         local final_name=""

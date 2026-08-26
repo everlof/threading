@@ -42,6 +42,12 @@ directory because current `simctl io screenshot` help documents `-` as stdout, b
 treats it as a literal filename. Threading bounded-reads the PNG and removes the whole capture
 directory on every success or failure path.
 
+The pane does not overlap those public device transactions with its private framebuffer client.
+Before an agent install/launch or public screenshot, it stops the current direct transport; after
+the bounded command completes or fails, it establishes a fresh stream for the same live lease.
+CoreSimulator otherwise can leave `simctl` waiting while the old helper remains connected but
+receives no frames. This is one serialization rule owned by the pane, not a retry budget.
+
 The public path is the fallback and lifecycle plane, not the intended live renderer. The direct
 backend is a first-party signed helper using the CoreSimulator framebuffer and device HID seams:
 
@@ -174,6 +180,10 @@ The dogfood and iOS UI-evidence runners take the same host-wide advisory CoreSim
 reading the catalogue. A second Threading worktree therefore refuses immediately instead of
 cloning or rebooting the adopted device midway through compatibility evidence. The lock is held
 through cleanup and released by the kernel when the owning script exits.
+
+The runner also gives its own catalogue and fixture-cleanup `simctl` process groups explicit
+deadlines. A CoreSimulator service that stops answering therefore produces failed evidence and a
+released lane rather than an indefinitely wedged test process.
 
 The runner records a versioned JSON matrix and requires Simulator/Device Hub to be absent before
 and after the lane, so activating an existing GUI cannot masquerade as headless behavior. It also

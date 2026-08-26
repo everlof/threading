@@ -293,6 +293,18 @@ final class SimulatorPaneViewController: NSViewController {
         let deviceID = lease.device.id
         let control = control
         runAgentCommand { [weak self] in
+            guard let self else { return }
+            // CoreSimulator does not serialize its public simctl mutations against the private
+            // framebuffer service for us. Keeping the adopted stream open while install/launch
+            // runs can wedge both services: the helper remains connected but sends no frames,
+            // while simctl never answers. Quiesce the one pane-owned transport for the bounded
+            // public mutation, then establish a fresh stream against the launched process.
+            self.stopTransport()
+            defer {
+                if self.isPresented, self.lease?.device.id == deviceID {
+                    self.startFrameLoop()
+                }
+            }
             do {
                 let receipt = try await control.installAndLaunch(
                     applicationURL: applicationURL,
@@ -301,7 +313,7 @@ final class SimulatorPaneViewController: NSViewController {
                     arguments: arguments
                 )
                 try Task.checkCancellation()
-                guard self?.lease?.device.id == deviceID else {
+                guard self.lease?.device.id == deviceID else {
                     completion(.failure("The selected Simulator changed during launch."))
                     return
                 }
@@ -325,17 +337,27 @@ final class SimulatorPaneViewController: NSViewController {
         }
         let control = control
         runAgentCommand { [weak self] in
+            guard let self else { return }
+            // A public screenshot is another CoreSimulator service transaction. It must not
+            // overlap the adopted private framebuffer stream for the same device; after the
+            // capture, reconnect so subsequent input stays on the direct pane transport.
+            self.stopTransport()
+            defer {
+                if self.isPresented, self.lease?.device.id == device.id {
+                    self.startFrameLoop()
+                }
+            }
             do {
                 let data = try await control.screenshot(of: device.id)
                 try Task.checkCancellation()
                 guard let image = NSImage(data: data) else {
                     throw SimulatorControlError.invalidScreenshot
                 }
-                guard self?.lease?.device.id == device.id else {
+                guard self.lease?.device.id == device.id else {
                     completion(.failure("The selected Simulator changed during capture."))
                     return
                 }
-                self?.screenView.image = image
+                self.screenView.image = image
                 completion(.success(SimulatorPaneScreenshot(data: data, device: device)))
             } catch is CancellationError {
                 completion(.failure("The Simulator capture was cancelled."))
