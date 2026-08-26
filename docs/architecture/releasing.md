@@ -380,11 +380,31 @@ its own release's tag. **The seed goes to the output path, not the archives dire
 help says the archives directory, which is true only when that is also the output; with `-o` it
 reads the existing feed from the output path. Verified against Sparkle 2, not inferred.
 
+`--maximum-versions` is 5 rather than the old 1, and that is 5 *per channel* rather than 5 in
+total: the channel is part of Sparkle's `UpdateBranch`, alongside the minimum OS and hardware
+requirements. Stable and beta are pruned independently, so a run of betas can never push the
+stable release a lagging user needs out of the feed. Sparkle also trims a channel branch back to
+one item once the default branch has overtaken it, so a settled beta line tidies itself up.
+
 Seeding made the old signature check unsound, which is worth stating because the failure is
 silent: when the signing key's public half does not match the app's `SUPublicEDKey`, Sparkle
 prints a warning, **omits the enclosure signature and exits 0**. A whole-file grep for a signature
 is then satisfied by a carried-over item while this release goes out unsigned. The verification
 now reads this version's own item.
+
+### Running a beta while subscribed to stable
+
+The one state the picker can leave somebody in, and it needs no new copy. Sparkle filters the
+beta items, so the newest item that updater can see is the last stable — older than the build
+they are running — and `SPUBasicUpdateDriver` answers "You're up to date!" with
+`SPUNoUpdateFoundReasonOnNewerThanLatestVersion`.
+
+That is honest, and it is where it ends: the next stable release outranks that beta by
+construction, so it arrives on its own. Note that Sparkle **cannot** report channel gating as a
+reason — it says so in as many words ("There could be update items on channels the updater is
+not subscribed to for example. But we can't tell the user about them.") and reports being on the
+latest version. So there is nothing to render differently, and inferring it from an error code
+would mean claiming to know what Sparkle just said it could not determine.
 
 ### Where each artefact goes
 

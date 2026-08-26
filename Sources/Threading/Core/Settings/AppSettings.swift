@@ -1223,15 +1223,13 @@ final class AppSettings {
         }
     }
 
-    /// Whether Threading may ask its own and installed agent tools' official release sources
-    /// whether newer versions exist.
+    /// Which builds this person receives, which is not what their build *is*. See
+    /// `UpdateChannelSubscription`.
     ///
-    /// Defaults to **on**, and `defaults.bool` cannot express that — an unset key reads `false`,
-    /// which would ship the feature switched off for everyone who never opened Settings. The
-    /// registered default is `true` and this reads through it, so "never touched" and
-    /// "deliberately off" stay distinguishable in the stored domain.
-    /// Which builds this person receives. Resolved against the running build when unset, so a
-    /// direct beta download is not silently filtered away from its own updates.
+    /// An unset value is resolved against the running build rather than against a constant: a
+    /// beta someone downloaded directly would otherwise default to the stable subscription,
+    /// filtering away every beta item and never updating again. The stored string therefore only
+    /// ever records a choice somebody actually made.
     var updateChannelSubscription: UpdateChannelSubscription {
         get {
             let stored = AppSettingDefinitions.updateChannelSubscription.read(from: defaults) ?? ""
@@ -1243,6 +1241,13 @@ final class AppSettings {
         }
     }
 
+    /// Whether Threading may ask its own and installed agent tools' official release sources
+    /// whether newer versions exist.
+    ///
+    /// Defaults to **on**, and `defaults.bool` cannot express that — an unset key reads `false`,
+    /// which would ship the feature switched off for everyone who never opened Settings. The
+    /// registered default is `true` and this reads through it, so "never touched" and
+    /// "deliberately off" stay distinguishable in the stored domain.
     var automaticUpdateChecksEnabled: Bool {
         get { AppSettingDefinitions.automaticUpdateChecksEnabled.read(from: defaults) ?? true }
         set {

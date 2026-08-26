@@ -24,8 +24,13 @@
 # publishes them (see CLAUDE.md); the tag
 # is pushed by hand, and this script only verifies the remote already has it, exactly where
 # HEAD is. Run:
-#   git tag -a v0.1.0 -m "Threading 0.1.0"
-#   git push origin v0.1.0        # deliberately by hand, never from a script
+#   git tag -a v0.2.0 -m "Threading 0.2.0"
+#   git push origin v0.2.0        # deliberately by hand, never from a script
+#   scripts/publish_release.sh
+#
+# or, for a beta of the 0.2.0 that follows it:
+#   git tag -a beta-v0.1.90 -m "Threading 0.1.90 beta"
+#   git push origin beta-v0.1.90
 #   scripts/publish_release.sh
 #
 # Environment: THREADING_REPO (default everlof/threading), NOTARY_PROFILE, and everything

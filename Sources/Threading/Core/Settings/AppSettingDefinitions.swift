@@ -1230,14 +1230,14 @@ enum AppSettingDefinitions {
         validation: .allowedStrings(
             Set(UpdateChannelSubscription.allCases.map(\.rawValue)).union([""])
         ),
-        presentations: [row("general", 1, "Software Updates", "Updates you receive",
+        presentations: [row("general", 30, "Software Updates", "Updates you receive",
                             ["beta", "channel", "prerelease", "nightly", "updates"])]
     )
     static let automaticUpdateChecksEnabled = AppSettingDescriptor<Bool>(
         identity: .automaticUpdateChecksEnabled,
         persistenceKey: "automaticUpdateChecksEnabled",
         absence: .registered(true),
-        presentations: [row("general", 30, "Software Updates",
+        presentations: [row("general", 31, "Software Updates",
                             "Check for updates automatically", [
                                 "updates", "Sparkle", "agent", "CLI", "Claude", "Codex",
                                 "Grok", "OpenCode", "Cursor"
@@ -1248,7 +1248,7 @@ enum AppSettingDefinitions {
         persistenceKey: "preventsIdleSystemSleepWhileAgentsWork",
         absence: .registered(false),
         presentations: [row(
-            "general", 31, "Power", "Keep this Mac awake while agents work",
+            "general", 32, "Power", "Keep this Mac awake while agents work",
             ["sleep", "awake", "lid", "battery", "energy", "active turn"]
         )]
     )
@@ -1336,6 +1336,7 @@ enum AppSettingDefinitions {
         .init(remoteAccessDiscoveryEnabled),
         .init(remoteInputControlDefault),
         .init(phoneReportWorkspace),
+        .init(updateChannelSubscription),
         .init(automaticUpdateChecksEnabled), .init(preventsIdleSystemSleepWhileAgentsWork),
         .init(workingOrbStyle),
         .init(chatNameMorphStyle), .init(chromeFontFamily), .init(conversationFontFamily),

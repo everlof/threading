@@ -175,9 +175,19 @@ extension UpdateUserDriver: SPUUserDriver {
     }
 
     func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
-        // Sparkle populates this error with alert-ready strings covering every "no update for
-        // you" reason — already newest, OS too old, channel gated — so the honest sheet is its
-        // words, not a hardcoded "up to date" that would misreport the gated cases.
+        // Sparkle populates this error with alert-ready strings covering the "no update for
+        // you" reasons it can tell apart — already newest, newer than the feed, Mac too old,
+        // macOS too old or too new — so the honest sheet is its words rather than a hardcoded
+        // "up to date" that would misreport the hardware and OS cases.
+        //
+        // A channel the updater is not subscribed to is deliberately *not* among them:
+        // SPUBasicUpdateDriver says so in as many words ("we can't tell the user about them")
+        // and reports being on the latest version. That is not a gap to paper over here. The
+        // one way to reach it is running a beta after choosing stable in Settings, and the
+        // truthful answer there is that nothing is being offered — the next stable release
+        // outranks that beta by construction (scripts/release_tag_policy.sh), so it arrives on
+        // its own. Inventing a "you are on a beta" sheet would mean inferring from an error
+        // code what Sparkle just said it could not determine.
         let nsError = error as NSError
         ThreadingLogger.updates.info(
             "Update check completed without an offer domain=\(nsError.domain, privacy: .private(mask: .hash)) code=\(nsError.code, privacy: .public)"
