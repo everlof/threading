@@ -7796,6 +7796,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ShortcutRecorderView",
                 "SidebarBackdropView",
                 "SidebarBrandView",
+                "SimulatorScreenView",
                 "SplitButtonView",
                 "SplitIconButtonView",
                 "StorageProposalOutlineView",

@@ -35,6 +35,7 @@ struct MacSupportReportDetails {
     private let launchLedgerRead: LaunchLedgerRead?
     private let metricKitDiagnostics: MetricKitDiagnosticReading?
     private let mainThreadStallIncidents: MainThreadStallIncidentReading?
+    private let simulatorStreaming: String
 
     init(
         privacyStatuses: [SystemPrivacyPermission: SystemPrivacyStatus],
@@ -50,7 +51,8 @@ struct MacSupportReportDetails {
         crashLoopDecision: CrashLoopDecision? = nil,
         launchLedgerRead: LaunchLedgerRead? = nil,
         metricKitDiagnostics: MetricKitDiagnosticReading? = nil,
-        mainThreadStallIncidents: MainThreadStallIncidentReading? = nil
+        mainThreadStallIncidents: MainThreadStallIncidentReading? = nil,
+        simulatorStreaming: String = "active=0 limit=4 starts=0 h264=0 jpeg=0 fallback=0 frames=0 replaced=0 last=none"
     ) {
         self.privacyStatuses = privacyStatuses
         self.remoteAccessEnabled = remoteAccessEnabled
@@ -66,6 +68,7 @@ struct MacSupportReportDetails {
         self.launchLedgerRead = launchLedgerRead
         self.metricKitDiagnostics = metricKitDiagnostics
         self.mainThreadStallIncidents = mainThreadStallIncidents
+        self.simulatorStreaming = simulatorStreaming
     }
 
     // MARK: - Output
@@ -79,7 +82,8 @@ struct MacSupportReportDetails {
             .sessionCount: String(sessionCount),
             .extensionCount: String(extensionCount),
             .extensionCompanionCount: String(companionCount),
-            .agentAccountSummary: Self.summary(of: agentAccounts)
+            .agentAccountSummary: Self.summary(of: agentAccounts),
+            .simulatorStreaming: simulatorStreaming
         ]
 
         // The grant rows are the point of the exercise: "the companion cannot capture the

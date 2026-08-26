@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingSimulatorKit
 import XCTest
 @testable import Threading
 
@@ -6,7 +7,11 @@ import XCTest
 final class SimulatorPaneTests: XCTestCase {
     func testHiddenPaneDoesNoWorkAndStopsFramebufferRequestsWhenHidden() async throws {
         let control = SimulatorPaneControlFake()
-        let controller = SimulatorPaneViewController(control: control)
+        let stream = SimulatorPaneStreamCoordinatorFake()
+        let controller = SimulatorPaneViewController(
+            control: control,
+            streamCoordinator: stream
+        )
         _ = controller.view
 
         XCTAssertEqual(controller.presentationState, .idle)
@@ -15,17 +20,91 @@ final class SimulatorPaneTests: XCTestCase {
 
         controller.setPresented(true)
         try await eventually {
-            controller.frameImageForTesting != nil
+            controller.liveBackendForTesting == .direct(codec: .h264)
         }
         XCTAssertEqual(controller.selectedDeviceID, simulatorPaneTestDevice.id)
         XCTAssertTrue(controller.isPresentedForTesting)
 
         controller.setPresented(false)
-        let hiddenCount = await control.counts().screenshots
-        try await Task.sleep(nanoseconds: 1_200_000_000)
-        let finalHiddenCount = await control.counts().screenshots
-        XCTAssertEqual(finalHiddenCount, hiddenCount)
+        try await eventually { stream.session.lastVisibility == false }
+        let hiddenCounts = await control.counts()
+        XCTAssertEqual(hiddenCounts.screenshots, 0)
+        XCTAssertEqual(stream.session.visibilityChanges, [true, false])
         XCTAssertFalse(controller.isPresentedForTesting)
+    }
+
+    func testLeaseManagerSharesOneCapabilityAndCancelsPrematureRelease() async throws {
+        let control = SimulatorPaneControlFake()
+        let manager = SimulatorLeaseManager(
+            control: control,
+            releaseGraceNanoseconds: 20_000_000
+        )
+
+        let first = try await manager.acquire(deviceID: simulatorPaneTestDevice.id)
+        let second = try await manager.acquire(deviceID: simulatorPaneTestDevice.id)
+        XCTAssertEqual(first, second)
+        let preparedCounts = await control.counts()
+        XCTAssertEqual(preparedCounts.prepares, 1)
+
+        await manager.release(first)
+        try await Task.sleep(nanoseconds: 40_000_000)
+        let retainedCounts = await control.counts()
+        XCTAssertEqual(retainedCounts.releases, 0)
+
+        await manager.release(second)
+        try await Task.sleep(nanoseconds: 5_000_000)
+        let reacquired = try await manager.acquire(deviceID: simulatorPaneTestDevice.id)
+        let reacquiredCounts = await control.counts()
+        XCTAssertEqual(reacquiredCounts.prepares, 1)
+        try await Task.sleep(nanoseconds: 40_000_000)
+        let graceCounts = await control.counts()
+        XCTAssertEqual(graceCounts.releases, 0)
+
+        await manager.release(reacquired)
+        try await eventually {
+            await control.counts().releases == 1
+        }
+    }
+
+    func testLiveStreamBudgetCapsAndReleasesExactReservations() throws {
+        var budget = SimulatorStreamBudget(maximum: 4)
+        let reservations = try (0..<4).map { _ in try budget.reserve() }
+        XCTAssertEqual(budget.activeCount, 4)
+        XCTAssertThrowsError(try budget.reserve()) { error in
+            XCTAssertEqual(error as? SimulatorLiveStreamError, .streamLimit(maximum: 4))
+        }
+
+        budget.release(reservations[2])
+        XCTAssertEqual(budget.activeCount, 3)
+        _ = try budget.reserve()
+        XCTAssertEqual(budget.activeCount, 4)
+        budget.release(UUID())
+        XCTAssertEqual(budget.activeCount, 4)
+    }
+
+    func testStreamDiagnosticsStayContentFreeAndAccountForFinalStatistics() {
+        let diagnostics = SimulatorStreamDiagnostics()
+        let id = UUID()
+        diagnostics.started(id: id, codec: .h264)
+        diagnostics.update(id: id, statistics: SimulatorBridgeStatistics(
+            capturedFrames: 12,
+            sentFrames: 8,
+            replacedFrames: 3,
+            encodedBytes: 65_536
+        ))
+        diagnostics.ended(id: id)
+        diagnostics.recordedFallback()
+        diagnostics.recordedFailure(.refused(.screenUnavailable, "secret device detail"))
+
+        let token = diagnostics.reportToken
+        XCTAssertTrue(token.contains("active=0"))
+        XCTAssertTrue(token.contains("h264=1"))
+        XCTAssertTrue(token.contains("fallback=1"))
+        XCTAssertTrue(token.contains("frames=8"))
+        XCTAssertTrue(token.contains("replaced=3"))
+        XCTAssertTrue(token.contains("last=refused-screenUnavailable"))
+        XCTAssertFalse(token.contains("secret"))
+        XCTAssertFalse(token.contains(simulatorPaneTestDevice.id.rawValue))
     }
 
     func testFailureRemainsInThePaneAndRetryUsesTheSameController() async throws {
@@ -109,6 +188,73 @@ final class SimulatorPaneTests: XCTestCase {
         }
     }
 
+    private func eventually(
+        timeout: TimeInterval = 3,
+        _ condition: @escaping @Sendable () async -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !(await condition()) {
+            if Date() >= deadline {
+                XCTFail("Timed out waiting for async simulator state.")
+                return
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+}
+
+private actor SimulatorPaneStreamCoordinatorFake: SimulatorLiveStreamCoordinating {
+    nonisolated let session = SimulatorPaneStreamSessionFake()
+
+    func openStream(
+        for deviceID: SimulatorDeviceID
+    ) async throws -> any SimulatorLiveStreamSession {
+        session
+    }
+}
+
+private final class SimulatorPaneStreamSessionFake: SimulatorLiveStreamSession, @unchecked Sendable {
+    let events: AsyncStream<SimulatorLiveStreamEvent>
+
+    private let lock = NSLock()
+    private var visibility: [Bool] = []
+
+    init() {
+        let pair = AsyncStream<SimulatorLiveStreamEvent>.makeStream(
+            bufferingPolicy: .bufferingNewest(2)
+        )
+        events = pair.stream
+        pair.continuation.yield(.ready(
+            backend: .direct(codec: .h264),
+            capabilities: SimulatorBridgeCapabilities(
+                codecs: [.h264, .jpeg],
+                supportsTouch: true,
+                supportsKeyboard: true,
+                supportsButtons: true,
+                maximumFramesPerSecond: 60
+            ),
+            coreSimulatorVersion: "1065",
+            simulatorKitVersion: "1065"
+        ))
+    }
+
+    var visibilityChanges: [Bool] {
+        lock.lock()
+        defer { lock.unlock() }
+        return visibility
+    }
+
+    var lastVisibility: Bool? { visibilityChanges.last }
+
+    func setVisible(_ visible: Bool) {
+        lock.lock()
+        visibility.append(visible)
+        lock.unlock()
+    }
+
+    func sendInput(_ input: SimulatorBridgeInput) async throws {}
+    func stop() {}
 }
 
 private let simulatorPaneTestDevice = SimulatorDevice(

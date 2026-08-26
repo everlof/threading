@@ -163,6 +163,22 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     _ arguments: SimulatorScreenshotArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  func simulatorTap(
+    _ arguments: SimulatorTapArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func simulatorSwipe(
+    _ arguments: SimulatorSwipeArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func simulatorTypeText(
+    _ arguments: SimulatorTypeTextArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func simulatorPressButton(
+    _ arguments: SimulatorPressButtonArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
 
   func panelListTabs(for sessionID: SessionID) -> MCPToolResult
   func panelActivateTab(

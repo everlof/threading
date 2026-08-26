@@ -212,6 +212,7 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Sendable {
     case agentAccountSummary
     case previousLaunchClean
     case automaticUpdateChecks
+    case simulatorStreaming
 
     // What the app's own launch history says, beside `previousLaunchClean`, which only ever
     // describes the one launch before this one. These describe the run of them: the verdict, the

@@ -3,7 +3,8 @@
 Threading adopts an iOS Simulator **device**, not another application's window. The selected
 device is rendered inside the session's trailing display pane so an agent and a person share one
 stable surface without launching Apple Simulator or Device Hub as the default workflow. The
-public fallback is view-only; device-local interaction arrives with the direct backend below.
+public fallback is view-only; the default direct backend supplies live pixels and device-local
+interaction without a Simulator.app window.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index. Read
 [`mcp-and-display.md`](mcp-and-display.md) for session routing and tab ownership and
@@ -41,9 +42,8 @@ directory because current `simctl io screenshot` help documents `-` as stdout, b
 treats it as a literal filename. Threading bounded-reads the PNG and removes the whole capture
 directory on every success or failure path.
 
-The public path is the fallback and lifecycle plane, not the intended live renderer. The planned
-direct backend is a first-party signed helper using the CoreSimulator framebuffer and device HID
-seams:
+The public path is the fallback and lifecycle plane, not the intended live renderer. The direct
+backend is a first-party signed helper using the CoreSimulator framebuffer and device HID seams:
 
 ```text
 session / MCP tool
@@ -57,16 +57,20 @@ first-party helper                  direct framebuffer + device HID
 CoreSimulator device                no Simulator.app window required
 ```
 
-The helper will speak a versioned protocol over an inherited Unix socket. It opens no listener,
-accepts no arbitrary executable or path command, verifies same-team signing before launch, and
-exposes only the selected device's framebuffer/input vocabulary. Extension companions do not gain
-this authority: safe-extension sandboxing and ExtensionKit v1 remain unchanged.
+The helper speaks a versioned, length-bounded protocol over an inherited Unix socket. It opens no
+listener and accepts no arbitrary executable or path command. The app verifies the embedded
+helper's exact location, signing identifier and team before launch; the helper verifies its direct
+Threading parent and Apple signatures before loading CoreSimulator and the active Xcode's
+SimulatorKit. The hello exchange binds the process to one exact UDID and refuses incompatible
+protocol or private API versions. Extension companions do not gain this authority:
+safe-extension sandboxing and ExtensionKit v1 remain unchanged.
 
-The planned default live codec is H.264 through VideoToolbox, with JPEG as a compatibility
-fallback. The
-host permits one unacknowledged frame; a slow or hidden consumer causes replacement, never a
-queue. A hidden tab requests zero frames. Active targets are 30 fps expected and 60 fps stress,
-with decode and conversion off main.
+The default live codec is real-time H.264 through VideoToolbox at 30 fps with two-second keyframes;
+JPEG is negotiated as a compatibility fallback. The helper permits one unacknowledged frame and
+one replaceable pending frame. A slow consumer therefore gets the newest state rather than a
+queue, and a hidden tab stops its capture timer and drops an encode already in flight. Decode and
+conversion stay off main. The app admits at most four live helpers across all sessions, while the
+public one-frame-per-second screenshot fallback remains available for unsupported Xcode versions.
 
 ## Device and session ownership
 
@@ -93,8 +97,9 @@ The built-in **iOS Simulator** tool group is session-scoped. Its preferred seque
 2. The agent runs `xcodebuild` through its ordinary shell permission flow, using the returned UDID
    and a session-specific DerivedData directory.
 3. `simulator_install_launch` installs the resulting `.app` and launches it in that same device.
-4. `simulator_screenshot` reads the current pixels from that lease. Future input tools address the
-   same lease rather than accepting another session id.
+4. `simulator_screenshot` reads the current pixels from that lease.
+5. `simulator_tap`, `simulator_swipe`, `simulator_type_text` and `simulator_press_button` address
+   that same visible lease with normalized coordinates and a closed, bounded input vocabulary.
 
 `xcodebuild` is deliberately not hidden inside a pre-approved MCP call. The MCP group makes the
 in-app surface easy to discover and reuse; it does not broaden permission to execute an arbitrary
@@ -103,9 +108,11 @@ agents to prefer `simulator_prepare` over launching Simulator/Device Hub directl
 group removes both the tools and the preference guidance from discovery.
 
 Read-only screenshots are available while the built-in group is enabled and the session's exact
-lease is alive; they update and return the same frame the user sees. Future device HID input
-requires one user decision per device. That consent belongs to the device identity, not to a pixel
-tab, and every input tool must fail closed when the lease or consent no longer matches.
+lease is alive. Device HID requires one explicit user decision per exact device per app launch;
+both approval and denial are remembered so repeated calls do not pressure the user. Pointer and
+keyboard interaction in the pane and all agent input tools converge on that decision and the same
+live session. Input fails closed while screenshot fallback is active or whenever the lease,
+consent, device identity or stream generation no longer matches.
 
 ## Presentation and customization boundary
 
@@ -115,10 +122,10 @@ boundary. Those behaviours cannot be delegated to an extension without granting 
 authority and making session guarantees depend on third-party process uptime.
 
 Presentation still uses the shared host vocabulary from `Sources/Threading/UI/Design/`: the pane
-header, tab chip, controls, status rows, placeholder and image surface are themed components. A
-future public extension component may embed a semantic device status or explicit remote surface,
-but it cannot replace the host-owned lifecycle or consent rules. Record this deliberate host-only
-decision in `docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md` when the visible pane lands.
+header, tab chip, controls, status rows, placeholder and interactive screen surface are themed
+components. A future public extension component may embed a semantic device status or explicit
+remote surface, but it cannot replace the host-owned lifecycle or consent rules. The deliberate
+host-only decision is recorded in `docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md`.
 
 The enabled built-in tool group is the current agent preference: **Threading right panel**. Apple
 Simulator / Device Hub is an explicit workflow fallback, not an automatic reaction to a
@@ -141,4 +148,14 @@ never opens that external window silently.
 
 Each increment ships as a coherent fallback-capable slice. The direct helper does not replace the
 public lifecycle path, and the MCP tools do not create a second simulator state model beside the
-pane. Increments 1–3 are now implemented; 4–5 remain future work.
+pane. All five increments are implemented. Deterministic tests cover protocol compatibility,
+framing bounds, 60 fps replacement pressure, hidden visibility, the four-stream budget, lease
+grace, input routing and content-free support diagnostics. The opt-in
+`SimulatorLiveIntegrationTests` lane adds signed-host verification, a real framebuffer decode and
+a harmless Home-button HID round trip against an already-booted device:
+
+```bash
+THREADING_SIMULATOR_INTEGRATION_UDID=<udid> xcodebuild test \
+  -project Threading.xcodeproj -scheme Threading -destination 'platform=macOS' \
+  -only-testing:ThreadingTests/SimulatorLiveIntegrationTests
+```

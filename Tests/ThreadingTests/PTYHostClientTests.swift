@@ -674,20 +674,41 @@ final class PTYHostClientTests: XCTestCase {
 
     func testAnUnknownControlTypeIsIgnoredAndTheConnectionSurvives() throws {
         let session = Self.session
-        let daemon = try makeDaemon(
-            onFrame: Self.greetingDaemon { daemon in
-                // Exactly the shape a later build adds — the `foreground` push frame the design
-                // reserves. A well-framed frame this build has no case for must be read past,
-                // not treated as a corrupt stream.
-                let unknown = Data(#"{"type":"foreground","body":{"pgid":4321}}"#.utf8)
-                guard let framed = try? PTYHostFraming.encode(
+        let daemon = try makeDaemon { frame, daemon in
+            guard frame.kind == .control,
+                  let control = try? JSONDecoder().decode(PTYHostFrame.self, from: frame.payload),
+                  case .hello = control
+            else { return }
+
+            // One write is deliberate. A stream may expose all three frames in the handshake's
+            // same decoded batch; returning as soon as `hello` appeared used to discard the two
+            // frames that were already beside it. The unknown frame is exactly the additive
+            // `foreground` push a later build may add, and only that frame should disappear.
+            let unknown = Data(#"{"type":"foreground","body":{"pgid":4321}}"#.utf8)
+            let exited = PTYHostFrame.exited(
+                PTYHostExited(id: session, status: 0, signalled: false)
+            )
+            guard let helloPayload = try? JSONEncoder().encode(Self.hello(
+                protocolVersion: PTYHostProtocol.current,
+                minimum: PTYHostProtocol.minimumSupported
+            )),
+                  let unknownWire = try? PTYHostFraming.encode(
                     kind: .control,
                     payload: unknown
-                ) else { return }
-                daemon.sendRaw(framed)
-                daemon.send(.exited(PTYHostExited(id: session, status: 0, signalled: false)))
-            }
-        )
+                  ),
+                  let exitedPayload = try? JSONEncoder().encode(exited),
+                  let helloWire = try? PTYHostFraming.encode(
+                    kind: .control,
+                    payload: helloPayload
+                  ),
+                  let exitedWire = try? PTYHostFraming.encode(
+                    kind: .control,
+                    payload: exitedPayload
+                  )
+            else { return XCTFail("the fake daemon could not encode its handshake batch") }
+
+            daemon.sendRaw(helloWire + unknownWire + exitedWire)
+        }
         let recorder = PTYHostEventRecorder()
         let client = makeClient(socketPath: daemon.socketPath, events: recorder.events)
         try client.connect()

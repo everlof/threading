@@ -146,6 +146,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ShortcutRecorderView",
         "SidebarBackdropView",
         "SidebarBrandView",
+        "SimulatorScreenView",
         "SplitButtonView",
         "SplitIconButtonView",
         "StorageProposalOutlineView",
@@ -2875,6 +2876,12 @@ final class ComponentGalleryViewController: NSViewController {
                     commandPalette
                 ),
                 story(
+                    "SimulatorScreenView",
+                    "The adopted device framebuffer: click, drag, focus, and type while the "
+                        + "surrounding feature remains the sole owner of transport and consent.",
+                    makeSimulatorScreenSample()
+                ),
+                story(
                     "HoverPopoverScheduler",
                     "Hover timing as configured policy: instant, dwell, and dwell with a grace that holds.",
                     hoverPolicies
@@ -2931,6 +2938,95 @@ final class ComponentGalleryViewController: NSViewController {
         content.setAccessibilityIdentifier("gallery.presentation.actionPopover")
         content.layoutSubtreeIfNeeded()
         return content
+    }
+
+    /// A framebuffer-shaped fixture with no Simulator dependency. The component gallery owns
+    /// only pixels and interaction callbacks, matching the design component's production
+    /// boundary; device selection, transport, and input consent remain feature-owned.
+    private func makeSimulatorScreenSample() -> NSView {
+        let size = NSSize(width: 390, height: 844)
+        let frame = NSImage(size: size, flipped: false) { bounds in
+            Design.Surface.background.setFill()
+            bounds.fill()
+
+            Design.Surface.accent.withAlphaComponent(0.34).setFill()
+            NSBezierPath(
+                roundedRect: NSRect(x: 28, y: 610, width: 334, height: 150),
+                xRadius: 28,
+                yRadius: 28
+            ).fill()
+
+            Design.Text.label.setFill()
+            NSBezierPath(
+                roundedRect: NSRect(x: 130, y: 790, width: 130, height: 24),
+                xRadius: 12,
+                yRadius: 12
+            ).fill()
+            Design.Text.secondary.setFill()
+            NSRect(x: 52, y: 704, width: 184, height: 18).fill()
+            NSRect(x: 52, y: 672, width: 270, height: 12).fill()
+
+            let tileSize = NSSize(width: 68, height: 68)
+            let tileOrigins = [
+                NSPoint(x: 44, y: 492), NSPoint(x: 161, y: 492), NSPoint(x: 278, y: 492),
+                NSPoint(x: 44, y: 374), NSPoint(x: 161, y: 374), NSPoint(x: 278, y: 374)
+            ]
+            for (index, origin) in tileOrigins.enumerated() {
+                let colour = index.isMultiple(of: 3)
+                    ? Design.Surface.accent
+                    : (index.isMultiple(of: 2) ? Design.Status.positive : Design.Status.warning)
+                colour.withAlphaComponent(0.82).setFill()
+                NSBezierPath(
+                    roundedRect: NSRect(origin: origin, size: tileSize),
+                    xRadius: 16,
+                    yRadius: 16
+                ).fill()
+            }
+
+            Design.Surface.elevated.setFill()
+            NSBezierPath(
+                roundedRect: NSRect(x: 24, y: 28, width: 342, height: 92),
+                xRadius: 28,
+                yRadius: 28
+            ).fill()
+            return true
+        }
+
+        let screen = SimulatorScreenView()
+        screen.image = frame
+        screen.allowsInteraction = true
+        screen.setAccessibilityIdentifier("gallery.presentation.simulatorScreen")
+        screen.onTap = { [weak self] point in
+            self?.showReceipt(
+                L10n.format(
+                    "SimulatorScreenView tapped at %.2f, %.2f.",
+                    Double(point.x),
+                    Double(point.y)
+                )
+            )
+        }
+        screen.onDrag = { [weak self] from, to, milliseconds in
+            self?.showReceipt(
+                L10n.format(
+                    "SimulatorScreenView dragged from %.2f, %.2f to %.2f, %.2f in %lld ms.",
+                    Double(from.x),
+                    Double(from.y),
+                    Double(to.x),
+                    Double(to.y),
+                    Int64(milliseconds)
+                )
+            )
+        }
+        screen.onText = { [weak self] text in
+            self?.showReceipt(
+                L10n.format("SimulatorScreenView typed %@.", text)
+            )
+        }
+        NSLayoutConstraint.activate([
+            screen.widthAnchor.constraint(equalToConstant: 180),
+            screen.heightAnchor.constraint(equalToConstant: 390)
+        ])
+        return screen
     }
 
     private func makeHoverTrackingSample() -> NSView {

@@ -3156,7 +3156,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             metricKitDiagnostics: MetricKitDiagnosticReader().read(),
             // Unlike MetricKit's delayed delivery, this is present immediately after the
             // watchdog fires — including when the user force-quit before main recovered.
-            mainThreadStallIncidents: MainThreadStallIncidentStore.shared.read()
+            mainThreadStallIncidents: MainThreadStallIncidentStore.shared.read(),
+            simulatorStreaming: SimulatorStreamDiagnostics.shared.reportToken
         )
     }
 

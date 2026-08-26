@@ -1,3 +1,5 @@
+import AppKit
+import ThreadingSimulatorKit
 import XCTest
 @testable import Threading
 
@@ -12,6 +14,10 @@ final class SimulatorAgentToolTests: XCTestCase {
             .simulatorPrepare,
             .simulatorInstallLaunch,
             .simulatorScreenshot,
+            .simulatorTap,
+            .simulatorSwipe,
+            .simulatorTypeText,
+            .simulatorPressButton,
         ])
         XCTAssertTrue(group.instruction.contains("prefer Threading's adopted Simulator"))
         XCTAssertTrue(group.instruction.contains("Do not run open -a Simulator"))
@@ -159,6 +165,104 @@ final class SimulatorAgentToolTests: XCTestCase {
         XCTAssertNil(snapshot.launch)
     }
 
+    func testInputToolsUseTheAdoptedDirectStream() async throws {
+        let fixture = makeFixture(visible: true)
+        defer { fixture.cleanup() }
+
+        let prepare = await execute(
+            .simulatorPrepare(SimulatorPrepareArguments(deviceID: nil)),
+            with: fixture.coordinator,
+            sessionID: fixture.sessionID
+        )
+        XCTAssertFalse(prepare.isError, prepare.text)
+
+        let results = [
+            await execute(
+                .simulatorTap(SimulatorTapArguments(x: 0.25, y: 0.75)),
+                with: fixture.coordinator,
+                sessionID: fixture.sessionID
+            ),
+            await execute(
+                .simulatorSwipe(SimulatorSwipeArguments(
+                    fromX: 0.1,
+                    fromY: 0.2,
+                    toX: 0.8,
+                    toY: 0.9,
+                    durationMilliseconds: 450
+                )),
+                with: fixture.coordinator,
+                sessionID: fixture.sessionID
+            ),
+            await execute(
+                .simulatorTypeText(SimulatorTypeTextArguments(text: "Hello!\n")),
+                with: fixture.coordinator,
+                sessionID: fixture.sessionID
+            ),
+            await execute(
+                .simulatorPressButton(SimulatorPressButtonArguments(button: "home")),
+                with: fixture.coordinator,
+                sessionID: fixture.sessionID
+            ),
+        ]
+
+        for result in results {
+            XCTAssertFalse(result.isError, result.text)
+            XCTAssertTrue(result.text.contains(#""surface" : "Threading right panel""#))
+        }
+        XCTAssertEqual(fixture.stream.session.inputs, [
+            .tap(x: 0.25, y: 0.75),
+            .drag(
+                fromX: 0.1,
+                fromY: 0.2,
+                toX: 0.8,
+                toY: 0.9,
+                durationMilliseconds: 450
+            ),
+            .text("Hello!\n"),
+            .button(.home),
+        ])
+        XCTAssertEqual(fixture.authorizer.authorizedDeviceIDs, [simulatorAgentTestDevice.id])
+    }
+
+    func testInputValidationFailsBeforeControlAuthorityIsRequested() async {
+        let fixture = makeFixture(visible: true)
+        defer { fixture.cleanup() }
+
+        let results = [
+            await execute(
+                .simulatorTap(SimulatorTapArguments(x: -0.01, y: 0.5)),
+                with: fixture.coordinator,
+                sessionID: fixture.sessionID
+            ),
+            await execute(
+                .simulatorSwipe(SimulatorSwipeArguments(
+                    fromX: 0,
+                    fromY: 0,
+                    toX: 1,
+                    toY: 1,
+                    durationMilliseconds: 99
+                )),
+                with: fixture.coordinator,
+                sessionID: fixture.sessionID
+            ),
+            await execute(
+                .simulatorTypeText(SimulatorTypeTextArguments(text: "nul\u{0}")),
+                with: fixture.coordinator,
+                sessionID: fixture.sessionID
+            ),
+            await execute(
+                .simulatorPressButton(SimulatorPressButtonArguments(button: "volume-up")),
+                with: fixture.coordinator,
+                sessionID: fixture.sessionID
+            ),
+        ]
+
+        XCTAssertTrue(results.allSatisfy(\.isError))
+        XCTAssertTrue(fixture.pane.tabs(for: fixture.sessionID).isEmpty)
+        XCTAssertTrue(fixture.authorizer.authorizedDeviceIDs.isEmpty)
+        XCTAssertTrue(fixture.stream.session.inputs.isEmpty)
+    }
+
     private func execute(
         _ command: AgentCommand,
         with coordinator: AgentToolCoordinator,
@@ -174,7 +278,13 @@ final class SimulatorAgentToolTests: XCTestCase {
     private func makeFixture(visible: Bool) -> SimulatorAgentFixture {
         let sessionID = SessionID()
         let control = SimulatorAgentControlFake()
-        let pane = DisplayPaneController(simulatorControl: control)
+        let stream = SimulatorAgentStreamCoordinatorFake()
+        let authorizer = SimulatorAgentInputAuthorizerFake()
+        let pane = DisplayPaneController(
+            simulatorControl: control,
+            simulatorStreamCoordinator: stream,
+            simulatorInputAuthorizer: authorizer
+        )
         var paneVisible = false
         let coordinator = AgentToolCoordinator(
             displayPaneController: pane,
@@ -182,9 +292,15 @@ final class SimulatorAgentToolTests: XCTestCase {
             setPaneVisible: { paneVisible = $0 },
             windowProvider: { nil }
         )
+        if visible {
+            _ = pane.view
+            pane.showSession(sessionID)
+        }
         return SimulatorAgentFixture(
             sessionID: sessionID,
             control: control,
+            stream: stream,
+            authorizer: authorizer,
             pane: pane,
             coordinator: coordinator,
             paneWasRevealed: { paneVisible }
@@ -196,6 +312,8 @@ final class SimulatorAgentToolTests: XCTestCase {
 private struct SimulatorAgentFixture {
     let sessionID: SessionID
     let control: SimulatorAgentControlFake
+    let stream: SimulatorAgentStreamCoordinatorFake
+    let authorizer: SimulatorAgentInputAuthorizerFake
     let pane: DisplayPaneController
     let coordinator: AgentToolCoordinator
     let paneWasRevealed: () -> Bool
@@ -278,4 +396,71 @@ private actor SimulatorAgentControlFake: SimulatorControlling {
     private static let onePixelPNG =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/"
         + "ScLhWQAAAABJRU5ErkJggg=="
+}
+
+private actor SimulatorAgentStreamCoordinatorFake: SimulatorLiveStreamCoordinating {
+    nonisolated let session = SimulatorAgentStreamSessionFake()
+
+    func openStream(
+        for deviceID: SimulatorDeviceID
+    ) async throws -> any SimulatorLiveStreamSession {
+        session
+    }
+}
+
+private final class SimulatorAgentStreamSessionFake: SimulatorLiveStreamSession, @unchecked Sendable {
+    let events: AsyncStream<SimulatorLiveStreamEvent>
+
+    private let lock = NSLock()
+    private var recordedInputs: [SimulatorBridgeInput] = []
+
+    init() {
+        let pair = AsyncStream<SimulatorLiveStreamEvent>.makeStream(
+            bufferingPolicy: .bufferingNewest(2)
+        )
+        events = pair.stream
+        pair.continuation.yield(.ready(
+            backend: .direct(codec: .h264),
+            capabilities: SimulatorBridgeCapabilities(
+                codecs: [.h264, .jpeg],
+                supportsTouch: true,
+                supportsKeyboard: true,
+                supportsButtons: true,
+                maximumFramesPerSecond: 60
+            ),
+            coreSimulatorVersion: "1065",
+            simulatorKitVersion: "1065"
+        ))
+    }
+
+    var inputs: [SimulatorBridgeInput] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedInputs
+    }
+
+    func setVisible(_ visible: Bool) {}
+
+    func sendInput(_ input: SimulatorBridgeInput) async throws {
+        lock.withLock { recordedInputs.append(input) }
+    }
+
+    func stop() {}
+}
+
+@MainActor
+private final class SimulatorAgentInputAuthorizerFake: SimulatorInputAuthorizing {
+    private(set) var authorizedDeviceIDs: [SimulatorDeviceID] = []
+    private var decisions: Set<SimulatorDeviceID> = []
+
+    func authorize(
+        device: SimulatorDevice,
+        in window: NSWindow?,
+        completion: @escaping @MainActor (Bool) -> Void
+    ) {
+        if decisions.insert(device.id).inserted {
+            authorizedDeviceIDs.append(device.id)
+        }
+        completion(true)
+    }
 }

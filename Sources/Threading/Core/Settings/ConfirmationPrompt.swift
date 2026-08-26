@@ -101,6 +101,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case shareChatLink
     case approveSystemPermissionPrompt
     case conferManagerRole
+    case controlSimulatorDevice
 
     // MARK: Software updates
 
@@ -279,6 +280,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              .approveAgentExtensionInstall,
              .shareChatLink,
              .conferManagerRole,
+             .controlSimulatorDevice,
              // Storing a test credential is the moment an origin gains the right to be signed
              // in to unattended, so it belongs with the other grants rather than with the
              // reversible edits: removing the entry later does not un-ring whatever an agent

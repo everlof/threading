@@ -168,6 +168,16 @@ final class PTYHostClient: @unchecked Sendable {
         case closed
     }
 
+    /// A decoded frame that shared a socket read with the peer's `hello`.
+    ///
+    /// The handshake must finish draining that already-decoded batch before handing the
+    /// descriptor to `DispatchIO`. Keeping output and control in one sequence preserves wire
+    /// order, including the standard-error bit that a pair of payload-only arrays would lose.
+    private enum PendingDelivery {
+        case control(PTYHostFrame)
+        case output(Data, standardError: Bool)
+    }
+
     // MARK: - Properties
 
     /// The queue every event is delivered on. Serial, so frames arrive in wire order.
@@ -458,8 +468,7 @@ final class PTYHostClient: @unchecked Sendable {
         )
 
         let deadline = Date().addingTimeInterval(helloTimeout)
-        var pending: [PTYHostFrame] = []
-        var pendingOutput: [Data] = []
+        var pending: [PendingDelivery] = []
 
         while true {
             let bytes = try Self.read(descriptor: connected, until: deadline)
@@ -474,10 +483,15 @@ final class PTYHostClient: @unchecked Sendable {
                 wire = frames
             }
 
+            var admittedPeer: PTYHostHello?
             for frame in wire {
                 switch frame.kind {
                 case .output:
-                    pendingOutput.append(frame.payload)
+                    pending.append(.output(
+                        frame.payload,
+                        standardError: frame.flags
+                            & PTYHostFramingDefaults.standardErrorFlag != 0
+                    ))
                     continue
                 case .input:
                     // The daemon never sends input. Ignore it rather than close: the framing is
@@ -492,17 +506,23 @@ final class PTYHostClient: @unchecked Sendable {
                 guard let control = decodeControl(frame.payload) else { continue }
                 switch control {
                 case .hello(let peer):
+                    guard admittedPeer == nil else { continue }
                     let compatibility = PTYHostCompatibility.evaluate(peer: peer)
                     try admit(peer, compatibility: compatibility, descriptor: connected)
-                    deliver(pending: pending, output: pendingOutput)
-                    return peer
+                    admittedPeer = peer
                 case .helloRefused(let refusal):
+                    guard admittedPeer == nil else { continue }
                     // The daemon evaluated us. Its answer names *us* as the peer, so it is the
                     // mirror of ours.
                     throw PTYHostClientError.incompatible(Self.flipped(refusal.compatibility))
                 default:
-                    pending.append(control)
+                    pending.append(.control(control))
                 }
+            }
+
+            if let admittedPeer {
+                deliver(pending)
+                return admittedPeer
             }
         }
     }
@@ -577,12 +597,22 @@ final class PTYHostClient: @unchecked Sendable {
 
     /// Frames that arrived in the same read as `hello` — the daemon's `lost` set is the one that
     /// matters — are replayed once the pump owns the connection, in wire order.
-    private func deliver(pending: [PTYHostFrame], output: [Data]) {
-        guard !pending.isEmpty || !output.isEmpty else { return }
+    private func deliver(_ pending: [PendingDelivery]) {
+        guard !pending.isEmpty else { return }
         queue.async { [weak self] in
             guard let self else { return }
-            for frame in pending { self.handle(control: frame) }
-            for bytes in output { self.events.output(bytes) }
+            for delivery in pending {
+                switch delivery {
+                case .control(let frame):
+                    self.handle(control: frame)
+                case .output(let bytes, let standardError):
+                    if standardError {
+                        self.events.standardError(bytes)
+                    } else {
+                        self.events.output(bytes)
+                    }
+                }
+            }
         }
     }
 

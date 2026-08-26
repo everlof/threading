@@ -19,6 +19,10 @@
         "value" : "$(THREADING_LOTTIE_CORPUS)"
       },
       {
+        "key" : "THREADING_SIMULATOR_INTEGRATION_UDID",
+        "value" : "$(THREADING_SIMULATOR_INTEGRATION_UDID)"
+      },
+      {
         "key" : "THREADING_EXTENSION_PACKAGE_UNDER_TEST",
         "value" : "$(THREADING_EXTENSION_PACKAGE_UNDER_TEST)"
       },
