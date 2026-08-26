@@ -485,6 +485,8 @@ final class AdvancedPreferencesViewController: NSViewController {
             backgroundHostRemoval = AdvancedStrings.backgroundHostRemoved
         case .leave(let count):
             backgroundHostRemoval = AdvancedStrings.backgroundHostLeft(count: count)
+        case .leaveUnanswered:
+            backgroundHostRemoval = AdvancedStrings.backgroundHostLeftUnanswered
         }
         backgroundSessions.refresh()
         rebuild()
@@ -697,6 +699,13 @@ enum AdvancedStrings {
                     + "launch that finds it idle.",
                 count
             )
+    }
+
+    static var backgroundHostLeftUnanswered: String {
+        L10n.string(
+            "Threading has stopped using the background host. It stays in Login Items until "
+                + "Threading can verify that no sessions are still running under it."
+        )
     }
     static var stopButton: String { L10n.string("Stop") }
     static func confirmStopTitle(name: String) -> String {

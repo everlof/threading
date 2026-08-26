@@ -381,6 +381,7 @@ final class AgentChildProcess {
                 "Agent child exited pid=\(pid, privacy: .public) session=\(sessionID.uuidString, privacy: .public) status=\(status, privacy: .public)"
             )
             onExit(status)
+            NotificationCenter.default.post(PTYHostMayHaveDrained())
         })
         return process
     }

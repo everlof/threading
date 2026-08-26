@@ -332,7 +332,7 @@ struct RemoteRouter {
             ThreadingLogger.remote.error(
                 "Remote JSON response exceeded its encoded ceiling bytes=\(body.count, privacy: .public) maximum=\(maximumBytes, privacy: .public)"
             )
-            return error(503, "Response Too Large")
+            return error(503, "Response Too Large", code: .responseTooLarge)
         }
         return harden(
             HTTPResponse(status: status, reason: reason, contentType: "application/json", body: body),
@@ -353,7 +353,35 @@ struct RemoteRouter {
         return harden(response, isDocument: false)
     }
 
-    static func error(_ status: Int, _ reason: String) -> HTTPResponse {
-        harden(HTTPResponse.status(status, reason), isDocument: false)
+    /// Every REST refusal has a bounded machine-readable body. HTTP reason phrases are not
+    /// surfaced by URLSession, which used to reduce distinct host decisions to only "HTTP 422"
+    /// on iPhone. Callers name business refusals; deliberately opaque failures use the generic
+    /// status-derived code.
+    static func error(
+        _ status: Int,
+        _ reason: String,
+        code: RemoteRESTErrorCode? = nil,
+        detail: String? = nil
+    ) -> HTTPResponse {
+        json(
+            RemoteErrorDTO(code: code ?? genericErrorCode(for: status), detail: detail),
+            status: status,
+            reason: reason
+        )
+    }
+
+    private static func genericErrorCode(for status: Int) -> RemoteRESTErrorCode {
+        switch status {
+        case 400: return .badRequest
+        case 401: return .unauthorized
+        case 403: return .forbidden
+        case 404: return .notFound
+        case 409: return .conflict
+        case 422: return .unprocessableRequest
+        case 429: return .rateLimited
+        case 503: return .serviceUnavailable
+        case 500...599: return .serverFailure
+        default: return .serverFailure
+        }
     }
 }

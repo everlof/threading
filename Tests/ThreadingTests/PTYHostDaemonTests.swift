@@ -31,6 +31,8 @@ final class PTYHostDaemonTests: XCTestCase {
         static let exitTimeout: TimeInterval = 15
         /// The daemon's own foreground poll is 1 Hz, so a change has to survive at least one.
         static let foregroundTimeout: TimeInterval = 8
+        /// A child that ignores TERM still expires if an assertion prevents the kill request.
+        static let stubbornChildIterations = 600
 
         static let helperName = "threading-ptyd"
         static let shell = "/bin/sh"
@@ -57,7 +59,18 @@ final class PTYHostDaemonTests: XCTestCase {
     override func tearDownWithError() throws {
         for client in clients { client.hangUp() }
         clients.removeAll()
-        for daemon in daemons { daemon.terminate() }
+        // Restart tests keep both `Process` wrappers for one rendezvous. Only the newest one owns
+        // the live endpoint; shutting both down would start a needless recovery daemon after the
+        // first shutdown had already drained it.
+        var endpoints: [String: DaemonProcess] = [:]
+        for daemon in daemons { endpoints[daemon.socketPath] = daemon }
+        for daemon in endpoints.values {
+            XCTAssertTrue(
+                daemon.shutdown(),
+                "scratch PTY daemon did not drain: \(daemon.diagnosticText)"
+            )
+        }
+        for daemon in daemons { daemon.finishDiagnostics() }
         daemons.removeAll()
         if let directory { try? FileManager.default.removeItem(at: directory) }
         try super.tearDownWithError()
@@ -347,7 +360,12 @@ final class PTYHostDaemonTests: XCTestCase {
         let client = try connect(to: daemon)
         let id = Self.newIdentity()
 
-        _ = try spawn(on: client, id: id, script: "trap '' TERM; while :; do sleep 0.2; done")
+        _ = try spawn(
+            on: client,
+            id: id,
+            script: "trap '' TERM; i=0; while [ \"$i\" -lt \(Fixture.stubbornChildIterations) ]; "
+                + "do i=$((i + 1)); sleep 0.2; done"
+        )
         client.send(.kill(PTYHostKill(id: id, escalate: true)))
 
         let exited = try nextExit(on: client)
@@ -881,11 +899,17 @@ final class PTYHostDaemonTests: XCTestCase {
 
     /// The environment the daemon is handed for a child. Composed here rather than inherited,
     /// because that is the contract: the daemon adds nothing and removes nothing.
-    private static let childEnvironment = [
-        "TERM=xterm-256color",
-        "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
-        "LC_ALL=C"
-    ]
+    private static var childEnvironment: [String] {
+        var environment = [
+            "TERM=xterm-256color",
+            "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+            "LC_ALL=C"
+        ]
+        if let token = ProcessInfo.processInfo.environment["THREADING_TEST_RUN_TOKEN"] {
+            environment.append("THREADING_TEST_RUN_TOKEN=\(token)")
+        }
+        return environment
+    }
 
     private func waitUntil(
         timeout: TimeInterval,
@@ -921,6 +945,8 @@ private final class DaemonProcess: @unchecked Sendable {
     let stateDirectory: URL
 
     private let process = Process()
+    private let helper: URL
+    private let ringBudget: Int?
     private let diagnostics = Pipe()
     private let lock = NSLock()
     private var collected = Data()
@@ -928,14 +954,19 @@ private final class DaemonProcess: @unchecked Sendable {
     // MARK: - Initialization
 
     init(helper: URL, socketPath: String, stateDirectory: URL, ringBudget: Int?) throws {
+        self.helper = helper
         self.socketPath = socketPath
         self.stateDirectory = stateDirectory
+        self.ringBudget = ringBudget
 
         process.executableURL = helper
         process.arguments = ["--socket", socketPath, "--state", stateDirectory.path]
         var environment = ["PATH": "/usr/bin:/bin"]
         if let ringBudget {
             environment["THREADING_PTY_HOST_RING_BUDGET"] = String(ringBudget)
+        }
+        if let token = ProcessInfo.processInfo.environment["THREADING_TEST_RUN_TOKEN"] {
+            environment["THREADING_TEST_RUN_TOKEN"] = token
         }
         process.environment = environment
         process.standardError = diagnostics
@@ -996,11 +1027,45 @@ private final class DaemonProcess: @unchecked Sendable {
         Darwin.kill(process.processIdentifier, SIGKILL)
     }
 
-    func terminate() {
+    /// Drains the endpoint through the shipping protocol. If the daemon already crashed before
+    /// the test reached its recovery assertion, a replacement is launched on the same state
+    /// directory first; startup then validates pid/start-time pairs and reclaims every survivor.
+    func shutdown() -> Bool {
         if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
+            let drained = PTYHostTestProcessCleanup.stopSessionsAndRetire(socketPath: socketPath)
+            let exited = waitUntilExited(timeout: PTYHostTestProcessCleanup.childTimeout)
+            return drained && exited
         }
+
+        if PTYHostTestProcessCleanup.daemonIsReady(socketPath: socketPath) {
+            return PTYHostTestProcessCleanup.stopSessionsAndRetire(socketPath: socketPath)
+        }
+
+        guard let recovery = try? DaemonProcess(
+            helper: helper,
+            socketPath: socketPath,
+            stateDirectory: stateDirectory,
+            ringBudget: ringBudget
+        ), tryRecoveryListening(recovery) else {
+            return false
+        }
+        let drained = PTYHostTestProcessCleanup.stopSessionsAndRetire(socketPath: socketPath)
+        let exited = recovery.waitUntilExited(timeout: PTYHostTestProcessCleanup.childTimeout)
+        recovery.finishDiagnostics()
+        return drained && exited
+    }
+
+    func finishDiagnostics() {
         diagnostics.fileHandleForReading.readabilityHandler = nil
+    }
+
+    private func tryRecoveryListening(_ recovery: DaemonProcess) -> Bool {
+        do {
+            try recovery.waitUntilListening(timeout: PTYHostTestProcessCleanup.replyTimeout)
+            return true
+        } catch {
+            return false
+        }
     }
 
     var diagnosticText: String {

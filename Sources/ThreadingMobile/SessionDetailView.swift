@@ -216,7 +216,7 @@ struct SessionDetailView: View {
                         SessionActionsToolbarIcon(
                             activity: workspaceActivity,
                             identity: .resolve(currentSession.agentKind),
-                            usageFraction: sessionAccount?.usageFraction
+                            reading: sessionUsageReading
                         )
                     }
                     .accessibilityLabel(
@@ -226,7 +226,7 @@ struct SessionDetailView: View {
                                 : "Session actions"
                         )
                     )
-                    .accessibilityValue(sessionAccount?.usageSummary ?? "")
+                    .accessibilityValue(sessionUsageReading?.summary ?? "")
                 }
             }
         }
@@ -486,6 +486,12 @@ struct SessionDetailView: View {
         )
     }
 
+    /// The disc's rings, for the model this chat runs rather than the login's default: a Fable
+    /// window rings a Fable chat and no other.
+    private var sessionUsageReading: MobileAccountUsageReading? {
+        MobileAccountUsageReading.resolve(account: sessionAccount, model: currentSession.model)
+    }
+
     /// The catalogue's row for the login this chat runs on, which is where its usage lives —
     /// joined by `accountID`, as the settings screen joins it, because a session row carries no
     /// usage of its own. Nil for a guest share, a runtime without account routing, or an older
@@ -693,7 +699,7 @@ struct SessionDetailView: View {
 private struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
     let identity: MobileAgentIdentity
-    let usageFraction: Double?
+    let reading: MobileAccountUsageReading?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.remoteTheme) private var theme
@@ -730,7 +736,7 @@ private struct SessionActionsToolbarIcon: View {
     /// mark is not a symbol, so the breath is a scale phase rather than a symbol effect.
     @ViewBuilder
     private var disc: some View {
-        let disc = MobileAccountDisc(identity: identity, usageFraction: usageFraction)
+        let disc = MobileAccountDisc(identity: identity, reading: reading)
         if reduceMotion {
             disc
         } else {

@@ -221,6 +221,10 @@ final class PTYHostPipeSessionTests: XCTestCase {
     func testTheExitIsReportedExactlyOnce() throws {
         let box = TransportBox()
         let statuses = StatusSink()
+        let drained = expectation(description: "the host may now be idle")
+        drained.assertForOverFulfill = true
+        let observations = AppEventObservations()
+        observations.observe(PTYHostMayHaveDrained.self) { _ in drained.fulfill() }
         _ = try launch(answering: .spawned, into: box, onExit: { statuses.append($0) })
         let transport = try XCTUnwrap(box.transport)
 
@@ -231,7 +235,7 @@ final class PTYHostPipeSessionTests: XCTestCase {
         )))
         let reported = expectation(description: "the ending arrived")
         poll(reported) { !statuses.statuses.isEmpty }
-        wait(for: [reported], timeout: Fixture.timeout)
+        wait(for: [reported, drained], timeout: Fixture.timeout)
 
         transport.drop(nil)
         transport.send(.exited(PTYHostExited(

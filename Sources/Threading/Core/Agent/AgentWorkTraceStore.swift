@@ -103,6 +103,18 @@ final class AgentWorkTraceStore {
             rootPath: String
         )
         case removeSession(SessionID)
+
+        var sessionID: SessionID {
+            switch self {
+            case .file(let id, _, _, _, _, _),
+                 .action(let id, _, _, _, _, _),
+                 .observed(let id, _, _, _, _, _, _, _, _),
+                 .seed(let id, _),
+                 .hydrate(let id, _, _, _, _, _),
+                 .removeSession(let id):
+                return id
+            }
+        }
     }
 
     private struct SeenCalls {
@@ -697,6 +709,11 @@ struct AgentDirectoryWork: Sendable {
 /// A serial owner for filesystem and total-content work. Keeping it outside the main-actor store
 /// makes the isolation boundary explicit and testable by construction.
 private final class AgentWorkWorker: @unchecked Sendable {
+    private struct SaveKey: Hashable {
+        let projectID: ProjectID
+        let sessionID: SessionID
+    }
+
     /// The sole owner of mutable traces. Projection and JSON work may delay a following event,
     /// but can never make that event copy or scan project state on the main actor.
     private let queue = DispatchQueue(label: "codes.threading.agent-work.state", qos: .utility)
@@ -707,7 +724,9 @@ private final class AgentWorkWorker: @unchecked Sendable {
     private let directory: URL
     private let fileManager: FileManager
     private var projects: [ProjectID: ProjectMemory] = [:]
-    private var saveGenerations: [ProjectID: Int] = [:]
+    /// Trailing coalescing is per session. A busy agent rewrites only its own sparse trace and
+    /// never the other hundreds of conversations in the same project.
+    private var saveGenerations: [SaveKey: Int] = [:]
 
     private final class ProjectMemory {
         var file: AgentProjectWorkFile
@@ -789,7 +808,18 @@ private final class AgentWorkWorker: @unchecked Sendable {
             // Revision rather than `change != nil`: a hydration pass that found no new work still
             // moved the transcript's resume position, and losing that means re-reading — and
             // re-counting — everything before it after the next launch.
-            if memory.revision != revisionBefore { scheduleSave(projectID) }
+            if memory.revision != revisionBefore {
+                switch mutation {
+                case .removeSession(let sessionID):
+                    removePersistedSession(
+                        sessionID,
+                        projectID: projectID,
+                        remaining: memory.file
+                    )
+                default:
+                    scheduleSave(projectID, sessionID: mutation.sessionID)
+                }
+            }
             let revision = memory.revision
             Task { @MainActor in completion(change, revision) }
         }
@@ -797,9 +827,12 @@ private final class AgentWorkWorker: @unchecked Sendable {
 
     func remove(projectID: ProjectID) {
         queue.async { [self] in
-            saveGenerations.removeValue(forKey: projectID)
+            saveGenerations = saveGenerations.filter { $0.key.projectID != projectID }
             projects.removeValue(forKey: projectID)
             try? fileManager.removeItem(at: Self.url(projectID: projectID, directory: directory))
+            try? fileManager.removeItem(
+                at: Self.sessionDirectory(projectID: projectID, directory: directory)
+            )
         }
     }
 
@@ -929,29 +962,30 @@ private final class AgentWorkWorker: @unchecked Sendable {
 
     private func memory(for projectID: ProjectID) -> ProjectMemory {
         if let existing = projects[projectID] { return existing }
-        let store = Self.persistence(
-            projectID: projectID, directory: directory, fileManager: fileManager
+        let file = Self.load(
+            projectID: projectID,
+            directory: directory,
+            fileManager: fileManager
         )
-        let file = store.load(defaultValue: AgentProjectWorkFile()) { file in
-            guard file.version == AgentProjectWorkFile.currentVersion else {
-                throw AgentWorkPersistenceError.unsupportedVersion(file.version)
-            }
-        }.value
         let memory = ProjectMemory(file: file)
         projects[projectID] = memory
         return memory
     }
 
-    private func scheduleSave(_ projectID: ProjectID) {
-        let generation = saveGenerations[projectID, default: 0] + 1
-        saveGenerations[projectID] = generation
+    private func scheduleSave(_ projectID: ProjectID, sessionID: SessionID) {
+        let key = SaveKey(projectID: projectID, sessionID: sessionID)
+        let generation = saveGenerations[key, default: 0] + 1
+        saveGenerations[key] = generation
         queue.asyncAfter(deadline: .now() + 1) { [weak self] in
-            guard let self, saveGenerations[projectID] == generation,
-                  let memory = projects[projectID] else { return }
-            saveGenerations.removeValue(forKey: projectID)
-            _ = Self.persistence(
-                projectID: projectID, directory: directory, fileManager: fileManager
-            ).save(memory.file)
+            guard let self, saveGenerations[key] == generation,
+                  let trace = projects[projectID]?.file.sessions[sessionID] else { return }
+            saveGenerations.removeValue(forKey: key)
+            _ = Self.sessionPersistence(
+                projectID: projectID,
+                sessionID: sessionID,
+                directory: directory,
+                fileManager: fileManager
+            ).save(trace)
         }
     }
 
@@ -1204,7 +1238,91 @@ private final class AgentWorkWorker: @unchecked Sendable {
         )
     }
 
-    private static func persistence(
+    /// Loads session shards one at a time. The legacy project document is overlaid first so an
+    /// interrupted migration can only retain an older trace, never erase a newer shard.
+    private static func load(
+        projectID: ProjectID,
+        directory: URL,
+        fileManager: FileManager
+    ) -> AgentProjectWorkFile {
+        let legacyURL = url(projectID: projectID, directory: directory)
+        let hadLegacy = fileManager.fileExists(atPath: legacyURL.path)
+        var file = legacyPersistence(
+            projectID: projectID,
+            directory: directory,
+            fileManager: fileManager
+        ).load(defaultValue: AgentProjectWorkFile()) { file in
+            guard file.version == AgentProjectWorkFile.currentVersion else {
+                throw AgentWorkPersistenceError.unsupportedVersion(file.version)
+            }
+        }.value
+
+        let shardDirectory = sessionDirectory(projectID: projectID, directory: directory)
+        let shards = (try? fileManager.contentsOfDirectory(
+            at: shardDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        for shard in shards where shard.pathExtension == "json" {
+            guard let sessionID = SessionID(
+                uuidString: shard.deletingPathExtension().lastPathComponent
+            ) else { continue }
+            let trace = sessionPersistence(
+                projectID: projectID,
+                sessionID: sessionID,
+                directory: directory,
+                fileManager: fileManager
+            ).load(defaultValue: AgentSessionWorkTrace()).value
+            file.sessions[sessionID] = trace
+        }
+
+        // This cache is rebuildable, but migration still uses write-then-delete. A failed shard
+        // leaves the old whole document in place and the next launch retries; a successful pass
+        // removes the source of the 6.6 MB whole-project rewrites permanently.
+        if hadLegacy {
+            var migrated = true
+            for (sessionID, trace) in file.sessions {
+                if !sessionPersistence(
+                    projectID: projectID,
+                    sessionID: sessionID,
+                    directory: directory,
+                    fileManager: fileManager
+                ).save(trace) {
+                    migrated = false
+                }
+            }
+            if migrated { try? fileManager.removeItem(at: legacyURL) }
+        }
+        return file
+    }
+
+    private func removePersistedSession(
+        _ sessionID: SessionID,
+        projectID: ProjectID,
+        remaining: AgentProjectWorkFile
+    ) {
+        saveGenerations.removeValue(forKey: SaveKey(
+            projectID: projectID,
+            sessionID: sessionID
+        ))
+        try? fileManager.removeItem(at: Self.sessionURL(
+            projectID: projectID,
+            sessionID: sessionID,
+            directory: directory
+        ))
+
+        // Only possible after an interrupted legacy migration. Keep that fallback honest so a
+        // deleted session cannot reappear if the machine loses power before migration retries.
+        let legacyURL = Self.url(projectID: projectID, directory: directory)
+        if fileManager.fileExists(atPath: legacyURL.path) {
+            _ = Self.legacyPersistence(
+                projectID: projectID,
+                directory: directory,
+                fileManager: fileManager
+            ).save(remaining)
+        }
+    }
+
+    private static func legacyPersistence(
         projectID: ProjectID,
         directory: URL,
         fileManager: FileManager
@@ -1219,8 +1337,44 @@ private final class AgentWorkWorker: @unchecked Sendable {
         )
     }
 
+    private static func sessionPersistence(
+        projectID: ProjectID,
+        sessionID: SessionID,
+        directory: URL,
+        fileManager: FileManager
+    ) -> RecoverableFileStore<AgentSessionWorkTrace> {
+        RecoverableFileStore(
+            url: sessionURL(
+                projectID: projectID,
+                sessionID: sessionID,
+                directory: directory
+            ),
+            fileManager: fileManager,
+            criticality: .rebuildableCache,
+            sizePolicy: .derivedCache,
+            dateEncodingStrategy: .millisecondsSince1970,
+            dateDecodingStrategy: .millisecondsSince1970
+        )
+    }
+
     private static func url(projectID: ProjectID, directory: URL) -> URL {
         directory.appendingPathComponent(projectID.uuidString.lowercased() + ".json")
+    }
+
+    private static func sessionDirectory(projectID: ProjectID, directory: URL) -> URL {
+        directory.appendingPathComponent(
+            projectID.uuidString.lowercased() + ".sessions",
+            isDirectory: true
+        )
+    }
+
+    private static func sessionURL(
+        projectID: ProjectID,
+        sessionID: SessionID,
+        directory: URL
+    ) -> URL {
+        sessionDirectory(projectID: projectID, directory: directory)
+            .appendingPathComponent(sessionID.uuidString.lowercased() + ".json")
     }
 }
 

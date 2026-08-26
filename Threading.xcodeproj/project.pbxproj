@@ -1600,14 +1600,13 @@
 				CODE_SIGN_ENTITLEMENTS = "Targets/PTYHost/threading-ptyd.entitlements";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 0.0.0;
 				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Targets/PTYHost/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/PTYHost/Info.plist",
-				);
+				MARKETING_VERSION = 0.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.ptyd";
 				PRODUCT_NAME = "threading-ptyd";
 				SDKROOT = macosx;
@@ -1623,14 +1622,13 @@
 				CODE_SIGN_ENTITLEMENTS = "Targets/PTYHost/threading-ptyd.entitlements";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 0.0.0;
 				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Targets/PTYHost/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/Targets/PTYHost/Info.plist",
-				);
+				MARKETING_VERSION = 0.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "codes.threading.ptyd";
 				PRODUCT_NAME = "threading-ptyd";
 				SDKROOT = macosx;

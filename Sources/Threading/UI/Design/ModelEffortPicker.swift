@@ -39,12 +39,15 @@ struct ModelEffortPickerPresentation: Equatable {
 @MainActor
 final class ModelEffortPickerViewController: NSViewController {
     private enum Layout {
-        static let inset = Design.Spacing.medium
-        static let titleHeight: CGFloat = 22
-        static let titleGap = Design.Spacing.small
-        static let footerGap = Design.Spacing.small
-        static let maximumWidth: CGFloat = 680
-        static let maximumMatrixHeight: CGFloat = 336
+        // Computed accessors keep picker-only measurements injectable while the opt-in
+        // InjectionNext session is running. Stored constants have already been initialized by
+        // the time a replacement function body arrives.
+        static var inset: CGFloat { Design.Spacing.medium }
+        static var titleHeight: CGFloat { 22 }
+        static var titleGap: CGFloat { Design.Spacing.small }
+        static var footerGap: CGFloat { Design.Spacing.small }
+        static var maximumWidth: CGFloat { 680 }
+        static var maximumMatrixHeight: CGFloat { 336 }
     }
 
     let matrixView: ModelEffortMatrixControl
@@ -168,15 +171,19 @@ final class ModelEffortMatrixControl: ThemedControl {
     }
 
     private enum Layout {
-        static let modelWidth: CGFloat = 156
-        static let effortWidth: CGFloat = 74
-        static let headerHeight: CGFloat = 34
-        static let rowHeight: CGFloat = 48
-        static let horizontalCellInset: CGFloat = 4
-        static let verticalCellInset: CGFloat = 6
-        static let beacon: CGFloat = 7
-        static let selectedBeacon: CGFloat = 11
+        static var modelWidth: CGFloat { 156 }
+        static var effortWidth: CGFloat { 74 }
+        static var headerHeight: CGFloat { 34 }
+        static var rowHeight: CGFloat { 48 }
+        static var horizontalCellInset: CGFloat { 4 }
+        static var verticalCellInset: CGFloat { 6 }
+        static var beacon: CGFloat { 7 }
+        static var selectedBeacon: CGFloat { 11 }
     }
+
+    #if DEBUG
+    private static let injectionNotification = Notification.Name("INJECTION_BUNDLE_NOTIFICATION")
+    #endif
 
     private let presentation: ModelEffortPickerPresentation
     private let onHideModel: ((_ modelID: String) -> Void)?
@@ -218,6 +225,16 @@ final class ModelEffortMatrixControl: ThemedControl {
         setAccessibilityRole(.radioGroup)
         setAccessibilityLabel(L10n.string("Model and effort"))
         updateAccessibilityValue()
+        #if DEBUG
+        // Injection replaces the drawing methods, but AppKit still needs an invalidation before
+        // the already-open picker asks those methods for another frame.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(injectionDidComplete(_:)),
+            name: Self.injectionNotification,
+            object: nil
+        )
+        #endif
     }
 
     @available(*, unavailable)
@@ -739,6 +756,17 @@ final class ModelEffortMatrixControl: ThemedControl {
     }
 
     #if DEBUG
+    @objc private nonisolated func injectionDidComplete(_ notification: Notification) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.invalidateIntrinsicContentSize()
+            self.setFrameSize(self.intrinsicContentSize)
+            self.needsLayout = true
+            self.needsDisplay = true
+            self.updateUltraAnimation()
+        }
+    }
+
     /// Freezes the otherwise pointer-only affordance into deterministic rendered evidence.
     func hoverModelForTesting(at row: Int?) {
         hoveredModelRow = row.flatMap { presentation.models.indices.contains($0) ? $0 : nil }

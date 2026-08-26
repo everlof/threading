@@ -92,6 +92,11 @@ protocol AgentConversationRuntimeSurface:
     var onAttention: (() -> Void)? { get set }
     var conversationRootProcessIdentifier: pid_t? { get }
 
+    /// The input behind this surface's current state, where it has one to name. Defaulted
+    /// rather than required, because a surface that computes its activity has no such input —
+    /// see `AgentRuntime.activityCause(sessionID:)`.
+    var activityCause: SessionActivityCause? { get }
+
     /// Whether this conversation's CLI lives in `threading-ptyd` rather than in this process.
     var isHostBacked: Bool { get }
 
@@ -110,6 +115,9 @@ protocol AgentConversationRuntimeSurface:
 }
 
 extension AgentConversationRuntimeSurface {
+
+    /// A surface that derives its own state names no input, and says so rather than guessing.
+    var activityCause: SessionActivityCause? { nil }
 
     /// Defaults so a renderer with no host-backed path — and every test double — is unchanged by
     /// the background host existing.
@@ -438,6 +446,18 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             sessionID: sessionID,
             participantID: participantID
         )
+    }
+
+    /// Why this session's activity last moved, where its runtime keeps that answer.
+    ///
+    /// Exposed for `AttentionAlertCenter`, so a journalled banner can name the input that
+    /// produced it rather than leaving a reader with the three candidates the state alone
+    /// allows — a turn that ended off screen, the runtime's own idle-prompt notice, a bell.
+    /// `nil` where the runtime *derives* its state instead of being told it: a native
+    /// conversation computes `activity` from the stream and holds no separate fact to report.
+    func activityCause(sessionID: SessionID) -> SessionActivityCause? {
+        controllers[sessionID]?.activityTracker.lastCause
+            ?? conversations[sessionID]?.activityCause
     }
 
     private func sharedActivity(sessionID: SessionID) -> SessionActivity {

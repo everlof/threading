@@ -73,7 +73,9 @@ enum RemoteClientError: LocalizedError {
     /// app" the other, and telling somebody to update the wrong device is worse than saying
     /// nothing.
     case upgradeRequired(RemoteUpdateTarget)
-    case server(Int)
+    /// An authoritative HTTP refusal. `code` and `detail` are absent when the Mac predates
+    /// structured REST errors; the status remains the compatibility fallback.
+    case server(status: Int, code: String? = nil, detail: String? = nil)
 
     var errorDescription: String? {
         switch self {
@@ -85,8 +87,166 @@ enum RemoteClientError: LocalizedError {
             )
         case .upgradeRequired(let target):
             return Self.upgradeMessage(for: target)
-        case .server(let status):
+        case .server(let status, let code, let detail):
+            return Self.serverMessage(status: status, code: code, detail: detail)
+        }
+    }
+
+    var statusCode: Int? {
+        guard case .server(let status, _, _) = self else { return nil }
+        return status
+    }
+
+    var refusalCode: String? {
+        guard case .server(_, let code, _) = self else { return nil }
+        return code
+    }
+
+    var refusalDetail: String? {
+        guard case .server(_, _, let detail) = self else { return nil }
+        return detail
+    }
+
+    var requiresLaunchCatalogRefresh: Bool {
+        guard let refusalCode else { return false }
+        return Self.launchCatalogRefusalCodes.contains(refusalCode)
+    }
+
+    private static let launchCatalogRefusalCodes = Set([
+        RemoteRESTErrorCode.unknownLaunchChoice.rawValue,
+        RemoteRESTErrorCode.unknownAccount.rawValue,
+        RemoteRESTErrorCode.unknownModel.rawValue,
+        RemoteRESTErrorCode.unknownReasoningEffort.rawValue,
+        RemoteRESTErrorCode.unknownPermissionMode.rawValue,
+        RemoteRESTErrorCode.unsupportedSpeed.rawValue,
+        RemoteRESTErrorCode.unsupportedSurface.rawValue,
+        RemoteRESTErrorCode.unknownRole.rawValue,
+        RemoteRESTErrorCode.unsupportedWorkspace.rawValue,
+    ])
+
+    static func decodedRefusal(status: Int, data: Data) -> RemoteClientError {
+        let payload = try? JSONDecoder().decode(RemoteErrorDTO.self, from: data)
+        let error = payload?.type == "error" ? payload : nil
+        if status == 401,
+           error?.code == nil || error?.code == RemoteRESTErrorCode.unauthorized.rawValue {
+            return .unauthorized
+        }
+        return .server(status: status, code: error?.code, detail: error?.detail)
+    }
+
+    private static func serverMessage(status: Int, code: String?, detail: String?) -> String {
+        switch code.flatMap(RemoteRESTErrorCode.init(rawValue:)) {
+        case .unknownLaunchChoice:
+            return MobileL10n.string(
+                "That project or agent is no longer available. Threading is refreshing the choices; review them and try again."
+            )
+        case .unknownAccount:
+            return MobileL10n.string(
+                "That account is no longer available. Threading is refreshing the choices; review them and try again."
+            )
+        case .unknownModel:
+            return MobileL10n.string(
+                "That model is no longer available for this account. Threading is refreshing the choices; review them and try again."
+            )
+        case .unknownReasoningEffort:
+            return MobileL10n.string(
+                "That reasoning level is no longer available for this model. Threading is refreshing the choices; review them and try again."
+            )
+        case .unknownPermissionMode:
+            return MobileL10n.string(
+                "That permission mode is no longer supported by this agent. Review the updated choices and try again."
+            )
+        case .unsupportedSpeed:
+            return MobileL10n.string(
+                "That speed is not available for this model. Review the updated choices and try again."
+            )
+        case .unsupportedSurface:
+            return MobileL10n.string(
+                "That interface is not available for this agent. Review the updated choices and try again."
+            )
+        case .unknownRole:
+            return MobileL10n.string(
+                "That session role is no longer available. Review the updated choices and try again."
+            )
+        case .unsupportedWorkspace:
+            return MobileL10n.string(
+                "That workspace option is not available for this project and agent. Review the updated choices and try again."
+            )
+        case .invalidInvitation:
+            return MobileL10n.string("This invitation is expired or already used.")
+        case .invalidRequestID, .requestIDReused:
+            return MobileL10n.string("The Mac couldn’t safely identify that action. Try again.")
+        case .replayCacheBusy:
+            return MobileL10n.string("The Mac is handling too many actions right now. Try again.")
+        case .responseTooLarge:
+            return MobileL10n.string("The Mac couldn’t return that result safely.")
+        case .hostNotReady:
+            return MobileL10n.string("The Mac isn’t ready for that action yet. Try again.")
+        case .persistenceUnavailable:
+            return MobileL10n.string("The Mac couldn’t save that change. Try again.")
+        case .unknownTheme:
+            return MobileL10n.string("That theme is no longer available on the Mac.")
+        case .unknownSetting, .settingNotMutable, .invalidSettingValue, .unsupportedValue:
+            return MobileL10n.string("That setting can’t be changed to the selected value.")
+        case .unsupportedRuntime:
+            return MobileL10n.string("That action isn’t supported by this agent.")
+        case .unsupportedAccount:
+            return MobileL10n.string("That account isn’t available for this session.")
+        case .unsupportedRecovery:
+            return MobileL10n.string("That recovery option isn’t available for this session.")
+        case .archiveAlreadyChanging:
+            return MobileL10n.string("This session’s archive state is already changing.")
+        case .archiveAccountUnavailable:
+            return MobileL10n.string("The Mac can’t find the account that owns this session.")
+        case .archiveCommandUnavailable:
+            return MobileL10n.string("The Mac couldn’t start the agent’s archive command.")
+        case .archiveCommandRejected:
+            return MobileL10n.string("The agent rejected the archive change.")
+        case .invalidSnoozeDeadline:
+            return MobileL10n.string("That reminder time is no longer valid.")
+        case .accountMoveRefused:
+            return accountMoveMessage(detail: detail)
+        case .sharingNotAvailable, .hostedServiceUnavailable:
+            return MobileL10n.string("That service isn’t available on the Mac right now. Try again.")
+        case .ownerAccessRequired:
+            return MobileL10n.string("Only the Mac owner can perform that action.")
+        case .invalidDevice:
+            return MobileL10n.string("The Mac couldn’t identify this iPhone. Pair it again.")
+        case .invalidDeviceToken:
+            return MobileL10n.string("The Mac couldn’t register this iPhone for notifications.")
+        case .localDiagnosticsDisabled:
+            return MobileL10n.string("Local diagnostics is disabled on the Mac.")
+        case .captureNotRequested:
+            return MobileL10n.string("The Mac did not request this diagnostics capture.")
+        case .rateLimited:
+            return MobileL10n.string("The Mac received too many requests. Wait a moment and try again.")
+        default:
             return MobileL10n.string("The Mac returned HTTP %lld.", status)
+        }
+    }
+
+    private static func accountMoveMessage(detail: String?) -> String {
+        switch detail {
+        case "missingSession":
+            return MobileL10n.string("This session no longer exists.")
+        case "providerMismatch":
+            return MobileL10n.string("A session can only move to another account for the same agent.")
+        case "missingTranscript":
+            return MobileL10n.string("This session has no recorded conversation to move yet.")
+        case "invalidSourceLocation":
+            return MobileL10n.string("The Mac couldn’t locate this conversation on disk.")
+        case "persistenceUnavailable", "commitRefused":
+            return MobileL10n.string("The Mac couldn’t save the moved conversation.")
+        case "sourceNotRegular":
+            return MobileL10n.string("The conversation transcript is not a regular file.")
+        case "rollbackNeedsRecovery":
+            return MobileL10n.string(
+                "The move couldn’t be saved. The Mac kept the previous target copy for recovery."
+            )
+        case "copyFailed":
+            return MobileL10n.string("The Mac couldn’t copy the conversation.")
+        default:
+            return MobileL10n.string("The Mac couldn’t move this session to that account.")
         }
     }
 
@@ -1233,9 +1393,6 @@ struct RemoteClient {
         guard let response = response as? HTTPURLResponse else {
             throw RemoteClientError.invalidResponse
         }
-        if response.statusCode == 401 {
-            throw RemoteClientError.unauthorized
-        }
         if response.statusCode == 426 {
             // The body names the side that is behind. Without it the refusal is still terminal,
             // and "this app is too old" is the safer of the two guesses to make about a host
@@ -1244,7 +1401,7 @@ struct RemoteClient {
             throw RemoteClientError.upgradeRequired(upgrade?.update ?? .client)
         }
         guard accepted.contains(response.statusCode) else {
-            throw RemoteClientError.server(response.statusCode)
+            throw RemoteClientError.decodedRefusal(status: response.statusCode, data: data)
         }
         return response
     }

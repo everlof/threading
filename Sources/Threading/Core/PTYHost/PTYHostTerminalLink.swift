@@ -90,10 +90,14 @@ typealias PTYHostTransportFactory =
 struct PTYHostFeedSegment: Sendable {
     var bytes: [UInt8]
     let answersQueries: Bool
+    /// Output in the attach handoff waits for the main-actor `attached` delivery to adopt the
+    /// daemon's grid. Ordinary live output is false and parses on the transport queue.
+    let requiresMainActorParse: Bool
 
-    init(bytes: [UInt8], answersQueries: Bool) {
+    init(bytes: [UInt8], answersQueries: Bool, requiresMainActorParse: Bool) {
         self.bytes = bytes
         self.answersQueries = answersQueries
+        self.requiresMainActorParse = requiresMainActorParse
     }
 }
 
@@ -101,14 +105,15 @@ struct PTYHostFeedSegment: Sendable {
 
 /// One host-backed terminal's half of the link to `threading-ptyd`.
 ///
-/// It owns the transport, coalesces the daemon's output into **one main-queue hop per burst**,
-/// and hands the session the three things a session with no pty descriptor can no longer learn
-/// for itself: the bytes, the ending, and which process group owns the terminal.
+/// It owns the transport, parses steady-state output on that transport's interactive queue,
+/// coalesces its UI reporting into **one main-queue hop per burst**, and hands the session the
+/// three things a session with no pty descriptor can no longer learn for itself: the bytes, the
+/// ending, and which process group owns the terminal.
 ///
-/// **Nothing here runs on main except the delivery.** Frames arrive on the client's own serial
-/// queue and are handled there; only the coalesced feed and the lifecycle edges cross to the main
-/// actor, in `installProcessOutputObserver`'s existing shape, because a hop per frame would put a
-/// terminal's whole output rate on the main queue — the shape that makes a mirror slow.
+/// **Parsing does not wait for main.** Frames arrive on the client's own serial queue and steady-
+/// state bytes enter SwiftTerm there, like the local-process IO path. Only coalesced activity/raw-
+/// output callbacks and lifecycle edges cross to the main actor. The first attach run is the one
+/// exception: it follows the main-actor delivery that adopts the daemon's authoritative grid.
 ///
 /// **Only an explicit stop kills the child.** `terminate()` sends `kill`; a quit sends `detach`
 /// with the seeds only this process can compute; and a link that is simply released lets go —
@@ -120,11 +125,18 @@ final class PTYHostTerminalLink: @unchecked Sendable {
 
     // MARK: - Types
 
-    /// Where the link's four edges go. Each is invoked **on the main queue**, in wire order.
+    /// Where the link's edges go. `parseOutput` runs on the transport queue; every other closure
+    /// is invoked on the main queue, in wire order.
     struct Delivery: Sendable {
 
-        /// Output, coalesced. Runs of bytes in arrival order, never merged across a suppression
-        /// boundary.
+        /// Parses ordinary live output synchronously on the transport queue. This is the hosted
+        /// equivalent of SwiftTerm's local-process IO parser and deliberately happens before the
+        /// coalesced main-actor reporting below.
+        var parseOutput: @Sendable (PTYHostFeedSegment) -> Void = { _ in }
+
+        /// Main-actor output reporting, coalesced. Runs of bytes stay in arrival order and are
+        /// never merged across a suppression boundary. A segment whose authoritative attach
+        /// grid has not landed yet is also parsed here, after `attached` adopted that grid.
         var output: @Sendable ([PTYHostFeedSegment]) -> Void = { _ in }
 
         /// The child exists: its pid and the kernel start time that is the other half of its
@@ -231,6 +243,17 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     /// `.exact` needs none of this: those bytes have never reached an emulator, so they are
     /// answered exactly as live output is.
     private var isReplayingHistory = false
+
+    /// True from `attached` through the main-actor handoff. The `attached` delivery was enqueued
+    /// first and adopts the daemon's grid; parsing the initial run and the finite backlog that
+    /// arrived during it on that same queue keeps wire order on the grid the bytes were written
+    /// at. Every ordinary spawned/live run stays on the transport queue.
+    private var isAwaitingFirstAttachFlush = false
+
+    /// Published only while main parses the finite backlog that arrived during the first attach
+    /// delivery. The transport queue waits here before accepting the next frame, preserving wire
+    /// order without making an unbounded live stream part of the main-actor drain.
+    private var attachParseBarrier: DispatchGroup?
 
     // MARK: - Initialization
 
@@ -524,17 +547,21 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         case .attached(let attached) where attached.id == identity:
             lock.lock()
             ringOffset = attached.totalBytesWritten
+            isAwaitingFirstAttachFlush = true
             // `.exact` carries bytes no emulator has ever seen and must be answered; `.cut` is
             // history and must not be. See `isReplayingHistory`.
             if case .cut = attached.replay { isReplayingHistory = true }
             // The daemon's own grid, which this watcher adopts rather than replaces. The
-            // comparison in `converge()` is what replaces the view's old "suppress the first
-            // resize after an attach" rule: equal is silence, different is one frame.
+            // whole grid is authoritative here, pixels included. The view adopted the summary's
+            // cell dimensions before asking, and that programmatic resize can report its local
+            // pixel extent back before this frame arrives. Replacing `wanted` closes that echo:
+            // an attach itself never resizes; the next genuine window change records a new grid.
             grids.acknowledged = attached.grid
+            grids.wanted = attached.grid
+            grids.delivered = nil
             grids.isConfirmed = true
             let delivery = deliveryStorage
             lock.unlock()
-            converge()
             DispatchQueue.main.async { delivery.attached(attached) }
 
         case .resized(let resized) where resized.id == identity:
@@ -578,25 +605,41 @@ final class PTYHostTerminalLink: @unchecked Sendable {
     private func received(output bytes: Data) {
         guard !bytes.isEmpty else { return }
         lock.lock()
+        if let barrier = attachParseBarrier {
+            lock.unlock()
+            barrier.wait()
+            received(output: bytes)
+            return
+        }
         ringOffset &+= UInt64(bytes.count)
         let answers = !isReplayingHistory
+        let requiresMainActorParse = isAwaitingFirstAttachFlush
+        let delivery = deliveryStorage
         // One comparison per burst, and only after a send that failed. Bytes arriving are this
         // side's only evidence that a transport which refused a write is current again — there
         // is no frame for "ready", and a timer would be a guess.
         let shouldConverge = grids.didFail
         lock.unlock()
         if shouldConverge { converge() }
-        deliver(PTYHostFeedSegment(bytes: [UInt8](bytes), answersQueries: answers))
+        let segment = PTYHostFeedSegment(
+            bytes: [UInt8](bytes),
+            answersQueries: answers,
+            requiresMainActorParse: requiresMainActorParse
+        )
+        if !requiresMainActorParse { delivery.parseOutput(segment) }
+        deliver(segment)
     }
 
     /// Appends to the pending burst and schedules at most one main-queue hop for it.
     ///
-    /// Adjacent runs that agree about answering queries are merged, so a burst that crossed the
-    /// wire as several frames is one `feed` and one pair of activity callbacks — and a run that
+    /// Adjacent runs that agree about answering queries are merged, so frames that were already
+    /// parsed on the transport queue share one main-actor activity/raw-output report. A run that
     /// disagrees starts a new segment rather than being folded into one that would answer for it.
     private func deliver(_ segment: PTYHostFeedSegment) {
         lock.lock()
-        if var last = pending.last, last.answersQueries == segment.answersQueries {
+        if var last = pending.last,
+           last.answersQueries == segment.answersQueries,
+           last.requiresMainActorParse == segment.requiresMainActorParse {
             last.bytes.append(contentsOf: segment.bytes)
             pending[pending.count - 1] = last
         } else {
@@ -614,15 +657,53 @@ final class PTYHostTerminalLink: @unchecked Sendable {
         lock.lock()
         let segments = pending
         pending.removeAll(keepingCapacity: true)
-        isFlushScheduled = false
-        // The replay is the head of what a rejoining watcher is given, and this hop is the only
-        // boundary the wire offers. See `isReplayingHistory`.
-        if !segments.isEmpty { isReplayingHistory = false }
+        guard !segments.isEmpty else {
+            isFlushScheduled = false
+            lock.unlock()
+            return
+        }
+
+        let isDrainingAttachHandoff = isAwaitingFirstAttachFlush
+        // The replay is the head of what a rejoining watcher is given, and this first drain is
+        // the only boundary the wire offers. Bytes arriving while it parses are live for query-
+        // suppression purposes, but still stay on main until the finite handoff below completes.
+        // See `isReplayingHistory`.
+        isReplayingHistory = false
+        if !isDrainingAttachHandoff { isFlushScheduled = false }
         let delivery = deliveryStorage
         lock.unlock()
 
-        guard !segments.isEmpty else { return }
         delivery.output(segments)
+        guard isDrainingAttachHandoff else { return }
+
+        // A frame can arrive while the first delivery holds SwiftTerm's parser lock. Take that
+        // finite backlog, then publish a barrier before releasing the attach gate: the client's
+        // serial transport queue waits at `received(output:)` while main parses the backlog, so
+        // a later live frame cannot overtake it. This is one bounded second drain, not a loop that
+        // could keep main busy forever when a child emits continuously.
+        lock.lock()
+        let backlog = pending
+        pending.removeAll(keepingCapacity: true)
+        isAwaitingFirstAttachFlush = false
+        isFlushScheduled = false
+        let barrier: DispatchGroup?
+        if backlog.isEmpty {
+            barrier = nil
+        } else {
+            let group = DispatchGroup()
+            group.enter()
+            attachParseBarrier = group
+            barrier = group
+        }
+        let backlogDelivery = deliveryStorage
+        lock.unlock()
+
+        if !backlog.isEmpty { backlogDelivery.output(backlog) }
+
+        lock.lock()
+        attachParseBarrier = nil
+        lock.unlock()
+        barrier?.leave()
     }
 
     // MARK: - Private Methods — Endings

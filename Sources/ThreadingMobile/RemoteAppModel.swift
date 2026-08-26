@@ -1166,7 +1166,7 @@ final class RemoteAppModel: ObservableObject {
             }
             try await Task.sleep(for: .milliseconds(500))
         }
-        throw RemoteClientError.server(408)
+        throw RemoteClientError.server(status: 408)
     }
 
     func makeTerminalReady(_ terminal: RemoteProjectTerminalSummaryDTO) async throws {
@@ -1192,7 +1192,7 @@ final class RemoteAppModel: ObservableObject {
             }
             try await Task.sleep(for: .milliseconds(500))
         }
-        throw RemoteClientError.server(408)
+        throw RemoteClientError.server(status: 408)
     }
 
     /// Changes the one app appearance shared by the Mac and paired clients. The local preview
@@ -2088,7 +2088,7 @@ final class RemoteAppModel: ObservableObject {
             ]) { current, _ in current }
             fields.merge(metrics.fields) { current, _ in current }
             if let remote = error as? RemoteClientError,
-               case .server(let status) = remote {
+               case .server(let status, _, _) = remote {
                 fields[.status] = String(status)
             }
             MobileDiagnostics.recordConnectivity(
@@ -2206,7 +2206,7 @@ final class RemoteAppModel: ObservableObject {
                     .code: MobileDiagnostics.errorCode(error),
                     .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
                 ]) { _, new in new }
-                if case .server(let status) = error {
+                if case .server(let status, _, _) = error {
                     failedFields[.status] = String(status)
                 }
                 MobileDiagnostics.recordConnectivity(
@@ -2218,7 +2218,7 @@ final class RemoteAppModel: ObservableObject {
                 // bypassing an authorization or compatibility decision made by the Mac. A
                 // gateway failure can belong to the route in front of it, and the same request
                 // id keeps trying the next route safe even if the Mac did receive it.
-                if case .server(let status) = error, [502, 503, 504].contains(status) {
+                if case .server(let status, _, _) = error, [502, 503, 504].contains(status) {
                     lastError = error
                     Self.closeDoor(
                         for: error,
@@ -3153,6 +3153,24 @@ final class RemoteAppModel: ObservableObject {
         ]
     )
 
+    /// The Claude demo login's windows, held apart from the catalogue literal: three windows and
+    /// a model list inside that one expression put the type checker past its budget.
+    private static let demoClaudeModels: [RemoteModelChoiceDTO] = [
+        RemoteModelChoiceDTO(id: "claude-fable-5", name: "Fable 5"),
+    ]
+
+    private static let demoClaudeUsageWindows: [RemoteAccountUsageWindowDTO] = [
+        RemoteAccountUsageWindowDTO(id: "5h", name: "5h", fraction: 0.31, windowDuration: 5 * 60 * 60),
+        RemoteAccountUsageWindowDTO(id: "7d", name: "7d", fraction: 0.56, windowDuration: 7 * 24 * 60 * 60),
+        RemoteAccountUsageWindowDTO(
+            id: "Fable",
+            name: "7d Fable",
+            fraction: 0.82,
+            windowDuration: 7 * 24 * 60 * 60,
+            metersModelIDs: ["claude-fable-5"]
+        ),
+    ]
+
     private static var demoResponse: RemoteMeDTO {
         let now = Date().timeIntervalSince1970
         return RemoteMeDTO(
@@ -3407,10 +3425,11 @@ final class RemoteAppModel: ObservableObject {
                             .init(
                                 id: "default",
                                 name: "David",
-                                usageSummary: "5h 31% · 7d 56%",
-                                usageFraction: 0.56,
-                                models: [],
-                                defaultModelID: nil
+                                usageSummary: "5h 31% · 7d 56% · 7d Fable 82%",
+                                usageFraction: 0.82,
+                                usageWindows: demoClaudeUsageWindows,
+                                models: demoClaudeModels,
+                                defaultModelID: demoClaudeModels[0].id
                             )
                         ],
                         models: [],

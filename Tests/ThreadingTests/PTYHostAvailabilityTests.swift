@@ -229,6 +229,10 @@ final class PTYHostAvailabilityTests: XCTestCase {
         XCTAssertEqual(PTYHostUnavailability.helperMissing.token, "helperMissing")
         XCTAssertEqual(PTYHostUnavailability.notRunning.token, "notRunning")
         XCTAssertEqual(
+            PTYHostUnavailability.registrationRefreshing.token,
+            "registrationRefreshing"
+        )
+        XCTAssertEqual(
             PTYHostUnavailability.protocolMismatch(.selfTooOld).token,
             "protocolMismatch.selfTooOld"
         )
@@ -307,18 +311,32 @@ final class PTYHostAvailabilityTests: XCTestCase {
         XCTAssertEqual(snapshot.build, "7.7.7 (777)")
     }
 
+    func testTheLocalInstallRevisionDistinguishesOtherwiseIdenticalPlaceholderVersions() throws {
+        let bundle = try makeBundle(withHelper: true, sourceRevision: "1552f778")
+
+        XCTAssertEqual(
+            PTYHostBuild.string(for: bundle),
+            "7.7.7 (777) @1552f778",
+            "the autoinstaller changes the source revision while its two versions stay fixed"
+        )
+    }
+
     // MARK: - Helpers
 
-    private func makeBundle(withHelper: Bool) throws -> Bundle {
+    private func makeBundle(
+        withHelper: Bool,
+        sourceRevision: String? = nil
+    ) throws -> Bundle {
         let root = scratch
             .appendingPathComponent("Bundle-\(UUID().uuidString.prefix(8)).app", isDirectory: true)
         let contents = root.appendingPathComponent("Contents", isDirectory: true)
         try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
-        let info: [String: Any] = [
+        var info: [String: Any] = [
             "CFBundleIdentifier": "codes.threading.tests.ptyhost",
             "CFBundleShortVersionString": "7.7.7",
             "CFBundleVersion": "777"
         ]
+        if let sourceRevision { info["ThreadingSourceRevision"] = sourceRevision }
         try PropertyListSerialization
             .data(fromPropertyList: info, format: .xml, options: 0)
             .write(to: contents.appendingPathComponent("Info.plist"))

@@ -84,6 +84,12 @@ reshuffling it is a line move.
 
 ### Gated — blocked on something named
 
+- [SSH remote hosts and SFTP attachment sources](ssh-remote-hosts-and-sftp-attachments.md) — let
+  the Mac own trusted SSH/SFTP profiles while both Mac and iPhone can choose remote files as
+  ordinary session-owned chat attachments, then reuse the profile for a later remote-execution
+  helper. The attachment slice is gated on adopting and auditing a client that preserves macOS 13
+  and on proving its authentication, paging, cancellation and teardown matrix; it deliberately
+  does not replace Threading's remote-companion protocol.
 - [Hosted remote service](hosted-remote-service.md) — operate accounts, push, widgets and an
   optional managed public relay while preserving local use and Tailscale, with explicit service
   boundaries and cost ceilings. The transport shipped 2026-08-12; production waits on re-checking

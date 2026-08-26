@@ -167,6 +167,11 @@ enum PTYHostBackgroundSessionsStatus: Equatable {
                 "The background host is registered but nothing is listening. It starts again on "
                     + "its own."
             )
+        case .registrationRefreshing:
+            return L10n.string(
+                "The background host is being updated. New sessions run inside Threading until "
+                    + "it is ready."
+            )
         case .protocolMismatch:
             return L10n.string(
                 "A background host from a different version of Threading is running. It stands "
@@ -257,7 +262,9 @@ enum PTYHostSessionStop {
         } catch {
             return false
         }
-        return exited.wait(PTYHostBackgroundSessionsDefaults.stopTimeout) != nil
+        let didExit = exited.wait(PTYHostBackgroundSessionsDefaults.stopTimeout) != nil
+        if didExit { NotificationCenter.default.post(PTYHostMayHaveDrained()) }
+        return didExit
     }
 }
 

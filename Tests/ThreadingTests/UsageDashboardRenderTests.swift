@@ -62,6 +62,8 @@ final class UsageDashboardRenderTests: XCTestCase {
                 Design.Chart.maximumRenderedPoints + 2
             )
             XCTAssertEqual(dashboard.topToolCountForTesting, 4)
+            XCTAssertEqual(dashboard.selectedDashboardSectionForTesting, .consumption)
+            XCTAssertEqual(dashboard.visibleDashboardSectionCountForTesting, 1)
             XCTAssertEqual(dashboard.usageChartCompositionForTesting, .stackedBands)
             XCTAssertEqual(dashboard.limitChartCompositionForTesting, .independent)
             XCTAssertGreaterThan(dashboard.breakdownVisibleSubviewCountForTesting, 0)
@@ -109,8 +111,38 @@ final class UsageDashboardRenderTests: XCTestCase {
             )
         }
 
+        // Limit history is a separate dashboard state, not another block above Consumption.
+        // One canonical render proves the switch and the retained limit chart without multiplying
+        // that state through the theme matrix already exercised by the default tab.
+        let limitFixture = fixtures[0]
+        AppThemePalette.set(limitFixture.theme)
+        let limitAppearance = try XCTUnwrap(NSAppearance(named: limitFixture.appearance))
+        let limitDashboard = UsageDashboardView()
+        limitDashboard.update(
+            report: report,
+            limits: limitFixtures(),
+            isBuilding: false,
+            animated: false
+        )
+        limitDashboard.selectLimitRangeForTesting(days: 7)
+        limitDashboard.selectDashboardSectionForTesting(.limitHistory)
+        let limitHost = laidOut(limitDashboard, appearance: limitAppearance)
+        AppThemeRefresh.repaint(limitHost)
+        limitHost.layoutSubtreeIfNeeded()
+        var limitPayload: Data?
+        limitAppearance.performAsCurrentDrawingAppearance {
+            limitPayload = png(of: limitHost)
+        }
+        let limitURL = directory.appendingPathComponent(
+            "usage-dashboard-limit-history-system-dark.png"
+        )
+        try XCTUnwrap(limitPayload, "No Usage Limit history render").write(to: limitURL)
+        files.append(limitURL)
+        XCTAssertEqual(limitDashboard.selectedDashboardSectionForTesting, .limitHistory)
+        XCTAssertEqual(limitDashboard.visibleDashboardSectionCountForTesting, 1)
+
         print("Rendered Usage dashboard fixtures to \(directory.path)")
-        XCTAssertEqual(files.count, fixtures.count)
+        XCTAssertEqual(files.count, fixtures.count + 1)
     }
 
     func testLimitHistoryChartDoesNotStretchToALaterBankedResetExpiry() throws {
@@ -310,12 +342,12 @@ final class UsageDashboardRenderTests: XCTestCase {
         width: CGFloat = Design.Size.settingsContentWidth
     ) -> NSView {
         let dashboardWidth = width
-        let fleet = AccountUsageFleetView()
+        let fleet = AccountUsageFleetView(scrollHost: .nestedPage)
         fleet.show(fleetFixture())
         dashboard.translatesAutoresizingMaskIntoConstraints = false
         dashboard.widthAnchor.constraint(equalToConstant: dashboardWidth).isActive = true
         let section = SettingsUI.section("Current capacity", fleet)
-        let stack = NSStackView(views: [section, dashboard])
+        let stack = NSStackView(views: [dashboard, section])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.large

@@ -199,7 +199,9 @@ enum MobileDiagnostics {
             case .invalidResponse: return "remote.invalidResponse"
             case .unauthorized: return "remote.unauthorized"
             case .upgradeRequired: return "remote.upgradeRequired"
-            case .server(let status): return "remote.http.\(status)"
+            case .server(let status, let code, _):
+                guard let code else { return "remote.http.\(status)" }
+                return "remote.refusal.\(machineToken(code))"
             }
         }
         if let url = error as? URLError {

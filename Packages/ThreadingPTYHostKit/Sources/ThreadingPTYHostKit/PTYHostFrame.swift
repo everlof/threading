@@ -159,13 +159,13 @@ public enum PTYHostFrame: Codable, Equatable, Sendable {
 
 // MARK: - Frame bodies
 
-/// A version pair plus what is useful to journal but must never gate admission.
+/// A protocol version pair plus the process generation used for reporting and graceful upgrade.
 public struct PTYHostHello: Codable, Equatable, Sendable {
     /// `protocol` on the wire; a Swift keyword, hence the property name.
     public let protocolVersion: Int
     public let minimumSupported: Int
-    /// The sender's build string. Reported and journalled, never compared — see
-    /// `PTYHostProtocol`.
+    /// The sender's generation. It may select graceful replacement, but never gates admission;
+    /// see `PTYHostProtocol`.
     public let build: String
     public let pid: Int32
 

@@ -7,13 +7,12 @@ import Foundation
 /// version independently — a remote-access frame change must not retire a working daemon, and a
 /// daemon frame change must not tell every installed iPhone to update.
 ///
-/// **The protocol pair is the gate; the build string is not.** `hello` also carries a build, and
-/// it is reported and journalled and never compared for admission. The reason is local to this
-/// repository: a commit on `master` rebuilds and reinstalls `/Applications/Threading.app`, so a
-/// build-gated daemon would be retired and drained several times a day for changes that touch no
-/// frame. macOS keeps a running executable's text pages valid after the file underneath is
-/// replaced, so an already-running daemon goes on executing the code it started with — which is
-/// exactly what is wanted, provided the protocol still matches.
+/// **The protocol pair is the gate; the generation string is not.** `hello` retains the wire key
+/// `build` for compatibility, but its value is reported, journalled, and used only to replace an
+/// old compatible daemon gracefully. A different generation remains admissible while it holds
+/// work; a same-generation process with an incompatible protocol is still refused. macOS keeps a
+/// running executable's text pages valid after the file underneath is replaced, so a daemon can
+/// keep serving the code it started with until a safe retirement point.
 ///
 /// **Bump policy, verbatim from `RemoteProtocol`**: additive changes bump nothing, a breaking
 /// change bumps `current` while still speaking the old version, and `minimumSupported` rises

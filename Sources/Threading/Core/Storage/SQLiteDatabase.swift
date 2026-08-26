@@ -294,6 +294,26 @@ final class SQLiteDatabase {
         }
 
         @discardableResult
+        func bind(_ index: Int32, _ value: Int64) -> Statement {
+            sqlite3_bind_int64(activeHandle, index, value)
+            return self
+        }
+
+        @discardableResult
+        func bind(_ index: Int32, _ value: Data) -> Statement {
+            _ = value.withUnsafeBytes { bytes in
+                sqlite3_bind_blob(
+                    activeHandle,
+                    index,
+                    bytes.baseAddress,
+                    Int32(bytes.count),
+                    transient
+                )
+            }
+            return self
+        }
+
+        @discardableResult
         func bind(_ index: Int32, _ value: Double) -> Statement {
             sqlite3_bind_double(activeHandle, index, value)
             return self
@@ -360,6 +380,24 @@ final class SQLiteDatabase {
         func run() throws {
             defer { finalize() }
             _ = try step()
+        }
+
+        /// Reuses a prepared statement for a bounded batch. Both the virtual machine and every
+        /// previous binding are cleared; retaining either would make one source's values bleed
+        /// into the next row of an incremental cache update.
+        func reset() throws {
+            let handle = activeHandle
+            let result = sqlite3_reset(handle)
+            guard result == SQLITE_OK else {
+                let database = sqlite3_db_handle(handle)
+                throw Failure.step(Failure.Diagnostic(
+                    code: database.map(sqlite3_errcode) ?? result,
+                    extendedCode: database.map(sqlite3_extended_errcode) ?? result,
+                    message: database.map { String(cString: sqlite3_errmsg($0)) }
+                        ?? "unknown error"
+                ))
+            }
+            sqlite3_clear_bindings(handle)
         }
 
         func finalize() {

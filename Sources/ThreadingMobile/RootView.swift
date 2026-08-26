@@ -4,9 +4,7 @@ import UIKit
 
 struct RootView: View {
     @EnvironmentObject private var model: RemoteAppModel
-    @State private var showsShakeReportOptions = false
     @State private var issueReportRequest: MobileIssueReportRequest?
-    @State private var isCapturingReportScreen = false
     @State private var showsSettings = false
 #if DEBUG
     @StateObject private var demoConversation = RemoteSessionConnection.demoConversation()
@@ -225,41 +223,18 @@ struct RootView: View {
         .mobileTheme(theme)
         .background {
             ShakeGestureDetector {
-                guard issueReportRequest == nil, !isCapturingReportScreen else { return }
+                guard issueReportRequest == nil else { return }
+                // Taken here, before anything is presented, because the screen the shake was
+                // about is the one still on the display: a prompt asking permission first is a
+                // prompt standing in front of the evidence. The image never leaves the phone
+                // unless the report sheet's screenshot checkmark is still on when it is sent
+                // or shared, and it is discarded with the sheet otherwise.
+                let screenshot = MobileScreenCapture.currentScreen()
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
-                showsShakeReportOptions = true
+                openShakeReport(screenshot: screenshot)
             }
             .frame(width: 0, height: 0)
         }
-        .themedConfirmationDialog(
-            "Report a problem?",
-            message:
-                "A screenshot can help explain visual problems, but it may contain code or "
-                + "chat content. You can preview and remove it before sharing.",
-            isPresented: $showsShakeReportOptions,
-            actions: [
-                ThemedDialogAction(
-                    "Continue without screenshot",
-                    systemImage: "doc.text"
-                ) {
-                    openShakeReport(screenshot: nil, requested: false)
-                },
-                ThemedDialogAction(
-                    "Include current screen",
-                    systemImage: "rectangle.dashed.badge.record"
-                ) {
-                    isCapturingReportScreen = true
-                    Task { @MainActor in
-                        // Let the confirmation dialog disappear before taking the opted-in image.
-                        try? await Task.sleep(for: .milliseconds(300))
-                        let screenshot = MobileScreenCapture.currentScreen()
-                        isCapturingReportScreen = false
-                        openShakeReport(screenshot: screenshot, requested: true)
-                    }
-                },
-                ThemedDialogAction("Cancel", role: .cancel),
-            ]
-        )
         .sheet(item: $issueReportRequest) { request in
             MobileIssueReportView(request: request)
                 .mobileTheme(theme)
@@ -332,7 +307,7 @@ struct RootView: View {
         return RemoteThemePalette(model.me?.theme)
     }
 
-    private func openShakeReport(screenshot: UIImage?, requested: Bool) {
+    private func openShakeReport(screenshot: UIImage?) {
         MobileDiagnostics.record(.issueReportOpened, fields: [
             .reason: "shake",
             .surface: screenshot == nil ? "none" : "screenshot",
@@ -340,7 +315,7 @@ struct RootView: View {
         issueReportRequest = MobileIssueReportRequest(
             trigger: .shake,
             screenshot: screenshot,
-            screenshotWasRequested: requested
+            screenshotWasRequested: true
         )
     }
 
@@ -465,16 +440,13 @@ struct RootView: View {
     @MainActor
     private func openIssueReportDemoIfNeeded() async {
         let mode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-        guard mode == "report-preflight"
-                || mode == "report"
+        guard mode == "report"
                 || mode == "report-receipt"
                 || mode == "report-screenshot" else {
             return
         }
         try? await Task.sleep(for: .milliseconds(650))
         switch mode {
-        case "report-preflight":
-            showsShakeReportOptions = true
         case "report", "report-receipt":
             issueReportRequest = MobileIssueReportRequest(
                 trigger: .diagnostics,

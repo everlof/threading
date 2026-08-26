@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import ThreadingPTYHostKit
 
@@ -15,8 +16,8 @@ enum PTYHostUpgradeHold: Equatable, Sendable {
     case sameBuild
 
     /// The daemon is a different build and is holding somebody's agents. It keeps them; it
-    /// retires when its last session ends, which is what `retire` already means, and which is why
-    /// nothing has to be killed for an upgrade to happen.
+    /// remains reachable until a later event-driven or fallback survey sees its last session end,
+    /// then receives `retire`. Nothing has to be killed for the upgrade to happen.
     case holdsSessions(Int)
 
     /// The version gate refused the peer. The handshake has already done whatever was correct —
@@ -72,14 +73,16 @@ enum PTYHostUpgradeDecision: Equatable, Sendable {
 /// the old daemon running the deleted binary's image, and launchd execs the new binary only on
 /// the next start. Nothing in the OS will end it. So the app has to ask — and `retire` is the ask:
 /// stop accepting, unlink the socket now so a replacement can bind it, keep serving what is
-/// already attached, exit when the last session ends.
+/// already attached, exit when the last session ends. A busy daemon is not asked yet, because
+/// unlinking its socket would make a detached session impossible to take back; the monitor below
+/// asks again after an exit edge and has a low-frequency backstop for unobserved detached work.
 ///
 /// The post-commit hook reinstalls `/Applications/Threading.app` several times a day, which is why
 /// the build string is *not* the admission gate (`PTYHostProtocol` is) and why this decision is
 /// separate from it: a daemon of a different build is perfectly able to serve, and the only
 /// question is whether now is a free moment to replace it. A daemon holding zero sessions is that
-/// moment; one holding somebody's agents is not, and the answer there is to leave it — it retires
-/// on its own once it has been asked, and until then it goes on doing exactly what it was doing.
+/// moment; one holding somebody's agents is not, and the answer there is to leave it reachable
+/// until a later survey finds that the work has ended.
 ///
 /// One function with four value arguments and no I/O, because every interesting case is a
 /// combination rather than a code path: same build, different build with nothing held, different
@@ -90,24 +93,27 @@ enum PTYHostUpgradePolicy {
     ///   - peerBuild: the daemon's `hello` build string. Reported, never compared for admission.
     ///   - ownBuild: this app's, from `PTYHostBuild.string(for:)`.
     ///   - compatibility: what `PTYHostProtocol.evaluate` said about the pair.
-    ///   - heldSessions: what `list` answered — every session the daemon holds, attached or not.
+    ///   - activeSessions: what `list` answered is still running, attached or not. Ended sessions
+    ///     retained for a late observer are safe because `retire` releases them itself.
     static func decide(
         peerBuild: String,
         ownBuild: String,
         compatibility: PTYHostCompatibility,
-        heldSessions: Int
+        activeSessions: Int,
+        requiresRegistrationRefresh: Bool = false
     ) -> PTYHostUpgradeDecision {
         // The gate outranks everything below it. A `peerTooOld` daemon has already been sent
         // `retire` by the handshake, and a `selfTooOld` one must never be: retiring a daemon
         // newer than this app would take working agents down in order to install an older host.
         guard compatibility == .compatible else { return .refuse(compatibility) }
 
-        // Identical builds are the common case — one reinstall in ten leaves the daemon actually
-        // stale — and there is nothing to gain from replacing a process with its own image.
-        guard peerBuild != ownBuild else { return .leave(.sameBuild) }
+        // Identical generations are the common case, unless the registration receipt says this
+        // daemon came from another bundle or from files replaced in place. In that case the
+        // launchd association still has to be refreshed even though the wire generation agrees.
+        if peerBuild == ownBuild, !requiresRegistrationRefresh { return .leave(.sameBuild) }
 
         // A different build holding work stays. This is the whole reason the daemon exists.
-        guard heldSessions == 0 else { return .leave(.holdsSessions(heldSessions)) }
+        guard activeSessions == 0 else { return .leave(.holdsSessions(activeSessions)) }
 
         return .retire
     }
@@ -120,8 +126,184 @@ struct PTYHostSurvey: Equatable, Sendable {
     /// The daemon's `hello` build. Empty when the gate refused the peer before it said.
     let build: String
     let compatibility: PTYHostCompatibility
-    /// Every session the daemon holds, attached or not, as `list` answered.
-    let heldSessions: Int
+    /// Every still-running session the daemon holds, attached or not.
+    let activeSessions: Int
+}
+
+// MARK: - Process identity
+
+/// The kernel identity of the daemon that accepted a retirement request.
+///
+/// A pid alone is unsafe because macOS reuses it. The start timestamp lets the monitor wait for a
+/// retiring daemon that raced from zero to one session between `list` and `retire`, without ever
+/// mistaking a later process for the one it was waiting on or killing the raced session.
+struct PTYHostProcessIdentity: Equatable, Sendable {
+    let pid: Int32
+    let startTime: ProcessStartTime
+}
+
+/// Read-only kernel questions used by the upgrade monitor, behind a deterministic test seam.
+struct PTYHostKernelProcessProbe: Sendable {
+    private let identifyProcess: @Sendable (Int32) -> PTYHostProcessIdentity?
+    private let matchProcess: @Sendable (PTYHostProcessIdentity) -> Bool
+
+    init(
+        identify: @escaping @Sendable (Int32) -> PTYHostProcessIdentity?,
+        matches: @escaping @Sendable (PTYHostProcessIdentity) -> Bool
+    ) {
+        self.identifyProcess = identify
+        self.matchProcess = matches
+    }
+
+    func identity(for pid: Int32) -> PTYHostProcessIdentity? { identifyProcess(pid) }
+    func matches(_ identity: PTYHostProcessIdentity) -> Bool { matchProcess(identity) }
+
+    static let live = PTYHostKernelProcessProbe(
+        identify: { pid in
+            guard let startTime = ProcessUtility.startTime(forPid: pid) else { return nil }
+            return PTYHostProcessIdentity(pid: pid, startTime: startTime)
+        },
+        matches: { identity in
+            ProcessUtility.startTime(forPid: identity.pid) == identity.startTime
+        }
+    )
+}
+
+/// What launchd says about the process behind the registered label when no socket answers.
+enum PTYHostRegisteredProcessState: Equatable, Sendable {
+    case running(PTYHostProcessIdentity)
+    case notRunning
+    case unknown
+}
+
+/// Whether a newly launched conversation may join the background daemon.
+///
+/// Reattach and stop clients deliberately do not consult this gate: existing work remains
+/// reachable while a stale daemon drains. Only a new spawn is held back, closing the race where
+/// launchd restarts an old registered image between confirmed retirement and re-registration.
+final class PTYHostNewSessionAdmission: @unchecked Sendable {
+    static let shared = PTYHostNewSessionAdmission()
+
+    private let lock = NSLock()
+    private var allowed = true
+
+    var permitsHostedSpawn: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return allowed
+    }
+
+    func setAllowed(_ allowed: Bool) {
+        lock.lock()
+        self.allowed = allowed
+        lock.unlock()
+    }
+}
+
+/// A bounded, read-only `launchctl print` probe for the exact launchd label.
+///
+/// This is not used on the ordinary path. It exists for the one ambiguous state
+/// `SMAppService` cannot answer: an enabled stale association with no socket. A retiring daemon
+/// has deliberately unlinked the socket and must be allowed to drain; a missing DerivedData
+/// bundle has no process and can be reclaimed immediately.
+struct PTYHostRegisteredProcessProbe: Sendable {
+    private let answer: @Sendable () -> PTYHostRegisteredProcessState
+
+    init(_ answer: @escaping @Sendable () -> PTYHostRegisteredProcessState) {
+        self.answer = answer
+    }
+
+    func state() -> PTYHostRegisteredProcessState { answer() }
+
+    /// Interprets one captured `launchctl print` answer without assigning meaning to prose other
+    /// than launchctl's explicit missing-service diagnostic. Kept pure so malformed, repeated and
+    /// pid-reuse-sensitive answers are regression cases rather than machine-state tests.
+    static func interpret(
+        output text: String,
+        terminationStatus: Int32,
+        kernel: PTYHostKernelProcessProbe
+    ) -> PTYHostRegisteredProcessState {
+        if text.localizedCaseInsensitiveContains("could not find service") {
+            return .notRunning
+        }
+        guard terminationStatus == 0 else { return .unknown }
+
+        let pidValues = text.split(whereSeparator: \.isNewline).compactMap { line -> Substring? in
+            let value = line.trimmingCharacters(in: .whitespaces)
+            let prefix = "pid = "
+            guard value.hasPrefix(prefix) else { return nil }
+            return value.dropFirst(prefix.count)
+        }
+        guard pidValues.count <= 1 else { return .unknown }
+        guard let pidValue = pidValues.first else {
+            // A successful print with no pid is absence proof only when launchctl also gave one
+            // unambiguous inactive state. Empty, truncated, or changed-format output must not
+            // become permission to call `unregister()`, which can kill a draining helper.
+            let states = text.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+                let value = line.trimmingCharacters(in: .whitespaces)
+                let prefix = "state = "
+                guard value.hasPrefix(prefix) else { return nil }
+                return String(value.dropFirst(prefix.count))
+            }
+            guard states.count == 1 else { return .unknown }
+            switch states[0] {
+            case "waiting", "not running", "exited":
+                return .notRunning
+            default:
+                return .unknown
+            }
+        }
+        guard let pid = Int32(pidValue), pid > 0 else { return .unknown }
+        guard let identity = kernel.identity(for: pid) else { return .unknown }
+        return .running(identity)
+    }
+
+    static func live(
+        kernel: PTYHostKernelProcessProbe = .live
+    ) -> PTYHostRegisteredProcessProbe {
+        PTYHostRegisteredProcessProbe {
+            let process = Process()
+            let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            process.arguments = [
+                "print",
+                "gui/\(getuid())/\(PTYHostRegistrationDefaults.label)"
+            ]
+            process.standardOutput = output
+            process.standardError = output
+
+            let exited = DispatchSemaphore(value: 0)
+            process.terminationHandler = { _ in exited.signal() }
+            do {
+                try process.run()
+            } catch {
+                return .unknown
+            }
+            guard exited.wait(
+                timeout: .now() + PTYHostRegistrationDefaults.launchctlProbeTimeout
+            ) == .success else {
+                process.terminate()
+                return .unknown
+            }
+
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            guard let text = String(data: data, encoding: .utf8) else { return .unknown }
+            return interpret(
+                output: text,
+                terminationStatus: process.terminationStatus,
+                kernel: kernel
+            )
+        }
+    }
+}
+
+/// More precise than the policy decision because re-registering launchd needs proof that the
+/// daemon which received `retire` is actually gone.
+enum PTYHostUpgradeProgress: Equatable, Sendable {
+    case noAnswer
+    case settled(PTYHostUpgradeDecision)
+    case retirementConfirmed
+    case retirementPending(PTYHostProcessIdentity?)
 }
 
 // MARK: - The round trip
@@ -129,7 +311,7 @@ struct PTYHostSurvey: Equatable, Sendable {
 /// Connect, ask who is there and what they are holding, and act on the answer.
 ///
 /// This is P2's half of the design made real: nothing in the OS ends a daemon whose bundle was
-/// replaced, so the app asks — once per launch, off the main actor, bounded by
+/// replaced, so the app first asks at launch, off the main actor, bounded by
 /// `PTYHostRegistrationDefaults.surveyTimeout`, and costing an idle machine one connect and two
 /// frames.
 ///
@@ -149,43 +331,80 @@ enum PTYHostUpgradeCheck {
     /// **Blocking.** Never call it from the main actor.
     @discardableResult
     static func run(
-        socketPath: String,
-        ownBuild: String,
+        request: PTYHostUpgradeRequest,
         eventLog: EventLog = .shared,
-        timeout: TimeInterval = PTYHostRegistrationDefaults.surveyTimeout
-    ) -> PTYHostUpgradeDecision? {
+        timeout: TimeInterval = PTYHostRegistrationDefaults.surveyTimeout,
+        kernel: PTYHostKernelProcessProbe = .live
+    ) -> PTYHostUpgradeProgress {
         switch connectAndCount(
-            socketPath: socketPath,
-            ownBuild: ownBuild,
+            socketPath: request.socketPath,
+            ownBuild: request.ownBuild,
             eventLog: eventLog,
             timeout: timeout
         ) {
         case .noAnswer:
-            return nil
+            return .noAnswer
 
         case .refusedByGate(let compatibility):
             // The handshake has already done whatever was correct — including sending `retire` to
             // a daemon too old to talk to. Saying it twice is how a newer daemon gets retired by
             // an older app, which is exactly what must never happen.
-            return .refuse(compatibility)
+            return .settled(.refuse(compatibility))
 
-        case .counted(let client, let survey, let closed):
+        case .counted(let client, let hello, let survey, let closed):
             let decision = PTYHostUpgradePolicy.decide(
                 peerBuild: survey.build,
-                ownBuild: ownBuild,
+                ownBuild: request.ownBuild,
                 compatibility: survey.compatibility,
-                heldSessions: survey.heldSessions
+                activeSessions: survey.activeSessions,
+                requiresRegistrationRefresh: request.requiresRegistrationRefresh
             )
-            if decision.retires {
-                try? client.retire()
-                // Wait for the daemon to hang up rather than closing on top of the frame: the
-                // write is asynchronous, and `close()` stops the channel. A retiring daemon with
-                // nothing to drain exits immediately, so this is the ending, not a delay.
-                _ = closed.wait(timeout)
+            guard decision.retires else {
+                client.close()
+                journal(decision, survey: survey, ownBuild: request.ownBuild, eventLog: eventLog)
+                return .settled(decision)
             }
+
+            // Capture the pid's other half before asking it to exit. If a spawn raced the list,
+            // the daemon now drains instead of closing inside the short survey deadline; the
+            // monitor follows this exact process until it is gone and only then re-registers.
+            let identity = kernel.identity(for: hello.pid)
+            do {
+                try client.retire()
+            } catch {
+                client.close()
+                return .noAnswer
+            }
+            let didClose = closed.wait(timeout) != nil
             client.close()
-            journal(decision, survey: survey, ownBuild: ownBuild, eventLog: eventLog)
+            journal(decision, survey: survey, ownBuild: request.ownBuild, eventLog: eventLog)
+            if didClose { return .retirementConfirmed }
+            if let identity, !kernel.matches(identity) { return .retirementConfirmed }
+            return .retirementPending(identity)
+        }
+    }
+
+    /// Compatibility surface for callers interested only in the policy answer. Registration
+    /// handoff uses the richer request overload above because it must distinguish "retire sent"
+    /// from "the retiring process is confirmed gone".
+    @discardableResult
+    static func run(
+        socketPath: String,
+        ownBuild: String,
+        eventLog: EventLog = .shared,
+        timeout: TimeInterval = PTYHostRegistrationDefaults.surveyTimeout
+    ) -> PTYHostUpgradeDecision? {
+        switch run(
+            request: PTYHostUpgradeRequest(socketPath: socketPath, ownBuild: ownBuild),
+            eventLog: eventLog,
+            timeout: timeout
+        ) {
+        case .noAnswer:
+            return nil
+        case .settled(let decision):
             return decision
+        case .retirementConfirmed, .retirementPending:
+            return .retire
         }
     }
 
@@ -195,7 +414,7 @@ enum PTYHostUpgradeCheck {
     /// feature off has to know whether that would end somebody's turn.
     ///
     /// **Blocking.** Never call it from the main actor.
-    static func heldSessions(
+    static func activeSessions(
         socketPath: String,
         ownBuild: String,
         eventLog: EventLog = .shared,
@@ -207,9 +426,9 @@ enum PTYHostUpgradeCheck {
             eventLog: eventLog,
             timeout: timeout
         ) {
-        case .counted(let client, let survey, _):
+        case .counted(let client, _, let survey, _):
             client.close()
-            return survey.heldSessions
+            return survey.activeSessions
         case .refusedByGate, .noAnswer:
             return nil
         }
@@ -219,7 +438,12 @@ enum PTYHostUpgradeCheck {
 
     private enum Outcome {
         /// The link is open and the caller owns closing it.
-        case counted(client: PTYHostClient, survey: PTYHostSurvey, closed: PTYHostLatch<Void>)
+        case counted(
+            client: PTYHostClient,
+            hello: PTYHostHello,
+            survey: PTYHostSurvey,
+            closed: PTYHostLatch<Void>
+        )
         case refusedByGate(PTYHostCompatibility)
         case noAnswer
     }
@@ -230,14 +454,14 @@ enum PTYHostUpgradeCheck {
         eventLog: EventLog,
         timeout: TimeInterval
     ) -> Outcome {
-        let sessions = PTYHostLatch<Int>()
+        let sessions = PTYHostLatch<[PTYHostSessionSummary]>()
         let closed = PTYHostLatch<Void>()
         let client = PTYHostClient(
             socketPath: socketPath,
             build: ownBuild,
             events: PTYHostClient.Events(
                 frame: { frame in
-                    if case .sessions(let summaries) = frame { sessions.complete(summaries.count) }
+                    if case .sessions(let summaries) = frame { sessions.complete(summaries) }
                 },
                 closed: { _ in
                     // Both latches: a link that ended before answering must not hold the caller
@@ -265,16 +489,17 @@ enum PTYHostUpgradeCheck {
             return .noAnswer
         }
 
-        guard let count = sessions.wait(timeout) else {
+        guard let summaries = sessions.wait(timeout) else {
             client.close()
             return .noAnswer
         }
         return .counted(
             client: client,
+            hello: hello,
             survey: PTYHostSurvey(
                 build: hello.build,
                 compatibility: .compatible,
-                heldSessions: count
+                activeSessions: summaries.lazy.filter { $0.exit == nil }.count
             ),
             closed: closed
         )
@@ -293,7 +518,7 @@ enum PTYHostUpgradeCheck {
             "decision": decision.token,
             "daemonBuild": survey.build,
             "appBuild": ownBuild,
-            "sessions": String(survey.heldSessions)
+            "sessions": String(survey.activeSessions)
         ])
         switch decision {
         case .retire:
@@ -304,12 +529,222 @@ enum PTYHostUpgradeCheck {
             ThreadingLogger.ptyHost.info(
                 """
                 A stale PTY host holds \(count, privacy: .public) sessions; \
-                it retires when idle
+                retirement is pending
                 """
             )
         case .leave, .refuse:
             break
         }
+    }
+}
+
+// MARK: - Eventual retirement
+
+/// A host-owned child ended, so a stale daemon which was busy at launch may now be idle.
+///
+/// PTY links, native pipe links, and the background-session stop client all post this same edge.
+/// The registration coordinator ignores it unless its launch survey found a different generation
+/// with live work, so ordinary same-generation sessions add no socket traffic when they end.
+struct PTYHostMayHaveDrained: AppEvent {
+    static let name = Notification.Name("ptyHostMayHaveDrained")
+}
+
+/// The values a deferred upgrade check needs after the launch-time request has gone away.
+struct PTYHostUpgradeRequest: Equatable, Sendable {
+    let socketPath: String
+    let ownBuild: String
+    let registrationRequest: PTYHostRegistrationRequest?
+    /// Whether an otherwise-current registration is allowed to accept new work. False after a
+    /// refused/approval-pending registration even though the upgrade survey itself may settle.
+    let allowsNewSessionsWhenCurrent: Bool
+
+    var requiresRegistrationRefresh: Bool { registrationRequest != nil }
+
+    init(
+        socketPath: String,
+        ownBuild: String,
+        registrationRequest: PTYHostRegistrationRequest? = nil,
+        allowsNewSessionsWhenCurrent: Bool = true
+    ) {
+        self.socketPath = socketPath
+        self.ownBuild = ownBuild
+        self.registrationRequest = registrationRequest
+        self.allowsNewSessionsWhenCurrent = allowsNewSessionsWhenCurrent
+    }
+}
+
+/// The blocking survey seam used by `PTYHostUpgradeMonitor`.
+struct PTYHostUpgradeProbe: Sendable {
+    private let answer: @Sendable (PTYHostUpgradeRequest) -> PTYHostUpgradeProgress
+
+    init(_ answer: @escaping @Sendable (PTYHostUpgradeRequest) -> PTYHostUpgradeProgress) {
+        self.answer = answer
+    }
+
+    func progress(for request: PTYHostUpgradeRequest) -> PTYHostUpgradeProgress {
+        answer(request)
+    }
+
+    static func live(eventLog: EventLog = .shared) -> PTYHostUpgradeProbe {
+        PTYHostUpgradeProbe { request in
+            PTYHostUpgradeCheck.run(request: request, eventLog: eventLog)
+        }
+    }
+}
+
+/// Remembers the one upgrade that could not happen because the stale host still had live work.
+///
+/// `PTYHostRegistrationCoordinator` calls every method on its serial background queue. A session
+/// ending re-runs the real `hello` + `list` decision rather than trusting an app-side count: the
+/// daemon may also hold detached sessions this process has never represented in memory. One
+/// scheduled retry covers those unobservable endings without polling an ordinary current daemon.
+final class PTYHostUpgradeMonitor: @unchecked Sendable {
+    private let probe: PTYHostUpgradeProbe
+    private let scheduleRetry: @Sendable (@escaping @Sendable () -> Void) -> Void
+    private let registeredProcessProbe: PTYHostRegisteredProcessProbe
+    private let kernelProcessProbe: PTYHostKernelProcessProbe
+    private let refreshRegistration: @Sendable (PTYHostRegistrationRequest) -> Bool
+    private let setNewSessionAdmission: @Sendable (Bool) -> Void
+    private var pending: PTYHostUpgradeRequest?
+    private var observedProcess: PTYHostProcessIdentity?
+    private var hasScheduledRetry = false
+
+    init(
+        probe: PTYHostUpgradeProbe = .live(),
+        scheduleRetry: @escaping @Sendable (@escaping @Sendable () -> Void) -> Void = { _ in },
+        registeredProcessProbe: PTYHostRegisteredProcessProbe = .live(),
+        kernelProcessProbe: PTYHostKernelProcessProbe = .live,
+        refreshRegistration: @escaping @Sendable (PTYHostRegistrationRequest) -> Bool = { _ in true },
+        setNewSessionAdmission: @escaping @Sendable (Bool) -> Void = { _ in }
+    ) {
+        self.probe = probe
+        self.scheduleRetry = scheduleRetry
+        self.registeredProcessProbe = registeredProcessProbe
+        self.kernelProcessProbe = kernelProcessProbe
+        self.refreshRegistration = refreshRegistration
+        self.setNewSessionAdmission = setNewSessionAdmission
+    }
+
+    /// Runs the once-per-launch survey. Only a stale daemon with active work stays pending.
+    /// Silence means there was no old process to replace; a daemon launched later comes from the
+    /// bundle currently on disk.
+    func begin(_ request: PTYHostUpgradeRequest) {
+        setNewSessionAdmission(false)
+        pending = request
+        observedProcess = nil
+        evaluate(request, preservesPendingOnSilence: false)
+        scheduleFallbackIfNeeded()
+    }
+
+    /// Rechecks after a host-owned child ended. A transient silence keeps the pending generation
+    /// so another ending can retry; it never turns into permission to signal a process.
+    func hostMayHaveDrained() {
+        guard let pending else { return }
+        evaluate(pending, preservesPendingOnSilence: true)
+    }
+
+    /// Turning the host off cancels upgrade work as well as future hosted launches.
+    func cancel() {
+        setNewSessionAdmission(false)
+        pending = nil
+        observedProcess = nil
+    }
+
+    /// Runs the scheduled backstop. Kept separate from session-ending retries so one timer stays
+    /// outstanding however many hosted children end in the interval.
+    private func scheduledRetry() {
+        hasScheduledRetry = false
+        guard let pending else { return }
+        evaluate(pending, preservesPendingOnSilence: true)
+        scheduleFallbackIfNeeded()
+    }
+
+    private func evaluate(
+        _ request: PTYHostUpgradeRequest,
+        preservesPendingOnSilence: Bool
+    ) {
+        switch probe.progress(for: request) {
+        case .settled(.leave(.holdsSessions)):
+            setNewSessionAdmission(false)
+            pending = request
+            observedProcess = nil
+        case .noAnswer where request.requiresRegistrationRefresh:
+            evaluateUnansweredRefresh(request)
+        case .noAnswer where preservesPendingOnSilence:
+            setNewSessionAdmission(false)
+            pending = request
+        case .retirementPending(let identity) where request.requiresRegistrationRefresh:
+            setNewSessionAdmission(false)
+            pending = request
+            observedProcess = identity ?? observedProcess
+            if observedProcess == nil { observeRegisteredProcess(for: request) }
+        case .retirementConfirmed where request.requiresRegistrationRefresh:
+            completeRefresh(request)
+        case .settled(.leave(.sameBuild)), .retirementConfirmed, .noAnswer:
+            setNewSessionAdmission(request.allowsNewSessionsWhenCurrent)
+            pending = nil
+            observedProcess = nil
+        case .settled, .retirementPending:
+            setNewSessionAdmission(false)
+            pending = nil
+            observedProcess = nil
+        }
+    }
+
+    private func evaluateUnansweredRefresh(_ request: PTYHostUpgradeRequest) {
+        // A process already observed behind the now-silent label is allowed to drain. Once that
+        // exact pid/start-time pair is gone, a later launchd restart can only be idle: the stale
+        // socket never admitted a new app-side spawn after retirement.
+        if let observedProcess {
+            if kernelProcessProbe.matches(observedProcess) {
+                pending = request
+            } else {
+                completeRefresh(request)
+            }
+            return
+        }
+        observeRegisteredProcess(for: request)
+    }
+
+    private func observeRegisteredProcess(for request: PTYHostUpgradeRequest) {
+        switch registeredProcessProbe.state() {
+        case .running(let identity):
+            setNewSessionAdmission(false)
+            pending = request
+            observedProcess = identity
+        case .notRunning:
+            completeRefresh(request)
+        case .unknown:
+            setNewSessionAdmission(false)
+            // Uncertainty is never permission to call `unregister()`, because that call kills a
+            // helper which may simply have unlinked its socket to drain.
+            pending = request
+        }
+    }
+
+    private func completeRefresh(_ request: PTYHostUpgradeRequest) {
+        guard let registrationRequest = request.registrationRequest else {
+            pending = nil
+            observedProcess = nil
+            return
+        }
+        if refreshRegistration(registrationRequest) {
+            setNewSessionAdmission(true)
+            pending = nil
+            observedProcess = nil
+        } else {
+            setNewSessionAdmission(false)
+            // `SMAppService` can fail transiently. With no old daemon left, the next backstop
+            // retries only the bounded registration handoff; sessions meanwhile use in-process.
+            pending = request
+            observedProcess = nil
+        }
+    }
+
+    private func scheduleFallbackIfNeeded() {
+        guard pending != nil, !hasScheduledRetry else { return }
+        hasScheduledRetry = true
+        scheduleRetry { [weak self] in self?.scheduledRetry() }
     }
 }
 

@@ -88,6 +88,12 @@ paths, URLs, credentials, notification text, request bodies and arbitrary log pr
 wire type. “All logs” here therefore means all retained records the structured Threading journal
 deliberately owns, not iOS unified logs or strings emitted by dependencies.
 
+Failed REST requests contribute their stable refusal code (for example `unknownModel`) and HTTP
+status, never the response prose or request body. A phone talking to an older Mac records the
+status-only fallback; a future code is reduced to the journal's bounded machine-token alphabet
+instead of being discarded. This is enough to identify the failed guard without exposing the
+project, account, prompt or selected value that reached it.
+
 The screenshot is the sole content-bearing exception. An incident screenshot requires the
 separate iPhone switch and is limited to the foreground app window. A current screenshot is taken
 only for the agent tool's explicit `current` policy. Both have a JPEG marker and size check on the

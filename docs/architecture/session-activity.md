@@ -259,6 +259,15 @@ Four decisions inside that, each of which was the alternative first:
   enabled before the thing it would have explained is a level that explains nothing, which is
   exactly what the existing per-hook `debug` line does today. Per-hook detail is still there for
   anyone streaming: `log stream --level debug --predicate 'subsystem == "codes.threading"'`.
+  **`info` does not survive the question either, and the recipe above is a live tool rather
+  than a post-mortem one.** macOS keeps `.debug` *and* `.info` in a memory ring buffer that is
+  evicted within minutes; only `.error`/`.fault` reach disk, which `EventLog`'s own header has
+  recorded since July 2026. Measured on 25 August 2026, asked why a banner had appeared ninety
+  seconds earlier: `log show --info --predicate 'subsystem == "codes.threading" AND category ==
+  "session"'` returned **nothing** from the running app for that minute, while a test host's
+  lines from the same subsystem — written seconds before the query — came back intact. The ring
+  had already dropped the answer. So the trail above is what to `log stream` while a bug
+  reproduces, and [the alert journal](#the-alert-journal) is what to read afterwards.
 - **Every fact the branch reads, not the two that moved.** `turnFinished` with `visible=false` is
   an unread mark; the identical cause with `visible=true` is a session going quietly idle. One
   input, two outcomes, and only the facts beside it tell them apart.
@@ -570,6 +579,75 @@ attention state, the session coming on screen (`setVisibleSession` →
 `sessionWasViewed`), or the app coming back to the front over the visible session. Hygiene is
 half the feature. `start()` runs only from the real app startup, which is what keeps
 `UNUserNotificationCenter` and its permission prompt out of the test host.
+
+### The alert journal
+
+**Putting a banner on somebody's screen was the one thing this app did unprompted with no
+durable record that it had happened.** Asked on 25 August 2026 why a chat had pushed a
+notification, the honest answer was a reconstruction: the unified log prints the *identifier*
+of every add and removal but never the content, `AttentionAlerts.swift` recorded nothing in
+`EventLog`, and the activity trail one layer down had already been evicted from the ring (see
+above). The session could be named only by hashing — the log's `2D27-D1E9` is the first four
+bytes of `SHA1(sessionID.uuidString.uppercased())`, because the request identifier *is* the
+session id — and the cause could not be named at all.
+
+So `AttentionAlertCenter` journals under `EventLog`'s `session` category, four records:
+
+| Record | What it settles |
+|---|---|
+| `Attention alert posted` | `alert`, `cause` (the tracker's own `SessionActivityCause`), `appActive`, `sounds`, `repeat`, `sinceLast`, `presented` |
+| `Attention alert withdrawn` | `reason` — `viewed` / `stateMoved` / `sessionEnded` / `preferenceOff` |
+| `Attention alert suppressed` | `gate` — which of `masterSwitch` / `alertKind` / `muted` / `snoozed` refused it |
+| `Attention alert not delivered` | macOS refused: the notification permission was denied, `answered` earlier or just now |
+
+Three of those are answers nothing could give before. `cause` separates the three ways into a
+flag that used to be the same dot. `gate` replaces a `Bool` — `wants(_:for:)` asked four
+questions and returned one answer, so a session that had stopped alerting could not say which
+switch had stopped it, and the curfew give-up in particular could be swallowed by a mute with
+nothing anywhere saying so. And `not delivered` is the gate the app's own Settings can neither
+show nor fix: before it, a denied permission meant every alert was built, counted as delivered
+and dropped by the system in silence.
+
+Nothing user-authored is on a line — enum tokens, booleans, counts and an opaque session id.
+The session's *name* is on the banner and deliberately not in the journal, which is copied into
+support reports. No test guard is needed: every entrance already checks `isStarted`, which the
+app sets and a test never does.
+
+### One interruption per episode, not one per edge
+
+**A session that keeps re-deriving the same alert used to post a full banner every time.**
+Recorded live on 25 August 2026 on a terminal session with no lifecycle hooks:
+
+```
+21:57:48.924  idle -> working           cause=output
+21:57:50.636  working -> needsAttention cause=quiet
+21:57:51.340  needsAttention -> working cause=output
+21:57:52.160  working -> needsAttention cause=quiet
+21:57:52.965  needsAttention -> working cause=output
+21:57:52.973  working -> needsAttention cause=bell
+21:57:53.007  needsAttention -> working cause=output
+21:57:54.066  working -> needsAttention cause=quiet
+```
+
+Four identical banners in six seconds for one burst of output, because the quiet timer *is* the
+turn boundary for a session that reports none of its own. A second session, parked at an idle
+prompt and having produced no turn since the morning, did the same thing fifteen times across
+one day about thirty-five minutes apart.
+
+`AttentionAlertPolicy.presentation(of:lastAnnounced:)` is the rule, and it is one sentence:
+**the user is interrupted once per session per episode, and the episode ends when they look at
+it.** A repeat posts with `UNNotificationInterruptionLevel.passive` and no sound — quiet, never
+dropped. Suppressing the post outright was the obvious alternative and is wrong: the withdrawal
+on the way out took the previous banner with it, so "post nothing" would leave a session that
+wants the user with nothing anywhere saying so.
+
+Two things keep it from being a mute. `AttentionAlertCenter.announced` — what a session was
+last *told*, as distinct from `delivered`, which is only what is on screen — is cleared by a
+`viewed` withdrawal and by that alone, so looking at the session re-arms the next alert. And an
+escalation is a different alert: `unread` becoming `blocked` interrupts, because a session
+holding a turn up on a question has said something new. `curfew` is exempt outright — it is
+posted once per curfew episode by a ladder that has already run out, and it is the only alert
+that reports Threading trying something and failing.
 
 **A banner carries the project's icon as an attachment** (`AttentionAlertIcon`), on the
 trailing side — the leading slot is the app's and cannot be taken. That was measured, not

@@ -51,8 +51,8 @@ final class UsagePreferencesViewController: NSViewController {
             summary: UsageStrings.summary,
             actions: [rebuild],
             sections: [
-                SettingsUI.section(UsageStrings.currentCapacity, liveCapacity),
                 dashboard,
+                SettingsUI.section(UsageStrings.currentCapacity, liveCapacity),
                 SettingsUI.note(UsageStrings.footnote)
             ],
             hostPage: .usage

@@ -92,8 +92,8 @@ enum PTYHostClientError: Error, Equatable, Sendable {
 /// interleaved on.
 ///
 /// **The client speaks first.** `hello` goes out before anything is read, carrying this build's
-/// protocol pair, its build string and its pid, and the daemon answers with its own `hello` or
-/// with `helloRefused`. Speaking first is what makes a wrong-version daemon cheap to detect: the
+/// protocol pair, its generation string and its pid, and the daemon answers with its own `hello`
+/// or with `helloRefused`. Speaking first is what makes a wrong-protocol daemon cheap to detect: the
 /// app has committed to nothing at the point the answer arrives, so a refusal is a close rather
 /// than an unwind.
 ///
@@ -226,7 +226,10 @@ final class PTYHostClient: @unchecked Sendable {
         self.build = build
         self.events = events
         self.eventLog = eventLog
-        self.queue = queue ?? DispatchQueue(label: PTYHostDefaults.clientQueueLabel)
+        self.queue = queue ?? DispatchQueue(
+            label: PTYHostDefaults.clientQueueLabel,
+            qos: PTYHostDefaults.clientQueueQoS
+        )
         self.connectTimeout = connectTimeout
         self.helloTimeout = helloTimeout
         self.maximumQueuedWriteBytes = maximumQueuedWriteBytes

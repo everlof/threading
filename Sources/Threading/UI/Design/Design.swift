@@ -1124,6 +1124,7 @@ enum Design {
         static let coverageRowHeight: CGFloat = 54
         static let minimumContentWidth: CGFloat = 560
         static let consumptionSummaryWidth: CGFloat = 300
+        static let sectionControlWidth: CGFloat = 272
         static let rangeControlWidth: CGFloat = 148
         static let metricControlWidth: CGFloat = 144
         /// The rescan strip's bar, beside the tabs. Short on purpose: a page already showing its
@@ -1133,9 +1134,9 @@ enum Design {
     }
 
     /// The live, all-account capacity run shared by Usage settings and the toolbar's expanded
-    /// fleet popover. Account count comes from provider discovery, so the list is a bounded
-    /// viewport rather than a retained stack; these values define that viewport and the maximum
-    /// amount of provider-shaped detail one recycled row may materialize.
+    /// fleet popover. Account count comes from provider discovery, so both hosts keep a virtual
+    /// table rather than a retained stack. Settings lets its outer page own scrolling; the
+    /// popover uses the bounded viewport these values define.
     enum AccountUsageFleet {
         static let settingsMaximumHeight: CGFloat = 430
         static let popoverMaximumHeight: CGFloat = 520
@@ -1144,6 +1145,10 @@ enum Design {
         static let estimatedWindowRowHeight: CGFloat = 50
         static let estimatedActionHeight: CGFloat = Size.chipHeight + Spacing.small
         static let maximumWindowsPerAccount = 6
+        /// A detached embedded table may bind this many cheap rows before an enclosing page clip
+        /// exists. Larger fleets wait for the real Settings viewport, or AppKit would correctly
+        /// consider their complete logical height visible and eagerly ask for every cell.
+        static let embeddedEagerRowCap = 12
         static let minimumViewportHeight: CGFloat = 112
         static let providerIconSize: CGFloat = 18
         static let accountCardInset = Spacing.inset

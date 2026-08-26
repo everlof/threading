@@ -330,6 +330,15 @@ the same provider conversation identifier on the other surface. The session row'
 submenu shows both choices with the active one checked on Mac and iPhone, and catalogue changes
 are pushed immediately so another open device follows the switch without waiting for polling.
 
+REST refusals use the same bounded `RemoteErrorDTO` envelope as WebSocket refusals: the HTTP
+status remains the compatibility fallback, while `code` names the guard that refused the action
+and optional `detail` is restricted to a machine token. Launch choices therefore distinguish a
+withdrawn project/agent, account, model, reasoning level, permission mode, speed, surface, role
+and workspace instead of presenting every one as “HTTP 422.” An open iPhone draft reconciles when
+the host catalogue changes and refreshes it after one of those authoritative refusals, preserving
+the prompt and every choice that is still valid. Older hosts with empty error bodies still work
+and retain the status-only message. Authorization and scope failures remain deliberately generic.
+
 A session's iPhone **Workspace** gathers **Browser**, **Review**, the read-only repository
 **Files** browser, and **Attachments** under one route so companion surfaces do not accumulate as
 toolbar buttons. The session screen keeps a single trailing control for the same reason:

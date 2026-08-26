@@ -101,10 +101,77 @@ final class AccountUsageFleetTests: XCTestCase {
         XCTAssertEqual(controller.fleetVerticalScrollHandoffForTesting, .never)
     }
 
-    func testSettingsFleetHandsScrollingToItsPageOnlyAtContentEnds() {
+    func testSettingsFleetUsesThePageAsItsOnlyVerticalScrollOwner() {
         let fleet = AccountUsageFleetView(scrollHost: .nestedPage)
 
-        XCTAssertEqual(fleet.verticalScrollHandoffForTesting, .atContentEnds)
+        XCTAssertFalse(fleet.hasInternalScrollViewForTesting)
+        XCTAssertEqual(fleet.verticalScrollHandoffForTesting, .always)
+    }
+
+    func testSettingsFleetContributesItsCompleteLogicalHeightInsteadOfClippingCards() {
+        let fleet = AccountUsageFleetView(scrollHost: .nestedPage)
+        fleet.show((0..<5).map { index in
+            item("settings-\(index)", fraction: Double(index + 1) / 10)
+        }, at: now)
+
+        XCTAssertGreaterThan(
+            fleet.viewportHeightForTesting,
+            Design.AccountUsageFleet.settingsMaximumHeight,
+            "the Settings account run was capped into a second viewport"
+        )
+    }
+
+    func testSettingsFleetVirtualizesAgainstThePageViewport() throws {
+        let fleet = AccountUsageFleetView(scrollHost: .nestedPage)
+        fleet.show((0..<120).map { index in
+            item("settings-\(String(format: "%03d", index))", fraction: 0.20)
+        }, at: now)
+
+        let page = try XCTUnwrap(SettingsUI.page([
+            SettingsUI.section("Current capacity", fleet, localizesTitle: false)
+        ]) as? ThemedScrollView)
+        let viewport = NSRect(x: 0, y: 0, width: 900, height: 600)
+        let window = NSWindow(
+            contentRect: viewport,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = page
+        page.layoutSubtreeIfNeeded()
+
+        // The embedded table waits for this real outer clip before binding. Let that deferred
+        // bind run, just as the production Settings shell does after installing its page.
+        let didBind = expectation(description: "bind behind Settings page viewport layout")
+        DispatchQueue.main.async { didBind.fulfill() }
+        wait(for: [didBind], timeout: 1)
+        page.layoutSubtreeIfNeeded()
+        page.displayIfNeeded()
+
+        let initialIDs = Set(fleet.materializedAccountIDsForTesting)
+        XCTAssertEqual(fleet.itemCountForTesting, 120)
+        XCTAssertGreaterThan(initialIDs.count, 0)
+        XCTAssertLessThan(initialIDs.count, fleet.itemCountForTesting)
+
+        page.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: fleet.viewportHeightForTesting / 2
+        ))
+        page.reflectScrolledClipView(page.contentView)
+        page.layoutSubtreeIfNeeded()
+        page.displayIfNeeded()
+
+        let didScroll = expectation(description: "recycle fleet rows at page scroll position")
+        DispatchQueue.main.async { didScroll.fulfill() }
+        wait(for: [didScroll], timeout: 1)
+        page.layoutSubtreeIfNeeded()
+        page.displayIfNeeded()
+
+        let deepIDs = Set(fleet.materializedAccountIDsForTesting)
+        XCTAssertGreaterThan(deepIDs.count, 0)
+        XCTAssertLessThan(deepIDs.count, fleet.itemCountForTesting)
+        XCTAssertTrue(initialIDs.isDisjoint(with: deepIDs))
+        withExtendedLifetime(window) {}
     }
 
     func testFleetUsesOneFooterLegendForItsRepeatedCustomLimitMarkers() {
@@ -218,6 +285,32 @@ final class AccountUsageFleetTests: XCTestCase {
         NotificationCenter.default.post(AccountUsageDidChange(accountID: accounts[41].id))
 
         XCTAssertEqual(reads, [accounts[41].id])
+    }
+
+    func testUsageSettingsPlacesAnalyticsBeforeTheVariableAccountFleet() throws {
+        let controller = UsagePreferencesViewController(
+            accountsProvider: { self.fixtureAccounts(count: 5, prefix: "order") },
+            readingProvider: { _ in .notFetched },
+            refreshProvider: { _, _ in }
+        )
+        let root = controller.view
+        let stacks = descendants(of: root).compactMap { $0 as? NSStackView }
+        let body = try XCTUnwrap(stacks.first { stack in
+            stack.arrangedSubviews.contains { $0 is UsageDashboardView }
+                && stack.arrangedSubviews.contains { section in
+                    descendants(of: section).contains { $0 is AccountUsageFleetView }
+                }
+        })
+        let dashboardIndex = try XCTUnwrap(
+            body.arrangedSubviews.firstIndex { $0 is UsageDashboardView }
+        )
+        let capacityIndex = try XCTUnwrap(
+            body.arrangedSubviews.firstIndex { section in
+                descendants(of: section).contains { $0 is AccountUsageFleetView }
+            }
+        )
+
+        XCTAssertLessThan(dashboardIndex, capacityIndex)
     }
 
     func testOptionClickSelectsAllAccountsWithoutTakingOverControlClick() {
@@ -370,6 +463,10 @@ final class AccountUsageFleetTests: XCTestCase {
                 displayName: "Account \(index)"
             )
         }
+    }
+
+    private func descendants(of root: NSView) -> [NSView] {
+        [root] + root.subviews.flatMap(descendants(of:))
     }
 
     private var renderDirectory: URL {

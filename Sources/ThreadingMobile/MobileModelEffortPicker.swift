@@ -61,16 +61,22 @@ struct MobileModelEffortPicker: View {
         /// Six model rows and Auto plus six provider efforts are the bounded page. Provider
         /// catalogues can be larger, so overflow advances by pages before any cell views exist.
         /// The matrix itself never becomes a two-axis scroll surface.
-        static let modelsPerPage = 6
-        static let providerEffortsPerPage = 6
-        static let modelWidth: CGFloat = 94
-        static let headerHeight: CGFloat = 30
-        static let rowHeight: CGFloat = MobileDesign.Size.minimumTapTarget
-        static let cellGap: CGFloat = 4
-        static let beacon: CGFloat = 7
-        static let selectedBeacon: CGFloat = 11
+        // Keep the numeric picker measurements as computed accessors so InjectionNext can
+        // replace them after launch; a stored static constant is already initialized by then.
+        static var modelsPerPage: Int { 6 }
+        static var providerEffortsPerPage: Int { 6 }
+        static var modelWidth: CGFloat { 94 }
+        static var headerHeight: CGFloat { 30 }
+        static var rowHeight: CGFloat { MobileDesign.Size.minimumTapTarget }
+        static var cellGap: CGFloat { 4 }
+        static var beacon: CGFloat { 7 }
+        static var selectedBeacon: CGFloat { 11 }
         static let automaticEffortID = "threading.mobile.model-effort.automatic"
     }
+
+    #if DEBUG
+    private static let injectionNotification = Notification.Name("INJECTION_BUNDLE_NOTIFICATION")
+    #endif
 
     @Environment(\.remoteTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -79,6 +85,9 @@ struct MobileModelEffortPicker: View {
     @State private var scrubbedCell: MatrixCell?
     @State private var scrubFeedback = UISelectionFeedbackGenerator()
     @State private var commitFeedback = UIImpactFeedbackGenerator(style: .medium)
+    #if DEBUG
+    @State private var injectionRevision = 0
+    #endif
 
     private let rows: [ModelRow]
     private let effortCatalog: [EffortColumn]
@@ -209,6 +218,14 @@ struct MobileModelEffortPicker: View {
         .background(theme.floatingSurface)
         .frame(minWidth: 350, idealWidth: 380, maxWidth: 420)
         .accessibilityElement(children: .contain)
+        #if DEBUG
+        // The injected body is available immediately, and changing this state makes an already
+        // presented SwiftUI picker evaluate it again without closing the sheet.
+        .onReceive(NotificationCenter.default.publisher(for: Self.injectionNotification)) { _ in
+            injectionRevision &+= 1
+        }
+        .id(injectionRevision)
+        #endif
     }
 
     private var matrix: some View {

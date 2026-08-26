@@ -2,9 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Embedded into the executable with -sectcreate __TEXT __info_plist rather than shipped
-	     beside it, matching the other helpers: a command-line tool in Contents/Helpers is one
-	     file, and a loose plist next to it would be one more thing to sign and keep in step. -->
+	<!-- Xcode expands the build settings, then embeds the processed plist in __TEXT __info_plist.
+	     A command-line tool in Contents/Helpers remains one file; no loose plist can drift from it. -->
 	<key>CFBundleIdentifier</key>
 	<string>codes.threading.ptyd</string>
 	<key>CFBundleName</key>
@@ -12,8 +11,12 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- The local autoinstaller keeps both versions at 0.0.0, so its exact installed commit is
+	     the generation. Shipping builds leave this empty and move the two versions instead. -->
+	<key>ThreadingSourceRevision</key>
+	<string>$(THREADING_SOURCE_REVISION)</string>
 </dict>
 </plist>

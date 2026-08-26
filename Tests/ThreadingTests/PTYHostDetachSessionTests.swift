@@ -227,6 +227,45 @@ final class PTYHostDetachSessionTests: XCTestCase {
         )
     }
 
+    /// The attach grid handoff cannot release background parsing while an earlier main-actor
+    /// batch is still entering the emulator. This injects a second frame from inside that first
+    /// delivery: releasing the gate before the delivery reverses them deterministically.
+    func testAttachHandoffPreservesWireOrderWhenOutputArrivesDuringItsFirstDelivery() throws {
+        let identity = PTYHostSessionIdentity.agentSession(SessionID())
+        let link = PTYHostTerminalLink(identity: identity)
+        let transport = FakeDetachTransport(events: link.events())
+        let recorder = AttachOutputOrderRecorder()
+        let second = Array("second".utf8)
+
+        link.delivery = PTYHostTerminalLink.Delivery(
+            parseOutput: { segment in recorder.append(segment.bytes) },
+            output: { segments in
+                if recorder.claimInjection() { transport.send(output: second) }
+                for segment in segments where segment.requiresMainActorParse {
+                    recorder.append(segment.bytes)
+                }
+            }
+        )
+        link.adopt(transport)
+        try link.attach(PTYHostAttach(id: identity))
+        transport.send(.attached(PTYHostAttached(
+            id: identity,
+            pid: Fixture.childPid,
+            grid: Fixture.hostGrid,
+            replay: .none,
+            totalBytesWritten: 0
+        )))
+        transport.send(output: Array("first".utf8))
+
+        settle()
+
+        XCTAssertEqual(
+            recorder.values,
+            ["first", "second"],
+            "attach output must enter the emulator in wire order across the queue handoff"
+        )
+    }
+
     // MARK: - Helpers
 
     private static let deviceAttributesQuery: [UInt8] = Array("\u{1b}[>c".utf8)
@@ -482,6 +521,33 @@ private final class FakeDetachTransportBox: @unchecked Sendable {
     func adopt(_ transport: FakeDetachTransport) {
         lock.lock()
         storage = transport
+        lock.unlock()
+    }
+}
+
+/// A Sendable witness shared by the transport queue and the main-actor attach delivery.
+private final class AttachOutputOrderRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+    private var shouldInject = true
+
+    var values: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func claimInjection() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard shouldInject else { return false }
+        shouldInject = false
+        return true
+    }
+
+    func append(_ bytes: [UInt8]) {
+        lock.lock()
+        storage.append(String(decoding: bytes, as: UTF8.self))
         lock.unlock()
     }
 }

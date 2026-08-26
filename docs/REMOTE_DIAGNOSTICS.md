@@ -8,8 +8,9 @@ chat, repository, notification text, or credentials.
 
 1. The reporter shakes the affected iPhone from the screen where the problem happened, or opens
    **Diagnostics** and chooses **Report a problem**.
-2. A shake asks whether to continue without a screenshot or capture the current screen. The
-   screenshot is taken only after that choice, previewed in the report and removable.
+2. A shake captures the screen it happened on and opens the report over it. The image stays on
+   the phone: the checkmark in the report's navigation bar decides whether it is part of the
+   report, the sheet previews it at full size while it is, and dismissing the sheet discards it.
 3. The report composer accepts a user-written description. Additional device details are a
    separate, off-by-default opt-in and are gathered only when the user shares.
 4. The Diagnostics page shows current protocol, Mac reachability, notification authorization, APNs token
@@ -146,8 +147,12 @@ never use this route.
 ### Explicitly optional attachments and context
 
 - A reporter description is a separate text attachment and is shared exactly as written.
-- A screenshot is never taken merely because the phone was shaken. The user selects it in a
-  preflight prompt, sees the image that will leave the phone, and can remove it before sharing.
+- A screenshot is captured locally when the phone is shaken, because a prompt asking permission
+  first is a prompt standing in front of the evidence. Capturing is not sharing: the image is held
+  in the report request, the user sees the exact picture that would leave the phone, and it leaves
+  only when the navigation bar's checkmark is still on as they send or share. A report opened from
+  Diagnostics or the connection-recovery card captures nothing, since the screen it would take is
+  the sheet itself.
 - Additional device details are off by default. The allowlist covers model, idiom, locale,
   preferred language, time zone, power/thermal/storage/display state, app/connection state,
   counts, capability/scope and notification state. Connection state is carried as a bounded ring
@@ -233,7 +238,8 @@ its report code. A guest can export its own report but cannot inspect another pa
 
 - Shared privacy-bounded JSONL schema and report manifest.
 - Durable iOS journal and Diagnostics sheet with live status, checks and export.
-- Shake-to-report with screenshot preflight, attachment preview and manual Diagnostics fallback.
+- Shake-to-report with an on-device capture, an inclusion checkmark, attachment preview and a
+  manual Diagnostics fallback.
 - Off-by-default, typed additional-device-details manifest.
 - iOS notification and registration transitions; fully traced host refresh route racing and
   session socket hello/failure/end/reconnect lifecycles.

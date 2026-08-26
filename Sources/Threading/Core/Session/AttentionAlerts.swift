@@ -69,6 +69,54 @@ enum AttentionAlert: String, Equatable, CaseIterable {
 /// delivery, this owns the judgement.
 enum AttentionAlertPolicy {
 
+    /// How loudly a post arrives.
+    ///
+    /// Not a property of the alert — the same `unread` is worth interrupting somebody for once
+    /// and worth almost nothing the fourth time in six seconds.
+    enum Presentation: Equatable {
+
+        /// A banner, and whatever sound the chain resolved. What every post used to be.
+        case interrupt
+
+        /// Delivered to Notification Center with no banner and no sound
+        /// (`UNNotificationInterruptionLevel.passive`).
+        ///
+        /// **Quiet, never dropped.** The session still wants the user and the entry still says
+        /// so; what is withheld is the second, third and fourth interruption for a fact they
+        /// have already been handed. Suppressing the post outright was the obvious alternative
+        /// and is wrong: the withdrawal on the way out took the previous banner with it, so
+        /// "post nothing" would leave a session that wants the user with nothing anywhere
+        /// saying so.
+        case quiet
+    }
+
+    /// Whether this post is news.
+    ///
+    /// The rule is one sentence: **the user is interrupted once per session per episode, and
+    /// the episode ends when they look at it.** `lastAnnounced` is what the session has already
+    /// said and is cleared by viewing, so a state that leaves a flag and lands straight back on
+    /// it re-posts quietly, while a genuinely different alert — `unread` escalating to
+    /// `blocked` — interrupts like it should.
+    ///
+    /// Measured on 25 August 2026, which is why this exists. One terminal session with no
+    /// lifecycle hooks produced `output → working`, `quiet → needsAttention`, `output →
+    /// working`, `bell → needsAttention`, `output → working`, `quiet → needsAttention` inside
+    /// six seconds: four identical banners for one burst of output, because the quiet timer is
+    /// the turn boundary for a session that reports none of its own. A second session sitting
+    /// at an idle prompt did the same thing fifteen times across one day, ~35 minutes apart,
+    /// having produced no turn at all since the morning.
+    ///
+    /// `curfew` is exempt and stays loud. It is not derived from a state edge — it is posted
+    /// once per curfew episode by a ladder that has already run out — and it is the only alert
+    /// that reports Threading trying something and failing. A repeat of that one is news.
+    static func presentation(
+        of alert: AttentionAlert,
+        lastAnnounced: AttentionAlert?
+    ) -> Presentation {
+        guard alert != .curfew else { return .interrupt }
+        return alert == lastAnnounced ? .quiet : .interrupt
+    }
+
     enum Action: Equatable {
         case post(AttentionAlert)
 
@@ -116,6 +164,61 @@ enum AttentionAlertPolicy {
             return couldHaveAlert ? .clear : .none
         }
     }
+}
+
+// MARK: - Attention Alert Journal
+
+/// Why a banner left the screen.
+///
+/// A type rather than nothing at all, because the four callers of `withdraw` mean four
+/// different things and only one of them — `viewed` — is the user having actually dealt with
+/// the session. The distinction is what separates "you looked at it" from "it went stale
+/// again", which is the difference between a run of banners being expected and being a bug.
+enum AttentionAlertWithdrawal: String {
+
+    /// The session came on screen. The only reason that counts as the user having seen it.
+    case viewed
+
+    /// The activity edge made the delivered alert describe a state that no longer holds.
+    case stateMoved
+
+    /// The terminal ended, so there is no session left to alert about.
+    case sessionEnded
+
+    /// A preference was switched off — this kind, this session's mute, or the master switch.
+    case preferenceOff
+}
+
+/// Which gate refused an alert, when one did.
+///
+/// `wants(_:for:)` asks four questions and returned one `Bool`, so a session that stopped
+/// alerting could not say which switch stopped it. Named separately from the switches
+/// themselves so the journal reads as a reason rather than as a settings dump.
+enum AttentionAlertGate: String {
+    case masterSwitch
+    case alertKind
+    case muted
+    case snoozed
+
+    /// macOS itself refused: the user answered No to the permission prompt, so nothing this
+    /// app does will put a banner on screen. Its own case because it is the one gate the app's
+    /// own Settings cannot show and cannot fix.
+    case systemDenied
+}
+
+/// What a session was last told, kept **across** a withdrawal.
+///
+/// `delivered` answers "what is on screen right now" and is cleared the moment a banner is
+/// taken back. That is the wrong memory for the question a run of identical banners raises,
+/// which is "has this session already said this". Keeping the announcement separately is what
+/// lets a re-post record `repeat=yes` and the gap since the last one, so fifteen identical
+/// alerts in a day read as fifteen identical alerts rather than as fifteen unrelated events.
+///
+/// Cleared only by `viewed`: the user having looked at the session is what makes the next
+/// alert news again.
+struct AttentionAlertAnnouncement {
+    let alert: AttentionAlert
+    let at: Date
 }
 
 // MARK: - Attention Alert Scope
@@ -207,6 +310,10 @@ final class AttentionAlertCenter: NSObject {
     /// this file exist to avoid.
     private var delivered: [SessionID: AttentionAlert] = [:]
 
+    /// What each session has already been told, surviving the withdrawals `delivered` does not.
+    /// See `AttentionAlertAnnouncement` — this is what makes a repeat legible as a repeat.
+    private var announced: [SessionID: AttentionAlertAnnouncement] = [:]
+
     /// Set once `start()` runs. Everything reachable from other subsystems no-ops before it,
     /// which is what keeps `UNUserNotificationCenter` (and its permission prompt) out of the
     /// test host — tests never start the center.
@@ -250,7 +357,7 @@ final class AttentionAlertCenter: NSObject {
     /// front with it showing. Its notification, if any, has been seen.
     func sessionWasViewed(_ sessionID: SessionID) {
         guard isStarted else { return }
-        withdraw(sessionID: sessionID)
+        withdraw(sessionID: sessionID, reason: .viewed)
     }
 
     /// Re-checks everything already delivered against the current preferences and withdraws
@@ -262,7 +369,7 @@ final class AttentionAlertCenter: NSObject {
     func preferencesChanged() {
         guard isStarted else { return }
         for (sessionID, alert) in delivered where !wants(alert, for: sessionID) {
-            withdraw(sessionID: sessionID)
+            withdraw(sessionID: sessionID, reason: .preferenceOff)
         }
     }
 
@@ -279,13 +386,28 @@ final class AttentionAlertCenter: NSObject {
         body: String,
         destination: RemoteNotificationDestinationDTO
     ) -> Bool {
-        guard isStarted, destination.isValid else { return false }
+        guard isStarted else { return false }
+        guard destination.isValid else {
+            journal("Requested update refused", sessionID: sessionID, alert: nil, extra: [
+                "event": eventID,
+                "reason": "invalidDestination",
+                "destination": destination.kind.rawValue,
+            ])
+            return false
+        }
 
         // A requested update is an explicit promise to notify, so its arrival outranks a
         // visibility snooze just like an approval request or a fresh failure.
         SessionSnoozeCenter.shared.record(.requestedUpdate, for: sessionID)
-        guard AppSettings.shared.notifiesOnAttention,
-              !AttentionAlertScope.isMuted(sessionID: sessionID) else { return false }
+        if !AppSettings.shared.notifiesOnAttention || AttentionAlertScope.isMuted(sessionID: sessionID) {
+            let gate: AttentionAlertGate =
+                AppSettings.shared.notifiesOnAttention ? .muted : .masterSwitch
+            journal("Requested update refused", sessionID: sessionID, alert: nil, extra: [
+                "event": eventID,
+                "reason": gate.rawValue,
+            ])
+            return false
+        }
 
         let content = UNMutableNotificationContent()
         let session = ProjectStore.shared.session(withID: sessionID)
@@ -340,7 +462,18 @@ final class AttentionAlertCenter: NSObject {
     /// interrupt and one that shrugged off three, and says plainly whether the agent was stopped.
     /// Clicking it opens the session, where the strip offers Lift.
     func postCurfewGaveUp(sessionID: SessionID, interrupts: Int, stopped: Bool) {
-        guard isStarted, wants(.curfew, for: sessionID) else { return }
+        guard isStarted else { return }
+        // Journalled rather than dropped, and this is the alert where that matters most: it is
+        // the only one that reports Threading trying something and failing, so a mute swallowing
+        // it leaves a session working past its curfew with nothing anywhere having said so.
+        if let gate = refusal(of: .curfew, for: sessionID) {
+            journal("Attention alert suppressed", sessionID: sessionID, alert: .curfew, extra: [
+                "gate": gate.rawValue,
+                "interrupts": String(interrupts),
+                "stopped": stopped ? "yes" : "no",
+            ])
+            return
+        }
 
         let body = stopped
             ? L10n.format("Stopped after %lld interrupts", Int64(interrupts))
@@ -354,7 +487,7 @@ final class AttentionAlertCenter: NSObject {
     /// unread banner since, and lifting a curfew says nothing about those.
     func withdrawCurfewAlert(sessionID: SessionID) {
         guard isStarted, delivered[sessionID] == .curfew else { return }
-        withdraw(sessionID: sessionID)
+        withdraw(sessionID: sessionID, reason: .stateMoved)
     }
 
     // MARK: - Which Sound An Alert Carries
@@ -443,13 +576,24 @@ final class AttentionAlertCenter: NSObject {
         )
 
         switch action {
-        case .post(let alert) where wants(alert, for: sessionID):
-            post(alert, for: sessionID)
-        case .post, .clear:
+        case .post(let alert):
             // Two ways to arrive at the same place: the edge made whatever was delivered
             // stale, or the state it moved to is one this session no longer alerts on. Either
-            // way nothing that describes `old` should still be on screen.
-            withdraw(sessionID: sessionID)
+            // way nothing that describes `old` should still be on screen — but they are not
+            // the same *answer*, and only one of them is a switch the user can find and undo.
+            if let gate = refusal(of: alert, for: sessionID) {
+                journal(
+                    "Attention alert suppressed",
+                    sessionID: sessionID,
+                    alert: alert,
+                    extra: ["gate": gate.rawValue, "activity": new.logName]
+                )
+                withdraw(sessionID: sessionID, reason: .stateMoved)
+            } else {
+                post(alert, for: sessionID)
+            }
+        case .clear:
+            withdraw(sessionID: sessionID, reason: .stateMoved)
         case .none:
             break
         }
@@ -458,15 +602,69 @@ final class AttentionAlertCenter: NSObject {
     /// Whether this session posts this kind of alert: the app-wide switch as an outer gate,
     /// then the kind the user chose to keep, then the session's own scope.
     private func wants(_ alert: AttentionAlert, for sessionID: SessionID) -> Bool {
-        AppSettings.shared.notifiesOnAttention
-            && AppSettings.shared.notifies(on: alert)
-            && !AttentionAlertScope.isMuted(sessionID: sessionID)
-            && !SessionSnoozeCenter.shared.isSnoozed(sessionID)
+        refusal(of: alert, for: sessionID) == nil
+    }
+
+    /// The first gate that refuses this alert, or `nil` where every one of them lets it through.
+    ///
+    /// The same four questions `wants` used to ask inline, answered by *name* rather than by a
+    /// `Bool`, because "no alert appeared" is asked as often as its opposite and a boolean cannot
+    /// say which switch was the one. Ordered loudest-first — the master switch is the answer to
+    /// give when it is off, whatever else is also off underneath it.
+    private func refusal(of alert: AttentionAlert, for sessionID: SessionID) -> AttentionAlertGate? {
+        if !AppSettings.shared.notifiesOnAttention { return .masterSwitch }
+        if !AppSettings.shared.notifies(on: alert) { return .alertKind }
+        if AttentionAlertScope.isMuted(sessionID: sessionID) { return .muted }
+        if SessionSnoozeCenter.shared.isSnoozed(sessionID) { return .snoozed }
+        return nil
     }
 
     /// `body` overrides the alert's own sentence for the one case that cannot carry its detail —
     /// see `postCurfewGaveUp(sessionID:interrupts:stopped:)`. Every other caller omits it and
     /// gets what the settings row promised.
+    // MARK: - The Journal
+
+    /// Writes what this center just decided into the durable journal.
+    ///
+    /// **`EventLog`, not `ThreadingLogger`**, and the reason is measured rather than stylistic.
+    /// The activity trail one layer down deliberately chose `os_log` at `info` so it could be
+    /// read in the past tense — but `info` is not retained either: macOS keeps `.debug` and
+    /// `.info` in a memory ring buffer and only `.error`/`.fault` reach disk, which is the
+    /// finding `EventLog`'s own header records. Checked on 25 August 2026, asked why a banner
+    /// had appeared 90 seconds earlier: `log show --info --predicate 'subsystem ==
+    /// "codes.threading" AND category == "session"'` returned **nothing** from the running app
+    /// for that minute, while a test host's lines from the same subsystem — written seconds
+    /// before the query — came back fine. The ring had already evicted the answer.
+    ///
+    /// So the one user-visible thing this app does without asking — put a banner on someone's
+    /// screen — had no durable record of having happened, and the only honest answer to "why
+    /// did I get that" was a list of candidates.
+    ///
+    /// Nothing user-authored goes on a line: enum tokens, booleans, counts and an opaque
+    /// session id. A session's *name* is on the banner and deliberately not here — the journal
+    /// is copied into support reports.
+    ///
+    /// Safe under tests without a guard of its own: every entrance checks `isStarted`, which
+    /// the app sets and a test never does.
+    private func journal(
+        _ message: String,
+        sessionID: SessionID,
+        alert: AttentionAlert?,
+        extra: [String: String] = [:]
+    ) {
+        var detail = ["session": sessionID.uuidString]
+        detail["alert"] = alert?.rawValue
+        detail.merge(extra) { _, new in new }
+        EventLog.shared.record(.session, message, detail)
+    }
+
+    /// How long the same session has been saying the same thing, in whole seconds, or `nil`
+    /// where this alert is genuinely new. Rounded because the question is "again?", not "when".
+    private func repeatGap(of alert: AttentionAlert, for sessionID: SessionID, now: Date) -> Int? {
+        guard let previous = announced[sessionID], previous.alert == alert else { return nil }
+        return Int(now.timeIntervalSince(previous.at).rounded())
+    }
+
     private func post(_ alert: AttentionAlert, for sessionID: SessionID, body: String? = nil) {
         let content = UNMutableNotificationContent()
         let session = ProjectStore.shared.session(withID: sessionID)
@@ -480,6 +678,15 @@ final class AttentionAlertCenter: NSObject {
         // the ranking the sidebar's filled-versus-hollow marks already draw. Nothing visual
         // turns on it — a silent alert still posts its banner.
         content.sound = Self.stateAlertSound(for: alert, sessionID: sessionID)
+        // Once per episode, not once per edge. See `AttentionAlertPolicy.presentation`.
+        let presentation = AttentionAlertPolicy.presentation(
+            of: alert,
+            lastAnnounced: announced[sessionID]?.alert
+        )
+        if presentation == .quiet {
+            content.interruptionLevel = .passive
+            content.sound = nil
+        }
         content.userInfo = [AttentionAlertDefaults.sessionKey: sessionID.uuidString]
         if let project { content.threadIdentifier = project.id.uuidString }
         if let icon = project?.icon,
@@ -487,7 +694,24 @@ final class AttentionAlertCenter: NSObject {
            let attachment = AttentionAlertIcon.attachment(iconPNGData: png) {
             content.attachments = [attachment]
         }
+        let now = Date()
+        let gap = repeatGap(of: alert, for: sessionID, now: now)
         delivered[sessionID] = alert
+        announced[sessionID] = AttentionAlertAnnouncement(alert: alert, at: now)
+
+        // `repeat` is the field this whole record exists for. A session that keeps re-deriving
+        // the same alert — the row leaves the flag and lands straight back on it — produces a
+        // banner every time, and from outside those are indistinguishable from a session that
+        // genuinely wanted the user fifteen times. `sinceLast` is what tells them apart.
+        var reported = [
+            "cause": AgentRuntime.shared.activityCause(sessionID: sessionID)?.rawValue ?? "unknown",
+            "appActive": NSApp.isActive ? "yes" : "no",
+            "sounds": content.sound == nil ? "no" : "yes",
+            "repeat": gap == nil ? "no" : "yes",
+            "presented": presentation == .quiet ? "quiet" : "interrupt",
+        ]
+        reported["sinceLast"] = gap.map(String.init)
+        journal("Attention alert posted", sessionID: sessionID, alert: alert, extra: reported)
 
         // The request id is the session id, so a session's newer state replaces its older
         // notification instead of stacking beneath it.
@@ -497,6 +721,12 @@ final class AttentionAlertCenter: NSObject {
             trigger: nil
         )
 
+        // Captured as tokens rather than reaching back through `self`: the settings callback is
+        // not on the main actor, and the journal must not need a hop it could be dropped in.
+        // `EventLog.record` is already serialized behind its own queue.
+        let sessionToken = sessionID.uuidString
+        let alertToken = alert.rawValue
+
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
             switch settings.authorizationStatus {
@@ -504,19 +734,51 @@ final class AttentionAlertCenter: NSObject {
                 // Asked on the first alert-worthy edge rather than at launch, so the
                 // permission dialog appears beside a notification with a reason to exist.
                 center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-                    guard granted else { return }
+                    guard granted else {
+                        // The one refusal the app's own Settings cannot show and cannot undo.
+                        // Silent before this line: every alert afterwards was built, counted as
+                        // delivered, and dropped by the system with nothing anywhere saying so.
+                        EventLog.shared.record(.session, "Attention alert not delivered", [
+                            "session": sessionToken,
+                            "alert": alertToken,
+                            "gate": AttentionAlertGate.systemDenied.rawValue,
+                            "answered": "just now",
+                        ])
+                        return
+                    }
                     center.add(request)
                 }
             case .denied:
-                break
+                EventLog.shared.record(.session, "Attention alert not delivered", [
+                    "session": sessionToken,
+                    "alert": alertToken,
+                    "gate": AttentionAlertGate.systemDenied.rawValue,
+                    "answered": "earlier",
+                ])
             default:
                 center.add(request)
             }
         }
     }
 
-    private func withdraw(sessionID: SessionID) {
+    /// Takes this session's banner back, and says why.
+    ///
+    /// The reason is not decoration. `viewed` is the only one that means the user dealt with
+    /// the session, and it is the only one that forgets what the session was last told — so a
+    /// banner the user actually saw makes the next one news again, while a banner that merely
+    /// went stale leaves the announcement standing and the re-post records itself as a repeat.
+    private func withdraw(sessionID: SessionID, reason: AttentionAlertWithdrawal) {
+        let had = delivered[sessionID]
         delivered[sessionID] = nil
+        if reason == .viewed || reason == .sessionEnded { announced[sessionID] = nil }
+        if had != nil {
+            journal(
+                "Attention alert withdrawn",
+                sessionID: sessionID,
+                alert: had,
+                extra: ["reason": reason.rawValue]
+            )
+        }
         let identifiers = [sessionID.uuidString]
         let center = UNUserNotificationCenter.current()
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
@@ -525,7 +787,7 @@ final class AttentionAlertCenter: NSObject {
 
     private func forget(_ sessionID: SessionID) {
         lastActivity[sessionID] = nil
-        withdraw(sessionID: sessionID)
+        withdraw(sessionID: sessionID, reason: .sessionEnded)
     }
 
     /// Switching any of it off withdraws what it described: an off switch that leaves its

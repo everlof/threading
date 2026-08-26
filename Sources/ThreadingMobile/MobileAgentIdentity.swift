@@ -223,22 +223,115 @@ struct MobileAgentMarkGlyph: View {
     }
 }
 
+// MARK: - Mobile Account Usage Reading
+
+/// What the account disc rings for one login, as a chat on one model is metered.
+///
+/// The Mac's toolbar pill gauges the *binding* window, the fullest of the account's own and of
+/// those scoped to the session's model, and names every window in its text. The phone's disc
+/// has no text beside it, so it rings each window instead: the account's own outermost, the
+/// longest on the outside, and a model-scoped window innermost, hugging the mark, present only
+/// when the chat runs a model that window meters. The account's rings therefore never move when
+/// a Fable chat is opened; the model's own ring appears inside them.
+///
+/// Resolved from the catalogue's per-window list when the host sends one, and from the single
+/// binding fraction an older host sends otherwise, so a phone ahead of its Mac draws what that
+/// Mac knew how to say.
+struct MobileAccountUsageReading: Equatable {
+
+    /// One ring. A nil fraction is a window whose reset has passed, or whose value the Mac did
+    /// not know: the track is drawn, the arc is not.
+    struct Ring: Equatable, Identifiable {
+        let id: String
+        let fraction: Double?
+    }
+
+    /// Outermost first.
+    let rings: [Ring]
+
+    /// The words the rings stand for, in the Mac's reading order, `5h 43% · 7d 73% · 7d Fable
+    /// 89%`, for VoiceOver and the draft's identity line. Nil when there is nothing to say. It
+    /// names every window the chat is metered by, including one the disc had no room to ring.
+    let summary: String?
+
+    /// The rings for `account` as a chat on `model` is metered. A nil model means the account's
+    /// default, the fallback the Mac's own pill makes, because that is what the next turn spends.
+    static func resolve(
+        account: RemoteAccountChoiceDTO?,
+        model: String?,
+        now: Date = Date()
+    ) -> MobileAccountUsageReading? {
+        guard let account else { return nil }
+        guard let windows = account.usageWindows else {
+            return MobileAccountUsageReading(
+                rings: account.usageFraction.map {
+                    [Ring(id: MobileUsageDefaults.bindingRingID, fraction: $0)]
+                } ?? [],
+                summary: account.usageSummary
+            )
+        }
+
+        let metered = model ?? account.defaultModelID
+        let chosen = windows.filter { window in
+            guard let meters = window.metersModelIDs else { return true }
+            guard let metered else { return false }
+            return meters.contains(metered)
+        }
+        let accountWide = chosen
+            .filter { $0.metersModelIDs == nil }
+            .sorted { ($0.windowDuration ?? -1) > ($1.windowDuration ?? -1) }
+        let scoped = chosen.filter { $0.metersModelIDs != nil }
+        let rings = (accountWide + scoped)
+            .prefix(MobileUsageDefaults.ringCapacity)
+            .map { Ring(id: $0.id, fraction: liveFraction($0, now: now)) }
+        let summary = chosen
+            .map { "\($0.name) \(value($0, now: now))" }
+            .joined(separator: MobileUsageDefaults.segmentSeparator)
+        return MobileAccountUsageReading(rings: Array(rings), summary: summary.isEmpty ? nil : summary)
+    }
+
+    /// The Mac's own rule, `AccountUsage.Window.isExpired`: past the reset, the fraction is a
+    /// leftover from the window before, and the phone may hold a catalogue for hours.
+    private static func liveFraction(_ window: RemoteAccountUsageWindowDTO, now: Date) -> Double? {
+        if let resetsAt = window.resetsAt, resetsAt <= now.timeIntervalSince1970 { return nil }
+        return window.fraction
+    }
+
+    private static func value(_ window: RemoteAccountUsageWindowDTO, now: Date) -> String {
+        guard let fraction = liveFraction(window, now: now) else {
+            return MobileUsageDefaults.unknownValue
+        }
+        return "\(Int((fraction * 100).rounded()))%"
+    }
+}
+
+/// The disc's vocabulary, matching the Mac's `UsageDefaults` so a reading is one text on both.
+enum MobileUsageDefaults {
+    /// How many rings fit around the mark at the disc's stroke and gap; a fourth would touch it.
+    static let ringCapacity = 3
+    /// The one ring an older host's single fraction draws.
+    static let bindingRingID = "binding"
+    static let segmentSeparator = " · "
+    static let unknownValue = "—"
+}
+
 // MARK: - Mobile Account Disc
 
 /// The account as a bar control: the runtime's mark on the toolbar's disc, ringed by how much
 /// of the account's allowance is used.
 ///
-/// The ring is the usage reading the old identity capsule spelled out — "5h 18% · 7d 63%" —
-/// reduced to the one fact a glance needs, how close to the limit. The disc is the dashboard's
-/// toolbar circle, so the bar keeps one kind of control, and the mark is the one the rows draw,
-/// so the runtime looks like itself. The draft's bar wears it to choose an account; the chat's
-/// bar wears the same disc, for the same account, as the handle on the session's actions — so
-/// starting a chat keeps the control where it was.
+/// The rings are the usage reading the old identity capsule spelled out — "5h 18% · 7d 63%" —
+/// each window drawn as how close to its limit it is, the week outside the five hours, and a
+/// model's own window inside both when the chat runs that model (`MobileAccountUsageReading`).
+/// The disc is the dashboard's toolbar circle, so the bar keeps one kind of control, and the
+/// mark is the one the rows draw, so the runtime looks like itself. The draft's bar wears it to
+/// choose an account; the chat's bar wears the same disc, for the same account, as the handle on
+/// the session's actions — so starting a chat keeps the control where it was.
 struct MobileAccountDisc: View {
     let identity: MobileAgentIdentity
-    /// Peak consumed fraction, 0...1; nil draws the mark alone, for a share or a host that does
-    /// not report usage.
-    let usageFraction: Double?
+    /// Nil, or a reading with no rings, draws the mark alone: a share, or a host that does not
+    /// report usage.
+    let reading: MobileAccountUsageReading?
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
@@ -246,23 +339,30 @@ struct MobileAccountDisc: View {
             Circle()
                 .fill(theme.controlResting)
             MobileAgentMarkGlyph(identity: identity)
-            if let usageFraction {
-                let tint = usageTint(for: usageFraction)
-                Circle()
-                    .stroke(
-                        tint.opacity(MobileDesign.Opacity.usageRingTrack),
-                        lineWidth: MobileDesign.Size.badgeStroke
-                    )
-                Circle()
-                    .trim(from: 0, to: min(max(usageFraction, 0), 1))
-                    .stroke(
-                        tint,
-                        style: StrokeStyle(
-                            lineWidth: MobileDesign.Size.badgeStroke,
-                            lineCap: .round
+            if let reading {
+                ForEach(Array(reading.rings.enumerated()), id: \.element.id) { depth, ring in
+                    let tint = usageTint(for: ring.fraction ?? 0)
+                    let inset = CGFloat(depth) * MobileDesign.Size.usageRingPitch
+                    Circle()
+                        .stroke(
+                            tint.opacity(MobileDesign.Opacity.usageRingTrack),
+                            lineWidth: MobileDesign.Size.badgeStroke
                         )
-                    )
-                    .rotationEffect(.degrees(-90))
+                        .padding(inset)
+                    if let fraction = ring.fraction {
+                        Circle()
+                            .trim(from: 0, to: min(max(fraction, 0), 1))
+                            .stroke(
+                                tint,
+                                style: StrokeStyle(
+                                    lineWidth: MobileDesign.Size.badgeStroke,
+                                    lineCap: .round
+                                )
+                            )
+                            .padding(inset)
+                            .rotationEffect(.degrees(-90))
+                    }
+                }
             }
         }
         .frame(
@@ -272,7 +372,7 @@ struct MobileAccountDisc: View {
         .contentShape(Circle())
     }
 
-    /// The ring's colour by how close the account is to its limit — the thresholds the draft's
+    /// A ring's colour by how close its window is to its limit — the thresholds the draft's
     /// identity capsule used for its usage text.
     private func usageTint(for fraction: Double) -> Color {
         if fraction >= 0.9 { return theme.negative }

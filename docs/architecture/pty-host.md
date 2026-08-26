@@ -214,13 +214,18 @@ not retire a working daemon and a daemon frame change must not tell every instal
 update. `PTYHostCompatibility.evaluate(peerVersion:peerMinimum:)` gives the same three answers —
 `compatible`, `peerTooOld`, `selfTooOld`.
 
-**The protocol pair is the gate; the build string is not.** `hello` carries a build, and it is
-reported and journalled and never compared for admission. The reason is local to this repository:
-a commit on `master` rebuilds and reinstalls `/Applications/Threading.app`, so a build-gated
-daemon would be retired and drained several times a day for changes that touch no frame. macOS
-keeps a running executable's text pages valid after the file underneath is replaced, so an
-already-running daemon goes on executing the code it started with — which is exactly what is
-wanted, provided the protocol still matches.
+**The protocol pair is the gate; the generation string is not.** `hello` carries the generation
+for reporting and graceful replacement, but it is never an admission condition. A compatible old
+daemon remains usable while it has work; an incompatible same-generation daemon is still refused.
+
+`PTYHostGeneration` gives the app and helper one canonical spelling:
+`CFBundleShortVersionString (CFBundleVersion)`, followed by `@ThreadingSourceRevision` when that
+value is nonempty. Shipping releases move the two bundle versions. The local autoinstaller keeps
+them at `0.0.0`, so it injects the installed source revision into both processed plists instead.
+The helper's plist is expanded and embedded in its executable, not read from the app bundle. That
+is load-bearing for an offline replacement: macOS keeps the old process's deleted image alive,
+including its old embedded generation, while the next app launch reads the generation now on
+disk and can tell that the two differ.
 
 **Bump policy, verbatim.** Additive changes bump nothing; a breaking change bumps `current` while
 still speaking the old version; `minimumSupported` rises only in its own later release. A frame
@@ -228,8 +233,9 @@ added to `PTYHostFrame` is additive — the `type` discriminator and the nested 
 and therefore bumps nothing. `PTYHostProtocolTests` pins both numbers so a bump fails a test once,
 deliberately.
 
-On a mismatch the app **refuses to attach, refuses to spawn, and never signals anything**. It
-sends `retire` and falls back to in-process PTYs for new sessions.
+On a protocol mismatch the app **refuses to attach and refuses to spawn**. When the daemon is the
+outdated peer, the handshake sends `retire` and new sessions fall back to in-process PTYs; when
+the app is outdated, it never signals the newer daemon.
 `PTYHostCompatibility.updateTarget(evaluatedBy:)` names which side has to move, and takes the
 evaluator as a parameter because `peerTooOld` means the app when the daemon evaluates and the
 daemon when the app evaluates — a fixed mapping would be right on one side and exactly backwards
@@ -512,6 +518,7 @@ working becomes unexplainable.
 | `notRegistered` | launchd knows the label and the service is off | in-process PTY |
 | `notFound` | launchd has never seen the label | in-process PTY |
 | `requiresApproval` | registered, and waiting for the user in System Settings ▸ Login Items | in-process PTY |
+| `registrationRefreshing` | a stale or ambiguous launchd association is being replaced safely | in-process PTY |
 
 The last three are **set by registration, not by the probe**. `PTYHostAvailability.resolve` has no
 `SMAppService` and deliberately none — a launch-path call into a framework that can block is not
@@ -530,7 +537,7 @@ checks is an ordering claim that drifts.
 
 The split is also a concurrency boundary. `PTYHostDecision.live(settings:bundle:)` is
 `@MainActor` and reads only values — the setting, the bundle's helper path, the rendezvous, the
-build string — in `MCPBridgeDecision.live`'s shape, every dependency named by the caller and
+generation string — in `MCPBridgeDecision.live`'s shape, every dependency named by the caller and
 nothing recovered from a singleton inside. `PTYHostAvailability.resolve(_:probing:)` is not
 main-actor isolated and is where the connect happens. A caller that wants both in one call has
 `PTYHostAvailability.live(settings:bundle:probe:)`, and the probe is still the caller's, because
@@ -556,7 +563,7 @@ answers `PTYHostClientError.alreadyBound`, a `resize` naming another session ans
 id and guessing would type into somebody else's agent.
 
 **The client speaks first.** `hello` goes out before a byte is read, carrying the protocol pair,
-this build's version string and `getpid()`. Speaking first is what makes a wrong-version daemon
+this build's generation string and `getpid()`. Speaking first is what makes a wrong-protocol daemon
 cheap: the app has committed to nothing when the answer arrives, so a refusal is a close rather
 than an unwind. The gate is `PTYHostProtocol.evaluate`, and its three answers do three different
 things:
@@ -579,8 +586,11 @@ After the gate a `DispatchIO` read loop on the client's own serial queue feeds
 `PTYHostFrameDecoder`, and **every delivery happens on that queue and never on main**. The
 coalescing hop to main belongs to the caller, in `installProcessOutputObserver`'s existing shape;
 a client that hopped per frame would put a terminal's whole output rate on the main queue, which
-is the shape that makes a mirror slow. The handshake itself blocks — with a `poll` deadline on the
-connect and another on the `hello`, so it is bounded — and therefore runs off the main actor too.
+is the shape that makes a mirror slow. The production client queue is explicitly
+`userInteractive`: a key is not visible until the child echoes through it, so this queue is part
+of the direct interaction loop even though it must stay off main. The handshake itself blocks —
+with a `poll` deadline on the connect and another on the `hello`, so it is bounded — and therefore
+runs off the main actor too.
 
 **A frame this build does not know is logged and ignored.** The protocol is additive, so a
 well-framed control frame with an unrecognised `type` means a peer the gate already admitted has
@@ -638,6 +648,12 @@ than asked first. `unregister()` is clean and **kills the running helper**, whic
 | `AssociatedBundleIdentifiers` | `[codes.threading]` | what makes the Login Items row read as Threading rather than as a loose helper nobody recognises |
 | `StandardOutPath` / `StandardErrorPath` | **absent** | the daemon keeps its own dated journal in `pty/` and prunes it after seven days; a launchd redirect would be a second file nothing reads and no retention rule covers |
 
+The plist keeps the daemon out of macOS's background process band. Its serial state queue and
+per-session `DispatchIO` queues are also explicit `userInitiated` work: they are on the causal
+key-to-echo path when attached, but the same queues retain output for unattended agents, so the
+whole daemon does not claim animation priority. The attached app client owns the final
+`userInteractive` leg.
+
 ### `--default-locations`, and why the daemon has one derivation after all
 
 The daemon requires `--socket <path> --state <dir>` and refuses a half-named command line, because
@@ -680,14 +696,23 @@ A **hosted test bundle never registers either**, and that refusal is sharper tha
 bundle a test runs in *is* the shipping app, so `SMAppService.agent(plistName:)` from a test would
 address the developer's own Threading, register their login item, and start a daemon on their
 machine — and `unregister()` would then kill it. `PTYHostRegistrationCoordinator` refuses before it
-so much as reads `status`, and `PTYHostRegistrationTests` asserts the call count is zero. The one
-real registration this feature has ever performed was from a throwaway bundle with a `-probe`
-label, unregistered afterwards.
+so much as reads `status` or the registration receipt, and `PTYHostRegistrationTests` asserts all
+of those call counts are zero. The one real registration this feature has ever performed was from
+a throwaway bundle with a `-probe` label, unregistered afterwards.
 
-Registration is **idempotent**: an `enabled` status is answered without calling `register()`, so
-the ordinary launch costs one status read. The setting is followed with `AppSettingsDidChange`,
-reconciled from the current value, the way every other behavioural key is — so turning the key on
-takes effect without a restart.
+Registration is **idempotent only for the same registration**. `SMAppService.status` says that the
+label is enabled, but not which copy of Threading supplied it. After each successful or
+approval-pending registration the app atomically writes `pty/registration.json` (`0600`, inside
+the existing `0700` directory). It records a format version, the wire generation, and the
+canonical path plus filesystem identity/size/mtime of both the helper and launch-agent plist. The
+daemon never reads it. A matching receipt means the ordinary launch reads status and the receipt
+without calling `register()` again. A missing, corrupt or different receipt means the association
+must be replaced safely — including an in-place local rebuild whose marketing/build versions did
+not move, and an app installed offline at a different path. An approval-pending registration uses
+the same identity rule and is never blindly registered twice.
+
+The setting is followed with `AppSettingsDidChange`, reconciled from the current value, the way
+every other behavioural key is — so turning the key on takes effect without a restart.
 
 `SMAppService.Status` becomes a `PTYHostUnavailability` in one place:
 
@@ -706,28 +731,56 @@ bundle leaves `status` at `enabled` and the running daemon executing the deleted
 launchd execs the new binary only on the next start. Nothing in the OS will end it, and this
 repository replaces `/Applications/Threading.app` several times a day.
 
-So the app asks, once per launch, off the main actor: connect, `hello`, `list`, and then one pure
-decision.
+So the app first asks at launch, off the main actor: connect, `hello`, `list`, and then one pure
+decision. A generation mismatch and a stale registration receipt both require replacement. If the
+compatible daemon is busy, the registration coordinator remembers that exact upgrade. Host-owned
+exit edges re-run the survey immediately. One 30-second fallback survey remains scheduled while
+it is pending, covering a detached child this launch could not adopt and therefore cannot observe
+ending. There is never more than one fallback outstanding, and a current registration with a
+same-generation, absent, incompatible, retired or cancelled daemon schedules none.
+Turning the feature off cancels the pending replacement; turning it on again starts a fresh survey
+immediately and reuses any harmless delayed callback that was already outstanding.
 
-| `hello` build | protocol gate | sessions held | Decision |
-|---|---|---|---|
-| same as the app's | compatible | any | leave — replacing a process with its own image buys nothing, and this is the ordinary answer |
-| different | compatible | 0 | **`retire`** — the daemon unlinks its socket, exits, and `KeepAlive` starts the binary on disk. That is the upgrade |
-| different | compatible | *n* > 0 | leave, journalled as "a stale PTY host holds *n* sessions; it retires when idle" |
-| any | `peerTooOld` | any | refuse. The handshake has already sent `retire`; saying it twice is a second retirement |
-| any | `selfTooOld` | any | refuse, and **never retire**. Retiring a daemon newer than this app would take working agents down in order to install an older host |
+While any replacement is pending, `PTYHostNewSessionAdmission` keeps **new** conversations on the
+in-process path. Existing hosted links and the reattach/stop clients do not consult that gate, so
+old work remains usable and can drain. This prevents a stream of new launches from keeping a stale
+generation busy forever, and closes the launchd-restart race between a retiring process exiting
+and its registration being refreshed.
 
-`PTYHostUpgradePolicy.decide(peerBuild:ownBuild:compatibility:heldSessions:)` is that table and
-nothing else — no I/O, four value arguments, because every interesting case is a combination
-rather than a code path. `PTYHostUpgradeCheck` is its one caller with a socket: it uses the
+| `hello` generation | receipt | protocol gate | active sessions | Decision |
+|---|---|---|---|---|
+| same as the app's | current | compatible | any | leave — this is the ordinary answer |
+| same as the app's | stale | compatible | 0 | **`retire`**, then refresh the registration — the same build can still be registered from a deleted bundle or rebuilt files |
+| different | either | compatible | 0 | **`retire`** — the old daemon exits; refresh the registration too when its receipt is stale |
+| same or different | stale or current | compatible | *n* > 0 | leave reachable, remember the upgrade, and retry after an exit edge or the fallback interval |
+| any | either | `peerTooOld` | any | refuse. The handshake has already sent `retire`; saying it twice is a second retirement |
+| any | either | `selfTooOld` | any | refuse, and **never retire**. Retiring a daemon newer than this app would take working agents down in order to install an older host |
+
+Only summaries whose `exit` is nil count as active. The daemon retains an observed ending for five
+seconds so a late watcher can learn its status, but `retire` releases such records itself; treating
+them as live would add an artificial five-second upgrade delay.
+
+`PTYHostUpgradePolicy.decide` is that table and nothing else — no I/O, five value arguments,
+because every interesting case is a combination rather than a code path. `PTYHostUpgradeCheck` is
+its one caller with a socket: it uses the
 shipping `PTYHostClient` rather than a simplified dialect, because a check that spoke less than the
 link does could reach a conclusion about a daemon the link then refuses. Nothing listening, a
-refused connect, or a `list` that misses its deadline are all "no decision", and every caller's
-response to that is to leave the daemon alone.
+refused connect, or a `list` that misses its deadline are all "no decision" and never permission
+to signal a process. Initial silence settles for a current receipt. For a stale receipt it triggers
+a bounded, read-only `launchctl print`: a missing process permits refresh, an exact pid plus kernel
+start time is followed until that process exits, and an error or ambiguous answer leaves the job
+alone and retries. Socket silence by itself never proves absence, because a retiring daemon
+deliberately unlinks the socket while it drains.
 
 After sending `retire` the check waits for the daemon to hang up rather than closing on top of the
 frame: the write is asynchronous and `close()` stops the channel. A retiring daemon with nothing
-to drain exits immediately, so the wait is the ending rather than a delay.
+to drain exits immediately, so the wait is the ending rather than a delay. The check captured the
+answering daemon's pid and kernel start time before sending the frame. If a spawn raced between
+`list` and `retire`, that exact process remains pending until the raced session ends; pid reuse
+cannot be mistaken for its survival. Only confirmed exit permits `unregister()` followed by
+`register()` of the current app and movement of the receipt. That handoff is required when an
+offline install moved the app while it was not running; `KeepAlive` cannot repair an association
+whose old bundle path no longer exists.
 
 ### Turning it off
 
@@ -735,7 +788,11 @@ to drain exits immediately, so the wait is the ending rather than a delay.
 Turning a hidden preference off must not be a way to end somebody's turn, so the off path counts
 first:
 
-- **nothing held, or nothing answered** — unregister. There is no daemon to kill.
+- **nothing held** — unregister. There is no live work to kill.
+- **nothing answered and launchd reports no process** — unregister; this is independent absence
+  proof, including an association to a deleted offline/DerivedData bundle.
+- **nothing answered but a process is running, or launchd cannot answer unambiguously** — leave
+  registered, report the uncertainty, and retry later. Silence is not zero.
 - **sessions held** — leave the registration in place, journal `leftForRunningSessions`, and stop
   using the host. With the key off, `AppSettings.ptyHostEnabled` short-circuits the availability
   decision before anything connects, so the app is already on the in-process path; the next launch
@@ -745,9 +802,9 @@ Deliberately **not** `retire` in that second case. Retiring unlinks the socket, 
 turns the key back on would then be unable to reach the sessions still running under it — the
 opposite of what the daemon is for.
 
-Nothing new goes on disk for any of this. The registration's state is launchd's: the Background
-Task Management record and the Login Items row, both keyed by the label, and neither of them
-Threading's to write.
+The one app-owned registration artifact is `pty/registration.json`; it records what Threading last
+handed to ServiceManagement, not launchd's state. The Background Task Management record and Login
+Items row remain launchd's, both keyed by the label and neither Threading's to write.
 
 ### Reaching the daemon from a terminal
 
@@ -785,7 +842,7 @@ exactly that — so the inherited path is inert rather than wrong, and only four
 | Seam | In-process | Host-backed |
 |---|---|---|
 | `EmojiFixedTerminalView.send(source:data:)` | `super.send` → `process.send` | `hostTransport.sendInput` — an `input` frame |
-| output | `setProcessOutputBytesHandler` → main hop → `onOutput`, `onOutputBytes` | `feedFromHost(_:answersQueries:)` → `feed(byteArray:)`, then **the same two callbacks in the same order on main** |
+| output | the PTY IO worker parses → main hop → `onOutput`, `onOutputBytes` | the client transport queue parses through a per-link `TerminalFeedSender` → one coalesced main hop → **the same two callbacks in the same order** |
 | `sendWindowSize(_:)` | `process.updateWindowSize` — a synchronous local ioctl | the link's reconciled grid: recorded, then a `resize` frame the daemon answers with `resized`. See [The durable grid](#the-durable-grid) |
 | `TerminalSession.terminate()` | `terminalView.terminate()` | a `kill` frame; the view's process is never touched |
 
@@ -794,12 +851,13 @@ The third is the one SwiftTerm fork change this whole design needs, and it is re
 
 `TerminalHostTransport` is those three operations as a value of closures, held by the view;
 `PTYHostTerminalLink` is what fills them in, owning the connection and turning the daemon's frames
-into the session's edges. The link coalesces output into **one main-queue hop per burst** — the
-client's read loop never touches main, which is the scaling gate's rule for a callback whose
-frequency is a terminal's output rate — and it delivers a `spawned` pid, a `foreground` group and
-one ending. **A link that is released kills its child**, because until detach and reattach land
-there is no way to hand a session over, and an agent still working where no surface can reach it
-is worse than one that stopped.
+into the session's edges. In steady state each frame is parsed synchronously on the client's
+serial queue, where frame order is already authoritative, while activity and raw-output reporting
+are coalesced into **one main-queue hop per burst**. The parser belongs to one link and is
+invalidated before that link is replaced, so a late old burst cannot enter the replacement's
+emulator. The client's read loop therefore never makes parser cost main-actor work, which is the
+scaling gate's rule for a callback whose frequency is a terminal's output rate. The link also
+delivers a `spawned` pid, a `foreground` group and one ending.
 
 ### Replayed history answers nothing
 
@@ -953,6 +1011,15 @@ rather than answering history. That is the safe direction, and it is stated here
 to be discovered because the exact fix is one field: a replay byte count on `attached` (or a flags
 bit marking replay frames) would make the boundary exact instead of prompt.
 
+That attach handoff is also the only output parsed on main. The `attached` callback was enqueued
+first and must adopt the daemon's authoritative grid before replay mutates the emulator. The first
+delivery takes one finite second drain of bytes that arrived while it parsed; the serial transport
+queue waits behind that drain, so a later live frame cannot overtake it, and a continuously noisy
+child cannot turn the handoff into an unbounded main-actor loop. With no replay-length field, the
+handoff can include immediately following live bytes; after it, ordinary live output always
+parses on the client queue. This makes reattach exact without putting the ongoing typed-input and
+activity path back behind AppKit work.
+
 The same missing field has a second consequence, and it is the honest cost of this slice. A link
 that attached with a replay counts the replay bytes along with the live ones, because it cannot
 tell them apart — so its `ringOffset` is an **upper bound** rather than the exact value.
@@ -1055,6 +1122,22 @@ actually has. `PTYHostSessionDaemonTests` reproduces the original symptom agains
 — a transport that refuses exactly one `resize`, a child that goes on reporting the old grid while
 nothing is flowing, and the same child landing on the new grid as soon as any output proves the
 link current.
+
+Those real-daemon fixtures own process lifetime as part of their assertion. Polling children are
+finite even when an assertion aborts before teardown. Teardown terminates every live session
+through the shipping client and `PTYHostSessionStop`, waits until inventory reports no host-backed
+child, then sends `retire` and waits for the helper. A daemon crash fixture starts a replacement on
+the same state directory so the production survivor sweep can reap the recorded pid/start-time
+group before that replacement retires.
+
+`scripts/test.sh` is the last containment boundary. Every run exports a random
+`THREADING_TEST_RUN_TOKEN` and records descendants of the XCTest app host while `xcodebuild` is
+alive, because a leaked PTY child is reparented and cannot be recovered from the tree afterwards.
+Xcode's own reusable build workers are outside that ownership tree. On success, failure or
+interrupt the guard signals only live pids whose environment still carries that exact token,
+sends TERM to exact `forkpty` process groups, escalates if needed, and fails the run when it found
+a leak. A concurrent run and the registered production daemon do not share the token and are never
+cleanup targets.
 
 ## Pipes
 
@@ -1270,8 +1353,9 @@ perform itself, so it is the one that grows a button —
 the removal went, because the two outcomes are otherwise indistinguishable and the one that leaves
 a daemon running is the one a user needs told. The removal itself is
 [`PTYHostRegistration.removalDecision`](#turning-it-off)'s, unchanged: unregister when the daemon
-holds nothing, leave it registered when it holds something, because `unregister()` kills the
-running helper and turning a preference off must not be a way to end somebody's turn.
+is proven to hold nothing, leave it registered when it holds something or cannot be reached and
+launchd cannot prove it absent, because `unregister()` kills the running helper and turning a
+preference off must not be a way to end somebody's turn.
 
 The switch itself stopped being a `defaults write` here. It is presented on the Advanced page and
 is `.catalogueOnly` by construction — omitting `remotePolicy` is deliberate, so `list_settings` may

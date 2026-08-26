@@ -346,13 +346,34 @@ enum UsageLedgerBuilder {
     }
 
     static func build(
-        records rawRecords: [UsageLedgerRecord],
+        records: [UsageLedgerRecord],
         coverage: [UsageSourceCoverage],
         projects: [ProjectDescriptor],
         scan: TranscriptUsageReport.ScanStatistics,
         now: Date = Date(),
         calendar: Calendar = .autoupdatingCurrent
     ) -> TranscriptUsageReport {
+        // The array entry point remains for adapters and focused tests. The shipping scan uses
+        // the streaming overload below so total history never becomes one resident array.
+        build(
+            forEachRecord: { body in records.forEach(body) },
+            coverage: coverage,
+            projects: projects,
+            scan: scan,
+            now: now,
+            calendar: calendar
+        )
+    }
+
+    static func build(
+        forEachRecord: (_ body: (UsageLedgerRecord) -> Void) throws -> Void,
+        recordsAreDistinct: Bool = false,
+        coverage: [UsageSourceCoverage],
+        projects: [ProjectDescriptor],
+        scan: TranscriptUsageReport.ScanStatistics,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) rethrows -> TranscriptUsageReport {
         let oldest = calendar.date(
             byAdding: .day,
             value: -(UsageReportDefaults.maximumDayRange - 1),
@@ -366,8 +387,10 @@ enum UsageLedgerBuilder {
         var byBucket: [Date: TranscriptUsageReport.Bucket] = [:]
         var distinct = 0
 
-        for raw in rawRecords {
-            guard seen.insert(raw.identity).inserted else { continue }
+        try forEachRecord { raw in
+            if !recordsAreDistinct {
+                guard seen.insert(raw.identity).inserted else { return }
+            }
             distinct += 1
             let priced = UsagePricingCatalog.price(raw)
 
@@ -405,7 +428,7 @@ enum UsageLedgerBuilder {
 
             // Missing provider timestamps still contribute to the lifetime session receipt, but
             // cannot honestly be placed on a day chart or in a quarter-hour spend bucket.
-            guard let at = raw.at else { continue }
+            guard let at = raw.at else { return }
             let day = calendar.startOfDay(for: at)
 
             let root: String
@@ -703,6 +726,7 @@ final class TranscriptUsageService {
         }
         let loginShellPath = AgentLauncher.loginShellPath
         let cacheDirectory = cacheDirectory
+        let previousReport = report
         ThreadingLogger.usage.info(
             "Usage scan started accounts=\(accountSources.count, privacy: .public) projects=\(projects.count, privacy: .public) exports=\(exports.count, privacy: .public)"
         )
@@ -721,7 +745,8 @@ final class TranscriptUsageService {
                 projects: projectDescriptors,
                 loginShellPath: loginShellPath,
                 cacheDirectory: cacheDirectory,
-                reporter: reporter
+                reporter: reporter,
+                previousReport: previousReport
             )
 
             Task { @MainActor in
@@ -745,14 +770,28 @@ final class TranscriptUsageService {
         projects: [UsageLedgerBuilder.ProjectDescriptor],
         loginShellPath: String,
         cacheDirectory: URL,
-        reporter: UsageScanProgressReporter
+        reporter: UsageScanProgressReporter,
+        previousReport: TranscriptUsageReport?
     ) -> TranscriptUsageReport {
         let started = CFAbsoluteTimeGetCurrent()
         let cache = UsageScanCache(directory: cacheDirectory)
         cache.beginScan()
         defer { cache.finishScan() }
 
-        var records: [UsageLedgerRecord] = []
+        let index: UsageLedgerIndex
+        do {
+            index = try UsageLedgerIndex(directory: cacheDirectory)
+            index.beginScan()
+        } catch {
+            ThreadingLogger.usage.error(
+                "Usage ledger index unavailable: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            var fallback = previousReport ?? TranscriptUsageReport()
+            fallback.builtAt = Date()
+            fallback.scan.duration = CFAbsoluteTimeGetCurrent() - started
+            return fallback
+        }
+
         var scan = TranscriptUsageReport.ScanStatistics()
         var coverage = Dictionary(uniqueKeysWithValues: AgentKind.allCases.map { runtime in
             let detail: String?
@@ -820,27 +859,39 @@ final class TranscriptUsageService {
             let runtime = source.runtime
             let account = source.account
             let file = source.file
-            let result = cache.records(for: file, parserID: source.parserID) {
-                switch runtime {
-                case .claude:
-                    return ClaudeUsageAdapter.records(
-                        inTranscriptAt: file,
-                        accountID: account.accountID,
-                        accountName: account.accountName
-                    )
-                case .codex:
-                    return CodexUsageAdapter.records(
-                        inRolloutAt: file,
-                        accountID: account.accountID,
-                        accountName: account.accountName
-                    )
-                case .grok, .openCode, .cursor:
-                    return []
+            let result: UsageLedgerIndex.Update
+            do {
+                result = try index.update(source: file, parserID: source.parserID) {
+                    cache.records(for: file, parserID: source.parserID) {
+                        switch runtime {
+                        case .claude:
+                            return ClaudeUsageAdapter.records(
+                                inTranscriptAt: file,
+                                accountID: account.accountID,
+                                accountName: account.accountName
+                            )
+                        case .codex:
+                            return CodexUsageAdapter.records(
+                                inRolloutAt: file,
+                                accountID: account.accountID,
+                                accountName: account.accountName
+                            )
+                        case .grok, .openCode, .cursor:
+                            return []
+                        }
+                    }
                 }
+            } catch {
+                ThreadingLogger.usage.error(
+                    "Usage ledger index update failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+                var fallback = previousReport ?? TranscriptUsageReport()
+                fallback.builtAt = Date()
+                fallback.scan.duration = CFAbsoluteTimeGetCurrent() - started
+                return fallback
             }
             scan.sourceFiles += 1
             if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
-            records.append(contentsOf: result.records)
             reporter.advance(sourceName: runtime.displayName)
             guard var item = coverage[runtime.rawValue] else {
                 ThreadingLogger.usage.fault(
@@ -850,7 +901,7 @@ final class TranscriptUsageService {
                 continue
             }
             item.sourceCount += 1
-            item.recordCount += result.records.count
+            item.recordCount += result.recordCount
             item.state = .complete
             item.detail = nil
             coverage[runtime.rawValue] = item
@@ -867,34 +918,37 @@ final class TranscriptUsageService {
             }
             item.sourceCount += 1
             do {
-                let result = try cache.records(
-                    forKey: "opencode|\(source.transcriptID)",
+                let key = "opencode|\(source.transcriptID)"
+                let result = try index.update(
+                    key: key,
                     revision: source.lastActiveAt,
                     parserID: UsageScanCacheDefaults.openCodeParserID
                 ) {
-                    let data = try ConversationHandoffCapture.runExport(
-                        kind: runtime,
-                        transcriptID: TranscriptID(source.transcriptID),
-                        projectFolder: source.projectPath,
-                        loginShellPath: loginShellPath
-                    )
-                    return try OpenCodeUsageAdapter.records(fromExport: data)
+                    try cache.records(
+                        forKey: key,
+                        revision: source.lastActiveAt,
+                        parserID: UsageScanCacheDefaults.openCodeParserID
+                    ) {
+                        let data = try ConversationHandoffCapture.runExport(
+                            kind: runtime,
+                            transcriptID: TranscriptID(source.transcriptID),
+                            projectFolder: source.projectPath,
+                            loginShellPath: loginShellPath
+                        )
+                        return try OpenCodeUsageAdapter.records(fromExport: data)
+                    }
                 }
                 scan.sourceFiles += 1
                 if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
-                records.append(contentsOf: result.records)
-                item.recordCount += result.records.count
+                item.recordCount += result.recordCount
                 item.state = .complete
                 item.detail = nil
 
-                let routed = result.records.filter {
-                    $0.origin.billingProviderID == UsageReportDefaults.openRouterCoverageID
-                }
-                if !routed.isEmpty {
+                if result.routedRecordCount > 0 {
                     let routeID = UsageReportDefaults.openRouterCoverageID
                     if var route = coverage[routeID] {
                         route.sourceCount += 1
-                        route.recordCount += routed.count
+                        route.recordCount += result.routedRecordCount
                         route.state = .complete
                         route.detail = nil
                         coverage[routeID] = route
@@ -905,6 +959,14 @@ final class TranscriptUsageService {
                         assertionFailure("Missing usage coverage for \(routeID)")
                     }
                 }
+            } catch let error as SQLiteDatabase.Failure {
+                ThreadingLogger.usage.error(
+                    "Usage ledger index update failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+                var fallback = previousReport ?? TranscriptUsageReport()
+                fallback.builtAt = Date()
+                fallback.scan.duration = CFAbsoluteTimeGetCurrent() - started
+                return fallback
             } catch {
                 item.state = item.recordCount > 0 ? .partial : .failed
                 item.detail = "One or more OpenCode exports could not be read."
@@ -918,14 +980,35 @@ final class TranscriptUsageService {
             coverage[runtime.rawValue] = item
         }
 
-        scan.rawRecords = records.count
+        do {
+            scan.rawRecords = try index.finishScan()
+        } catch {
+            ThreadingLogger.usage.error(
+                "Usage ledger index cleanup failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            var fallback = previousReport ?? TranscriptUsageReport()
+            fallback.builtAt = Date()
+            fallback.scan.duration = CFAbsoluteTimeGetCurrent() - started
+            return fallback
+        }
         scan.duration = CFAbsoluteTimeGetCurrent() - started
-        return UsageLedgerBuilder.build(
-            records: records,
-            coverage: Array(coverage.values),
-            projects: projects,
-            scan: scan
-        )
+        do {
+            return try UsageLedgerBuilder.build(
+                forEachRecord: { body in try index.forEachRecord(body) },
+                recordsAreDistinct: true,
+                coverage: Array(coverage.values),
+                projects: projects,
+                scan: scan
+            )
+        } catch {
+            ThreadingLogger.usage.error(
+                "Usage ledger index read failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            var fallback = previousReport ?? TranscriptUsageReport()
+            fallback.builtAt = Date()
+            fallback.scan.duration = CFAbsoluteTimeGetCurrent() - started
+            return fallback
+        }
     }
 
     private func notifyChanged() {

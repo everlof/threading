@@ -35,18 +35,25 @@ final class UsageScanCache {
         case write
         case enumerate
         case remove
+        case prune
     }
 
     private let directory: URL
     private let fileManager: FileManager
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let maximumTotalBytes: Int64
     private var usedFiles = Set<String>()
     private var failureCounts: [FailureStage: Int] = [:]
 
-    init(directory: URL, fileManager: FileManager = .default) {
+    init(
+        directory: URL,
+        fileManager: FileManager = .default,
+        maximumTotalBytes: Int64 = UsageScanCacheDefaults.maximumTotalBytes
+    ) {
         self.directory = directory
         self.fileManager = fileManager
+        self.maximumTotalBytes = maximumTotalBytes
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -180,7 +187,45 @@ final class UsageScanCache {
                 recordFailure(.remove)
             }
         }
+        enforceAggregateBound()
         reportFailures()
+    }
+
+    /// Per-entry safety did not stop 2,824 individually valid files from reaching 4.4 GB. The
+    /// source cache is rebuildable and the SQLite ledger below is the warm authority now, so its
+    /// oldest envelopes are discarded until the directory has one real machine-wide bound.
+    private func enforceAggregateBound() {
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
+        let entries: [(url: URL, bytes: Int64, modifiedAt: Date)]
+        do {
+            entries = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: Array(keys)
+            ).compactMap { url in
+                guard url.pathExtension == UsageScanCacheDefaults.extensionName else { return nil }
+                let values = try url.resourceValues(forKeys: keys)
+                return (
+                    url,
+                    Int64(values.fileSize ?? 0),
+                    values.contentModificationDate ?? .distantPast
+                )
+            }
+        } catch {
+            recordFailure(.enumerate)
+            return
+        }
+
+        var total = entries.reduce(Int64(0)) { $0 + $1.bytes }
+        guard total > maximumTotalBytes else { return }
+        for entry in entries.sorted(by: { $0.modifiedAt < $1.modifiedAt }) {
+            do {
+                try fileManager.removeItem(at: entry.url)
+                total -= entry.bytes
+                if total <= maximumTotalBytes { return }
+            } catch {
+                recordFailure(.prune)
+            }
+        }
     }
 
     private func prepareDirectory() {
@@ -281,11 +326,332 @@ final class UsageScanCache {
     }
 }
 
+// MARK: - Incremental global ledger
+
+/// A source-fingerprinted, globally deduplicated ledger.
+///
+/// `UsageScanCache` made parsing incremental but still decoded every cached envelope and joined
+/// every record in RAM once an hour. This index moves the unchanged-source decision in front of
+/// decoding and stores one payload per response identity. A warm scan is filesystem metadata plus
+/// one indexed lookup per source; report aggregation streams distinct rows one at a time.
+final class UsageLedgerIndex {
+    struct Update {
+        let recordCount: Int
+        let routedRecordCount: Int
+        let wasCacheHit: Bool
+    }
+
+    private struct Revision: Equatable {
+        let size: Int64
+        let modifiedAt: TimeInterval
+    }
+
+    private let database: SQLiteDatabase
+    private let fileManager: FileManager
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+    private var usedSources = Set<String>()
+
+    init(directory: URL, fileManager: FileManager = .default) throws {
+        self.fileManager = fileManager
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        database = try SQLiteDatabase(
+            path: directory.appendingPathComponent(UsageLedgerIndexDefaults.fileName).path,
+            maximumSchemaVersion: UsageLedgerIndexDefaults.schemaVersion
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        self.encoder = encoder
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.decoder = decoder
+
+        try database.migrate(to: UsageLedgerIndexDefaults.schemaVersion) { version in
+            guard version == 1 else { return }
+            try database.execute(
+                """
+                CREATE TABLE usage_source (
+                    source_key TEXT PRIMARY KEY,
+                    parser_id TEXT NOT NULL,
+                    source_path TEXT NOT NULL,
+                    revision_size INTEGER NOT NULL,
+                    revision_modified_at REAL NOT NULL,
+                    record_count INTEGER NOT NULL,
+                    routed_record_count INTEGER NOT NULL
+                );
+                CREATE TABLE usage_record (
+                    identity TEXT PRIMARY KEY,
+                    data BLOB NOT NULL
+                );
+                CREATE TABLE usage_source_record (
+                    source_key TEXT NOT NULL REFERENCES usage_source(source_key) ON DELETE CASCADE,
+                    identity TEXT NOT NULL REFERENCES usage_record(identity) ON DELETE CASCADE,
+                    PRIMARY KEY (source_key, identity)
+                );
+                CREATE INDEX usage_source_record_identity
+                    ON usage_source_record(identity);
+                """
+            )
+        }
+    }
+
+    func beginScan() {
+        usedSources.removeAll(keepingCapacity: true)
+    }
+
+    func update(
+        source: URL,
+        parserID: String,
+        load: () -> UsageScanCache.Result
+    ) throws -> Update {
+        let attributes = try fileManager.attributesOfItem(atPath: source.path)
+        guard let size = attributes[.size] as? NSNumber,
+              let modifiedAt = attributes[.modificationDate] as? Date else {
+            throw UsageLedgerIndexError.missingRevision(source.path)
+        }
+        return try update(
+            key: source.path,
+            revision: Revision(
+                size: size.int64Value,
+                modifiedAt: modifiedAt.timeIntervalSince1970
+            ),
+            parserID: parserID,
+            load: load
+        )
+    }
+
+    func update(
+        key: String,
+        revision: Date,
+        parserID: String,
+        load: () throws -> UsageScanCache.Result
+    ) throws -> Update {
+        try update(
+            key: key,
+            revision: Revision(size: 0, modifiedAt: revision.timeIntervalSince1970),
+            parserID: parserID,
+            load: load
+        )
+    }
+
+    /// Deletes sources no adapter offered this pass and returns the raw record total represented
+    /// by the surviving source set. Orphaned response rows are reclaimed in the same transaction.
+    func finishScan() throws -> Int {
+        var storedKeys: [String] = []
+        let select = try database.prepare("SELECT source_key FROM usage_source")
+        while try select.step() {
+            if let key = select.text(0) { storedKeys.append(key) }
+        }
+        select.finalize()
+
+        try database.transaction {
+            let remove = try database.prepare(
+                "DELETE FROM usage_source WHERE source_key = ?"
+            )
+            defer { remove.finalize() }
+            for key in storedKeys where !usedSources.contains(key) {
+                _ = try remove.bind(1, key).step()
+                try remove.reset()
+            }
+            try database.execute(
+                """
+                DELETE FROM usage_record
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM usage_source_record
+                    WHERE usage_source_record.identity = usage_record.identity
+                )
+                """
+            )
+        }
+        return try database.scalar("SELECT COALESCE(SUM(record_count), 0) FROM usage_source") ?? 0
+    }
+
+    /// Streams globally distinct records. The callback returns before the next SQLite row is
+    /// decoded, so peak transient memory is one compact record rather than the whole history.
+    func forEachRecord(_ body: (UsageLedgerRecord) -> Void) throws {
+        let statement = try database.prepare(
+            """
+            SELECT data FROM usage_record
+            WHERE EXISTS (
+                SELECT 1 FROM usage_source_record
+                WHERE usage_source_record.identity = usage_record.identity
+            )
+            ORDER BY identity
+            """
+        )
+        defer { statement.finalize() }
+        while try statement.step() {
+            guard let data = statement.data(0) else { continue }
+            try autoreleasepool {
+                body(try decoder.decode(UsageLedgerRecord.self, from: data))
+            }
+        }
+    }
+
+    private func update(
+        key: String,
+        revision: Revision,
+        parserID: String,
+        load: () throws -> UsageScanCache.Result
+    ) throws -> Update {
+        let sourceKey = Self.sourceKey(path: key, parserID: parserID)
+        usedSources.insert(sourceKey)
+        if let stored = try storedSource(
+            sourceKey: sourceKey,
+            parserID: parserID,
+            revision: revision
+        ) {
+            return Update(
+                recordCount: stored.records,
+                routedRecordCount: stored.routed,
+                wasCacheHit: true
+            )
+        }
+
+        let loaded: UsageScanCache.Result
+        do {
+            loaded = try load()
+        } catch {
+            usedSources.remove(sourceKey)
+            throw error
+        }
+        let routed = loaded.records.reduce(into: 0) { count, record in
+            if record.origin.billingProviderID == UsageReportDefaults.openRouterCoverageID {
+                count += 1
+            }
+        }
+        try replace(
+            sourceKey: sourceKey,
+            sourcePath: key,
+            parserID: parserID,
+            revision: revision,
+            records: loaded.records,
+            routedRecordCount: routed
+        )
+        return Update(
+            recordCount: loaded.records.count,
+            routedRecordCount: routed,
+            wasCacheHit: loaded.wasCacheHit
+        )
+    }
+
+    private func storedSource(
+        sourceKey: String,
+        parserID: String,
+        revision: Revision
+    ) throws -> (records: Int, routed: Int)? {
+        let statement = try database.prepare(
+            """
+            SELECT record_count, routed_record_count
+            FROM usage_source
+            WHERE source_key = ? AND parser_id = ?
+              AND revision_size = ? AND revision_modified_at = ?
+            """
+        )
+        defer { statement.finalize() }
+        statement.bind(1, sourceKey)
+            .bind(2, parserID)
+            .bind(3, revision.size)
+            .bind(4, revision.modifiedAt)
+        guard try statement.step() else { return nil }
+        return (statement.int(0), statement.int(1))
+    }
+
+    private func replace(
+        sourceKey: String,
+        sourcePath: String,
+        parserID: String,
+        revision: Revision,
+        records: [UsageLedgerRecord],
+        routedRecordCount: Int
+    ) throws {
+        try database.transaction {
+            let source = try database.prepare(
+                """
+                INSERT INTO usage_source (
+                    source_key, parser_id, source_path, revision_size,
+                    revision_modified_at, record_count, routed_record_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_key) DO UPDATE SET
+                    parser_id = excluded.parser_id,
+                    source_path = excluded.source_path,
+                    revision_size = excluded.revision_size,
+                    revision_modified_at = excluded.revision_modified_at,
+                    record_count = excluded.record_count,
+                    routed_record_count = excluded.routed_record_count
+                """
+            )
+            source.bind(1, sourceKey)
+                .bind(2, parserID)
+                .bind(3, sourcePath)
+                .bind(4, revision.size)
+                .bind(5, revision.modifiedAt)
+                .bind(6, records.count)
+                .bind(7, routedRecordCount)
+            try source.run()
+
+            let remove = try database.prepare(
+                "DELETE FROM usage_source_record WHERE source_key = ?"
+            )
+            try remove.bind(1, sourceKey).run()
+
+            let insertRecord = try database.prepare(
+                """
+                INSERT INTO usage_record(identity, data) VALUES (?, ?)
+                ON CONFLICT(identity) DO UPDATE SET data = excluded.data
+                """
+            )
+            let associate = try database.prepare(
+                """
+                INSERT OR IGNORE INTO usage_source_record(source_key, identity)
+                VALUES (?, ?)
+                """
+            )
+            defer {
+                insertRecord.finalize()
+                associate.finalize()
+            }
+            for record in records {
+                let data = try autoreleasepool { try encoder.encode(record) }
+                _ = try insertRecord.bind(1, record.identity).bind(2, data).step()
+                try insertRecord.reset()
+                _ = try associate.bind(1, sourceKey).bind(2, record.identity).step()
+                try associate.reset()
+            }
+        }
+    }
+
+    private static func sourceKey(path: String, parserID: String) -> String {
+        // This key stays inside SQLite, so there is no filesystem-name constraint that would
+        // justify a lossy hash. A length prefix makes the pair unambiguous and collision-free.
+        "\(parserID.utf8.count):\(parserID)\(path)"
+    }
+}
+
+private enum UsageLedgerIndexError: LocalizedError {
+    case missingRevision(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingRevision: return "A transcript source had no stable filesystem revision"
+        }
+    }
+}
+
+enum UsageLedgerIndexDefaults {
+    static let fileName = "usage-ledger-index.sqlite"
+    static let schemaVersion = 1
+}
+
 enum UsageScanCacheDefaults {
     static let directoryName = "UsageScanCache"
     static let schemaVersion = 1
     static let extensionName = "usagecache"
     static let maximumEntryBytes = 64 * 1024 * 1024
+    /// The cache is only a migration/fallback layer once `UsageLedgerIndex` has a source. It may
+    /// use enough room to avoid reparsing a recent working set, but never several gigabytes.
+    static let maximumTotalBytes: Int64 = 512 * 1024 * 1024
     static let claudeParserID = "claude-v2"
     static let codexParserID = "codex-v1"
     static let openCodeParserID = "opencode-export-v1"

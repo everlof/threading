@@ -746,7 +746,7 @@ final class RemoteHostCandidateTests: XCTestCase {
         for answer: RemoteClientError in [
             .unauthorized,
             .invalidResponse,
-            .server(404),
+            .server(status: 404),
             .upgradeRequired(.client),
         ] {
             XCTAssertEqual(

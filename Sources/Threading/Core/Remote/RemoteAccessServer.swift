@@ -332,7 +332,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         guard let requestID = RemoteInboundPolicy.normalizedMutationRequestID(rawRequestID) else {
-            respond(.respond(RemoteRouter.error(400, "Invalid request id")))
+            respond(.respond(RemoteRouter.error(
+                400,
+                "Invalid request id",
+                code: .invalidRequestID
+            )))
             return
         }
         guard let bearer = RemoteRouter.bearerToken(from: request),
@@ -359,7 +363,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         let fingerprint = Self.mutationFingerprint(for: request)
         if var existing = mutationReplayCache[key] {
             guard existing.fingerprint == fingerprint else {
-                respond(.respond(RemoteRouter.error(409, "Request id was reused")))
+                respond(.respond(RemoteRouter.error(
+                    409,
+                    "Request id was reused",
+                    code: .requestIDReused
+                )))
                 return
             }
             if let response = existing.response {
@@ -382,7 +390,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             mutationReplayCache.removeValue(forKey: oldestCompleted)
         }
         guard mutationReplayCache.count < RemoteAccessDefaults.maximumMutationReplayEntries else {
-            respond(.respond(RemoteRouter.error(503, "Replay cache busy")))
+            respond(.respond(RemoteRouter.error(
+                503,
+                "Replay cache busy",
+                code: .replayCacheBusy
+            )))
             return
         }
         mutationReplayCache[key] = MutationReplayEntry(
@@ -925,7 +937,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             if !self.services.runtimeStatus.isRunning(sessionID: sessionID) {
                 guard let sessionCommands = self.sessionCommands,
                       sessionCommands.resumeRemoteSession(sessionID) else {
-                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                     return
                 }
             }
@@ -962,7 +974,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             if !self.services.mirrors.isTerminalAvailable(terminalID) {
                 guard let sessionCommands = self.sessionCommands,
                       sessionCommands.resumeRemoteTerminal(terminalID) else {
-                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                     return
                 }
             }
@@ -1009,7 +1021,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             guard let projectID = ProjectID(uuidString: creation.projectID),
                   self.services.sessionQueries.project(withID: projectID) != nil,
                   let kind = AgentKind(rawValue: creation.agentKind) else {
-                respond(.respond(RemoteRouter.error(422, "Unknown Launch Choice")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unknown Launch Choice",
+                    code: .unknownLaunchChoice
+                )))
                 return
             }
 
@@ -1022,7 +1038,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 guard let selected = discoveredAccounts.first(where: {
                     $0.handle == accountHandle
                 }) else {
-                    respond(.respond(RemoteRouter.error(422, "Unknown Account")))
+                    respond(.respond(RemoteRouter.error(422, "Unknown Account", code: .unknownAccount)))
                     return
                 }
                 account = selected
@@ -1030,20 +1046,28 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             let modelOptions = AgentModels.options(for: kind, account: account)
             if let model = creation.model,
                !modelOptions.contains(where: { $0.identifier == model }) {
-                respond(.respond(RemoteRouter.error(422, "Unknown Model")))
+                respond(.respond(RemoteRouter.error(422, "Unknown Model", code: .unknownModel)))
                 return
             }
             if let effort = creation.reasoningEffort {
                 guard let option = modelOptions.first(where: { $0.identifier == creation.model }),
                       option.supports(reasoningEffort: effort) else {
-                    respond(.respond(RemoteRouter.error(422, "Unknown Reasoning Effort")))
+                    respond(.respond(RemoteRouter.error(
+                        422,
+                        "Unknown Reasoning Effort",
+                        code: .unknownReasoningEffort
+                    )))
                     return
                 }
             }
             let permissionMode = creation.permissionMode.flatMap(AgentPermissionMode.init(rawValue:))
             guard creation.permissionMode == nil
                     || (permissionMode != nil && kind.supportsPermissionModes) else {
-                respond(.respond(RemoteRouter.error(422, "Unknown Permission Mode")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unknown Permission Mode",
+                    code: .unknownPermissionMode
+                )))
                 return
             }
             if creation.fastMode != nil {
@@ -1052,13 +1076,21 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     model: creation.model,
                     account: account
                 ) else {
-                    respond(.respond(RemoteRouter.error(422, "Unsupported Speed")))
+                    respond(.respond(RemoteRouter.error(
+                        422,
+                        "Unsupported Speed",
+                        code: .unsupportedSpeed
+                    )))
                     return
                 }
             }
             let usesNativeUI = creation.surface == .conversation
             guard !usesNativeUI || kind.supportsNativeUI else {
-                respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Surface",
+                    code: .unsupportedSurface
+                )))
                 return
             }
             // Absent is a chat, the only thing older phones could ask for. The lossless wire
@@ -1067,7 +1099,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             // guessed as chat: a phone that asked for a manager and got a chat would not find
             // out until the agent failed to reach its siblings.
             guard let role = creation.role.map({ SessionRole(rawValue: $0.rawValue) }) ?? .chat else {
-                respond(.respond(RemoteRouter.error(422, "Unknown Role")))
+                respond(.respond(RemoteRouter.error(422, "Unknown Role", code: .unknownRole)))
                 return
             }
 
@@ -1087,7 +1119,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                           kind: kind,
                           usesNativeUI: usesNativeUI
                       ) else {
-                    respond(.respond(RemoteRouter.error(422, "Unsupported Workspace")))
+                    respond(.respond(RemoteRouter.error(
+                        422,
+                        "Unsupported Workspace",
+                        code: .unsupportedWorkspace
+                    )))
                     return
                 }
                 managedWorkspacePlan = ManagedWorkspacePlan(delivery: delivery)
@@ -1109,7 +1145,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 prompt: prompt
             )
             guard let sessionID = self.sessionCommands?.startRemoteSession(launch) else {
-                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                 return
             }
 
@@ -1120,7 +1156,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     for: sessionID,
                     authorization: authorization
                 ) else {
-                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                     return
                 }
                 response = RemoteCreateSessionResponseDTO(
@@ -1161,7 +1197,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 deviceID: deviceID,
                 authorization: authorization
             ) else {
-                respond(.respond(RemoteRouter.error(422, "Invalid Device Token")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Invalid Device Token",
+                    code: .invalidDeviceToken
+                )))
                 return
             }
             self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
@@ -1257,9 +1297,17 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 )
             )))
         } catch MobileDiagnosticsCaptureStore.StoreError.disabled {
-            respond(.respond(RemoteRouter.error(403, "Local Diagnostics Disabled")))
+            respond(.respond(RemoteRouter.error(
+                403,
+                "Local Diagnostics Disabled",
+                code: .localDiagnosticsDisabled
+            )))
         } catch MobileDiagnosticsCaptureStore.StoreError.unsolicited {
-            respond(.respond(RemoteRouter.error(409, "Capture Not Requested")))
+            respond(.respond(RemoteRouter.error(
+                409,
+                "Capture Not Requested",
+                code: .captureNotRequested
+            )))
         } catch {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
         }
@@ -1389,7 +1437,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                   ) else {
                 self?.queue.async { [weak self] in
                     self?.recordFailedAuth(reason: "invalid invitation", device: deviceID)
-                    respond(.respond(RemoteRouter.error(401, "Invalid Invitation")))
+                    respond(.respond(RemoteRouter.error(
+                        401,
+                        "Invalid Invitation",
+                        code: .invalidInvitation
+                    )))
                 }
                 return
             }
@@ -1412,19 +1464,27 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard authorization.canManageHost else {
-            respond(.respond(RemoteRouter.error(403, "Owner access required")))
+            respond(.respond(RemoteRouter.error(
+                403,
+                "Owner access required",
+                code: .ownerAccessRequired
+            )))
             return
         }
         guard let deviceID = RemoteInboundPolicy.normalizedDeviceID(
             request.header(RemoteRouter.deviceHeader)
         ) else {
-            respond(.respond(RemoteRouter.error(400, "Invalid device")))
+            respond(.respond(RemoteRouter.error(400, "Invalid device", code: .invalidDevice)))
             return
         }
         Task { @MainActor in
             do {
                 guard let hostCommands = self.hostCommands else {
-                    respond(.respond(RemoteRouter.error(503, "Hosted service unavailable")))
+                    respond(.respond(RemoteRouter.error(
+                        503,
+                        "Hosted service unavailable",
+                        code: .hostedServiceUnavailable
+                    )))
                     return
                 }
                 let credential = try await hostCommands.issueHostedDeviceCredential(
@@ -1441,7 +1501,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 ThreadingLogger.remote.error(
                     "Hosted device credential issue failed code=service"
                 )
-                respond(.respond(RemoteRouter.error(503, "Hosted service unavailable")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Hosted service unavailable",
+                    code: .hostedServiceUnavailable
+                )))
             }
         }
     }
@@ -1469,7 +1533,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             case .applied(let themeID):
                 appliedThemeID = themeID
             case .unknownTheme:
-                respond(.respond(RemoteRouter.error(422, "Unknown Theme")))
+                respond(.respond(RemoteRouter.error(422, "Unknown Theme", code: .unknownTheme)))
                 return
             }
             self.services.eventLog.recordRemoteEvent("App theme changed remotely", [
@@ -1514,11 +1578,19 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     self.services.mirrors.meResponse(for: authorization)
                 )))
             case .unknownSetting:
-                respond(.respond(RemoteRouter.error(404, "Unknown Setting")))
+                respond(.respond(RemoteRouter.error(404, "Unknown Setting", code: .unknownSetting)))
             case .notMutable:
-                respond(.respond(RemoteRouter.error(403, "Setting Not Mutable")))
+                respond(.respond(RemoteRouter.error(
+                    403,
+                    "Setting Not Mutable",
+                    code: .settingNotMutable
+                )))
             case .invalidValue:
-                respond(.respond(RemoteRouter.error(422, "Invalid Setting Value")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Invalid Setting Value",
+                    code: .invalidSettingValue
+                )))
             }
         }
     }
@@ -1565,10 +1637,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Persistence Unavailable",
+                    code: .persistenceUnavailable
+                )))
                 return
             case .unsupportedValue:
-                respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Value",
+                    code: .unsupportedValue
+                )))
                 return
             }
             self.services.eventLog.recordRemoteEvent("Session theme changed remotely", [
@@ -1617,10 +1697,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Persistence Unavailable",
+                    code: .persistenceUnavailable
+                )))
                 return
             case .unsupportedValue:
-                respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Value",
+                    code: .unsupportedValue
+                )))
                 return
             }
             self.services.eventLog.recordRemoteEvent("Session renamed remotely", [
@@ -1668,10 +1756,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Persistence Unavailable",
+                    code: .persistenceUnavailable
+                )))
                 return
             case .unsupportedValue:
-                respond(.respond(RemoteRouter.error(422, "Unsupported Value")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Value",
+                    code: .unsupportedValue
+                )))
                 return
             }
             self.sessionCommands?.refreshAfterRemoteSessionMutation(
@@ -1734,7 +1830,26 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     } else {
                         status = 500
                     }
-                    respond(.respond(RemoteRouter.error(status, failure.localizedDescription)))
+                    let code: RemoteRESTErrorCode
+                    switch failure {
+                    case .alreadyChanging:
+                        code = .archiveAlreadyChanging
+                    case .sessionNotFound:
+                        code = .notFound
+                    case .accountUnavailable:
+                        code = .archiveAccountUnavailable
+                    case .persistenceUnavailable:
+                        code = .persistenceUnavailable
+                    case .commandCouldNotLaunch:
+                        code = .archiveCommandUnavailable
+                    case .commandRejected:
+                        code = .archiveCommandRejected
+                    }
+                    respond(.respond(RemoteRouter.error(
+                        status,
+                        failure.localizedDescription,
+                        code: code
+                    )))
                 }
             }
         }
@@ -1768,7 +1883,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             if let rawDeadline = choice.snoozedUntil {
                 let deadline = Date(timeIntervalSince1970: rawDeadline)
                 guard deadline > Date(), deadline < Date().addingTimeInterval(366 * 86_400) else {
-                    respond(.respond(RemoteRouter.error(422, "Invalid snooze deadline")))
+                    respond(.respond(RemoteRouter.error(
+                        422,
+                        "Invalid snooze deadline",
+                        code: .invalidSnoozeDeadline
+                    )))
                     return
                 }
                 self.services.snoozeCenter.snooze(sessionID, until: deadline)
@@ -1807,7 +1926,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             let usesNativeUI = choice.surface == .conversation
             guard !usesNativeUI || session.kind.supportsNativeUI else {
-                respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Surface",
+                    code: .unsupportedSurface
+                )))
                 return
             }
 
@@ -1830,10 +1953,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             case .unsupportedValue:
-                respond(.respond(RemoteRouter.error(422, "Unsupported Surface")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Surface",
+                    code: .unsupportedSurface
+                )))
                 return
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Persistence Unavailable",
+                    code: .persistenceUnavailable
+                )))
                 return
             }
             self.services.eventLog.recordRemoteEvent("Session UI changed remotely", [
@@ -1872,11 +2003,15 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             guard session.kind.supportsAccounts else {
-                respond(.respond(RemoteRouter.error(422, "Unsupported Runtime")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Runtime",
+                    code: .unsupportedRuntime
+                )))
                 return
             }
             guard let commands = self.sessionCommands else {
-                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                 return
             }
 
@@ -1896,11 +2031,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             case .failure(.sessionNotFound):
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
             case .failure(.accountNotFound), .failure(.unsupportedRuntime):
-                respond(.respond(RemoteRouter.error(422, "Unsupported Account")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Account",
+                    code: .unsupportedAccount
+                )))
             case .failure(.appUnavailable):
-                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
-            case .failure(.moveRefused(let message)):
-                respond(.respond(RemoteRouter.error(409, message)))
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
+            case .failure(.moveRefused(let refusal)):
+                respond(.respond(RemoteRouter.error(
+                    409,
+                    "Account move refused",
+                    code: .accountMoveRefused,
+                    detail: refusal.rawValue
+                )))
             }
         }
     }
@@ -1933,7 +2077,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 choice.policy,
                 for: session
             ) else {
-                respond(.respond(RemoteRouter.error(422, "Unsupported Recovery")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Recovery",
+                    code: .unsupportedRecovery
+                )))
                 return
             }
             let inherited = LimitRecoveryResolution.inherited(
@@ -1962,9 +2110,17 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             case .targetNotFound:
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
             case .unsupportedValue:
-                respond(.respond(RemoteRouter.error(422, "Unsupported Recovery")))
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Recovery",
+                    code: .unsupportedRecovery
+                )))
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(503, "Persistence Unavailable")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Persistence Unavailable",
+                    code: .persistenceUnavailable
+                )))
             }
         }
     }
@@ -2014,7 +2170,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let hostCommands = self.hostCommands else {
-                respond(.respond(RemoteRouter.error(503, "Sharing Not Available")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Sharing Not Available",
+                    code: .sharingNotAvailable
+                )))
                 return
             }
             switch hostCommands.createSessionShare(
@@ -2034,7 +2194,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 // An invitation points at a door of this Mac's own, so the only way to fail is
                 // to have none bound. That is a state the owner fixes on the Mac, which is why
                 // it is reported rather than retried here.
-                respond(.respond(RemoteRouter.error(503, "Sharing Not Available")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Sharing Not Available",
+                    code: .sharingNotAvailable
+                )))
             }
         }
     }
@@ -2059,7 +2223,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let hostCommands = self.hostCommands else {
-                respond(.respond(RemoteRouter.error(503, "Mac Not Ready")))
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                 return
             }
             hostCommands.revokeSessionShares(sessionID)
@@ -2107,7 +2271,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     me: self.services.mirrors.meResponse(for: authorization)
                 ))))
             case .failure:
-                respond(.respond(RemoteRouter.error(503, "Sharing Not Available")))
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Sharing Not Available",
+                    code: .sharingNotAvailable
+                )))
             }
         }
     }

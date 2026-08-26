@@ -1136,7 +1136,7 @@ final class RemoteNotificationManager: ObservableObject {
                             with: host
                         )
                     } catch let error as RemoteClientError {
-                        if case .server(let status) = error,
+                        if case .server(let status, _, _) = error,
                            (400...499).contains(status) {
                             // The baseline registration is already active. Remember this result
                             // for this launch instead of repeatedly probing an older host.
@@ -1232,7 +1232,7 @@ final class RemoteNotificationManager: ObservableObject {
                     .code: MobileDiagnostics.errorCode(error),
                     .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
                 ]) { _, new in new }
-                if case .server(let status) = error {
+                if case .server(let status, _, _) = error {
                     failedFields[.status] = String(status)
                 }
                 MobileDiagnostics.recordConnectivity(
@@ -1240,7 +1240,7 @@ final class RemoteNotificationManager: ObservableObject {
                     level: .warning,
                     fields: failedFields
                 )
-                if case .server(let status) = error,
+                if case .server(let status, _, _) = error,
                    [502, 503, 504].contains(status) {
                     lastError = error
                     continue

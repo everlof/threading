@@ -4,6 +4,19 @@ import ThreadingExtensionKit
 
 final class RemoteProtocolTests: XCTestCase {
 
+    func testRESTRefusalCarriesStableCodeAndOptionalMachineDetail() throws {
+        let refusal = RemoteErrorDTO(
+            code: RemoteRESTErrorCode.unknownModel,
+            detail: "catalogChanged"
+        )
+        let data = try JSONEncoder().encode(refusal)
+
+        XCTAssertEqual(try JSONDecoder().decode(RemoteErrorDTO.self, from: data), refusal)
+        XCTAssertEqual(refusal.type, "error")
+        XCTAssertEqual(refusal.code, "unknownModel")
+        XCTAssertEqual(RemoteRESTErrorCode(rawValue: refusal.code), .unknownModel)
+    }
+
     func testHostedPairingLinkRoundTripsWithoutPuttingSecretsInTheRequestURL() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let link = try XCTUnwrap(HostedPairingLink(
@@ -1643,5 +1656,73 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertTrue(
             RemoteWebSocketFeature.allCases.contains(.sessionConnectionParking)
         )
+    }
+}
+
+// MARK: - Account usage windows
+
+/// The phone rings each window of a login for the chat's own model. The catalogue therefore
+/// carries the windows, each scoped one with the model ids it meters, and a chat carries the
+/// model it chose; and a Mac predating both leaves them absent rather than empty, so a phone can
+/// tell "no windows" from "no answer".
+final class RemoteAccountUsageWireTests: XCTestCase {
+
+    func testAnAccountCarriesItsWindowsAndAChatItsModelAcrossTheWire() throws {
+        let account = RemoteAccountChoiceDTO(
+            id: "default",
+            name: "David",
+            usageSummary: "5h 43% · 7d Fable 89%",
+            usageFraction: 0.89,
+            usageWindows: [
+                .init(id: "5h", name: "5h", fraction: 0.43, resetsAt: 1_700_000_000, windowDuration: 18_000),
+                .init(
+                    id: "Fable",
+                    name: "7d Fable",
+                    fraction: 0.89,
+                    windowDuration: 604_800,
+                    metersModelIDs: ["claude-fable-5", "claude-fable-5[1m]"]
+                ),
+            ],
+            models: [],
+            defaultModelID: "claude-fable-5"
+        )
+        let decoded = try JSONDecoder().decode(
+            RemoteAccountChoiceDTO.self,
+            from: JSONEncoder().encode(account)
+        )
+        XCTAssertEqual(decoded, account)
+
+        let chat = RemoteSessionSummaryDTO(
+            id: "s",
+            title: "Rings",
+            agentKind: "claude",
+            surface: .conversation,
+            state: .idle,
+            projectName: "Threading",
+            model: "claude-fable-5"
+        )
+        let decodedChat = try JSONDecoder().decode(
+            RemoteSessionSummaryDTO.self,
+            from: JSONEncoder().encode(chat)
+        )
+        XCTAssertEqual(decodedChat.model, "claude-fable-5")
+        XCTAssertEqual(decodedChat, chat)
+    }
+
+    func testAnOlderHostLeavesTheWindowsAndTheModelAbsentNotEmpty() throws {
+        let account = try JSONDecoder().decode(
+            RemoteAccountChoiceDTO.self,
+            from: Data(#"{"id":"default","name":"David","usageFraction":0.73,"models":[]}"#.utf8)
+        )
+        XCTAssertNil(account.usageWindows)
+        XCTAssertEqual(account.usageFraction, 0.73)
+
+        let chat = try JSONDecoder().decode(
+            RemoteSessionSummaryDTO.self,
+            from: Data(#"""
+            {"id":"s","title":"Rings","agentKind":"claude","surface":"terminal","state":"idle","projectName":"Threading"}
+            """#.utf8)
+        )
+        XCTAssertNil(chat.model)
     }
 }

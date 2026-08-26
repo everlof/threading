@@ -35,6 +35,10 @@ enum PTYHostUnavailability: Equatable, Sendable {
     /// because the daemon that left the file behind is gone.
     case notRunning
 
+    /// Registration or daemon replacement is in progress. Existing hosted sessions may reattach,
+    /// but new sessions stay in-process so they cannot race into the daemon being drained.
+    case registrationRefreshing
+
     /// A daemon answered and the protocol pair does not admit it. The app refuses to attach,
     /// refuses to spawn and never signals anything; a `peerTooOld` daemon has already been sent
     /// `retire` by the client, so `KeepAlive` will relaunch the new binary.
@@ -74,6 +78,7 @@ enum PTYHostUnavailability: Equatable, Sendable {
         case .socketPathTooLong: return "socketPathTooLong"
         case .helperMissing: return "helperMissing"
         case .notRunning: return "notRunning"
+        case .registrationRefreshing: return "registrationRefreshing"
         case .protocolMismatch(let compatibility): return "protocolMismatch.\(compatibility.rawValue)"
         case .notRegistered: return "notRegistered"
         case .notFound: return "notFound"
@@ -135,7 +140,8 @@ enum PTYHostProbeOutcome: Equatable, Sendable {
 /// What a probe is asked.
 struct PTYHostProbeRequest: Sendable {
     let socketPath: String
-    /// This app's build, for the daemon's journal. Reported, never compared for admission.
+    /// This app's generation, for the daemon's journal and graceful replacement. It never gates
+    /// admission.
     let build: String
 
     init(socketPath: String, build: String) {
@@ -199,23 +205,23 @@ struct PTYHostProbe: Sendable {
     }
 }
 
-// MARK: - Build Identity
+// MARK: - Generation Identity
 
-/// The build string `hello` carries.
+/// The installed generation `hello` carries.
 ///
-/// `CFBundleShortVersionString (CFBundleVersion)` — the spelling `EventLog`,
-/// `SingleInstanceLock` and `BuildFingerprint` already use, so a daemon's journal line and the
-/// app's own name the same thing. Reported and journalled; never compared for admission, because
-/// a commit on `master` reinstalls the app several times a day and a build-gated daemon would be
-/// retired and drained for changes that touch no frame.
+/// The release version/build spelling used elsewhere, plus the source revision local installs
+/// inject while those two values remain `0.0.0`. It is compared only for graceful replacement;
+/// the independently versioned protocol pair remains the admission gate.
 enum PTYHostBuild {
-    static let unknown = "?"
+    static let unknown = PTYHostGeneration.unknown
 
     static func string(for bundle: Bundle = .main) -> String {
         let info = bundle.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? unknown
-        let number = info?["CFBundleVersion"] as? String ?? unknown
-        return "\(short) (\(number))"
+        return PTYHostGeneration.string(
+            shortVersion: info?["CFBundleShortVersionString"] as? String,
+            bundleVersion: info?["CFBundleVersion"] as? String,
+            sourceRevision: info?["ThreadingSourceRevision"] as? String
+        )
     }
 }
 
@@ -231,7 +237,7 @@ enum PTYHostBuild {
 /// The split from `PTYHostAvailability.resolve` is also a concurrency boundary: this half reads
 /// `AppSettings`, which is `@MainActor`, and the other half connects to a socket, which must not
 /// happen on the main actor. Snapshot here, resolve there.
-struct PTYHostDecision: Sendable {
+struct PTYHostDecision: Equatable, Sendable {
 
     /// The hidden opt-in. Off runs every PTY in-process, exactly as before the daemon existed.
     let isEnabled: Bool

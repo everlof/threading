@@ -119,6 +119,78 @@ final class UsageScanCacheTests: XCTestCase {
         XCTAssertEqual(warm.records.map(\.identity), ["exported"])
     }
 
+    func testLedgerIndexSkipsEnvelopeReadsAndStreamsOneGloballyDistinctRecord() throws {
+        let cacheDirectory = directory.appendingPathComponent("cache")
+        let secondSource = directory.appendingPathComponent("second.jsonl")
+        try Data("two".utf8).write(to: secondSource)
+        let cache = UsageScanCache(directory: cacheDirectory)
+        let index = try UsageLedgerIndex(directory: cacheDirectory)
+        var loads = 0
+
+        cache.beginScan()
+        index.beginScan()
+        for candidate in [source!, secondSource] {
+            _ = try index.update(source: candidate, parserID: "fixture-v1") {
+                loads += 1
+                return cache.records(for: candidate, parserID: "fixture-v1") {
+                    [makeRecord(identity: "shared")]
+                }
+            }
+        }
+        XCTAssertEqual(try index.finishScan(), 2, "raw coverage still counts both sources")
+        cache.finishScan()
+
+        cache.beginScan()
+        index.beginScan()
+        for candidate in [source!, secondSource] {
+            let warm = try index.update(source: candidate, parserID: "fixture-v1") {
+                loads += 1
+                XCTFail("an unchanged indexed source decoded its envelope")
+                return cache.records(for: candidate, parserID: "fixture-v1") { [] }
+            }
+            XCTAssertTrue(warm.wasCacheHit)
+        }
+        XCTAssertEqual(try index.finishScan(), 2)
+        cache.finishScan()
+
+        var streamed: [UsageLedgerRecord] = []
+        try index.forEachRecord { streamed.append($0) }
+        XCTAssertEqual(loads, 2)
+        XCTAssertEqual(streamed.map(\.identity), ["shared"])
+    }
+
+    func testCacheEnforcesOneAggregateDirectoryBound() throws {
+        let cacheDirectory = directory.appendingPathComponent("bounded-cache")
+        let maximumBytes: Int64 = 2_500
+        let cache = UsageScanCache(
+            directory: cacheDirectory,
+            maximumTotalBytes: maximumBytes
+        )
+        let sources = (0..<4).map { index in
+            directory.appendingPathComponent("source-\(index).jsonl")
+        }
+        for (index, candidate) in sources.enumerated() {
+            try Data("source-\(index)".utf8).write(to: candidate)
+        }
+
+        cache.beginScan()
+        for (index, candidate) in sources.enumerated() {
+            _ = cache.records(for: candidate, parserID: "fixture-v1") {
+                [makeRecord(identity: String(repeating: "x", count: 900) + "-\(index)")]
+            }
+        }
+        cache.finishScan()
+
+        let total = try FileManager.default.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.fileSizeKey]
+        ).filter { $0.pathExtension == UsageScanCacheDefaults.extensionName }
+            .reduce(Int64(0)) { sum, url in
+                sum + Int64(try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+            }
+        XCTAssertLessThanOrEqual(total, maximumBytes)
+    }
+
     private func makeRecord(identity: String) -> UsageLedgerRecord {
         UsageLedgerRecord(
             identity: identity,

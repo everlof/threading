@@ -162,6 +162,11 @@ final class TerminalSession: NSObject {
     /// The live link, while this session's child lives in the background host.
     private var hostLink: PTYHostTerminalLink?
 
+    /// The transport-queue parser belonging to `hostLink`. Invalidated before the link is
+    /// replaced or cleared so a late burst from an old child cannot enter the replacement's
+    /// emulator.
+    private var hostOutputParser: TerminalHostOutputParser?
+
     /// The launch a host-backed spawn is still waiting on an answer for.
     ///
     /// Kept because a refusal is not an ending: the daemon may hold the previous incarnation of
@@ -530,7 +535,8 @@ final class TerminalSession: NSObject {
 
         let hostIdentity = PTYHostSessionIdentity(identity)
         let link = PTYHostTerminalLink(identity: hostIdentity)
-        link.delivery = hostDelivery(for: link)
+        let outputParser = terminalView.makeHostOutputParser()
+        link.delivery = hostDelivery(for: link, outputParser: outputParser)
 
         do {
             link.adopt(try hostTransportFactory(link.events()))
@@ -564,7 +570,9 @@ final class TerminalSession: NSObject {
             return false
         }
 
+        hostOutputParser?.invalidate()
         hostLink = link
+        hostOutputParser = outputParser
         hostLaunchPlan = plan
         terminalView.hostTransport = TerminalHostTransport(
             sendInput: { [weak link] bytes in link?.sendInput(bytes) },
@@ -601,7 +609,8 @@ final class TerminalSession: NSObject {
 
         let hostIdentity = PTYHostSessionIdentity(identity)
         let link = PTYHostTerminalLink(identity: hostIdentity)
-        link.delivery = hostDelivery(for: link)
+        let outputParser = terminalView.makeHostOutputParser()
+        link.delivery = hostDelivery(for: link, outputParser: outputParser)
 
         do {
             link.adopt(try hostTransportFactory(link.events()))
@@ -625,7 +634,9 @@ final class TerminalSession: NSObject {
             return false
         }
 
+        hostOutputParser?.invalidate()
         hostLink = link
+        hostOutputParser = outputParser
         terminalView.hostTransport = TerminalHostTransport(
             sendInput: { [weak link] bytes in link?.sendInput(bytes) },
             sendWindowSize: { [weak link] size in link?.sendWindowSize(size) ?? false },
@@ -665,6 +676,8 @@ final class TerminalSession: NSObject {
             by: deadline
         )
 
+        hostOutputParser?.invalidate()
+        hostOutputParser = nil
         self.hostLink = nil
         hostLaunchPlan = nil
         hostForegroundGroup = nil
@@ -676,21 +689,32 @@ final class TerminalSession: NSObject {
         return sent
     }
 
-    /// The four edges of a host-backed session, each already on the main queue.
+    /// The edges of a host-backed session. Live parsing stays on the transport queue; lifecycle
+    /// and output reporting arrive on main.
     ///
     /// Every one of them is guarded by the link still being *this* session's. A stop followed at
     /// once by a relaunch leaves the previous link alive until the daemon answers it, and its
     /// late `exited` must not end the launch that replaced it.
-    private func hostDelivery(for link: PTYHostTerminalLink) -> PTYHostTerminalLink.Delivery {
+    private func hostDelivery(
+        for link: PTYHostTerminalLink,
+        outputParser: TerminalHostOutputParser
+    ) -> PTYHostTerminalLink.Delivery {
         PTYHostTerminalLink.Delivery(
+            parseOutput: { segment in
+                outputParser.feed(segment.bytes)
+            },
             output: { [weak self, weak link] segments in
                 MainActor.assumeIsolated {
                     guard let self, let link, self.hostLink === link else { return }
                     for segment in segments {
-                        self.terminalView.feedFromHost(
-                            segment.bytes,
-                            answersQueries: segment.answersQueries
-                        )
+                        if segment.requiresMainActorParse {
+                            self.terminalView.feedFromHost(
+                                segment.bytes,
+                                answersQueries: segment.answersQueries
+                            )
+                        } else {
+                            self.terminalView.reportHostOutput(segment.bytes)
+                        }
                     }
                 }
             },
@@ -770,6 +794,8 @@ final class TerminalSession: NSObject {
             """
         )
 
+        hostOutputParser?.invalidate()
+        hostOutputParser = nil
         hostLink = nil
         hostForegroundGroup = nil
         terminalView.hostTransport = nil
@@ -793,11 +819,14 @@ final class TerminalSession: NSObject {
                 ["session": identity.historyFileStem, "cause": cause]
             )
         }
+        hostOutputParser?.invalidate()
+        hostOutputParser = nil
         hostLink = nil
         hostLaunchPlan = nil
         hostForegroundGroup = nil
         terminalView.hostTransport = nil
         handleProcessTermination(exitCode: exitCode)
+        NotificationCenter.default.post(PTYHostMayHaveDrained())
     }
 
     /// `LocalProcess` now uses `forkpty`, which returns the exact child synchronously. Keeping

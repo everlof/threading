@@ -542,27 +542,37 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     adapter seam was cut to make that mechanical.
 
 - **InjectionNext** (downloaded developer tool, never a product dependency): opt-in function-body
-  hot reloading for the macOS Debug app.
+  hot reloading for the macOS and iOS Simulator Debug apps.
   - `scripts/injection_next.sh` pins release `2.0.1` and its archive SHA-256, then verifies the
     bundle id, version, Developer ID team, code signature and Gatekeeper assessment before caching
-    it under the user's Library. Its signed client has an `/Applications/InjectionNext.app`
-    install name, so the script prepares a separate ad-hoc-signed cache copy with a cache-local
-    install name; neither the tool, package nor sources enter this repository, `Package.resolved`,
-    the app bundle or a Release build.
+    it under the user's Library. Its signed macOS and iOS Simulator clients have
+    `/Applications/InjectionNext.app` install names, so the script prepares separate
+    ad-hoc-signed cache copies with cache-local install names; neither the tool, package nor
+    sources enter this repository, `Package.resolved`, either app bundle or a Release build.
   - `scripts/config/injection-next.xcconfig` exists outside every target configuration. Only the
     script passes it through `XCODE_XCCONFIG_FILE` to the Xcode process InjectionNext supervises;
     normal Xcode, command-line builds, hosted tests, profiling, CI and releases retain their
-    ordinary linker and compilation-cache behavior. The config also gates itself to Debug and
-    keys linker flags by wrapper extension, so Release and the three command-line helpers built
-    beside `Threading.app` do not load an injection client or lose their own `OTHER_LDFLAGS`.
+    ordinary linker and compilation-cache behavior. The config also gates itself by Debug,
+    wrapper extension and platform: the two app targets load their matching client on macOS and
+    iOS Simulator, while Release, physical-device builds, tests and the command-line helpers built
+    beside `Threading.app` do not load one or lose their own `OTHER_LDFLAGS`.
   - In that supervised Debug process the config disables Xcode's compilation cache, emits frontend
-    commands, links `libmacosxInjection.dylib` with `-interposable`, and supplies runpaths for the
-    client's XCTest support libraries from the selected Xcode. The script uses InjectionNext's
-    supervised-Xcode path rather than its fallback file watcher: command-line `xcodebuild` does not
-    create the IDE activity log the fallback needs, and watching the repository root makes the
-    upstream app offer to patch `project.pbxproj`. The supervised path uses ordinary user state:
-    every Xcode and InjectionNext process must quit before the wrapper starts, and every Threading
-    process must quit before Run so the injected app remains the sole owner of its live stores.
+    commands, links the matching `libmacosxInjection.dylib` or
+    `libiphonesimulatorInjection.dylib` with `-interposable`, and supplies platform-specific
+    runpaths for the client's XCTest support libraries from the selected Xcode. The script uses
+    InjectionNext's supervised-Xcode path rather than its fallback file watcher: command-line
+    `xcodebuild` does not create the IDE activity log the fallback needs, and watching the
+    repository root makes the upstream app offer to patch `project.pbxproj`. The supervised path
+    uses ordinary user state: every Xcode and InjectionNext process must quit before the wrapper
+    starts, and every Threading process must quit before Run so the injected Mac app remains the
+    sole owner of its live stores. Two project windows in the supervised Xcode keep the Mac and
+    Simulator Run sessions alive together.
+  - Loading a replacement does not itself make a standing UI ask for another frame. The AppKit
+    model-effort matrix invalidates its intrinsic size and display on
+    `INJECTION_BUNDLE_NOTIFICATION`; the SwiftUI counterpart increments debug-only state and
+    rebuilds its body. Their local numeric metrics are computed accessors rather than initialized
+    stored constants, so the measurements themselves remain injectable. This seam is picker-local:
+    it does not turn every application injection into a whole-window or whole-scene rebuild.
   - This is an iteration aid, never evidence. It may replace existing function bodies but cannot
     change type layout, stored properties, signatures or the source-file graph. A normal build and
     the relevant tests remain the completion gate, rendered evidence remains the appearance gate,

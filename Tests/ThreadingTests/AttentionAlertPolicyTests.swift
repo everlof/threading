@@ -227,6 +227,91 @@ final class AttentionAlertPolicyTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: attachment.url), png)
     }
 
+    // MARK: - Once Per Episode, Not Once Per Edge
+
+    /// The bug this rule exists for, replayed as the states it arrived as.
+    ///
+    /// A terminal session with no lifecycle hooks flip-flops `working` / `needsAttention` on
+    /// every burst of output, because the quiet timer *is* its turn boundary. Recorded live on
+    /// 25 August 2026: four `needsAttention` edges inside six seconds, each of which posted a
+    /// full banner. Only the first is news.
+    func testARepeatedAlertIsQuietAndOnlyTheFirstInterrupts() {
+        var lastAnnounced: AttentionAlert?
+        var presentations: [AttentionAlertPolicy.Presentation] = []
+
+        for _ in 0..<4 {
+            let presentation = AttentionAlertPolicy.presentation(
+                of: .unread,
+                lastAnnounced: lastAnnounced
+            )
+            presentations.append(presentation)
+            lastAnnounced = .unread
+        }
+
+        XCTAssertEqual(presentations, [.interrupt, .quiet, .quiet, .quiet])
+    }
+
+    /// Looking at the session ends the episode, so the next one is news again. This is the
+    /// half that keeps the rule from being a mute: the center clears its announcement on a
+    /// `viewed` withdrawal and on that alone.
+    func testViewingTheSessionMakesTheNextAlertInterruptAgain() {
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(of: .unread, lastAnnounced: .unread),
+            .quiet
+        )
+        // `viewed` is what clears the announcement, which arrives here as nil.
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(of: .unread, lastAnnounced: nil),
+            .interrupt
+        )
+    }
+
+    /// An escalation is a different alert and interrupts. A session that was merely unread and
+    /// is now holding a turn up on a question has said something new, and quieting that would
+    /// be the failure this rule must not introduce.
+    func testAnEscalationToADifferentAlertStillInterrupts() {
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(of: .blocked, lastAnnounced: .unread),
+            .interrupt
+        )
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(of: .unread, lastAnnounced: .blocked),
+            .interrupt
+        )
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(of: .finished, lastAnnounced: .unread),
+            .interrupt
+        )
+    }
+
+    /// The curfew give-up is exempt. It is not derived from a state edge — a ladder that ran
+    /// out posts it once per episode — and it is the only alert that reports Threading trying
+    /// something and failing, so a second one is news however recently the first arrived.
+    func testTheCurfewGiveUpIsNeverQuietedAsARepeat() {
+        XCTAssertEqual(
+            AttentionAlertPolicy.presentation(of: .curfew, lastAnnounced: .curfew),
+            .interrupt
+        )
+    }
+
+    /// Every alert kind is covered by the rule, so a case added later cannot quietly inherit
+    /// whichever branch happens to be first.
+    func testEveryAlertKindHasAnAnswerForBothFirstAndRepeat() {
+        for alert in AttentionAlert.allCases {
+            XCTAssertEqual(
+                AttentionAlertPolicy.presentation(of: alert, lastAnnounced: nil),
+                .interrupt,
+                "\(alert.rawValue) should interrupt when it is the first of its episode"
+            )
+            let repeated = AttentionAlertPolicy.presentation(of: alert, lastAnnounced: alert)
+            XCTAssertEqual(
+                repeated,
+                alert == .curfew ? .interrupt : .quiet,
+                "\(alert.rawValue) repeated"
+            )
+        }
+    }
+
     private func samplePNG() throws -> Data {
         let side = 8
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { bounds in

@@ -385,3 +385,113 @@ final class RemoteConnectionFailureTests: XCTestCase {
         throw XCTSkip("no terminal state")
     }
 }
+
+/// The REST half of the same reliability boundary: HTTP status says which broad class failed,
+/// while the bounded refusal code retains the host's actionable reason across the wire.
+final class RemoteRESTErrorTests: XCTestCase {
+    func testStructuredRefusalPreservesStatusCodeAndMachineDetail() {
+        let body = try! JSONEncoder().encode(RemoteErrorDTO(
+            code: .unknownModel,
+            detail: "catalogChanged"
+        ))
+        let error = RemoteClientError.decodedRefusal(status: 422, data: body)
+
+        XCTAssertEqual(error.statusCode, 422)
+        XCTAssertEqual(error.refusalCode, RemoteRESTErrorCode.unknownModel.rawValue)
+        XCTAssertEqual(error.refusalDetail, "catalogChanged")
+        XCTAssertTrue(error.requiresLaunchCatalogRefresh)
+        XCTAssertEqual(
+            MobileDiagnostics.errorCode(error),
+            "remote.refusal.unknownModel"
+        )
+        XCTAssertFalse(error.localizedDescription.contains("HTTP 422"))
+    }
+
+    func testLegacyAndFutureHostRefusalsRemainDiagnosable() throws {
+        let legacy = RemoteClientError.decodedRefusal(status: 422, data: Data())
+        XCTAssertEqual(legacy.statusCode, 422)
+        XCTAssertNil(legacy.refusalCode)
+        XCTAssertEqual(MobileDiagnostics.errorCode(legacy), "remote.http.422")
+
+        let futureBody = try JSONEncoder().encode(RemoteErrorDTO(code: "futureGuard"))
+        let future = RemoteClientError.decodedRefusal(status: 409, data: futureBody)
+        XCTAssertEqual(future.refusalCode, "futureGuard")
+        XCTAssertEqual(
+            MobileDiagnostics.errorCode(future),
+            "remote.refusal.futureGuard"
+        )
+    }
+
+    func testGenericUnauthorizedResponseKeepsMembershipMessage() throws {
+        let body = try JSONEncoder().encode(RemoteErrorDTO(code: .unauthorized))
+        let error = RemoteClientError.decodedRefusal(status: 401, data: body)
+
+        guard case .unauthorized = error else {
+            return XCTFail("generic authentication refusal should keep the established case")
+        }
+    }
+
+    func testAccountMoveRefusalUsesItsSafeGuardDetail() throws {
+        let body = try JSONEncoder().encode(RemoteErrorDTO(
+            code: .accountMoveRefused,
+            detail: "missingTranscript"
+        ))
+        let error = RemoteClientError.decodedRefusal(status: 409, data: body)
+
+        XCTAssertEqual(
+            error.localizedDescription,
+            MobileL10n.string("This session has no recorded conversation to move yet.")
+        )
+        XCTAssertEqual(error.refusalDetail, "missingTranscript")
+    }
+
+    func testOpenDraftRepairsOnlyWithdrawnProjectAndAgentChoices() {
+        let catalog = RemoteNewSessionCatalogDTO(
+            projects: [
+                .init(id: "project-a", name: "Alpha", branch: nil, checkoutLabel: "Alpha"),
+                .init(id: "project-b", name: "Beta", branch: nil, checkoutLabel: "Beta"),
+            ],
+            agents: [
+                .init(
+                    id: "claude",
+                    name: "Claude",
+                    models: [],
+                    defaultModelID: nil,
+                    supportsConversation: true
+                ),
+                .init(
+                    id: "codex",
+                    name: "Codex",
+                    models: [],
+                    defaultModelID: nil,
+                    supportsConversation: true
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            SessionDraftCatalogReconciliation.projectID(
+                current: "project-a",
+                draftProjectName: "Beta",
+                catalog: catalog
+            ),
+            "project-a",
+            "a still-advertised choice must not be reset"
+        )
+        XCTAssertEqual(
+            SessionDraftCatalogReconciliation.projectID(
+                current: "removed-project",
+                draftProjectName: "Beta",
+                catalog: catalog
+            ),
+            "project-b"
+        )
+        XCTAssertEqual(
+            SessionDraftCatalogReconciliation.agentID(
+                current: "removed-agent",
+                catalog: catalog
+            ),
+            "codex"
+        )
+    }
+}

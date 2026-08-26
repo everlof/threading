@@ -69,7 +69,8 @@ enum PTYHostPolicy {
         settings: AppSettings = .shared,
         bundle: Bundle = .main,
         probe: PTYHostProbe = .connecting(),
-        eventLog: EventLog = .shared
+        eventLog: EventLog = .shared,
+        newSessionAdmission: PTYHostNewSessionAdmission = .shared
     ) -> PTYHostTransportFactory? {
         // Version 1 hosts agent sessions only. A project terminal, a session shell and an
         // ephemeral terminal all poll `tcgetpgrp` on a descriptor a host-backed session does not
@@ -78,6 +79,13 @@ enum PTYHostPolicy {
         // daemon change rather than a protocol change.
         guard case .agentSession = identity else { return nil }
         guard let session, hostsSession(session, settings: settings) else { return nil }
+        guard newSessionAdmission.permitsHostedSpawn else {
+            eventLog.record(.session, "Session runs its PTY in-process", [
+                "session": identity.historyFileStem,
+                "cause": PTYHostUnavailability.registrationRefreshing.token
+            ])
+            return nil
+        }
 
         let availability = PTYHostAvailability.live(
             settings: settings,

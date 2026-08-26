@@ -1,10 +1,11 @@
 #!/bin/bash
 #
-# Opt-in InjectionNext hot reloading for the macOS app.
+# Opt-in InjectionNext hot reloading for the macOS app and iOS Simulator app.
 #
 # The normal project contains no InjectionNext package or linked runtime. This script downloads
 # one pinned, notarized release into the user's cache, then starts an InjectionNext-supervised
-# Xcode whose Debug builds alone receive an injection xcconfig through their process environment.
+# Xcode whose macOS and iOS Simulator Debug app builds alone receive an injection xcconfig
+# through their process environment.
 #
 # Usage:
 #   scripts/injection_next.sh xcode      # launch the opt-in supervised Xcode
@@ -25,9 +26,11 @@ repository_directory="$(cd "${script_directory}/.." && pwd)"
 injection_cache_base="${THREADING_INJECTION_NEXT_CACHE:-${HOME}/Library/Caches/codes.threading/InjectionNext}"
 injection_version_directory="${injection_cache_base}/${injection_version}"
 injection_app="${injection_version_directory}/InjectionNext.app"
-injection_release_dylib="${injection_app}/Contents/Resources/libmacosxInjection.dylib"
+injection_release_macos_dylib="${injection_app}/Contents/Resources/libmacosxInjection.dylib"
+injection_release_ios_simulator_dylib="${injection_app}/Contents/Resources/libiphonesimulatorInjection.dylib"
 injection_runtime_directory="${injection_version_directory}/Runtime"
-injection_dylib="${injection_runtime_directory}/libmacosxInjection.dylib"
+injection_macos_dylib="${injection_runtime_directory}/libmacosxInjection.dylib"
+injection_ios_simulator_dylib="${injection_runtime_directory}/libiphonesimulatorInjection.dylib"
 injection_xcconfig="${script_directory}/config/injection-next.xcconfig"
 log_directory="${injection_version_directory}/Logs"
 threading_project="${repository_directory}/Threading.xcodeproj"
@@ -61,6 +64,8 @@ verify_injection_app() {
         fail "cached app is not InjectionNext ${injection_version}"
     [[ -f "${app}/Contents/Resources/libmacosxInjection.dylib" ]] ||
         fail "cached app has no macOS injection client dylib"
+    [[ -f "${app}/Contents/Resources/libiphonesimulatorInjection.dylib" ]] ||
+        fail "cached app has no iOS Simulator injection client dylib"
 
     /usr/bin/codesign --verify --deep --strict "${app}" 2>/dev/null ||
         fail "cached InjectionNext signature does not verify"
@@ -75,13 +80,16 @@ verify_injection_app() {
 }
 
 verify_runtime_dylib() {
-    [[ -f "${injection_dylib}" ]] || return 1
-    /usr/bin/codesign --verify --strict "${injection_dylib}" 2>/dev/null || return 1
+    local dylib="$1"
+    local expected_install_name="${2:-${dylib}}"
+
+    [[ -f "${dylib}" ]] || return 1
+    /usr/bin/codesign --verify --strict "${dylib}" 2>/dev/null || return 1
 
     # The release dylib's install name is rooted at /Applications. Every architecture in the
     # prepared copy must instead name the exact cache-local file the linker and loader will use.
-    /usr/bin/otool -D "${injection_dylib}" |
-        /usr/bin/awk -v expected="${injection_dylib}" '
+    /usr/bin/otool -D "${dylib}" |
+        /usr/bin/awk -v expected="${expected_install_name}" '
             NR > 1 && index($0, " (architecture ") == 0 {
                 found = 1
                 if ($0 != expected) exit 1
@@ -91,22 +99,38 @@ verify_runtime_dylib() {
 }
 
 prepare_runtime_dylib() {
-    if verify_runtime_dylib; then
+    local release_dylib="$1"
+    local prepared_dylib="$2"
+
+    if verify_runtime_dylib "${prepared_dylib}"; then
         return
     fi
 
-    /usr/bin/find "${injection_runtime_directory}" -depth -delete 2>/dev/null || true
     /bin/mkdir -p "${injection_runtime_directory}"
-    /usr/bin/ditto "${injection_release_dylib}" "${injection_dylib}"
-    /usr/bin/install_name_tool -id "${injection_dylib}" "${injection_dylib}"
-    /usr/bin/codesign --force --sign - --timestamp=none "${injection_dylib}" >/dev/null
-    verify_runtime_dylib || fail "could not prepare the cache-local InjectionNext client dylib"
+    local staged_dylib="${prepared_dylib}.staged.$$"
+    /usr/bin/ditto "${release_dylib}" "${staged_dylib}"
+    /usr/bin/install_name_tool -id "${prepared_dylib}" "${staged_dylib}"
+    /usr/bin/codesign --force --sign - --timestamp=none "${staged_dylib}" >/dev/null
+    if ! verify_runtime_dylib "${staged_dylib}" "${prepared_dylib}"; then
+        /usr/bin/find "${staged_dylib}" -depth -delete 2>/dev/null || true
+        fail "could not prepare cache-local InjectionNext client: ${prepared_dylib}"
+    fi
+    /bin/mv -f "${staged_dylib}" "${prepared_dylib}"
+    verify_runtime_dylib "${prepared_dylib}" ||
+        fail "prepared InjectionNext client did not survive installation: ${prepared_dylib}"
+}
+
+prepare_runtime_dylibs() {
+    prepare_runtime_dylib "${injection_release_macos_dylib}" "${injection_macos_dylib}"
+    prepare_runtime_dylib \
+        "${injection_release_ios_simulator_dylib}" \
+        "${injection_ios_simulator_dylib}"
 }
 
 bootstrap() {
     if [[ -d "${injection_app}" ]]; then
         verify_injection_app "${injection_app}"
-        prepare_runtime_dylib
+        prepare_runtime_dylibs
         echo "InjectionNext ${injection_version} is already verified at ${injection_app}"
         return
     fi
@@ -141,7 +165,7 @@ bootstrap() {
     /bin/mv "${staged_app}" "${injection_app}"
     trap - RETURN
     cleanup_staging
-    prepare_runtime_dylib
+    prepare_runtime_dylibs
 
     echo "Installed verified InjectionNext ${injection_version} in the user cache."
 }
@@ -175,7 +199,8 @@ launch_supervised_xcode() {
         --stdout "${server_log}"
         --stderr "${server_log}"
         --env "XCODE_XCCONFIG_FILE=${injection_xcconfig}"
-        --env "THREADING_INJECTION_DYLIB=${injection_dylib}"
+        --env "THREADING_INJECTION_MACOS_DYLIB=${injection_macos_dylib}"
+        --env "THREADING_INJECTION_IOS_SIMULATOR_DYLIB=${injection_ios_simulator_dylib}"
     )
     echo "Launching with ordinary user state; quit every Threading before pressing Run."
 
@@ -185,8 +210,9 @@ launch_supervised_xcode() {
         -hideXcodeAlert YES \
         -projectPath "${threading_project}"
     echo "InjectionNext log: ${server_log}"
-    echo "In the launched Xcode: choose the Threading scheme, Debug configuration, then Run."
-    echo "Once InjectionNext's icon is orange, saving an existing Swift function body injects it."
+    echo "In the launched Xcode: run Threading on My Mac and ThreadingMobile on an iOS Simulator."
+    echo "Use two project windows to keep both Run sessions live at the same time."
+    echo "Once both clients have connected, saving an existing Swift function body injects it."
 }
 
 latest_log() {
@@ -211,10 +237,14 @@ case "${command}" in
         ;;
     status)
         verify_injection_app "${injection_app}"
-        verify_runtime_dylib || fail "cache-local client dylib is not prepared; run '$0 bootstrap'."
+        verify_runtime_dylib "${injection_macos_dylib}" ||
+            fail "cache-local macOS client is not prepared; run '$0 bootstrap'."
+        verify_runtime_dylib "${injection_ios_simulator_dylib}" ||
+            fail "cache-local iOS Simulator client is not prepared; run '$0 bootstrap'."
         verify_selected_xcode
         echo "InjectionNext ${injection_version} is verified at ${injection_app}"
-        echo "Client dylib: ${injection_dylib}"
+        echo "macOS client: ${injection_macos_dylib}"
+        echo "iOS Simulator client: ${injection_ios_simulator_dylib}"
         echo "Selected Xcode: ${selected_xcode_app}"
         ;;
     xcode)

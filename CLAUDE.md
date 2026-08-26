@@ -37,7 +37,7 @@ scripts/test.sh ui       # app-level XCUITest scenarios in an isolated Cocoa hom
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)
 open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Threading-*/Build/Products/Debug/Threading.app | head -1)"
 
-# Opt-in InjectionNext hot reload. Quit Threading and Xcode first; then Run in launched Xcode.
+# Opt-in macOS + iOS Simulator InjectionNext hot reload. Quit Threading and Xcode first.
 scripts/injection_next.sh xcode
 ```
 
@@ -47,17 +47,21 @@ supervised Xcode is ready so they can quit Threading and press Run. If Xcode or 
 already open, report that prerequisite instead of quitting either app without permission.
 
 `scripts/injection_next.sh` is the only InjectionNext path. It downloads one pinned, signed and
-notarized release to the user's cache, applies `scripts/config/injection-next.xcconfig` to that
-supervised Xcode's Debug builds through `XCODE_XCCONFIG_FILE`, and has InjectionNext launch that
-Xcode so it can observe compiler commands and source saves. In the launched Xcode, choose the
-Threading scheme and Run; do not accept any offer to patch the project or compiler. The wrapper
-does not enable file-watcher mode and does not modify `Threading.xcodeproj`. Xcode and
-InjectionNext must both be quit before running the wrapper, and every Threading must be
-quit before pressing Run because the experiment uses ordinary app state. Ordinary Xcode,
-command-line builds, tests, profiling, CI and Release do not link or start InjectionNext; use
-those ordinary paths for every completion check. Injection replaces function bodies, not type
-layout: adding stored properties, changing signatures, adding or renaming source files, and
-changing already-initialized stored constants still require a normal rebuild. Never use an
+notarized release to the user's cache, prepares cache-local macOS and iOS Simulator clients,
+applies `scripts/config/injection-next.xcconfig` to that supervised Xcode's Debug app builds
+through `XCODE_XCCONFIG_FILE`, and has InjectionNext launch that Xcode so it can observe compiler
+commands and source saves. To keep both apps live, open the project in two windows inside that one
+Xcode process, then Run `Threading` on My Mac in one and `ThreadingMobile` on an iOS Simulator in
+the other. Do not accept any offer to patch the project or compiler. The wrapper does not enable
+file-watcher mode and does not modify `Threading.xcodeproj`. Xcode and InjectionNext must both be
+quit before running the wrapper, and every Threading must be quit before pressing Run because the
+experiment uses ordinary app state. Ordinary Xcode, command-line builds, tests, profiling, CI,
+Release and physical-device builds do not link or start InjectionNext; use those ordinary paths
+for every completion check. Injection replaces function bodies, not type layout: adding stored
+properties, changing signatures, adding or renaming source files, and changing already-initialized
+stored constants still require a normal rebuild. The two model-effort pickers deliberately keep
+their tweakable local metrics as computed accessors and invalidate/re-evaluate on InjectionNext's
+completion notification, so an already-open picker visibly refreshes after a save. Never use an
 injection build for tests, performance evidence or shipping verification.
 
 **A commit on master starts a background build.** `scripts/install_git_hooks.sh` installs

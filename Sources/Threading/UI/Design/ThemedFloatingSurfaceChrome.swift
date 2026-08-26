@@ -27,16 +27,20 @@ struct ThemedFloatingSurfaceChrome {
         )
     }
 
-    /// Applies the rectangular form of the grammar. The popover owns its joined arrow path;
-    /// ordinary floating cards use this shared layer-backed surface interpreter.
-    func apply(to view: NSView) {
+    /// Applies the layer-backed form of the grammar. The popover owns its joined arrow path;
+    /// ordinary floating cards use the material's corner, while a compact semantic shape such
+    /// as the scroll-to-end target supplies its own. The override changes only geometry: fill,
+    /// edge construction and depth remain the one floating-surface contract.
+    func apply(to view: NSView, radius radiusOverride: SurfaceRadius? = nil) {
         let materialEdge = style.edge == .material && material.bevel != nil
         let flatEdge = style.edge == .flat || (style.edge == .material && !materialEdge)
         let materialShadow = material.glow != nil
             && (style.shadow == .material || style.shadow == .automatic)
         let systemShadow = style.shadow == .system
             || (style.shadow == .automatic && !materialShadow)
-        let radius = style.cornerRadius.map(SurfaceRadius.fixed) ?? .panel
+        let radius = radiusOverride
+            ?? style.cornerRadius.map(SurfaceRadius.fixed)
+            ?? .panel
 
         view.applySurface(
             fill: fill,

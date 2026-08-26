@@ -32,6 +32,8 @@ final class PTYHostSessionDaemonTests: XCTestCase {
         static let exitTimeout: TimeInterval = 15
         /// Long enough that "the child never learned" means it rather than "not yet".
         static let quietWindow: TimeInterval = 2
+        /// `read -t 1` makes this roughly two minutes when a failed test abandons the child.
+        static let sizePollIterations = 120
     }
 
     // MARK: - Fixture state
@@ -53,11 +55,25 @@ final class PTYHostSessionDaemonTests: XCTestCase {
 
     override func tearDown() {
         session?.terminate()
+        if let session {
+            XCTAssertTrue(
+                pump(
+                    until: { !session.isHostBacked },
+                    timeout: PTYHostTestProcessCleanup.childTimeout
+                ),
+                "host-backed test session did not report its ending"
+            )
+        }
         session = nil
         recorder = nil
         window?.orderOut(nil)
         window = nil
-        daemon?.terminate()
+        if let daemon {
+            XCTAssertTrue(
+                daemon.shutdown(),
+                "scratch PTY daemon did not drain: \(daemon.diagnosticText)"
+            )
+        }
         daemon = nil
         if let directory { try? FileManager.default.removeItem(at: directory) }
         super.tearDown()
@@ -208,9 +224,10 @@ final class PTYHostSessionDaemonTests: XCTestCase {
     /// depends on no shell's trap semantics; the `read` is what lets a test decide when output
     /// flows, since a pty echoes and any output at all is evidence the link is current.
     private static func sizeLoggingScript(log: URL) -> String {
-        "last=; while :; do now=$(stty size); "
+        "last=; i=0; while [ \"$i\" -lt \(Fixture.sizePollIterations) ]; do now=$(stty size); "
             + "if [ \"$now\" != \"$last\" ]; then printf '%s\\n' \"$now\" >> \(log.path); "
-            + "last=$now; fi; if read -t 1 line; then printf '[%s]' \"$line\"; fi; done"
+            + "last=$now; fi; if read -t 1 line; then printf '[%s]' \"$line\"; fi; "
+            + "i=$((i + 1)); done"
     }
 
     /// The size lines the child has written. `stty size` prints "rows cols".
@@ -361,14 +378,20 @@ private final class RefusingResizeTransport: PTYHostSessionTransport, @unchecked
 private final class DaemonProcess: @unchecked Sendable {
 
     private let process = Process()
+    private let socketPath: String
     private let diagnostics = Pipe()
     private let lock = NSLock()
     private var collected = Data()
 
     init(helper: URL, socketPath: String, stateDirectory: URL) throws {
+        self.socketPath = socketPath
         process.executableURL = helper
         process.arguments = ["--socket", socketPath, "--state", stateDirectory.path]
-        process.environment = ["PATH": "/usr/bin:/bin"]
+        var environment = ["PATH": "/usr/bin:/bin"]
+        if let token = ProcessInfo.processInfo.environment["THREADING_TEST_RUN_TOKEN"] {
+            environment["THREADING_TEST_RUN_TOKEN"] = token
+        }
+        process.environment = environment
         process.standardError = diagnostics
         process.standardOutput = FileHandle.nullDevice
 
@@ -388,11 +411,24 @@ private final class DaemonProcess: @unchecked Sendable {
         try process.run()
     }
 
-    func terminate() {
-        if process.isRunning {
+    func shutdown() -> Bool {
+        let drained = PTYHostTestProcessCleanup.stopSessionsAndRetire(socketPath: socketPath)
+        let exited = waitUntilExited(timeout: PTYHostTestProcessCleanup.childTimeout)
+        if !exited, process.isRunning {
             Darwin.kill(process.processIdentifier, SIGKILL)
+            _ = waitUntilExited(timeout: 1)
         }
         diagnostics.fileHandleForReading.readabilityHandler = nil
+        return drained && exited
+    }
+
+    private func waitUntilExited(timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !process.isRunning { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return !process.isRunning
     }
 
     var diagnosticText: String {

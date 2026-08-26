@@ -1276,7 +1276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             mainWindowController.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
             return .success(())
         case .failure(let error):
-            return .failure(.moveRefused(error.message))
+            return .failure(.moveRefused(error.code))
         }
     }
 

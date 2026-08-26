@@ -37,6 +37,39 @@ struct TerminalHostTransport {
     }
 }
 
+/// The background half of a host-backed terminal's output path.
+///
+/// SwiftTerm's local-process path parses on its PTY IO worker and hops to main only for host
+/// callbacks. A hosted child has to preserve that split: putting `feed` itself on main makes a
+/// Codex repaint wait behind AppKit drawing, and both echoed keystrokes and the activity edge
+/// behind that repaint feel late.
+///
+/// The sender is SwiftTerm's checked, thread-safe feed handle. The lock is a lifetime gate rather
+/// than a parser lock — the sender owns parser serialization. Holding it across the feed makes
+/// `invalidate()` an exact boundary: once it returns, bytes from a link this session replaced can
+/// no longer land in the emulator now showing the replacement.
+final class TerminalHostOutputParser: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sender: TerminalFeedSender?
+
+    init(sender: TerminalFeedSender) {
+        self.sender = sender
+    }
+
+    func feed(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        sender?.feed(byteArray: bytes[...])
+    }
+
+    func invalidate() {
+        lock.lock()
+        sender = nil
+        lock.unlock()
+    }
+}
+
 /// A subclass of LocalProcessTerminalView that fixes emoji rendering issues.
 ///
 /// The issue: Apple Color Emoji glyphs rendered via CTFontDrawGlyphs don't properly
@@ -193,6 +226,22 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             }
         }
 
+        reportHostOutput(bytes)
+    }
+
+    /// Builds the lifetime-gated parser a single host link uses on its transport queue.
+    ///
+    /// A new value per link is what lets a rapid stop/relaunch invalidate the old producer
+    /// without disabling the new one. `TerminalFeedSender` is the nonisolated SwiftTerm seam;
+    /// no AppKit view state crosses the queue boundary.
+    func makeHostOutputParser() -> TerminalHostOutputParser {
+        TerminalHostOutputParser(sender: feedSender)
+    }
+
+    /// Fires the same main-actor callbacks as the local-process output observer, after a hosted
+    /// batch has already been parsed on the transport queue.
+    func reportHostOutput(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty else { return }
         onOutput?(bytes.count)
         onOutputBytes?(bytes[...])
     }
@@ -218,12 +267,9 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
     /// region for no reason — the same scar `applyRemoteGrid` records.
     ///
     /// Adopting a grid is itself an emulator resize, which SwiftTerm reports back through
-    /// `sizeChanged` — so the size the daemon has just given us is offered straight back to it.
-    /// Nothing here refuses that: `PTYHostTerminalLink` holds the daemon's acknowledged grid
-    /// beside the wanted one and sends only a difference, which is the same rule for the echo
-    /// after an adoption, for a window that moved while Threading was closed, and for a resize
-    /// that was dropped in transit. A view that suppressed the echo itself would be a second,
-    /// narrower copy of that rule, and the two would drift.
+    /// `sizeChanged`. `PTYHostTerminalLink` treats the attached frame's whole grid as both wanted
+    /// and acknowledged, so that programmatic echo is silence even when this view's local pixel
+    /// extent differs. A later window move records a genuinely new grid and is sent normally.
     func adoptHostGrid(cols: Int, rows: Int) {
         guard cols > 0, rows > 0 else { return }
         let current = terminalDimensions

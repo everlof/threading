@@ -22,6 +22,129 @@
     "1 second": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 sekund" } } }
     },
+    "Local diagnostics is disabled on the Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lokal diagnostik är avstängd på Macen." } } }
+    },
+    "That account is no longer available. Threading is refreshing the choices; review them and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det kontot är inte längre tillgängligt. Threading uppdaterar alternativen; granska dem och försök igen." } } }
+    },
+    "That account isn’t available for this session.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det kontot är inte tillgängligt för den här sessionen." } } }
+    },
+    "That action isn’t supported by this agent.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den åtgärden stöds inte av den här agenten." } } }
+    },
+    "That interface is not available for this agent. Review the updated choices and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det gränssnittet är inte tillgängligt för den här agenten. Granska de uppdaterade alternativen och försök igen." } } }
+    },
+    "That model is no longer available for this account. Threading is refreshing the choices; review them and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den modellen är inte längre tillgänglig för det här kontot. Threading uppdaterar alternativen; granska dem och försök igen." } } }
+    },
+    "That permission mode is no longer supported by this agent. Review the updated choices and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det behörighetsläget stöds inte längre av den här agenten. Granska de uppdaterade alternativen och försök igen." } } }
+    },
+    "That project or agent is no longer available. Threading is refreshing the choices; review them and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det projektet eller den agenten är inte längre tillgänglig. Threading uppdaterar alternativen; granska dem och försök igen." } } }
+    },
+    "That reasoning level is no longer available for this model. Threading is refreshing the choices; review them and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den resonemangsnivån är inte längre tillgänglig för den här modellen. Threading uppdaterar alternativen; granska dem och försök igen." } } }
+    },
+    "That recovery option isn’t available for this session.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det återställningsalternativet är inte tillgängligt för den här sessionen." } } }
+    },
+    "That service isn’t available on the Mac right now. Try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den tjänsten är inte tillgänglig på Macen just nu. Försök igen." } } }
+    },
+    "That session role is no longer available. Review the updated choices and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den sessionsrollen är inte längre tillgänglig. Granska de uppdaterade alternativen och försök igen." } } }
+    },
+    "That setting can’t be changed to the selected value.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den inställningen kan inte ändras till det valda värdet." } } }
+    },
+    "That speed is not available for this model. Review the updated choices and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den hastigheten är inte tillgänglig för den här modellen. Granska de uppdaterade alternativen och försök igen." } } }
+    },
+    "That theme is no longer available on the Mac.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det temat är inte längre tillgängligt på Macen." } } }
+    },
+    "That workspace option is not available for this project and agent. Review the updated choices and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det arbetsytealternativet är inte tillgängligt för det här projektet och den här agenten. Granska de uppdaterade alternativen och försök igen." } } }
+    },
+    "The Mac couldn’t save that change. Try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte spara ändringen. Försök igen." } } }
+    },
+    "The Mac did not request this diagnostics capture.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen begärde inte den här diagnostikinsamlingen." } } }
+    },
+    "The Mac isn’t ready for that action yet. Try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen är inte redo för den åtgärden än. Försök igen." } } }
+    },
+    "The Mac received too many requests. Wait a moment and try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen fick för många förfrågningar. Vänta en stund och försök igen." } } }
+    },
+    "This invitation is expired or already used.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inbjudan har gått ut eller har redan använts." } } }
+    },
+    "A session can only move to another account for the same agent.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "En session kan bara flyttas till ett annat konto för samma agent." } } }
+    },
+    "Only the Mac owner can perform that action.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bara Macens ägare kan utföra den åtgärden." } } }
+    },
+    "That reminder time is no longer valid.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den påminnelsetiden är inte längre giltig." } } }
+    },
+    "The Mac can’t find the account that owns this session.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen hittar inte kontot som äger den här sessionen." } } }
+    },
+    "The Mac couldn’t copy the conversation.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte kopiera konversationen." } } }
+    },
+    "The Mac couldn’t identify this iPhone. Pair it again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte identifiera den här iPhonen. Parkoppla den igen." } } }
+    },
+    "The Mac couldn’t locate this conversation on disk.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte hitta den här konversationen på skivan." } } }
+    },
+    "The Mac couldn’t move this session to that account.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte flytta den här sessionen till det kontot." } } }
+    },
+    "The Mac couldn’t register this iPhone for notifications.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte registrera den här iPhonen för notiser." } } }
+    },
+    "The Mac couldn’t return that result safely.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte returnera resultatet på ett säkert sätt." } } }
+    },
+    "The Mac couldn’t safely identify that action. Try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte identifiera åtgärden på ett säkert sätt. Försök igen." } } }
+    },
+    "The Mac couldn’t save the moved conversation.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte spara den flyttade konversationen." } } }
+    },
+    "The Mac couldn’t start the agent’s archive command.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen kunde inte starta agentens arkiveringskommando." } } }
+    },
+    "The Mac is handling too many actions right now. Try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen hanterar för många åtgärder just nu. Försök igen." } } }
+    },
+    "The agent rejected the archive change.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Agenten avvisade arkiveringsändringen." } } }
+    },
+    "The conversation transcript is not a regular file.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Konversationens transkript är inte en vanlig fil." } } }
+    },
+    "The move couldn’t be saved. The Mac kept the previous target copy for recovery.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Flytten kunde inte sparas. Macen behöll den tidigare målkopian för återställning." } } }
+    },
+    "This session has no recorded conversation to move yet.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här sessionen har ännu ingen sparad konversation att flytta." } } }
+    },
+    "This session no longer exists.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här sessionen finns inte längre." } } }
+    },
+    "This session’s archive state is already changing.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Den här sessionens arkivstatus håller redan på att ändras." } } }
+    },
     "Advanced": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Avancerat" } } }
     },
@@ -2731,6 +2854,16 @@
         }
       }
     },
+    "Not included": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingår inte"
+          }
+        }
+      }
+    },
     "Not registered": {
       "localizations": {
         "sv": {
@@ -3277,6 +3410,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Skanna QR-koden igen"
+          }
+        }
+      }
+    },
+    "Screenshot": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skärmbild"
           }
         }
       }

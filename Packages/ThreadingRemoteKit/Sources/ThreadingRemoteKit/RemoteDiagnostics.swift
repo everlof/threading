@@ -528,6 +528,17 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
         return formatter
     }()
 
+    /// The name a shared report is saved under. A UUID made every export unique and none of them
+    /// legible: two reports in a Downloads folder could not be told apart, or put in order,
+    /// without opening both. The locale is pinned, or the filename inherits the user's numerals
+    /// and calendar — a Buddhist-era year is a valid path and a wrong name.
+    private lazy var fileStampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
     public init(
         directory: URL,
         source: RemoteDiagnosticSource,
@@ -665,7 +676,7 @@ public final class RemoteDiagnosticJournal: @unchecked Sendable {
             withIntermediateDirectories: true
         )
         let url = outputDirectory.appendingPathComponent(
-            "threading-support-\(source.rawValue)-\(UUID().uuidString.lowercased()).json"
+            "threading-support-\(source.rawValue)-\(fileStampFormatter.string(from: Date())).json"
         )
         try data.write(to: url, options: .atomic)
         return url

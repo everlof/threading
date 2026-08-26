@@ -399,6 +399,13 @@ the editor back is not the user asking for the caret to move out of the middle o
 
 ## The Composer
 
+The iPhone's new-session composer treats the Mac catalogue as live state, not defaults read once
+on appearance. When discovery, accounts or settings replace that catalogue, the draft preserves
+every still-advertised choice and repairs only withdrawn project, agent, account, model, effort,
+permission, speed, surface or role values. A server-side race can still reject the request between
+selection and launch; the structured REST refusal names that guard, refreshes the catalogue behind
+the alert, and leaves the prompt intact for the retry.
+
 ### Turn admission and completion checkpoints
 
 A native prompt is not placed on the provider wire immediately after the composer accepts it.

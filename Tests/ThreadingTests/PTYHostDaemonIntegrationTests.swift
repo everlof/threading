@@ -71,7 +71,11 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
         let hello = try client.connect()
         XCTAssertEqual(hello.protocolVersion, PTYHostProtocol.current)
         XCTAssertGreaterThan(hello.pid, 0)
-        XCTAssertFalse(hello.build.isEmpty)
+        XCTAssertEqual(
+            hello.build,
+            PTYHostBuild.string(for: .main),
+            "the app and helper embedded by one bundle must advertise one generation"
+        )
 
         let session = PTYHostSessionIdentity.agentSession(SessionID())
         try client.spawn(
@@ -180,7 +184,7 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
 
     /// The other half, and the reason `retire` is not a kill: a daemon of the wrong build that is
     /// holding somebody's agents keeps them.
-    func testAStaleDaemonHoldingASessionIsLeftRunning() throws {
+    func testAStaleDaemonIsLeftWhileItsSessionRunsAndRetiresAfterThatSessionEnds() throws {
         let socketPath = try startDaemon()
         let journal = EventLog(directory: scratch)
         let recorder = PTYHostEventRecorder()
@@ -222,7 +226,7 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
         // And the count that decision rested on is the one the removal decision reads, which is
         // what stops turning the hidden key off from killing a working agent.
         XCTAssertEqual(
-            PTYHostUpgradeCheck.heldSessions(
+            PTYHostUpgradeCheck.activeSessions(
                 socketPath: socketPath,
                 ownBuild: PTYHostBuild.string(for: .main),
                 eventLog: journal
@@ -235,8 +239,60 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
         )
 
         // Ended here rather than left for teardown: killing the daemon orphans its children, and
-        // a `sleep` reparented to launchd outlives this process (the R4 finding).
-        try holder.kill(PTYHostKill(id: held, escalate: true))
+        // a `sleep` reparented to launchd outlives this process (the R4 finding). Use the same
+        // attach-then-kill path as the background-sessions surface so its upgrade edge is part of
+        // the real-daemon proof too.
+        let drained = expectation(description: "the stop path announces a possible idle host")
+        drained.assertForOverFulfill = true
+        let token = NotificationCenter.default.addObserver(
+            forName: PTYHostMayHaveDrained.name,
+            object: nil,
+            queue: nil
+        ) { notification in
+            guard notification.object is PTYHostMayHaveDrained else { return }
+            drained.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        XCTAssertTrue(
+            PTYHostSessionStop.run(
+                held,
+                socketPath: socketPath,
+                build: PTYHostBuild.string(for: .main),
+                eventLog: journal
+            )
+        )
+        wait(for: [drained], timeout: 1)
+        XCTAssertTrue(
+            waitFor {
+                recorder.frames.contains { frame in
+                    if case .exited(let ending) = frame { return ending.id == held }
+                    return false
+                }
+            },
+            "the active-session count cannot fall until the daemon delivered the child's exit"
+        )
+
+        XCTAssertEqual(
+            PTYHostUpgradeCheck.activeSessions(
+                socketPath: socketPath,
+                ownBuild: PTYHostBuild.string(for: .main),
+                eventLog: journal
+            ),
+            0,
+            "an exit retained for a late watcher is not live work that an upgrade can kill"
+        )
+        XCTAssertEqual(
+            PTYHostUpgradeCheck.run(
+                socketPath: socketPath,
+                ownBuild: "slice8-a-different-build (999)",
+                eventLog: journal
+            ),
+            .retire
+        )
+        XCTAssertTrue(
+            waitFor { self.daemon?.isRunning == false },
+            "the stale daemon must converge to the installed generation after its work ends"
+        )
     }
 
     /// The ordinary launch: the daemon is the one this build installed, so there is nothing to do
@@ -277,7 +333,7 @@ final class PTYHostDaemonIntegrationTests: XCTestCase {
             )
         )
         XCTAssertNil(
-            PTYHostUpgradeCheck.heldSessions(
+            PTYHostUpgradeCheck.activeSessions(
                 socketPath: socketPath,
                 ownBuild: PTYHostBuild.string(for: .main),
                 eventLog: EventLog(directory: scratch)

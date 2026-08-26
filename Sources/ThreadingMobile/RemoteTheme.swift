@@ -81,6 +81,10 @@ enum MobileDesign {
         static let diffMarkerColumnWidth: CGFloat = 18
         static let workspaceActivityDot: CGFloat = 7
         static let badgeStroke: CGFloat = 2
+        /// Between one usage ring and the next inside it: the stroke plus a one-point gap, so
+        /// three rings sit 17, 14 and 11 points from the disc's centre and clear its 16-point mark.
+        static let usageRingGap: CGFloat = 1
+        static let usageRingPitch: CGFloat = badgeStroke + usageRingGap
         /// Fixed leading column used by the stacked terminal presence/control/activity rows.
         static let terminalStatusIconColumn: CGFloat = 24
 

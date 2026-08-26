@@ -37,9 +37,148 @@ if [[ -z "${THREADING_UI_EVIDENCE_OUT:-}" ]]; then
 fi
 
 scratch_list=""
+process_ledger=""
+test_root_pid=""
+process_monitor_pid=""
+process_guard_done=0
+process_leak_detected=0
+
+# Snapshot descendants of the XCTest app host while xcodebuild is alive. A child that outlives its
+# test host is reparented to launchd and cannot be discovered from the tree afterwards, so
+# observation has to happen during the run. Build workers such as ibtoold are xcodebuild children
+# too but are deliberately outside this ownership tree. Cleanup still validates the run token in
+# the live process environment; a recorded pid alone is never authority to signal a reused pid.
+capture_test_descendants() {
+  local root_pid="$1"
+  ps -axo pid=,ppid=,pgid=,command= 2>/dev/null | awk -v root="${root_pid}" '
+    {
+      pid[NR] = $1
+      parent[$1] = $2
+      group[$1] = $3
+      executable[$1] = $4
+    }
+    END {
+      descendant[root] = 1
+      changed = 1
+      while (changed) {
+        changed = 0
+        for (row = 1; row <= NR; row++) {
+          current = pid[row]
+          if (!descendant[current] && descendant[parent[current]]) {
+            descendant[current] = 1
+            changed = 1
+          }
+        }
+      }
+      for (row = 1; row <= NR; row++) {
+        current = pid[row]
+        name = executable[current]
+        sub(/^.*\//, "", name)
+        isTestHost = name == "Threading" || name == "ThreadingTests" || name == "xctest"
+        if (descendant[current] && isTestHost) testOwned[current] = 1
+      }
+      changed = 1
+      while (changed) {
+        changed = 0
+        for (row = 1; row <= NR; row++) {
+          current = pid[row]
+          if (!testOwned[current] && testOwned[parent[current]]) {
+            testOwned[current] = 1
+            changed = 1
+          }
+        }
+      }
+      for (row = 1; row <= NR; row++) {
+        current = pid[row]
+        if (testOwned[current]) print current, group[current]
+      }
+    }
+  ' >> "${process_ledger}"
+}
+
+monitor_test_descendants() {
+  local root_pid="$1"
+  while kill -0 "${root_pid}" 2>/dev/null; do
+    capture_test_descendants "${root_pid}"
+    sleep 0.2
+  done
+  capture_test_descendants "${root_pid}"
+}
+
+stop_process_guard() {
+  # `cleanup` invokes this a second time from the EXIT trap. Return success explicitly: a bare
+  # `return` would preserve the failed guard expression and turn a passing xcodebuild into exit 1.
+  [[ "${process_guard_done}" == "0" ]] || return 0
+  process_guard_done=1
+
+  if [[ -n "${process_monitor_pid}" ]]; then
+    kill "${process_monitor_pid}" 2>/dev/null || true
+    wait "${process_monitor_pid}" 2>/dev/null || true
+    process_monitor_pid=""
+  fi
+  if [[ -n "${test_root_pid}" && -n "${process_ledger}" ]]; then
+    capture_test_descendants "${test_root_pid}"
+  fi
+  [[ -n "${process_ledger}" && -f "${process_ledger}" ]] || return
+
+  local live_list
+  live_list="$(mktemp -t threading-live-test-processes)"
+  local leaked=0
+  local attempt
+  # XCTest can report completion a fraction before its app host exits. Give ordinary teardown a
+  # short, early-exit grace period; a detached PTY shell does not disappear during this window.
+  for attempt in {1..20}; do
+    : > "${live_list}"
+    awk '!seen[$1]++ { print $1, $2 }' "${process_ledger}" | while read -r pid pgid; do
+      kill -0 "${pid}" 2>/dev/null || continue
+      # `eww` includes the environment. The exact random token is the ownership proof which keeps
+      # a concurrent test run, a production daemon, and a reused pid out of this cleanup.
+      command_with_environment="$(ps eww -p "${pid}" -o command= 2>/dev/null || true)"
+      [[ "${command_with_environment}" == *"THREADING_TEST_RUN_TOKEN=${THREADING_TEST_RUN_TOKEN}"* ]] \
+        || continue
+      printf '%s %s\n' "${pid}" "${pgid}" >> "${live_list}"
+    done
+    leaked="$(wc -l < "${live_list}" | tr -d ' ')"
+    [[ "${leaked}" == "0" || "${attempt}" == "20" ]] && break
+    sleep 0.1
+  done
+
+  if [[ "${leaked}" != "0" ]]; then
+    process_leak_detected=1
+    echo "test process guard found ${leaked} run-owned processes after xcodebuild; reaping them" >&2
+    while read -r pid pgid; do
+      command_without_environment="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
+      echo "  pid=${pid} pgid=${pgid} command=${command_without_environment}" >&2
+    done < "${live_list}"
+    # `forkpty` makes the child its process-group leader. End those exact token-validated groups
+    # first so a shell and the `stty`/`sleep` child it happens to be waiting for leave together.
+    while read -r pid pgid; do
+      [[ "${pid}" == "${pgid}" ]] || continue
+      kill -TERM -- "-${pgid}" 2>/dev/null || true
+    done < "${live_list}"
+    while read -r pid _; do
+      kill -TERM "${pid}" 2>/dev/null || true
+    done < "${live_list}"
+    sleep 0.5
+    while read -r pid pgid; do
+      kill -0 "${pid}" 2>/dev/null || continue
+      if [[ "${pid}" == "${pgid}" ]]; then
+        kill -KILL -- "-${pgid}" 2>/dev/null || true
+      else
+        kill -KILL "${pid}" 2>/dev/null || true
+      fi
+    done < "${live_list}"
+  fi
+  rm -f "${live_list}"
+}
+
 cleanup() {
+  stop_process_guard
   if [[ -n "${scratch_list}" ]]; then
     rm -f "${scratch_list}"
+  fi
+  if [[ -n "${process_ledger}" ]]; then
+    rm -f "${process_ledger}"
   fi
   if [[ -n "${render_scratch}" && -d "${render_scratch}" ]]; then
     find "${render_scratch}" -depth -delete
@@ -60,6 +199,9 @@ case "${level}" in
   all)  test_plan="Threading-All" ;;
 esac
 
+export THREADING_TEST_RUN_TOKEN="$(uuidgen)"
+process_ledger="$(mktemp -t threading-test-processes)"
+
 set +e
 xcodebuild \
   -project "${repository_directory}/Threading.xcodeproj" \
@@ -67,9 +209,19 @@ xcodebuild \
   -testPlan "${test_plan}" \
   -destination "platform=macOS" \
   test \
-  "$@"
+  "$@" &
+test_root_pid=$!
+test_root_pgid="$(ps -p "${test_root_pid}" -o pgid= | tr -d ' ')"
+printf '%s %s\n' "${test_root_pid}" "${test_root_pgid}" >> "${process_ledger}"
+monitor_test_descendants "${test_root_pid}" &
+process_monitor_pid=$!
+wait "${test_root_pid}"
 status=$?
 set -e
+stop_process_guard
+if [[ "${process_leak_detected}" != "0" ]]; then
+  status=1
+fi
 
 # Sweep the empty preference files the scratch suites leave behind.
 #

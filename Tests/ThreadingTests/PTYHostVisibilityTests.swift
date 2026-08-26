@@ -300,7 +300,10 @@ final class PTYHostVisibilityTests: XCTestCase {
     /// `unregister()` kills the running helper, so turning the key off must not be a way to end
     /// somebody's turn: the registration stays while the daemon holds anything.
     func testTurningTheHostOffLeavesTheRegistrationWhileItHoldsSessions() {
-        XCTAssertEqual(PTYHostRegistration.removalDecision(heldSessions: nil), .unregister)
+        XCTAssertEqual(
+            PTYHostRegistration.removalDecision(heldSessions: nil),
+            .leaveUnanswered
+        )
         XCTAssertEqual(PTYHostRegistration.removalDecision(heldSessions: 0), .unregister)
         XCTAssertEqual(
             PTYHostRegistration.removalDecision(heldSessions: 2),
@@ -369,6 +372,7 @@ extension PTYHostUnavailability {
             .notRegistered,
             .notFound,
             .notRunning,
+            .registrationRefreshing,
             .protocolMismatch(.peerTooOld),
             .helperMissing,
             .socketPathTooLong(bytes: 120)

@@ -387,6 +387,10 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     public let accountID: String?
     /// The resolved chat/project/app answer. Owner-only; nil on older hosts and guest shares.
     public let limitRecovery: RemoteLimitRecoveryPolicyDTO?
+    /// The model this chat chose for itself, when it chose one. Nil is the account's default, and
+    /// also what a host predating this field sends; a client falls back the way the Mac's own
+    /// toolbar does, to `RemoteAccountChoiceDTO.defaultModelID`.
+    public let model: String?
 
     public init(
         id: String,
@@ -410,7 +414,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         inheritedTerminalTheme: RemoteTerminalThemeDTO? = nil,
         account: RemoteSessionAccountDTO? = nil,
         accountID: String? = nil,
-        limitRecovery: RemoteLimitRecoveryPolicyDTO? = nil
+        limitRecovery: RemoteLimitRecoveryPolicyDTO? = nil,
+        model: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -434,6 +439,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.account = account
         self.accountID = accountID
         self.limitRecovery = limitRecovery
+        self.model = model
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -441,7 +447,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         case isPinned, isArchived, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
-        case inheritedTerminalTheme, account, accountID, limitRecovery
+        case inheritedTerminalTheme, account, accountID, limitRecovery, model
     }
 
     public init(from decoder: Decoder) throws {
@@ -487,6 +493,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
             RemoteLimitRecoveryPolicyDTO.self,
             forKey: .limitRecovery
         )
+        model = try container.decodeIfPresent(String.self, forKey: .model)
     }
 
     /// Derived on the client as well as the host, so a missed refresh cannot keep an expired
@@ -711,6 +718,44 @@ public struct RemoteModelChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// One rolling limit window of an account: `5h`, `7d`, or a window scoped to one model.
+///
+/// The phone draws these as the rings around its account disc, so this carries what a ring needs
+/// and nothing a dashboard would: the fraction, the reset that makes that fraction stale, the
+/// length that orders the rings, and, for a scoped window, the model ids it meters. That last
+/// list is resolved on the Mac by `ModelName.scope`, so the phone matches a chat's model with a
+/// lookup rather than a second copy of that rule.
+public struct RemoteAccountUsageWindowDTO: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    /// The window's compact name: `5h`, `7d`, `7d Fable`.
+    public let name: String
+    /// Consumed fraction, 0...1. Nil when the Mac does not know it.
+    public let fraction: Double?
+    /// Epoch seconds. A reading whose reset has passed describes the window before it.
+    public let resetsAt: Double?
+    /// The window's full length in seconds, when the provider states it.
+    public let windowDuration: Double?
+    /// For a window scoped to a model, the ids among the account's model choices it meters. Nil
+    /// for a window that meters the account as a whole.
+    public let metersModelIDs: [String]?
+
+    public init(
+        id: String,
+        name: String,
+        fraction: Double?,
+        resetsAt: Double? = nil,
+        windowDuration: Double? = nil,
+        metersModelIDs: [String]? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.fraction = fraction
+        self.resetsAt = resetsAt
+        self.windowDuration = windowDuration
+        self.metersModelIDs = metersModelIDs
+    }
+}
+
 /// One login available to an agent on the Mac. Only presentation-safe identity and the latest
 /// normalized usage reading cross the wire; config paths and credentials never leave the host.
 public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable {
@@ -722,6 +767,10 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable
     /// Peak consumed fraction, 0...1, so clients can tint a compact usage cue consistently.
     public let usageFraction: Double?
     public let usageError: String?
+    /// Every limit window of the account, account-wide ones first, then those scoped to a model.
+    /// Nil when decoded from a host predating per-window usage; a client then has only
+    /// `usageFraction` to draw.
+    public let usageWindows: [RemoteAccountUsageWindowDTO]?
     public let models: [RemoteModelChoiceDTO]
     public let defaultModelID: String?
 
@@ -732,6 +781,7 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable
         usageSummary: String? = nil,
         usageFraction: Double? = nil,
         usageError: String? = nil,
+        usageWindows: [RemoteAccountUsageWindowDTO]? = nil,
         models: [RemoteModelChoiceDTO],
         defaultModelID: String?
     ) {
@@ -741,6 +791,7 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable
         self.usageSummary = usageSummary
         self.usageFraction = usageFraction
         self.usageError = usageError
+        self.usageWindows = usageWindows
         self.models = models
         self.defaultModelID = defaultModelID
     }
@@ -3052,6 +3103,64 @@ public enum RemoteViewportRefusal: String, Codable, Sendable {
     public static let rows = 4...160
 }
 
+/// Stable failure vocabulary for the REST transport.
+///
+/// `RemoteErrorDTO.code` remains a string so an older client can preserve a future code it does
+/// not know. The host constructs REST failures through this enum so adding a refusal is an
+/// explicit protocol decision rather than an English HTTP reason phrase that URLSession drops.
+public enum RemoteRESTErrorCode: String, Codable, CaseIterable, Sendable {
+    case badRequest
+    case unauthorized
+    case forbidden
+    case notFound
+    case conflict
+    case unprocessableRequest
+    case rateLimited
+    case serviceUnavailable
+    case serverFailure
+
+    case invalidRequestID
+    case requestIDReused
+    case replayCacheBusy
+    case responseTooLarge
+    case hostNotReady
+
+    case unknownLaunchChoice
+    case unknownAccount
+    case unknownModel
+    case unknownReasoningEffort
+    case unknownPermissionMode
+    case unsupportedSpeed
+    case unsupportedSurface
+    case unknownRole
+    case unsupportedWorkspace
+
+    case invalidDeviceToken
+    case localDiagnosticsDisabled
+    case captureNotRequested
+    case invalidInvitation
+    case ownerAccessRequired
+    case invalidDevice
+    case hostedServiceUnavailable
+
+    case unknownTheme
+    case unknownSetting
+    case settingNotMutable
+    case invalidSettingValue
+    case persistenceUnavailable
+    case unsupportedValue
+    case archiveAlreadyChanging
+    case archiveAccountUnavailable
+    case archiveCommandUnavailable
+    case archiveCommandRejected
+    case invalidSnoozeDeadline
+    case unsupportedRuntime
+    case unsupportedAccount
+    case accountMoveRefused
+    case unsupportedRecovery
+    case sharingNotAvailable
+}
+
 public struct RemoteErrorDTO: Codable, Equatable, Sendable {
     public let type: String        // "error"
     public let code: String
@@ -3063,6 +3172,10 @@ public struct RemoteErrorDTO: Codable, Equatable, Sendable {
         self.type = "error"
         self.code = code
         self.detail = detail
+    }
+
+    public init(code: RemoteRESTErrorCode, detail: String? = nil) {
+        self.init(code: code.rawValue, detail: detail)
     }
 }
 

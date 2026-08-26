@@ -30,8 +30,10 @@ struct MobileIssueReportRequest: Identifiable {
 /// The consent surface between an in-app symptom and files that can leave the device.
 ///
 /// The base report remains content-free. Device context is not even gathered until its toggle
-/// is on and the user taps Share. A screenshot is captured only after the separate preflight
-/// choice shown for a shake report, then previewed here and removable before export.
+/// is on and the user taps Share. A shake captures the screen it happened on before this sheet
+/// covers it, and that image stays on the phone: the checkmark in the navigation bar decides
+/// whether it is part of the report, it is previewed here at full size while it is, and it is
+/// discarded with the sheet when the report is not sent.
 struct MobileIssueReportView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var notifications: RemoteNotificationManager
@@ -120,28 +122,29 @@ struct MobileIssueReportView: View {
                         }
                     }
 
-                    if let screenshot = request.screenshot {
-                        Toggle(isOn: $includeScreenshot) {
+                    if let screenshot = request.screenshot, includeScreenshot {
+                        Label {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Current screen")
                                 Text("May contain code or chat content; Send uses a small preview")
                                     .font(.caption)
                                     .foregroundStyle(theme.secondaryLabel)
                             }
+                        } icon: {
+                            Image(systemName: "photo.fill")
+                                .foregroundStyle(theme.accent)
                         }
 
-                        if includeScreenshot {
-                            Image(uiImage: screenshot)
-                                .resizable()
-                                .scaledToFit()
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(theme.border, lineWidth: 1)
-                                }
-                                .accessibilityLabel(MobileL10n.string("Screenshot that will be shared"))
-                        }
-                    } else if request.screenshotWasRequested {
+                        Image(uiImage: screenshot)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(theme.border, lineWidth: 1)
+                            }
+                            .accessibilityLabel(MobileL10n.string("Screenshot that will be shared"))
+                    } else if request.screenshot == nil, request.screenshotWasRequested {
                         Label("The current screen couldn’t be captured", systemImage: "photo.badge.exclamationmark")
                             .foregroundStyle(theme.warning)
                     }
@@ -230,6 +233,30 @@ struct MobileIssueReportView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                }
+                if request.screenshot != nil {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            includeScreenshot.toggle()
+                        } label: {
+                            // The navigation bar renders this as its glyph alone; the title is
+                            // what an overflow presentation would say, and the accessibility
+                            // label and value below are what VoiceOver reads either way.
+                            Label(
+                                "Screenshot",
+                                systemImage: includeScreenshot
+                                    ? "checkmark.circle.fill"
+                                    : "circle"
+                            )
+                        }
+                        .tint(includeScreenshot ? theme.accent : theme.secondaryLabel)
+                        .accessibilityLabel(MobileL10n.string("Include current screen"))
+                        .accessibilityValue(
+                            includeScreenshot
+                                ? MobileL10n.string("Included")
+                                : MobileL10n.string("Not included")
+                        )
+                    }
                 }
             }
         }

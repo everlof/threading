@@ -275,6 +275,15 @@ private struct SessionDraftComposerScreen: View {
         return models.first { $0.id == effectiveID }
     }
 
+    /// The disc's rings follow the model the draft will start, so picking Fable rings its window
+    /// before the chat exists.
+    private var selectedUsageReading: MobileAccountUsageReading? {
+        MobileAccountUsageReading.resolve(
+            account: selectedAccount,
+            model: modelID.isEmpty ? defaultModelID : modelID
+        )
+    }
+
     private var hostStatusColor: Color {
         switch appModel.phase {
         case .online: return theme.positive
@@ -329,6 +338,13 @@ private struct SessionDraftComposerScreen: View {
                 }
                 runPickerIsPresented = true
             }
+            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+                == "new-session-structured-error" {
+                errorMessage = RemoteClientError.server(
+                    status: 422,
+                    code: RemoteRESTErrorCode.unknownModel.rawValue
+                ).localizedDescription
+            }
             if ProcessInfo.processInfo.environment[
                 "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
             ] == nil {
@@ -346,6 +362,11 @@ private struct SessionDraftComposerScreen: View {
         }
         .onChange(of: modelID) { _, _ in
             applyModelDefaults()
+        }
+        .onChange(of: catalog) { _, _ in
+            // Discovery and settings can change while this screen is open. Keep every still-valid
+            // choice, but do not submit an identifier the current Mac catalogue has withdrawn.
+            applyCatalogDefaults()
         }
         .onReceive(
             NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
@@ -600,7 +621,7 @@ private struct SessionDraftComposerScreen: View {
         } label: {
             MobileAccountDisc(
                 identity: .resolve(agentID),
-                usageFraction: selectedAccount?.usageFraction
+                reading: selectedUsageReading
             )
         }
         .disabled(isSubmitting)
@@ -788,8 +809,8 @@ private struct SessionDraftComposerScreen: View {
 
     /// The chip carries the usage as a ring; VoiceOver gets the words the ring stands for.
     private var selectedIdentityAccessibilityValue: String {
-        guard let selectedAccount else { return selectedIdentityLabel }
-        guard let usage = selectedAccount.usageSummary else { return selectedIdentityLabel }
+        guard selectedAccount != nil else { return selectedIdentityLabel }
+        guard let usage = selectedUsageReading?.summary else { return selectedIdentityLabel }
         return "\(selectedIdentityLabel), \(usage)"
     }
 
@@ -817,18 +838,16 @@ private struct SessionDraftComposerScreen: View {
     }
 
     private func applyCatalogDefaults() {
-        if projectID.isEmpty {
-            projectID = draft.projectName.flatMap { name in
-                catalog?.projects.first {
-                    $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
-                }?.id
-            } ?? catalog?.projects.first?.id ?? ""
-        }
-        if agentID.isEmpty {
-            agentID = catalog?.agents.first(where: { $0.id == "codex" })?.id
-                ?? catalog?.agents.first?.id
-                ?? ""
-        }
+        projectID = SessionDraftCatalogReconciliation.projectID(
+            current: projectID,
+            draftProjectName: draft.projectName,
+            catalog: catalog
+        )
+        agentID = SessionDraftCatalogReconciliation.agentID(
+            current: agentID,
+            catalog: catalog
+        )
+        if role == .manager, !offersManager { role = .agent }
         applyAgentDefaults()
     }
 
@@ -902,8 +921,48 @@ private struct SessionDraftComposerScreen: View {
                 MobileDiagnostics.logDegraded(.sessionAction, error: error)
                 isSubmitting = false
                 errorMessage = error.localizedDescription
+                if let remote = error as? RemoteClientError,
+                   remote.requiresLaunchCatalogRefresh {
+                    // The refusal is authoritative, while this draft's catalogue may be an old
+                    // snapshot. Refresh behind the alert and reconcile only invalid selections;
+                    // the prompt and every still-valid choice remain untouched.
+                    await appModel.refresh()
+                    applyCatalogDefaults()
+                }
             }
         }
+    }
+}
+
+/// Pure catalogue repair for an already-mounted draft. Selection state lives in SwiftUI, but
+/// the rule is transport-facing: preserve a value while the current Mac still advertises it and
+/// choose a deterministic fallback once it does not.
+enum SessionDraftCatalogReconciliation {
+    static func projectID(
+        current: String,
+        draftProjectName: String?,
+        catalog: RemoteNewSessionCatalogDTO?
+    ) -> String {
+        guard catalog?.projects.contains(where: { $0.id == current }) != true else {
+            return current
+        }
+        return draftProjectName.flatMap { name in
+            catalog?.projects.first {
+                $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+            }?.id
+        } ?? catalog?.projects.first?.id ?? ""
+    }
+
+    static func agentID(
+        current: String,
+        catalog: RemoteNewSessionCatalogDTO?
+    ) -> String {
+        guard catalog?.agents.contains(where: { $0.id == current }) != true else {
+            return current
+        }
+        return catalog?.agents.first(where: { $0.id == "codex" })?.id
+            ?? catalog?.agents.first?.id
+            ?? ""
     }
 }
 

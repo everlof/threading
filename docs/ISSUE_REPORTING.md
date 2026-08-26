@@ -30,8 +30,10 @@ The iOS consent screen has three explicit destinations:
    checkout. It creates a real local agent task over the existing authenticated host route. It
    does not pass through the public service.
 3. **Share files…** packages the full support JSON, description, and selected original screenshot
-   into one `threading-report.zip`, then opens the system share sheet with that single attachment.
-   The user chooses the recipient and can inspect the archive first.
+   into one `threading-report-<yyyyMMdd-HHmmss>.zip`, then opens the system share sheet with that
+   single attachment. The user chooses the recipient and can inspect the archive first. The stamp
+   is the moment the archive was written, so saving a second report neither collides with the
+   first nor produces two files a person cannot tell apart.
 
 The macOS Help report, inspector report, and post-crash notice submit the same public DTO with
 trigger `manual` or `postCrash`. The inspector strips the temporary PNG path and sends only a

@@ -29,7 +29,7 @@ enum RemoteSessionAccountMoveFailure: Error {
     case sessionNotFound
     case accountNotFound
     case unsupportedRuntime
-    case moveRefused(String)
+    case moveRefused(SessionMigration.MoveError.Code)
 }
 
 /// The application operations the remote transport is allowed to request.

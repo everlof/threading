@@ -384,6 +384,79 @@ final class FileActivityMapTests: XCTestCase {
         XCTAssertEqual(restored.bins.reduce(0) { $0 + $1.editCount }, 1)
     }
 
+    /// A project with hundreds of old sessions used to rewrite one multi-megabyte JSON document
+    /// for every live event. Persistence is now sharded by the mutation's stable session id, so
+    /// changing one session leaves every unrelated shard byte-for-byte and timestamp-for-timestamp
+    /// untouched.
+    @MainActor
+    func testTracePersistenceWritesOnlyTheChangedSessionShard() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentWorkShardTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let projectID = ProjectID()
+        let first = AgentSession(kind: .codex, title: "First")
+        let second = AgentSession(kind: .claude, title: "Second")
+        let store = AgentWorkTraceStore(directory: directory)
+
+        func record(_ session: AgentSession, callID: String, path: String) {
+            store.record(
+                providerEvent: ProviderExecutionEvent(
+                    category: .filesystem,
+                    phase: .requested,
+                    operation: "Edit",
+                    callID: callID,
+                    input: .object(["file_path": .string("/repo/\(path)")]),
+                    output: nil,
+                    fidelity: .exact
+                ),
+                projectID: projectID,
+                session: session,
+                rootPath: "/repo",
+                at: Date()
+            )
+        }
+
+        record(first, callID: "first-1", path: "Sources/First.swift")
+        record(second, callID: "second-1", path: "Sources/Second.swift")
+        try await Task.sleep(for: .seconds(1.3))
+
+        let shardDirectory = directory.appendingPathComponent(
+            projectID.uuidString.lowercased() + ".sessions"
+        )
+        let firstURL = shardDirectory.appendingPathComponent(
+            first.id.uuidString.lowercased() + ".json"
+        )
+        let secondURL = shardDirectory.appendingPathComponent(
+            second.id.uuidString.lowercased() + ".json"
+        )
+        let firstBefore = try firstURL.resourceValues(forKeys: [.contentModificationDateKey])
+            .contentModificationDate
+        let secondBefore = try secondURL.resourceValues(forKeys: [.contentModificationDateKey])
+            .contentModificationDate
+        XCTAssertNotNil(firstBefore)
+        XCTAssertNotNil(secondBefore)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent(
+                projectID.uuidString.lowercased() + ".json"
+            ).path
+        ))
+
+        record(second, callID: "second-2", path: "Sources/SecondAgain.swift")
+        try await Task.sleep(for: .seconds(1.3))
+
+        let firstAfter = try firstURL.resourceValues(forKeys: [.contentModificationDateKey])
+            .contentModificationDate
+        let secondAfter = try secondURL.resourceValues(forKeys: [.contentModificationDateKey])
+            .contentModificationDate
+        XCTAssertEqual(firstAfter, firstBefore, "an unrelated session was rewritten")
+        XCTAssertGreaterThan(
+            try XCTUnwrap(secondAfter),
+            try XCTUnwrap(secondBefore),
+            "the changed session did not persist"
+        )
+    }
+
     @MainActor
     func testTreeItemsReturnExactFilesAndIncrementalDirectoryAggregates() async {
         let directory = FileManager.default.temporaryDirectory

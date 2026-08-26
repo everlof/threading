@@ -78,11 +78,11 @@ final class PTYHostSessionTests: XCTestCase {
         )
     }
 
-    /// Several frames in one burst are one feed and one pair of callbacks.
+    /// Several parsed frames in one burst are one main-actor report and one pair of callbacks.
     ///
     /// A hop per frame would put a terminal's whole output rate on the main queue, which is the
     /// shape `performance.md`'s scaling gate refuses.
-    func testABurstOfFramesCoalescesIntoOneFeed() throws {
+    func testABurstOfFramesCoalescesIntoOneMainActorReport() throws {
         let link = try startHostBackedSession()
         var counts: [Int] = []
         link.recorder.onOutputCount = { counts.append($0) }
@@ -98,6 +98,36 @@ final class PTYHostSessionTests: XCTestCase {
             3,
             "three frames arriving together must not cost three main-queue hops"
         )
+    }
+
+    /// Parsing is the byte-sized half of output delivery and must not wait behind AppKit work.
+    ///
+    /// `FakeHostTransport.send(output:)` enters the transport queue synchronously while this
+    /// test deliberately keeps the main actor on the current turn. A host path that schedules
+    /// the whole feed on main leaves `bytesFed` at zero here; the local-process path parses on
+    /// its IO worker, and the hosted path has to preserve that boundary. Activity callbacks
+    /// remain main-actor work and are asserted separately after the run loop advances.
+    func testLiveOutputParsesBeforeTheMainActorDeliveryTurn() throws {
+        let link = try startHostBackedSession()
+        let bytes = Array("codex repaint".utf8)
+        var counts: [Int] = []
+        link.recorder.onOutputCount = { counts.append($0) }
+        link.session.terminalView.resetDiagnostics()
+
+        link.transport.send(output: bytes)
+
+        XCTAssertEqual(
+            link.session.terminalView.diagnostics.bytesFed,
+            bytes.count,
+            "PTY-host parsing must run on the transport queue, before main-actor reporting"
+        )
+        XCTAssertTrue(
+            counts.isEmpty,
+            "activity callbacks still belong to the coalesced main-actor delivery"
+        )
+
+        settle()
+        XCTAssertEqual(counts, [bytes.count])
     }
 
     // MARK: - Input
@@ -358,9 +388,14 @@ final class PTYHostSessionTests: XCTestCase {
     /// An `exited` frame drives the same ending an in-process exit drives.
     func testAnExitedFrameDrivesTheTerminationPath() throws {
         let link = try startHostBackedSession()
+        let drained = expectation(description: "the host may now be idle")
+        drained.assertForOverFulfill = true
+        let observations = AppEventObservations()
+        observations.observe(PTYHostMayHaveDrained.self) { _ in drained.fulfill() }
 
         link.transport.send(.exited(PTYHostExited(id: link.identity, status: 3, signalled: false)))
         settle()
+        wait(for: [drained], timeout: Fixture.settle)
 
         XCTAssertEqual(link.recorder.exitCodes, [3])
         XCTAssertFalse(link.session.isRunning)
@@ -576,6 +611,26 @@ final class PTYHostSessionTests: XCTestCase {
             settings: settings,
             bundle: .main,
             probe: .answering(.notRunning)
+        ))
+    }
+
+    func testANewSessionStaysLocalWhileAStaleDaemonDrains() throws {
+        let suiteName = "PTYHostSessionTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(defaults: defaults)
+        settings.ptyHostEnabled = true
+        let admission = PTYHostNewSessionAdmission()
+        admission.setAllowed(false)
+
+        XCTAssertNil(PTYHostPolicy.transportFactory(
+            for: .agentSession(SessionID()),
+            session: AgentSession(kind: .codex, title: "t"),
+            settings: settings,
+            bundle: .main,
+            probe: .unreachable(),
+            eventLog: EventLog(directory: FileManager.default.temporaryDirectory),
+            newSessionAdmission: admission
         ))
     }
 

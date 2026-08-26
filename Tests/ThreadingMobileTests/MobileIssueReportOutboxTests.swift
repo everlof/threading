@@ -252,17 +252,40 @@ final class MobileIssueReportOutboxTests: XCTestCase {
             reporterNoteURL: note,
             screenshotURL: screenshot
         )
+        let modified = Date(timeIntervalSince1970: 1_700_000_000)
         let archiveURL = try MobileIssueReportArchive.write(
             diagnosticsURL: diagnostics,
             reporterNoteURL: note,
             screenshotURL: screenshot,
-            modified: Date(timeIntervalSince1970: 1_700_000_000),
+            modified: modified,
             outputDirectory: directory
         )
 
         XCTAssertEqual(entries.map(\.path), expected.map { $0.0 })
         XCTAssertEqual(entries.map(\.data), expected.map { $0.1 })
-        XCTAssertEqual(archiveURL.lastPathComponent, "threading-report.zip")
+        XCTAssertEqual(
+            archiveURL.lastPathComponent,
+            MobileIssueReportArchive.archiveFileName(for: modified)
+        )
         XCTAssertTrue(try Data(contentsOf: archiveURL).starts(with: [0x50, 0x4b, 0x03, 0x04]))
+    }
+
+    /// A saved report is told apart by its name, so two shares must never produce the same one.
+    func testShareArchiveIsNamedAfterTheMomentItWasMade() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let moment = Date(timeIntervalSince1970: 1_700_000_000)
+
+        XCTAssertEqual(
+            MobileIssueReportArchive.archiveFileName(for: moment),
+            "threading-report-\(formatter.string(from: moment)).zip",
+            "the stamp is the local moment, in a pinned calendar and numerals"
+        )
+        XCTAssertNotEqual(
+            MobileIssueReportArchive.archiveFileName(for: moment),
+            MobileIssueReportArchive.archiveFileName(for: moment.addingTimeInterval(1)),
+            "a second report must not overwrite the first when it is saved beside it"
+        )
     }
 }

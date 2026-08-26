@@ -138,12 +138,16 @@ enum ThreadingPTYHost {
 
     /// Reported in `hello` and journalled; never compared for admission.
     ///
-    /// Read from the embedded `Info.plist` section rather than compiled in, so the string tracks
-    /// the bundle the daemon shipped inside. A tool's plist is a `__TEXT` section rather than a
-    /// file, so this is best-effort by construction — and it may be, because nothing gates on it.
+    /// Read from the processed `Info.plist` embedded in this executable. The app and helper use
+    /// `PTYHostGeneration` over the same three build values, so an offline bundle replacement is
+    /// visible even though this already-running process keeps executing its old text pages.
     private static var buildString: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        return version ?? "unknown"
+        let info = Bundle.main.infoDictionary
+        return PTYHostGeneration.string(
+            shortVersion: info?["CFBundleShortVersionString"] as? String,
+            bundleVersion: info?["CFBundleVersion"] as? String,
+            sourceRevision: info?["ThreadingSourceRevision"] as? String
+        )
     }
 }
 

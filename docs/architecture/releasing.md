@@ -516,10 +516,24 @@ already sets for all six binaries.
 binds a registration to a *path*, not to a code identity (measured 2026-08-23): replacing the
 whole bundle leaves `SMAppService.status` at `enabled` and the job still resolvable, because the
 path it resolves — `Contents/Helpers/threading-ptyd` inside `/Applications/Threading.app` — is
-still there. An absolute `Program` would have been fine too until the day the app moved. What the
-swap does *not* do is update the running daemon: launchd execs the new binary only on the next
-start, so the old one goes on executing the deleted image. That is what `retire` is for, and the
-app asks for it once per launch — see the [upgrade decision](pty-host.md#registration-and-retirement).
+still there. An offline move from DerivedData to `/Applications`, however, leaves an enabled job
+resolving through the old bundle; status cannot distinguish the two.
+
+After registration Threading therefore writes an owner-only receipt for the exact helper and
+launch-agent plist paths, filesystem identities/metadata and `PTYHostGeneration`. A missing,
+corrupt or different receipt makes launch-time replacement pending even when the app was not
+running during the install. The app retires an idle daemon (or waits for a busy one), proves the
+exact pid/start-time pair has exited, then unregisters the old association and registers the
+current bundle. It never unregisters merely because the socket is silent. What an ordinary bundle
+swap also does *not* do is update a running daemon: launchd execs new code only on the next start,
+so the app and helper embed the same `PTYHostGeneration` — release version/build numbers for
+shipping, plus the injected source revision for local `0.0.0` autoinstalls. No working child is
+killed; `KeepAlive` starts the current helper after graceful retirement. See the
+[upgrade decision](pty-host.md#registration-and-retirement).
+
+The autoinstaller refuses its product if either the app plist or the helper's embedded plist lacks
+the requested source revision. The release command explicitly clears that field while overriding
+both version numbers, so a developer-shell value cannot leak into the shipping generation.
 
 Packaging uses `ditto -c -k --keepParent --sequesterRsrc`, not `zip`. Sparkle unpacks with the
 same tool, and only `ditto` preserves the symlinks and extended attributes inside a signed

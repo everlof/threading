@@ -439,6 +439,13 @@ final class PTYHostClientTests: XCTestCase {
 
     // MARK: - The handshake
 
+    /// The client is part of the key-to-echo UI loop even though it deliberately stays off main.
+    func testTheDefaultClientQueueHasUserInteractiveQoS() {
+        let client = makeClient(socketPath: "/unused", events: .ignored)
+
+        XCTAssertEqual(client.queue.qos.qosClass, .userInteractive)
+    }
+
     func testACompatibleHelloBecomesReadyAndRecordsTheBuildAndTheLostSet() throws {
         let lostSession = PTYHostSessionIdentity.agentSession(SessionID())
         let since = Date(timeIntervalSince1970: 1_700_000_000)

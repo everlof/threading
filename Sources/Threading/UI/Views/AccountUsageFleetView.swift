@@ -236,18 +236,21 @@ private struct AccountUsageFleetSummaryIndex {
     }
 }
 
-/// A bounded, virtualized run of every enabled account's live usage windows.
+/// A virtualized run of every enabled account's live usage windows.
 ///
 /// Usage settings and the Option-click toolbar popover share this exact hierarchy. The header is
 /// retained because it is constant-size; account cards are table rows, so provider/account
-/// cardinality affects cheap values and scroll extent rather than view construction at open.
+/// cardinality affects cheap values and scroll extent rather than view construction at open. The
+/// popover supplies a bounded viewport, while Settings exposes the table's full logical height to
+/// the page's existing scroll view.
 final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     typealias LimitsProvider = @MainActor (AccountID) -> [CustomLimit]
 
     enum ScrollHost: Equatable {
         /// The fleet is the only vertical viewport, as in the pinned toolbar popover.
         case standalone
-        /// The fleet is embedded in a vertically scrolling page, as in Usage settings.
+        /// The enclosing Settings page owns the only vertical viewport. The table contributes
+        /// its complete logical height while that outer clip remains its cell viewport.
         case nestedPage
     }
 
@@ -259,16 +262,15 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
     private let summaryReset = NSTextField(labelWithString: "")
     private let limitLegend = UsageLimitLegendView()
     private let table = ThemedTableView()
-    private let scroll = ThemedScrollView()
-    private lazy var heightConstraint = scroll.heightAnchor.constraint(
-        equalToConstant: Design.AccountUsageFleet.minimumViewportHeight
-    )
+    private var scroll: ThemedScrollView?
+    private var contentHeightConstraint: NSLayoutConstraint?
     private var items: [AccountUsageFleetItem] = []
     private var indexByAccountID: [AccountID: Int] = [:]
     private var limitsByAccountID: [AccountID: [CustomLimit]] = [:]
     private var summaryIndex = AccountUsageFleetSummaryIndex()
     private var estimatedContentHeight: CGFloat = 0
     private var now = Date()
+    private var tableIsBound = false
 
     var onHandoff: ((AgentAccount) -> Void)?
 
@@ -277,12 +279,20 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         guard !table.visibleRect.isEmpty else { return 0 }
         return table.rows(in: table.visibleRect).length
     }
-    var viewportHeightForTesting: CGFloat { heightConstraint.constant }
+    var materializedAccountIDsForTesting: [AccountID] {
+        items.indices.compactMap { row in
+            table.view(atColumn: 0, row: row, makeIfNecessary: false) == nil
+                ? nil
+                : items[row].account.id
+        }
+    }
+    var viewportHeightForTesting: CGFloat { contentHeightConstraint?.constant ?? 0 }
     var summaryForTesting: AccountUsageFleetSummary { summaryIndex.summary }
     var orderedAccountIDsForTesting: [AccountID] { items.map(\.account.id) }
     var verticalScrollHandoffForTesting: ThemedScrollView.VerticalScrollHandoff {
-        scroll.verticalScrollHandoff
+        scroll?.verticalScrollHandoff ?? .always
     }
+    var hasInternalScrollViewForTesting: Bool { scroll?.superview != nil }
     var showsLimitLegendForTesting: Bool { !limitLegend.isHidden }
 
     init(
@@ -313,12 +323,13 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         })
         summaryIndex.rebuild(items: items, now: now)
         estimatedContentHeight = items.reduce(CGFloat.zero) { partial, item in
-            partial + estimatedHeight(for: item) + Design.AccountUsageFleet.accountGap
-        }
+            partial + estimatedHeight(for: item)
+        } + CGFloat(max(items.count - 1, 0)) * Design.AccountUsageFleet.accountGap
         applySummary()
         applyLimitLegend()
-        table.reloadData()
-        applyViewportHeight()
+        updateTableBindingForCurrentHost()
+        if tableIsBound { table.reloadData() }
+        applyContentHeight()
     }
 
     /// Replaces one identity's reading without rediscovering, sorting, or rebuilding the fleet.
@@ -341,14 +352,16 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         estimatedContentHeight += estimatedHeight(for: updated) - estimatedHeight(for: previous)
         applySummary()
         applyLimitLegend()
-        applyViewportHeight()
+        applyContentHeight()
 
-        let rows = IndexSet(integer: index)
-        table.noteHeightOfRows(withIndexesChanged: rows)
-        table.reloadData(
-            forRowIndexes: rows,
-            columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns)
-        )
+        if tableIsBound {
+            let rows = IndexSet(integer: index)
+            table.noteHeightOfRows(withIndexesChanged: rows)
+            table.reloadData(
+                forRowIndexes: rows,
+                columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns)
+            )
+        }
         return true
     }
 
@@ -441,22 +454,40 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
         // width through Auto Layout. Keep the document and its sole column tracking the viewport;
         // otherwise its launch-time fitting width becomes permanent, cards render too narrow,
         // and AppKit's automatic-height cache spaces later rows using those wrapped measurements.
-        table.autoresizingMask = [.width]
-        table.delegate = self
-        table.dataSource = self
+        let accountRows: NSView
+        switch scrollHost {
+        case .standalone:
+            table.autoresizingMask = [.width]
+            let scroll = ThemedScrollView()
+            scroll.documentView = table
+            scroll.hasVerticalScroller = true
+            scroll.drawsBackground = false
+            scroll.automaticallyAdjustsContentInsets = false
+            scroll.verticalScrollHandoff = .never
+            self.scroll = scroll
+            accountRows = scroll
+            bindTableIfNeeded(force: true)
+        case .nestedPage:
+            // This is the ChangedFilesCard pattern at Settings scale: an embedded table has its
+            // full logical height, while NSView.visibleRect still intersects the outer page's
+            // clip. AppKit therefore constructs only the rows on screen without introducing a
+            // second scroller or a second owner for the trackpad gesture.
+            table.translatesAutoresizingMaskIntoConstraints = false
+            accountRows = table
+        }
 
-        scroll.documentView = table
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.automaticallyAdjustsContentInsets = false
-        scroll.verticalScrollHandoff = scrollHost == .nestedPage ? .atContentEnds : .never
-
-        let content = NSStackView(views: [summaryRow, scroll, limitLegend])
+        let content = NSStackView(views: [summaryRow, accountRows, limitLegend])
         content.orientation = .vertical
         content.alignment = .leading
         content.spacing = Design.Spacing.small
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
+
+        let initialHeight = scrollHost == .standalone
+            ? Design.AccountUsageFleet.minimumViewportHeight
+            : 0
+        let contentHeight = accountRows.heightAnchor.constraint(equalToConstant: initialHeight)
+        contentHeightConstraint = contentHeight
 
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: topAnchor),
@@ -464,25 +495,77 @@ final class AccountUsageFleetView: NSView, NSTableViewDataSource, NSTableViewDel
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
             content.bottomAnchor.constraint(equalTo: bottomAnchor),
             summaryRow.widthAnchor.constraint(equalTo: content.widthAnchor),
-            scroll.widthAnchor.constraint(equalTo: content.widthAnchor),
+            accountRows.widthAnchor.constraint(equalTo: content.widthAnchor),
             limitLegend.widthAnchor.constraint(equalTo: content.widthAnchor),
-            heightConstraint
+            contentHeight
         ])
 
         show([])
         setAccessibilityIdentifier("usage.current-capacity")
     }
 
-    private func applyViewportHeight() {
-        heightConstraint.constant = min(
-            max(estimatedContentHeight, Design.AccountUsageFleet.minimumViewportHeight),
-            maximumHeight
-        )
+    private func applyContentHeight() {
+        switch scrollHost {
+        case .standalone:
+            contentHeightConstraint?.constant = min(
+                max(estimatedContentHeight, Design.AccountUsageFleet.minimumViewportHeight),
+                maximumHeight
+            )
+        case .nestedPage:
+            contentHeightConstraint?.constant = estimatedContentHeight
+        }
+    }
+
+    private func bindTableIfNeeded(force: Bool) {
+        guard !tableIsBound, force else { return }
+        tableIsBound = true
+        table.delegate = self
+        table.dataSource = self
+        table.reloadData()
+    }
+
+    private func unbindLargeDetachedTableIfNeeded() {
+        guard tableIsBound,
+              scrollHost == .nestedPage,
+              window == nil,
+              items.count > Design.AccountUsageFleet.embeddedEagerRowCap else { return }
+        tableIsBound = false
+        table.delegate = nil
+        table.dataSource = nil
+        table.reloadData()
+    }
+
+    private func updateTableBindingForCurrentHost() {
+        switch scrollHost {
+        case .standalone:
+            bindTableIfNeeded(force: true)
+        case .nestedPage:
+            if window != nil || (!items.isEmpty
+                && items.count <= Design.AccountUsageFleet.embeddedEagerRowCap) {
+                bindTableIfNeeded(force: true)
+            } else {
+                unbindLargeDetachedTableIfNeeded()
+            }
+        }
     }
 
     override func layout() {
         super.layout()
         table.fitSoleColumnToWidth()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard scrollHost == .nestedPage else { return }
+        if window != nil, !tableIsBound {
+            // Let Settings commit the outer clip before the table asks which rows are visible.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.window != nil else { return }
+                self.bindTableIfNeeded(force: true)
+            }
+        } else if window == nil {
+            unbindLargeDetachedTableIfNeeded()
+        }
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { items.count }

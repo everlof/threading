@@ -456,7 +456,8 @@ final class RemoteSessionMirrorRegistry {
                 : nil,
             limitRecovery: ownsSessionLifecycle
                 ? remoteLimitRecovery(resolvedLimitRecovery)
-                : nil
+                : nil,
+            model: session.model
         )
     }
 
@@ -535,6 +536,7 @@ final class RemoteSessionMirrorRegistry {
                     // account menu is: a plan metering that model separately can be nearly
                     // spent while the account's weekly window still looks comfortable.
                     let model = AgentModels.defaultModel(for: kind, account: account)
+                    let modelChoices = models(for: account)
                     return RemoteAccountChoiceDTO(
                         id: account.handle.name,
                         name: accountNames[account.id] ?? account.displayName,
@@ -542,8 +544,16 @@ final class RemoteSessionMirrorRegistry {
                         usageSummary: usage?.compactSummary(metering: model),
                         usageFraction: usage?.bindingWindow(metering: model)?.fraction,
                         usageError: reading.error?.message,
-                        models: models(for: account),
-                        defaultModelID: AgentModels.defaultModel(for: kind, account: account)
+                        // Every window, scoped ones with the models they meter, so the phone
+                        // can ring a chat's *own* model rather than the account's default.
+                        usageWindows: usage.map {
+                            RemoteAccountBridge.usageWindows(
+                                for: $0,
+                                modelChoices: modelChoices.map(\.id)
+                            )
+                        },
+                        models: modelChoices,
+                        defaultModelID: model
                     )
                 }
             }

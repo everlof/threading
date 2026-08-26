@@ -33,13 +33,25 @@ private extension UsageDashboardBreakdownKind {
 
 // MARK: - Dashboard
 
-/// The retained history-and-consumption half of the one-page Usage surface. It owns one chart per
-/// subject and updates their models in place, so range/metric/provider changes morph fluidly
-/// instead of replacing the view tree. All potentially long breakdowns live in a recycling
-/// table; provider and coverage rows are bounded by the runtime/route set.
+/// The retained analysis half of the Usage surface. Its two-state control shows Consumption by
+/// default or Limit history on demand; both charts keep their models and selection state in place,
+/// so switching sections does not rebuild either tree. All potentially long breakdowns live in a
+/// recycling table; provider and coverage rows are bounded by the runtime/route set.
 final class UsageDashboardView: NSView, ThemedComponent {
     private typealias Metric = UsageDashboardMetric
     private typealias Breakdown = UsageDashboardBreakdownKind
+
+    enum DashboardSection: Int, CaseIterable {
+        case consumption
+        case limitHistory
+
+        var title: String {
+            switch self {
+            case .consumption: return L10n.string("Consumption")
+            case .limitHistory: return L10n.string("Limit history")
+            }
+        }
+    }
 
     private var overview: UsageDashboardOverviewProjection?
     private var limits: [UsageLimitDashboardSeries] = []
@@ -50,6 +62,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     private var selectedBreakdown = Breakdown.models
     private var selectedLimitDays = 30
     private var selectedLimitID: String?
+    private var selectedDashboardSection = DashboardSection.consumption
     private var hasPresentedUsage = false
     private var hasPresentedLimits = false
     private let relativeDateFormatter: RelativeDateTimeFormatter = {
@@ -61,6 +74,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     private let scanStatusLabel = NSTextField(labelWithString: "")
     private let scanProgressBar = ThemedProgressBar()
     private let scanStatus = NSStackView()
+    private let dashboardSectionControl = ThemedSegmentedControl()
     private let rangeControl = ThemedSegmentedControl()
     private let metricControl = ThemedSegmentedControl()
     private let consumptionHero = UsageConsumptionHeroView()
@@ -199,6 +213,14 @@ final class UsageDashboardView: NSView, ThemedComponent {
         (!scanStatus.isHidden, scanProgressBar.isHidden ? nil : scanProgressBar.progress)
     }
     var topToolCountForTesting: Int { consumptionHero.toolCount }
+    var selectedDashboardSectionForTesting: DashboardSection { selectedDashboardSection }
+    var dashboardSectionTitlesForTesting: [String] { dashboardSectionControl.titles }
+    var visibleDashboardSectionCountForTesting: Int {
+        [overviewColumn, limitColumn].filter { !$0.isHidden }.count
+    }
+    func selectDashboardSectionForTesting(_ section: DashboardSection) {
+        selectDashboardSection(section)
+    }
     func selectLimitRangeForTesting(days: Int) {
         guard let index = UsageDashboardProjectionDefaults.overviewRanges.firstIndex(of: days) else {
             return
@@ -231,6 +253,26 @@ final class UsageDashboardView: NSView, ThemedComponent {
             content.spacing = Design.Spacing.large
             content.detachesHiddenViews = true
         }
+
+        dashboardSectionControl.configure(
+            titles: DashboardSection.allCases.map(\.title),
+            selectedIndex: selectedDashboardSection.rawValue
+        )
+        dashboardSectionControl.widthAnchor.constraint(
+            equalToConstant: Design.UsageDashboard.sectionControlWidth
+        ).isActive = true
+        dashboardSectionControl.setAccessibilityLabel(L10n.string("Usage section"))
+        dashboardSectionControl.setAccessibilityIdentifier("usage.dashboard.section-picker")
+        dashboardSectionControl.onSelect = { [weak self] index in
+            guard let section = DashboardSection(rawValue: index) else { return }
+            self?.selectDashboardSection(section)
+        }
+        let sectionControlSpacer = NSView()
+        sectionControlSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let sectionControlRow = NSStackView(views: [dashboardSectionControl, sectionControlSpacer])
+        sectionControlRow.orientation = .horizontal
+        sectionControlRow.alignment = .centerY
+        sectionControlRow.spacing = Design.Spacing.medium
 
         // The rescan strip. A page that already has its last complete report on screen says a new
         // scan is running beside the consumption controls rather than in the chart: the chart is
@@ -331,8 +373,9 @@ final class UsageDashboardView: NSView, ThemedComponent {
         limitColumn.addArrangedSubview(limitCardStack)
         limitColumn.addArrangedSubview(limitChart)
 
-        column.addArrangedSubview(limitColumn)
+        column.addArrangedSubview(sectionControlRow)
         column.addArrangedSubview(overviewColumn)
+        column.addArrangedSubview(limitColumn)
 
         for view in column.arrangedSubviews {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -344,6 +387,14 @@ final class UsageDashboardView: NSView, ThemedComponent {
                 view.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
             }
         }
+        selectDashboardSection(selectedDashboardSection)
+    }
+
+    private func selectDashboardSection(_ section: DashboardSection) {
+        selectedDashboardSection = section
+        dashboardSectionControl.selectedIndex = section.rawValue
+        overviewColumn.isHidden = section != .consumption
+        limitColumn.isHidden = section != .limitHistory
     }
 
     private func limitControls() -> NSView {

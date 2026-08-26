@@ -2533,7 +2533,9 @@ heading, pushes a **New session** screen — Back returns to the list it was ope
 middle of the screen says what will start and where — **Agent in AnotherTerminal**, each word a
 dropdown, with the branch under it; choose **Manager** to start a project manager instead. The
 agent and account are the disc at the top right, the agent's mark ringed by that account's usage,
-with the full usage figures in its menu. The composer at the bottom holds the prompt and, under
+one ring per limit window (the week outside, the five hours inside it, and a model's own window
+innermost when the draft will run a model the plan meters separately), with the full usage
+figures in its menu. The composer at the bottom holds the prompt and, under
 it, one line for the run — **GPT-5.6 Sol · High**, a menu of model, effort and speed — and two
 glyphs for permissions and interface, each a menu; a glyph takes the accent colour once its
 choice departs from the default. The composer sits on
@@ -2712,8 +2714,10 @@ position. A permission whose edit diff is too large for a bounded remote snapsho
 reviewed on the Mac, so a remote device can never approve from a partial preview.
 
 On iPhone, the session's menu is the **account disc** at the top right — the agent's mark ringed
-by how much of that login's allowance is used, the same disc the New session screen wears, so it
-stays put when a draft becomes a chat. Open it and choose **Workspace** for **Browser**,
+by how much of that login's allowance is used, one ring per limit window: the week on the
+outside, the five hours inside it, and, for a chat running a model the plan meters separately,
+that model's own window innermost. It is the same disc the New session screen wears, so it stays
+put when a draft becomes a chat. Open it and choose **Workspace** for **Browser**,
 **Review**, **Files**, and **Attachments**; a swipe in from the right edge of the session opens
 the same thing. Workspace is a drawer: it slides in from the right over the chat and follows your finger
 as you pull it, leaving a sliver of the chat visible at the left edge; drag the panel back to the
@@ -2781,10 +2785,13 @@ and beta limitations.
 
 ### Reporting a problem from your iPhone
 
-Shake the phone to open a report sheet: describe what happened, keep or drop the screenshot, then
-send it to Threading privately or share one zip containing all selected report files. On a paired
-owner device that can manage sessions, **Send to Mac** instead starts a chat on your Mac with the
-whole report, including the selected screenshot preview, as its opening prompt.
+Shake the phone to open a report sheet on the screen the problem happened on. That screen is
+captured as the sheet opens and stays on the phone; the checkmark at the top right decides whether
+it goes with the report, and the sheet shows you the exact picture while it does. Describe what
+happened, then send it to Threading privately or share one zip of the selected report files, named
+after the moment you made it so saved reports never collide. On a paired owner device that can
+manage sessions, **Send to Mac** instead starts a chat on your Mac with the whole report,
+including the screenshot preview when it is included, as its opening prompt.
 
 That chat is configured on the Mac, not on the phone. It comes up on the same agent, login, model,
 reasoning level, speed and permission mode as the chat you used most recently in that project, so
@@ -4745,7 +4752,9 @@ General ▸ Login Items**, which is the one case with a button that takes you th
 
 **Turn off the background host** stops Threading using the helper and removes it from Login Items.
 If it is still holding sessions it stays registered and they keep running, because removing it
-would end them; the next launch that finds it idle removes it.
+would end them; the next launch that finds it idle removes it. If the helper does not answer and
+macOS cannot confirm that its process is gone, Threading also leaves it registered and tells you,
+rather than treating silence as permission to end unseen work.
 
 #### Running the tools from a terminal
 

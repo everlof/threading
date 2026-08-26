@@ -2930,6 +2930,14 @@ the project aggregate. A live file event updates only that file's ancestors; ope
 the pane asks the worker for exact totals for visible rows, caches at most 256 paths, and never
 walks a closed directory or all expanded rows.
 
+Persistence is sharded by session as well as coalesced by session. A mutation writes
+`<project>.sessions/<session>.json`; it does not encode or replace every other conversation in the
+project. Legacy whole-project documents are migrated write-then-delete, one shard at a time, and
+remain only when a shard write fails so an interrupted migration is recoverable. Therefore write
+bytes for one live agent scale with that agent's sparse trace, not with the project-wide session
+count. Removing a session deletes its shard, and removing a project deletes both legacy and shard
+forms.
+
 **The git-observed floor is bounded the same way, at the checkpoint rather than at the call.** A
 turn's changed paths arrive as one enqueue carrying a path list, and each path is then applied
 through exactly the incremental primitive a live event uses: one session entry, one project entry,
@@ -3715,3 +3723,39 @@ a 1 MB ring's replay at 0.4 ms to first byte and 6.9 ms to complete.
 **Nothing here was optimised.** The numbers are the first measurement of a path that had not been
 measured, they are comfortably inside the interaction budget, and the slice ships with them as
 found.
+
+
+## Host-backed terminal input and activity latency
+
+Measured 2026-08-26 after reports that Codex input echo and its `Working` repaint felt late on
+host-backed PTYs. A five-second sample of the shipping app caught the main thread in
+`PTYHostTerminalLink.flush` → `TerminalSession.hostDelivery` →
+`EmojiFixedTerminalView.feedFromHost` → `TerminalRenderOwner.feed`, amid AppKit drawing. The
+daemon was about 0.1% CPU in the same observation. The socket and daemon were not saturated; the
+host-backed path had moved parser work onto main, unlike SwiftTerm's local-process path.
+
+The scaling contract is now:
+
+- The external source is terminal output, unbounded over a session and delivered in wire frames
+  no larger than 64 KiB. Daemon framing, ring retention and fan-out remain O(bytes).
+- The launchd job remains `ProcessType = Interactive`. Daemon state and per-session IO queues are
+  `userInitiated`: immediate causal work, but shared with detached sessions that have no visible
+  animation deadline.
+- An attached app client's serial queue is `userInteractive`. Steady live frames parse there in
+  wire order through SwiftTerm's checked `TerminalFeedSender`; parser work is O(bytes) and never
+  waits for a main-actor turn.
+- Main receives one coalesced activity/raw-output report per burst plus SwiftTerm's render
+  publication. It does not parse ordinary live bytes. The bounded exception is the first
+  post-attach handoff, which follows authoritative grid adoption on main because the current wire
+  has no replay-length boundary. It takes one finite backlog and holds the serial transport queue
+  behind it instead of draining a continuously growing stream on main.
+- A parser is lifetime-gated per link. Replacing, detaching or ending a link invalidates that gate
+  before late output can enter a replacement emulator.
+
+The deterministic regression test holds the main actor on its current turn while a fake transport
+delivers `codex repaint` synchronously. Before the change, diagnostics reported 0 of 13 bytes
+parsed until the main run loop advanced. After it, all 13 are parsed before that turn ends, while
+the activity callback remains queued for the coalesced main delivery. This proves queue ownership,
+not a wall-clock latency number. The focused parsing and QoS tests, the fake-link host-session
+suite, and the real-daemon attach/detach/replay suites cover the shipping path. A fresh sample of
+the patched product shell remains the final measurement after the build is installed.

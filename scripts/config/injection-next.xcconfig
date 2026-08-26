@@ -3,19 +3,25 @@
 //
 // InjectionNext cannot rebuild from Xcode's compilation cache and needs linker interposition
 // for final classes, structs, enums, and free functions. Key the linker flags by wrapper
-// extension so only Threading.app loads the client dylib; the command-line helper executables
-// built beside it retain their own OTHER_LDFLAGS unchanged.
+// extension and platform so only Threading.app and the iOS Simulator's ThreadingMobile.app load
+// their matching client dylibs; command-line helpers, tests, and device builds retain their own
+// OTHER_LDFLAGS unchanged.
 THREADING_INJECTION_COMPILATION_CACHE_Debug = NO
 THREADING_INJECTION_EMIT_FRONTEND_Debug = YES
 COMPILATION_CACHE_ENABLE_CACHING = $(inherited) $(THREADING_INJECTION_COMPILATION_CACHE_$(CONFIGURATION))
 EMIT_FRONTEND_COMMAND_LINES = $(inherited) $(THREADING_INJECTION_EMIT_FRONTEND_$(CONFIGURATION))
 
 THREADING_INJECTION_ACTIVE_Debug = YES
-THREADING_INJECTION_LINKER_FLAGS_app_YES = -Xlinker -interposable "$(THREADING_INJECTION_DYLIB)"
-OTHER_LDFLAGS = $(inherited) $(THREADING_INJECTION_LINKER_FLAGS_$(WRAPPER_EXTENSION)_$(THREADING_INJECTION_ACTIVE_$(CONFIGURATION)))
+THREADING_INJECTION_PLATFORM_ACTIVE_macosx = YES
+THREADING_INJECTION_PLATFORM_ACTIVE_iphonesimulator = YES
+THREADING_INJECTION_DYLIB_macosx = $(THREADING_INJECTION_MACOS_DYLIB)
+THREADING_INJECTION_DYLIB_iphonesimulator = $(THREADING_INJECTION_IOS_SIMULATOR_DYLIB)
+THREADING_INJECTION_LINKER_FLAGS_app_YES_YES = -Xlinker -interposable "$(THREADING_INJECTION_DYLIB_$(PLATFORM_NAME))"
+OTHER_LDFLAGS = $(inherited) $(THREADING_INJECTION_LINKER_FLAGS_$(WRAPPER_EXTENSION)_$(THREADING_INJECTION_ACTIVE_$(CONFIGURATION))_$(THREADING_INJECTION_PLATFORM_ACTIVE_$(PLATFORM_NAME)))
 
 // The prebuilt client uses XCTest only to inhibit specification caching. Its release rpaths
 // point at the publisher's Xcode installations, so resolve those two @rpath dependencies from
 // the same selected Xcode that performs this build.
-THREADING_INJECTION_RUNPATHS_app_YES = "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/usr/lib" "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/Library/Frameworks" "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks"
-LD_RUNPATH_SEARCH_PATHS = $(inherited) $(THREADING_INJECTION_RUNPATHS_$(WRAPPER_EXTENSION)_$(THREADING_INJECTION_ACTIVE_$(CONFIGURATION)))
+THREADING_INJECTION_RUNPATHS_app_YES_YES_macosx = "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/usr/lib" "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/Library/Frameworks" "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks"
+THREADING_INJECTION_RUNPATHS_app_YES_YES_iphonesimulator = "$(DEVELOPER_DIR)/Platforms/iPhoneSimulator.platform/Developer/usr/lib" "$(DEVELOPER_DIR)/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks" "$(DEVELOPER_DIR)/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks"
+LD_RUNPATH_SEARCH_PATHS = $(inherited) $(THREADING_INJECTION_RUNPATHS_$(WRAPPER_EXTENSION)_$(THREADING_INJECTION_ACTIVE_$(CONFIGURATION))_$(THREADING_INJECTION_PLATFORM_ACTIVE_$(PLATFORM_NAME))_$(PLATFORM_NAME))

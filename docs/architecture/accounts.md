@@ -304,6 +304,25 @@ the model that session runs. A weekly window at 56% beside a Fable window at 89%
 as an account and nearly spent as a session, and the toolbar belongs to the session — so the pill
 gauges the binding window and names it in its text (`5h 7% · 7d 56% · 7d Fable 89%`).
 
+### The phone's disc
+
+The iPhone's toolbar has no room for the pill's text, so its account disc (`MobileAccountDisc`)
+says the same thing in rings: the account's own windows outermost, the longest on the outside
+(`7d`, then `5h`), and a model-scoped window innermost, hugging the runtime's mark, drawn only
+when the chat runs a model that window meters. The account's rings never move when a Fable chat
+is opened; the Fable ring appears inside them. Three rings fit around the mark at the disc's
+stroke and gap, so a fourth is not drawn, while the disc's spoken value names every window in
+the pill's order.
+
+The scope match stays on the Mac. `RemoteAccountBridge.usageWindows` sends each scoped window
+with the ids among the account's model choices that `ModelName.scope` says it meters, and the
+phone matches the chat's model (`RemoteSessionSummaryDTO.model`, else the account's default, the
+pill's own fallback) with a lookup; a phone deciding from two strings whether `Fable` meters
+`claude-fable-5[1m]` would be a second copy of the families table, one release behind. A host
+predating `usageWindows` sends only the binding fraction, and the phone rings that alone. Ring
+order and the reset-expiry rule live in `MobileAccountUsageReading.resolve`; the draft's disc
+follows the model the draft will start.
+
 ### One name per window
 
 A window is named by its **length**, and a scoped one adds the **model** it meters: compact

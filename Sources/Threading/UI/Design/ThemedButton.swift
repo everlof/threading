@@ -1,6 +1,59 @@
 import AppKit
 import CoreText
 
+/// Draws only the two-point ring outside a floating target's own silhouette.
+///
+/// A companion layer is used instead of a second view so the ring travels and scales with the
+/// button's presence animation. Its resolved colour is refreshed by `ThemedButton` alongside the
+/// floating surface; storing the `CGColor` here is safe because it is never left to resolve itself.
+private final class FloatingTargetIsolationLayer: CALayer {
+    var isolationColor = NSColor.clear.cgColor
+    var clearance: CGFloat = 0
+    var surfaceRadius: CGFloat = 0
+
+    override init() {
+        super.init()
+        needsDisplayOnBoundsChange = true
+        drawsAsynchronously = false
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+        guard let source = layer as? FloatingTargetIsolationLayer else { return }
+        isolationColor = source.isolationColor
+        clearance = source.clearance
+        surfaceRadius = source.surfaceRadius
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        needsDisplayOnBoundsChange = true
+        drawsAsynchronously = false
+    }
+
+    override func draw(in context: CGContext) {
+        let inner = bounds.insetBy(dx: clearance, dy: clearance)
+        guard clearance > 0, inner.width > 0, inner.height > 0 else { return }
+        let innerRadius = min(surfaceRadius, min(inner.width, inner.height) / 2)
+        let outerRadius = innerRadius > 0 ? innerRadius + clearance : 0
+
+        context.addPath(CGPath(
+            roundedRect: bounds,
+            cornerWidth: outerRadius,
+            cornerHeight: outerRadius,
+            transform: nil
+        ))
+        context.addPath(CGPath(
+            roundedRect: inner,
+            cornerWidth: innerRadius,
+            cornerHeight: innerRadius,
+            transform: nil
+        ))
+        context.setFillColor(isolationColor)
+        context.drawPath(using: .eoFill)
+    }
+}
+
 /// A button drawn from the theme, replacing `NSButton`.
 ///
 /// It carries the design system's oldest rule — *flat over bezelled* — into the one control that
@@ -26,7 +79,8 @@ import CoreText
 /// should read as a mark. The flags stay because the call sites already say them; a new screen
 /// should say `emphasis` instead, because "which of the three is this" is the question being
 /// answered and `isBordered = false` is not an answer to it.
-final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProviding {
+final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProviding,
+    ThemeDerivedContent {
 
     // MARK: - Geometry
 
@@ -39,6 +93,11 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         static let plainInset: CGFloat = Design.Spacing.tight
         static let disabledAlpha: CGFloat = 0.4
         static let pressedDim: CGFloat = 0.75
+
+        /// A floating target covers arbitrary rows, rules and selections. This much of the
+        /// theme's ground is knocked out immediately outside its silhouette so none of those
+        /// surfaces can appear to continue through the control's edge.
+        static let floatingIsolation = Design.Spacing.hairline
 
         /// Between the title and the chord named after it. Wider than the image gap: the two
         /// are different kinds of thing, and a hint crowding the words reads as one word.
@@ -163,6 +222,13 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     private var buttonStyle: AppTheme.Material.ButtonStyle {
         AppThemePalette.current.material(for: effectiveAppearance).buttonStyle
     }
+
+    /// Set only by `floatingScrollToEnd`. A floating target is still a `ThemedButton`, but its
+    /// face is embedded floating chrome rather than the ordinary control surface. Remembering
+    /// the semantic shape lets an appearance/theme sweep rebuild the resolved fill and depth
+    /// instead of leaving the layer frozen in the theme under which the host was constructed.
+    private var floatingSurfaceRadius: SurfaceRadius?
+    private var floatingIsolationLayer: FloatingTargetIsolationLayer?
 
     /// What is painted may follow a theme's display convention; what accessibility and the
     /// action model expose remains the authored title below.
@@ -784,6 +850,85 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         }
 
         drawContent(in: faceBounds)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        rederiveThemedContent()
+    }
+
+    override func layout() {
+        super.layout()
+        layoutFloatingIsolation()
+    }
+
+    func rederiveThemedContent() {
+        guard let floatingSurfaceRadius else { return }
+        ThemedFloatingSurfaceChrome.current(for: effectiveAppearance).apply(
+            to: self,
+            radius: floatingSurfaceRadius
+        )
+        layoutFloatingIsolation()
+    }
+
+    /// The button's own fill already prevents content showing *through* it. This exterior ring
+    /// prevents the other half of the reported failure: a full-width row using the same colour
+    /// as the button's border meeting that border with no separating pixel, so the row reads as
+    /// a rectangular tail attached to the circle. It is outside the hit target and follows the
+    /// exact semantic silhouette, including square-cornered themes.
+    private func layoutFloatingIsolation() {
+        guard let radius = floatingSurfaceRadius, let layer else {
+            floatingIsolationLayer?.removeFromSuperlayer()
+            floatingIsolationLayer = nil
+            return
+        }
+
+        let clearance = Layout.floatingIsolation
+        let isolation: FloatingTargetIsolationLayer
+        if let floatingIsolationLayer {
+            isolation = floatingIsolationLayer
+        } else {
+            isolation = FloatingTargetIsolationLayer()
+            isolation.name = "threading.floatingTarget.isolation"
+            floatingIsolationLayer = isolation
+        }
+        if isolation.superlayer !== layer {
+            layer.insertSublayer(isolation, at: 0)
+        }
+
+        isolation.contentsScale = window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 2
+        isolation.frame = bounds.insetBy(dx: -clearance, dy: -clearance)
+        isolation.clearance = clearance
+        isolation.surfaceRadius = radius.current
+
+        // `.continuous` is the right curve for ordinary rounded controls, but at half a
+        // square's side it is a squircle with short flat segments. This target is semantically
+        // circular in themes whose pill radius reaches that limit, so keep its layer, knockout
+        // and shadow on the same true-circle geometry.
+        let shortestSide = min(bounds.width, bounds.height)
+        if shortestSide > 0 {
+            layer.cornerCurve = radius.current >= shortestSide / 2 ? .circular : .continuous
+        }
+
+        // The isolation layer deliberately extends beyond the control. Without an explicit
+        // path Core Animation includes that ring when it derives the parent shadow mask, which
+        // leaves short shadow ticks above and below a circular target. Depth belongs to the
+        // floating face, not to the knockout surrounding it.
+        layer.shadowPath = CGPath(
+            roundedRect: bounds,
+            cornerWidth: radius.current,
+            cornerHeight: radius.current,
+            transform: nil
+        )
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            isolation.isolationColor = AppThemePalette.current.resolved(
+                .ground,
+                appearance: effectiveAppearance
+            ).cgColor
+        }
+        isolation.setNeedsDisplay()
     }
 
     /// The face's ink — image, title and chord — drawn the same whether the surface under it is
@@ -1446,12 +1591,8 @@ extension ThemedButton {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isBordered = false
         button.toolTip = accessibility
-        button.applySurface(
-            fill: Design.Surface.elevated,
-            radius: .pill(height: Design.Size.floatingNavigationTarget),
-            border: Design.Surface.border,
-            glow: true
-        )
+        button.floatingSurfaceRadius = .pill(height: Design.Size.floatingNavigationTarget)
+        button.rederiveThemedContent()
         NSLayoutConstraint.activate([
             button.widthAnchor.constraint(equalToConstant: Design.Size.floatingNavigationTarget),
             button.heightAnchor.constraint(equalToConstant: Design.Size.floatingNavigationTarget)

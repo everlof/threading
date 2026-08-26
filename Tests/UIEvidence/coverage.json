@@ -1069,8 +1069,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Usage dashboard",
-      "description": "The one-page current-capacity, Limit History and Consumption hierarchy with bounded chart data and real virtualized account and breakdown tables under contrasting materials.",
-      "states": ["Current capacity", "Limit History", "Consumption"],
+      "description": "The Consumption-first Usage dashboard and its separate Limit History state, with Current Capacity below, bounded chart data, and real virtualized account and breakdown tables under contrasting materials.",
+      "states": ["Consumption default", "Limit History selected", "Current capacity below analysis"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Neo Brutalism", "Classic Player"],
         "appearances": ["Theme representative appearance"],

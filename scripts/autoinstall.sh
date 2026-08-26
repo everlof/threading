@@ -294,7 +294,7 @@ PYTHON
 # — release.sh's header says so — and an app you leave running all day should not be one any
 # process running as you can attach a debugger to and read the memory of.
 build_the_checkout() {
-    local sha="$1" status=0 product_revision
+    local sha="$1" status=0 product_revision helper
     : > "$BUILD_LOG"
     cd "$CHECKOUT"
 
@@ -328,6 +328,20 @@ build_the_checkout() {
         if [[ "$product_revision" != "$sha" ]]; then
             printf 'error: built product reports source revision %q, expected %q\n' \
                 "$product_revision" "$sha" >> "$BUILD_LOG"
+            status=1
+        fi
+    fi
+    if [[ $status -eq 0 ]]; then
+        helper="$PRODUCT/Contents/Helpers/threading-ptyd"
+        if [[ ! -x "$helper" ]]; then
+            printf 'error: built product has no executable PTY host at %q\n' \
+                "$helper" >> "$BUILD_LOG"
+            status=1
+        elif ! /usr/bin/strings "$helper" | awk \
+            -v expected="<string>${sha}</string>" \
+            '$0 == expected { found = 1 } END { exit(found ? 0 : 1) }'; then
+            printf 'error: PTY host does not embed source revision %q\n' \
+                "$sha" >> "$BUILD_LOG"
             status=1
         fi
     fi

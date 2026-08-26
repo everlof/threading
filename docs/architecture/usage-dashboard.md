@@ -24,10 +24,13 @@ copy; this note is not permission to blur that boundary later.
 
 ## Three layers, one page
 
-`UsagePreferencesViewController` owns one bounded `AccountUsageFleetView` followed by one retained
-`UsageDashboardView` and coordinates the feeds. There is no page-local tab switch: current
-capacity answers whether work can continue now, Limit History explains how the selected window
-arrived there, and Consumption accounts for cost and tokens below it:
+`UsagePreferencesViewController` owns one retained `UsageDashboardView` followed by one
+`AccountUsageFleetView` and coordinates the feeds. The dashboard has one host-owned section
+switch: Consumption is the default analysis; Limit history is a separate on-demand state rather
+than a second full-height chart stacked above it. Both columns stay retained, so switching keeps
+their range, metric and limit selection without rebuilding chart trees. Current capacity remains
+fully visible below the selected analysis without letting a variable account count push the
+Consumption graph out of the first viewport:
 
 - `TranscriptUsageService` scans on its utility queue, persists a rebuildable 90-day report, and
   posts `TranscriptUsageDidChange` when the completed report can replace the previous one.
@@ -46,12 +49,15 @@ percentage and a weekly or model-scoped percentage do not form a capacity provid
 Expired windows are absent. Each account renders at most six active windows and each account card
 is an `NSTableView` row, so opening five or five hundred discovered accounts constructs only the
 viewport. One fixed footer legend keys any user-authored limit markers visible across those rows;
-it is not repeated per recycled card. The viewport itself is height-bounded. In Settings it hands
-scrolling to the enclosing page at its content ends; in the pinned toolbar popover it owns the
-complete gesture because there is no parent scroller to receive a handoff.
+it is not repeated per recycled card. Settings has one scroll owner: the fleet table contributes
+its complete logical height while the enclosing page's clip remains the cell-materialization
+viewport. It therefore neither clips a card nor puts a scroller inside the page's scroller. The
+pinned toolbar popover instead gives the same table its own bounded viewport because there is no
+parent scroller.
 
-That bound continues after open. `AccountUsageDidChange` already carries an `AccountID`, so both
-hosts replace only that identity's cached item and reload only its table row. Status counts update
+That scaling discipline continues after open. `AccountUsageDidChange` already carries an
+`AccountID`, so both hosts replace only that identity's cached item and reload only its table row.
+Status counts update
 in O(1), and the next reset is maintained by an identity-indexed min-heap in O(log n); no event
 rediscovers or re-sorts the fleet. Limit history has its own `UsageLimitHistoryDidChange` signal,
 so a live-reading event does not restart the 90-day journal projection as collateral work.
@@ -60,7 +66,10 @@ provider fetches at once. Scheduled identities share the existing single-flight 
 queue advances by index rather than repeatedly removing its first element.
 
 The dashboard receives immutable report and limit-series values. It does not read transcripts,
-launch CLIs, call provider endpoints or perform journal I/O.
+launch CLIs, call provider endpoints or perform journal I/O. Its section switch is deliberately
+host-owned navigation over those native analyses; extension-contributed Usage settings remain
+additive page sections outside the switch, so choosing one native analysis cannot hide or
+misrepresent extension content.
 
 `UsageDashboardProjector` is the Foundation-only seam between those feeds and presentation. It
 prepares all three Overview ranges and both metric rankings on a utility task, including the
@@ -247,17 +256,22 @@ is never described as an invoice.
 
 ### Incremental scan and aggregation
 
-`UsageScanCache` stores one private envelope per source, keyed by stable FNV-1a of parser id and
-source path. File size plus a freshly read modification timestamp invalidates transcript entries;
-OpenCode entries use export id plus session revision. The cached value retains every response
-identity, so global deduplication happens after cache hits and misses are joined and a warm result
-is exactly the cold result. Stale cache entries are removed only inside the private cache directory.
-Each envelope is bounded to 64 MiB on both read and write. An externally enlarged entry is a cache
-miss and is replaced only after the source is parsed; metadata preflight is not used as allocation
-authority.
+`UsageLedgerIndex` is the warm authority. Its SQLite source table stores each parser/path pair with
+file size and a freshly read modification timestamp; OpenCode entries use export id plus session
+revision. The comparison happens before any response envelope is read. A changed source replaces
+only its source-to-record edges, while a separate identity table retains one payload globally, so
+warm and cold results have the same exact deduplication. Sources no adapter offered this pass and
+their now-unowned records are removed once at the end of the transaction.
 
-`UsageLedgerBuilder` deduplicates once, prices once, resolves checkout roots once per directory and
-aggregates at two bounded cell grains:
+`UsageScanCache` remains the cold/migration layer for a source the index does not yet know. It
+stores one private envelope per source and feeds either the existing envelope or a fresh parse into
+the index. Each envelope is bounded to 64 MiB on both read and write; the directory is also bounded
+to 512 MiB in aggregate by removing its oldest rebuildable envelopes after stale entries. An
+externally enlarged entry is a cache miss and is replaced only after the source is parsed;
+metadata preflight is not used as allocation authority.
+
+`UsageLedgerBuilder` streams globally distinct SQLite rows one at a time, prices once, resolves
+checkout roots once per directory and aggregates at two bounded cell grains:
 
 `day × runtime/biller × account × exact model × checkout`
 
@@ -487,15 +501,12 @@ caught it growing: `NSConcreteData` +4,912, `_NSJSONReader` +4,419, `__NSExactBl
 `BoundedFileReader.read` wraps each chunk append, so a file's chunks are gone before the next file
 opens. Returned records are Swift values, so the bound costs the scan nothing.
 
-Two things this exposed that are worth keeping in view:
-
-- **`maximumEntryBytes` is 64 MB per entry and there is no aggregate bound.** 2,824 entries under a
-  per-entry cap is the "per-item bounds mistaken for a global bound" pattern from the Scaling Gate.
-  4.4 GB of derived cache is already larger than most of what this app stores; it is marked
-  `rebuildableCache`/`derivedCache` so storage reclamation can offer it, but nothing caps its total.
-- **The scan accumulates `records` for every source before deduplicating.** That is deliberate, since
-  global deduplication has to see every response identity, but it means peak scan memory scales with
-  total history rather than with one source. Only the transient per-file bytes were fixed here.
+The two remaining scaling failures were closed on 2026-08-26. The per-source envelopes now have a
+512 MiB aggregate directory bound, and a normalized SQLite ledger moves unchanged-source checks
+ahead of envelope decoding. The report builder streams that ledger rather than accumulating every
+source's records before deduplication. The first migration can still read each old envelope once,
+but its transient bound is one source and the old directory is pruned at the end; later scans pay
+filesystem metadata plus an indexed fingerprint lookup for unchanged sources.
 
 `BoundedFileReaderTests.testReadingManyFilesDoesNotRetainEveryFilesChunks` reads 120 MB across 120
 files and fails if the footprint grows by more than 40 MB. Reverting the pool to confirm the test

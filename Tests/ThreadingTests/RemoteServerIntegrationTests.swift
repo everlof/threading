@@ -1172,11 +1172,42 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let unknownRole = Data(
             #"{"projectID":"\#(project.id.uuidString)","agentKind":"codex","surface":"terminal","role":"overlord","prompt":"Coordinate the release"}"#.utf8
         )
+        let refusal = try XCTUnwrap(post(
+            "/api/session",
+            bearer: "goodtoken",
+            body: unknownRole
+        ))
+        XCTAssertEqual(refusal.status, 422)
         XCTAssertEqual(
-            try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: unknownRole)).status,
-            422
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: refusal.body).code,
+            RemoteRESTErrorCode.unknownRole.rawValue
         )
         XCTAssertEqual(sessionCommands.launches.count, 3, "an unknown role starts nothing")
+    }
+
+    func testCreateSessionNamesTheWithdrawnModelThatRefusedLaunch() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-unknown-model-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let body = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+            projectID: project.id.uuidString,
+            agentKind: AgentKind.codex.rawValue,
+            model: "withdrawn-model",
+            surface: .terminal,
+            prompt: "Explain the refusal"
+        ))
+
+        let response = try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: body))
+        XCTAssertEqual(response.status, 422)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: response.body),
+            RemoteErrorDTO(code: .unknownModel)
+        )
+        XCTAssertTrue(sessionCommands.launches.isEmpty)
     }
 
     /// A phone may ask for the isolated worktree the Mac offered it, and nothing else.
@@ -3383,6 +3414,41 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(serialized.contains("Connection: close\r\n"))
         XCTAssertEqual(response.extraHeaders["Cache-Control"], "no-store")
         XCTAssertEqual(response.extraHeaders["X-Content-Type-Options"], "nosniff")
+    }
+
+    func testRESTRefusalsAreMachineReadableAndHardened() throws {
+        let precise = RemoteRouter.error(
+            422,
+            "Unknown Model",
+            code: .unknownModel
+        )
+        XCTAssertEqual(precise.status, 422)
+        XCTAssertEqual(precise.contentType, "application/json")
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: precise.body),
+            RemoteErrorDTO(code: .unknownModel)
+        )
+        XCTAssertEqual(precise.extraHeaders["Cache-Control"], "no-store")
+
+        let opaque = RemoteRouter.error(404, "Not Found")
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: opaque.body).code,
+            RemoteRESTErrorCode.notFound.rawValue
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteErrorDTO.self,
+                from: RemoteRouter.error(500, "Internal Server Error").body
+            ).code,
+            RemoteRESTErrorCode.serverFailure.rawValue
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteErrorDTO.self,
+                from: RemoteRouter.error(503, "Service Unavailable").body
+            ).code,
+            RemoteRESTErrorCode.serviceUnavailable.rawValue
+        )
     }
 
     func testAttachmentDetectorAcceptsVisualFilesInsideCheckoutOnly() throws {

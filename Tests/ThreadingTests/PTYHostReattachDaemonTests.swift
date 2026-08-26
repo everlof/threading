@@ -37,6 +37,9 @@ final class PTYHostReattachDaemonTests: XCTestCase {
         static let quietWindow: TimeInterval = 2
         /// Comfortably past the 512 KiB ring, so the rejoin cannot be exact.
         static let overflowBytes = 1_200_000
+        /// A failed test may never reach teardown. Pollers therefore expire on their own after
+        /// two minutes instead of becoming permanent launchd-owned fork loops.
+        static let sizePollIterations = 600
     }
 
     // MARK: - Fixture state
@@ -57,10 +60,20 @@ final class PTYHostReattachDaemonTests: XCTestCase {
 
     override func tearDown() {
         for session in sessions { session.terminate() }
+        let linksEnded = pump(
+            until: { self.sessions.allSatisfy { !$0.isHostBacked } },
+            timeout: PTYHostTestProcessCleanup.childTimeout
+        )
+        XCTAssertTrue(linksEnded, "host-backed test sessions did not report their ending")
         sessions.removeAll()
         for window in windows { window.orderOut(nil) }
         windows.removeAll()
-        daemon?.terminate()
+        if let daemon {
+            XCTAssertTrue(
+                daemon.shutdown(),
+                "scratch PTY daemon did not drain: \(daemon.diagnosticText)"
+            )
+        }
         daemon = nil
         if let directory { try? FileManager.default.removeItem(at: directory) }
         super.tearDown()
@@ -152,20 +165,27 @@ final class PTYHostReattachDaemonTests: XCTestCase {
     /// silence.
     func testARingThatWrappedWhileAwayReplaysACutAndTheEmulatorRecovers() throws {
         let socketPath = try startDaemon()
+        let overflowComplete = directory.appendingPathComponent("overflow.done")
 
         let first = try makeSession()
         first.hostTransportFactory = factory(socketPath: socketPath)
         first.start(plan: plan(
             "printf ALPHA; sleep 2; printf '\\033[>c'; "
                 + "head -c \(Fixture.overflowBytes) /dev/zero | tr '\\\\0' x; "
-                + "printf '\\r\\nTAILMARK'; sleep 60"
+                + "printf '\\r\\nTAILMARK'; : > \(overflowComplete.path); sleep 60"
         ))
         XCTAssertTrue(
             pump(until: { first.visibleScreenLines().contains { $0.contains("ALPHA") } }),
             "the child never started"
         )
         XCTAssertTrue(first.detachFromHost(by: Date().addingTimeInterval(2)))
-        Thread.sleep(forTimeInterval: Fixture.detachedPause)
+        XCTAssertTrue(
+            pump(
+                until: { FileManager.default.fileExists(atPath: overflowComplete.path) },
+                timeout: Fixture.childTimeout
+            ),
+            "the child did not finish writing enough bytes to wrap the ring"
+        )
 
         let holdings = try holdings(socketPath: socketPath)
         let summary = try XCTUnwrap(holdings.sessions.first)
@@ -219,9 +239,9 @@ final class PTYHostReattachDaemonTests: XCTestCase {
         let first = try makeSession()
         first.hostTransportFactory = factory(socketPath: socketPath)
         first.start(plan: plan(
-            "last=; while :; do now=$(stty size); "
+            "last=; i=0; while [ \"$i\" -lt \(Fixture.sizePollIterations) ]; do now=$(stty size); "
                 + "if [ \"$now\" != \"$last\" ]; then printf '%s\\n' \"$now\" >> \(log.path); "
-                + "last=$now; fi; sleep 0.2; done"
+                + "last=$now; fi; i=$((i + 1)); sleep 0.2; done"
         ))
         XCTAssertTrue(
             pump(until: { self.sizeLines(in: log) >= 1 }),
@@ -278,9 +298,9 @@ final class PTYHostReattachDaemonTests: XCTestCase {
         let first = try makeSession()
         first.hostTransportFactory = factory(socketPath: socketPath, box: box)
         first.start(plan: plan(
-            "last=; while :; do now=$(stty size); "
+            "last=; i=0; while [ \"$i\" -lt \(Fixture.sizePollIterations) ]; do now=$(stty size); "
                 + "if [ \"$now\" != \"$last\" ]; then printf '%s\\n' \"$now\" >> \(log.path); "
-                + "last=$now; fi; sleep 0.2; done"
+                + "last=$now; fi; i=$((i + 1)); sleep 0.2; done"
         ))
         XCTAssertTrue(
             pump(until: { self.sizeLines(in: log) >= 1 }),
@@ -618,14 +638,20 @@ private final class ClientBox: @unchecked Sendable {
 private final class DaemonHelperProcess: @unchecked Sendable {
 
     private let process = Process()
+    private let socketPath: String
     private let diagnostics = Pipe()
     private let lock = NSLock()
     private var collected = Data()
 
     init(helper: URL, socketPath: String, stateDirectory: URL) throws {
+        self.socketPath = socketPath
         process.executableURL = helper
         process.arguments = ["--socket", socketPath, "--state", stateDirectory.path]
-        process.environment = ["PATH": "/usr/bin:/bin"]
+        var environment = ["PATH": "/usr/bin:/bin"]
+        if let token = ProcessInfo.processInfo.environment["THREADING_TEST_RUN_TOKEN"] {
+            environment["THREADING_TEST_RUN_TOKEN"] = token
+        }
+        process.environment = environment
         process.standardError = diagnostics
         process.standardOutput = FileHandle.nullDevice
 
@@ -645,11 +671,27 @@ private final class DaemonHelperProcess: @unchecked Sendable {
         try process.run()
     }
 
-    func terminate() {
-        if process.isRunning {
+    func shutdown() -> Bool {
+        let drained = PTYHostTestProcessCleanup.stopSessionsAndRetire(socketPath: socketPath)
+        let exited = waitUntilExited(timeout: PTYHostTestProcessCleanup.childTimeout)
+        if !exited, process.isRunning {
+            // Last resort for a broken fixture. Every test child has a finite lifetime and the
+            // runner's token guard owns the remaining process tree; ordinary cleanup never takes
+            // this branch because killing the daemon before its groups is the leak being fixed.
             Darwin.kill(process.processIdentifier, SIGKILL)
+            _ = waitUntilExited(timeout: 1)
         }
         diagnostics.fileHandleForReading.readabilityHandler = nil
+        return drained && exited
+    }
+
+    private func waitUntilExited(timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !process.isRunning { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return !process.isRunning
     }
 
     var diagnosticText: String {

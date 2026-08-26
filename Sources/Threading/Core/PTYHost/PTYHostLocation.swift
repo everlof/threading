@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 import ThreadingPTYHostKit
 
@@ -38,6 +39,15 @@ enum PTYHostDefaults {
     /// find a daemon it did not start — and shared with the daemon through
     /// `PTYHostDefaultLocations` for the reason `directoryName` gives.
     static let socketFileName = PTYHostDefaultLocations.socketFileName
+
+    /// The app's receipt for the exact bundle generation last handed to `SMAppService`.
+    ///
+    /// `SMAppService.status == enabled` says only that launchd has a job with this label. It does
+    /// not say which copy of Threading registered it, and an enabled job can therefore still
+    /// resolve through a deleted DerivedData bundle after `/Applications/Threading.app` is
+    /// installed. The receipt is app-owned (the daemon never reads it) and lets the next launch
+    /// distinguish that stale association from an ordinary idempotent registration.
+    static let registrationReceiptFileName = "registration.json"
 
     /// The `product-type.tool` daemon, shipped in the app bundle beside the other helpers.
     ///
@@ -99,6 +109,12 @@ enum PTYHostDefaults {
 
     /// The client's serial queue. Every frame is decoded and delivered on it and never on main.
     static let clientQueueLabel = "codes.threading.ptyhost.client"
+
+    /// A connected terminal is part of the visible interaction loop even though its bytes do
+    /// not belong on main. In particular, a typed key is not visible until the child echoes it
+    /// through this queue, so leaving the queue's QoS unspecified turns an explicit UI edge into
+    /// work whose urgency depends on whichever thread happened to wake `DispatchIO`.
+    static let clientQueueQoS = DispatchQoS.userInteractive
 }
 
 // MARK: - PTY Host Location
@@ -148,6 +164,13 @@ enum PTYHostLocation {
     /// any `.jsonl` past the retention window and where a second writer has already interleaved
     /// one file into 23 unparseable lines.
     static var stateDirectory: URL { directory }
+
+    /// The app-owned identity of the bundle generation most recently registered with launchd.
+    /// Kept beside the rendezvous because both have the same per-user lifetime and owner-only
+    /// boundary; the daemon does not read or write it.
+    static var registrationReceiptURL: URL {
+        directory.appendingPathComponent(PTYHostDefaults.registrationReceiptFileName)
+    }
 
     /// Creates the directory if it is missing and tightens it to `0700` either way.
     ///

@@ -108,6 +108,19 @@ enum TranscriptCopyTransaction {
 enum SessionMigration {
 
     struct MoveError: LocalizedError {
+        enum Code: String, Sendable {
+            case missingSession
+            case providerMismatch
+            case missingTranscript
+            case invalidSourceLocation
+            case persistenceUnavailable
+            case sourceNotRegular
+            case commitRefused
+            case rollbackNeedsRecovery
+            case copyFailed
+        }
+
+        let code: Code
         let message: String
         var errorDescription: String? { message }
     }
@@ -151,7 +164,7 @@ enum SessionMigration {
             ThreadingLogger.agent.notice(
                 "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=missing_session"
             )
-            return .failure(MoveError(message: "The session no longer exists."))
+            return .failure(MoveError(code: .missingSession, message: "The session no longer exists."))
         }
 
         guard session.kind == account.provider else {
@@ -159,14 +172,20 @@ enum SessionMigration {
             ThreadingLogger.agent.notice(
                 "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=provider_mismatch"
             )
-            return .failure(MoveError(message: "A \(kind) conversation can only move to another \(kind) account."))
+            return .failure(MoveError(
+                code: .providerMismatch,
+                message: "A \(kind) conversation can only move to another \(kind) account."
+            ))
         }
 
         guard let source = sourceTranscript(for: session, in: project) else {
             ThreadingLogger.agent.notice(
                 "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=missing_transcript"
             )
-            return .failure(MoveError(message: "This conversation has nothing recorded to move yet."))
+            return .failure(MoveError(
+                code: .missingTranscript,
+                message: "This conversation has nothing recorded to move yet."
+            ))
         }
 
         guard let current = AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle),
@@ -178,14 +197,20 @@ enum SessionMigration {
             ThreadingLogger.agent.warning(
                 "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=invalid_source_location"
             )
-            return .failure(MoveError(message: "Could not locate the conversation on disk."))
+            return .failure(MoveError(
+                code: .invalidSourceLocation,
+                message: "Could not locate the conversation on disk."
+            ))
         }
 
         guard ProjectStore.shared.acceptsDurableMutations else {
             ThreadingLogger.agent.error(
                 "Session migration refused session=\(sessionID.uuidString, privacy: .public) reason=persistence_refused"
             )
-            return .failure(MoveError(message: "The moved conversation could not be saved."))
+            return .failure(MoveError(
+                code: .persistenceUnavailable,
+                message: "The moved conversation could not be saved."
+            ))
         }
 
         // The layout under a config directory is identical between accounts, so the destination
@@ -214,24 +239,34 @@ enum SessionMigration {
             ThreadingLogger.agent.warning(
                 "Session migration failed session=\(sessionID.uuidString, privacy: .public) reason=source_not_regular"
             )
-            return .failure(MoveError(message: "The conversation transcript is not a regular file."))
+            return .failure(MoveError(
+                code: .sourceNotRegular,
+                message: "The conversation transcript is not a regular file."
+            ))
         } catch TranscriptCopyTransactionError.commitRefused {
             ThreadingLogger.agent.error(
                 "Session migration failed session=\(sessionID.uuidString, privacy: .public) reason=commit_refused"
             )
-            return .failure(MoveError(message: "The moved conversation could not be saved."))
+            return .failure(MoveError(
+                code: .commitRefused,
+                message: "The moved conversation could not be saved."
+            ))
         } catch TranscriptCopyTransactionError.rollbackFailed(let recoveryPath, let detail) {
             ThreadingLogger.agent.error(
                 "Migrated transcript rollback needs recovery at \(recoveryPath, privacy: .private(mask: .hash)): \(detail, privacy: .private(mask: .hash))"
             )
             return .failure(MoveError(
+                code: .rollbackNeedsRecovery,
                 message: "The moved conversation could not be saved; its previous target copy was kept for recovery."
             ))
         } catch {
             ThreadingLogger.agent.error(
                 "Session migration failed session=\(sessionID.uuidString, privacy: .public) reason=copy_failed error=\(error.localizedDescription, privacy: .private(mask: .hash))"
             )
-            return .failure(MoveError(message: "Could not copy the conversation: \(error.localizedDescription)"))
+            return .failure(MoveError(
+                code: .copyFailed,
+                message: "Could not copy the conversation: \(error.localizedDescription)"
+            ))
         }
 
         // The file at `destination` is new only by path. In particular, a usage-limit record at

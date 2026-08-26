@@ -58,6 +58,14 @@ Fallbacks are allowed only when they preserve the operation's safety and are vis
 the UI. `try?` is appropriate for best-effort cleanup of an already-abandoned staging file; it is
 not appropriate for state writes, authorization, version checks, or user-requested operations.
 
+An HTTP status is a class of failure, not its cause. Remote REST refusals carry a bounded
+`RemoteErrorDTO` with a stable code; the status remains only the older-client fallback. The body
+does not repeat localized prose, request data, paths, account identities or prompts. Clients map
+known codes to localized action copy, preserve unknown future strings for diagnostics, and keep
+authorization/not-found codes generic where precision would disclose scope. This is the REST
+equivalent of the typed WebSocket refusals and prevents distinct validation guards from collapsing
+to “HTTP 422” after URLSession discards the reason phrase.
+
 ## Concurrency ownership
 
 The supported concurrency model has three kinds of owner:

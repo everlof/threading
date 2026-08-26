@@ -30,6 +30,19 @@ enum PTYHostRegistrationDefaults {
     /// alone, which is also what happens if it turns out there was no daemon at all.
     static let surveyTimeout: TimeInterval = 5
 
+    /// How often a known-busy stale daemon is surveyed when no app-side exit edge arrives.
+    ///
+    /// The normal retry is immediate and event-driven. This is only the backstop for a detached
+    /// child the launch could not adopt (and therefore cannot observe ending). Thirty seconds is
+    /// prompt for replacing background infrastructure without turning a long agent run into a
+    /// stream of local-socket polls.
+    static let upgradeRetryInterval: TimeInterval = 30
+
+    /// A read-only `launchctl print` is the fallback when an enabled stale registration has no
+    /// socket. It distinguishes an absent helper (safe to re-register) from a retiring helper
+    /// whose socket is intentionally gone while its sessions drain.
+    static let launchctlProbeTimeout: TimeInterval = 2
+
     /// The serial queue registration and surveying run on. Never main: `SMAppService.register()`
     /// is an XPC round trip to `smd`, and the survey blocks on a socket handshake.
     static let queueLabel = "codes.threading.ptyhost.registration"
@@ -151,7 +164,7 @@ final class PTYHostLaunchAgentService: PTYHostAgentService, @unchecked Sendable 
 /// `PTYHostDecision`'s shape, and for its reason: reusable code never recovers settings, launch
 /// mode or bundle state on demand, so a test can force recovery, force a hosted bundle, or name a
 /// helper that is not there without touching either.
-struct PTYHostRegistrationRequest: Sendable {
+struct PTYHostRegistrationRequest: Equatable, Sendable {
 
     /// The setting, the helper's path, the rendezvous and this build's string.
     let decision: PTYHostDecision
@@ -167,10 +180,20 @@ struct PTYHostRegistrationRequest: Sendable {
     /// would also stop whatever the developer's own app was doing.
     let isHostedTest: Bool
 
-    init(decision: PTYHostDecision, isRecovery: Bool, isHostedTest: Bool) {
+    /// The app-owned receipt which identifies the exact bundle generation last registered.
+    /// Injected because hosted tests must never touch the developer's production support tree.
+    let receiptURL: URL
+
+    init(
+        decision: PTYHostDecision,
+        isRecovery: Bool,
+        isHostedTest: Bool,
+        receiptURL: URL = PTYHostLocation.registrationReceiptURL
+    ) {
         self.decision = decision
         self.isRecovery = isRecovery
         self.isHostedTest = isHostedTest
+        self.receiptURL = receiptURL
     }
 
     @MainActor
@@ -178,7 +201,8 @@ struct PTYHostRegistrationRequest: Sendable {
         PTYHostRegistrationRequest(
             decision: PTYHostDecision.live(settings: settings, bundle: bundle),
             isRecovery: RecoveryMode.isActive,
-            isHostedTest: StateManager.isHostedTest
+            isHostedTest: StateManager.isHostedTest,
+            receiptURL: PTYHostLocation.registrationReceiptURL
         )
     }
 }
@@ -213,6 +237,11 @@ enum PTYHostRegistrationOutcome: Equatable, Sendable {
     /// launchd now holds the job and it is on.
     case registered
 
+    /// launchd has an enabled job, but the app-owned receipt names another bundle generation (or
+    /// predates receipts). The running daemon must be surveyed and retired safely before the
+    /// coordinator unregisters and re-registers the current bundle.
+    case replacementRequired
+
     /// Registered, and the user has to allow it. `PTYHostRegistration.openLoginItemsSettings()`
     /// is the affordance; this slice ships no UI for it.
     case awaitingApproval
@@ -227,6 +256,10 @@ enum PTYHostRegistrationOutcome: Equatable, Sendable {
     /// `unregister()` kills the running helper, and the helper is holding somebody's agents.
     case leftForRunningSessions(Int)
 
+    /// No daemon answered and its process could not be proven absent. Since `unregister()` kills
+    /// the helper, uncertainty leaves the job in place and a later launch/survey tries again.
+    case leftForUnansweredDaemon
+
     /// `register()` or `unregister()` threw. The `NSError` code, for the journal; never the
     /// message, which is a localized sentence.
     case failed(code: Int)
@@ -238,10 +271,12 @@ enum PTYHostRegistrationOutcome: Equatable, Sendable {
     var token: String {
         switch self {
         case .registered: return "registered"
+        case .replacementRequired: return "replacementRequired"
         case .awaitingApproval: return "awaitingApproval"
         case .unregistered: return "unregistered"
         case .skipped(let skip): return "skipped.\(skip.token)"
         case .leftForRunningSessions: return "leftForRunningSessions"
+        case .leftForUnansweredDaemon: return "leftForUnansweredDaemon"
         case .failed(let code): return "failed.\(code)"
         case .refused(let status): return "refused.\(status.token)"
         }
@@ -269,12 +304,126 @@ enum PTYHostRemovalDecision: Equatable, Sendable {
     /// back on would then be unable to reach the sessions still running under it.
     case leave(heldSessions: Int)
 
+    /// The socket did not answer and no independent process observation proved the helper gone.
+    /// Silence is not zero: a retiring daemon deliberately unlinks its socket while its sessions
+    /// continue, so unregistering on this answer could kill exactly that work.
+    case leaveUnanswered
+
     var token: String {
         switch self {
         case .unregister: return "unregister"
         case .leave: return "leave"
+        case .leaveUnanswered: return "leaveUnanswered"
         }
     }
+}
+
+// MARK: - Registration identity
+
+/// One file whose replacement requires `SMAppService` to be registered again.
+///
+/// The path identifies which copy of Threading owns the association. The filesystem identity and
+/// metadata catch a helper or plist rebuilt in place without a version-number change — common in
+/// DerivedData, and explicitly a re-registration case in ServiceManagement's contract.
+struct PTYHostRegisteredFileIdentity: Codable, Equatable, Sendable {
+    let path: String
+    let fileSystemNumber: UInt64?
+    let fileNumber: UInt64?
+    let size: UInt64?
+    let modificationTime: TimeInterval?
+
+    init(url: URL, fileManager: FileManager = .default) {
+        let canonical = url.standardizedFileURL.resolvingSymlinksInPath()
+        let attributes = try? fileManager.attributesOfItem(atPath: canonical.path)
+        path = canonical.path
+        fileSystemNumber = (attributes?[.systemNumber] as? NSNumber)?.uint64Value
+        fileNumber = (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
+        size = (attributes?[.size] as? NSNumber)?.uint64Value
+        modificationTime = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970
+    }
+}
+
+/// The exact registration the current app expects launchd to resolve.
+struct PTYHostRegistrationReceipt: Codable, Equatable, Sendable {
+    static let currentFormat = 1
+
+    let format: Int
+    let build: String
+    let helper: PTYHostRegisteredFileIdentity
+    let launchAgentPlist: PTYHostRegisteredFileIdentity
+
+    init(request: PTYHostRegistrationRequest, fileManager: FileManager = .default) {
+        let helper = request.decision.helperURL
+        let bundle = helper
+            .deletingLastPathComponent() // Helpers
+            .deletingLastPathComponent() // Contents
+            .deletingLastPathComponent() // Threading.app
+        let plist = bundle
+            .appendingPathComponent(
+                PTYHostRegistrationDefaults.launchAgentsDirectoryPath,
+                isDirectory: true
+            )
+            .appendingPathComponent(PTYHostRegistrationDefaults.plistName)
+
+        self.format = Self.currentFormat
+        self.build = request.decision.build
+        self.helper = PTYHostRegisteredFileIdentity(url: helper, fileManager: fileManager)
+        self.launchAgentPlist = PTYHostRegisteredFileIdentity(url: plist, fileManager: fileManager)
+    }
+}
+
+/// The receipt's filesystem behind a seam, so tests can prove the hosted-test refusal happens
+/// before a read or write just as sharply as the `SMAppService` refusal.
+struct PTYHostRegistrationReceiptStore: Sendable {
+    private let loadReceipt: @Sendable (URL) -> PTYHostRegistrationReceipt?
+    private let saveReceipt: @Sendable (PTYHostRegistrationReceipt, URL) throws -> Void
+    private let removeReceipt: @Sendable (URL) throws -> Void
+
+    init(
+        load: @escaping @Sendable (URL) -> PTYHostRegistrationReceipt?,
+        save: @escaping @Sendable (PTYHostRegistrationReceipt, URL) throws -> Void,
+        remove: @escaping @Sendable (URL) throws -> Void
+    ) {
+        self.loadReceipt = load
+        self.saveReceipt = save
+        self.removeReceipt = remove
+    }
+
+    func load(from url: URL) -> PTYHostRegistrationReceipt? { loadReceipt(url) }
+    func save(_ receipt: PTYHostRegistrationReceipt, to url: URL) throws {
+        try saveReceipt(receipt, url)
+    }
+    func remove(at url: URL) throws { try removeReceipt(url) }
+
+    static let live = PTYHostRegistrationReceiptStore(
+        load: { url in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? JSONDecoder().decode(PTYHostRegistrationReceipt.self, from: data)
+        },
+        save: { receipt, url in
+            let directory = url.deletingLastPathComponent()
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: PTYHostDefaults.directoryPermissions]
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: PTYHostDefaults.directoryPermissions],
+                ofItemAtPath: directory.path
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(receipt).write(to: url, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: PTYHostDefaults.filePermissions],
+                ofItemAtPath: url.path
+            )
+        },
+        remove: { url in
+            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            try FileManager.default.removeItem(at: url)
+        }
+    )
 }
 
 // MARK: - Registration
@@ -295,17 +444,20 @@ final class PTYHostRegistration: Sendable {
     private let service: PTYHostAgentService
     private let eventLog: EventLog
     private let fileProbe: PTYHostFileProbe
+    private let receiptStore: PTYHostRegistrationReceiptStore
 
     // MARK: - Initialization
 
     init(
         service: PTYHostAgentService = PTYHostLaunchAgentService(),
         eventLog: EventLog = .shared,
-        fileProbe: PTYHostFileProbe = .live
+        fileProbe: PTYHostFileProbe = .live,
+        receiptStore: PTYHostRegistrationReceiptStore = .live
     ) {
         self.service = service
         self.eventLog = eventLog
         self.fileProbe = fileProbe
+        self.receiptStore = receiptStore
     }
 
     // MARK: - Public Properties
@@ -319,17 +471,67 @@ final class PTYHostRegistration: Sendable {
 
     // MARK: - Public Methods
 
-    /// Registers the agent if the request allows it and launchd is not already holding the job.
+    /// Registers the agent if the request allows it and launchd is not already holding this job.
     ///
-    /// Idempotent by construction: an `enabled` status is answered `.skipped(.alreadySettled)`
-    /// without calling `register()`, so the ordinary launch — which is every launch after the
-    /// first — costs one status read.
+    /// Idempotent by construction: an `enabled` or approval-pending status plus the current
+    /// receipt is settled without calling `register()`. The receipt distinction matters because
+    /// status alone does not identify the bundle copy launchd retained.
     @discardableResult
     func register(_ request: PTYHostRegistrationRequest) -> PTYHostRegistrationOutcome {
         if let skip = refusal(for: request) { return .skipped(skip) }
 
         let before = service.status
-        guard before != .enabled else { return .skipped(.alreadySettled) }
+        switch before {
+        case .enabled, .requiresApproval:
+            let current = PTYHostRegistrationReceipt(request: request)
+            guard receiptStore.load(from: request.receiptURL) == current else {
+                journal("PTY host registration needs replacement", outcome: .replacementRequired)
+                return .replacementRequired
+            }
+            // Already registered and waiting on the user's choice. Calling `register()` again is
+            // not the fix and returns `kSMErrorAlreadyRegistered` on current macOS. A stale
+            // approval-pending receipt took the replacement branch above instead.
+            return before == .enabled ? .skipped(.alreadySettled) : .awaitingApproval
+        case .notRegistered, .notFound, .unknown:
+            break
+        }
+
+        return registerCurrent(request)
+    }
+
+    /// Replaces an enabled stale association after the upgrade monitor has proved the old daemon
+    /// exited. This method never performs that proof itself; keeping the destructive
+    /// `unregister()` below the monitor's confirmed-retirement edge is the safety boundary.
+    @discardableResult
+    func replaceAfterDaemonExited(
+        _ request: PTYHostRegistrationRequest
+    ) -> PTYHostRegistrationOutcome {
+        if let skip = refusal(for: request) { return .skipped(skip) }
+
+        let current = PTYHostRegistrationReceipt(request: request)
+        let before = service.status
+        if before.isRegistered, receiptStore.load(from: request.receiptURL) == current {
+            return before == .enabled ? .skipped(.alreadySettled) : .awaitingApproval
+        }
+
+        if before.isRegistered {
+            do {
+                try service.unregister()
+                try? receiptStore.remove(at: request.receiptURL)
+            } catch let error as NSError {
+                journal("PTY host unregistration failed", outcome: .failed(code: error.code))
+                return .failed(code: error.code)
+            }
+        }
+
+        return registerCurrent(request)
+    }
+
+    // MARK: - Registration implementation
+
+    private func registerCurrent(
+        _ request: PTYHostRegistrationRequest
+    ) -> PTYHostRegistrationOutcome {
 
         do {
             try service.register()
@@ -347,9 +549,11 @@ final class PTYHostRegistration: Sendable {
         let after = service.status
         switch after {
         case .enabled:
+            saveReceipt(for: request)
             journal("PTY host agent registered", outcome: .registered)
             return .registered
         case .requiresApproval:
+            saveReceipt(for: request)
             journal("PTY host agent awaits approval", outcome: .awaitingApproval)
             return .awaitingApproval
         case .notRegistered, .notFound, .unknown:
@@ -360,8 +564,8 @@ final class PTYHostRegistration: Sendable {
 
     /// Removes the registration, unless the daemon is holding sessions.
     ///
-    /// `heldSessions` is what a survey found: nil when nothing answered, which is the same as
-    /// nothing being held — there is no daemon to kill, so removing the job costs nobody a turn.
+    /// `heldSessions` is what a survey found. Nil is uncertainty, not zero: a retiring daemon
+    /// deliberately has no socket while it continues to hold sessions.
     @discardableResult
     func unregister(
         _ request: PTYHostRegistrationRequest,
@@ -388,6 +592,12 @@ final class PTYHostRegistration: Sendable {
                 """
             )
             return .leftForRunningSessions(count)
+        case .leaveUnanswered:
+            journal(
+                "PTY host agent left registered after unanswered survey",
+                outcome: .leftForUnansweredDaemon
+            )
+            return .leftForUnansweredDaemon
         case .unregister:
             break
         }
@@ -398,6 +608,7 @@ final class PTYHostRegistration: Sendable {
             journal("PTY host unregistration failed", outcome: .failed(code: error.code))
             return .failed(code: error.code)
         }
+        try? receiptStore.remove(at: request.receiptURL)
         journal("PTY host agent unregistered", outcome: .unregistered)
         return .unregistered
     }
@@ -417,7 +628,8 @@ final class PTYHostRegistration: Sendable {
     /// the running helper, so the count is the difference between a tidy removal and ending a
     /// person's turn.
     static func removalDecision(heldSessions: Int?) -> PTYHostRemovalDecision {
-        guard let heldSessions, heldSessions > 0 else { return .unregister }
+        guard let heldSessions else { return .leaveUnanswered }
+        guard heldSessions > 0 else { return .unregister }
         return .leave(heldSessions: heldSessions)
     }
 
@@ -449,6 +661,20 @@ final class PTYHostRegistration: Sendable {
         var fields = ["outcome": outcome.token, "label": PTYHostRegistrationDefaults.label]
         fields.merge(extra) { _, new in new }
         eventLog.record(.session, message, fields)
+    }
+
+    private func saveReceipt(for request: PTYHostRegistrationRequest) {
+        do {
+            try receiptStore.save(
+                PTYHostRegistrationReceipt(request: request),
+                to: request.receiptURL
+            )
+        } catch let error as NSError {
+            eventLog.record(.session, "PTY host registration receipt write failed", [
+                "code": String(error.code),
+                "label": PTYHostRegistrationDefaults.label
+            ])
+        }
     }
 }
 

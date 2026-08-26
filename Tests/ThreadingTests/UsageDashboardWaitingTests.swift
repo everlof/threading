@@ -61,6 +61,22 @@ final class UsageDashboardWaitingTests: XCTestCase {
 
     // MARK: - Nothing measured
 
+    func testConsumptionIsTheDefaultAndTheDashboardShowsExactlyOneSection() {
+        let view = dashboard(isBuilding: false)
+
+        XCTAssertEqual(view.selectedDashboardSectionForTesting, .consumption)
+        XCTAssertEqual(
+            view.dashboardSectionTitlesForTesting,
+            [L10n.string("Consumption"), L10n.string("Limit history")]
+        )
+        XCTAssertEqual(view.visibleDashboardSectionCountForTesting, 1)
+
+        view.selectDashboardSectionForTesting(.limitHistory)
+
+        XCTAssertEqual(view.selectedDashboardSectionForTesting, .limitHistory)
+        XCTAssertEqual(view.visibleDashboardSectionCountForTesting, 1)
+    }
+
     func testAnEmptyPageSaysWhatWouldFillIt() {
         let view = dashboard(isBuilding: false)
         XCTAssertEqual(view.usagePlaceholderForTesting, .empty)

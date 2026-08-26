@@ -26,7 +26,10 @@ final class PTYHostServer: @unchecked Sendable {
     private let stateDirectory: URL
     private let build: String
 
-    private let queue = DispatchQueue(label: "codes.threading.ptyd")
+    private let queue = DispatchQueue(
+        label: "codes.threading.ptyd",
+        qos: PTYHostDefaults.eventQueueQoS
+    )
     private let journal: PTYHostJournalFile
     private let state: PTYHostState
 
@@ -448,9 +451,8 @@ final class PTYHostServer: @unchecked Sendable {
 
     /// `hello` is the first frame on every connection, in both directions.
     ///
-    /// The version pair is the gate and the build is only reported: a commit on master replaces
-    /// the app bundle several times a day, and a build-gated daemon would be drained and
-    /// restarted for changes that touch no frame.
+    /// The protocol pair is the admission gate. The generation is reported so the app can replace
+    /// a compatible old process gracefully when the bundle on disk moved underneath it.
     private func greet(_ peer: PTYHostHello, on connection: PTYHostConnection) {
         guard !connection.hasGreeted else {
             refuse(connection, code: .malformedFrame, detail: "repeatedHello")
@@ -814,7 +816,10 @@ final class PTYHostServer: @unchecked Sendable {
             session.io = DispatchIO(
                 type: .stream,
                 fileDescriptor: input,
-                queue: DispatchQueue(label: "codes.threading.ptyd.stdin.\(sessionCount)"),
+                queue: DispatchQueue(
+                    label: "codes.threading.ptyd.stdin.\(sessionCount)",
+                    qos: PTYHostDefaults.eventQueueQoS
+                ),
                 cleanupHandler: { _ in close(input) }
             )
             session.outputIO = readChannel(child.output, of: session, stream: .standardOutput)
@@ -832,7 +837,10 @@ final class PTYHostServer: @unchecked Sendable {
         let io = DispatchIO(
             type: .stream,
             fileDescriptor: descriptor,
-            queue: DispatchQueue(label: "codes.threading.ptyd.read.\(sessionCount)"),
+            queue: DispatchQueue(
+                label: "codes.threading.ptyd.read.\(sessionCount)",
+                qos: PTYHostDefaults.eventQueueQoS
+            ),
             cleanupHandler: { _ in close(descriptor) }
         )
         io.setLimit(lowWater: 1)

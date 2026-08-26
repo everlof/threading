@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 import ThreadingPTYHostKit
 
@@ -15,6 +16,15 @@ import ThreadingPTYHostKit
 /// bridge) and a daemon that derived either would be a second place for that decision to be
 /// wrong.
 enum PTYHostDefaults {
+
+    // MARK: - Scheduling
+
+    /// The daemon is on the causal path from a typed key to its echoed cell, but the same queue
+    /// also records output for detached agents that have no visible deadline. User-initiated is
+    /// the deliberate middle: never background/utility scheduling, without assigning a whole
+    /// unattended agent's byte stream animation priority. The attached app-side queue owns the
+    /// final, user-interactive leg.
+    static let eventQueueQoS = DispatchQoS.userInitiated
 
     // MARK: - Listener
 
