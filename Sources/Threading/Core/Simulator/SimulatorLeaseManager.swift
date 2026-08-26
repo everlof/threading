@@ -3,6 +3,7 @@ import Foundation
 protocol SimulatorLeaseManaging: Sendable {
     func availableDevices() async throws -> [SimulatorDevice]
     func acquire(deviceID: SimulatorDeviceID) async throws -> SimulatorDeviceLease
+    func refresh(_ lease: SimulatorDeviceLease) async throws -> SimulatorDeviceLease
     func release(_ lease: SimulatorDeviceLease) async
 }
 
@@ -18,6 +19,7 @@ actor SimulatorLeaseManager: SimulatorLeaseManaging {
     private struct Entry {
         let lease: SimulatorDeviceLease
         var referenceCount: Int
+        var validCapabilityIDs: Set<UUID>
         var releaseToken: UUID?
         var releaseTask: Task<Void, Never>?
     }
@@ -31,6 +33,7 @@ actor SimulatorLeaseManager: SimulatorLeaseManaging {
     private let releaseGraceNanoseconds: UInt64
     private var entries: [SimulatorDeviceID: Entry] = [:]
     private var acquisitions: [SimulatorDeviceID: Acquisition] = [:]
+    private var refreshes: [SimulatorDeviceID: Acquisition] = [:]
 
     init(
         control: any SimulatorControlling,
@@ -78,6 +81,7 @@ actor SimulatorLeaseManager: SimulatorLeaseManaging {
             entries[deviceID] = Entry(
                 lease: lease,
                 referenceCount: 1,
+                validCapabilityIDs: [lease.capabilityID],
                 releaseToken: nil,
                 releaseTask: nil
             )
@@ -88,9 +92,66 @@ actor SimulatorLeaseManager: SimulatorLeaseManaging {
         }
     }
 
+    /// Revalidates a lease after the public fallback proves its device snapshot is stale.
+    ///
+    /// Refreshing does not add a reference. Every existing holder may still release the older
+    /// capability identity, while new acquisitions receive the refreshed device state and boot
+    /// ownership. If Threading originally owned the boot, seeing that same device booted during
+    /// refresh must not launder it into user ownership.
+    func refresh(_ lease: SimulatorDeviceLease) async throws -> SimulatorDeviceLease {
+        let deviceID = lease.device.id
+        guard let existingEntry = entries[deviceID],
+              existingEntry.referenceCount > 0,
+              existingEntry.validCapabilityIDs.contains(lease.capabilityID) else {
+            throw SimulatorControlError.deviceNotFound(deviceID)
+        }
+
+        let refresh: Acquisition
+        if let existing = refreshes[deviceID] {
+            refresh = existing
+        } else {
+            let control = control
+            let created = Acquisition(
+                token: UUID(),
+                task: Task { try await control.prepare(deviceID: deviceID) }
+            )
+            refreshes[deviceID] = created
+            refresh = created
+        }
+
+        do {
+            let prepared = try await refresh.task.value
+            if refreshes[deviceID]?.token == refresh.token { refreshes[deviceID] = nil }
+            guard var entry = entries[deviceID],
+                  entry.validCapabilityIDs.contains(lease.capabilityID) else {
+                try? await control.release(prepared)
+                throw SimulatorControlError.deviceNotFound(deviceID)
+            }
+            let ownership: SimulatorDeviceBootOwnership =
+                entry.lease.bootOwnership == .threading ? .threading : prepared.bootOwnership
+            let refreshed = SimulatorDeviceLease(
+                device: prepared.device,
+                bootOwnership: ownership
+            )
+            entry = Entry(
+                lease: refreshed,
+                referenceCount: entry.referenceCount,
+                validCapabilityIDs: entry.validCapabilityIDs.union([refreshed.capabilityID]),
+                releaseToken: entry.releaseToken,
+                releaseTask: entry.releaseTask
+            )
+            entries[deviceID] = entry
+            return refreshed
+        } catch {
+            if refreshes[deviceID]?.token == refresh.token { refreshes[deviceID] = nil }
+            throw error
+        }
+    }
+
     func release(_ lease: SimulatorDeviceLease) async {
         let deviceID = lease.device.id
-        guard var entry = entries[deviceID], entry.lease == lease else { return }
+        guard var entry = entries[deviceID],
+              entry.validCapabilityIDs.contains(lease.capabilityID) else { return }
         guard entry.referenceCount > 0 else { return }
         entry.referenceCount -= 1
         guard entry.referenceCount == 0 else {

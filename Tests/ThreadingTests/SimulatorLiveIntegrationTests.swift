@@ -32,7 +32,7 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
     func testDirectFramebufferDecodeAndHomeButton() async throws {
         guard let rawDeviceID = ProcessInfo.processInfo.environment[
             "THREADING_SIMULATOR_INTEGRATION_UDID"
-        ] else {
+        ], !rawDeviceID.isEmpty else {
             throw XCTSkip(
                 "Set THREADING_SIMULATOR_INTEGRATION_UDID to an already-booted iOS Simulator."
             )

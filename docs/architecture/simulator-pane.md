@@ -42,6 +42,12 @@ directory because current `simctl io screenshot` help documents `-` as stdout, b
 treats it as a literal filename. Threading bounded-reads the PNG and removes the whole capture
 directory on every success or failure path.
 
+The pane does not overlap those public device transactions with its private framebuffer client.
+Before an agent install/launch or public screenshot, it stops the current direct transport; after
+the bounded command completes or fails, it establishes a fresh stream for the same live lease.
+CoreSimulator otherwise can leave `simctl` waiting while the old helper remains connected but
+receives no frames. This is one serialization rule owned by the pane, not a retry budget.
+
 The public path is the fallback and lifecycle plane, not the intended live renderer. The direct
 backend is a first-party signed helper using the CoreSimulator framebuffer and device HID seams:
 
@@ -88,6 +94,13 @@ An agent process exiting is not a lease release. Archive, session deletion, expl
 quit may release after the coordinator's grace period. A user-adopted device is never shut down by
 that cleanup. This distinction is a domain value because inferring ownership from current boot
 state would eventually stop somebody's separately running device.
+
+The lease also carries an opaque capability identity. If helper loss is followed by a failed
+public screenshot, the pane has evidence that its device snapshot is stale. Retry refreshes that
+capability through the shared lease manager before reconnecting. Existing panes can still release
+their older capability identity, the reference count does not grow during refresh, and original
+`.threading` boot ownership is preserved even if the refreshed catalogue now sees the device
+running. This prevents both an endless stale-lease retry loop and ownership laundering.
 
 ## Agent route
 
@@ -145,17 +158,53 @@ never opens that external window silently.
    HID, H.264/JPEG negotiation, signature policy, input consent and fallback state.
 5. **Hardening:** multi-session stream budget, lifecycle grace, support diagnostics, performance
    spans, targeted real-shell evidence and the broad non-interactive gate.
+6. **Dogfood and compatibility:** deterministic restart, helper-loss, stale-device, Xcode-refusal
+   and device-switch recovery; a real agent-tool build/install/launch/inspect/input lane; and a
+   hidden one-shot probe of the exact signed host/helper pair across selected Xcodes and runtimes.
 
 Each increment ships as a coherent fallback-capable slice. The direct helper does not replace the
 public lifecycle path, and the MCP tools do not create a second simulator state model beside the
-pane. All five increments are implemented. Deterministic tests cover protocol compatibility,
+pane. All six increments are implemented. Deterministic tests cover protocol compatibility,
 framing bounds, 60 fps replacement pressure, hidden visibility, the four-stream budget, lease
-grace, input routing and content-free support diagnostics. The opt-in
-`SimulatorLiveIntegrationTests` lane adds signed-host verification, a real framebuffer decode and
-a harmless Home-button HID round trip against an already-booted device:
+grace and refresh, input routing, backend recovery and content-free support diagnostics.
+
+`scripts/simulator_dogfood.sh` is the complete opt-in lane. For every selected Xcode it requires
+an already-booted available iOS device, builds `ThreadingMobile` for the exact UDID, and drives the
+shipping `AgentToolCoordinator` commands through one visible right-panel tab: prepare,
+install/launch, screenshot, and a harmless Home-button input. It then launches the exact macOS app
+bundle in a pre-workspace, activation-prohibited probe that verifies the embedded helper handshake
+and first decoded frame using that Xcode's private frameworks. The probe is read-only; it cannot
+prepare, boot, install into or control a device.
+
+The dogfood and iOS UI-evidence runners take the same host-wide advisory CoreSimulator lane before
+reading the catalogue. A second Threading worktree therefore refuses immediately instead of
+cloning or rebooting the adopted device midway through compatibility evidence. The lock is held
+through cleanup and released by the kernel when the owning script exits.
+
+The runner also gives its own catalogue and fixture-cleanup `simctl` process groups explicit
+deadlines. A CoreSimulator service that stops answering therefore produces failed evidence and a
+released lane rather than an indefinitely wedged test process.
+
+The runner records a versioned JSON matrix and requires Simulator/Device Hub to be absent before
+and after the lane, so activating an existing GUI cannot masquerade as headless behavior. It also
+requires the user-owned device to remain booted with the same `lastBootedAt`, catching both a final
+shutdown and a hidden shutdown/reboot cycle. Cleanup terminates and uninstalls only a unique
+dogfood mobile bundle. It never opens, boots or shuts down Apple Simulator:
 
 ```bash
-THREADING_SIMULATOR_INTEGRATION_UDID=<udid> xcodebuild test \
-  -project Threading.xcodeproj -scheme Threading -destination 'platform=macOS' \
-  -only-testing:ThreadingTests/SimulatorLiveIntegrationTests
+scripts/simulator_dogfood.sh --udid <already-booted-udid>
+
+scripts/simulator_dogfood.sh \
+  --xcode /Applications/Xcode.app \
+  --xcode /Applications/Xcode-beta.app
+
+scripts/simulator_dogfood.sh \
+  --app build/release/export/Threading.app \
+  --require-notarized
 ```
+
+`scripts/release.sh --simulator-matrix` applies the same lane to the exported Developer ID bundle;
+with `--notarize`, it runs after stapling and requires Gatekeeper acceptance. A colon-separated
+`THREADING_SIMULATOR_MATRIX_XCODES` selects the release matrix. The active Xcode is the default.
+`scripts/ci.sh` also tests `ThreadingSimulatorKit` as one of the shipping protocol packages, so its
+wire contract cannot be omitted from the ordinary non-interactive gate.

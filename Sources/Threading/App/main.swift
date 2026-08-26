@@ -6,6 +6,11 @@ let processMainEntryNanoseconds = DispatchTime.now().uptimeNanoseconds
 let app = ThreadingApplication.shared
 let delegate = AppDelegate(processMainEntryNanoseconds: processMainEntryNanoseconds)
 app.delegate = delegate
-app.setActivationPolicy(.regular)
-app.activate(ignoringOtherApps: true)
+let runsSimulatorCompatibilityProbe = SimulatorCompatibilityProbeArguments.isRequested(
+    CommandLine.arguments
+)
+app.setActivationPolicy(runsSimulatorCompatibilityProbe ? .prohibited : .regular)
+if !runsSimulatorCompatibilityProbe {
+    app.activate(ignoringOtherApps: true)
+}
 app.run()

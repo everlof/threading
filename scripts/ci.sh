@@ -3,7 +3,7 @@
 # One reproducible, non-interactive quality gate for CI and release preflight.
 #
 # The app has no root Package.swift, so "swift test" alone silently omits the product. Test the
-# five local protocol/runtime/test-contract packages explicitly, then run the app's off-screen
+# six local protocol/runtime/test-contract packages explicitly, then run the app's off-screen
 # Xcode plan. Application-level UI scenarios stay in their separate GUI lane.
 set -euo pipefail
 
@@ -38,7 +38,7 @@ swiftlint lint \
     --config "${repository_directory}/.swiftlint.yml" \
     "${repository_directory}/Sources"
 
-for package in ThreadingExtensionKit ThreadingRemoteKit ThreadingWasmRuntime ThreadingScenarioKit ThreadingPeerTransport; do
+for package in ThreadingExtensionKit ThreadingRemoteKit ThreadingWasmRuntime ThreadingScenarioKit ThreadingPeerTransport ThreadingSimulatorKit; do
     say "Testing ${package}"
     swift test --package-path "${repository_directory}/Packages/${package}"
 done

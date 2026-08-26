@@ -258,6 +258,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // server, or touch the user's stores.
         if NSClassFromString("XCTestCase") != nil { return }
 
+        switch SimulatorCompatibilityProbeArguments.resolve(CommandLine.arguments) {
+        case .notRequested:
+            break
+        case .refused(let reason):
+            FileHandle.standardError.write(Data("error: \(reason)\n".utf8))
+            NSApp.terminate(nil)
+            return
+        case .requested(let request):
+            Task {
+                let report = await SimulatorCompatibilityProbe.run(request: request)
+                do {
+                    try SimulatorCompatibilityProbe.write(report, to: request.reportURL)
+                } catch {
+                    FileHandle.standardError.write(Data(
+                        "error: Could not write Simulator compatibility report: "
+                            .appending(error.localizedDescription)
+                            .appending("\n")
+                            .utf8
+                    ))
+                }
+                NSApp.terminate(nil)
+            }
+            return
+        }
+
         var startupProfile = ProcessInfo.processInfo.environment["THREADING_STARTUP_PROFILE"] == "1"
             ? StartupProfileMeasurement(
                 processMainEntryNanoseconds: processMainEntryNanoseconds,

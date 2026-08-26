@@ -241,6 +241,10 @@ scripts/ui-evidence-ios.sh --simulator <UDID>
 By default the script briefly clones the selected iPhone, restores the template to its prior
 boot state, clears the cloned app data, and deletes the clone on exit. That gives software-keyboard
 captures a clean Simulator menu state without changing a developer's persistent keyboard setting.
+Before reading the catalogue it takes the same host-wide advisory CoreSimulator lane as the signed
+Simulator dogfood matrix. Concurrent runs from another Threading worktree fail with the named lane
+owner rather than recycling the template underneath an adopted-panel compatibility run. The lane
+stays held through the cleanup trap.
 The script builds one Debug app in its own Derived Data directory, installs it once, and launches
 each declared scene with a fresh evidence identifier. The app repeatedly renders its own key
 window and publishes a marker from its temporary container only after asynchronous fixture data

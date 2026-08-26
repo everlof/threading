@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
+source "${repository_directory}/scripts/coresimulator_lane_lock.sh"
 manifest="${repository_directory}/Tests/UIEvidence/ios-coverage.json"
 baseline_directory="${repository_directory}/Tests/UIEvidence/iOSBaselines"
 derived_data_directory="${repository_directory}/.build/ui-evidence-ios-derived-data"
@@ -104,12 +105,14 @@ while (($#)); do
   esac
 done
 
-for command in jq python3 xcodebuild xcrun; do
+for command in jq lockf python3 xcodebuild xcrun; do
   command -v "${command}" >/dev/null || {
     printf 'error: required command is unavailable: %s\n' "${command}" >&2
     exit 1
   }
 done
+
+threading_acquire_coresimulator_lane "iOS UI evidence capture" || exit $?
 
 if [[ -n "${requested_output}" ]]; then
   case "${requested_output}" in
